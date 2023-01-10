@@ -30,9 +30,14 @@ type StoreLoadDetail struct {
 // ToHotPeersStat abstracts load information to HotPeersStat.
 func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 	totalLoads := make([]float64, RegionStatCount)
+	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[ByteDim],
+		li.LoadPred.Current.Loads[KeyDim], li.LoadPred.Current.Loads[QueryDim]
 	if len(li.HotPeers) == 0 {
 		return &HotPeersStat{
 			TotalLoads:     totalLoads,
+			StoreByteRate:  storeByteRate,
+			StoreKeyRate:   storeKeyRate,
+			StoreQueryRate: storeQueryRate,
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
 			TotalQueryRate: 0.0,
@@ -57,8 +62,6 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 
 	b, k, q := GetRegionStatKind(kind, ByteDim), GetRegionStatKind(kind, KeyDim), GetRegionStatKind(kind, QueryDim)
 	byteRate, keyRate, queryRate := totalLoads[b], totalLoads[k], totalLoads[q]
-	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[ByteDim],
-		li.LoadPred.Current.Loads[KeyDim], li.LoadPred.Current.Loads[QueryDim]
 
 	return &HotPeersStat{
 		TotalLoads:     totalLoads,

@@ -140,22 +140,6 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 		StorePeerSize:    map[uint64]int64{1: 301, 2: 100, 3: 100, 4: 250, 5: 201},
 		StorePeerKeys:    map[uint64]int64{1: 201, 2: 50, 3: 50, 4: 170, 5: 151},
 	}
-	res, err := testDialClient.Get(statsURL)
-	c.Assert(err, IsNil)
-	defer res.Body.Close()
-	stats := &statistics.RegionStats{}
-	err = apiutil.ReadJSON(res.Body, stats)
-	c.Assert(err, IsNil)
-	c.Assert(stats, DeepEquals, statsAll)
-
-	args := fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("\x01\x02"), url.QueryEscape("xyz\x00\x00"))
-	res, err = testDialClient.Get(statsURL + args)
-	c.Assert(err, IsNil)
-	defer res.Body.Close()
-	stats = &statistics.RegionStats{}
-	err = apiutil.ReadJSON(res.Body, stats)
-	c.Assert(err, IsNil)
-	c.Assert(stats, DeepEquals, statsAll)
 
 	stats23 := &statistics.RegionStats{
 		Count:            2,
@@ -170,12 +154,40 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 		StorePeerKeys:    map[uint64]int64{1: 151, 4: 150, 5: 151},
 	}
 
-	args = fmt.Sprintf("?start_key=%s&end_key=%s", url.QueryEscape("a"), url.QueryEscape("x"))
-	res, err = testDialClient.Get(statsURL + args)
-	c.Assert(err, IsNil)
-	defer res.Body.Close()
-	stats = &statistics.RegionStats{}
-	err = apiutil.ReadJSON(res.Body, stats)
-	c.Assert(err, IsNil)
-	c.Assert(stats, DeepEquals, stats23)
+	testdata := []struct {
+		startKey string
+		endKey   string
+		expect   *statistics.RegionStats
+	}{
+		{
+			startKey: "",
+			endKey:   "",
+			expect:   statsAll,
+		}, {
+			startKey: url.QueryEscape("\x01\x02"),
+			endKey:   url.QueryEscape("xyz\x00\x00"),
+			expect:   statsAll,
+		},
+		{
+			startKey: url.QueryEscape("a"),
+			endKey:   url.QueryEscape("x"),
+			expect:   stats23,
+		},
+	}
+
+	for _, data := range testdata {
+		for _, query := range []string{"", "count"} {
+			args := fmt.Sprintf("?start_key=%s&end_key=%s&%s", data.startKey, data.endKey, query)
+			res, err := testDialClient.Get(statsURL + args)
+			c.Assert(err, IsNil)
+			defer res.Body.Close()
+			stats := &statistics.RegionStats{}
+			err = apiutil.ReadJSON(res.Body, stats)
+			c.Assert(err, IsNil)
+			c.Assert(stats.Count, DeepEquals, data.expect.Count)
+			if query != "count" {
+				c.Assert(stats, DeepEquals, data.expect)
+			}
+		}
+	}
 }

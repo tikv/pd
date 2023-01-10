@@ -31,6 +31,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/logutil"
+
+	"github.com/tikv/pd/pkg/rangetree"
 	"go.uber.org/zap"
 )
 
@@ -554,6 +556,20 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 // IsFromHeartbeat returns whether the region info is from the region heartbeat.
 func (r *RegionInfo) IsFromHeartbeat() bool {
 	return r.fromHeartbeat
+}
+
+func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
+	return bytes.Compare(r.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(r.GetEndKey()) > 0 && bytes.Compare(r.GetEndKey(), endKey) <= 0))
+}
+
+func (r *RegionInfo) isRegionRecreated() bool {
+	// Regions recreated by online unsafe recover have both ver and conf ver equal to 1. To
+	// prevent stale bootstrap region (first region in a cluster which covers the entire key
+	// range) from reporting stale info, we exclude regions that covers the entire key range
+	// here. Technically, it is possible for unsafe recover to recreate such region, but that
+	// means the entire key range is unavailable, and we don't expect unsafe recover to perform
+	// better than recreating the cluster.
+	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
@@ -1131,6 +1147,27 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	}
 }
 
+// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
+func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
+	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
+	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
+	// it returns 0 if startKey is nil.
+	_, startIndex := r.tree.tree.GetWithIndex(start)
+	var endIndex int
+	var item rangetree.RangeItem
+	// it should return the length of the tree if endKey is nil.
+	if len(endKey) == 0 {
+		endIndex = r.tree.tree.Len() - 1
+	} else {
+		item, endIndex = r.tree.tree.GetWithIndex(end)
+		// it should return the endIndex - 1 if the endKey is the startKey of a region.
+		if item != nil && bytes.Equal(item.GetStartKey(), endKey) {
+			endIndex--
+		}
+	}
+	return endIndex - startIndex + 1
+}
+
 // ScanRange scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
 func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
@@ -1142,7 +1179,7 @@ func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInf
 		if limit > 0 && len(res) >= limit {
 			return false
 		}
-		res = append(res, r.GetRegion(region.GetID()))
+		res = append(res, region)
 		return true
 	})
 	return res
@@ -1258,10 +1295,6 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	}
 
 	return strings.Join(ret, ", ")
-}
-
-func isInvolved(region *RegionInfo, startKey, endKey []byte) bool {
-	return bytes.Compare(region.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), endKey) <= 0))
 }
 
 // String converts slice of bytes to string without copy.
