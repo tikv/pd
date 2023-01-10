@@ -809,7 +809,7 @@ const (
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
 	defaultRegionScheduleLimit       = 2048
-	defaultWitnessScheduleLimit      = 2048
+	defaultWitnessScheduleLimit      = 4
 	defaultReplicaScheduleLimit      = 64
 	defaultMergeScheduleLimit        = 8
 	defaultHotRegionScheduleLimit    = 4
