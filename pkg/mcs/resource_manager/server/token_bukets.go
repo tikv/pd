@@ -33,15 +33,15 @@ const (
 )
 
 // GroupTokenBucket is a token bucket for a resource group.
-// TODO: statistics Consumption
+// TODO: statistics consumption @JmPotato
 type GroupTokenBucket struct {
 	*rmpb.TokenBucket `json:"token_bucket,omitempty"`
 	// MaxTokens limits the number of tokens that can be accumulated
 	MaxTokens float64 `json:"max_tokens,omitempty"`
 
-	Consumption *rmpb.TokenBucketsRequest `json:"consumption,omitempty"`
-	LastUpdate  *time.Time                `json:"last_update,omitempty"`
-	Initialized bool                      `json:"initialized"`
+	Consumption *rmpb.Consumption `json:"consumption,omitempty"`
+	LastUpdate  *time.Time        `json:"last_update,omitempty"`
+	Initialized bool              `json:"initialized"`
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket

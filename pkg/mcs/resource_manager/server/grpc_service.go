@@ -156,15 +156,15 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			}
 			switch rg.Mode {
 			case rmpb.GroupMode_RUMode:
+				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					switch re.Type {
 					case rmpb.RequestUnitType_RRU:
-						tokens := rg.RequestRRU(now, re.Value, targetPeriodMs)
-						resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
+						tokens = rg.RequestRRU(now, re.Value, targetPeriodMs)
 					case rmpb.RequestUnitType_WRU:
-						tokens := rg.RequestWRU(now, re.Value, targetPeriodMs)
-						resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
+						tokens = rg.RequestWRU(now, re.Value, targetPeriodMs)
 					}
+					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}
 			case rmpb.GroupMode_RawMode:
 				log.Warn("not supports the resource type", zap.String("resource-group", req.ResourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
