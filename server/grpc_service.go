@@ -2073,3 +2073,50 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 		Timestamp: timestamp,
 	}, nil
 }
+
+// List implements gRPC PDServer.
+func (s *GrpcServer) List(request *pdpb.ListRequest, stream pdpb.PD_ListServer) error {
+	if s.IsClosed() || s.cluster == nil {
+		return ErrNotStarted
+	}
+	ctx := s.cluster.Context()
+	if ctx == nil {
+		return ErrNotStarted
+	}
+	clusterID := request.GetHeader().GetClusterId()
+	if clusterID != s.ClusterID() {
+		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.ClusterID(), clusterID)
+	}
+
+	if request.GetResource() == "regionstat" {
+		syncer := s.cluster.GetRegionSyncer()
+		start := time.Now()
+		if err := syncer.FullSync(ctx, stream); err != nil {
+			return err
+		}
+		log.Info("requested server has completed full synchronization with server",
+			zap.String("requested-server", request.GetName()), zap.String("server", s.Name()), zap.Duration("cost", time.Since(start)))
+	}
+	return nil
+}
+
+// Watch implements gRPC PDServer.
+func (s *GrpcServer) Watch(request *pdpb.WatchRequest, stream pdpb.PD_WatchServer) error {
+	if s.IsClosed() || s.cluster == nil {
+		return ErrNotStarted
+	}
+	ctx := s.cluster.Context()
+	if ctx == nil {
+		return ErrNotStarted
+	}
+	clusterID := request.GetHeader().GetClusterId()
+	if clusterID != s.ClusterID() {
+		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.ClusterID(), clusterID)
+	}
+	if request.GetResource() == "regionstat" {
+		syncer := s.cluster.GetRegionSyncer()
+		syncer.AddWatcher(request.GetName(), stream)
+		<-ctx.Done()
+	}
+	return nil
+}

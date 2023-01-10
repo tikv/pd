@@ -43,7 +43,7 @@ const (
 	defaultBucketRate        = 20 * units.MiB // 20MB/s
 	defaultBucketCapacity    = 20 * units.MiB // 20MB
 	maxSyncRegionBatchSize   = 100
-	syncerKeepAliveInterval  = 10 * time.Second
+	keepAliveInterval        = 10 * time.Second
 	defaultHistoryBufferSize = 10000
 )
 
@@ -53,9 +53,26 @@ type ClientStream interface {
 	CloseSend() error
 }
 
+// WatchClientStream is the client side of watch.
+type WatchClientStream interface {
+	Recv() (*pdpb.WatchResponse, error)
+	CloseSend() error
+}
+
+// ListClientStream is the client side of list.
+type ListClientStream interface {
+	Recv() (*pdpb.ListResponse, error)
+	CloseSend() error
+}
+
 // ServerStream is the server side of the region syncer.
 type ServerStream interface {
 	Send(regions *pdpb.SyncRegionResponse) error
+}
+
+// WatchStream is the server side of the region syncer.
+type WatchStream interface {
+	Send(regions *pdpb.WatchResponse) error
 }
 
 // Server is the abstraction of the syncer storage server.
@@ -76,6 +93,7 @@ type RegionSyncer struct {
 	mu struct {
 		syncutil.RWMutex
 		streams      map[string]ServerStream
+		watcher      map[string]WatchStream
 		clientCtx    context.Context
 		clientCancel context.CancelFunc
 	}
@@ -84,6 +102,8 @@ type RegionSyncer struct {
 	history   *historyBuffer
 	limit     *ratelimit.RateLimiter
 	tlsConfig *grpcutil.TLSConfig
+	// TODO: make it configurable and use it as a switch.
+	enableWatch bool
 }
 
 // NewRegionSyncer returns a region syncer.
@@ -102,7 +122,13 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		limit:     ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}
-	syncer.mu.streams = make(map[string]ServerStream)
+	syncer.enableWatch = false
+	if syncer.enableWatch {
+		syncer.mu.watcher = make(map[string]WatchStream)
+	} else {
+		syncer.mu.streams = make(map[string]ServerStream)
+	}
+
 	return syncer
 }
 
@@ -113,7 +139,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	var stats []*pdpb.RegionStat
 	var leaders []*metapb.Peer
 	var buckets []*metapb.Buckets
-	ticker := time.NewTicker(syncerKeepAliveInterval)
+	ticker := time.NewTicker(keepAliveInterval)
 
 	defer func() {
 		ticker.Stop()
@@ -173,6 +199,69 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		stats = stats[:0]
 		leaders = leaders[:0]
 		buckets = buckets[:0]
+	}
+}
+
+// RunWatchServer runs the server of the region syncer.
+// regionNotifier is used to get the changed regions.
+func (s *RegionSyncer) RunWatchServer(ctx context.Context, regionNotifier <-chan *core.RegionInfo) {
+	var events []*pdpb.Event
+	ticker := time.NewTicker(keepAliveInterval)
+
+	defer func() {
+		ticker.Stop()
+		s.mu.Lock()
+		s.mu.watcher = make(map[string]WatchStream)
+		s.mu.Unlock()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("region syncer has been stopped")
+			return
+		case first := <-regionNotifier:
+			// bucket should not be nil to avoid grpc marshal panic.
+			bucket := &metapb.Buckets{}
+			if b := first.GetBuckets(); b != nil {
+				bucket = b
+			}
+			events = append(events, &pdpb.Event{Item: &pdpb.Item{Item: &pdpb.Item_RegionStat{RegionStat: &pdpb.RegionStats{
+				Region:      first.GetMeta(),
+				RegionStats: first.GetStat(),
+				Leader:      first.GetLeader(),
+				Buckets:     bucket,
+			}}}})
+			startIndex := s.history.GetNextIndex()
+			s.history.Record(first)
+			pending := len(regionNotifier)
+			for i := 0; i < pending && i < maxSyncRegionBatchSize; i++ {
+				region := <-regionNotifier
+				// bucket should not be nil to avoid grpc marshal panic.
+				bucket := &metapb.Buckets{}
+				if b := region.GetBuckets(); b != nil {
+					bucket = b
+				}
+				events = append(events, &pdpb.Event{Item: &pdpb.Item{Item: &pdpb.Item_RegionStat{RegionStat: &pdpb.RegionStats{
+					Region:      region.GetMeta(),
+					RegionStats: region.GetStat(),
+					Leader:      region.GetLeader(),
+					Buckets:     bucket,
+				}}}})
+				s.history.Record(region)
+			}
+			regions := &pdpb.WatchResponse{
+				Revision: startIndex,
+				Events:   events,
+			}
+			s.notify(regions)
+		case <-ticker.C:
+			alive := &pdpb.WatchResponse{
+				Revision: s.history.GetNextIndex(),
+			}
+			s.notify(alive)
+		}
+		events = events[:0]
 	}
 }
 
@@ -333,6 +422,13 @@ func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
 	s.mu.streams[name] = stream
 }
 
+// AddWatcher adds a watcher for synchronize the regions.
+func (s *RegionSyncer) AddWatcher(name string, stream WatchStream) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.mu.watcher[name] = stream
+}
+
 func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 	var failed []string
 	s.mu.RLock()
@@ -352,4 +448,77 @@ func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
 		}
 		s.mu.Unlock()
 	}
+}
+
+func (s *RegionSyncer) notify(regions *pdpb.WatchResponse) {
+	var failed []string
+	s.mu.RLock()
+	for name, sender := range s.mu.watcher {
+		err := sender.Send(regions)
+		if err != nil {
+			log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
+			failed = append(failed, name)
+		}
+	}
+	s.mu.RUnlock()
+	if len(failed) > 0 {
+		s.mu.Lock()
+		for _, name := range failed {
+			delete(s.mu.watcher, name)
+			log.Info("region syncer delete the watcher", zap.String("watcher", name))
+		}
+		s.mu.Unlock()
+	}
+}
+
+// FullSync is used to synchronize full regions with followers.
+func (s *RegionSyncer) FullSync(ctx context.Context, stream pdpb.PD_ListServer) error {
+	// do full synchronization
+	regions := s.server.GetRegions()
+	regionStats := make([]*pdpb.Item, 0, maxSyncRegionBatchSize)
+	lastIndex := 0
+	for syncedIndex, r := range regions {
+		select {
+		case <-ctx.Done():
+			log.Info("stop sending sync region response due to the context canceled")
+			failpoint.Inject("noFastExitSync", func() {
+				failpoint.Goto("doSync")
+			})
+			return nil
+		default:
+		}
+		failpoint.Label("doSync")
+		leader := &metapb.Peer{}
+		if r.GetLeader() != nil {
+			leader = r.GetLeader()
+		}
+		buckets := &metapb.Buckets{}
+		if r.GetBuckets() != nil {
+			buckets = r.GetBuckets()
+		}
+		regionStats = append(regionStats, &pdpb.Item{Item: &pdpb.Item_RegionStat{RegionStat: &pdpb.RegionStats{
+			Region:      r.GetMeta(),
+			RegionStats: r.GetStat(),
+			Leader:      leader,
+			Buckets:     buckets,
+		}}})
+		if len(regionStats) < maxSyncRegionBatchSize && syncedIndex < len(regions)-1 {
+			continue
+		}
+
+		resp := &pdpb.ListResponse{
+			Header: &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+			Items:  regionStats,
+			// The revision here is not the real revision.
+			Revision: uint64(lastIndex),
+		}
+		s.limit.WaitN(ctx, resp.Size())
+		lastIndex += len(regionStats)
+		if err := stream.Send(resp); err != nil {
+			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
+			return err
+		}
+		regionStats = regionStats[:0]
+	}
+	return nil
 }
