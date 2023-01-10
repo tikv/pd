@@ -50,7 +50,7 @@ func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
 	return nil
 }
 
-// ListResourceGroups loads and returns target keyspace's metadata.
+// ListResourceGroups loads and returns all metadata of resource groups.
 func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error) {
 	req := &rmpb.ListResourceGroupsRequest{}
 	resp, err := c.resourceManagerClient().ListResourceGroups(ctx, req)
@@ -211,7 +211,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		stream, streamCtx, cancel := connection.stream, connection.ctx, connection.cancel
 		if stream == nil {
 			c.tryResourceManagerConnect(dispatcherCtx, &connection)
-			c.finishTokenRequest(firstRequest, nil, errors.Errorf("no stream"))
+			firstRequest.done <- errors.Errorf("no stream")
 			continue
 		}
 		select {
@@ -235,26 +235,22 @@ func (c *client) processTokenRequests(stream rmpb.ResourceManager_AcquireTokenBu
 	req := t.Requeset
 	if err := stream.Send(req); err != nil {
 		err = errors.WithStack(err)
-		c.finishTokenRequest(t, nil, err)
+		t.done <- err
 		return err
 	}
 	resp, err := stream.Recv()
 	if err != nil {
 		err = errors.WithStack(err)
-		c.finishTokenRequest(t, nil, err)
+		t.done <- err
 		return err
 	}
 	if resp.GetError() != nil {
 		return errors.Errorf("[resource_manager]" + resp.GetError().Message)
 	}
 	tokenBuckets := resp.GetResponses()
-	c.finishTokenRequest(t, tokenBuckets, nil)
-	return nil
-}
-
-func (c *client) finishTokenRequest(t *tokenRequest, tokenBuckets []*rmpb.TokenBucketResponse, err error) {
 	t.TokenBuckets = tokenBuckets
-	t.done <- err
+	t.done <- nil
+	return nil
 }
 
 func (c *client) tryResourceManagerConnect(ctx context.Context, connection *resourceManagerConnectionContext) error {
