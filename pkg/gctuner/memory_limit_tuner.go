@@ -100,7 +100,7 @@ func (t *memoryLimitTuner) tuning() {
 
 // Start starts the memory limit tuner.
 func (t *memoryLimitTuner) Start() {
-	log.Info("memoryLimitTuner start")
+	log.Debug("memoryLimitTuner start")
 	t.finalizer = newFinalizer(t.tuning) // Start tuning
 }
 
