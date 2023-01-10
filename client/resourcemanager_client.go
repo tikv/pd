@@ -42,8 +42,8 @@ type ResourceManagerClient interface {
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 }
 
-// resouceManagerClient gets the ResourceManager client of current PD leader.
-func (c *client) resouceManagerClient() rmpb.ResourceManagerClient {
+// resourceManagerClient gets the ResourceManager client of current PD leader.
+func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
 	if cc, ok := c.clientConns.Load(c.GetLeaderAddr()); ok {
 		return rmpb.NewResourceManagerClient(cc.(*grpc.ClientConn))
 	}
@@ -53,7 +53,7 @@ func (c *client) resouceManagerClient() rmpb.ResourceManagerClient {
 // ListResourceGroups loads and returns target keyspace's metadata.
 func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error) {
 	req := &rmpb.ListResourceGroupsRequest{}
-	resp, err := c.resouceManagerClient().ListResourceGroups(ctx, req)
+	resp, err := c.resourceManagerClient().ListResourceGroups(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string)
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 	}
-	resp, err := c.resouceManagerClient().GetResourceGroup(ctx, req)
+	resp, err := c.resourceManagerClient().GetResourceGroup(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -94,9 +94,9 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 	var resp *rmpb.PutResourceGroupResponse
 	switch typ {
 	case add:
-		resp, err = c.resouceManagerClient().AddResourceGroup(ctx, req)
+		resp, err = c.resourceManagerClient().AddResourceGroup(ctx, req)
 	case modify:
-		resp, err = c.resouceManagerClient().ModifyResourceGroup(ctx, req)
+		resp, err = c.resourceManagerClient().ModifyResourceGroup(ctx, req)
 	}
 	if err != nil {
 		return str, err
@@ -113,7 +113,7 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	req := &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 	}
-	resp, err := c.resouceManagerClient().DeleteResourceGroup(ctx, req)
+	resp, err := c.resourceManagerClient().DeleteResourceGroup(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -191,11 +191,11 @@ func (c *client) createTokenispatcher() {
 		tokenBatchController: newTokenBatchController(
 			make(chan *tokenRequest, 1)),
 	}
-	go c.handleResouceTokenDispatcher(dispatcherCtx, dispatcher.tokenBatchController)
+	go c.handleResourceTokenDispatcher(dispatcherCtx, dispatcher.tokenBatchController)
 	c.tokenDispatcher = dispatcher
 }
 
-func (c *client) handleResouceTokenDispatcher(dispatcherCtx context.Context, tbc *tokenBatchController) {
+func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tbc *tokenBatchController) {
 	var connection resourceManagerConnectionContext
 	if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
 		log.Warn("get stream error", zap.Error(err))
@@ -264,7 +264,7 @@ func (c *client) tryResourceManagerConnect(ctx context.Context, connection *reso
 	)
 	for i := 0; i < maxRetryTimes; i++ {
 		cctx, cancel := context.WithCancel(ctx)
-		stream, err = c.resouceManagerClient().AcquireTokenBuckets(cctx)
+		stream, err = c.resourceManagerClient().AcquireTokenBuckets(cctx)
 		if err == nil && stream != nil {
 			connection.cancel = cancel
 			connection.ctx = cctx
