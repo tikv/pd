@@ -39,7 +39,7 @@ var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	replicaCheckerCounter                         = checkerCounter.WithLabelValues(replicaChecker, "check")
 	replicaCheckerPausedCounter                   = checkerCounter.WithLabelValues(replicaChecker, "paused")
-	replicaCheckerOpCounter                       = checkerCounter.WithLabelValues(replicaChecker, "new-operator")
+	replicaCheckerNewOpCounter                    = checkerCounter.WithLabelValues(replicaChecker, "new-operator")
 	replicaCheckerNoTargetStoreCounter            = checkerCounter.WithLabelValues(replicaChecker, "no-target-store")
 	replicaCheckerNoWorstPeerCounter              = checkerCounter.WithLabelValues(replicaChecker, "no-worst-peer")
 	replicaCheckerCreateOpFailedCounter           = checkerCounter.WithLabelValues(replicaChecker, "create-operator-failed")
@@ -87,26 +87,26 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 		return nil
 	}
 	if op := r.checkDownPeer(region); op != nil {
-		replicaCheckerOpCounter.Inc()
+		replicaCheckerNewOpCounter.Inc()
 		op.SetPriorityLevel(core.High)
 		return op
 	}
 	if op := r.checkOfflinePeer(region); op != nil {
-		replicaCheckerOpCounter.Inc()
+		replicaCheckerNewOpCounter.Inc()
 		op.SetPriorityLevel(core.High)
 		return op
 	}
 	if op := r.checkMakeUpReplica(region); op != nil {
-		replicaCheckerOpCounter.Inc()
+		replicaCheckerNewOpCounter.Inc()
 		op.SetPriorityLevel(core.High)
 		return op
 	}
 	if op := r.checkRemoveExtraReplica(region); op != nil {
-		replicaCheckerOpCounter.Inc()
+		replicaCheckerNewOpCounter.Inc()
 		return op
 	}
 	if op := r.checkLocationReplacement(region); op != nil {
-		replicaCheckerOpCounter.Inc()
+		replicaCheckerNewOpCounter.Inc()
 		return op
 	}
 	return nil

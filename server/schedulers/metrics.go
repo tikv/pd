@@ -32,6 +32,7 @@ var schedulerStatus = prometheus.NewGaugeVec(
 		Help:      "Inner status of the scheduler.",
 	}, []string{"type", "name"})
 
+// todo: pre-allocate gauge metrics
 var opInfluenceStatus = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Namespace: "pd",
@@ -40,6 +41,7 @@ var opInfluenceStatus = prometheus.NewGaugeVec(
 		Help:      "Store status for schedule",
 	}, []string{"scheduler", "store", "type"})
 
+// todo: pre-allocate gauge metrics
 var tolerantResourceStatus = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Namespace: "pd",
