@@ -183,13 +183,13 @@ func TestLowSpaceScoreV2(t *testing.T) {
 		small:  newStoreInfoWithAvailable(2, 60*units.GiB, 100*units.GiB, 1),
 	}, {
 		// store1's capacity is less than store2's capacity, but store2 has more available space,
-		bigger: NewStoreInfoWithAvailable(1, 2*units.GiB, 100*units.GiB, 3),
-		small:  NewStoreInfoWithAvailable(2, 100*units.GiB, 10*1000*units.GiB, 3),
+		bigger: newStoreInfoWithAvailable(1, 2*units.GiB, 100*units.GiB, 3),
+		small:  newStoreInfoWithAvailable(2, 100*units.GiB, 10*1000*units.GiB, 3),
 	}, {
 		// store2 has extra file size (70GB), it can balance region from store1 to store2.
 		// See https://github.com/tikv/pd/issues/5790
-		small:  NewStoreInfoWithDisk(1, 400*units.MiB, 6930*units.GiB, 7000*units.GiB, 400),
-		bigger: NewStoreInfoWithAvailable(2, 1500*units.GiB, 7000*units.GiB, 1.32),
+		small:  newStoreInfoWithDisk(1, 400*units.MiB, 6930*units.GiB, 7000*units.GiB, 400),
+		bigger: newStoreInfoWithAvailable(2, 1500*units.GiB, 7000*units.GiB, 1.32),
 		delta:  37794,
 	}}
 	for _, v := range testdata {
@@ -206,6 +206,23 @@ func newStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *Sto
 	stats.Available = available
 	usedSize := capacity - available
 	regionSize := (float64(usedSize) * amp) / units.MiB
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id: id,
+		},
+		SetStoreStats(stats),
+		SetRegionCount(int(regionSize/96)),
+		SetRegionSize(int64(regionSize)),
+	)
+	return store
+}
+
+// newStoreInfoWithDisk is created with all disk infos.
+func newStoreInfoWithDisk(id, used, available, capacity, regionSize uint64) *StoreInfo {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = capacity
+	stats.Available = available
+	stats.UsedSize = used
 	store := NewStoreInfo(
 		&metapb.Store{
 			Id: id,
