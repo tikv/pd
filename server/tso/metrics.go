@@ -22,6 +22,7 @@ const (
 )
 
 var (
+	// todo: pre-allocate gauge metrics
 	tsoCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",

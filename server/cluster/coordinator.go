@@ -58,6 +58,12 @@ const (
 	PluginUnload = "PluginUnload"
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	waitingListGauge  = regionListGauge.WithLabelValues("waiting_list")
+	priorityListGauge = regionListGauge.WithLabelValues("priority_list")
+)
+
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
 type coordinator struct {
 	syncutil.RWMutex
@@ -181,7 +187,7 @@ func (c *coordinator) checkSuspectRegions() {
 
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
-	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
+	waitingListGauge.Set(float64(len(items)))
 	for _, item := range items {
 		region := c.cluster.GetRegion(item.Key)
 		c.tryAddOperators(region)
@@ -192,7 +198,7 @@ func (c *coordinator) checkWaitingRegions() {
 func (c *coordinator) checkPriorityRegions() {
 	items := c.checkers.GetPriorityRegions()
 	removes := make([]uint64, 0)
-	regionListGauge.WithLabelValues("priority_list").Set(float64(len(items)))
+	priorityListGauge.Set(float64(len(items)))
 	for _, id := range items {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
@@ -569,6 +575,7 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
 	for _, s := range stores {
+		// todo: pre-allocate gauge metrics
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)

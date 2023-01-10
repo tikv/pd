@@ -92,6 +92,13 @@ const (
 // EtcdStartTimeout the timeout of the startup etcd.
 var EtcdStartTimeout = time.Minute * 5
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	etcdTermGauge           = etcdStateGauge.WithLabelValues("term")
+	etcdAppliedIndexGauge   = etcdStateGauge.WithLabelValues("appliedIndex")
+	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
+)
+
 // Server is the pd server.
 // nolint
 type Server struct {
@@ -565,9 +572,9 @@ func (s *Server) encryptionKeyManagerLoop() {
 }
 
 func (s *Server) collectEtcdStateMetrics() {
-	etcdStateGauge.WithLabelValues("term").Set(float64(s.member.Etcd().Server.Term()))
-	etcdStateGauge.WithLabelValues("appliedIndex").Set(float64(s.member.Etcd().Server.AppliedIndex()))
-	etcdStateGauge.WithLabelValues("committedIndex").Set(float64(s.member.Etcd().Server.CommittedIndex()))
+	etcdTermGauge.Set(float64(s.member.Etcd().Server.Term()))
+	etcdAppliedIndexGauge.Set(float64(s.member.Etcd().Server.AppliedIndex()))
+	etcdCommittedIndexGauge.Set(float64(s.member.Etcd().Server.CommittedIndex()))
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
