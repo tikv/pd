@@ -359,7 +359,7 @@ func NewBalanceWitnessSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "balance-witness-scheduler",
 		Short: "add a scheduler to balance witness",
-		Run:   addSchedulerForBalanceWitnessCommandFunc,
+		Run:   addSchedulerCommandFunc,
 	}
 	return c
 }
@@ -369,21 +369,9 @@ func NewTransferWitnessLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "transfer-witness-leader-scheduler",
 		Short: "add a scheduler to transfer witness leader",
-		Run:   addSchedulerForTransferWitnessLeaderCommandFunc,
+		Run:   addSchedulerCommandFunc,
 	}
 	return c
-}
-
-func addSchedulerForBalanceWitnessCommandFunc(cmd *cobra.Command, args []string) {
-	input := make(map[string]interface{})
-	input["name"] = cmd.Name()
-	postJSON(cmd, schedulersPrefix, input)
-}
-
-func addSchedulerForTransferWitnessLeaderCommandFunc(cmd *cobra.Command, args []string) {
-	input := make(map[string]interface{})
-	input["name"] = cmd.Name()
-	postJSON(cmd, schedulersPrefix, input)
 }
 
 func addSchedulerForSplitBucketCommandFunc(cmd *cobra.Command, args []string) {
