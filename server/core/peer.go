@@ -94,11 +94,6 @@ func NewPeerInfo(meta *metapb.Peer, loads []float64, interval uint64) *PeerInfo 
 	}
 }
 
-// GetStoreID provides located storeID
-func (p *PeerInfo) GetStoreID() uint64 {
-	return p.GetStoreId()
-}
-
 // GetLoads provides loads
 func (p *PeerInfo) GetLoads() []float64 {
 	return p.loads

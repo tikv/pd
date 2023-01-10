@@ -45,6 +45,15 @@ const (
 	lastStoreDeleteInfo  = "The last store has been deleted"
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	evictLeaderCounter              = schedulerCounter.WithLabelValues(EvictLeaderName, "schedule")
+	evictLeaderNoLeaderCounter      = schedulerCounter.WithLabelValues(EvictLeaderName, "no-leader")
+	evictLeaderPickUnhealthyCounter = schedulerCounter.WithLabelValues(EvictLeaderName, "pick-unhealthy-region")
+	evictLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(EvictLeaderName, "no-target-store")
+	evictLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(EvictLeaderName, "new-operator")
+)
+
 func init() {
 	schedule.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -257,7 +266,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	evictLeaderCounter.Inc()
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize), nil
 }
 
@@ -314,10 +323,10 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 			// try to pick unhealthy region
 			region = filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil)
 			if region == nil {
-				schedulerCounter.WithLabelValues(name, "no-leader").Inc()
+				evictLeaderNoLeaderCounter.Inc()
 				continue
 			}
-			schedulerCounter.WithLabelValues(name, "pick-unhealthy-region").Inc()
+			evictLeaderPickUnhealthyCounter.Inc()
 			unhealthyPeerStores := make(map[uint64]struct{})
 			for _, peer := range region.GetDownPeers() {
 				unhealthyPeerStores[peer.GetPeer().GetStoreId()] = struct{}{}
@@ -336,7 +345,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 		targets := candidates.PickAll()
 		// `targets` MUST contains `target`, so only needs to check if `target` is nil here.
 		if target == nil {
-			schedulerCounter.WithLabelValues(name, "no-target-store").Inc()
+			evictLeaderNoTargetStoreCounter.Inc()
 			continue
 		}
 		targetIDs := make([]uint64, 0, len(targets))
@@ -349,7 +358,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 			continue
 		}
 		op.SetPriorityLevel(core.Urgent)
-		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(name, "new-operator"))
+		op.Counters = append(op.Counters, evictLeaderNewOperatorCounter)
 		ops = append(ops, op)
 	}
 	return ops

@@ -66,7 +66,7 @@ func TestHotRegionStorage(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
-	startTime := time.Now().Second()
+	startTime := time.Now().Unix()
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
@@ -104,7 +104,7 @@ func TestHotRegionStorage(t *testing.T) {
 	var next *storage.HistoryHotRegion
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
 	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
-		iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), time.Now().UnixNano()/int64(time.Millisecond))
+		iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime*1000, time.Now().UnixMilli())
 		next, err = iter.Next()
 		return err == nil && next != nil
 	})
@@ -120,8 +120,10 @@ func TestHotRegionStorage(t *testing.T) {
 	next, err = iter.Next()
 	re.NoError(err)
 	re.Nil(next)
-	iter = hotRegionStorage.NewIterator([]string{storage.ReadType.String()}, int64(startTime*1000), time.Now().UnixNano()/int64(time.Millisecond))
+	iter = hotRegionStorage.NewIterator([]string{storage.ReadType.String()}, startTime*1000, time.Now().UnixMilli())
 	next, err = iter.Next()
+	re.NoError(err)
+	re.NotNil(next)
 	re.Equal(uint64(3), next.RegionID)
 	re.Equal(uint64(1), next.StoreID)
 	re.Equal(storage.ReadType.String(), next.HotRegionType)
@@ -172,14 +174,14 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
-	startTime := time.Now().Second()
+	startTime := time.Now().Unix()
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	var iter storage.HotRegionStorageIterator
 	var next *storage.HistoryHotRegion
 	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
 		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
-		iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), time.Now().UnixNano()/int64(time.Millisecond))
+		iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime*1000, time.Now().UnixMilli())
 		next, err = iter.Next()
 		return err == nil && next != nil
 	})
@@ -195,11 +197,10 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
 	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
-		core.SetReportInterval(uint64(time.Now().Second()-statistics.WriteReportInterval), uint64(time.Now().Second())))
+		core.SetReportInterval(uint64(time.Now().Unix()-statistics.WriteReportInterval), uint64(time.Now().Unix())))
 	time.Sleep(10 * interval)
-	endTime := time.Now().UnixNano() / int64(time.Millisecond)
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
-	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), endTime)
+	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime*1000, time.Now().UnixMilli())
 	next, err = iter.Next()
 	re.NoError(err)
 	re.NotNil(next)
@@ -213,9 +214,8 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	schedule.HotRegionsReservedDays = 1
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
-	endTime = time.Now().UnixNano() / int64(time.Millisecond)
 	hotRegionStorage = leaderServer.GetServer().GetHistoryHotRegionStorage()
-	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), endTime)
+	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime*1000, time.Now().UnixMilli())
 	next, err = iter.Next()
 	re.NoError(err)
 	re.NotNil(next)
@@ -266,7 +266,7 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
-	startTime := time.Now().Second()
+	startTime := time.Now().Unix()
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-statistics.WriteReportInterval), uint64(startTime)))
@@ -274,7 +274,7 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	var next *storage.HistoryHotRegion
 	testutil.Eventually(re, func() bool { // wait for the history hot region to be written to the storage
 		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
-		iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), time.Now().UnixNano()/int64(time.Millisecond))
+		iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime*1000, time.Now().UnixMilli())
 		next, err = iter.Next()
 		return err == nil && next != nil
 	})
@@ -290,12 +290,11 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
 	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
-		core.SetReportInterval(uint64(time.Now().Second()-statistics.WriteReportInterval), uint64(time.Now().Second())))
+		core.SetReportInterval(uint64(time.Now().Unix()-statistics.WriteReportInterval), uint64(time.Now().Unix())))
 	time.Sleep(10 * interval)
-	endTime := time.Now().UnixNano() / int64(time.Millisecond)
 	// it cant get new hot region because wait time smaller than hot region write interval
 	hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
-	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), endTime)
+	iter = hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime*1000, time.Now().UnixMilli())
 	next, err = iter.Next()
 	re.NoError(err)
 	re.NotNil(next)
