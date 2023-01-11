@@ -19,6 +19,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
@@ -89,12 +90,7 @@ func NewStoreInfoWithDisk(id, used, available, capacity, regionSize uint64) *Sto
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = capacity
 	stats.Available = available
-<<<<<<< HEAD
-	usedSize := capacity - available
-	regionSize := (float64(usedSize) * amp) / mb
-=======
 	stats.UsedSize = used
->>>>>>> 74136a911 (core: scoreV2 conside the extra file (#5819))
 	store := NewStoreInfo(
 		&metapb.Store{
 			Id: id,

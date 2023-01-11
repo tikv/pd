@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -373,17 +374,12 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 }
 
 func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
-<<<<<<< HEAD
-	A := float64(s.GetAvgAvailable()) / gb
-	C := float64(s.GetCapacity()) / gb
-=======
 	A := float64(s.GetAvgAvailable()) / units.GiB
 	C := float64(s.GetCapacity()) / units.GiB
 	// the used size always be accurate, it only statistics the raftDB|rocksDB|snap directory, so we use it directly.
 	U := float64(s.GetUsedSize()) / units.GiB
 	// the diff maybe not zero if the disk has other files.
 	diff := C - A - U
->>>>>>> 74136a911 (core: scoreV2 conside the extra file (#5819))
 	R := float64(s.GetRegionSize() + delta)
 	if R < 0 {
 		R = float64(s.GetRegionSize())

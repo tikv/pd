@@ -167,7 +167,11 @@ func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
 		small:  NewStoreInfoWithAvailable(2, 60*gb, 100*gb, 1),
 	}, {
 		// store1's capacity is less than store2's capacity, but store2 has more available space,
-<<<<<<< HEAD
+		bigger: NewStoreInfoWithAvailable(1, 2*gb, 100*gb, 3),
+		small:  NewStoreInfoWithAvailable(2, 100*gb, 10*1000*gb, 3),
+	}, {
+		// store2 has extra file size (70GB), it can balance region from store1 to store2.
+		// See https://github.com/tikv/pd/issues/5790
 		bigger: NewStoreInfoWithAvailable(1, 2*gb, 100*gb, 3),
 		small:  NewStoreInfoWithAvailable(2, 100*gb, 10*1000*gb, 3),
 	}}
@@ -175,20 +179,5 @@ func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
 		score1 := v.bigger.regionScoreV2(0, 0.8)
 		score2 := v.small.regionScoreV2(0, 0.8)
 		c.Assert(score1, Greater, score2)
-=======
-		bigger: NewStoreInfoWithAvailable(1, 2*units.GiB, 100*units.GiB, 3),
-		small:  NewStoreInfoWithAvailable(2, 100*units.GiB, 10*1000*units.GiB, 3),
-	}, {
-		// store2 has extra file size (70GB), it can balance region from store1 to store2.
-		// See https://github.com/tikv/pd/issues/5790
-		small:  NewStoreInfoWithDisk(1, 400*units.MiB, 6930*units.GiB, 7000*units.GiB, 400),
-		bigger: NewStoreInfoWithAvailable(2, 1500*units.GiB, 7000*units.GiB, 1.32),
-		delta:  37794,
-	}}
-	for _, v := range testdata {
-		score1 := v.bigger.regionScoreV2(-v.delta, 0.8)
-		score2 := v.small.regionScoreV2(v.delta, 0.8)
-		re.Greater(score1, score2)
->>>>>>> 74136a911 (core: scoreV2 conside the extra file (#5819))
 	}
 }
