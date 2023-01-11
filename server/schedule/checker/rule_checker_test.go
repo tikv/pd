@@ -431,52 +431,41 @@ func (s *testRuleCheckerSuite) TestPriorityFixOrphanPeer(c *C) {
 	c.Assert(op, IsNil)
 	var add operator.AddLearner
 	var remove operator.RemovePeer
-<<<<<<< HEAD
 	s.cluster.SetStoreOffline(2)
 	op = s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op, NotNil)
 	c.Assert(op.Step(0), FitsTypeOf, add)
 	c.Assert(op.Desc(), Equals, "replace-rule-offline-peer")
-	r := s.cluster.GetRegion(1).Clone(core.WithAddPeer(
-=======
 	// Ref 5786
-	originRegion := suite.cluster.GetRegion(1)
+	originRegion := s.cluster.GetRegion(1)
 	learner4 := &metapb.Peer{Id: 114, StoreId: 4, Role: metapb.PeerRole_Learner}
 	testRegion := originRegion.Clone(
 		core.WithAddPeer(learner4),
 		core.WithAddPeer(&metapb.Peer{Id: 115, StoreId: 5, Role: metapb.PeerRole_Learner}),
 		core.WithPendingPeers([]*metapb.Peer{originRegion.GetStorePeer(2), learner4}),
 	)
-	suite.cluster.PutRegion(testRegion)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
-	suite.NotNil(op)
-	suite.Equal("remove-orphan-peer", op.Desc())
-	suite.IsType(remove, op.Step(0))
+	s.cluster.PutRegion(testRegion)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert("remove-orphan-peer", Equals, op.Desc())
+	c.Assert(op.Step(0).(operator.RemovePeer), FitsTypeOf, remove)
 	// Ref #3521
-	suite.cluster.SetStoreOffline(2)
-	suite.cluster.PutRegion(originRegion)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
-	suite.NotNil(op)
-	suite.IsType(add, op.Step(0))
-	suite.Equal("replace-rule-offline-peer", op.Desc())
-	testRegion = suite.cluster.GetRegion(1).Clone(core.WithAddPeer(
->>>>>>> 531d9f32d (checker: when there are too many orphan peers, try to delete them (#5787))
+	s.cluster.SetStoreOffline(2)
+	s.cluster.PutRegion(originRegion)
+	op = s.rc.Check(s.cluster.GetRegion(1))
+	c.Assert(op, NotNil)
+	c.Assert(op.Step(0).(operator.AddLearner), FitsTypeOf, add)
+	c.Assert("replace-rule-offline-peer", Equals, op.Desc())
+	testRegion = s.cluster.GetRegion(1).Clone(core.WithAddPeer(
 		&metapb.Peer{
 			Id:      125,
 			StoreId: 4,
 			Role:    metapb.PeerRole_Learner,
 		}))
-<<<<<<< HEAD
-	s.cluster.PutRegion(r)
+	s.cluster.PutRegion(testRegion)
 	op = s.rc.Check(s.cluster.GetRegion(1))
 	c.Assert(op.Step(0), FitsTypeOf, remove)
 	c.Assert(op.Desc(), Equals, "remove-orphan-peer")
-=======
-	suite.cluster.PutRegion(testRegion)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
-	suite.IsType(remove, op.Step(0))
-	suite.Equal("remove-orphan-peer", op.Desc())
->>>>>>> 531d9f32d (checker: when there are too many orphan peers, try to delete them (#5787))
 }
 
 func (s *testRuleCheckerSuite) TestIssue3293(c *C) {
