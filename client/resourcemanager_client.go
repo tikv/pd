@@ -218,7 +218,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		case <-streamCtx.Done():
 			log.Info("[resource_manager] resource manager stream is canceled")
 			cancel()
-			stream = nil
+			connection.stream = nil
 			continue
 		default:
 		}
