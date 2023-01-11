@@ -20,16 +20,23 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
+// RequestUnit is the basic unit of the resource request management, which has two types:
+//   - RRU: read request unit
+//   - WRU: write request unit
 type RequestUnit float64
 
+// RequestInfo is the interface of the request information provider. A request should be
+// able tell whether it's a write request and if so, the written bytes would also be provided.
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
 }
 
+// ResponseInfo is the interface of the response information provider. A response should be
+// able tell how many bytes it read and KV CPU cost in milliseconds.
 type ResponseInfo interface {
 	ReadBytes() uint64
-	KVCPUms() uint64
+	KVCPUMs() uint64
 }
 
 func Sub(c float64, other float64) float64 {
@@ -40,12 +47,14 @@ func Sub(c float64, other float64) float64 {
 	}
 }
 
+// ResourceCalculator is used to calculate the resource consumption of a request.
 type ResourceCalculator interface {
 	Trickle(map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64, context.Context)
 	BeforeKVRequest(map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64, RequestInfo)
 	AfterKVRequest(map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64, RequestInfo, ResponseInfo)
 }
 
+// KVCalculator is used to calculate the KV request consumption.
 type KVCalculator struct {
 	*Config
 }
@@ -61,28 +70,26 @@ func (dwc *KVCalculator) BeforeKVRequest(resource map[rmpb.ResourceType]float64,
 	if req.IsWrite() {
 		resource[rmpb.ResourceType_KVWriteRPCCount] += 1
 
-		writeBytes := req.WriteBytes()
-		resource[rmpb.ResourceType_WriteBytes] += float64(writeBytes)
+		writeBytes := float64(req.WriteBytes())
+		resource[rmpb.ResourceType_WriteBytes] += writeBytes
 
-		ru[rmpb.RequestUnitType_WRU] += float64(dwc.WriteRequestCost)
-		ru[rmpb.RequestUnitType_WRU] += float64(dwc.WriteBytesCost) * float64(writeBytes)
+		ru[rmpb.RequestUnitType_WRU] += float64(dwc.WriteBaseCost)
+		ru[rmpb.RequestUnitType_WRU] += float64(dwc.WriteBytesCost) * writeBytes
 	} else {
 		resource[rmpb.ResourceType_KVReadRPCCount] += 1
-		ru[rmpb.RequestUnitType_RRU] += float64(dwc.ReadRequestCost)
+		ru[rmpb.RequestUnitType_RRU] += float64(dwc.ReadBaseCost)
 	}
 }
+
 func (dwc *KVCalculator) AfterKVRequest(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, req RequestInfo, res ResponseInfo) {
-	readBytes := res.ReadBytes()
-	resource[rmpb.ResourceType_ReadBytes] += float64(readBytes)
+	readBytes := float64(res.ReadBytes())
+	resource[rmpb.ResourceType_ReadBytes] += readBytes
+	ru[rmpb.RequestUnitType_RRU] += readBytes * float64(dwc.ReadBytesCost)
 
-	ru[rmpb.RequestUnitType_RRU] += float64(readBytes) * float64(dwc.ReadBytesCost)
-
-	kvCPUms := float64(res.KVCPUms())
-	resource[rmpb.ResourceType_TotalCPUTimeMs] += kvCPUms
+	kvCPUMs := float64(res.KVCPUMs())
+	resource[rmpb.ResourceType_TotalCPUTimeMs] += kvCPUMs
 	if req.IsWrite() {
-		ru[rmpb.RequestUnitType_WRU] += kvCPUms * float64(dwc.WriteCPUMsCost)
-	} else {
-		ru[rmpb.RequestUnitType_RRU] += kvCPUms * float64(dwc.ReadCPUMsCost)
+		ru[rmpb.RequestUnitType_WRU] += kvCPUMs * float64(dwc.WriteCPUMsCost)
 	}
 }
 
@@ -106,5 +113,6 @@ func (dsc *SQLLayerCPUCalculateor) Trickle(resource map[rmpb.ResourceType]float6
 
 func (dsc *SQLLayerCPUCalculateor) BeforeKVRequest(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, req RequestInfo) {
 }
+
 func (dsc *SQLLayerCPUCalculateor) AfterKVRequest(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, req RequestInfo, res ResponseInfo) {
 }
