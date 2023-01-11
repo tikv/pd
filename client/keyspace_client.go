@@ -33,6 +33,7 @@ type KeyspaceClient interface {
 	LoadKeyspace(ctx context.Context, name string) (*keyspacepb.KeyspaceMeta, error)
 	// WatchKeyspaces watches keyspace meta changes.
 	WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.KeyspaceMeta, error)
+	// UpdateKeyspaceState updates target keyspace's state.
 	UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error)
 }
 
