@@ -107,7 +107,6 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	if neededTokens <= 0 {
 		return &res, 0
 	}
-
 	// If the current tokens can directly meet the requirement, returns the need token
 	if t.Tokens >= neededTokens {
 		t.Tokens -= neededTokens
