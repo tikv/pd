@@ -21,14 +21,15 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
-	"google.golang.org/grpc"
 
 	// Register Service
 	_ "github.com/tikv/pd/pkg/mcs/registry"
@@ -39,27 +40,114 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestBasicReourceGroupCURD(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+type resourceManagerClientTestSuite struct {
+	suite.Suite
+	ctx     context.Context
+	clean   context.CancelFunc
+	cluster *tests.TestCluster
+	client  pd.Client
+}
 
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
+func TestResourceManagerClientTestSuite(t *testing.T) {
+	suite.Run(t, new(resourceManagerClientTestSuite))
+}
+
+func (suite *resourceManagerClientTestSuite) SetupSuite() {
+	var err error
+	re := suite.Require()
+
+	suite.ctx, suite.clean = context.WithCancel(context.Background())
+
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
 
-	err = cluster.RunInitialServers()
+	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 
-	leaderName := cluster.WaitLeader()
-	leader := cluster.GetServer(leaderName)
-
-	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(leader.GetAddr(), "http://"), grpc.WithInsecure())
+	leaderName := suite.cluster.WaitLeader()
+	leader := suite.cluster.GetServer(leaderName)
+	suite.client, err = pd.NewClientWithContext(suite.ctx, []string{leader.GetAddr()}, pd.SecurityOption{})
 	re.NoError(err)
-	defer cc.Close()
 
-	grpcclient := rmpb.NewResourceManagerClient(cc)
+}
+func (suite *resourceManagerClientTestSuite) TearDownSuite() {
+	suite.client.Close()
+	suite.clean()
+	suite.cluster.Destroy()
+}
+
+func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
+	re := suite.Require()
+	cli := suite.client
+
+	groups := []*rmpb.ResourceGroup{
+		{
+			Name: "test1",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RRU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate: 10000,
+					},
+					Tokens: 100000,
+				},
+			},
+		},
+		{
+			Name: "test2",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RRU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate: 40000,
+					},
+					Tokens: 100000,
+				},
+			},
+		},
+	}
+	for _, group := range groups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	reqs := &rmpb.TokenBucketsRequest{
+		Requests:              make([]*rmpb.TokenBucketRequest, 0),
+		TargetRequestPeriodMs: uint64(time.Second * 10 / time.Millisecond),
+	}
+	for _, group := range groups {
+		requests := make([]*rmpb.RequestUnitItem, 0)
+		requests = append(requests, &rmpb.RequestUnitItem{
+			Type:  rmpb.RequestUnitType_RRU,
+			Value: 10000,
+		})
+		req := &rmpb.TokenBucketRequest{
+			ResourceGroupName: group.Name,
+			Request: &rmpb.TokenBucketRequest_RuItems{
+				RuItems: &rmpb.TokenBucketRequest_RequestRU{
+					RequestRU: requests,
+				},
+			},
+		}
+		reqs.Requests = append(reqs.Requests, req)
+	}
+	aresp, err := cli.AcquireTokenBuckets(suite.ctx, reqs)
+	re.NoError(err)
+	for _, resp := range aresp {
+		re.Len(resp.GrantedRUTokens, 1)
+		re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(10000.))
+	}
+	for _, g := range groups {
+		// Delete Resource Group
+		dresp, err := cli.DeleteResourceGroup(suite.ctx, g.Name)
+		re.NoError(err)
+		re.Contains(dresp, "Success!")
+	}
+}
+
+func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
+	re := suite.Require()
+	cli := suite.client
 
 	testCasesSet1 := []struct {
 		name           string
@@ -67,15 +155,15 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		addSuccess     bool
 		modifySuccess  bool
 		expectMarshal  string
-		modifySettings func(*rmpb.GroupSettings)
+		modifySettings func(*rmpb.ResourceGroup)
 	}{
 		{"test1", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test1","mode":0,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fillrate":10000}},"initialized":false},"wru":{"initialized":false}}}`,
-			func(gs *rmpb.GroupSettings) {
+			`{"name":"test1","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":10000}},"initialized":false},"wru":{"initialized":false}}}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 10000,
+							FillRate: 10000,
 						},
 					},
 				}
@@ -83,48 +171,48 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":0,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fillrate":20000}},"initialized":false},"wru":{"initialized":false}}}`,
-			func(gs *rmpb.GroupSettings) {
+			`{"name":"test2","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":20000}},"initialized":false},"wru":{"initialized":false}}}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 20000,
+							FillRate: 20000,
 						},
 					},
 				}
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":0,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fillrate":30000}},"initialized":false},"wru":{"initialized":false}}}`,
-			func(gs *rmpb.GroupSettings) {
+			`{"name":"test2","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":30000}},"initialized":false},"wru":{"initialized":false}}}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 30000,
+							FillRate: 30000,
 						},
 					},
 				}
 			},
 		},
-		{"test3", rmpb.GroupMode_NativeMode, true, false,
-			`{"name":"test3","mode":1}`,
-			func(gs *rmpb.GroupSettings) {
+		{"test3", rmpb.GroupMode_RawMode, true, false,
+			`{"name":"test3","mode":2}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RRU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 10000,
+							FillRate: 10000,
 						},
 					},
 				}
 			},
 		},
-		{"test3", rmpb.GroupMode_NativeMode, false, true,
-			`{"name":"test3","mode":1,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fillrate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
-			func(gs *rmpb.GroupSettings) {
+		{"test3", rmpb.GroupMode_RawMode, false, true,
+			`{"name":"test3","mode":2,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
+			func(gs *rmpb.ResourceGroup) {
 				gs.ResourceSettings = &rmpb.GroupResourceSettings{
 					Cpu: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							Fillrate: 1000000,
+							FillRate: 1000000,
 						},
 					},
 				}
@@ -145,59 +233,59 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 	for i, tcase := range testCasesSet1 {
 		group := &rmpb.ResourceGroup{
 			Name: tcase.name,
-			Settings: &rmpb.GroupSettings{
-				Mode: tcase.mode,
-			},
+			Mode: tcase.mode,
 		}
 		// Create Resource Group
-		resp, err := grpcclient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
 		checkErr(err, tcase.addSuccess)
 		if tcase.addSuccess {
 			finalNum++
-			re.Contains(resp.Body, "Success!")
+			re.Contains(resp, "Success!")
 		}
 
 		// Modify Resource Group
-		tcase.modifySettings(group.Settings)
-		mresp, err := grpcclient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
+		tcase.modifySettings(group)
+		mresp, err := cli.ModifyResourceGroup(suite.ctx, group)
 		checkErr(err, tcase.modifySuccess)
 		if tcase.modifySuccess {
-			re.Contains(mresp.Body, "Success!")
+			re.Contains(mresp, "Success!")
 		}
 
 		// Get Resource Group
-		gresp, err := grpcclient.GetResourceGroup(ctx, &rmpb.GetResourceGroupRequest{ResourceGroupName: tcase.name})
+		gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
 		re.NoError(err)
-		re.Equal(tcase.name, gresp.Group.Name)
+		re.Equal(tcase.name, gresp.Name)
 		if tcase.modifySuccess {
-			re.Equal(group, gresp.Group)
+			re.Equal(group, gresp)
 		}
 
 		// Last one, Check list and delete all resource groups
 		if i == len(testCasesSet1)-1 {
 			// List Resource Group
-			lresp, err := grpcclient.ListResourceGroups(ctx, &rmpb.ListResourceGroupsRequest{})
+			lresp, err := cli.ListResourceGroups(suite.ctx)
 			re.NoError(err)
-			re.Equal(finalNum, len(lresp.Groups))
+			re.Equal(finalNum, len(lresp))
 
-			for _, g := range lresp.Groups {
+			for _, g := range lresp {
 				// Delete Resource Group
-				dresp, err := grpcclient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{ResourceGroupName: g.Name})
+				dresp, err := cli.DeleteResourceGroup(suite.ctx, g.Name)
 				re.NoError(err)
-				re.Contains(dresp.Body, "Success!")
+				re.Contains(dresp, "Success!")
+				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
+				re.EqualError(err, "rpc error: code = Unknown desc = resource group not found")
 			}
 		}
 	}
 
+	leaderName := suite.cluster.WaitLeader()
+	leader := suite.cluster.GetServer(leaderName)
 	// Test Resource Group CURD via HTTP
 	finalNum = 0
 	for i, tcase := range testCasesSet1 {
 		// Create Resource Group
 		group := &rmpb.ResourceGroup{
 			Name: tcase.name,
-			Settings: &rmpb.GroupSettings{
-				Mode: tcase.mode,
-			},
+			Mode: tcase.mode,
 		}
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
@@ -212,7 +300,7 @@ func TestBasicReourceGroupCURD(t *testing.T) {
 		}
 
 		// Modify Resource Group
-		tcase.modifySettings(group.Settings)
+		tcase.modifySettings(group)
 		modifyJSON, err := json.Marshal(group)
 		re.NoError(err)
 		req, err := http.NewRequest(http.MethodPut, leader.GetAddr()+"/resource-manager/api/v1/config/group", strings.NewReader(string(modifyJSON)))

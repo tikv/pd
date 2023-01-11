@@ -109,3 +109,21 @@ func TestRegionEmptyFilter(t *testing.T) {
 	}
 	re.Equal(filter.Select(region), statusRegionEmpty)
 }
+
+func TestRegionWitnessFilter(t *testing.T) {
+	re := require.New(t)
+
+	filter := NewRegionWitnessFilter(2)
+	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+		{StoreId: 1, Id: 1},
+		{StoreId: 2, Id: 2, IsWitness: true},
+		{StoreId: 3, Id: 3},
+	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	re.Equal(filter.Select(region), statusRegionWitnessPeer)
+	region = core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+		{StoreId: 1, Id: 1},
+		{StoreId: 2, Id: 2},
+		{StoreId: 3, Id: 3, IsWitness: true},
+	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	re.Equal(filter.Select(region), statusOK)
+}

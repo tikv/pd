@@ -36,6 +36,9 @@ const (
 	slowStoreRecoverThreshold = 1
 )
 
+// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+var evictSlowStoreCounter = schedulerCounter.WithLabelValues(EvictSlowStoreName, "schedule")
+
 func init() {
 	schedule.RegisterSliceDecoderBuilder(EvictSlowStoreType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -171,7 +174,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster schedule.Cluster) bo
 }
 
 func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	evictSlowStoreCounter.Inc()
 	var ops []*operator.Operator
 
 	if s.conf.evictStore() != 0 {

@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"path"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -57,7 +58,7 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	}
 
 	manager := s.GetKeyspaceManager()
-	meta, err := manager.LoadKeyspace(request.Name)
+	meta, err := manager.LoadKeyspace(request.GetName())
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: s.getErrorHeader(err)}, nil
 	}
@@ -125,4 +126,24 @@ func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspac
 		metas[i] = meta
 	}
 	return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: metas})
+}
+
+// UpdateKeyspaceState updates the state of keyspace specified in the request.
+func (s *KeyspaceServer) UpdateKeyspaceState(_ context.Context, request *keyspacepb.UpdateKeyspaceStateRequest) (*keyspacepb.UpdateKeyspaceStateResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &keyspacepb.UpdateKeyspaceStateResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+	manager := s.GetKeyspaceManager()
+	meta, err := manager.UpdateKeyspaceStateByID(request.GetId(), request.GetState(), time.Now().Unix())
+	if err != nil {
+		return &keyspacepb.UpdateKeyspaceStateResponse{Header: s.getErrorHeader(err)}, nil
+	}
+	return &keyspacepb.UpdateKeyspaceStateResponse{
+		Header:   s.header(),
+		Keyspace: meta,
+	}, nil
 }

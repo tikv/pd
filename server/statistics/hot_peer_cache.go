@@ -20,7 +20,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server/core"
 )
@@ -67,6 +67,8 @@ var MinHotThresholds = [RegionStatCount]float64{
 type thresholds struct {
 	updatedTime time.Time
 	rates       []float64
+	topNLen     int
+	metrics     [DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for total length.
 }
 
 // hotPeerCache saves the hot peer's statistics.
@@ -77,7 +79,8 @@ type hotPeerCache struct {
 	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
 	topNTTL           time.Duration
 	taskQueue         chan FlowItemTask
-	thresholdsOfStore map[uint64]*thresholds // storeID -> thresholds
+	thresholdsOfStore map[uint64]*thresholds                     // storeID -> thresholds
+	metrics           map[uint64][ActionTypeLen]prometheus.Gauge // storeID -> metrics
 	// TODO: consider to remove store info when store is offline.
 }
 
@@ -91,6 +94,7 @@ func NewHotPeerCache(kind RWType) *hotPeerCache {
 		taskQueue:         make(chan FlowItemTask, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
 		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
+		metrics:           make(map[uint64][ActionTypeLen]prometheus.Gauge),
 	}
 }
 
@@ -116,17 +120,27 @@ func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 	switch item.actionType {
 	case Remove:
 		f.removeItem(item)
-		item.Log("region heartbeat remove from cache", log.Debug)
-		incMetrics("remove_item", item.StoreID, f.kind)
+		item.Log("region heartbeat remove from cache")
+	case Add, Update:
+		f.putItem(item)
+		item.Log("region heartbeat update")
+	default:
 		return
-	case Add:
-		incMetrics("add_item", item.StoreID, f.kind)
-	case Update:
-		incMetrics("update_item", item.StoreID, f.kind)
 	}
-	// for add and update
-	f.putItem(item)
-	item.Log("region heartbeat update", log.Debug)
+	f.incMetrics(item.actionType, item.StoreID)
+}
+
+func (f *hotPeerCache) incMetrics(action ActionType, storeID uint64) {
+	if _, ok := f.metrics[storeID]; !ok {
+		store := storeTag(storeID)
+		kind := f.kind.String()
+		f.metrics[storeID] = [ActionTypeLen]prometheus.Gauge{
+			Add:    hotCacheStatusGauge.WithLabelValues("add_item", store, kind),
+			Remove: hotCacheStatusGauge.WithLabelValues("remove_item", store, kind),
+			Update: hotCacheStatusGauge.WithLabelValues("update_item", store, kind),
+		}
+	}
+	f.metrics[storeID][action].Inc()
 }
 
 func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
@@ -157,12 +171,14 @@ func (f *hotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
 func (f *hotPeerCache) collectExpiredItems(region *core.RegionInfo) []*HotPeerStat {
 	regionID := region.GetID()
 	items := make([]*HotPeerStat, 0)
-	for _, storeID := range f.getAllStoreIDs(region) {
-		if region.GetStorePeer(storeID) == nil {
-			item := f.getOldHotPeerStat(regionID, storeID)
-			if item != nil {
-				item.actionType = Remove
-				items = append(items, item)
+	if ids, ok := f.storesOfRegion[regionID]; ok {
+		for storeID := range ids {
+			if region.GetStorePeer(storeID) == nil {
+				item := f.getOldHotPeerStat(regionID, storeID)
+				if item != nil {
+					item.actionType = Remove
+					items = append(items, item)
+				}
 			}
 		}
 	}
@@ -177,7 +193,7 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 	if Denoising && interval < HotRegionReportMinInterval { // for test or simulator purpose
 		return nil
 	}
-	storeID := peer.GetStoreID()
+	storeID := peer.GetStoreId()
 	deltaLoads := peer.GetLoads()
 	f.collectPeerMetrics(deltaLoads, interval) // update metrics
 	regionID := region.GetID()
@@ -207,15 +223,16 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		}
 	}
 
+	peers := region.GetPeers()
 	newItem := &HotPeerStat{
 		StoreID:    storeID,
 		RegionID:   regionID,
 		Loads:      f.kind.GetLoadRatesFromPeer(peer),
 		isLeader:   region.GetLeader().GetStoreId() == storeID,
 		actionType: Update,
-		stores:     make([]uint64, len(region.GetPeers())),
+		stores:     make([]uint64, len(peers)),
 	}
-	for _, peer := range region.GetPeers() {
+	for _, peer := range peers {
 		newItem.stores = append(newItem.stores, peer.GetStoreId())
 	}
 
@@ -272,15 +289,12 @@ func (f *hotPeerCache) checkColdPeer(storeID uint64, reportRegions map[uint64]*c
 	return
 }
 
-func (f *hotPeerCache) collectMetrics(typ string) {
-	for storeID, peers := range f.peersOfStore {
-		store := storeTag(storeID)
-		thresholds := f.calcHotThresholds(storeID)
-		hotCacheStatusGauge.WithLabelValues("total_length", store, typ).Set(float64(peers.Len()))
-		hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, typ).Set(thresholds[ByteDim])
-		hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, typ).Set(thresholds[KeyDim])
-		// for compatibility
-		hotCacheStatusGauge.WithLabelValues("hotThreshold", store, typ).Set(thresholds[ByteDim])
+func (f *hotPeerCache) collectMetrics() {
+	for _, thresholds := range f.thresholdsOfStore {
+		thresholds.metrics[ByteDim].Set(thresholds.rates[ByteDim])
+		thresholds.metrics[KeyDim].Set(thresholds.rates[KeyDim])
+		thresholds.metrics[QueryDim].Set(thresholds.rates[QueryDim])
+		thresholds.metrics[DimLen].Set(float64(thresholds.topNLen))
 	}
 }
 
@@ -294,51 +308,70 @@ func (f *hotPeerCache) getOldHotPeerStat(regionID, storeID uint64) *HotPeerStat 
 }
 
 func (f *hotPeerCache) calcHotThresholds(storeID uint64) []float64 {
+	// check whether the thresholds is updated recently
 	t, ok := f.thresholdsOfStore[storeID]
 	if ok && time.Since(t.updatedTime) <= ThresholdsUpdateInterval {
 		return t.rates
 	}
-	t = &thresholds{
-		updatedTime: time.Now(),
-		rates:       make([]float64, DimLen),
+	// if no exist, or the thresholds is outdated, we need to update it.
+	if !ok {
+		store := storeTag(storeID)
+		kind := f.kind.String()
+		t = &thresholds{
+			rates: make([]float64, DimLen),
+			metrics: [DimLen + 1]prometheus.Gauge{
+				ByteDim:  hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, kind),
+				KeyDim:   hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, kind),
+				QueryDim: hotCacheStatusGauge.WithLabelValues("query-rate-threshold", store, kind),
+				DimLen:   hotCacheStatusGauge.WithLabelValues("total_length", store, kind),
+			},
+		}
 	}
+	// update the thresholds
 	f.thresholdsOfStore[storeID] = t
+	t.updatedTime = time.Now()
 	statKinds := f.kind.RegionStats()
 	for dim, kind := range statKinds {
 		t.rates[dim] = MinHotThresholds[kind]
 	}
-	tn, ok := f.peersOfStore[storeID]
-	if !ok || tn.Len() < TopNN {
-		return t.rates
-	}
-	for i := range t.rates {
-		t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
+	if tn, ok := f.peersOfStore[storeID]; ok {
+		t.topNLen = tn.Len()
+		if t.topNLen < TopNN {
+			return t.rates
+		}
+		for i := range t.rates {
+			t.rates[i] = math.Max(tn.GetTopNMin(i).(*HotPeerStat).GetLoad(i)*HotThresholdRatio, t.rates[i])
+		}
 	}
 	return t.rates
 }
 
 // gets the storeIDs, including old region and new region
 func (f *hotPeerCache) getAllStoreIDs(region *core.RegionInfo) []uint64 {
-	storeIDs := make(map[uint64]struct{})
 	regionPeers := region.GetPeers()
 	ret := make([]uint64, 0, len(regionPeers))
+	isInSlice := func(id uint64) bool {
+		for _, storeID := range ret {
+			if storeID == id {
+				return true
+			}
+		}
+		return false
+	}
 	// old stores
-	ids, ok := f.storesOfRegion[region.GetID()]
-	if ok {
+	if ids, ok := f.storesOfRegion[region.GetID()]; ok {
 		for storeID := range ids {
-			storeIDs[storeID] = struct{}{}
 			ret = append(ret, storeID)
 		}
 	}
-
 	// new stores
-	for _, peer := range region.GetPeers() {
-		if _, ok := storeIDs[peer.GetStoreId()]; !ok {
-			storeIDs[peer.GetStoreId()] = struct{}{}
-			ret = append(ret, peer.GetStoreId())
+	for _, peer := range regionPeers {
+		storeID := peer.GetStoreId()
+		if isInSlice(storeID) {
+			continue
 		}
+		ret = append(ret, storeID)
 	}
-
 	return ret
 }
 
@@ -351,23 +384,23 @@ func (f *hotPeerCache) isOldColdPeer(oldItem *HotPeerStat, storeID uint64) bool 
 		}
 		return false
 	}
-	noInCache := func() bool {
-		ids, ok := f.storesOfRegion[oldItem.RegionID]
-		if ok {
-			for id := range ids {
-				if id == storeID {
-					return false
-				}
+	isInHotCache := func() bool {
+		if ids, ok := f.storesOfRegion[oldItem.RegionID]; ok {
+			if _, ok := ids[storeID]; ok {
+				return true
 			}
 		}
-		return true
+		return false
 	}
-	return isOldPeer() && noInCache()
+	return isOldPeer() && !isInHotCache()
 }
 
-func (f *hotPeerCache) justTransferLeader(region *core.RegionInfo) bool {
+func (f *hotPeerCache) justTransferLeader(region *core.RegionInfo, oldItem *HotPeerStat) bool {
 	if region == nil {
 		return false
+	}
+	if oldItem.isLeader { // old item is not nil according to the function
+		return oldItem.StoreID != region.GetLeader().GetStoreId()
 	}
 	ids, ok := f.storesOfRegion[region.GetID()]
 	if ok {
@@ -425,7 +458,7 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 		newItem.allowInherited = oldItem.allowInherited
 	}
 
-	if f.justTransferLeader(region) {
+	if f.justTransferLeader(region, oldItem) {
 		newItem.lastTransferLeaderTime = time.Now()
 		// skip the first heartbeat flow statistic after transfer leader, because its statistics are calculated by the last leader in this store and are inaccurate
 		// maintain anticount and hotdegree to avoid store threshold and hot peer are unstable.

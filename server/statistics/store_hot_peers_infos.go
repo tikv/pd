@@ -167,6 +167,7 @@ func summaryStoresLoadByEngine(
 		}
 		{
 			// Metric for debug.
+			// todo: pre-allocate gauge metrics
 			ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[ByteDim])
 			ty = "key-rate-" + rwTy.String() + "-" + kind.String()

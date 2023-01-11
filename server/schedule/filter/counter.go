@@ -49,6 +49,8 @@ const (
 	BalanceRegion
 	// BalanceHotRegion is the filter type for hot region.
 	BalanceHotRegion
+	// BalanceWitness is the filter type for balance witness.
+	BalanceWitness
 	// Label is the filter type for replica.
 	Label
 
@@ -76,6 +78,7 @@ var scopes = [scopeLen]string{
 	"balance-leader-scheduler",
 	"balance-region-scheduler",
 	"balance-hot-region-scheduler",
+	"balance-witness-scheduler",
 	"label-scheduler",
 
 	"evict-leader-scheduler",

@@ -227,13 +227,13 @@ func (h *HotRegionStorage) backgroundFlush() {
 	}
 }
 
-// NewIterator return a iterator which can traverse all data as reqeust.
+// NewIterator return a iterator which can traverse all data as request.
 func (h *HotRegionStorage) NewIterator(requireTypes []string, startTime, endTime int64) HotRegionStorageIterator {
 	iters := make([]iterator.Iterator, len(requireTypes))
 	for index, requireType := range requireTypes {
 		requireType = strings.ToLower(requireType)
 		startKey := HotRegionStorePath(requireType, startTime, 0)
-		endKey := HotRegionStorePath(requireType, endTime, math.MaxInt64)
+		endKey := HotRegionStorePath(requireType, endTime, math.MaxUint64)
 		iter := h.LevelDBKV.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 		iters[index] = iter
 	}

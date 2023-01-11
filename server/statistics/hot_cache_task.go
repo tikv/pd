@@ -140,17 +140,14 @@ func (t *checkRegionHotTask) waitRet(ctx context.Context) bool {
 }
 
 type collectMetricsTask struct {
-	typ string
 }
 
-func newCollectMetricsTask(typ string) *collectMetricsTask {
-	return &collectMetricsTask{
-		typ: typ,
-	}
+func newCollectMetricsTask() *collectMetricsTask {
+	return &collectMetricsTask{}
 }
 
 func (t *collectMetricsTask) runTask(cache *hotPeerCache) {
-	cache.collectMetrics(t.typ)
+	cache.collectMetrics()
 }
 
 type getHotPeerStatTask struct {
