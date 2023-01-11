@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -180,4 +181,116 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 	}
 
 	return resp, errors.WithStack(err)
+}
+
+// etcdTxn is used to record user's action during RunInTxn,
+// It stores modification in operations to apply as a single transaction during commit.
+// All load/loadRange result will be stored in conditions.
+// Transaction commit will be successful only if all conditions are met,
+// aka, no other transaction has modified values loaded during current transaction.
+type etcdTxn struct {
+	kv  *etcdKVBase
+	ctx context.Context
+	// mu protects conditions and operations.
+	mu         syncutil.Mutex
+	conditions []clientv3.Cmp
+	operations []clientv3.Op
+}
+
+// RunInTxn runs user provided function f in a transaction.
+func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
+	txn := &etcdTxn{
+		kv:  kv,
+		ctx: ctx,
+	}
+	err := f(txn)
+	if err != nil {
+		return err
+	}
+	return txn.commit()
+}
+
+// Save puts a put operation into operations.
+// Note that save result are not immediately observable before current transaction commit.
+func (txn *etcdTxn) Save(key, value string) error {
+	key = path.Join(txn.kv.rootPath, key)
+	operation := clientv3.OpPut(key, value)
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.operations = append(txn.operations, operation)
+	return nil
+}
+
+// Remove puts a delete operation into operations.
+func (txn *etcdTxn) Remove(key string) error {
+	key = path.Join(txn.kv.rootPath, key)
+	operation := clientv3.OpDelete(key)
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.operations = append(txn.operations, operation)
+	return nil
+}
+
+// Load loads the target value from etcd and puts a comparator into conditions.
+func (txn *etcdTxn) Load(key string) (string, error) {
+	key = path.Join(txn.kv.rootPath, key)
+	resp, err := etcdutil.EtcdKVGet(txn.kv.client, key)
+	if err != nil {
+		return "", err
+	}
+	var condition clientv3.Cmp
+	var value string
+	switch respLen := len(resp.Kvs); {
+	case respLen == 0:
+		// If target key does not contain a value, pin the CreateRevision of the key to 0.
+		// Returned value should be empty string.
+		value = ""
+		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
+	case respLen == 1:
+		// If target key has value, must make sure it stays the same at the time of commit.
+		value = string(resp.Kvs[0].Value)
+		condition = clientv3.Compare(clientv3.Value(key), "=", value)
+	default:
+		// If response contains multiple kvs, error occurred.
+		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+	}
+	// Append the check condition to transaction.
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	txn.conditions = append(txn.conditions, condition)
+	return value, nil
+}
+
+// LoadRange loads the target range from etcd,
+// Then for each value loaded, it puts a comparator into conditions.
+func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
+	keys, values, err = txn.kv.LoadRange(key, endKey, limit)
+	// If LoadRange failed, preserve the failure behavior of base LoadRange.
+	if err != nil {
+		return keys, values, err
+	}
+	// If LoadRange successful, must make sure values stay the same before commit.
+	txn.mu.Lock()
+	defer txn.mu.Unlock()
+	for i := range keys {
+		fullKey := path.Join(txn.kv.rootPath, keys[i])
+		condition := clientv3.Compare(clientv3.Value(fullKey), "=", values[i])
+		txn.conditions = append(txn.conditions, condition)
+	}
+	return keys, values, err
+}
+
+// commit perform the operations on etcd, with pre-condition that values observed by user has not been changed.
+func (txn *etcdTxn) commit() error {
+	baseTxn := txn.kv.client.Txn(txn.ctx)
+	baseTxn.If(txn.conditions...)
+	baseTxn.Then(txn.operations...)
+	resp, err := baseTxn.Commit()
+	if err != nil {
+		return err
+	}
+	if !resp.Succeeded {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	return nil
 }

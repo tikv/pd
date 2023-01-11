@@ -16,12 +16,16 @@ package server
 
 import (
 	"context"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/server"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -125,5 +129,50 @@ func (s *Service) ModifyResourceGroup(ctx context.Context, req *rmpb.PutResource
 
 // AcquireTokenBuckets implements ResourceManagerServer.AcquireTokenBuckets.
 func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBucketsServer) error {
-	return errors.New("Not implemented")
+	for {
+		select {
+		case <-s.ctx.Done():
+			return errors.New("server closed")
+		default:
+		}
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		targetPeriodMs := request.GetTargetRequestPeriodMs()
+		resps := &rmpb.TokenBucketsResponse{}
+		for _, req := range request.Requests {
+			rg := s.manager.GetResourceGroup(req.ResourceGroupName)
+			if rg == nil {
+				log.Warn("resource group not found", zap.String("resource-group", req.ResourceGroupName))
+				continue
+			}
+			now := time.Now()
+			resp := &rmpb.TokenBucketResponse{
+				ResourceGroupName: rg.Name,
+			}
+			switch rg.Mode {
+			case rmpb.GroupMode_RUMode:
+				var tokens *rmpb.GrantedRUTokenBucket
+				for _, re := range req.GetRuItems().GetRequestRU() {
+					switch re.Type {
+					case rmpb.RequestUnitType_RRU:
+						tokens = rg.RequestRRU(now, re.Value, targetPeriodMs)
+					case rmpb.RequestUnitType_WRU:
+						tokens = rg.RequestWRU(now, re.Value, targetPeriodMs)
+					}
+					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
+				}
+			case rmpb.GroupMode_RawMode:
+				log.Warn("not supports the resource type", zap.String("resource-group", req.ResourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
+				continue
+			}
+			log.Debug("finish token request from", zap.String("resource group", req.ResourceGroupName))
+			resps.Responses = append(resps.Responses, resp)
+		}
+		stream.Send(resps)
+	}
 }
