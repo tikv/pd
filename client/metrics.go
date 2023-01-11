@@ -101,6 +101,8 @@ var (
 	cmdDurationSplitAndScatterRegions   = cmdDuration.WithLabelValues("split_and_scatter_regions")
 	cmdDurationLoadKeyspace             = cmdDuration.WithLabelValues("load_keyspace")
 	cmdDurationUpdateKeyspaceState      = cmdDuration.WithLabelValues("update_keyspace_state")
+	cmdDurationLoadTimestamp            = cmdDuration.WithLabelValues("load_timestamp")
+	cmdDurationSaveTimestamp            = cmdDuration.WithLabelValues("save_timestamp")
 
 	cmdFailDurationGetRegion                  = cmdFailedDuration.WithLabelValues("get_region")
 	cmdFailDurationTSO                        = cmdFailedDuration.WithLabelValues("tso")
@@ -115,6 +117,8 @@ var (
 	cmdFailedDurationLoadKeyspace             = cmdDuration.WithLabelValues("load_keyspace")
 	cmdFailedDurationUpdateKeyspaceState      = cmdDuration.WithLabelValues("update_keyspace_state")
 	requestDurationTSO                        = requestDuration.WithLabelValues("tso")
+	cmdFailedDurationLoadTimestamp            = cmdDuration.WithLabelValues("load_timestamp")
+	cmdFailedDurationSaveTimestamp            = cmdDuration.WithLabelValues("save_timestamp")
 )
 
 func init() {
