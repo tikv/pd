@@ -17,20 +17,20 @@ package tenantclient
 import (
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/resource_manager"
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
 var (
-	ruLen                                                         = len(resource_manager.RequestUnitType_name)
-	resourceLen                                                   = len(resource_manager.ResourceType_name)
-	requestUnitList map[resource_manager.RequestUnitType]struct{} = map[resource_manager.RequestUnitType]struct{}{
-		resource_manager.RequestUnitType_RRU: {},
-		resource_manager.RequestUnitType_WRU: {},
+	ruLen                                             = len(rmpb.RequestUnitType_name)
+	resourceLen                                       = len(rmpb.ResourceType_name)
+	requestUnitList map[rmpb.RequestUnitType]struct{} = map[rmpb.RequestUnitType]struct{}{
+		rmpb.RequestUnitType_RRU: {},
+		rmpb.RequestUnitType_WRU: {},
 	}
-	requestResourceList map[resource_manager.ResourceType]struct{} = map[resource_manager.ResourceType]struct{}{
-		resource_manager.ResourceType_ReadBytes:      {},
-		resource_manager.ResourceType_WriteBytes:     {},
-		resource_manager.ResourceType_TotalCPUTimeMs: {},
+	requestResourceList map[rmpb.ResourceType]struct{} = map[rmpb.ResourceType]struct{}{
+		rmpb.ResourceType_ReadBytes:      {},
+		rmpb.ResourceType_WriteBytes:     {},
+		rmpb.ResourceType_TotalCPUTimeMs: {},
 	}
 )
 

@@ -811,7 +811,7 @@ func (gc *groupCostController) OnResponse(ctx context.Context, req RequestInfo, 
 		for typ, counter := range gc.run.resourceTokens {
 			v, ok := deltaResource[typ]
 			if ok {
-				counter.limiter.RemoveTokens(time.Now(), float64(v))
+				counter.limiter.RemoveTokens(time.Now(), v)
 			}
 		}
 		gc.mu.Lock()
@@ -823,7 +823,7 @@ func (gc *groupCostController) OnResponse(ctx context.Context, req RequestInfo, 
 		for typ, counter := range gc.run.requestUnitTokens {
 			v, ok := deltaRequestUnit[typ]
 			if ok {
-				counter.limiter.RemoveTokens(time.Now(), float64(v))
+				counter.limiter.RemoveTokens(time.Now(), v)
 			}
 		}
 		gc.mu.Lock()
@@ -858,6 +858,6 @@ func (c *resourceGroupsController) addDemoResourceGroup(ctx context.Context) err
 	if err != nil {
 		return err
 	}
-	log.Info("add resource group", zap.String("resp", string(context)), zap.Any("setting", setting))
+	log.Info("add resource group", zap.String("resp", context), zap.Any("setting", setting))
 	return err
 }
