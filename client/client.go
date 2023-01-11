@@ -137,7 +137,7 @@ type Client interface {
 
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
-	// ResourceManagerClient
+	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
 	// Close closes the client.
 	Close()
