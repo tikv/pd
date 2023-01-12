@@ -120,20 +120,13 @@ func (s *testOpStatusTrackerSuite) TestCheckStepTimeout(c *C) {
 		start  time.Time
 		status OpStatus
 	}{{
-		step:   AddLearner{},
-<<<<<<< HEAD
-		start:  time.Now().Add(-(SlowOperatorWaitTime - 1*time.Second)),
-		status: STARTED,
-	}, {
-		step:   AddLearner{},
-		start:  time.Now().Add(-(SlowOperatorWaitTime + 1*time.Second)),
-=======
+		step: AddLearner{},
+
 		start:  time.Now().Add(-(SlowStepWaitTime - time.Second)),
 		status: STARTED,
 	}, {
 		step:   AddLearner{},
 		start:  time.Now().Add(-(SlowStepWaitTime + time.Second)),
->>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
 		status: TIMEOUT,
 	}}
 
@@ -141,14 +134,9 @@ func (s *testOpStatusTrackerSuite) TestCheckStepTimeout(c *C) {
 		// Timeout and status changed
 		trk := NewOpStatusTracker()
 		trk.To(STARTED)
-<<<<<<< HEAD
-		c.Assert(trk.CheckStepTimeout(v.start, v.step, 0), Equals, v.status == TIMEOUT)
-		c.Assert(trk.Status(), Equals, v.status)
-=======
 		trk.reachTimes[STARTED] = v.start
-		re.Equal(v.status == TIMEOUT, trk.CheckTimeout(SlowStepWaitTime))
-		re.Equal(v.status, trk.Status())
->>>>>>> 99528a67e (operator: the operator timeout duation depends on all the step not separated (#5600))
+		c.Assert(v.status == TIMEOUT, Equals, trk.CheckTimeout(SlowStepWaitTime))
+		c.Assert(v.status, Equals, trk.Status())
 	}
 }
 
