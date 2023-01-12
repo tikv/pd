@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -361,4 +362,88 @@ func (s *hotTestSuite) TestHistoryHotRegions(c *C) {
 	output, e = pdctl.ExecuteCommand(cmd, args...)
 	c.Assert(e, IsNil)
 	c.Assert(json.Unmarshal(output, &hotRegions), NotNil)
+}
+
+func (s *hotTestSuite) TestHotWithoutHotPeer(c *C) {
+	statistics.Denoising = false
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, serverName string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
+	c.Assert(err, IsNil)
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctlCmd.GetRootCmd()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	err = leaderServer.BootstrapCluster()
+	c.Assert(err, IsNil)
+	for _, store := range stores {
+		pdctl.MustPutStore(c, leaderServer.GetServer(), store)
+	}
+	timestamp := uint64(time.Now().UnixNano())
+	load := 1024.0
+	for _, store := range stores {
+		for i := 0; i < 5; i++ {
+			err := leaderServer.GetServer().GetRaftCluster().HandleStoreHeartbeat(&pdpb.StoreStats{
+				StoreId:      store.Id,
+				BytesRead:    uint64(load * statistics.StoreHeartBeatReportInterval),
+				KeysRead:     uint64(load * statistics.StoreHeartBeatReportInterval),
+				BytesWritten: uint64(load * statistics.StoreHeartBeatReportInterval),
+				KeysWritten:  uint64(load * statistics.StoreHeartBeatReportInterval),
+				Capacity:     1000 * units.MiB,
+				Available:    1000 * units.MiB,
+				Interval: &pdpb.TimeInterval{
+					StartTimestamp: timestamp + uint64(i*statistics.StoreHeartBeatReportInterval),
+					EndTimestamp:   timestamp + uint64((i+1)*statistics.StoreHeartBeatReportInterval)},
+			})
+			c.Assert(err, IsNil)
+		}
+	}
+	defer cluster.Destroy()
+
+	// wait hot scheduler starts
+	time.Sleep(5000 * time.Millisecond)
+	{
+		args := []string{"-u", pdAddr, "hot", "read"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		hotRegion := statistics.StoreHotPeersInfos{}
+		c.Assert(err, IsNil)
+		err = json.Unmarshal(output, &hotRegion)
+		c.Assert(err, IsNil)
+		c.Assert(hotRegion.AsPeer[1].Count, Equals, 0)
+		c.Assert(hotRegion.AsPeer[1].TotalBytesRate, Equals, 0.0)
+		c.Assert(hotRegion.AsPeer[1].StoreByteRate, Equals, load)
+		c.Assert(hotRegion.AsLeader[1].Count, Equals, 0)
+		c.Assert(hotRegion.AsLeader[1].TotalBytesRate, Equals, 0.0)
+		c.Assert(hotRegion.AsLeader[1].StoreByteRate, Equals, load)
+	}
+	{
+		args := []string{"-u", pdAddr, "hot", "write"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		hotRegion := statistics.StoreHotPeersInfos{}
+		c.Assert(err, IsNil)
+		err = json.Unmarshal(output, &hotRegion)
+		c.Assert(err, IsNil)
+		c.Assert(hotRegion.AsPeer[1].Count, Equals, 0)
+		c.Assert(hotRegion.AsPeer[1].TotalBytesRate, Equals, 0.0)
+		c.Assert(hotRegion.AsPeer[1].StoreByteRate, Equals, load)
+		c.Assert(hotRegion.AsLeader[1].Count, Equals, 0)
+		c.Assert(hotRegion.AsLeader[1].TotalBytesRate, Equals, 0.0)
+		c.Assert(hotRegion.AsLeader[1].StoreByteRate, Equals, 0.0) // write leader sum
+	}
 }
