@@ -654,8 +654,8 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	noLog := func(msg string, fields ...zap.Field) {}
 	debug, info := noLog, noLog
 	if enableLog {
-		debug = log.Debug
-		info = log.Info
+		debug = logDebug
+		info = logInfo
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
@@ -742,6 +742,18 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 		}
 		return
+	}
+}
+
+func logDebug(msg string, fields ...zap.Field) {
+	if log.GetLevel() <= zap.DebugLevel {
+		log.Debug(msg, fields...)
+	}
+}
+
+func logInfo(msg string, fields ...zap.Field) {
+	if log.GetLevel() <= zap.InfoLevel {
+		log.Info(msg, fields...)
 	}
 }
 
