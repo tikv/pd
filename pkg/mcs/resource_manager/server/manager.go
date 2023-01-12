@@ -15,8 +15,10 @@
 package server
 
 import (
+	"context"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
@@ -27,11 +29,26 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultConsumptionChanSize = 1024
+	metricsFlushInterval       = time.Minute
+	metricsGCInterval          = time.Hour
+)
+
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
 	groups  map[string]*ResourceGroup
 	storage func() storage.Storage
+	// consumptionChan is used to send the consumption
+	// info to the background metrics flusher.
+	consumptionDispatcher chan struct {
+		resourceGroupName string
+		*rmpb.Consumption
+	}
+	// metricsMap is used to store the metrics of each resource group.
+	// It will be updated and persisted by the (*Manager).backgroundMetricsFlush.
+	metricsMap map[string]*Metrics
 }
 
 // NewManager returns a new Manager.
@@ -39,8 +56,16 @@ func NewManager(srv *server.Server) *Manager {
 	m := &Manager{
 		groups:  make(map[string]*ResourceGroup),
 		storage: srv.GetStorage,
+		consumptionDispatcher: make(chan struct {
+			resourceGroupName string
+			*rmpb.Consumption
+		}, defaultConsumptionChanSize),
+		metricsMap: make(map[string]*Metrics),
 	}
 	srv.AddStartCallback(m.Init)
+	ctx := srv.Context()
+	go m.backgroundMetricsFlush(ctx)
+	go m.backgroundMetricsGC(ctx)
 	return m
 }
 
@@ -144,4 +169,50 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 		return res[i].Name < res[j].Name
 	})
 	return res
+}
+
+// Update and flush the metrics info periodically.
+func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+	ticker := time.NewTicker(metricsFlushInterval)
+	defer ticker.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case consumption := <-m.consumptionDispatcher:
+		// Aggregate the consumption info to the metrics.
+		if metrics := m.getMetrics(consumption.resourceGroupName); metrics != nil {
+			metrics.Update(consumption.Consumption)
+		}
+	// Flush the metrics info to the storage.
+	case <-ticker.C:
+		// TODO: persist the metrics info into the storage.
+		m.resetAllMetrics()
+	}
+}
+
+// GC the metrics info periodically.
+func (m *Manager) backgroundMetricsGC(ctx context.Context) {
+	ticker := time.NewTicker(metricsGCInterval)
+	defer ticker.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	// GC the outdated metrics info in storage.
+	case <-ticker.C:
+		// TODO: delete the outdated metrics info from the storage.
+	}
+}
+
+func (m *Manager) getMetrics(name string) *Metrics {
+	m.RLock()
+	defer m.RUnlock()
+	return m.metricsMap[name]
+}
+
+func (m *Manager) resetAllMetrics() {
+	m.Lock()
+	defer m.Unlock()
+	for _, metrics := range m.metricsMap {
+		metrics.Reset()
+	}
 }
