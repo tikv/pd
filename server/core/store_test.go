@@ -132,6 +132,7 @@ func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
 	testdata := []struct {
 		bigger *StoreInfo
 		small  *StoreInfo
+		delta  int64
 	}{{
 		// store1 and store2 has same store available ratio and store1 less 50gb
 		bigger: NewStoreInfoWithAvailable(1, 20*gb, 100*gb, 1.4),
@@ -166,6 +167,11 @@ func (s *testStoreSuite) TestLowSpaceScoreV2(c *C) {
 		small:  NewStoreInfoWithAvailable(2, 60*gb, 100*gb, 1),
 	}, {
 		// store1's capacity is less than store2's capacity, but store2 has more available space,
+		bigger: NewStoreInfoWithAvailable(1, 2*gb, 100*gb, 3),
+		small:  NewStoreInfoWithAvailable(2, 100*gb, 10*1000*gb, 3),
+	}, {
+		// store2 has extra file size (70GB), it can balance region from store1 to store2.
+		// See https://github.com/tikv/pd/issues/5790
 		bigger: NewStoreInfoWithAvailable(1, 2*gb, 100*gb, 3),
 		small:  NewStoreInfoWithAvailable(2, 100*gb, 10*1000*gb, 3),
 	}}
