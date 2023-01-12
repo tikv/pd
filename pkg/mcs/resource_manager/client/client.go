@@ -706,46 +706,27 @@ func (gc *groupCostController) OnRequestWait(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
-	var wg sync.WaitGroup
-	var errReturn error
+	now := time.Now()
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
-		wg.Add(len(requestResourceList))
+		res := make([]*Reservation, 0, len(requestResourceList))
 		for typ, counter := range gc.run.resourceTokens {
 			if v := GetResourceValueFromConsumption(delta, typ); v > 0 {
-				go func(value float64, counter *tokenCounter) {
-					err := counter.limiter.WaitN(ctx, int(v))
-					if err != nil {
-						errReturn = err
-					}
-					wg.Done()
-				}(v, counter)
-			} else {
-				wg.Done()
+				res = append(res, counter.limiter.ReserveN(ctx, now, int(v)))
 			}
 		}
-		wg.Wait()
-		if errReturn != nil {
-			return errReturn
+		if err := waitReservations(ctx, res); err != nil {
+			return err
 		}
 	case rmpb.GroupMode_RUMode:
-		wg.Add(len(requestUnitList))
+		res := make([]*Reservation, 0, len(requestUnitList))
 		for typ, counter := range gc.run.requestUnitTokens {
 			if v := GetRUValueFromConsumption(delta, typ); v > 0 {
-				go func(value float64, counter *tokenCounter) {
-					err := counter.limiter.WaitN(ctx, int(v))
-					if err != nil {
-						errReturn = err
-					}
-					wg.Done()
-				}(v, counter)
-			} else {
-				wg.Done()
+				res = append(res, counter.limiter.ReserveN(ctx, now, int(v)))
 			}
 		}
-		wg.Wait()
-		if errReturn != nil {
-			return errReturn
+		if err := waitReservations(ctx, res); err != nil {
+			return err
 		}
 	}
 	gc.mu.Lock()

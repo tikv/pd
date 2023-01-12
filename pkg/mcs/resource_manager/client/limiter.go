@@ -202,8 +202,21 @@ func (r *Reservation) CancelAt(now time.Time) {
 // Use this method if you wish to wait and slow down in accordance with the rate limit without dropping events.
 // If you need to respect a deadline or cancel the delay, use Wait instead.
 // To drop or skip events exceeding rate limit, use Allow instead.
-func (lim *Limiter) ReserveN(now time.Time, n int) *Reservation {
-	r := lim.reserveN(now, n, InfDuration)
+func (lim *Limiter) ReserveN(ctx context.Context, now time.Time, n int) *Reservation {
+	// Check if ctx is already cancelled
+	select {
+	case <-ctx.Done():
+		return &Reservation{
+			ok: false,
+		}
+	default:
+	}
+	// Determine wait limit
+	waitLimit := InfDuration
+	if deadline, ok := ctx.Deadline(); ok {
+		waitLimit = deadline.Sub(now)
+	}
+	r := lim.reserveN(now, n, waitLimit)
 	return &r
 }
 
@@ -218,9 +231,6 @@ func (lim *Limiter) WaitN(ctx context.Context, n int) (err error) {
 	limit := lim.limit
 	lim.mu.Unlock()
 
-	if n > maxRequestTokens && limit != Inf {
-		return fmt.Errorf("rate: Wait(n=%d) exceeds limiter's max request token %f", n, maxRequestTokens)
-	}
 	// Check if ctx is already cancelled
 	select {
 	case <-ctx.Done():
@@ -246,7 +256,7 @@ func (lim *Limiter) WaitN(ctx context.Context, n int) (err error) {
 	t := time.NewTimer(delay)
 	defer t.Stop()
 	if delay > 500*time.Millisecond {
-		log.Warn("[tenant controllor] Need wait N", zap.Time("now", now), zap.Duration("delay", delay), zap.Int("n", n))
+		log.Warn("[resource group controllor] Need wait N", zap.Time("now", now), zap.Duration("delay", delay), zap.Int("n", n))
 	}
 	select {
 	case <-t.C:
@@ -258,30 +268,6 @@ func (lim *Limiter) WaitN(ctx context.Context, n int) (err error) {
 		r.Cancel()
 		return ctx.Err()
 	}
-}
-
-// SetLimit is shorthand for SetLimitAt(time.Now(), newLimit).
-func (lim *Limiter) SetLimit(newLimit Limit) {
-	lim.setLimitAt(time.Now(), newLimit)
-}
-
-// SetLimitAt sets a new Limit for the limiter. The new Limit, and Burst, may be violated
-// or underutilized by those which reserved (using Reserve or Wait) but did not yet act
-// before SetLimitAt was called.
-func (lim *Limiter) setLimitAt(now time.Time, newLimit Limit) {
-	select {
-	case <-lim.lowTokensNotifyChan:
-	default:
-	}
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
-
-	now, _, tokens := lim.advance(now)
-
-	lim.last = now
-	lim.tokens = tokens
-	lim.limit = newLimit
-	lim.maybeNotify(now)
 }
 
 // SetupNotificationAt enables the notification at the given threshold.
@@ -340,27 +326,14 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	}
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	log.Debug("[tenant controllor] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
+	log.Debug("[resource group controllor] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 	now, _, tokens := lim.advance(now)
 	lim.last = now
 	lim.tokens = tokens + args.NewTokens
 	lim.limit = Limit(args.NewRate)
 	lim.notifyThreshold = args.NotifyThreshold
 	lim.maybeNotify(now)
-	log.Debug("[tenant controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
-}
-
-// SetTokens decreases the amount of tokens currently available.
-func (lim *Limiter) SetTokens(now time.Time, amount float64) {
-	select {
-	case <-lim.lowTokensNotifyChan:
-	default:
-	}
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
-	now, _, _ = lim.advance(now)
-	lim.last = now
-	lim.tokens = amount
+	log.Debug("[resource group controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -386,7 +359,6 @@ func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duratio
 			timeToAct: now,
 		}
 	} else if lim.limit == 0 {
-		// TODO(nolouch), remove burst, just use tokens
 		var ok bool
 		if lim.tokens >= float64(n) {
 			ok = true
@@ -398,8 +370,14 @@ func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duratio
 			tokens:    int(lim.tokens),
 			timeToAct: now,
 		}
+	} else if n > maxRequestTokens {
+		return Reservation{
+			ok:        false,
+			lim:       lim,
+			tokens:    int(lim.tokens),
+			timeToAct: now,
+		}
 	}
-
 	now, last, tokens := lim.advance(now)
 
 	// Calculate the remaining number of tokens resulting from the request.
@@ -469,4 +447,43 @@ func (limit Limit) tokensFromDuration(d time.Duration) float64 {
 		return 0
 	}
 	return d.Seconds() * float64(limit)
+}
+
+func waitReservations(ctx context.Context, reservations []*Reservation) error {
+	if len(reservations) == 0 {
+		return nil
+	}
+	now := reservations[0].timeToAct
+	cancel := func() {
+		for _, res := range reservations {
+			res.CancelAt(now)
+		}
+	}
+	longestDelayDuration := time.Duration(0)
+	for _, res := range reservations {
+		if !res.ok {
+			cancel()
+			return fmt.Errorf("[resource group controller] limiter has no enough token")
+		}
+		delay := res.DelayFrom(now)
+		if delay > longestDelayDuration {
+			longestDelayDuration = delay
+		}
+	}
+	if longestDelayDuration > 500*time.Millisecond {
+		log.Warn("[resource group controllor] limiter needs wait ", zap.Time("now", now), zap.Duration("delay", longestDelayDuration))
+	}
+	t := time.NewTimer(longestDelayDuration)
+	defer t.Stop()
+
+	select {
+	case <-t.C:
+		// We can proceed.
+		return nil
+	case <-ctx.Done():
+		// Context was canceled before we could proceed.  Cancel the
+		// reservation, which may permit other events to proceed sooner.
+		cancel()
+		return ctx.Err()
+	}
 }
