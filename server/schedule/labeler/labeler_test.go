@@ -25,9 +25,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/server/core"
 )
 
 func TestAdjustRule(t *testing.T) {
@@ -164,7 +164,7 @@ func TestIndex(t *testing.T) {
 	for _, testCase := range testCases {
 		start, _ := hex.DecodeString(testCase.start)
 		end, _ := hex.DecodeString(testCase.end)
-		region := core.NewTestRegionInfo(start, end)
+		region := core.NewTestRegionInfo(1, 1, start, end)
 		labels := labeler.GetRegionLabels(region)
 		re.Len(labels, len(testCase.labels))
 		for _, l := range labels {
@@ -250,7 +250,7 @@ func TestKeyRange(t *testing.T) {
 	for _, testCase := range testCases {
 		start, _ := hex.DecodeString(testCase.start)
 		end, _ := hex.DecodeString(testCase.end)
-		region := core.NewTestRegionInfo(start, end)
+		region := core.NewTestRegionInfo(1, 1, start, end)
 		labels := labeler.GetRegionLabels(region)
 		re.Len(labels, len(testCase.labels))
 		for _, l := range labels {
@@ -293,7 +293,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 
 	start, _ := hex.DecodeString("1234")
 	end, _ := hex.DecodeString("5678")
-	region := core.NewTestRegionInfo(start, end)
+	region := core.NewTestRegionInfo(1, 1, start, end)
 	// the region has no lable rule at the beginning.
 	re.Empty(labeler.GetRegionLabels(region))
 
@@ -343,7 +343,7 @@ func TestGC(t *testing.T) {
 	ttls := []string{"1ms", "1ms", "1ms", "5ms", "5ms", "10ms", "1h", "24h"}
 	start, _ := hex.DecodeString("1234")
 	end, _ := hex.DecodeString("5678")
-	region := core.NewTestRegionInfo(start, end)
+	region := core.NewTestRegionInfo(1, 1, start, end)
 	// the region has no lable rule at the beginning.
 	re.Empty(labeler.GetRegionLabels(region))
 

@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.

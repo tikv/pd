@@ -15,7 +15,7 @@
 package statistics
 
 import (
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 const (
