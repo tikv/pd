@@ -192,8 +192,8 @@ func TestRegionRuleFitCache(t *testing.T) {
 	re.False(cache.IsUnchanged(originRegion, originRules, originStores))
 }
 
-func mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *RegionRuleFitCache {
-	return &RegionRuleFitCache{
+func mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *regionRuleFitCache {
+	return &regionRuleFitCache{
 		region:       toRegionCache(region),
 		regionStores: toStoreCacheList(regionStores),
 		rules:        toRuleCacheList(rules),
