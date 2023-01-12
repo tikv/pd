@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 func makeStores() StoreSet {
@@ -42,7 +42,7 @@ func makeStores() StoreSet {
 					if x == 5 {
 						labels["engine"] = "tiflash"
 					}
-					stores.SetStore(core.NewStoreInfoWithLabel(id, 0, labels))
+					stores.SetStore(core.NewStoreInfoWithLabel(id, labels))
 				}
 			}
 		}

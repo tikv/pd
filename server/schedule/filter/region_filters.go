@@ -15,8 +15,8 @@
 package filter
 
 import (
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 )

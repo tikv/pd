@@ -137,6 +137,8 @@ type Client interface {
 
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
+	// ResourceManagerClient manages resource group metadata and token assignment.
+	ResourceManagerClient
 	// Close closes the client.
 	Close()
 }
@@ -390,6 +392,8 @@ type client struct {
 	// dc-location -> *lastTSO
 	lastTSMap sync.Map // Same as map[string]*lastTSO
 
+	tokenDispatcher *tokenDispatcher
+
 	// For internal usage.
 	checkTSDeadlineCh    chan struct{}
 	leaderNetworkFailure int32
@@ -417,6 +421,7 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	}
 	// Start the daemons.
 	c.updateTSODispatcher()
+	c.createTokenispatcher()
 	c.wg.Add(3)
 	go c.tsLoop()
 	go c.tsCancelLoop()

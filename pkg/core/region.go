@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 	"strings"
@@ -1727,4 +1728,72 @@ func NeedTransferWitnessLeader(region *RegionInfo) bool {
 		return false
 	}
 	return region.GetLeader().IsWitness
+}
+
+// SplitRegions split a set of RegionInfo by the middle of regionKey. Only for test purpose.
+func SplitRegions(regions []*RegionInfo) []*RegionInfo {
+	results := make([]*RegionInfo, 0, len(regions)*2)
+	for _, region := range regions {
+		start, end := byte(0), byte(math.MaxUint8)
+		if len(region.GetStartKey()) > 0 {
+			start = region.GetStartKey()[0]
+		}
+		if len(region.GetEndKey()) > 0 {
+			end = region.GetEndKey()[0]
+		}
+		middle := []byte{start/2 + end/2}
+		left := region.Clone()
+		left.meta.Id = region.GetID() + uint64(len(regions))
+		left.meta.EndKey = middle
+		left.meta.RegionEpoch.Version++
+		right := region.Clone()
+		right.meta.Id = region.GetID() + uint64(len(regions)*2)
+		right.meta.StartKey = middle
+		right.meta.RegionEpoch.Version++
+		results = append(results, left, right)
+	}
+	return results
+}
+
+// MergeRegions merge a set of RegionInfo by regionKey. Only for test purpose.
+func MergeRegions(regions []*RegionInfo) []*RegionInfo {
+	results := make([]*RegionInfo, 0, len(regions)/2)
+	for i := 0; i < len(regions); i += 2 {
+		left := regions[i]
+		right := regions[i]
+		if i+1 < len(regions) {
+			right = regions[i+1]
+		}
+		region := &RegionInfo{meta: &metapb.Region{
+			Id:       left.GetID(),
+			StartKey: left.GetStartKey(),
+			EndKey:   right.GetEndKey(),
+			Peers:    left.meta.Peers,
+		}}
+		if left.GetRegionEpoch().GetVersion() > right.GetRegionEpoch().GetVersion() {
+			region.meta.RegionEpoch = left.GetRegionEpoch()
+		} else {
+			region.meta.RegionEpoch = right.GetRegionEpoch()
+		}
+		region.meta.RegionEpoch.Version++
+		region.leader = left.leader
+		results = append(results, region)
+	}
+	return results
+}
+
+// NewTestRegionInfo creates a new RegionInfo for test purpose.
+func NewTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...RegionCreateOption) *RegionInfo {
+	leader := &metapb.Peer{
+		Id:      regionID,
+		StoreId: storeID,
+	}
+	metaRegion := &metapb.Region{
+		Id:          regionID,
+		StartKey:    start,
+		EndKey:      end,
+		Peers:       []*metapb.Peer{leader},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	return NewRegionInfo(metaRegion, leader, opts...)
 }

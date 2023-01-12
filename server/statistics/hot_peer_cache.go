@@ -21,8 +21,8 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/server/core"
 )
 
 const (

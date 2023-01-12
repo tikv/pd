@@ -16,8 +16,8 @@ package core
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/core/storelimit"
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
