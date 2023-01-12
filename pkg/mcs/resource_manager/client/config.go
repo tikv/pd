@@ -21,8 +21,6 @@ import (
 )
 
 var (
-	ruLen                                             = len(rmpb.RequestUnitType_name)
-	resourceLen                                       = len(rmpb.ResourceType_name)
 	requestUnitList map[rmpb.RequestUnitType]struct{} = map[rmpb.RequestUnitType]struct{}{
 		rmpb.RequestUnitType_RRU: {},
 		rmpb.RequestUnitType_WRU: {},
@@ -108,17 +106,18 @@ func DefaultConfig() *Config {
 	cfg := generateConfig(
 		DefaultRequestUnitConfig(),
 	)
-	cfg.groupLoopUpdateInterval = defaultGroupLoopUpdateInterval
-	cfg.targetPeriod = defaultTargetPeriod
 	return cfg
 }
 
 func generateConfig(ruConfig *RequestUnitConfig) *Config {
-	return &Config{
+	cfg := &Config{
 		ReadBaseCost:   RequestUnit(ruConfig.ReadBaseCost),
 		ReadBytesCost:  RequestUnit(ruConfig.ReadCostPerByte),
 		WriteBaseCost:  RequestUnit(ruConfig.WriteBaseCost),
 		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
 		WriteCPUMsCost: RequestUnit(ruConfig.WriteCPUMsCost),
 	}
+	cfg.groupLoopUpdateInterval = defaultGroupLoopUpdateInterval
+	cfg.targetPeriod = defaultTargetPeriod
+	return cfg
 }

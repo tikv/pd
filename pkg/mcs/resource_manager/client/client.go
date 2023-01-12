@@ -44,8 +44,9 @@ type ResourceGroupProvider interface {
 func NewResourceGroupController(
 	clientUniqueId uint64,
 	provider ResourceGroupProvider,
+	requestUnitConfig *RequestUnitConfig,
 ) (*resourceGroupsController, error) {
-	return newResourceGroupController(clientUniqueId, provider)
+	return newResourceGroupController(clientUniqueId, provider, requestUnitConfig)
 }
 
 var _ ResourceGroupKVInterceptor = (*resourceGroupsController)(nil)
@@ -86,12 +87,17 @@ type resourceGroupsController struct {
 	}
 }
 
-func newResourceGroupController(clientUniqueId uint64, provider ResourceGroupProvider) (*resourceGroupsController, error) {
-	config := DefaultConfig()
+func newResourceGroupController(clientUniqueId uint64, provider ResourceGroupProvider, requestUnitConfig *RequestUnitConfig) (*resourceGroupsController, error) {
+	var config *Config
+	if requestUnitConfig != nil {
+		config = generateConfig(requestUnitConfig)
+	} else {
+		config = DefaultConfig()
+	}
 	return &resourceGroupsController{
 		clientUniqueId:     clientUniqueId,
 		provider:           provider,
-		config:             DefaultConfig(),
+		config:             config,
 		lowTokenNotifyChan: make(chan struct{}, 1),
 		tokenResponseChan:  make(chan []*rmpb.TokenBucketResponse, 1),
 		calculators:        []ResourceCalculator{newKVCalculator(config), newSQLLayerCPUCalculateor(config)},
@@ -476,11 +482,7 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 			case <-counter.setupNotificationCh:
 				counter.setupNotificationTimer = nil
 				counter.setupNotificationCh = nil
-<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 				counter.limiter.SetupNotificationAt(gc.run.now, float64(counter.setupNotificationThreshold))
-=======
-				counter.limiter.SetupNotification(gc.run.now, counter.setupNotificationThreshold)
->>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 				gc.updateRunState(ctx)
 			default:
 			}
@@ -491,11 +493,7 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 			case <-counter.setupNotificationCh:
 				counter.setupNotificationTimer = nil
 				counter.setupNotificationCh = nil
-<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 				counter.limiter.SetupNotificationAt(gc.run.now, float64(counter.setupNotificationThreshold))
-=======
-				counter.limiter.SetupNotification(gc.run.now, counter.setupNotificationThreshold)
->>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 				gc.updateRunState(ctx)
 			default:
 			}
@@ -765,61 +763,18 @@ func (gc *groupCostController) OnResponse(ctx context.Context, req RequestInfo, 
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for typ, counter := range gc.run.resourceTokens {
-<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 			if v := GetResourceValueFromConsumption(delta, typ); v > 0 {
 				counter.limiter.RemoveTokens(time.Now(), float64(v))
-=======
-			v, ok := deltaResource[typ]
-			if ok {
-				counter.limiter.RemoveTokens(time.Now(), v)
->>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 			}
 		}
 	case rmpb.GroupMode_RUMode:
 		for typ, counter := range gc.run.requestUnitTokens {
-<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 			if v := GetRUValueFromConsumption(delta, typ); v > 0 {
 				counter.limiter.RemoveTokens(time.Now(), float64(v))
-=======
-			v, ok := deltaRequestUnit[typ]
-			if ok {
-				counter.limiter.RemoveTokens(time.Now(), v)
->>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 			}
 		}
 	}
-<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 	gc.mu.Lock()
 	Add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
-=======
-}
-
-func (c *resourceGroupsController) addDemoResourceGroup(ctx context.Context) error {
-	setting := &rmpb.GroupSettings{
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RRU: &rmpb.TokenBucket{
-				Tokens: 200000,
-				Settings: &rmpb.TokenLimitSettings{
-					Fillrate:   2000,
-					BurstLimit: 20000000,
-				},
-			},
-			WRU: &rmpb.TokenBucket{
-				Tokens: 200000,
-				Settings: &rmpb.TokenLimitSettings{
-					Fillrate:   20000,
-					BurstLimit: 2000000,
-				},
-			},
-		},
-	}
-	context, err := c.provider.AddResourceGroup(ctx, "demo", setting)
-	if err != nil {
-		return err
-	}
-	log.Info("add resource group", zap.String("resp", context), zap.Any("setting", setting))
-	return err
->>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 }
