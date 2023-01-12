@@ -45,7 +45,7 @@ type Region struct {
 }
 
 // CheckerFunc checks if the scheduler is finished.
-type CheckerFunc func(*core.RegionsInfo, []info.StoreStats) bool
+type CheckerFunc func([]*metapb.Store, *core.RegionsInfo, []info.StoreStats) bool
 
 // Case represents a test suite for simulator.
 type Case struct {
@@ -61,37 +61,10 @@ type Case struct {
 	Labels  typeutil.StringSlice
 }
 
-// IDAllocator is used to alloc unique ID.
-type idAllocator struct {
-	id uint64
-}
-
-// nextID gets the next unique ID.
-func (a *idAllocator) nextID() uint64 {
-	a.id++
-	return a.id
-}
-
-// ResetID resets the IDAllocator.
-func (a *idAllocator) ResetID() {
-	a.id = 0
-}
-
-// GetID gets the current ID.
-func (a *idAllocator) GetID() uint64 {
-	return a.id
-}
-
-// IDAllocator is used to alloc unique ID.
-var IDAllocator idAllocator
-
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
 var CaseMap = map[string]func() *Case{
 	"balance-leader":            newBalanceLeader,
-	"redundant-balance-region":  newRedundantBalanceRegion,
-	"add-nodes":                 newAddNodes,
-	"add-nodes-dynamic":         newAddNodesDynamic,
-	"delete-nodes":              newDeleteNodes,
+	"balance-region":            newBalanceRegion,
 	"region-split":              newRegionSplit,
 	"region-merge":              newRegionMerge,
 	"hot-read":                  newHotRead,
@@ -111,10 +84,6 @@ func NewCase(name string) *Case {
 		return f()
 	}
 	return nil
-}
-
-func leaderAndRegionIsUniform(leaderCount, regionCount, regionNum int, threshold float64) bool {
-	return isUniform(leaderCount, regionNum/3, threshold) && isUniform(regionCount, regionNum, threshold)
 }
 
 func isUniform(count, meanCount int, threshold float64) bool {
@@ -137,12 +106,4 @@ func getRegionNum() int {
 		simutil.Logger.Fatal("Region num should be larger than 0.")
 	}
 	return regionNum
-}
-
-func getNoEmptyStoreNum(storeNum int, noEmptyRatio float64) uint64 {
-	noEmptyStoreNum := uint64(float64(storeNum) * noEmptyRatio)
-	if noEmptyStoreNum < 3 || noEmptyStoreNum == uint64(storeNum) {
-		noEmptyStoreNum = 3
-	}
-	return noEmptyStoreNum
 }

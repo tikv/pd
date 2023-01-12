@@ -29,19 +29,19 @@ func newMakeupDownReplicas() *Case {
 	noEmptyStoreNum := storeNum - 1
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
 
 	for i := 0; i < storeNum*regionNum/3; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64((i)%storeNum) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum) + 1},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i)%storeNum) + 1},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+1)%storeNum) + 1},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+2)%storeNum) + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -64,8 +64,14 @@ func newMakeupDownReplicas() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		sum := 0
+		storeNum := 0
+		for _, store := range stores {
+			if store.NodeState != metapb.NodeState_Removed {
+				storeNum++
+			}
+		}
 		regionCounts := make([]int, 0, storeNum)
 		for i := 1; i <= storeNum; i++ {
 			regionCount := regions.GetStoreRegionCount(uint64(i))

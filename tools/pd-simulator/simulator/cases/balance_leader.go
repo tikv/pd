@@ -30,19 +30,19 @@ func newBalanceLeader() *Case {
 
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
 
 	for i := 0; i < storeNum*regionNum/3; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeNum)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%(storeNum-1)) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%(storeNum-1)) + 1},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(storeNum)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+1)%(storeNum-1)) + 1},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+2)%(storeNum-1)) + 1},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -51,8 +51,14 @@ func newBalanceLeader() *Case {
 	}
 
 	threshold := 0.05
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
+		storeNum := 0
+		for _, store := range stores {
+			if store.NodeState != metapb.NodeState_Removed {
+				storeNum++
+			}
+		}
 		leaderCounts := make([]int, 0, storeNum)
 		for i := 1; i <= storeNum; i++ {
 			leaderCount := regions.GetStoreLeaderCount(uint64(i))

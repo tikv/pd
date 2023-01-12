@@ -25,7 +25,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func newRedundantBalanceRegion() *Case {
+func newBalanceRegion() *Case {
 	var simCase Case
 
 	storeNum := simutil.CaseConfigure.StoreNum
@@ -36,7 +36,7 @@ func newRedundantBalanceRegion() *Case {
 
 	for i := 0; i < storeNum; i++ {
 		s := &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		}
 		if i%2 == 1 {
@@ -47,12 +47,12 @@ func newRedundantBalanceRegion() *Case {
 
 	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(i%storeNum + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+1)%storeNum + 1)},
+			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+2)%storeNum + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -62,8 +62,14 @@ func newRedundantBalanceRegion() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
+		storeNum := 0
+		for _, store := range stores {
+			if store.NodeState != metapb.NodeState_Removed {
+				storeNum++
+			}
+		}
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
 		for i := 1; i <= storeNum; i++ {
