@@ -21,6 +21,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 )
 
+const chanMaxLength = 6000000
+
 var (
 	readTaskMetrics  = hotCacheFlowQueueStatusGauge.WithLabelValues(Read.String())
 	writeTaskMetrics = hotCacheFlowQueueStatusGauge.WithLabelValues(Write.String())
@@ -47,6 +49,9 @@ func NewHotCache(ctx context.Context) *HotCache {
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
+	if w.writeCache.taskQueue.Len() > chanMaxLength {
+		return false
+	}
 	select {
 	case w.writeCache.taskQueue.In <- task:
 		return true
@@ -57,6 +62,9 @@ func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(task FlowItemTask) bool {
+	if w.readCache.taskQueue.Len() > chanMaxLength {
+		return false
+	}
 	select {
 	case w.readCache.taskQueue.In <- task:
 		return true
