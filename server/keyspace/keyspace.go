@@ -224,26 +224,6 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 	return meta, err
 }
 
-// LoadKeyspaceByID returns the keyspace specified by id.
-// It returns error if loading or unmarshalling met error or if keyspace does not exist.
-func (manager *Manager) LoadKeyspaceByID(id uint32) (*keyspacepb.KeyspaceMeta, error) {
-	var (
-		meta *keyspacepb.KeyspaceMeta
-		err  error
-	)
-	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
-		if err != nil {
-			return err
-		}
-		if meta == nil {
-			return ErrKeyspaceNotFound
-		}
-		return nil
-	})
-	return meta, err
-}
-
 // Mutation represents a single operation to be applied on keyspace config.
 type Mutation struct {
 	Op    OpType
