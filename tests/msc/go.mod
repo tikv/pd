@@ -110,6 +110,7 @@ require (
 	github.com/shirou/gopsutil v3.21.3+incompatible // indirect
 	github.com/shurcooL/httpgzip v0.0.0-20190720172056-320755c1c1b0 // indirect
 	github.com/sirupsen/logrus v1.6.0 // indirect
+	github.com/smallnest/chanx v0.0.0-20221229104322-eb4c998d2072 // indirect
 	github.com/soheilhy/cmux v0.1.4 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/objx v0.4.0 // indirect
