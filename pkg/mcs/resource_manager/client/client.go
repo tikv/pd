@@ -283,7 +283,6 @@ func (c *resourceGroupsController) mainLoop(ctx context.Context) {
 		default:
 			c.handleTokenBucketTrickEvent(ctx)
 		}
-
 	}
 }
 
@@ -412,8 +411,8 @@ func (gc *groupCostController) initRunState(ctx context.Context) {
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(0, initialRquestUnits, gc.lowRUNotifyChan),
-				avgRUPerSec: initialRquestUnits / gc.run.targetPeriod.Seconds(),
+				limiter:     NewLimiter(0, initialRequestUnits, gc.lowRUNotifyChan),
+				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds(),
 				avgLastTime: now,
 			}
 			gc.run.requestUnitTokens[typ] = counter
@@ -422,8 +421,8 @@ func (gc *groupCostController) initRunState(ctx context.Context) {
 		gc.run.resourceTokens = make(map[rmpb.ResourceType]*tokenCounter)
 		for typ := range requestResourceList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(0, initialRquestUnits, gc.lowRUNotifyChan),
-				avgRUPerSec: initialRquestUnits / gc.run.targetPeriod.Seconds(),
+				limiter:     NewLimiter(0, initialRequestUnits, gc.lowRUNotifyChan),
+				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds(),
 				avgLastTime: now,
 			}
 			gc.run.resourceTokens[typ] = counter
@@ -477,7 +476,11 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 			case <-counter.setupNotificationCh:
 				counter.setupNotificationTimer = nil
 				counter.setupNotificationCh = nil
+<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 				counter.limiter.SetupNotificationAt(gc.run.now, float64(counter.setupNotificationThreshold))
+=======
+				counter.limiter.SetupNotification(gc.run.now, counter.setupNotificationThreshold)
+>>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 				gc.updateRunState(ctx)
 			default:
 			}
@@ -488,7 +491,11 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 			case <-counter.setupNotificationCh:
 				counter.setupNotificationTimer = nil
 				counter.setupNotificationCh = nil
+<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 				counter.limiter.SetupNotificationAt(gc.run.now, float64(counter.setupNotificationThreshold))
+=======
+				counter.limiter.SetupNotification(gc.run.now, counter.setupNotificationThreshold)
+>>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 				gc.updateRunState(ctx)
 			default:
 			}
@@ -551,7 +558,7 @@ func (gc *groupCostController) handleTokenBucketResponse(ctx context.Context, re
 		// This is the first successful request. Take back the initial RUs that we
 		// used to pre-fill the bucket.
 		for _, counter := range gc.run.resourceTokens {
-			counter.limiter.RemoveTokens(gc.run.now, initialRquestUnits)
+			counter.limiter.RemoveTokens(gc.run.now, initialRequestUnits)
 		}
 	}
 }
@@ -687,7 +694,7 @@ func (gc *groupCostController) collectRequestAndConsumption(low bool) *rmpb.Toke
 
 func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 	value := counter.avgRUPerSec*gc.run.targetPeriod.Seconds() + bufferRUs
-	value -= float64(counter.limiter.AvailableTokens(gc.run.now))
+	value -= counter.limiter.AvailableTokens(gc.run.now)
 	if value < 0 {
 		value = 0
 	}
@@ -758,18 +765,61 @@ func (gc *groupCostController) OnResponse(ctx context.Context, req RequestInfo, 
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for typ, counter := range gc.run.resourceTokens {
+<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 			if v := GetResourceValueFromConsumption(delta, typ); v > 0 {
 				counter.limiter.RemoveTokens(time.Now(), float64(v))
+=======
+			v, ok := deltaResource[typ]
+			if ok {
+				counter.limiter.RemoveTokens(time.Now(), v)
+>>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 			}
 		}
 	case rmpb.GroupMode_RUMode:
 		for typ, counter := range gc.run.requestUnitTokens {
+<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 			if v := GetRUValueFromConsumption(delta, typ); v > 0 {
 				counter.limiter.RemoveTokens(time.Now(), float64(v))
+=======
+			v, ok := deltaRequestUnit[typ]
+			if ok {
+				counter.limiter.RemoveTokens(time.Now(), v)
+>>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 			}
 		}
 	}
+<<<<<<< HEAD:pkg/mcs/resource_manager/client/client.go
 	gc.mu.Lock()
 	Add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
+=======
+}
+
+func (c *resourceGroupsController) addDemoResourceGroup(ctx context.Context) error {
+	setting := &rmpb.GroupSettings{
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RRU: &rmpb.TokenBucket{
+				Tokens: 200000,
+				Settings: &rmpb.TokenLimitSettings{
+					Fillrate:   2000,
+					BurstLimit: 20000000,
+				},
+			},
+			WRU: &rmpb.TokenBucket{
+				Tokens: 200000,
+				Settings: &rmpb.TokenLimitSettings{
+					Fillrate:   20000,
+					BurstLimit: 2000000,
+				},
+			},
+		},
+	}
+	context, err := c.provider.AddResourceGroup(ctx, "demo", setting)
+	if err != nil {
+		return err
+	}
+	log.Info("add resource group", zap.String("resp", context), zap.Any("setting", setting))
+	return err
+>>>>>>> 49a78a80a7ba30505845094295fe5e3f2a802cf0:pkg/mcs/resource_manager/tenant_client/client.go
 }

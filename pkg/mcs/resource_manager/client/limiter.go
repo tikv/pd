@@ -403,7 +403,6 @@ func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duratio
 	now, last, tokens := lim.advance(now)
 
 	// Calculate the remaining number of tokens resulting from the request.
-	//log.Info("advance token", zap.Float64("tokens", tokens), zap.Float64("new tokens", tokens-float64(n)))
 	tokens -= float64(n)
 	lim.maybeNotify(now)
 	// Calculate the wait duration

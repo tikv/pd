@@ -151,6 +151,8 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewEvictSlowStoreSchedulerCommand())
 	c.AddCommand(NewGrantHotRegionSchedulerCommand())
 	c.AddCommand(NewSplitBucketSchedulerCommand())
+	c.AddCommand(NewBalanceWitnessSchedulerCommand())
+	c.AddCommand(NewTransferWitnessLeaderSchedulerCommand())
 	return c
 }
 
@@ -348,6 +350,26 @@ func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 		Use:   "grant-hot-region-scheduler <store_leader_id> <store_leader_id,store_peer_id_1,store_peer_id_2>",
 		Short: "add a scheduler to grant hot region to fixed stores",
 		Run:   addSchedulerForGrantHotRegionCommandFunc,
+	}
+	return c
+}
+
+// NewBalanceWitnessSchedulerCommand returns a command to add a balance-witness-scheduler.
+func NewBalanceWitnessSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-witness-scheduler",
+		Short: "add a scheduler to balance witness",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewTransferWitnessLeaderSchedulerCommand returns a command to add a transfer-witness-leader-shceudler.
+func NewTransferWitnessLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "transfer-witness-leader-scheduler",
+		Short: "add a scheduler to transfer witness leader",
+		Run:   addSchedulerCommandFunc,
 	}
 	return c
 }

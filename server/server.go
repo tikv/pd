@@ -92,6 +92,13 @@ const (
 // EtcdStartTimeout the timeout of the startup etcd.
 var EtcdStartTimeout = time.Minute * 5
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	etcdTermGauge           = etcdStateGauge.WithLabelValues("term")
+	etcdAppliedIndexGauge   = etcdStateGauge.WithLabelValues("appliedIndex")
+	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
+)
+
 // Server is the pd server.
 // nolint
 type Server struct {
@@ -206,7 +213,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 	}
 	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
-	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
@@ -382,10 +388,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.storage, keyspaceIDAllocator)
-	if err != nil {
-		return err
-	}
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, keyspaceIDAllocator)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -568,9 +571,9 @@ func (s *Server) encryptionKeyManagerLoop() {
 }
 
 func (s *Server) collectEtcdStateMetrics() {
-	etcdStateGauge.WithLabelValues("term").Set(float64(s.member.Etcd().Server.Term()))
-	etcdStateGauge.WithLabelValues("appliedIndex").Set(float64(s.member.Etcd().Server.AppliedIndex()))
-	etcdStateGauge.WithLabelValues("committedIndex").Set(float64(s.member.Etcd().Server.CommittedIndex()))
+	etcdTermGauge.Set(float64(s.member.Etcd().Server.Term()))
+	etcdAppliedIndexGauge.Set(float64(s.member.Etcd().Server.AppliedIndex()))
+	etcdCommittedIndexGauge.Set(float64(s.member.Etcd().Server.CommittedIndex()))
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
@@ -645,6 +648,10 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	err = s.storage.Flush()
 	if err != nil {
 		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
+	}
+
+	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
+		log.Warn("bootstrap keyspace manager failed", errs.ZapError(err))
 	}
 
 	if err := s.cluster.Start(s); err != nil {

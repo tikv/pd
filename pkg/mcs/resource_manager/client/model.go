@@ -196,7 +196,7 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	readBytes := float64(res.ReadBytes())
 	kvCPUms := float64(res.KVCPUms())
 	ru_io := readBytes * float64(kc.ReadBytesCost)
-	ru_cpu := kvCPUms * float64(kc.KVCPUMsCost)
+	ru_cpu := kvCPUms * float64(kc.WriteCPUMsCost)
 	// for consumption
 	consumption.RRU += ru_cpu + ru_io
 	consumption.ReadBytes += readBytes
@@ -217,7 +217,7 @@ func (sc *SQLLayerCPUCalculateor) Trickle(consumption *rmpb.Consumption, ctx con
 		return 0.
 	}
 	cpu := cpuFunc(ctx)
-	ru_cpu := cpu * float64(sc.SQLCPUSecondCost)
+	ru_cpu := cpu * 0.
 	// TODO: SQL Layer RU/resource custom type
 	consumption.RRU += ru_cpu / 2
 	consumption.RRU += ru_cpu / 2
