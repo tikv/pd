@@ -15,12 +15,14 @@
 package statistics
 
 import (
+	"context"
 	"math"
 	"time"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/smallnest/chanx"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
 )
@@ -78,20 +80,20 @@ type hotPeerCache struct {
 	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
 	topNTTL           time.Duration
-	taskQueue         chan FlowItemTask
+	taskQueue         *chanx.UnboundedChan[FlowItemTask]
 	thresholdsOfStore map[uint64]*thresholds                     // storeID -> thresholds
 	metrics           map[uint64][ActionTypeLen]prometheus.Gauge // storeID -> metrics
 	// TODO: consider to remove store info when store is offline.
 }
 
 // NewHotPeerCache creates a hotPeerCache
-func NewHotPeerCache(kind RWType) *hotPeerCache {
+func NewHotPeerCache(ctx context.Context, kind RWType) *hotPeerCache {
 	return &hotPeerCache{
 		kind:              kind,
 		peersOfStore:      make(map[uint64]*TopN),
 		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
-		taskQueue:         make(chan FlowItemTask, queueCap),
+		taskQueue:         chanx.NewUnboundedChan[FlowItemTask](ctx, queueCap),
 		thresholdsOfStore: make(map[uint64]*thresholds),
 		topNTTL:           time.Duration(3*kind.ReportInterval()) * time.Second,
 		metrics:           make(map[uint64][ActionTypeLen]prometheus.Gauge),
