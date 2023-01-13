@@ -17,8 +17,8 @@ package client
 const (
 	defaultReadBaseCost     = 1
 	defaultReadCostPerByte  = 1. / 1024 / 1024
-	defaultWriteBaseCost    = 5
-	defaultWriteCostPerByte = 10. / 1024 / 1024
+	defaultWriteBaseCost    = 3
+	defaultWriteCostPerByte = 5. / 1024 / 1024
 	defaultWriteCPUMsCost   = 1
 )
 
@@ -33,7 +33,7 @@ type RequestUnitConfig struct {
 	// WriteBaseCost is the base cost for a write request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	WriteBaseCost float64 `toml:"write-base-cost" json:"write-base-cost"`
-	// WriteCostPerByte is the cost for each byte written. It's 1 MiB = 10 WRU by default.
+	// WriteCostPerByte is the cost for each byte written. It's 1 MiB = 5 WRU by default.
 	WriteCostPerByte float64 `toml:"write-cost-per-byte" json:"write-cost-per-byte"`
 	// WriteCPUMsCost is the cost for each millisecond of CPU time taken by a write request.
 	// It's 1 millisecond = 1 WRU by default.
