@@ -43,19 +43,21 @@ type ResponseInfo interface {
 type ResourceCalculator interface {
 	// Trickle is used to calculate the resource consumption periodically rather than on the request path.
 	// It's mainly used to calculate like the SQL CPU cost.
-	Trickle(context.Context, map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64)
+	Trickle(context.Context, *rmpb.Consumption)
 	// BeforeKVRequest is used to calculate the resource consumption before the KV request.
 	// It's mainly used to calculate the base and write request cost.
-	BeforeKVRequest(map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64, RequestInfo)
+	BeforeKVRequest(*rmpb.Consumption, RequestInfo)
 	// AfterKVRequest is used to calculate the resource consumption after the KV request.
 	// It's mainly used to calculate the read request cost and KV CPU cost.
-	AfterKVRequest(map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64, RequestInfo, ResponseInfo)
+	AfterKVRequest(*rmpb.Consumption, RequestInfo, ResponseInfo)
 }
 
 // KVCalculator is used to calculate the KV-side consumption.
 type KVCalculator struct {
 	*Config
 }
+
+var _ ResourceCalculator = (*KVCalculator)(nil)
 
 // func newKVCalculator(cfg *Config) *KVCalculator {
 // 	return &KVCalculator{Config: cfg}
@@ -69,26 +71,30 @@ func (kc *KVCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumpti
 func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
 	if req.IsWrite() {
 		consumption.KvWriteRpcCount += 1
+		// Write bytes are knowable in advance, so we can calculate the WRU cost here.
 		writeBytes := float64(req.WriteBytes())
 		consumption.WriteBytes += writeBytes
 		consumption.WRU += float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
 	} else {
 		consumption.KvReadRpcCount += 1
+		// Read bytes could not be known before the request is executed,
+		// so we only add the base cost here.
 		consumption.RRU += float64(kc.ReadBaseCost)
 	}
 }
 
 // AfterKVRequest ...
 func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
-	if req.IsWrite() {
+	// For now, we can only collect the KV CPU cost for a read request.
+	if !req.IsWrite() {
 		kvCPUMs := float64(res.KVCPUMs())
 		consumption.TotalCpuTimeMs += kvCPUMs
-		consumption.WRU += float64(kc.WriteCPUMsCost) * kvCPUMs
-	} else {
-		readBytes := float64(res.ReadBytes())
-		consumption.ReadBytes += readBytes
-		consumption.RRU += float64(kc.ReadBytesCost) * readBytes
+		consumption.RRU += float64(kc.ReadCPUMsCost) * kvCPUMs
 	}
+	// A write request may also read data, which should be counted into the RRU cost.
+	readBytes := float64(res.ReadBytes())
+	consumption.ReadBytes += readBytes
+	consumption.RRU += float64(kc.ReadBytesCost) * readBytes
 }
 
 // SQLCalculator is used to calculate the SQL-side consumption.
@@ -96,19 +102,21 @@ type SQLCalculator struct {
 	*Config
 }
 
+var _ ResourceCalculator = (*SQLCalculator)(nil)
+
 // func newSQLCalculator(cfg *Config) *SQLCalculator {
 // 	return &SQLCalculator{Config: cfg}
 // }
 
 // Trickle ...
 // TODO: calculate the SQL CPU cost and related resource consumption.
-func (dsc *SQLCalculator) Trickle(ctx context.Context, resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64) {
+func (dsc *SQLCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumption) {
 }
 
 // BeforeKVRequest ...
-func (dsc *SQLCalculator) BeforeKVRequest(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, req RequestInfo) {
+func (dsc *SQLCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
 }
 
 // AfterKVRequest ...
-func (dsc *SQLCalculator) AfterKVRequest(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, req RequestInfo, res ResponseInfo) {
+func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
 }
