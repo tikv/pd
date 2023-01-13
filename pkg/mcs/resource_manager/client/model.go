@@ -41,23 +41,31 @@ type ResponseInfo interface {
 
 // ResourceCalculator is used to calculate the resource consumption of a request.
 type ResourceCalculator interface {
-	Trickle(map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64, context.Context)
+	// Trickle is used to calculate the resource consumption periodically rather than on the request path.
+	// It's mainly used to calculate like the SQL CPU cost.
+	Trickle(context.Context, map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64)
+	// BeforeKVRequest is used to calculate the resource consumption before the KV request.
+	// It's mainly used to calculate the base and write request cost.
 	BeforeKVRequest(map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64, RequestInfo)
+	// AfterKVRequest is used to calculate the resource consumption after the KV request.
+	// It's mainly used to calculate the read request cost and KV CPU cost.
 	AfterKVRequest(map[rmpb.ResourceType]float64, map[rmpb.RequestUnitType]float64, RequestInfo, ResponseInfo)
 }
 
-// KVCalculator is used to calculate the KV request consumption.
+// KVCalculator is used to calculate the KV-side consumption.
 type KVCalculator struct {
 	*Config
 }
 
-func newKVCalculator(cfg *Config) *KVCalculator {
-	return &KVCalculator{Config: cfg}
+// func newKVCalculator(cfg *Config) *KVCalculator {
+// 	return &KVCalculator{Config: cfg}
+// }
+
+// Trickle ...
+func (kc *KVCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumption) {
 }
 
-func (kc *KVCalculator) Trickle(consumption *rmpb.Consumption, ctx context.Context) {
-}
-
+// BeforeKVRequest ...
 func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
 	if req.IsWrite() {
 		consumption.KvWriteRpcCount += 1
@@ -69,6 +77,8 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		consumption.RRU += float64(kc.ReadBaseCost)
 	}
 }
+
+// AfterKVRequest ...
 func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
 	if req.IsWrite() {
 		kvCPUMs := float64(res.KVCPUMs())
@@ -81,20 +91,24 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	}
 }
 
-type SQLCPUCalculator struct {
+// SQLCalculator is used to calculate the SQL-side consumption.
+type SQLCalculator struct {
 	*Config
 }
 
-func newSQLCPUCalculator(cfg *Config) *SQLCPUCalculator {
-	return &SQLCPUCalculator{Config: cfg}
-}
+// func newSQLCalculator(cfg *Config) *SQLCalculator {
+// 	return &SQLCalculator{Config: cfg}
+// }
 
+// Trickle ...
 // TODO: calculate the SQL CPU cost and related resource consumption.
-func (dsc *SQLCPUCalculator) Trickle(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, ctx context.Context) {
+func (dsc *SQLCalculator) Trickle(ctx context.Context, resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64) {
 }
 
-func (dsc *SQLCPUCalculator) BeforeKVRequest(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, req RequestInfo) {
+// BeforeKVRequest ...
+func (dsc *SQLCalculator) BeforeKVRequest(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, req RequestInfo) {
 }
 
-func (dsc *SQLCPUCalculator) AfterKVRequest(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, req RequestInfo, res ResponseInfo) {
+// AfterKVRequest ...
+func (dsc *SQLCalculator) AfterKVRequest(resource map[rmpb.ResourceType]float64, ru map[rmpb.RequestUnitType]float64, req RequestInfo, res ResponseInfo) {
 }
