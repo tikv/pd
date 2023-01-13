@@ -350,6 +350,24 @@ func (m *RuleManager) InvalidCache(regionID uint64) {
 	m.cache.Invalid(regionID)
 }
 
+// SetPlaceholderRegionFitCache sets a placeholder region fit cache information
+// Only used for testing
+func (m *RuleManager) SetPlaceholderRegionFitCache(region *core.RegionInfo) {
+	placeholderCache := &RegionRuleFitCache{region: toRegionCache(region)}
+	m.cache.mu.Lock()
+	defer m.cache.mu.Unlock()
+	m.cache.caches[region.GetID()] = placeholderCache
+}
+
+// CheckIsCachedDirectly returns whether the region's fit is cached
+// Only used for testing
+func (m *RuleManager) CheckIsCachedDirectly(regionID uint64) bool {
+	m.cache.mu.RLock()
+	defer m.cache.mu.RUnlock()
+	_, ok := m.cache.caches[regionID]
+	return ok
+}
+
 func (m *RuleManager) beginPatch() *ruleConfigPatch {
 	return m.ruleConfig.beginPatch()
 }
