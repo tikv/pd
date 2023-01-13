@@ -33,6 +33,7 @@ require (
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.6.0
 	github.com/sasha-s/go-deadlock v0.2.0
+	github.com/smallnest/chanx v0.0.0-20221229104322-eb4c998d2072
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.0
