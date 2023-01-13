@@ -68,8 +68,8 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	leader := suite.cluster.GetServer(leaderName)
 	suite.client, err = pd.NewClientWithContext(suite.ctx, []string{leader.GetAddr()}, pd.SecurityOption{})
 	re.NoError(err)
-
 }
+
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.clean()

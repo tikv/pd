@@ -148,33 +148,33 @@ func ExternalTimestampPath() string {
 	return path.Join(clusterPath, externalTimeStamp)
 }
 
-// KeySpaceServiceSafePointPrefix returns the prefix of given service's service safe point.
+// KeyspaceServiceSafePointPrefix returns the prefix of given service's service safe point.
 // Prefix: /keyspaces/gc_safepoint/{space_id}/service/
-func KeySpaceServiceSafePointPrefix(spaceID string) string {
+func KeyspaceServiceSafePointPrefix(spaceID string) string {
 	return path.Join(keyspaceSafePointPrefix, spaceID, "service") + "/"
 }
 
-// KeySpaceGCSafePointPath returns the gc safe point's path of the given key-space.
+// KeyspaceGCSafePointPath returns the gc safe point's path of the given key-space.
 // Path: /keyspaces/gc_safepoint/{space_id}/gc
-func KeySpaceGCSafePointPath(spaceID string) string {
+func KeyspaceGCSafePointPath(spaceID string) string {
 	return path.Join(keyspaceSafePointPrefix, spaceID, keyspaceGCSafePointSuffix)
 }
 
-// KeySpaceServiceSafePointPath returns the path of given service's service safe point.
+// KeyspaceServiceSafePointPath returns the path of given service's service safe point.
 // Path: /keyspaces/gc_safepoint/{space_id}/service/{service_id}
-func KeySpaceServiceSafePointPath(spaceID, serviceID string) string {
-	return path.Join(KeySpaceServiceSafePointPrefix(spaceID), serviceID)
+func KeyspaceServiceSafePointPath(spaceID, serviceID string) string {
+	return path.Join(KeyspaceServiceSafePointPrefix(spaceID), serviceID)
 }
 
-// KeySpaceSafePointPrefix returns prefix for all key-spaces' safe points.
+// KeyspaceSafePointPrefix returns prefix for all key-spaces' safe points.
 // Path: /keyspaces/gc_safepoint/
-func KeySpaceSafePointPrefix() string {
+func KeyspaceSafePointPrefix() string {
 	return keyspaceSafePointPrefix + "/"
 }
 
-// KeySpaceGCSafePointSuffix returns the suffix for any gc safepoint.
+// KeyspaceGCSafePointSuffix returns the suffix for any gc safepoint.
 // Postfix: /gc
-func KeySpaceGCSafePointSuffix() string {
+func KeyspaceGCSafePointSuffix() string {
 	return "/" + keyspaceGCSafePointSuffix
 }
 
