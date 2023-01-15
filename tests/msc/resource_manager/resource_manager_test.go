@@ -232,6 +232,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 		},
 	}
 
+	_, err := cli.GetResourceGroup(suite.ctx, "failtest")
+	re.Error(err)
+
 	checkErr := func(err error, success bool) {
 		if success {
 			re.NoError(err)
