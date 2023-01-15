@@ -137,6 +137,18 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		re.Len(resp.GrantedRUTokens, 1)
 		re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(10000.))
 	}
+	gresp, err := cli.GetResourceGroup(suite.ctx, groups[0].GetName())
+	re.NoError(err)
+	re.Less(gresp.RUSettings.RRU.Tokens, groups[0].RUSettings.RRU.Tokens)
+
+	// to test persistent
+	leaderName := suite.cluster.WaitLeader()
+	leader := suite.cluster.GetServer(leaderName)
+	leader.Stop()
+	suite.cluster.RunServers([]*tests.TestServer{leader})
+	_, err = cli.GetResourceGroup(suite.ctx, groups[0].GetName())
+	re.NoError(err)
+
 	for _, g := range groups {
 		// Delete Resource Group
 		dresp, err := cli.DeleteResourceGroup(suite.ctx, g.Name)
