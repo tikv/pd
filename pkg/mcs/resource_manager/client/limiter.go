@@ -238,7 +238,7 @@ func (lim *Limiter) notify() {
 
 // maybeNotify checks if it's time to send the notification and if so, performs
 // the notification.
-func (lim *Limiter) maybeNotify(now time.Time) {
+func (lim *Limiter) maybeNotify() {
 	if lim.IsLowTokens() {
 		lim.notify()
 	}
@@ -258,7 +258,7 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	now, _, tokens := lim.advance(now)
 	lim.last = now
 	lim.tokens = tokens - amount
-	lim.maybeNotify(now)
+	lim.maybeNotify()
 }
 
 type tokenBucketReconfigureArgs struct {
@@ -279,7 +279,7 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	lim.limit = Limit(args.NewRate)
 	lim.notifyThreshold = args.NotifyThreshold
 	lim.isLowProcess = false
-	lim.maybeNotify(now)
+	lim.maybeNotify()
 	log.Debug("[resource group controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 }
 
@@ -311,7 +311,7 @@ func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duratio
 			ok = true
 			lim.tokens -= float64(n)
 		}
-		lim.maybeNotify(now)
+		lim.maybeNotify()
 		return Reservation{
 			ok:        ok,
 			lim:       lim,
@@ -330,7 +330,7 @@ func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duratio
 
 	// Calculate the remaining number of tokens resulting from the request.
 	tokens -= float64(n)
-	lim.maybeNotify(now)
+	lim.maybeNotify()
 	// Calculate the wait duration
 	var waitDuration time.Duration
 	if tokens < 0 {
