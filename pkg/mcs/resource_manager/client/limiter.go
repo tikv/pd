@@ -80,6 +80,7 @@ type Limiter struct {
 	lastEvent           time.Time
 	notifyThreshold     float64
 	lowTokensNotifyChan chan struct{}
+	isLowProcess        bool
 }
 
 // Limit returns the maximum overall event rate.
@@ -141,11 +142,6 @@ func (r *Reservation) DelayFrom(now time.Time) time.Duration {
 		return 0
 	}
 	return delay
-}
-
-// Cancel is shorthand for CancelAt(time.Now()).
-func (r *Reservation) Cancel() {
-	r.CancelAt(time.Now())
 }
 
 // CancelAt indicates that the reservation holder will not perform the reserved action
@@ -220,56 +216,6 @@ func (lim *Limiter) ReserveN(ctx context.Context, now time.Time, n int) *Reserva
 	return &r
 }
 
-// WaitN blocks until lim permits n events to happen.
-// It returns an error if n exceeds the Limiter's burst size, the Context is
-// canceled, or the expected wait time exceeds the Context's Deadline.
-// The burst limit is ignored if the rate limit is Inf.
-
-// Todo: support float64 n
-func (lim *Limiter) WaitN(ctx context.Context, n int) (err error) {
-	lim.mu.Lock()
-	limit := lim.limit
-	lim.mu.Unlock()
-
-	// Check if ctx is already cancelled
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	// Determine wait limit
-	now := time.Now()
-	waitLimit := InfDuration
-	if deadline, ok := ctx.Deadline(); ok {
-		waitLimit = deadline.Sub(now)
-	}
-	// Reserve
-	r := lim.reserveN(now, n, waitLimit)
-	if !r.ok {
-		return fmt.Errorf("rate: Wait(n=%d) tokens(t=%f) rate(r=%f) would exceed context deadline", n, lim.tokens, limit)
-	}
-	// Wait if necessary
-	delay := r.DelayFrom(now)
-	if delay == 0 {
-		return nil
-	}
-	t := time.NewTimer(delay)
-	defer t.Stop()
-	if delay > 500*time.Millisecond {
-		log.Warn("[resource group controllor] Need wait N", zap.Time("now", now), zap.Duration("delay", delay), zap.Int("n", n))
-	}
-	select {
-	case <-t.C:
-		// We can proceed.
-		return nil
-	case <-ctx.Done():
-		// Context was canceled before we could proceed.  Cancel the
-		// reservation, which may permit other events to proceed sooner.
-		r.Cancel()
-		return ctx.Err()
-	}
-}
-
 // SetupNotificationAt enables the notification at the given threshold.
 func (lim *Limiter) SetupNotificationAt(now time.Time, threshold float64) {
 	lim.advance(now)
@@ -279,7 +225,11 @@ func (lim *Limiter) SetupNotificationAt(now time.Time, threshold float64) {
 // notify tries to send a non-blocking notification on notifyCh and disables
 // further notifications (until the next Reconfigure or StartNotification).
 func (lim *Limiter) notify() {
+	if lim.isLowProcess {
+		return
+	}
 	lim.notifyThreshold = 0
+	lim.isLowProcess = true
 	select {
 	case lim.lowTokensNotifyChan <- struct{}{}:
 	default:
@@ -295,7 +245,7 @@ func (lim *Limiter) maybeNotify(now time.Time) {
 }
 
 func (lim *Limiter) IsLowTokens() bool {
-	if lim.notifyThreshold > 0 && lim.tokens < lim.notifyThreshold {
+	if lim.isLowProcess || (lim.notifyThreshold > 0 && lim.tokens < lim.notifyThreshold) {
 		return true
 	}
 	return false
@@ -320,10 +270,6 @@ type tokenBucketReconfigureArgs struct {
 }
 
 func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) {
-	select {
-	case <-lim.lowTokensNotifyChan:
-	default:
-	}
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	log.Debug("[resource group controllor] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
@@ -332,6 +278,7 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	lim.tokens = tokens + args.NewTokens
 	lim.limit = Limit(args.NewRate)
 	lim.notifyThreshold = args.NotifyThreshold
+	lim.isLowProcess = false
 	lim.maybeNotify(now)
 	log.Debug("[resource group controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 }
@@ -364,6 +311,7 @@ func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duratio
 			ok = true
 			lim.tokens -= float64(n)
 		}
+		lim.maybeNotify(now)
 		return Reservation{
 			ok:        ok,
 			lim:       lim,
@@ -449,11 +397,10 @@ func (limit Limit) tokensFromDuration(d time.Duration) float64 {
 	return d.Seconds() * float64(limit)
 }
 
-func waitReservations(ctx context.Context, reservations []*Reservation) error {
+func waitReservations(now time.Time, ctx context.Context, reservations []*Reservation) error {
 	if len(reservations) == 0 {
 		return nil
 	}
-	now := reservations[0].timeToAct
 	cancel := func() {
 		for _, res := range reservations {
 			res.CancelAt(now)
@@ -469,6 +416,9 @@ func waitReservations(ctx context.Context, reservations []*Reservation) error {
 		if delay > longestDelayDuration {
 			longestDelayDuration = delay
 		}
+	}
+	if longestDelayDuration <= 0 {
+		return nil
 	}
 	if longestDelayDuration > 500*time.Millisecond {
 		log.Warn("[resource group controllor] limiter needs wait ", zap.Time("now", now), zap.Duration("delay", longestDelayDuration))

@@ -183,6 +183,7 @@ func (c *resourceGroupsController) shouldReportConsumption() bool {
 			ret = ret || gc.shouldReportConsumption()
 			return !ret
 		})
+		return ret
 	}
 	return false
 }
@@ -283,8 +284,10 @@ func (c *resourceGroupsController) mainLoop(ctx context.Context) {
 			}
 		case <-c.lowTokenNotifyChan:
 			c.updateRunState(ctx)
+			c.updateAvgRequestResourcePerSec(ctx)
 			if !c.run.requestInProgress {
-				c.collectTokenBucketRequests(ctx, "low_ru", true /* only select low tokens resource group */)
+				c.collectTokenBucketRequests(ctx, "low_ru", false /* only select low tokens resource group */)
+				//c.collectTokenBucketRequests(ctx, "low_ru", true /* only select low tokens resource group */)
 			}
 		default:
 			c.handleTokenBucketTrickEvent(ctx)
@@ -418,7 +421,7 @@ func (gc *groupCostController) initRunState(ctx context.Context) {
 		for typ := range requestUnitList {
 			counter := &tokenCounter{
 				limiter:     NewLimiter(0, initialRequestUnits, gc.lowRUNotifyChan),
-				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds(),
+				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
 			gc.run.requestUnitTokens[typ] = counter
@@ -428,7 +431,7 @@ func (gc *groupCostController) initRunState(ctx context.Context) {
 		for typ := range requestResourceList {
 			counter := &tokenCounter{
 				limiter:     NewLimiter(0, initialRequestUnits, gc.lowRUNotifyChan),
-				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds(),
+				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
 			gc.run.resourceTokens[typ] = counter
@@ -521,7 +524,7 @@ func (gc *groupCostController) updateAvgRUPerSec(ctx context.Context) {
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
-	if deltaDuration <= 10*time.Millisecond {
+	if deltaDuration <= 500*time.Millisecond {
 		return false
 	}
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
@@ -556,6 +559,9 @@ func (gc *groupCostController) handleTokenBucketResponse(ctx context.Context, re
 		// This is the first successful request. Take back the initial RUs that we
 		// used to pre-fill the bucket.
 		for _, counter := range gc.run.resourceTokens {
+			counter.limiter.RemoveTokens(gc.run.now, initialRequestUnits)
+		}
+		for _, counter := range gc.run.requestUnitTokens {
 			counter.limiter.RemoveTokens(gc.run.now, initialRequestUnits)
 		}
 	}
@@ -624,7 +630,6 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		if timerDuration <= 0 {
 			timerDuration = (trickleDuration + time.Second) / 2
 		}
-		log.Info("QQQ2 ", zap.Duration("timerDuration", timerDuration), zap.Float64("cfg.NewRate", cfg.NewRate))
 		counter.setupNotificationTimer = time.NewTimer(timerDuration)
 		counter.setupNotificationCh = counter.setupNotificationTimer.C
 		counter.setupNotificationThreshold = notifyThreshold
@@ -715,7 +720,7 @@ func (gc *groupCostController) OnRequestWait(
 				res = append(res, counter.limiter.ReserveN(ctx, now, int(v)))
 			}
 		}
-		if err := waitReservations(ctx, res); err != nil {
+		if err := waitReservations(now, ctx, res); err != nil {
 			return err
 		}
 	case rmpb.GroupMode_RUMode:
@@ -725,7 +730,7 @@ func (gc *groupCostController) OnRequestWait(
 				res = append(res, counter.limiter.ReserveN(ctx, now, int(v)))
 			}
 		}
-		if err := waitReservations(ctx, res); err != nil {
+		if err := waitReservations(now, ctx, res); err != nil {
 			return err
 		}
 	}

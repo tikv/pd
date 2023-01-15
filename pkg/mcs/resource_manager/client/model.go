@@ -55,25 +55,25 @@ func GetResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.Resource
 }
 
 func Add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
-	custom1.RRU += custom1.RRU
-	custom1.WRU += custom1.WRU
-	custom1.ReadBytes += custom1.ReadBytes
-	custom1.WriteBytes += custom1.WriteBytes
-	custom1.TotalCpuTimeMs += custom1.TotalCpuTimeMs
-	custom1.SqlLayerCpuTimeMs += custom1.SqlLayerCpuTimeMs
-	custom1.KvReadRpcCount += custom1.KvReadRpcCount
-	custom1.KvWriteRpcCount += custom1.KvWriteRpcCount
+	custom1.RRU += custom2.RRU
+	custom1.WRU += custom2.WRU
+	custom1.ReadBytes += custom2.ReadBytes
+	custom1.WriteBytes += custom2.WriteBytes
+	custom1.TotalCpuTimeMs += custom2.TotalCpuTimeMs
+	custom1.SqlLayerCpuTimeMs += custom2.SqlLayerCpuTimeMs
+	custom1.KvReadRpcCount += custom2.KvReadRpcCount
+	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
 }
 
 func Sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
-	custom1.RRU -= custom1.RRU
-	custom1.WRU -= custom1.WRU
-	custom1.ReadBytes -= custom1.ReadBytes
-	custom1.WriteBytes -= custom1.WriteBytes
-	custom1.TotalCpuTimeMs -= custom1.TotalCpuTimeMs
-	custom1.SqlLayerCpuTimeMs -= custom1.SqlLayerCpuTimeMs
-	custom1.KvReadRpcCount -= custom1.KvReadRpcCount
-	custom1.KvWriteRpcCount -= custom1.KvWriteRpcCount
+	custom1.RRU -= custom2.RRU
+	custom1.WRU -= custom2.WRU
+	custom1.ReadBytes -= custom2.ReadBytes
+	custom1.WriteBytes -= custom2.WriteBytes
+	custom1.TotalCpuTimeMs -= custom2.TotalCpuTimeMs
+	custom1.SqlLayerCpuTimeMs -= custom2.SqlLayerCpuTimeMs
+	custom1.KvReadRpcCount -= custom2.KvReadRpcCount
+	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
 }
 
 type ResourceCalculator interface {
@@ -96,12 +96,13 @@ func (kc *KVCalculator) Trickle(consumption *rmpb.Consumption, ctx context.Conte
 func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
 	if req.IsWrite() {
 		writeBytes := float64(req.WriteBytes())
-		wru := float64(kc.WriteBytesCost) * writeBytes
+		wru := float64(kc.WriteBytesCost)*writeBytes + float64(kc.WriteBaseCost)
 		consumption.KvWriteRpcCount += 1
 		consumption.WRU += wru
 		consumption.WriteBytes += writeBytes
-
 	} else {
+		rru := float64(kc.ReadBaseCost)
+		consumption.RRU += rru
 		consumption.KvReadRpcCount += 1
 	}
 }
@@ -109,7 +110,10 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	readBytes := float64(res.ReadBytes())
 	kvCPUms := float64(res.KVCPUms())
 	ru_io := readBytes * float64(kc.ReadBytesCost)
-	ru_cpu := kvCPUms * float64(kc.WriteCPUMsCost)
+	var ru_cpu = 0.
+	if req.IsWrite() {
+		ru_cpu = kvCPUms * float64(kc.WriteCPUMsCost)
+	}
 	// for consumption
 	consumption.RRU += ru_cpu + ru_io
 	consumption.ReadBytes += readBytes
