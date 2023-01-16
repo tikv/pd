@@ -165,6 +165,8 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
+
+	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 }
 
 // NewConfig creates a new config.
@@ -1476,4 +1478,10 @@ type SecurityConfig struct {
 	// RedactInfoLog indicates that whether enabling redact log
 	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
 	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
+}
+
+// KeyspaceConfig is the configuration for keyspace management.
+type KeyspaceConfig struct {
+	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
+	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
 }
