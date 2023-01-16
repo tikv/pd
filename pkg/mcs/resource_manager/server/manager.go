@@ -15,7 +15,6 @@
 package server
 
 import (
-	"path"
 	"sort"
 	"sync"
 
@@ -55,7 +54,7 @@ func (m *Manager) Init() {
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
-	m.storage().LoadResourceGroups(groupSettingsPathPrefix, handler)
+	m.storage().LoadResourceGroupSettings(handler)
 }
 
 // AddResourceGroup puts a resource group.
@@ -104,8 +103,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(name string) error {
-	prefix := path.Join(groupSettingsPathPrefix, name)
-	if err := m.storage().DeleteResourceGroup(prefix); err != nil {
+	if err := m.storage().DeleteResourceGroupSetting(name); err != nil {
 		return err
 	}
 	m.Lock()

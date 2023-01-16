@@ -20,28 +20,31 @@ import (
 	"github.com/gogo/protobuf/proto"
 )
 
+const (
+	// groupSettingsPathPrefix is the prefix of the resource group path to store group settings.
+	groupSettingsPathPrefix = "/settings"
+)
+
 // ResourceGroupStorage defines the storage operations on the rule.
 type ResourceGroupStorage interface {
-	LoadResourceGroups(prefix string, f func(k, v string)) error
-	SaveResourceGroup(prefix string, msg proto.Message) error
-	DeleteResourceGroup(prefix string) error
+	LoadResourceGroupSettings(f func(k, v string)) error
+	SaveResourceGroupSetting(name string, msg proto.Message) error
+	DeleteResourceGroupSetting(name string) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
 
-// SaveResourceGroup stores a resource group to storage.
-func (se *StorageEndpoint) SaveResourceGroup(prefix string, msg proto.Message) error {
-	path := path.Join(resourceGroupPath, prefix)
-	return se.saveProto(path, msg)
+// SaveResourceGroupSetting stores a resource group to storage.
+func (se *StorageEndpoint) SaveResourceGroupSetting(name string, msg proto.Message) error {
+	return se.saveProto(resourceGroupKeyPath(groupSettingsPathPrefix, name), msg)
 }
 
-// DeleteResourceGroup removes a resource group from storage.
-func (se *StorageEndpoint) DeleteResourceGroup(prefix string) error {
-	return se.Remove(resourceGroupKeyPath(prefix))
+// DeleteResourceGroupSetting removes a resource group from storage.
+func (se *StorageEndpoint) DeleteResourceGroupSetting(name string) error {
+	return se.Remove(resourceGroupKeyPath(groupSettingsPathPrefix, name))
 }
 
-// LoadResourceGroups loads all resource groups from storage.
-func (se *StorageEndpoint) LoadResourceGroups(prefix string, f func(k, v string)) error {
-	path := path.Join(resourceGroupPath, prefix)
-	return se.loadRangeByPrefix(path, f)
+// LoadResourceGroupSettings loads all resource groups from storage.
+func (se *StorageEndpoint) LoadResourceGroupSettings(f func(k, v string)) error {
+	return se.loadRangeByPrefix(path.Join(resourceGroupPath, groupSettingsPathPrefix), f)
 }

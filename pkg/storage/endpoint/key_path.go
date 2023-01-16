@@ -105,8 +105,8 @@ func RegionPath(regionID uint64) string {
 	return buf.String()
 }
 
-func resourceGroupKeyPath(groupName string) string {
-	return path.Join(resourceGroupPath, groupName)
+func resourceGroupKeyPath(prefix, groupName string) string {
+	return path.Join(resourceGroupPath, prefix, groupName)
 }
 
 func ruleKeyPath(ruleKey string) string {
