@@ -717,20 +717,20 @@ func (gc *groupCostController) OnRequestWait(
 		res := make([]*Reservation, 0, len(requestResourceList))
 		for typ, counter := range gc.run.resourceTokens {
 			if v := GetResourceValueFromConsumption(delta, typ); v > 0 {
-				res = append(res, counter.limiter.ReserveN(ctx, now, int(v)))
+				res = append(res, counter.limiter.Reserve(ctx, now, v))
 			}
 		}
-		if err := waitReservations(now, ctx, res); err != nil {
+		if err := WaitReservations(ctx, now, res); err != nil {
 			return err
 		}
 	case rmpb.GroupMode_RUMode:
 		res := make([]*Reservation, 0, len(requestUnitList))
 		for typ, counter := range gc.run.requestUnitTokens {
 			if v := GetRUValueFromConsumption(delta, typ); v > 0 {
-				res = append(res, counter.limiter.ReserveN(ctx, now, int(v)))
+				res = append(res, counter.limiter.Reserve(ctx, now, v))
 			}
 		}
-		if err := waitReservations(now, ctx, res); err != nil {
+		if err := WaitReservations(ctx, now, res); err != nil {
 			return err
 		}
 	}

@@ -58,26 +58,16 @@ const maxRequestTokens = 1e8
 // The zero value is a valid Limiter, but it will reject all events.
 // Use NewLimiter to create non-zero Limiters.
 //
-// Limiter has three main methods, Allow, Reserve, and Wait.
-// Most callers should use Wait.
-//
-// Each of the three methods consumes a single token.
-// They differ in their behavior when no token is available.
-// If no token is available, Allow returns false.
+// Limiter has one main methods Reserve.
 // If no token is available, Reserve returns a reservation for a future token
-// and the amount of time the caller must wait before using it.
-// If no token is available, Wait blocks until one can be obtained
+// and the amount of time the caller must wait before using it,
 // or its associated context.Context is canceled.
-//
-// The methods AllowN, ReserveN, and WaitN consume n tokens.
 type Limiter struct {
 	mu     sync.Mutex
 	limit  Limit
 	tokens float64
 	// last is the last time the limiter's tokens field was updated
-	last time.Time
-	// lastEvent is the latest time of a rate-limited event (past or future)
-	lastEvent           time.Time
+	last                time.Time
 	notifyThreshold     float64
 	lowTokensNotifyChan chan struct{}
 	isLowProcess        bool
@@ -108,7 +98,7 @@ func NewLimiter(r Limit, tokens float64, lowTokensNotifyChan chan struct{}) *Lim
 type Reservation struct {
 	ok        bool
 	lim       *Limiter
-	tokens    int
+	tokens    float64
 	timeToAct time.Time
 	// This is the Limit at reservation time, it can change later.
 	limit Limit
@@ -145,8 +135,7 @@ func (r *Reservation) DelayFrom(now time.Time) time.Duration {
 }
 
 // CancelAt indicates that the reservation holder will not perform the reserved action
-// and reverses the effects of this Reservation on the rate limit as much as possible,
-// considering that other reservations may have already been made.
+// and reverses tokens which be refilled into limiter.
 func (r *Reservation) CancelAt(now time.Time) {
 	if !r.ok {
 		return
@@ -158,36 +147,22 @@ func (r *Reservation) CancelAt(now time.Time) {
 	if r.lim.limit == Inf || r.tokens == 0 || r.timeToAct.Before(now) {
 		return
 	}
-
-	// calculate tokens to restore
-	// The duration between lim.lastEvent and r.timeToAct tells us how many tokens were reserved
-	// after r was obtained. These tokens should not be restored.
-	restoreTokens := float64(r.tokens) - r.limit.tokensFromDuration(r.lim.lastEvent.Sub(r.timeToAct))
-	if restoreTokens <= 0 {
-		return
-	}
 	// advance time to now
 	now, _, tokens := r.lim.advance(now)
 	// calculate new number of tokens
-	tokens += restoreTokens
+	tokens += float64(r.tokens)
 
 	// update state
 	r.lim.last = now
 	r.lim.tokens = tokens
-	if r.timeToAct == r.lim.lastEvent {
-		prevEvent := r.timeToAct.Add(r.limit.durationFromTokens(float64(-r.tokens)))
-		if !prevEvent.Before(now) {
-			r.lim.lastEvent = prevEvent
-		}
-	}
 }
 
-// ReserveN returns a Reservation that indicates how long the caller must wait before n events happen.
+// Reserve returns a Reservation that indicates how long the caller must wait before n events happen.
 // The Limiter takes this Reservation into account when allowing future events.
-// The returned Reservation’s OK() method returns false if n exceeds the Limiter's burst size.
+// The returned Reservation’s OK() method returns false if waitting duration exceeds deadline.
 // Usage example:
 //
-//	r := lim.ReserveN(time.Now(), 1)
+//	r := lim.Reserve(time.Now(), 1)
 //	if !r.OK() {
 //	  // Not allowed to act! Did you remember to set lim.burst to be > 0 ?
 //	  return
@@ -196,9 +171,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 //	Act()
 //
 // Use this method if you wish to wait and slow down in accordance with the rate limit without dropping events.
-// If you need to respect a deadline or cancel the delay, use Wait instead.
-// To drop or skip events exceeding rate limit, use Allow instead.
-func (lim *Limiter) ReserveN(ctx context.Context, now time.Time, n int) *Reservation {
+func (lim *Limiter) Reserve(ctx context.Context, now time.Time, n float64) *Reservation {
 	// Check if ctx is already cancelled
 	select {
 	case <-ctx.Done():
@@ -238,12 +211,13 @@ func (lim *Limiter) notify() {
 
 // maybeNotify checks if it's time to send the notification and if so, performs
 // the notification.
-func (lim *Limiter) maybeNotify(now time.Time) {
+func (lim *Limiter) maybeNotify() {
 	if lim.IsLowTokens() {
 		lim.notify()
 	}
 }
 
+// IsLowTokens returns whether the limiter is in low tokens
 func (lim *Limiter) IsLowTokens() bool {
 	if lim.isLowProcess || (lim.notifyThreshold > 0 && lim.tokens < lim.notifyThreshold) {
 		return true
@@ -258,7 +232,7 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	now, _, tokens := lim.advance(now)
 	lim.last = now
 	lim.tokens = tokens - amount
-	lim.maybeNotify(now)
+	lim.maybeNotify()
 }
 
 type tokenBucketReconfigureArgs struct {
@@ -269,6 +243,7 @@ type tokenBucketReconfigureArgs struct {
 	NotifyThreshold float64
 }
 
+// Reconfigure modifies all setting for limiter
 func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
@@ -279,7 +254,7 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	lim.limit = Limit(args.NewRate)
 	lim.notifyThreshold = args.NotifyThreshold
 	lim.isLowProcess = false
-	lim.maybeNotify(now)
+	lim.maybeNotify()
 	log.Debug("[resource group controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 }
 
@@ -291,10 +266,10 @@ func (lim *Limiter) AvailableTokens(now time.Time) float64 {
 	return tokens
 }
 
-// reserveN is a helper method for ReserveN.
+// reserveN is a helper method for Reserve.
 // maxFutureReserve specifies the maximum reservation wait duration allowed.
 // reserveN returns Reservation, not *Reservation, to avoid allocation in AllowN and WaitN.
-func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duration) Reservation {
+func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Duration) Reservation {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 
@@ -305,24 +280,11 @@ func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duratio
 			tokens:    n,
 			timeToAct: now,
 		}
-	} else if lim.limit == 0 {
-		var ok bool
-		if lim.tokens >= float64(n) {
-			ok = true
-			lim.tokens -= float64(n)
-		}
-		lim.maybeNotify(now)
-		return Reservation{
-			ok:        ok,
-			lim:       lim,
-			tokens:    int(lim.tokens),
-			timeToAct: now,
-		}
 	} else if n > maxRequestTokens {
 		return Reservation{
 			ok:        false,
 			lim:       lim,
-			tokens:    int(lim.tokens),
+			tokens:    lim.tokens,
 			timeToAct: now,
 		}
 	}
@@ -330,7 +292,7 @@ func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duratio
 
 	// Calculate the remaining number of tokens resulting from the request.
 	tokens -= float64(n)
-	lim.maybeNotify(now)
+	lim.maybeNotify()
 	// Calculate the wait duration
 	var waitDuration time.Duration
 	if tokens < 0 {
@@ -354,11 +316,9 @@ func (lim *Limiter) reserveN(now time.Time, n int, maxFutureReserve time.Duratio
 	if ok {
 		lim.last = now
 		lim.tokens = tokens
-		lim.lastEvent = r.timeToAct
 	} else {
 		lim.last = last
 	}
-
 	return r
 }
 
@@ -397,7 +357,9 @@ func (limit Limit) tokensFromDuration(d time.Duration) float64 {
 	return d.Seconds() * float64(limit)
 }
 
-func waitReservations(now time.Time, ctx context.Context, reservations []*Reservation) error {
+// WaitReservations is used to process a series of reservations
+// so that all limiter tokens are returned if one reservation fails
+func WaitReservations(ctx context.Context, now time.Time, reservations []*Reservation) error {
 	if len(reservations) == 0 {
 		return nil
 	}
