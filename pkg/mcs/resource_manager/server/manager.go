@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"sync"
 	"time"
@@ -24,6 +25,8 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
@@ -33,6 +36,10 @@ const (
 	defaultConsumptionChanSize = 1024
 	metricsFlushInterval       = time.Minute
 	metricsGCInterval          = time.Hour
+	// metricsGCLifeInterval is the life time of the metrics.
+	// After every `metricsGCInterval`, the metrics older than
+	// this will be deleted.
+	metricsGCLifeInterval = 24 * time.Hour
 )
 
 // Manager is the manager of resource group.
@@ -175,18 +182,55 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	ticker := time.NewTicker(metricsFlushInterval)
 	defer ticker.Stop()
-	select {
-	case <-ctx.Done():
-		return
-	case consumption := <-m.consumptionDispatcher:
-		// Aggregate the consumption info to the metrics.
-		if metrics := m.getMetrics(consumption.resourceGroupName); metrics != nil {
-			metrics.Update(consumption.Consumption)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case consumption := <-m.consumptionDispatcher:
+			// Aggregate the consumption info to the metrics.
+			if metrics := m.getMetrics(consumption.resourceGroupName); metrics != nil {
+				metrics.Update(consumption.Consumption)
+			}
+		// Flush the metrics info to the storage.
+		case <-ticker.C:
+			m.RLock()
+			metricsMapToFlush := make(map[string]*Metrics, len(m.metricsMap))
+			for name, metrics := range m.metricsMap {
+				// No update since the last flush.
+				if metrics.updateTime.Sub(metrics.flushTime) <= 0 {
+					continue
+				}
+				metricsMapToFlush[name] = metrics.Copy()
+			}
+			m.RUnlock()
+			// Start a txn to write in batch.
+			if err := m.storage().RunInTxn(ctx, func(txn kv.Txn) error {
+				for name, metrics := range metricsMapToFlush {
+					key := endpoint.HistoryResourceGroupMetricsKeyPath(name, metrics.updateTime.UnixMilli())
+					value, err := json.Marshal(metrics)
+					if err != nil {
+						log.Error("failed to marshal the resource group metrics info",
+							zap.String("key", key),
+							zap.Error(err))
+						return err
+					}
+					if err = txn.Save(key, string(value)); err != nil {
+						log.Error("failed to save the resource group metrics info in txn",
+							zap.String("key", key),
+							zap.Error(err))
+						return err
+					}
+				}
+				return nil
+			}); err != nil {
+				log.Error("failed to flush the resource group metrics info", zap.Error(err))
+				continue
+			}
+			// Reset the metrics info in memory safely after flushing.
+			for name := range metricsMapToFlush {
+				m.resetMetricsAfterFlush(name)
+			}
 		}
-	// Flush the metrics info to the storage.
-	case <-ticker.C:
-		// TODO: persist the metrics info into the storage.
-		m.resetAllMetrics()
 	}
 }
 
@@ -194,12 +238,56 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 func (m *Manager) backgroundMetricsGC(ctx context.Context) {
 	ticker := time.NewTicker(metricsGCInterval)
 	defer ticker.Stop()
-	select {
-	case <-ctx.Done():
-		return
-	// GC the outdated metrics info in storage.
-	case <-ticker.C:
-		// TODO: delete the outdated metrics info from the storage.
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		// GC the outdated metrics info in storage.
+		case <-ticker.C:
+			// Get all the group names.
+			m.RLock()
+			groupNameToGC := make([]string, 0, len(m.metricsMap))
+			for name := range m.metricsMap {
+				groupNameToGC = append(groupNameToGC, name)
+			}
+			m.RUnlock()
+			gcPoint := time.Now().Add(-metricsGCLifeInterval).UnixMilli()
+			// Start a txn to delete in batch.
+			if err := m.storage().RunInTxn(ctx, func(txn kv.Txn) error {
+				for _, name := range groupNameToGC {
+					startKey := endpoint.HistoryResourceGroupMetricsKeyPath(name, 0)
+					endKey := endpoint.HistoryResourceGroupMetricsKeyPath(name, gcPoint)
+					keys, _, err := txn.LoadRange(startKey, endKey, 0)
+					if err != nil {
+						log.Error("failed to load the resource group metrics info in txn",
+							zap.String("startKey", startKey),
+							zap.String("endKey", endKey),
+							zap.Error(err))
+						return err
+					}
+					for _, key := range keys {
+						if err = txn.Remove(key); err != nil {
+							log.Error("failed to remove the resource group metrics info in txn",
+								zap.String("key", key),
+								zap.Error(err))
+							return err
+						}
+					}
+				}
+				return nil
+			}); err != nil {
+				log.Error("failed to gc the resource group metrics info", zap.Error(err))
+				continue
+			}
+			// GC the outdated metrics info in memory.
+			m.Lock()
+			for name, metrics := range m.metricsMap {
+				if metrics != nil && metrics.updateTime.UnixMilli() < gcPoint {
+					delete(m.metricsMap, name)
+				}
+			}
+			m.Unlock()
+		}
 	}
 }
 
@@ -209,10 +297,10 @@ func (m *Manager) getMetrics(name string) *Metrics {
 	return m.metricsMap[name]
 }
 
-func (m *Manager) resetAllMetrics() {
+func (m *Manager) resetMetricsAfterFlush(name string) {
 	m.Lock()
 	defer m.Unlock()
-	for _, metrics := range m.metricsMap {
-		metrics.Reset()
+	if metrics := m.metricsMap[name]; metrics != nil {
+		metrics.ResetAfterFlush()
 	}
 }

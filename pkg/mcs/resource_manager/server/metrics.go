@@ -38,16 +38,21 @@ type HistoryResourceGroupMetrics struct {
 	Metrics       *Metrics `json:"metrics"`
 }
 
-// TODO: implement the API method to retrieve the history resource group metrics info.
+// TODO: implement the API method to retrieve and aggregate the history resource group metrics info.
 
 // Metrics contains the RU and resource metrics info.
+// It will be reset every time after it's persisted.
 type Metrics struct {
 	ResourceUnit *ResourceUnitMetrics `json:"resource_unit_metrics,omitempty"`
 	Resource     *ResourceMetrics     `json:"resource_metrics,omitempty"`
-	// Metrics will be reset every time after it's persisted. These two time points will
-	// help us to track its lifetime.
-	createTime time.Time
+	// Last time the metrics is reset. It's used to calculate the rate-related metrics.
+	resetTime time.Time
+	// Last time the metrics is updated. It's used to calculate the rate-related metrics
+	// and to determine whether the metrics is stale.
 	updateTime time.Time
+	// Last time the metrics is persisted to the storage. It's used to check whether the
+	// metrics is stale.
+	flushTime time.Time
 }
 
 // ResourceUnitMetrics contains the RU metrics info for the RU mode, which provides the RU cost info.
@@ -78,8 +83,21 @@ func NewMetrics() *Metrics {
 	return &Metrics{
 		ResourceUnit: &ResourceUnitMetrics{},
 		Resource:     &ResourceMetrics{},
-		createTime:   time.Now(),
+		resetTime:    time.Now(),
 		updateTime:   time.Now(),
+	}
+}
+
+// Copy copies the metrics.
+func (m *Metrics) Copy() *Metrics {
+	resourceUnit := *m.ResourceUnit
+	resource := *m.Resource
+	return &Metrics{
+		ResourceUnit: &resourceUnit,
+		Resource:     &resource,
+		resetTime:    m.resetTime,
+		updateTime:   m.updateTime,
+		flushTime:    m.flushTime,
 	}
 }
 
@@ -94,7 +112,7 @@ func (m *Metrics) Update(consumption *rmpb.Consumption) {
 		return
 	}
 	m.updateTime = now
-	createInterval := now.Sub(m.createTime).Seconds()
+	resetInterval := now.Sub(m.resetTime).Seconds()
 	// RU info.
 	if consumption.RRU != 0 {
 		m.ResourceUnit.TotalRRU += consumption.RRU
@@ -102,7 +120,7 @@ func (m *Metrics) Update(consumption *rmpb.Consumption) {
 		if m.ResourceUnit.RRUPerSec > m.ResourceUnit.MaxRRUPerSec {
 			m.ResourceUnit.MaxRRUPerSec = m.ResourceUnit.RRUPerSec
 		}
-		m.ResourceUnit.AverageRRUPerSec = m.ResourceUnit.TotalRRU / createInterval
+		m.ResourceUnit.AverageRRUPerSec = m.ResourceUnit.TotalRRU / resetInterval
 	}
 	if consumption.WRU != 0 {
 		m.ResourceUnit.TotalWRU += consumption.WRU
@@ -110,7 +128,7 @@ func (m *Metrics) Update(consumption *rmpb.Consumption) {
 		if m.ResourceUnit.WRUPerSec > m.ResourceUnit.MaxWRUPerSec {
 			m.ResourceUnit.MaxWRUPerSec = m.ResourceUnit.WRUPerSec
 		}
-		m.ResourceUnit.AverageWRUPerSec = m.ResourceUnit.TotalWRU / createInterval
+		m.ResourceUnit.AverageWRUPerSec = m.ResourceUnit.TotalWRU / resetInterval
 	}
 	// Byte info.
 	if consumption.ReadBytes != 0 {
@@ -136,8 +154,8 @@ func (m *Metrics) Update(consumption *rmpb.Consumption) {
 	}
 }
 
-// Reset will reset each filed manually to prevent from allocating new memory.
-func (m *Metrics) Reset() {
+// ResetAfterFlush will reset each filed manually to prevent from allocating new memory.
+func (m *Metrics) ResetAfterFlush() {
 	m.ResourceUnit.RRUPerSec = 0
 	m.ResourceUnit.WRUPerSec = 0
 	m.ResourceUnit.MaxRRUPerSec = 0
@@ -153,6 +171,7 @@ func (m *Metrics) Reset() {
 	m.Resource.KVWriteRPCCount = 0
 	m.Resource.KVReadBytes = 0
 	m.Resource.KVWriteBytes = 0
-	m.createTime = time.Now()
+	m.resetTime = time.Now()
 	m.updateTime = time.Now()
+	m.flushTime = time.Now()
 }
