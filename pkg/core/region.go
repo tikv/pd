@@ -654,17 +654,19 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	noLog := func(msg string, fields ...zap.Field) {}
 	debug, info := noLog, noLog
 	if enableLog {
-		debug = logDebug
-		info = logInfo
+		debug = log.Debug
+		info = log.Info
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
 		if origin == nil {
-			debug("insert new region",
-				zap.Uint64("region-id", region.GetID()),
-				logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
+			if log.GetLevel() <= zap.DebugLevel {
+				debug("insert new region",
+					zap.Uint64("region-id", region.GetID()),
+					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
+			}
 			saveKV, saveCache, isNew = true, true, true
 		} else {
 			if !origin.IsFromHeartbeat() {
@@ -673,27 +675,31 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
 			if r.GetVersion() > o.GetVersion() {
-				info("region Version changed",
-					zap.Uint64("region-id", region.GetID()),
-					logutil.ZapRedactString("detail", DiffRegionKeyInfo(origin, region)),
-					zap.Uint64("old-version", o.GetVersion()),
-					zap.Uint64("new-version", r.GetVersion()),
-				)
+				if log.GetLevel() <= zap.InfoLevel {
+					info("region Version changed",
+						zap.Uint64("region-id", region.GetID()),
+						logutil.ZapRedactString("detail", DiffRegionKeyInfo(origin, region)),
+						zap.Uint64("old-version", o.GetVersion()),
+						zap.Uint64("new-version", r.GetVersion()),
+					)
+				}
 				saveKV, saveCache = true, true
 			}
 			if r.GetConfVer() > o.GetConfVer() {
-				info("region ConfVer changed",
-					zap.Uint64("region-id", region.GetID()),
-					zap.String("detail", DiffRegionPeersInfo(origin, region)),
-					zap.Uint64("old-confver", o.GetConfVer()),
-					zap.Uint64("new-confver", r.GetConfVer()),
-				)
+				if log.GetLevel() <= zap.InfoLevel {
+					info("region ConfVer changed",
+						zap.Uint64("region-id", region.GetID()),
+						zap.String("detail", DiffRegionPeersInfo(origin, region)),
+						zap.Uint64("old-confver", o.GetConfVer()),
+						zap.Uint64("new-confver", r.GetConfVer()),
+					)
+				}
 				saveKV, saveCache = true, true
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
 				if origin.GetLeader().GetId() == 0 {
 					isNew = true
-				} else {
+				} else if log.GetLevel() <= zap.InfoLevel {
 					info("leader changed",
 						zap.Uint64("region-id", region.GetID()),
 						zap.Uint64("from", origin.GetLeader().GetStoreId()),
@@ -708,7 +714,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				return
 			}
 			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
-				debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
+				if log.GetLevel() <= zap.DebugLevel {
+					debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
+				}
 				saveKV, saveCache = true, true
 				return
 			}
@@ -721,12 +729,16 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				return
 			}
 			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
-				debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+				if log.GetLevel() <= zap.DebugLevel {
+					debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+				}
 				saveCache, needSync = true, true
 				return
 			}
 			if !SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
-				debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+				if log.GetLevel() <= zap.DebugLevel {
+					debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+				}
 				saveCache, needSync = true, true
 				return
 			}
@@ -742,18 +754,6 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 		}
 		return
-	}
-}
-
-func logDebug(msg string, fields ...zap.Field) {
-	if log.GetLevel() <= zap.DebugLevel {
-		log.Debug(msg, fields...)
-	}
-}
-
-func logInfo(msg string, fields ...zap.Field) {
-	if log.GetLevel() <= zap.InfoLevel {
-		log.Info(msg, fields...)
 	}
 }
 
