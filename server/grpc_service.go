@@ -1887,19 +1887,19 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 	for i, item := range request.Changes {
 		name := item.GetName()
 		switch item.GetKind() {
-		case pdpb.ItemKind_PUT:
-			ops[i] = clientv3.OpPut(s.GetEtcdPath(request.GetConfigPath()+name), item.GetValue())
-		case pdpb.ItemKind_DELETE:
-			ops[i] = clientv3.OpDelete(s.GetEtcdPath(request.GetConfigPath() + name))
+		case pdpb.EventType_PUT:
+			ops[i] = clientv3.OpPut(s.GetFinalPathWithinPD(request.GetConfigPath()+name), item.GetValue())
+		case pdpb.EventType_DELETE:
+			ops[i] = clientv3.OpDelete(s.GetFinalPathWithinPD(request.GetConfigPath() + name))
 		}
 	}
 	res, err :=
 		kv.NewSlowLogTxn(s.client).Then(ops...).Commit()
 	if err != nil {
-		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}, err
+		return &pdpb.StoreGlobalConfigResponse{}, err
 	}
 	if !res.Succeeded {
-		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "failed to execute StoreGlobalConfig transaction"}}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
+		return &pdpb.StoreGlobalConfigResponse{}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
 	}
 	return &pdpb.StoreGlobalConfigResponse{}, nil
 }
@@ -1907,21 +1907,15 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 // LoadGlobalConfig load global config from etcd
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
 	configPath := request.GetConfigPath()
-	r, err := s.client.Get(ctx, s.GetEtcdPath(configPath), clientv3.WithPrefix())
+	r, err := s.client.Get(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix())
 	if err != nil {
-		item := &pdpb.GlobalConfigItem{Name: configPath, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
-		return &pdpb.LoadGlobalConfigResponse{Items: []*pdpb.GlobalConfigItem{item}}, err
-	} else if len(r.Kvs) == 0 {
-		msg := "key " + configPath + " not found"
-		item := &pdpb.GlobalConfigItem{Name: configPath, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
-		return &pdpb.LoadGlobalConfigResponse{Items: []*pdpb.GlobalConfigItem{item}}, nil
-	} else {
-		res := make([]*pdpb.GlobalConfigItem, len(r.Kvs))
-		for i, value := range r.Kvs {
-			res[i] = &pdpb.GlobalConfigItem{Kind: pdpb.ItemKind_PUT, Name: string(value.Key), Value: string(value.Value)}
-		}
-		return &pdpb.LoadGlobalConfigResponse{Items: res, Revision: r.Header.GetRevision()}, nil
+		return &pdpb.LoadGlobalConfigResponse{}, err
 	}
+	res := make([]*pdpb.GlobalConfigItem, len(r.Kvs))
+	for i, value := range r.Kvs {
+		res[i] = &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: string(value.Key), Value: string(value.Value)}
+	}
+	return &pdpb.LoadGlobalConfigResponse{Items: res, Revision: r.Header.GetRevision()}, nil
 }
 
 // WatchGlobalConfig if the connection of WatchGlobalConfig is end
@@ -1932,7 +1926,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	if err := s.sendAllGlobalConfig(ctx, server, req.GetConfigPath(), req.GetRevision()); err != nil {
 		return err
 	}
-	watchChan := s.client.Watch(ctx, req.GetConfigPath(), clientv3.WithPrefix(), clientv3.WithRev(req.GetRevision()))
+	watchChan := s.client.Watch(ctx, s.GetFinalPathWithinPD(req.GetConfigPath()), clientv3.WithPrefix(), clientv3.WithRev(req.GetRevision()))
 	for {
 		select {
 		case <-ctx.Done():
@@ -1940,7 +1934,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 		case res := <-watchChan:
 			cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
 			for _, e := range res.Events {
-				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Value: string(e.Kv.Value), Kind: pdpb.ItemKind(e.Type)})
+				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Value: string(e.Kv.Value), Kind: pdpb.EventType(e.Type)})
 			}
 			if len(cfgs) > 0 {
 				if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs, Revision: res.Header.GetRevision()}); err != nil {
@@ -1952,13 +1946,13 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 }
 
 func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_WatchGlobalConfigServer, configPath string, revision int64) error {
-	configList, err := s.client.Get(ctx, s.GetEtcdPath(configPath), clientv3.WithPrefix(), clientv3.WithRev(revision))
+	configList, err := s.client.Get(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix(), clientv3.WithRev(revision))
 	if err != nil {
 		return err
 	}
 	ls := make([]*pdpb.GlobalConfigItem, configList.Count)
 	for i, kv := range configList.Kvs {
-		ls[i] = &pdpb.GlobalConfigItem{Kind: pdpb.ItemKind_PUT, Name: string(kv.Key), Value: string(kv.Value)}
+		ls[i] = &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: string(kv.Key), Value: string(kv.Value)}
 	}
 	return server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
 }

@@ -37,7 +37,7 @@ const (
 
 // ResourceManagerClient manages resource group info and token request.
 type ResourceManagerClient interface {
-	ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
+	ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error)
 	GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
@@ -55,17 +55,17 @@ func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
 }
 
 // ListResourceGroups loads and returns all metadata of resource groups.
-func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
+func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error) {
 	req := &rmpb.ListResourceGroupsRequest{}
 	resp, err := c.resourceManagerClient().ListResourceGroups(ctx, req)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return nil, 0, errors.Errorf("[resource_manager]" + resErr.Message)
+		return nil, errors.Errorf("[resource_manager]" + resErr.Message)
 	}
-	return resp.GetGroups(), resp.GetRevision(), nil
+	return resp.GetGroups(), nil
 }
 
 func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error) {
@@ -154,14 +154,14 @@ func (c *client) WatchResourceGroup(ctx context.Context, revision int64) (chan [
 				}
 				groups := make([]*rmpb.ResourceGroup, 0, len(res))
 				for _, item := range res {
-					switch item.ItemKind {
-					case pdpb.ItemKind_PUT:
+					switch item.EventType {
+					case pdpb.EventType_PUT:
 						group := &rmpb.ResourceGroup{}
 						if err := proto.Unmarshal([]byte(item.Value), group); err != nil {
 							return
 						}
 						groups = append(groups, group)
-					case pdpb.ItemKind_DELETE:
+					case pdpb.EventType_DELETE:
 						continue
 					}
 				}

@@ -94,13 +94,13 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	}
 	// Mock get revision by listing
 	for i := 0; i < 3; i++ {
-		group.Name = group.Name + strconv.Itoa(i)
+		group.Name += strconv.Itoa(i)
 		resp, err := cli.AddResourceGroup(suite.ctx, group)
 		group.Name = "test"
 		re.NoError(err)
 		re.Contains(resp, "Success!")
 	}
-	lresp, revision, err := cli.ListResourceGroups(suite.ctx)
+	lresp, err := cli.ListResourceGroups(suite.ctx)
 	re.NoError(err)
 	re.Equal(len(lresp), 3)
 	// Mock when start watcher there are existed some keys, will load firstly
@@ -111,7 +111,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		re.Contains(resp, "Success!")
 	}
 	// Start watcher
-	watchChan, err := suite.client.WatchResourceGroup(suite.ctx, revision)
+	watchChan, err := suite.client.WatchResourceGroup(suite.ctx, int64(0))
 	suite.NoError(err)
 	// Mock add resource groups
 	for i := 6; i < 9; i++ {
@@ -125,7 +125,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 			RRU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
-					FillRate: 10000,
+					FillRate: 20000,
 				},
 			},
 		}
@@ -151,14 +151,14 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 			close(watchChan)
 			return
 		case res := <-watchChan:
-			if i < 6 {
+			if i < 9 {
 				for _, r := range res {
-					suite.Equal(float64(100000), r.RUSettings.RRU.Tokens)
+					suite.Equal(uint64(10000), r.RUSettings.RRU.Settings.FillRate)
 					i++
 				}
 			} else { // after modify
 				for _, r := range res {
-					suite.Equal(float64(200000), r.RUSettings.RRU.Tokens)
+					suite.Equal(uint64(20000), r.RUSettings.RRU.Settings.FillRate)
 					i++
 				}
 			}
@@ -299,7 +299,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		{"test3", rmpb.GroupMode_RawMode, false, true,
 			`{"name":"test3","mode":2,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
-				gs.ResourceSettings = &rmpb.GroupResourceSettings{
+				gs.RawResourceSettings = &rmpb.GroupRawResourceSettings{
 					Cpu: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate: 1000000,
@@ -352,7 +352,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		// Last one, Check list and delete all resource groups
 		if i == len(testCasesSet1)-1 {
 			// List Resource Groups
-			lresp, _, err := cli.ListResourceGroups(suite.ctx)
+			lresp, err := cli.ListResourceGroups(suite.ctx)
 			re.NoError(err)
 			re.Equal(finalNum, len(lresp))
 

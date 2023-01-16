@@ -128,12 +128,12 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 		rg.RUSettings.RRU.patch(metaGroup.GetRUSettings().GetRRU())
 		rg.RUSettings.WRU.patch(metaGroup.GetRUSettings().GetWRU())
 	case rmpb.GroupMode_RawMode:
-		if metaGroup.GetResourceSettings() == nil {
+		if metaGroup.GetRawResourceSettings() == nil {
 			return errors.New("invalid resource group settings, raw mode should set resource settings")
 		}
-		rg.ResourceSettings.CPU.patch(metaGroup.GetResourceSettings().GetCpu())
-		rg.ResourceSettings.IOReadBandwidth.patch(metaGroup.GetResourceSettings().GetIoRead())
-		rg.ResourceSettings.IOWriteBandwidth.patch(metaGroup.GetResourceSettings().GetIoWrite())
+		rg.ResourceSettings.CPU.patch(metaGroup.GetRawResourceSettings().GetCpu())
+		rg.ResourceSettings.IOReadBandwidth.patch(metaGroup.GetRawResourceSettings().GetIoRead())
+		rg.ResourceSettings.IOWriteBandwidth.patch(metaGroup.GetRawResourceSettings().GetIoWrite())
 	}
 	log.Info("patch resource group settings", zap.String("name", rg.Name), zap.String("settings", rg.String()))
 	return nil
@@ -160,7 +160,7 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 			rg.RUSettings = ruSettings
 		}
 	case rmpb.GroupMode_RawMode:
-		if settings := group.GetResourceSettings(); settings != nil {
+		if settings := group.GetRawResourceSettings(); settings != nil {
 			resourceSettings = &NativeResourceSettings{
 				CPU:              NewGroupTokenBucket(settings.GetCpu()),
 				IOReadBandwidth:  NewGroupTokenBucket(settings.GetIoRead()),
@@ -213,7 +213,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 		group := &rmpb.ResourceGroup{
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RawMode,
-			ResourceSettings: &rmpb.GroupResourceSettings{
+			RawResourceSettings: &rmpb.GroupRawResourceSettings{
 				Cpu:     rg.ResourceSettings.CPU.TokenBucket,
 				IoRead:  rg.ResourceSettings.IOReadBandwidth.TokenBucket,
 				IoWrite: rg.ResourceSettings.IOWriteBandwidth.TokenBucket,

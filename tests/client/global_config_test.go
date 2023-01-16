@@ -30,7 +30,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-const globalConfigPath = "/global/config/"
+const globalConfigPath = "global/config/"
 
 type testReceiver struct {
 	re *require.Assertions
@@ -41,9 +41,9 @@ func (s testReceiver) Send(m *pdpb.WatchGlobalConfigResponse) error {
 	log.Info("received", zap.Any("received", m.GetChanges()))
 	for _, change := range m.GetChanges() {
 		switch change.GetKind() {
-		case pdpb.ItemKind_PUT:
+		case pdpb.EventType_PUT:
 			s.re.Contains(change.Name, globalConfigPath+change.Value)
-		case pdpb.ItemKind_DELETE:
+		case pdpb.EventType_DELETE:
 			s.re.Empty(change.Value)
 		}
 	}
@@ -80,7 +80,7 @@ func (suite *globalConfigTestSuite) TearDownSuite() {
 }
 
 func (suite *globalConfigTestSuite) GetEtcdPath(configPath string) string {
-	return suite.server.GetEtcdPath(globalConfigPath + configPath)
+	return suite.server.GetFinalPathWithinPD(globalConfigPath + configPath)
 }
 
 func (suite *globalConfigTestSuite) TestLoad() {
@@ -100,15 +100,6 @@ func (suite *globalConfigTestSuite) TestLoad() {
 	suite.Equal("test", res.Items[0].Value)
 }
 
-func (suite *globalConfigTestSuite) TestLoadError() {
-	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
-		ConfigPath: globalConfigPath,
-	})
-	suite.NoError(err)
-	suite.Equal(res.Revision, int64(0))
-	suite.NotNil(res.Items[0].Error)
-}
-
 func (suite *globalConfigTestSuite) TestStore() {
 	defer func() {
 		for i := 0; i < 3; i++ {
@@ -116,7 +107,7 @@ func (suite *globalConfigTestSuite) TestStore() {
 			suite.NoError(err)
 		}
 	}()
-	changes := []*pdpb.GlobalConfigItem{{Kind: pdpb.ItemKind_PUT, Name: "0", Value: "0"}, {Kind: pdpb.ItemKind_PUT, Name: "1", Value: "1"}, {Kind: pdpb.ItemKind_PUT, Name: "2", Value: "2"}}
+	changes := []*pdpb.GlobalConfigItem{{Kind: pdpb.EventType_PUT, Name: "0", Value: "0"}, {Kind: pdpb.EventType_PUT, Name: "1", Value: "1"}, {Kind: pdpb.EventType_PUT, Name: "2", Value: "2"}}
 	_, err := suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
 		ConfigPath: globalConfigPath,
 		Changes:    changes,
@@ -159,7 +150,7 @@ func (suite *globalConfigTestSuite) TestClientLoad() {
 	suite.NoError(err)
 	suite.Len(res, 1)
 	suite.Equal(r.Header.GetRevision(), revision)
-	suite.Equal(pd.GlobalConfigItem{Name: suite.GetEtcdPath("test"), Value: "test", Error: nil}, res[0])
+	suite.Equal(pd.GlobalConfigItem{Name: suite.GetEtcdPath("test"), Value: "test", EventType: pdpb.EventType_PUT}, res[0])
 }
 
 func (suite *globalConfigTestSuite) TestClientStore() {
@@ -196,7 +187,7 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 	suite.NoError(err)
 	suite.Len(res, 1)
 	suite.Equal(r.Header.GetRevision(), revision)
-	suite.Equal(pd.GlobalConfigItem{Name: suite.GetEtcdPath("test"), Value: "test", Error: nil}, res[0])
+	suite.Equal(pd.GlobalConfigItem{Name: suite.GetEtcdPath("test"), Value: "test", EventType: pdpb.EventType_PUT}, res[0])
 	// Mock when start watcher there are existed some keys, will load firstly
 	for i := 3; i < 6; i++ {
 		_, err = suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))

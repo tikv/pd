@@ -50,10 +50,9 @@ type Region struct {
 
 // GlobalConfigItem standard format of KV pair in GlobalConfig client
 type GlobalConfigItem struct {
-	ItemKind pdpb.ItemKind
-	Name     string
-	Value    string
-	Error    error
+	EventType pdpb.EventType
+	Name      string
+	Value     string
 }
 
 // Client is a PD (Placement Driver) client.
@@ -348,8 +347,6 @@ var (
 	errClosing = errors.New("[pd] closing")
 	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
 	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
-	// errGlobalConfigNotFound is returned when etcd does not contain the globalConfig item
-	errGlobalConfigNotFound = errors.New("[pd] global config not found")
 )
 
 // ClientOption configures client.
@@ -1828,18 +1825,11 @@ func (c *client) LoadGlobalConfig(ctx context.Context, configPath string) ([]Glo
 	if err != nil {
 		return nil, 0, err
 	}
+
 	res := make([]GlobalConfigItem, len(resp.GetItems()))
 	for i, item := range resp.GetItems() {
 		cfg := GlobalConfigItem{Name: item.GetName()}
-		if item.Error != nil {
-			if item.Error.Type == pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND {
-				cfg.Error = errGlobalConfigNotFound
-			} else {
-				cfg.Error = errors.New("[pd]" + item.Error.Message)
-			}
-		} else {
-			cfg.Value = item.GetValue()
-		}
+		cfg.Value = item.GetValue()
 		res[i] = cfg
 	}
 	return res, resp.GetRevision(), nil
@@ -1848,17 +1838,13 @@ func (c *client) LoadGlobalConfig(ctx context.Context, configPath string) ([]Glo
 func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error {
 	resArr := make([]*pdpb.GlobalConfigItem, len(items))
 	for i, it := range items {
-		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.ItemKind}
+		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType}
 	}
-	res, err := c.getClient().StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr, ConfigPath: configPath})
+	_, err := c.getClient().StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr, ConfigPath: configPath})
 	if err != nil {
 		return err
 	}
-	resErr := res.GetError()
-	if resErr != nil {
-		return errors.Errorf("[pd]" + resErr.Message)
-	}
-	return err
+	return nil
 }
 
 func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error) {
@@ -1891,7 +1877,7 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 				}
 				arr := make([]GlobalConfigItem, len(m.Changes))
 				for j, i := range m.Changes {
-					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue(), nil}
+					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue()}
 				}
 				globalConfigWatcherCh <- arr
 			}

@@ -730,8 +730,8 @@ func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
 }
 
-// GetEtcdPath returns the etcd path.
-func (s *Server) GetEtcdPath(configPath string) string {
+// GetFinalPathWithinPD returns the etcd path.
+func (s *Server) GetFinalPathWithinPD(configPath string) string {
 	return strings.Join([]string{s.rootPath, configPath}, "/")
 }
 
