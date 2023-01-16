@@ -173,6 +173,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 	re := suite.Require()
 	cli := suite.client
 
+	leaderName := suite.cluster.WaitLeader()
+	leader := suite.cluster.GetServer(leaderName)
+
 	testCasesSet1 := []struct {
 		name           string
 		mode           rmpb.GroupMode
@@ -298,11 +301,18 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
 				re.EqualError(err, "rpc error: code = Unknown desc = resource group not found")
 			}
+
+			// to test the deletion of persistence
+			leader.Stop()
+			suite.cluster.RunServers([]*tests.TestServer{leader})
+
+			// List Resource Group
+			lresp, err = cli.ListResourceGroups(suite.ctx)
+			re.NoError(err)
+			re.Equal(0, len(lresp))
 		}
 	}
 
-	leaderName := suite.cluster.WaitLeader()
-	leader := suite.cluster.GetServer(leaderName)
 	// Test Resource Group CURD via HTTP
 	finalNum = 0
 	for i, tcase := range testCasesSet1 {

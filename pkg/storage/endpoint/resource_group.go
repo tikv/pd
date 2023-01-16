@@ -22,7 +22,7 @@ import (
 
 // ResourceGroupStorage defines the storage operations on the rule.
 type ResourceGroupStorage interface {
-	LoadResourceGroups(f func(k, v string)) error
+	LoadResourceGroups(prefix string, f func(k, v string)) error
 	SaveResourceGroup(prefix string, msg proto.Message) error
 	DeleteResourceGroup(prefix string) error
 }
@@ -41,6 +41,7 @@ func (se *StorageEndpoint) DeleteResourceGroup(prefix string) error {
 }
 
 // LoadResourceGroups loads all resource groups from storage.
-func (se *StorageEndpoint) LoadResourceGroups(f func(k, v string)) error {
-	return se.loadRangeByPrefix(resourceGroupPath+"/", f)
+func (se *StorageEndpoint) LoadResourceGroups(prefix string, f func(k, v string)) error {
+	path := path.Join(resourceGroupPath, prefix)
+	return se.loadRangeByPrefix(path, f)
 }

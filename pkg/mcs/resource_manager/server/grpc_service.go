@@ -78,7 +78,7 @@ func (s *Service) GetManager() *Manager {
 
 // GetResourceGroup implements ResourceManagerServer.GetResourceGroup.
 func (s *Service) GetResourceGroup(ctx context.Context, req *rmpb.GetResourceGroupRequest) (*rmpb.GetResourceGroupResponse, error) {
-	rg := s.manager.GetResourceGroupCopy(req.ResourceGroupName)
+	rg := s.manager.GetResourceGroup(req.ResourceGroupName)
 	if rg == nil {
 		return nil, errors.New("resource group not found")
 	}
@@ -145,7 +145,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		targetPeriodMs := request.GetTargetRequestPeriodMs()
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
-			rg := s.manager.GetResourceGroup(req.ResourceGroupName)
+			rg := s.manager.GetMutableResourceGroup(req.ResourceGroupName)
 			if rg == nil {
 				log.Warn("resource group not found", zap.String("resource-group", req.ResourceGroupName))
 				continue

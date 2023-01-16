@@ -15,6 +15,7 @@
 package server
 
 import (
+	"path"
 	"sort"
 	"sync"
 
@@ -54,7 +55,7 @@ func (m *Manager) Init() {
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
-	m.storage().LoadResourceGroups(handler)
+	m.storage().LoadResourceGroups(groupSettingsPathPrefix, handler)
 }
 
 // AddResourceGroup puts a resource group.
@@ -103,7 +104,8 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(name string) error {
-	if err := m.storage().DeleteResourceGroup(name); err != nil {
+	prefix := path.Join(groupSettingsPathPrefix, name)
+	if err := m.storage().DeleteResourceGroup(prefix); err != nil {
 		return err
 	}
 	m.Lock()
@@ -112,8 +114,8 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 	return nil
 }
 
-// GetResourceGroupCopy returns a copy of a resource group.
-func (m *Manager) GetResourceGroupCopy(name string) *ResourceGroup {
+// GetResourceGroup returns a copy of a resource group.
+func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
@@ -122,8 +124,8 @@ func (m *Manager) GetResourceGroupCopy(name string) *ResourceGroup {
 	return nil
 }
 
-// GetResourceGroup returns a resource group.
-func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
+// GetMutableResourceGroup returns a mutable resource group.
+func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
