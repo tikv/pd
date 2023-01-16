@@ -115,6 +115,8 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		Requests:              make([]*rmpb.TokenBucketRequest, 0),
 		TargetRequestPeriodMs: uint64(time.Second * 10 / time.Millisecond),
 	}
+
+	groups = append(groups, &rmpb.ResourceGroup{Name: "test3"})
 	for _, group := range groups {
 		requests := make([]*rmpb.RequestUnitItem, 0)
 		requests = append(requests, &rmpb.RequestUnitItem{
@@ -141,13 +143,23 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re.NoError(err)
 	re.Less(gresp.RUSettings.RRU.Tokens, groups[0].RUSettings.RRU.Tokens)
 
+	checkFunc := func(g1 *rmpb.ResourceGroup, g2 *rmpb.ResourceGroup) {
+		re.Equal(g1.GetName(), g2.GetName())
+		re.Equal(g1.GetMode(), g2.GetMode())
+		re.Equal(g1.GetRUSettings().RRU.Settings.FillRate, g2.GetRUSettings().RRU.Settings.FillRate)
+		// now we don't persistent tokens in running state, so tokens is original.
+		re.Equal(g1.GetRUSettings().RRU.Tokens, g2.GetRUSettings().RRU.Tokens)
+		re.NoError(err)
+	}
+
 	// to test persistent
 	leaderName := suite.cluster.WaitLeader()
 	leader := suite.cluster.GetServer(leaderName)
 	leader.Stop()
 	suite.cluster.RunServers([]*tests.TestServer{leader})
-	_, err = cli.GetResourceGroup(suite.ctx, groups[0].GetName())
+	gresp, err = cli.GetResourceGroup(suite.ctx, groups[0].GetName())
 	re.NoError(err)
+	checkFunc(gresp, groups[0])
 
 	for _, g := range groups {
 		// Delete Resource Group
@@ -231,9 +243,6 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 			},
 		},
 	}
-
-	_, err := cli.GetResourceGroup(suite.ctx, "failtest")
-	re.Error(err)
 
 	checkErr := func(err error, success bool) {
 		if success {
