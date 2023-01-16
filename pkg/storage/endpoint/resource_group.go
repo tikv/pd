@@ -42,5 +42,5 @@ func (se *StorageEndpoint) DeleteResourceGroup(prefix string) error {
 
 // LoadResourceGroups loads all resource groups from storage.
 func (se *StorageEndpoint) LoadResourceGroups(f func(k, v string)) error {
-	return se.loadRangeByPrefix(resourceGroupPath+"/", f)
+	return se.loadRangeByPrefix(resourceGroupPath+"/settings", f)
 }

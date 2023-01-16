@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,95 @@ func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.clean()
 	suite.cluster.Destroy()
+}
+
+func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
+	re := suite.Require()
+	cli := suite.client
+	group := &rmpb.ResourceGroup{
+		Name: "test",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RRU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 10000,
+				},
+				Tokens: 100000,
+			},
+		},
+	}
+	// Mock get revision by listing
+	for i := 0; i < 3; i++ {
+		group.Name = group.Name + strconv.Itoa(i)
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		group.Name = "test"
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	lresp, revision, err := cli.ListResourceGroups(suite.ctx)
+	re.NoError(err)
+	re.Equal(len(lresp), 3)
+	// Mock when start watcher there are existed some keys, will load firstly
+	for i := 3; i < 6; i++ {
+		group.Name = "test" + strconv.Itoa(i)
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	// Start watcher
+	watchChan, err := suite.client.WatchResourceGroup(suite.ctx, revision)
+	suite.NoError(err)
+	// Mock add resource groups
+	for i := 6; i < 9; i++ {
+		group.Name = "test" + strconv.Itoa(i)
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	// Mock modify resource groups
+	modifySettings := func(gs *rmpb.ResourceGroup) {
+		gs.RUSettings = &rmpb.GroupRequestUnitSettings{
+			RRU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 10000,
+				},
+			},
+		}
+	}
+	for i := 0; i < 9; i++ {
+		group.Name = "test" + strconv.Itoa(i)
+		modifySettings(group)
+		resp, err := cli.ModifyResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	// Mock delete resource groups
+	for i := 0; i < 3; i++ {
+		resp, err := cli.DeleteResourceGroup(suite.ctx, "test"+strconv.Itoa(i))
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	// Check watch result
+	i := 0
+	for {
+		select {
+		case <-time.After(time.Second):
+			close(watchChan)
+			return
+		case res := <-watchChan:
+			if i < 6 {
+				for _, r := range res {
+					suite.Equal(float64(100000), r.RUSettings.RRU.Tokens)
+					i++
+				}
+			} else { // after modify
+				for _, r := range res {
+					suite.Equal(float64(200000), r.RUSettings.RRU.Tokens)
+					i++
+				}
+			}
+		}
+	}
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
@@ -145,7 +235,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	}
 }
 
-func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
+func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re := suite.Require()
 	cli := suite.client
 
@@ -261,8 +351,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 
 		// Last one, Check list and delete all resource groups
 		if i == len(testCasesSet1)-1 {
-			// List Resource Group
-			lresp, err := cli.ListResourceGroups(suite.ctx)
+			// List Resource Groups
+			lresp, _, err := cli.ListResourceGroups(suite.ctx)
 			re.NoError(err)
 			re.Equal(finalNum, len(lresp))
 
