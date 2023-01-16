@@ -561,6 +561,10 @@ func (f *ruleLeaderFitFilter) Target(options *config.PersistOptions, store *core
 	}
 	copyRegion := createRegionForRuleFit(f.region.GetStartKey(), f.region.GetEndKey(),
 		f.region.GetPeers(), f.region.GetLeader(), newRegionOptions...)
+	targetPeer = copyRegion.GetStorePeer(targetStoreID)
+	if targetPeer.Role == metapb.PeerRole_Learner {
+		return false
+	}
 	newFit := f.ruleManager.FitRegion(f.cluster, copyRegion)
 	return placement.CompareRegionFit(f.oldFit, newFit) <= 0
 }
