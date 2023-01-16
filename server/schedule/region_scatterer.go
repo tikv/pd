@@ -461,7 +461,7 @@ func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.
 		if store == nil {
 			return 0
 		}
-		if filter == nil || filter.Target(r.cluster.GetOpts(), store).IsOK() {
+		if filter == nil || filter.Target(r.cluster.GetOpts(), store) {
 			leaderCandidateStores = append(leaderCandidateStores, storeID)
 		}
 	}

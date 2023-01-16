@@ -428,7 +428,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(plan *balancePlan) *operator.
 	targets := plan.GetFollowerStores(plan.region)
 	finalFilters := l.filters
 	opts := plan.GetOpts()
-	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source); leaderFilter != nil {
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, opts)
@@ -471,7 +471,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(plan *balancePlan) *operator.O
 	}
 	finalFilters := l.filters
 	opts := plan.GetOpts()
-	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source); leaderFilter != nil {
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	target := filter.NewCandidates([]*core.StoreInfo{plan.target}).
