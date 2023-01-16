@@ -15,7 +15,7 @@
 package server
 
 import (
-	"encoding/json"
+	"github.com/gogo/protobuf/proto"
 	"sort"
 	"sync"
 
@@ -45,11 +45,11 @@ func NewManager(srv *server.Server) *Manager {
 // Init initializes the resource group manager.
 func (m *Manager) Init() {
 	handler := func(k, v string) {
-		var group ResourceGroup
-		if err := json.Unmarshal([]byte(v), &group); err != nil {
+		group := &rmpb.ResourceGroup{}
+		if err := proto.Unmarshal([]byte(v), group); err != nil {
 			panic(err)
 		}
-		m.groups[group.Name] = &group
+		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
 	m.storage().LoadResourceGroups(handler)
 }

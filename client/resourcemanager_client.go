@@ -18,7 +18,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -28,17 +30,19 @@ import (
 type actionType int
 
 const (
-	add    actionType = 0
-	modify actionType = 1
+	add                     actionType = 0
+	modify                  actionType = 1
+	groupSettingsPathPrefix            = "resource_group/settings"
 )
 
 // ResourceManagerClient manages resource group info and token request.
 type ResourceManagerClient interface {
-	ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error)
+	ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
+	WatchResourceGroup(ctx context.Context, revision int64) (chan []*rmpb.ResourceGroup, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 }
 
@@ -51,17 +55,17 @@ func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
 }
 
 // ListResourceGroups loads and returns all metadata of resource groups.
-func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error) {
+func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
 	req := &rmpb.ListResourceGroupsRequest{}
 	resp, err := c.resourceManagerClient().ListResourceGroups(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return nil, errors.Errorf("[resource_manager]" + resErr.Message)
+		return nil, 0, errors.Errorf("[resource_manager]" + resErr.Message)
 	}
-	return resp.GetGroups(), nil
+	return resp.GetGroups(), resp.GetRevision(), nil
 }
 
 func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error) {
@@ -124,12 +128,56 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	return resp.GetBody(), nil
 }
 
+// WatchResourceGroup [just for TEST] watches resource groups changes.
+// It returns a stream of slices of resource groups.
+// The first message in stream contains all current resource groups,
+// all subsequent messages contains new events[PUT/DELETE] for all resource groups.
+func (c *client) WatchResourceGroup(ctx context.Context, revision int64) (chan []*rmpb.ResourceGroup, error) {
+	configChan, err := c.WatchGlobalConfig(ctx, groupSettingsPathPrefix, revision)
+	resourceGroupWatcherChan := make(chan []*rmpb.ResourceGroup)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("[pd] panic in ResourceManagerClient `WatchResourceGroups`", zap.Any("error", r))
+				return
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				close(resourceGroupWatcherChan)
+				return
+			case res, ok := <-configChan:
+				if !ok {
+					close(resourceGroupWatcherChan)
+					return
+				}
+				groups := make([]*rmpb.ResourceGroup, 0, len(res))
+				for _, item := range res {
+					switch item.ItemKind {
+					case pdpb.ItemKind_PUT:
+						group := &rmpb.ResourceGroup{}
+						if err := proto.Unmarshal([]byte(item.Value), group); err != nil {
+							return
+						}
+						groups = append(groups, group)
+					case pdpb.ItemKind_DELETE:
+						continue
+					}
+				}
+				resourceGroupWatcherChan <- groups
+			}
+		}
+	}()
+	return resourceGroupWatcherChan, err
+}
+
 func (c *client) AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error) {
 	req := &tokenRequest{
 		done:       make(chan error, 1),
 		requestCtx: ctx,
 		clientCtx:  c.ctx,
-		Requeset:   request,
+		Request:    request,
 	}
 	c.tokenDispatcher.tokenBatchController.tokenRequestCh <- req
 	grantedTokens, err := req.Wait()
@@ -143,7 +191,7 @@ type tokenRequest struct {
 	clientCtx    context.Context
 	requestCtx   context.Context
 	done         chan error
-	Requeset     *rmpb.TokenBucketsRequest
+	Request      *rmpb.TokenBucketsRequest
 	TokenBuckets []*rmpb.TokenBucketResponse
 }
 
@@ -232,7 +280,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 }
 
 func (c *client) processTokenRequests(stream rmpb.ResourceManager_AcquireTokenBucketsClient, t *tokenRequest) error {
-	req := t.Requeset
+	req := t.Request
 	if err := stream.Send(req); err != nil {
 		err = errors.WithStack(err)
 		t.done <- err
