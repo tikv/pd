@@ -146,17 +146,17 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
-			// Send the consumption to update the metrics.
-			s.manager.consumptionDispatcher <- struct {
-				resourceGroupName string
-				*rmpb.Consumption
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest()}
 			// Get the resource group from manager to acquire token buckets.
 			rg := s.manager.GetMutableResourceGroup(resourceGroupName)
 			if rg == nil {
 				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
 				continue
 			}
+			// Send the consumption to update the metrics.
+			s.manager.consumptionDispatcher <- struct {
+				resourceGroupName string
+				*rmpb.Consumption
+			}{resourceGroupName, req.GetConsumptionSinceLastRequest()}
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
