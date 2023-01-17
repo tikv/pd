@@ -100,7 +100,7 @@ func newResourceGroupController(clientUniqueId uint64, provider ResourceGroupPro
 		config:             config,
 		lowTokenNotifyChan: make(chan struct{}, 1),
 		tokenResponseChan:  make(chan []*rmpb.TokenBucketResponse, 1),
-		calculators:        []ResourceCalculator{newKVCalculator(config), newSQLLayerCPUCalculateor(config)},
+		calculators:        []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
 	}, nil
 }
 
@@ -390,7 +390,7 @@ func newGroupCostController(ctx context.Context, group *rmpb.ResourceGroup, main
 	gc := &groupCostController{
 		ResourceGroup:   group,
 		mainCfg:         mainCfg,
-		calculators:     []ResourceCalculator{newKVCalculator(mainCfg), newSQLLayerCPUCalculateor(mainCfg)},
+		calculators:     []ResourceCalculator{newKVCalculator(mainCfg), newSQLCalculator(mainCfg)},
 		mode:            group.GetMode(),
 		lowRUNotifyChan: lowRUNotifyChan,
 	}
@@ -443,7 +443,7 @@ func (gc *groupCostController) updateRunState(ctx context.Context) {
 	newTime := time.Now()
 	deltaConsumption := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
-		calc.Trickle(deltaConsumption, ctx)
+		calc.Trickle(ctx, deltaConsumption)
 	}
 	gc.mu.Lock()
 	Add(gc.mu.consumption, deltaConsumption)

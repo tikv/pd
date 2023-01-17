@@ -17,7 +17,6 @@ package server
 
 import (
 	"encoding/json"
-	"path"
 	"sync"
 	"time"
 
@@ -26,11 +25,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
-)
-
-const (
-	// groupSettingsPathPrefix is the prefix of the resource group path to store group settings.
-	groupSettingsPathPrefix = "/settings"
 )
 
 // ResourceGroup is the definition of a resource group, for REST API.
@@ -228,5 +222,5 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 // TODO: persist the state of the group separately.
 func (rg *ResourceGroup) persistSettings(storage storage.Storage) error {
 	metaGroup := rg.IntoProtoResourceGroup()
-	return storage.SaveResourceGroup(path.Join(groupSettingsPathPrefix, rg.Name), metaGroup)
+	return storage.SaveResourceGroupSetting(rg.Name, metaGroup)
 }

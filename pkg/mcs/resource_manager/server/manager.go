@@ -54,7 +54,7 @@ func (m *Manager) Init() {
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
-	m.storage().LoadResourceGroups(handler)
+	m.storage().LoadResourceGroupSettings(handler)
 }
 
 // AddResourceGroup puts a resource group.
@@ -103,7 +103,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(name string) error {
-	if err := m.storage().DeleteResourceGroup(name); err != nil {
+	if err := m.storage().DeleteResourceGroupSetting(name); err != nil {
 		return err
 	}
 	m.Lock()
@@ -122,8 +122,8 @@ func (m *Manager) GetResourceDuplicateGroup(name string) *ResourceGroup {
 	return nil
 }
 
-// GetResourceGroup returns a resource group.
-func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
+// GetMutableResourceGroup returns a mutable resource group.
+func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {

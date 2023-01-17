@@ -40,6 +40,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
@@ -58,7 +59,6 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/gc"
 	"github.com/tikv/pd/server/keyspace"
 	syncer "github.com/tikv/pd/server/region_syncer"
@@ -279,8 +279,46 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		return errs.ErrCancelStartEtcd.FastGenByArgs()
 	}
 
-	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
+	// start client
+	s.client, s.httpClient, err = startClient(s.cfg)
+	if err != nil {
+		return err
+	}
+
+	// update advertise peer urls.
+	etcdMembers, err := etcdutil.ListEtcdMembers(s.client)
+	if err != nil {
+		return err
+	}
+	etcdServerID := uint64(etcd.Server.ID())
+	for _, m := range etcdMembers.Members {
+		if etcdServerID == m.ID {
+			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
+			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
+				log.Info("update advertise peer urls", zap.String("from", s.cfg.AdvertisePeerUrls), zap.String("to", etcdPeerURLs))
+				s.cfg.AdvertisePeerUrls = etcdPeerURLs
+			}
+		}
+	}
+	failpoint.Inject("memberNil", func() {
+		time.Sleep(1500 * time.Millisecond)
+	})
+	s.member = member.NewMember(etcd, s.client, etcdServerID)
+	return nil
+}
+
+func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
+	tlsConfig, err := cfg.Security.ToTLSConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	endpoints := []string{etcdCfg.ACUrls[0].String()}
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", cfg.Security))
 
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
@@ -291,38 +329,16 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		LogConfig:   &lgc,
 	})
 	if err != nil {
-		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 
-	etcdServerID := uint64(etcd.Server.ID())
-
-	// update advertise peer urls.
-	etcdMembers, err := etcdutil.ListEtcdMembers(client)
-	if err != nil {
-		return err
-	}
-	for _, m := range etcdMembers.Members {
-		if etcdServerID == m.ID {
-			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
-			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
-				log.Info("update advertise peer urls", zap.String("from", s.cfg.AdvertisePeerUrls), zap.String("to", etcdPeerURLs))
-				s.cfg.AdvertisePeerUrls = etcdPeerURLs
-			}
-		}
-	}
-	s.client = client
-	s.httpClient = &http.Client{
+	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 			TLSClientConfig:   tlsConfig,
 		},
 	}
-
-	failpoint.Inject("memberNil", func() {
-		time.Sleep(1500 * time.Millisecond)
-	})
-	s.member = member.NewMember(etcd, client, etcdServerID)
-	return nil
+	return client, httpClient, nil
 }
 
 // AddStartCallback adds a callback in the startServer phase.
@@ -380,6 +396,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
+	s.basicCluster = core.NewBasicCluster()
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -388,9 +406,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, keyspaceIDAllocator)
-	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -650,12 +666,12 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
-	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
-		log.Warn("bootstrap keyspace manager failed", errs.ZapError(err))
-	}
-
 	if err := s.cluster.Start(s); err != nil {
 		return nil, err
+	}
+
+	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
+		log.Warn("bootstrap keyspace manager failed", errs.ZapError(err))
 	}
 
 	return &pdpb.BootstrapResponse{

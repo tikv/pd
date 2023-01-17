@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -35,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -1905,20 +1905,8 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 
 // LoadGlobalConfig load global config from etcd
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
-	names := request.Names
-	res := make([]*pdpb.GlobalConfigItem, len(names))
-	for i, name := range names {
-		r, err := s.client.Get(ctx, globalConfigPath+name)
-		if err != nil {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
-		} else if len(r.Kvs) == 0 {
-			msg := "key " + name + " not found"
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
-		} else {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Value: string(r.Kvs[0].Value)}
-		}
-	}
-	return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
+	// TODO: complete this function with new implementation
+	return &pdpb.LoadGlobalConfigResponse{}, nil
 }
 
 // WatchGlobalConfig if the connection of WatchGlobalConfig is end

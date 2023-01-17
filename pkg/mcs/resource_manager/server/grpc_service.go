@@ -145,7 +145,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		targetPeriodMs := request.GetTargetRequestPeriodMs()
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
-			rg := s.manager.GetResourceGroup(req.ResourceGroupName)
+			rg := s.manager.GetMutableResourceGroup(req.ResourceGroupName)
 			if rg == nil {
 				log.Warn("resource group not found", zap.String("resource-group", req.ResourceGroupName))
 				continue

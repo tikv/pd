@@ -15,10 +15,16 @@
 package keyspace
 
 import (
+	"encoding/binary"
+	"encoding/hex"
 	"regexp"
+	"strconv"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/server/schedule/labeler"
 )
 
 const (
@@ -86,4 +92,58 @@ func validateName(name string) error {
 // of collision when comparing with random hashes.
 func keyspaceIDHash(id uint32) uint32 {
 	return id & 0xFF
+}
+
+// makeKeyRanges encodes keyspace ID to correct LabelRule data.
+// For a keyspace with id ['a', 'b', 'c'], it has four boundaries:
+//
+//	Lower bound for raw mode: ['r', 'a', 'b', 'c']
+//	Upper bound for raw mode: ['r', 'a', 'b', 'c + 1']
+//	Lower bound for txn mode: ['x', 'a', 'b', 'c']
+//	Upper bound for txn mode: ['x', 'a', 'b', 'c + 1']
+//
+// From which it shares the lower bound with keyspace with id ['a', 'b', 'c-1'].
+// And shares upper bound with keyspace with id ['a', 'b', 'c + 1'].
+// These repeated bound will not cause any problem, as repetitive bound will be ignored during rangeListBuild,
+// but provides guard against hole in keyspace allocations should it occur.
+func makeKeyRanges(id uint32) []interface{} {
+	keyspaceIDBytes := make([]byte, 4)
+	nextKeyspaceIDBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
+	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
+	rawLeftBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...)))
+	rawRightBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...)))
+	txnLeftBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...)))
+	txnRightBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...)))
+	return []interface{}{
+		map[string]interface{}{
+			"start_key": rawLeftBound,
+			"end_key":   rawRightBound,
+		},
+		map[string]interface{}{
+			"start_key": txnLeftBound,
+			"end_key":   txnRightBound,
+		},
+	}
+}
+
+// getRegionLabelID returns the region label id of the target keyspace.
+func getRegionLabelID(id uint32) string {
+	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
+}
+
+// makeLabelRule makes the label rule for the given keyspace id.
+func makeLabelRule(id uint32) *labeler.LabelRule {
+	return &labeler.LabelRule{
+		ID:    getRegionLabelID(id),
+		Index: 0,
+		Labels: []labeler.RegionLabel{
+			{
+				Key:   regionLabelKey,
+				Value: strconv.FormatUint(uint64(id), endpoint.SpaceIDBase),
+			},
+		},
+		RuleType: labeler.KeyRange,
+		Data:     makeKeyRanges(id),
+	}
 }

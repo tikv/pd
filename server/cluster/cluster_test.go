@@ -28,13 +28,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
@@ -930,7 +930,7 @@ func TestRegionFlowChanged(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
-	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 	processRegions := func(regions []*core.RegionInfo) {
 		for _, r := range regions {
 			cluster.processRegionHeartbeat(r)
@@ -999,12 +999,12 @@ func TestConcurrentReportBucket(t *testing.T) {
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 
-	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 	heartbeatRegions(re, cluster, regions)
-	re.NotNil(cluster.GetRegion(0))
+	re.NotNil(cluster.GetRegion(1))
 
-	bucket1 := &metapb.Buckets{RegionId: 0, Version: 3}
-	bucket2 := &metapb.Buckets{RegionId: 0, Version: 2}
+	bucket1 := &metapb.Buckets{RegionId: 1, Version: 3}
+	bucket2 := &metapb.Buckets{RegionId: 1, Version: 2}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
@@ -1016,7 +1016,7 @@ func TestConcurrentReportBucket(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
 	re.NoError(cluster.processReportBuckets(bucket2))
 	wg.Wait()
-	re.Equal(bucket1, cluster.GetRegion(0).GetBuckets())
+	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }
 
 func TestConcurrentRegionHeartbeat(t *testing.T) {
@@ -1029,7 +1029,7 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 
-	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 	regions = core.SplitRegions(regions)
 	heartbeatRegions(re, cluster, regions)
 
@@ -1193,7 +1193,7 @@ func TestRegionSplitAndMerge(t *testing.T) {
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 
-	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 
 	// Byte will underflow/overflow if n > 7.
 	n := 7
@@ -1385,7 +1385,7 @@ func TestTopologyWeight(t *testing.T) {
 					"rack": rack,
 					"host": host,
 				}
-				store := core.NewStoreInfoWithLabel(storeID, 1, storeLabels)
+				store := core.NewStoreInfoWithLabel(storeID, storeLabels)
 				if i == 0 && j == 0 && k == 0 {
 					testStore = store
 				}
@@ -1401,12 +1401,12 @@ func TestTopologyWeight1(t *testing.T) {
 	re := require.New(t)
 
 	labels := []string{"dc", "zone", "host"}
-	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc2", "zone": "zone2", "host": "host2"})
-	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc3", "zone": "zone3", "host": "host3"})
-	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
-	store6 := core.NewStoreInfoWithLabel(6, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc2", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc3", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store6 := core.NewStoreInfoWithLabel(6, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
 	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6}
 
 	re.Equal(1.0/3, getStoreTopoWeight(store2, stores, labels, 3))
@@ -1418,11 +1418,11 @@ func TestTopologyWeight2(t *testing.T) {
 	re := require.New(t)
 
 	labels := []string{"dc", "zone", "host"}
-	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc2"})
-	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc3"})
-	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host1"})
-	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host1"})
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host1"})
 	stores := []*core.StoreInfo{store1, store2, store3, store4, store5}
 
 	re.Equal(1.0/3, getStoreTopoWeight(store2, stores, labels, 3))
@@ -1433,17 +1433,17 @@ func TestTopologyWeight3(t *testing.T) {
 	re := require.New(t)
 
 	labels := []string{"dc", "zone", "host"}
-	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
-	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
-	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host4"})
-	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host5"})
-	store6 := core.NewStoreInfoWithLabel(6, 1, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host6"})
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host4"})
+	store5 := core.NewStoreInfoWithLabel(5, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host5"})
+	store6 := core.NewStoreInfoWithLabel(6, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host6"})
 
-	store7 := core.NewStoreInfoWithLabel(7, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host7"})
-	store8 := core.NewStoreInfoWithLabel(8, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host8"})
-	store9 := core.NewStoreInfoWithLabel(9, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host9"})
-	store10 := core.NewStoreInfoWithLabel(10, 1, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host10"})
+	store7 := core.NewStoreInfoWithLabel(7, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host7"})
+	store8 := core.NewStoreInfoWithLabel(8, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host8"})
+	store9 := core.NewStoreInfoWithLabel(9, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host9"})
+	store10 := core.NewStoreInfoWithLabel(10, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host10"})
 	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6, store7, store8, store9, store10}
 
 	re.Equal(1.0/5/2, getStoreTopoWeight(store7, stores, labels, 5))
@@ -1456,10 +1456,10 @@ func TestTopologyWeight4(t *testing.T) {
 	re := require.New(t)
 
 	labels := []string{"dc", "zone", "host"}
-	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host2"})
-	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host3"})
-	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc2", "zone": "zone1", "host": "host4"})
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc2", "zone": "zone1", "host": "host4"})
 
 	stores := []*core.StoreInfo{store1, store2, store3, store4}
 
@@ -1753,8 +1753,8 @@ func TestCheckStaleRegion(t *testing.T) {
 	re := require.New(t)
 
 	// (0, 0) v.s. (0, 0)
-	region := core.NewTestRegionInfo([]byte{}, []byte{})
-	origin := core.NewTestRegionInfo([]byte{}, []byte{})
+	region := core.NewTestRegionInfo(1, 1, []byte{}, []byte{})
+	origin := core.NewTestRegionInfo(1, 1, []byte{}, []byte{})
 	re.NoError(checkStaleRegion(region.GetMeta(), origin.GetMeta()))
 	re.NoError(checkStaleRegion(origin.GetMeta(), region.GetMeta()))
 

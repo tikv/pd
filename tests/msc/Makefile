@@ -1,4 +1,4 @@
-# Copyright 2022 TiKV Project Authors.
+# Copyright 2023 TiKV Project Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,15 +26,12 @@ tidy:
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
-test: enable-codegen
-	CGO_ENABLED=1 go test -tags deadlock -race -cover || { $(MAKE) disable-codegen && exit 1; }
+test: enable-codegen 
+	CGO_ENABLED=1 go test ./... -tags deadlock -race -cover || { $(MAKE) disable-codegen && exit 1; }
 	$(MAKE) disable-codegen
 
-basic-test:
-	# skip
-
 ci-test-job: enable-codegen
-	CGO_ENABLED=1 go test -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=../../... github.com/tikv/pd/tests/client
+	CGO_ENABLED=1 go test ./... -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=../../... github.com/tikv/pd/tests/msc
 
 install-tools:
 	cd ../../ && $(MAKE) install-tools

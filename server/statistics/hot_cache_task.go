@@ -17,7 +17,7 @@ package statistics
 import (
 	"context"
 
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 // FlowItemTask indicates the task in flowItem queue

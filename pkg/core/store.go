@@ -22,9 +22,9 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
 
@@ -78,6 +78,24 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 		opt(storeInfo)
 	}
 	return storeInfo
+}
+
+// NewStoreInfoWithLabel is create a store with specified labels. only for test purpose.
+func NewStoreInfoWithLabel(id uint64, labels map[string]string) *StoreInfo {
+	storeLabels := make([]*metapb.StoreLabel, 0, len(labels))
+	for k, v := range labels {
+		storeLabels = append(storeLabels, &metapb.StoreLabel{
+			Key:   k,
+			Value: v,
+		})
+	}
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id:     id,
+			Labels: storeLabels,
+		},
+	)
+	return store
 }
 
 // Clone creates a copy of current StoreInfo.

@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,27 +52,27 @@ const (
 const (
 	defaultReadBaseCost     = 1
 	defaultReadCostPerByte  = 1. / 1024 / 1024
-	defaultWriteBaseCost    = 5
-	defaultWriteCostPerByte = 10. / 1024 / 1024
-	defaultWriteCPUMsCost   = 1
+	defaultReadCPUMsCost    = 1
+	defaultWriteBaseCost    = 3
+	defaultWriteCostPerByte = 5. / 1024 / 1024
 )
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
-// the RRU and WRU cost.
+// the RRU and WRU cost. This configuration should be modified carefully.
 type RequestUnitConfig struct {
 	// ReadBaseCost is the base cost for a read request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	ReadBaseCost float64 `toml:"read-base-cost" json:"read-base-cost"`
 	// ReadCostPerByte is the cost for each byte read. It's 1 MiB = 1 RRU by default.
 	ReadCostPerByte float64 `toml:"read-cost-per-byte" json:"read-cost-per-byte"`
+	// ReadCPUMsCost is the cost for each millisecond of CPU time taken by a read request.
+	// It's 1 millisecond = 1 RRU by default.
+	ReadCPUMsCost float64 `toml:"read-cpu-ms-cost" json:"read-cpu-ms-cost"`
 	// WriteBaseCost is the base cost for a write request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	WriteBaseCost float64 `toml:"write-base-cost" json:"write-base-cost"`
-	// WriteCostPerByte is the cost for each byte written. It's 1 MiB = 10 WRU by default.
+	// WriteCostPerByte is the cost for each byte written. It's 1 MiB = 5 WRU by default.
 	WriteCostPerByte float64 `toml:"write-cost-per-byte" json:"write-cost-per-byte"`
-	// WriteCPUMsCost is the cost for each millisecond of CPU time taken by a write request.
-	// It's 1 millisecond = 1 WRU by default.
-	WriteCPUMsCost float64 `toml:"write-cpu-ms-cost" json:"write-cpu-ms-cost"`
 }
 
 // DefaultRequestUnitConfig returns the default request unit configuration.
@@ -80,9 +80,9 @@ func DefaultRequestUnitConfig() *RequestUnitConfig {
 	return &RequestUnitConfig{
 		ReadBaseCost:     defaultReadBaseCost,
 		ReadCostPerByte:  defaultReadCostPerByte,
+		ReadCPUMsCost:    defaultReadCPUMsCost,
 		WriteBaseCost:    defaultWriteBaseCost,
 		WriteCostPerByte: defaultWriteCostPerByte,
-		WriteCPUMsCost:   defaultWriteCPUMsCost,
 	}
 }
 
@@ -95,9 +95,9 @@ type Config struct {
 
 	ReadBaseCost   RequestUnit
 	ReadBytesCost  RequestUnit
+	ReadCPUMsCost  RequestUnit
 	WriteBaseCost  RequestUnit
 	WriteBytesCost RequestUnit
-	WriteCPUMsCost RequestUnit
 	// TODO: add SQL computing CPU cost.
 }
 
@@ -113,9 +113,9 @@ func generateConfig(ruConfig *RequestUnitConfig) *Config {
 	cfg := &Config{
 		ReadBaseCost:   RequestUnit(ruConfig.ReadBaseCost),
 		ReadBytesCost:  RequestUnit(ruConfig.ReadCostPerByte),
+		ReadCPUMsCost:  RequestUnit(ruConfig.ReadCPUMsCost),
 		WriteBaseCost:  RequestUnit(ruConfig.WriteBaseCost),
 		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
-		WriteCPUMsCost: RequestUnit(ruConfig.WriteCPUMsCost),
 	}
 	cfg.groupLoopUpdateInterval = defaultGroupLoopUpdateInterval
 	cfg.targetPeriod = defaultTargetPeriod
