@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/tests"
@@ -41,6 +42,9 @@ type keyspaceTestSuite struct {
 	manager *keyspace.Manager
 }
 
+// preAllocKeyspace is used to test keyspace pre-allocation.
+var preAllocKeyspace = []string{"pre-alloc0", "pre-alloc1", "pre-alloc2"}
+
 func TestKeyspaceTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceTestSuite))
 }
@@ -48,7 +52,9 @@ func TestKeyspaceTestSuite(t *testing.T) {
 func (suite *keyspaceTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3)
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+		conf.Keyspace.PreAlloc = preAllocKeyspace
+	})
 	suite.cluster = cluster
 	suite.NoError(err)
 	suite.NoError(cluster.RunInitialServers())
@@ -108,4 +114,16 @@ func checkLabelRule(re *require.Assertions, id uint32, regionLabeler *labeler.Re
 	re.Equal(rawRightBound, rangeRule[0].EndKeyHex)
 	re.Equal(txnLeftBound, rangeRule[1].StartKeyHex)
 	re.Equal(txnRightBound, rangeRule[1].EndKeyHex)
+}
+
+func (suite *keyspaceTestSuite) TestPreAlloc() {
+	re := suite.Require()
+	regionLabeler := suite.server.GetRaftCluster().GetRegionLabeler()
+	for _, keyspaceName := range preAllocKeyspace {
+		// Check pre-allocated keyspaces are correctly allocated.
+		meta, err := suite.manager.LoadKeyspace(keyspaceName)
+		re.NoError(err)
+		// Check pre-allocated keyspaces also have the correct region label.
+		checkLabelRule(re, meta.GetId(), regionLabeler)
+	}
 }
