@@ -420,7 +420,7 @@ func (gc *groupCostController) initRunState(ctx context.Context) {
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(now, 0, gc.mainCfg.maxRequestTokens, initialRequestUnits, gc.lowRUNotifyChan),
+				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.mainCfg.maxRequestTokens, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
@@ -430,7 +430,7 @@ func (gc *groupCostController) initRunState(ctx context.Context) {
 		gc.run.resourceTokens = make(map[rmpb.ResourceType]*tokenCounter)
 		for typ := range requestResourceList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(now, 0, gc.mainCfg.maxRequestTokens, initialRequestUnits, gc.lowRUNotifyChan),
+				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.mainCfg.maxRequestTokens, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
