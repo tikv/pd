@@ -150,7 +150,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	// advance time to now
 	now, _, tokens := r.lim.advance(now)
 	// calculate new number of tokens
-	tokens += float64(r.tokens)
+	tokens += r.tokens
 
 	// update state
 	r.lim.last = now
@@ -291,7 +291,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	now, last, tokens := lim.advance(now)
 
 	// Calculate the remaining number of tokens resulting from the request.
-	tokens -= float64(n)
+	tokens -= n
 	lim.maybeNotify()
 	// Calculate the wait duration
 	var waitDuration time.Duration
