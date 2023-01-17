@@ -84,10 +84,10 @@ func (lim *Limiter) Limit() Limit {
 
 // NewLimiter returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiter(r Limit, tokens, maxRequestTokens float64, lowTokensNotifyChan chan struct{}) *Limiter {
+func NewLimiter(now time.Time, r Limit, tokens, maxRequestTokens float64, lowTokensNotifyChan chan struct{}) *Limiter {
 	lim := &Limiter{
 		limit:               r,
-		last:                time.Now(),
+		last:                now,
 		tokens:              tokens,
 		maxRequestTokens:    maxRequestTokens,
 		lowTokensNotifyChan: lowTokensNotifyChan,
