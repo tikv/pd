@@ -15,14 +15,7 @@
 package endpoint
 
 import (
-	"path"
-
 	"github.com/gogo/protobuf/proto"
-)
-
-const (
-	// groupSettingsPathPrefix is the prefix of the resource group path to store group settings.
-	groupSettingsPathPrefix = "/settings"
 )
 
 // ResourceGroupStorage defines the storage operations on the rule.
@@ -36,15 +29,15 @@ var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
 
 // SaveResourceGroupSetting stores a resource group to storage.
 func (se *StorageEndpoint) SaveResourceGroupSetting(name string, msg proto.Message) error {
-	return se.saveProto(resourceGroupKeyPath(groupSettingsPathPrefix, name), msg)
+	return se.saveProto(resourceGroupSettingKeyPath(name), msg)
 }
 
 // DeleteResourceGroupSetting removes a resource group from storage.
 func (se *StorageEndpoint) DeleteResourceGroupSetting(name string) error {
-	return se.Remove(resourceGroupKeyPath(groupSettingsPathPrefix, name))
+	return se.Remove(resourceGroupSettingKeyPath(name))
 }
 
 // LoadResourceGroupSettings loads all resource groups from storage.
 func (se *StorageEndpoint) LoadResourceGroupSettings(f func(k, v string)) error {
-	return se.loadRangeByPrefix(path.Join(resourceGroupPath, groupSettingsPathPrefix), f)
+	return se.loadRangeByPrefix(resourceGroupSettingsPath, f)
 }

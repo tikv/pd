@@ -157,6 +157,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	leader := suite.cluster.GetServer(leaderName)
 	leader.Stop()
 	suite.cluster.RunServers([]*tests.TestServer{leader})
+	suite.cluster.WaitLeader()
 	gresp, err = cli.GetResourceGroup(suite.ctx, groups[0].GetName())
 	re.NoError(err)
 	checkFunc(gresp, groups[0])
@@ -305,6 +306,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 			// to test the deletion of persistence
 			leader.Stop()
 			suite.cluster.RunServers([]*tests.TestServer{leader})
+			suite.cluster.WaitLeader()
 
 			// List Resource Group
 			lresp, err = cli.ListResourceGroups(suite.ctx)
