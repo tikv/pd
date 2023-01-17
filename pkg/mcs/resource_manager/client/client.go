@@ -362,7 +362,7 @@ type groupCostController struct {
 		// request completes successfully.
 		initialRequestCompleted bool
 
-		resourceTokens    map[rmpb.ResourceType]*tokenCounter
+		resourceTokens    map[rmpb.RawResourceType]*tokenCounter
 		requestUnitTokens map[rmpb.RequestUnitType]*tokenCounter
 	}
 }
@@ -427,7 +427,7 @@ func (gc *groupCostController) initRunState(ctx context.Context) {
 			gc.run.requestUnitTokens[typ] = counter
 		}
 	case rmpb.GroupMode_RawMode:
-		gc.run.resourceTokens = make(map[rmpb.ResourceType]*tokenCounter)
+		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceList {
 			counter := &tokenCounter{
 				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.mainCfg.maxRequestTokens, gc.lowRUNotifyChan),
@@ -509,7 +509,7 @@ func (gc *groupCostController) updateAvgResourcePerSec(ctx context.Context) {
 		if !gc.calcAvg(counter, GetResourceValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
-		log.Info("[resource group controllor] update avg ru per sec", zap.String("name", gc.Name), zap.String("type", rmpb.ResourceType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
+		log.Info("[resource group controllor] update avg ru per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
 	}
 }
 
@@ -573,7 +573,7 @@ func (gc *groupCostController) handleResourceTokenResponse(resp *rmpb.TokenBucke
 		// todo: check whether grant = 0
 		counter, ok := gc.run.resourceTokens[typ]
 		if !ok {
-			log.Warn("not support this resource type", zap.String("type", rmpb.ResourceType_name[int32(typ)]))
+			log.Warn("not support this resource type", zap.String("type", rmpb.RawResourceType_name[int32(typ)]))
 			continue
 		}
 		gc.modifyTokenCounter(counter, grantedTB.GetGrantedTokens(), grantedTB.GetTrickleTimeMs())
@@ -586,7 +586,7 @@ func (gc *groupCostController) handleRUTokenResponse(resp *rmpb.TokenBucketRespo
 		// todo: check whether grant = 0
 		counter, ok := gc.run.requestUnitTokens[typ]
 		if !ok {
-			log.Warn("not support this resource type", zap.String("type", rmpb.ResourceType_name[int32(typ)]))
+			log.Warn("not support this resource type", zap.String("type", rmpb.RawResourceType_name[int32(typ)]))
 			continue
 		}
 		gc.modifyTokenCounter(counter, grantedTB.GetGrantedTokens(), grantedTB.GetTrickleTimeMs())
@@ -648,20 +648,20 @@ func (gc *groupCostController) collectRequestAndConsumption(low bool) *rmpb.Toke
 	selected := !low
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
-		requests := make([]*rmpb.ResourceItem, 0, len(requestResourceList))
+		requests := make([]*rmpb.RawResourceItem, 0, len(requestResourceList))
 		for typ, counter := range gc.run.resourceTokens {
 			if low && counter.limiter.IsLowTokens() {
 				selected = true
 			}
-			request := &rmpb.ResourceItem{
+			request := &rmpb.RawResourceItem{
 				Type:  typ,
 				Value: gc.calcRequest(counter),
 			}
 			requests = append(requests, request)
 		}
-		req.Request = &rmpb.TokenBucketRequest_ResourceItems{
-			ResourceItems: &rmpb.TokenBucketRequest_RequestResource{
-				RequestResource: requests,
+		req.Request = &rmpb.TokenBucketRequest_RawResourceItems{
+			RawResourceItems: &rmpb.TokenBucketRequest_RequestRawResource{
+				RequestRawResource: requests,
 			},
 		}
 	case rmpb.GroupMode_RUMode:

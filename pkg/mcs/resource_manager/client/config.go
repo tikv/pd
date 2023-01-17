@@ -25,10 +25,10 @@ var (
 		rmpb.RequestUnitType_RRU: {},
 		rmpb.RequestUnitType_WRU: {},
 	}
-	requestResourceList map[rmpb.ResourceType]struct{} = map[rmpb.ResourceType]struct{}{
-		rmpb.ResourceType_IOReadFlow:  {},
-		rmpb.ResourceType_IOWriteFlow: {},
-		rmpb.ResourceType_CPU:         {},
+	requestResourceList map[rmpb.RawResourceType]struct{} = map[rmpb.RawResourceType]struct{}{
+		rmpb.RawResourceType_IOReadFlow:  {},
+		rmpb.RawResourceType_IOWriteFlow: {},
+		rmpb.RawResourceType_CPU:         {},
 	}
 )
 
