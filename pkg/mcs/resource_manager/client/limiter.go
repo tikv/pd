@@ -45,8 +45,6 @@ func Every(interval time.Duration) Limit {
 	return 1 / Limit(interval.Seconds())
 }
 
-const maxRequestTokens = 1e8
-
 // A Limiter controls how frequently events are allowed to happen.
 // It implements a "token bucket" of size b, initially full and refilled
 // at rate r tokens per second.
@@ -63,14 +61,18 @@ const maxRequestTokens = 1e8
 // and the amount of time the caller must wait before using it,
 // or its associated context.Context is canceled.
 type Limiter struct {
-	mu     sync.Mutex
-	limit  Limit
-	tokens float64
+	mu               sync.Mutex
+	limit            Limit
+	tokens           float64
+	maxRequestTokens float64
 	// last is the last time the limiter's tokens field was updated
 	last                time.Time
 	notifyThreshold     float64
 	lowTokensNotifyChan chan struct{}
-	isLowProcess        bool
+	// To prevent too many chan sent, the notifyThreshold is set to 0 after notify.
+	// So the notifyThreshold cannot show whether the limiter is in the low token state,
+	// isLowProcess is used to check it.
+	isLowProcess bool
 }
 
 // Limit returns the maximum overall event rate.
@@ -82,11 +84,12 @@ func (lim *Limiter) Limit() Limit {
 
 // NewLimiter returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiter(r Limit, tokens float64, lowTokensNotifyChan chan struct{}) *Limiter {
+func NewLimiter(now time.Time, r Limit, tokens, maxRequestTokens float64, lowTokensNotifyChan chan struct{}) *Limiter {
 	lim := &Limiter{
 		limit:               r,
-		last:                time.Now(),
+		last:                now,
 		tokens:              tokens,
+		maxRequestTokens:    maxRequestTokens,
 		lowTokensNotifyChan: lowTokensNotifyChan,
 	}
 	log.Info("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
@@ -144,13 +147,13 @@ func (r *Reservation) CancelAt(now time.Time) {
 	r.lim.mu.Lock()
 	defer r.lim.mu.Unlock()
 
-	if r.lim.limit == Inf || r.tokens == 0 || r.timeToAct.Before(now) {
+	if r.lim.limit == Inf || r.tokens == 0 {
 		return
 	}
 	// advance time to now
 	now, _, tokens := r.lim.advance(now)
 	// calculate new number of tokens
-	tokens += float64(r.tokens)
+	tokens += r.tokens
 
 	// update state
 	r.lim.last = now
@@ -189,8 +192,8 @@ func (lim *Limiter) Reserve(ctx context.Context, now time.Time, n float64) *Rese
 	return &r
 }
 
-// SetupNotificationAt enables the notification at the given threshold.
-func (lim *Limiter) SetupNotificationAt(now time.Time, threshold float64) {
+// SetupNotificationThreshold enables the notification at the given threshold.
+func (lim *Limiter) SetupNotificationThreshold(now time.Time, threshold float64) {
 	lim.advance(now)
 	lim.notifyThreshold = threshold
 }
@@ -268,7 +271,7 @@ func (lim *Limiter) AvailableTokens(now time.Time) float64 {
 
 // reserveN is a helper method for Reserve.
 // maxFutureReserve specifies the maximum reservation wait duration allowed.
-// reserveN returns Reservation, not *Reservation, to avoid allocation in AllowN and WaitN.
+// reserveN returns Reservation, not *Reservation.
 func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Duration) Reservation {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
@@ -280,19 +283,16 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 			tokens:    n,
 			timeToAct: now,
 		}
-	} else if n > maxRequestTokens {
+	} else if n > lim.maxRequestTokens {
 		return Reservation{
-			ok:        false,
-			lim:       lim,
-			tokens:    lim.tokens,
-			timeToAct: now,
+			ok:  false,
+			lim: lim,
 		}
 	}
 	now, last, tokens := lim.advance(now)
 
 	// Calculate the remaining number of tokens resulting from the request.
-	tokens -= float64(n)
-	lim.maybeNotify()
+	tokens -= n
 	// Calculate the wait duration
 	var waitDuration time.Duration
 	if tokens < 0 {
@@ -300,7 +300,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	}
 
 	// Decide result
-	ok := n <= maxRequestTokens && waitDuration <= maxFutureReserve
+	ok := n <= lim.maxRequestTokens && waitDuration <= maxFutureReserve
 
 	// Prepare reservation
 	r := Reservation{
@@ -316,6 +316,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	if ok {
 		lim.last = now
 		lim.tokens = tokens
+		lim.maybeNotify()
 	} else {
 		lim.last = last
 	}

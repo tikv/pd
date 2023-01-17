@@ -420,7 +420,7 @@ func (gc *groupCostController) initRunState(ctx context.Context) {
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(0, initialRequestUnits, gc.lowRUNotifyChan),
+				limiter:     NewLimiter(now, 0, gc.mainCfg.maxRequestTokens, initialRequestUnits, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
@@ -430,7 +430,7 @@ func (gc *groupCostController) initRunState(ctx context.Context) {
 		gc.run.resourceTokens = make(map[rmpb.ResourceType]*tokenCounter)
 		for typ := range requestResourceList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(0, initialRequestUnits, gc.lowRUNotifyChan),
+				limiter:     NewLimiter(now, 0, gc.mainCfg.maxRequestTokens, initialRequestUnits, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
@@ -485,7 +485,7 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 			case <-counter.setupNotificationCh:
 				counter.setupNotificationTimer = nil
 				counter.setupNotificationCh = nil
-				counter.limiter.SetupNotificationAt(gc.run.now, float64(counter.setupNotificationThreshold))
+				counter.limiter.SetupNotificationThreshold(gc.run.now, float64(counter.setupNotificationThreshold))
 				gc.updateRunState(ctx)
 			default:
 			}
@@ -496,7 +496,7 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 			case <-counter.setupNotificationCh:
 				counter.setupNotificationTimer = nil
 				counter.setupNotificationCh = nil
-				counter.limiter.SetupNotificationAt(gc.run.now, float64(counter.setupNotificationThreshold))
+				counter.limiter.SetupNotificationThreshold(gc.run.now, float64(counter.setupNotificationThreshold))
 				gc.updateRunState(ctx)
 			default:
 			}
