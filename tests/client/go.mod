@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230112063313-a14c44ef44b3
+	github.com/pingcap/kvproto v0.0.0-20230117104311-1bc802baaad6
 	github.com/stretchr/testify v1.8.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
