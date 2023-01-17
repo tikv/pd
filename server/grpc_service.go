@@ -1895,30 +1895,18 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 	res, err :=
 		kv.NewSlowLogTxn(s.client).Then(ops...).Commit()
 	if err != nil {
-		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}, err
+		return &pdpb.StoreGlobalConfigResponse{}, err
 	}
 	if !res.Succeeded {
-		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "failed to execute StoreGlobalConfig transaction"}}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
+		return &pdpb.StoreGlobalConfigResponse{}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
 	}
 	return &pdpb.StoreGlobalConfigResponse{}, err
 }
 
 // LoadGlobalConfig load global config from etcd
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
-	names := request.Names
-	res := make([]*pdpb.GlobalConfigItem, len(names))
-	for i, name := range names {
-		r, err := s.client.Get(ctx, globalConfigPath+name)
-		if err != nil {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
-		} else if len(r.Kvs) == 0 {
-			msg := "key " + name + " not found"
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
-		} else {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Value: string(r.Kvs[0].Value)}
-		}
-	}
-	return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
+	// TODO: complete this function with new implementation
+	return &pdpb.LoadGlobalConfigResponse{}, nil
 }
 
 // WatchGlobalConfig if the connection of WatchGlobalConfig is end

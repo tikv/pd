@@ -48,12 +48,12 @@ func TestPatchResourceGroup(t *testing.T) {
 		patchJSONString  string
 		expectJSONString string
 	}{
-		{`{"name":"test", "mode":2, "resource_settings": {"cpu":{"settings":{"fill_rate": 200000}}}}`,
-			`{"name":"test","mode":2,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":200000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`},
-		{`{"name":"test", "mode":2, "resource_settings": {"io_read":{"settings":{"fill_rate": 200000}}}}`,
-			`{"name":"test","mode":2,"resource_settings":{"cpu":{"initialized":false},"io_read_bandwidth":{"token_bucket":{"settings":{"fill_rate":200000}},"initialized":false},"io_write_bandwidth":{"initialized":false}}}`},
-		{`{"name":"test", "mode":2, "resource_settings": {"io_write":{"settings":{"fill_rate": 200000}}}}`,
-			`{"name":"test","mode":2,"resource_settings":{"cpu":{"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"token_bucket":{"settings":{"fill_rate":200000}},"initialized":false}}}`},
+		{`{"name":"test", "mode":2, "raw_resource_settings": {"cpu":{"settings":{"fill_rate": 200000}}}}`,
+			`{"name":"test","mode":2,"raw_resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":200000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`},
+		{`{"name":"test", "mode":2, "raw_resource_settings": {"io_read":{"settings":{"fill_rate": 200000}}}}`,
+			`{"name":"test","mode":2,"raw_resource_settings":{"cpu":{"initialized":false},"io_read_bandwidth":{"token_bucket":{"settings":{"fill_rate":200000}},"initialized":false},"io_write_bandwidth":{"initialized":false}}}`},
+		{`{"name":"test", "mode":2, "raw_resource_settings": {"io_write":{"settings":{"fill_rate": 200000}}}}`,
+			`{"name":"test","mode":2,"raw_resource_settings":{"cpu":{"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"token_bucket":{"settings":{"fill_rate":200000}},"initialized":false}}}`},
 	}
 
 	for _, ca := range testCaseResource {

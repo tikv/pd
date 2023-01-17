@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -49,7 +50,7 @@ func TestKeyspaceTestSuite(t *testing.T) {
 func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	suite.manager = NewKeyspaceManager(store, nil, allocator)
+	suite.manager = NewKeyspaceManager(store, nil, allocator, config.KeyspaceConfig{})
 	suite.NoError(suite.manager.Bootstrap())
 }
 
