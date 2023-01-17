@@ -15,14 +15,16 @@
 package server
 
 import (
-	"encoding/json"
 	"sort"
 	"sync"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/storage"
+	"go.uber.org/zap"
 )
 
 // Manager is the manager of resource group.
@@ -45,13 +47,14 @@ func NewManager(srv *server.Server) *Manager {
 // Init initializes the resource group manager.
 func (m *Manager) Init() {
 	handler := func(k, v string) {
-		var group ResourceGroup
-		if err := json.Unmarshal([]byte(v), &group); err != nil {
+		group := &rmpb.ResourceGroup{}
+		if err := proto.Unmarshal([]byte(v), group); err != nil {
+			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
-		m.groups[group.Name] = &group
+		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
-	m.storage().LoadResourceGroups(handler)
+	m.storage().LoadResourceGroupSettings(handler)
 }
 
 // AddResourceGroup puts a resource group.
@@ -100,7 +103,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(name string) error {
-	if err := m.storage().DeleteResourceGroup(name); err != nil {
+	if err := m.storage().DeleteResourceGroupSetting(name); err != nil {
 		return err
 	}
 	m.Lock()
@@ -115,6 +118,16 @@ func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
 		return group.Copy()
+	}
+	return nil
+}
+
+// GetMutableResourceGroup returns a mutable resource group.
+func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
+	m.RLock()
+	defer m.RUnlock()
+	if group, ok := m.groups[name]; ok {
+		return group
 	}
 	return nil
 }
