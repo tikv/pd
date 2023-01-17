@@ -15,163 +15,86 @@
 package server
 
 import (
-	"time"
-
-	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-// TODO: add some Prometheus metrics.
+const (
+	namespace              = "resource_manager"
+	ruSubsystem            = "resource_unit"
+	resourceSubsystem      = "resource"
+	resourceGroupNameLabel = "name"
+	typeLabel              = "type"
+	readTypeLabel          = "read"
+	writeTypeLabel         = "write"
+)
 
-// HistoryResourceGroupMetricsList wraps HistoryResourceGroupMetrics, which will be returned to TiDB.
-//
-// NOTE: This type will be exported by HTTP API. Please pay more attention when modifying it.
-type HistoryResourceGroupMetricsList struct {
-	HistoryResourceGroupMetricsList []*HistoryResourceGroupMetrics `json:"history_resource_group_metrics_list"`
-}
+var (
+	// RU cost metrics.
+	readRequestUnitCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "read_request_unit",
+			Help:      "Bucketed histogram of the read request unit cost for all resource groups.",
+			Buckets:   prometheus.ExponentialBuckets(1, 10, 5), // 1 ~ 100000
+		}, []string{resourceGroupNameLabel})
+	writeRequestUnitCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "write_request_unit",
+			Help:      "Bucketed histogram of the write request unit cost for all resource groups.",
+			Buckets:   prometheus.ExponentialBuckets(3, 10, 5), // 3 ~ 300000
+		}, []string{resourceGroupNameLabel})
 
-// HistoryResourceGroupMetrics contains the metrics info for a resource group to tell how many RUs and resources
-// it cost.
-type HistoryResourceGroupMetrics struct {
-	ResourceGroup string   `json:"resource_group"`
-	StartTime     int64    `json:"start_time"`
-	Duration      uint64   `json:"duration"`
-	Metrics       *Metrics `json:"metrics"`
-}
+	// Resource cost metrics.
+	readByteCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: resourceSubsystem,
+			Name:      "read_byte",
+			Help:      "Bucketed histogram of the read byte cost for all resource groups.",
+			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
+		}, []string{resourceGroupNameLabel})
+	writeByteCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: resourceSubsystem,
+			Name:      "write_byte",
+			Help:      "Bucketed histogram of the write byte cost for all resource groups.",
+			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
+		}, []string{resourceGroupNameLabel})
+	kvCPUCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: resourceSubsystem,
+			Name:      "kv_cpu_time_ms",
+			Help:      "Bucketed histogram of the KV CPU time cost in milliseconds for all resource groups.",
+			Buckets:   prometheus.ExponentialBuckets(1, 10, 3), // 1 ~ 1000
+		}, []string{resourceGroupNameLabel})
+	sqlCPUCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: resourceSubsystem,
+			Name:      "sql_cpu_time_ms",
+			Help:      "Bucketed histogram of the SQL CPU time cost in milliseconds for all resource groups.",
+			Buckets:   prometheus.ExponentialBuckets(1, 10, 3), // 1 ~ 1000
+		}, []string{resourceGroupNameLabel})
+	requestCount = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: resourceSubsystem,
+			Name:      "request_count",
+			Help:      "The number of read/write requests for all resource groups.",
+		}, []string{resourceGroupNameLabel, typeLabel})
+)
 
-// TODO: implement the API method to retrieve and aggregate the history resource group metrics info.
-
-// Metrics contains the RU and resource metrics info.
-// It will be reset every time after it's persisted.
-type Metrics struct {
-	ResourceUnit *ResourceUnitMetrics `json:"resource_unit_metrics,omitempty"`
-	Resource     *ResourceMetrics     `json:"resource_metrics,omitempty"`
-	// Last time the metrics is reset. It's used to calculate the rate-related metrics.
-	resetTime time.Time
-	// Last time the metrics is updated. It's used to calculate the rate-related metrics
-	// and to determine whether the metrics is stale.
-	updateTime time.Time
-	// Last time the metrics is persisted to the storage. It's used to check whether the
-	// metrics is stale.
-	flushTime time.Time
-}
-
-// ResourceUnitMetrics contains the RU metrics info for the RU mode, which provides the RU cost info.
-type ResourceUnitMetrics struct {
-	RRUPerSec        float64 `json:"rru_per_sec"`
-	WRUPerSec        float64 `json:"wru_per_sec"`
-	MaxRRUPerSec     float64 `json:"max_rru_per_sec"`
-	MaxWRUPerSec     float64 `json:"max_wru_per_sec"`
-	AverageRRUPerSec float64 `json:"average_rru_per_sec"`
-	AverageWRUPerSec float64 `json:"average_wru_per_sec"`
-	TotalRRU         float64 `json:"total_rru"`
-	TotalWRU         float64 `json:"total_wru"`
-}
-
-// ResourceMetrics contains the native resource metrics info.
-type ResourceMetrics struct {
-	TotalCPUTimeMs  float64 `json:"total_cpu_time_ms"`
-	SQLCPUTimeMs    float64 `json:"sql_cpu_time_ms"`
-	KVCPUTimeMs     float64 `json:"kv_cpu_time_ms"`
-	KVReadRPCCount  float64 `json:"kv_read_rpc_count"`
-	KVWriteRPCCount float64 `json:"kv_write_rpc_count"`
-	KVReadBytes     float64 `json:"kv_read_bytes"`
-	KVWriteBytes    float64 `json:"kv_write_bytes"`
-}
-
-// NewMetrics creates a new Metrics.
-func NewMetrics() *Metrics {
-	return &Metrics{
-		ResourceUnit: &ResourceUnitMetrics{},
-		Resource:     &ResourceMetrics{},
-		resetTime:    time.Now(),
-		updateTime:   time.Now(),
-	}
-}
-
-// Copy copies the metrics.
-func (m *Metrics) Copy() *Metrics {
-	resourceUnit := *m.ResourceUnit
-	resource := *m.Resource
-	return &Metrics{
-		ResourceUnit: &resourceUnit,
-		Resource:     &resource,
-		resetTime:    m.resetTime,
-		updateTime:   m.updateTime,
-		flushTime:    m.flushTime,
-	}
-}
-
-// Update updates the metrics with the consumption info.
-func (m *Metrics) Update(consumption *rmpb.Consumption) {
-	if consumption == nil {
-		return
-	}
-	now := time.Now()
-	updateInterval := now.Sub(m.updateTime).Seconds()
-	if updateInterval == 0 {
-		return
-	}
-	m.updateTime = now
-	resetInterval := now.Sub(m.resetTime).Seconds()
-	// RU info.
-	if consumption.RRU != 0 {
-		m.ResourceUnit.TotalRRU += consumption.RRU
-		m.ResourceUnit.RRUPerSec = consumption.RRU / updateInterval
-		if m.ResourceUnit.RRUPerSec > m.ResourceUnit.MaxRRUPerSec {
-			m.ResourceUnit.MaxRRUPerSec = m.ResourceUnit.RRUPerSec
-		}
-		m.ResourceUnit.AverageRRUPerSec = m.ResourceUnit.TotalRRU / resetInterval
-	}
-	if consumption.WRU != 0 {
-		m.ResourceUnit.TotalWRU += consumption.WRU
-		m.ResourceUnit.WRUPerSec = consumption.WRU / updateInterval
-		if m.ResourceUnit.WRUPerSec > m.ResourceUnit.MaxWRUPerSec {
-			m.ResourceUnit.MaxWRUPerSec = m.ResourceUnit.WRUPerSec
-		}
-		m.ResourceUnit.AverageWRUPerSec = m.ResourceUnit.TotalWRU / resetInterval
-	}
-	// Byte info.
-	if consumption.ReadBytes != 0 {
-		m.Resource.KVReadBytes += consumption.ReadBytes
-	}
-	if consumption.WriteBytes != 0 {
-		m.Resource.KVWriteBytes += consumption.WriteBytes
-	}
-	// CPU time info.
-	if consumption.TotalCpuTimeMs != 0 {
-		m.Resource.TotalCPUTimeMs += consumption.TotalCpuTimeMs
-	}
-	if consumption.SqlLayerCpuTimeMs != 0 {
-		m.Resource.SQLCPUTimeMs += consumption.SqlLayerCpuTimeMs
-	}
-	m.Resource.KVCPUTimeMs = m.Resource.TotalCPUTimeMs - m.Resource.SQLCPUTimeMs
-	// RPC count info.
-	if consumption.KvReadRpcCount != 0 {
-		m.Resource.KVReadRPCCount += consumption.KvReadRpcCount
-	}
-	if consumption.KvWriteRpcCount != 0 {
-		m.Resource.KVWriteRPCCount += consumption.KvWriteRpcCount
-	}
-}
-
-// ResetAfterFlush will reset each filed manually to prevent from allocating new memory.
-func (m *Metrics) ResetAfterFlush() {
-	m.ResourceUnit.RRUPerSec = 0
-	m.ResourceUnit.WRUPerSec = 0
-	m.ResourceUnit.MaxRRUPerSec = 0
-	m.ResourceUnit.MaxWRUPerSec = 0
-	m.ResourceUnit.AverageRRUPerSec = 0
-	m.ResourceUnit.AverageWRUPerSec = 0
-	m.ResourceUnit.TotalRRU = 0
-	m.ResourceUnit.TotalWRU = 0
-	m.Resource.TotalCPUTimeMs = 0
-	m.Resource.SQLCPUTimeMs = 0
-	m.Resource.KVCPUTimeMs = 0
-	m.Resource.KVReadRPCCount = 0
-	m.Resource.KVWriteRPCCount = 0
-	m.Resource.KVReadBytes = 0
-	m.Resource.KVWriteBytes = 0
-	m.resetTime = time.Now()
-	m.updateTime = time.Now()
-	m.flushTime = time.Now()
+func init() {
+	prometheus.MustRegister(readRequestUnitCost)
+	prometheus.MustRegister(writeRequestUnitCost)
+	prometheus.MustRegister(readByteCost)
+	prometheus.MustRegister(writeByteCost)
+	prometheus.MustRegister(kvCPUCost)
+	prometheus.MustRegister(sqlCPUCost)
+	prometheus.MustRegister(requestCount)
 }

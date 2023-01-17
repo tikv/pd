@@ -109,14 +109,6 @@ func resourceGroupSettingKeyPath(groupName string) string {
 	return path.Join(resourceGroupSettingsPath, groupName)
 }
 
-// HistoryResourceGroupMetricsKeyPath returns the key path of the history resource group
-// metrics aggregated by the given group name and update time.
-func HistoryResourceGroupMetricsKeyPath(groupName string, updateTime int64) string {
-	return path.Join(resourceGroupKeyPath(groupName),
-		"history_metrics",
-		fmt.Sprintf("%020d", updateTime))
-}
-
 func ruleKeyPath(ruleKey string) string {
 	return path.Join(rulesPath, ruleKey)
 }
