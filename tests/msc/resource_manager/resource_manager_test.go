@@ -235,9 +235,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 			},
 		},
 		{"test3", rmpb.GroupMode_RawMode, false, true,
-			`{"name":"test3","mode":2,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
+			`{"name":"test3","mode":2,"raw_resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
-				gs.ResourceSettings = &rmpb.GroupResourceSettings{
+				gs.RawResourceSettings = &rmpb.GroupRawResourceSettings{
 					Cpu: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate: 1000000,
