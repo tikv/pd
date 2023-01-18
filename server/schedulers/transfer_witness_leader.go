@@ -33,7 +33,7 @@ const (
 	TransferWitnessLeaderType = "transfer-witness-leader"
 	// TransferWitnessLeaderBatchSize is the number of operators to to transfer
 	// leaders by one scheduling
-	transferWitnessLeaderBatchSize = 3
+	transferWitnessLeaderBatchSize = 10
 	// TransferWitnessLeaderRecvMaxRegionSize is the max number of region can receive
 	// TODO: make it a reasonable value
 	transferWitnessLeaderRecvMaxRegionSize = 1000
@@ -81,9 +81,9 @@ func (s *trasferWitnessLeaderScheduler) GetType() string {
 
 func (s *trasferWitnessLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	// TODO: make sure the restriction is reasonable
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	allowed := s.OpController.OperatorCount(operator.OpWitnessLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpWitnessLeader.String()).Inc()
 	}
 	return allowed
 }
