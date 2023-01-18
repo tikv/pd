@@ -267,8 +267,8 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re := suite.Require()
 	cli := suite.client
 
-	groups := make([]*rmpb.ResourceGroup, len(suite.initGroups))
-	copy(groups, suite.initGroups)
+	groups := make([]*rmpb.ResourceGroup, 0)
+	groups = append(groups, suite.initGroups...)
 	for _, group := range groups {
 		resp, err := cli.AddResourceGroup(suite.ctx, group)
 		re.NoError(err)
