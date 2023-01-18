@@ -1924,9 +1924,6 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
 	revision := req.GetRevision()
-	if err := s.sendAllGlobalConfig(ctx, server, req.GetConfigPath(), revision); err != nil {
-		return err
-	}
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
@@ -1936,7 +1933,11 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 		case <-ctx.Done():
 			return nil
 		case res := <-watchChan:
-			if res.CompactRevision != 0 && req.GetRevision() < res.CompactRevision {
+			// update revision by every resp
+			if revision > res.Header.GetRevision() {
+				revision = res.Header.GetRevision()
+			}
+			if res.CompactRevision != 0 && revision < res.CompactRevision {
 				if err := server.Send(&pdpb.WatchGlobalConfigResponse{
 					Revision: res.CompactRevision,
 					Header: s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
@@ -1957,18 +1958,6 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 			}
 		}
 	}
-}
-
-func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_WatchGlobalConfigServer, configPath string, revision int64) error {
-	configList, err := s.client.Get(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix(), clientv3.WithRev(revision))
-	if err != nil {
-		return err
-	}
-	ls := make([]*pdpb.GlobalConfigItem, configList.Count)
-	for i, kv := range configList.Kvs {
-		ls[i] = &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: string(kv.Key), Value: string(kv.Value)}
-	}
-	return server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
