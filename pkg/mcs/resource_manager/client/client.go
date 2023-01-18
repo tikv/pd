@@ -25,6 +25,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultMaxWaitDuration = time.Second
+	maxRetry               = 3
+)
+
 var defaultWhiteList = map[string]struct{}{
 	"default": {},
 	"":        {},
@@ -709,13 +714,13 @@ func (gc *groupCostController) OnRequestWait(
 	now := time.Now()
 	// retry
 retryLoop:
-	for i := 0; i < 3; i++ {
+	for i := 0; i < maxRetry; i++ {
 		switch gc.mode {
 		case rmpb.GroupMode_RawMode:
 			res := make([]*Reservation, 0, len(requestResourceList))
 			for typ, counter := range gc.run.resourceTokens {
 				if v := getResourceValueFromConsumption(delta, typ); v > 0 {
-					res = append(res, counter.limiter.Reserve(ctx, now, v))
+					res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
 				}
 			}
 			if err = WaitReservations(ctx, now, res); err == nil {
@@ -725,7 +730,7 @@ retryLoop:
 			res := make([]*Reservation, 0, len(requestUnitList))
 			for typ, counter := range gc.run.requestUnitTokens {
 				if v := getRUValueFromConsumption(delta, typ); v > 0 {
-					res = append(res, counter.limiter.Reserve(ctx, now, v))
+					res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
 				}
 			}
 			if err = WaitReservations(ctx, now, res); err == nil {

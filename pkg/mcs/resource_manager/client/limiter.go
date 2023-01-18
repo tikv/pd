@@ -174,7 +174,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 //	Act()
 //
 // Use this method if you wish to wait and slow down in accordance with the rate limit without dropping events.
-func (lim *Limiter) Reserve(ctx context.Context, now time.Time, n float64) *Reservation {
+func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now time.Time, n float64) *Reservation {
 	// Check if ctx is already cancelled
 	select {
 	case <-ctx.Done():
@@ -184,7 +184,7 @@ func (lim *Limiter) Reserve(ctx context.Context, now time.Time, n float64) *Rese
 	default:
 	}
 	// Determine wait limit
-	waitLimit := InfDuration
+	waitLimit := waitDuration
 	if deadline, ok := ctx.Deadline(); ok {
 		waitLimit = deadline.Sub(now)
 	}
@@ -373,7 +373,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
-			return fmt.Errorf("[resource group controller] limiter has no enough token")
+			return fmt.Errorf("[resource group controller] limiter has no enough token or needs wait too long")
 		}
 		delay := res.DelayFrom(now)
 		if delay > longestDelayDuration {
@@ -385,9 +385,6 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	}
 	if longestDelayDuration > 500*time.Millisecond {
 		log.Warn("[resource group controllor] limiter needs wait ", zap.Time("now", now), zap.Duration("delay", longestDelayDuration))
-	}
-	if longestDelayDuration > 1*time.Second {
-		return fmt.Errorf("[resource group controllor] limiter needs wait too long")
 	}
 	t := time.NewTimer(longestDelayDuration)
 	defer t.Stop()

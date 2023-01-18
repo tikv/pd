@@ -118,7 +118,7 @@ func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 }
 
-const buffDuration = time.Millisecond * 100
+const buffDuration = time.Millisecond * 200
 
 type testRequestInfo struct {
 	isWrite    bool
