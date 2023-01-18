@@ -121,7 +121,7 @@ func (dsc *SQLCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Req
 func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
 }
 
-func GetRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
+func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
 	switch typ {
 	case 0:
 		return custom.RRU
@@ -131,7 +131,7 @@ func GetRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitTyp
 	return 0
 }
 
-func GetResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
+func getResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
 	switch typ {
 	case 0:
 		return custom.TotalCpuTimeMs
@@ -143,7 +143,7 @@ func GetResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResou
 	return 0
 }
 
-func Add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.RRU += custom2.RRU
 	custom1.WRU += custom2.WRU
 	custom1.ReadBytes += custom2.ReadBytes
@@ -154,7 +154,7 @@ func Add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
 }
 
-func Sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.RRU -= custom2.RRU
 	custom1.WRU -= custom2.WRU
 	custom1.ReadBytes -= custom2.ReadBytes
