@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"sort"
 	"sync"
 
@@ -27,11 +28,19 @@ import (
 	"go.uber.org/zap"
 )
 
+const defaultConsumptionChanSize = 1024
+
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
 	groups  map[string]*ResourceGroup
 	storage func() storage.Storage
+	// consumptionChan is used to send the consumption
+	// info to the background metrics flusher.
+	consumptionDispatcher chan struct {
+		resourceGroupName string
+		*rmpb.Consumption
+	}
 }
 
 // NewManager returns a new Manager.
@@ -39,8 +48,13 @@ func NewManager(srv *server.Server) *Manager {
 	m := &Manager{
 		groups:  make(map[string]*ResourceGroup),
 		storage: srv.GetStorage,
+		consumptionDispatcher: make(chan struct {
+			resourceGroupName string
+			*rmpb.Consumption
+		}, defaultConsumptionChanSize),
 	}
 	srv.AddStartCallback(m.Init)
+	go m.backgroundMetricsFlush(srv.Context())
 	return m
 }
 
@@ -144,4 +158,56 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 		return res[i].Name < res[j].Name
 	})
 	return res
+}
+
+// Receive the consumption and flush it to the metrics.
+func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case consumptionInfo := <-m.consumptionDispatcher:
+			consumption := consumptionInfo.Consumption
+			if consumption == nil {
+				continue
+			}
+			var (
+				name                     = consumptionInfo.resourceGroupName
+				rruMetrics               = readRequestUnitCost.WithLabelValues(name)
+				wruMetrics               = writeRequestUnitCost.WithLabelValues(name)
+				readByteMetrics          = readByteCost.WithLabelValues(name)
+				writeByteMetrics         = writeByteCost.WithLabelValues(name)
+				kvCPUMetrics             = kvCPUCost.WithLabelValues(name)
+				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name)
+				readRequestCountMetrics  = requestCount.WithLabelValues(name, readTypeLabel)
+				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
+			)
+			// RU info.
+			if consumption.RRU != 0 {
+				rruMetrics.Observe(consumption.RRU)
+			}
+			if consumption.WRU != 0 {
+				wruMetrics.Observe(consumption.WRU)
+			}
+			// Byte info.
+			if consumption.ReadBytes != 0 {
+				readByteMetrics.Observe(consumption.ReadBytes)
+			}
+			if consumption.WriteBytes != 0 {
+				writeByteMetrics.Observe(consumption.WriteBytes)
+			}
+			// CPU time info.
+			if consumption.SqlLayerCpuTimeMs != 0 {
+				sqlCPUMetrics.Observe(consumption.SqlLayerCpuTimeMs)
+				kvCPUMetrics.Observe(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
+			}
+			// RPC count info.
+			if consumption.KvReadRpcCount != 0 {
+				readRequestCountMetrics.Add(consumption.KvReadRpcCount)
+			}
+			if consumption.KvWriteRpcCount != 0 {
+				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
+			}
+		}
+	}
 }
