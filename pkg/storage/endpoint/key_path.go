@@ -28,7 +28,7 @@ const (
 	schedulePath               = "schedule"
 	gcPath                     = "gc"
 	rulesPath                  = "rules"
-	resourceGroupPath          = "resource_group"
+	resourceGroupSettingsPath  = "resource_group/settings"
 	ruleGroupPath              = "rule_group"
 	regionLabelPath            = "region_label"
 	replicationPath            = "replication_mode"
@@ -105,8 +105,8 @@ func RegionPath(regionID uint64) string {
 	return buf.String()
 }
 
-func resourceGroupKeyPath(groupName string) string {
-	return path.Join(resourceGroupPath, groupName)
+func resourceGroupSettingKeyPath(groupName string) string {
+	return path.Join(resourceGroupSettingsPath, groupName)
 }
 
 func ruleKeyPath(ruleKey string) string {

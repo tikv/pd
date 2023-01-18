@@ -26,7 +26,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
-	github.com/pingcap/kvproto v0.0.0-20230112063313-a14c44ef44b3
+	github.com/pingcap/kvproto v0.0.0-20230117104311-1bc802baaad6
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
 	github.com/pingcap/tidb-dashboard v0.0.0-20221201151320-ea3ee6971f2e
@@ -186,4 +186,4 @@ replace google.golang.org/grpc v1.51.0 => google.golang.org/grpc v1.26.0
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
-replace github.com/pingcap/kvproto => github.com/HuSharp/kvproto v0.0.0-20230116100124-3314ffcf6fb6
+// replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch

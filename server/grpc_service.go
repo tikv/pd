@@ -1923,15 +1923,29 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
-	if err := s.sendAllGlobalConfig(ctx, server, req.GetConfigPath(), req.GetRevision()); err != nil {
+	revision := req.GetRevision()
+	if err := s.sendAllGlobalConfig(ctx, server, req.GetConfigPath(), revision); err != nil {
 		return err
 	}
-	watchChan := s.client.Watch(ctx, s.GetFinalPathWithinPD(req.GetConfigPath()), clientv3.WithPrefix(), clientv3.WithRev(req.GetRevision()))
+	// If the revision is compacted, will meet required revision has been compacted error.
+	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
+	// - If required revision >= CompactRevision, just keep watching.
+	watchChan := s.client.Watch(ctx, s.GetFinalPathWithinPD(req.GetConfigPath()), clientv3.WithPrefix(), clientv3.WithRev(revision))
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case res := <-watchChan:
+			if res.CompactRevision != 0 && req.GetRevision() < res.CompactRevision {
+				if err := server.Send(&pdpb.WatchGlobalConfigResponse{
+					Revision: res.CompactRevision,
+					Header: s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision. %d", revision, res.CompactRevision)),
+				}); err != nil {
+					return err
+				}
+			}
+
 			cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
 			for _, e := range res.Events {
 				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Value: string(e.Kv.Value), Kind: pdpb.EventType(e.Type)})

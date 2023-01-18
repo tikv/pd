@@ -3,7 +3,7 @@ module github.com/tikv/pd/tests/msc
 go 1.19
 
 require (
-	github.com/pingcap/kvproto v0.0.0-20230112063313-a14c44ef44b3
+	github.com/pingcap/kvproto v0.0.0-20230117104311-1bc802baaad6
 	github.com/stretchr/testify v1.8.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
@@ -164,5 +164,3 @@ replace (
 
 // reset grpc and protobuf deps in order to import client and server at the same time
 replace google.golang.org/grpc v1.51.0 => google.golang.org/grpc v1.26.0
-
-replace github.com/pingcap/kvproto => github.com/HuSharp/kvproto v0.0.0-20230116100124-3314ffcf6fb6
