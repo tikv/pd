@@ -15,6 +15,7 @@
 package server
 
 import (
+	"math"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -117,10 +118,12 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 
 	// Firstly allocate the remaining tokens
 	var grantedTokens float64
+	hasRemaining := false
 	if t.Tokens > 0 {
 		grantedTokens = t.Tokens
 		neededTokens -= grantedTokens
 		t.Tokens = 0
+		hasRemaining = true
 	}
 
 	var targetPeriodTime = time.Duration(targetPeriodMs) * time.Millisecond
@@ -155,6 +158,7 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 		if roundReserveTokens > neededTokens {
 			t.Tokens -= neededTokens
 			grantedTokens += neededTokens
+			trickleTime += grantedTokens / fillRate
 			neededTokens = 0
 		} else {
 			roundReserveTime := roundReserveTokens / fillRate
@@ -177,5 +181,11 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 		grantedTokens = defaultReserveRatio * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
 	}
 	res.Tokens = grantedTokens
-	return &res, targetPeriodTime.Milliseconds()
+	var trickleDuration time.Duration
+	if hasRemaining {
+		trickleDuration = time.Duration(math.Min(trickleTime, targetPeriodTime.Seconds()) * float64(time.Second))
+	} else {
+		trickleDuration = targetPeriodTime
+	}
+	return &res, trickleDuration.Milliseconds()
 }
