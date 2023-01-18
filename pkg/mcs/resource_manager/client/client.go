@@ -285,7 +285,6 @@ func (c *resourceGroupsController) mainLoop(ctx context.Context) {
 			c.updateRunState(ctx)
 			c.updateAvgRequestResourcePerSec()
 			if !c.run.requestInProgress {
-				// c.collectTokenBucketRequests(ctx, "low_ru", false /* only select low tokens resource group */)
 				c.collectTokenBucketRequests(ctx, "low_ru", true /* only select low tokens resource group */)
 			}
 		default:
@@ -702,33 +701,41 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 
 func (gc *groupCostController) OnRequestWait(
 	ctx context.Context, info RequestInfo,
-) error {
+) (err error) {
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
 	now := time.Now()
-	switch gc.mode {
-	case rmpb.GroupMode_RawMode:
-		res := make([]*Reservation, 0, len(requestResourceList))
-		for typ, counter := range gc.run.resourceTokens {
-			if v := getResourceValueFromConsumption(delta, typ); v > 0 {
-				res = append(res, counter.limiter.Reserve(ctx, now, v))
+	// retry
+retryLoop:
+	for i := 0; i < 3; i++ {
+		switch gc.mode {
+		case rmpb.GroupMode_RawMode:
+			res := make([]*Reservation, 0, len(requestResourceList))
+			for typ, counter := range gc.run.resourceTokens {
+				if v := getResourceValueFromConsumption(delta, typ); v > 0 {
+					res = append(res, counter.limiter.Reserve(ctx, now, v))
+				}
+			}
+			if err = WaitReservations(ctx, now, res); err == nil {
+				break retryLoop
+			}
+		case rmpb.GroupMode_RUMode:
+			res := make([]*Reservation, 0, len(requestUnitList))
+			for typ, counter := range gc.run.requestUnitTokens {
+				if v := getRUValueFromConsumption(delta, typ); v > 0 {
+					res = append(res, counter.limiter.Reserve(ctx, now, v))
+				}
+			}
+			if err = WaitReservations(ctx, now, res); err == nil {
+				break retryLoop
 			}
 		}
-		if err := WaitReservations(ctx, now, res); err != nil {
-			return err
-		}
-	case rmpb.GroupMode_RUMode:
-		res := make([]*Reservation, 0, len(requestUnitList))
-		for typ, counter := range gc.run.requestUnitTokens {
-			if v := getRUValueFromConsumption(delta, typ); v > 0 {
-				res = append(res, counter.limiter.Reserve(ctx, now, v))
-			}
-		}
-		if err := WaitReservations(ctx, now, res); err != nil {
-			return err
-		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if err != nil {
+		return err
 	}
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
