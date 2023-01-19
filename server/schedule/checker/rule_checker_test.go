@@ -124,8 +124,8 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 60000}}))
 	op = suite.rc.Check(r)
 	suite.NotNil(op)
-	suite.Equal("replace-rule-down-peer", op.Desc())
-	suite.Equal(core.High, op.GetPriorityLevel())
+	suite.Equal("replace-rule-fast-failover-peer", op.Desc())
+	suite.Equal(core.Urgent, op.GetPriorityLevel())
 	var add operator.AddLearner
 	suite.IsType(add, op.Step(0))
 	suite.cluster.SetStoreUp(2)
@@ -966,7 +966,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness3() {
 	op := suite.rc.Check(r)
 
 	suite.NotNil(op)
-	suite.Equal("replace-rule-down-peer", op.Desc())
+	suite.Equal("replace-rule-fast-failover-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 	suite.True(op.Step(0).(operator.AddLearner).IsWitness)
 	suite.Equal(uint64(4), op.Step(1).(operator.PromoteLearner).ToStore)
@@ -990,7 +990,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness4() {
 	op := suite.rc.Check(r)
 
 	suite.NotNil(op)
-	suite.Equal("replace-rule-down-peer", op.Desc())
+	suite.Equal("replace-rule-fast-failover-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 	suite.True(op.Step(0).(operator.AddLearner).IsWitness)
 	suite.Equal(uint64(4), op.Step(1).(operator.PromoteLearner).ToStore)
@@ -1273,7 +1273,7 @@ func (suite *ruleCheckerTestSuite) TestOfflineAndDownStore() {
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(2), DownSeconds: 60000}}))
 	op = suite.rc.Check(region)
 	suite.NotNil(op)
-	suite.Equal("replace-rule-down-peer", op.Desc())
+	suite.Equal("replace-rule-fast-failover-peer", op.Desc())
 }
 
 func (suite *ruleCheckerTestSuite) TestPendingList() {

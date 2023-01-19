@@ -263,7 +263,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		// to non-witness gradually to improve availability.
 		if status == "down" {
 			fastFailover = true
-			status = "fastFailover"
+			status = "fast-failover"
 		} else {
 			fastFailover = rf.Rule.IsWitness
 		}
@@ -313,7 +313,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	if newLeader != nil {
 		c.record.incOfflineLeaderCount(newLeader.GetStoreId())
 	}
-	if status == "fastFailover" {
+	if status == "fast-failover" {
 		op.SetPriorityLevel(core.Urgent)
 	} else {
 		op.SetPriorityLevel(core.High)
