@@ -14,6 +14,42 @@
 
 package client
 
+import (
+	"time"
+
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+)
+
+var (
+	requestUnitList map[rmpb.RequestUnitType]struct{} = map[rmpb.RequestUnitType]struct{}{
+		rmpb.RequestUnitType_RRU: {},
+		rmpb.RequestUnitType_WRU: {},
+	}
+	requestResourceList map[rmpb.RawResourceType]struct{} = map[rmpb.RawResourceType]struct{}{
+		rmpb.RawResourceType_IOReadFlow:  {},
+		rmpb.RawResourceType_IOWriteFlow: {},
+		rmpb.RawResourceType_CPU:         {},
+	}
+)
+
+const (
+	initialRequestUnits = 10000
+	bufferRUs           = 2000
+	// movingAvgFactor is the weight applied to a new "sample" of RU usage (with one
+	// sample per mainLoopUpdateInterval).
+	//
+	// If we want a factor of 0.5 per second, this should be:
+	//
+	//	0.5^(1 second / mainLoopUpdateInterval)
+	movingAvgFactor                = 0.5
+	notifyFraction                 = 0.1
+	consumptionsReportingThreshold = 100
+	extendedReportingPeriodFactor  = 4
+	defaultGroupLoopUpdateInterval = 1 * time.Second
+	defaultTargetPeriod            = 10 * time.Second
+	defaultMaxRequestTokens        = 1e8
+)
+
 const (
 	defaultReadBaseCost     = 1
 	defaultReadCostPerByte  = 1. / 1024 / 1024
@@ -55,6 +91,10 @@ func DefaultRequestUnitConfig() *RequestUnitConfig {
 // units or request resource cost standards. It should be calculated by a given `RequestUnitConfig`
 // or `RequestResourceConfig`.
 type Config struct {
+	groupLoopUpdateInterval time.Duration
+	targetPeriod            time.Duration
+	maxRequestTokens        float64
+
 	ReadBaseCost   RequestUnit
 	ReadBytesCost  RequestUnit
 	ReadCPUMsCost  RequestUnit
@@ -79,5 +119,8 @@ func generateConfig(ruConfig *RequestUnitConfig) *Config {
 		WriteBaseCost:  RequestUnit(ruConfig.WriteBaseCost),
 		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
 	}
+	cfg.groupLoopUpdateInterval = defaultGroupLoopUpdateInterval
+	cfg.targetPeriod = defaultTargetPeriod
+	cfg.maxRequestTokens = defaultMaxRequestTokens
 	return cfg
 }

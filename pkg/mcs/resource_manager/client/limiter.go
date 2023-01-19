@@ -174,7 +174,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 //	Act()
 //
 // Use this method if you wish to wait and slow down in accordance with the rate limit without dropping events.
-func (lim *Limiter) Reserve(ctx context.Context, now time.Time, n float64) *Reservation {
+func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now time.Time, n float64) *Reservation {
 	// Check if ctx is already cancelled
 	select {
 	case <-ctx.Done():
@@ -184,7 +184,7 @@ func (lim *Limiter) Reserve(ctx context.Context, now time.Time, n float64) *Rese
 	default:
 	}
 	// Determine wait limit
-	waitLimit := InfDuration
+	waitLimit := waitDuration
 	if deadline, ok := ctx.Deadline(); ok {
 		waitLimit = deadline.Sub(now)
 	}
@@ -194,6 +194,8 @@ func (lim *Limiter) Reserve(ctx context.Context, now time.Time, n float64) *Rese
 
 // SetupNotificationThreshold enables the notification at the given threshold.
 func (lim *Limiter) SetupNotificationThreshold(now time.Time, threshold float64) {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
 	lim.advance(now)
 	lim.notifyThreshold = threshold
 }
@@ -215,17 +217,23 @@ func (lim *Limiter) notify() {
 // maybeNotify checks if it's time to send the notification and if so, performs
 // the notification.
 func (lim *Limiter) maybeNotify() {
-	if lim.IsLowTokens() {
+	if lim.isLowTokensLocked() {
 		lim.notify()
 	}
 }
 
-// IsLowTokens returns whether the limiter is in low tokens
-func (lim *Limiter) IsLowTokens() bool {
+func (lim *Limiter) isLowTokensLocked() bool {
 	if lim.isLowProcess || (lim.notifyThreshold > 0 && lim.tokens < lim.notifyThreshold) {
 		return true
 	}
 	return false
+}
+
+// IsLowTokens returns whether the limiter is in low tokens
+func (lim *Limiter) IsLowTokens() bool {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	return lim.isLowTokensLocked()
 }
 
 // RemoveTokens decreases the amount of tokens currently available.
@@ -373,7 +381,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
-			return fmt.Errorf("[resource group controller] limiter has no enough token")
+			return fmt.Errorf("[resource group controller] limiter has no enough token or needs wait too long")
 		}
 		delay := res.DelayFrom(now)
 		if delay > longestDelayDuration {
