@@ -17,6 +17,7 @@ package placement
 import (
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -29,7 +30,8 @@ func TestRegionRuleFitCache(t *testing.T) {
 	originRegion := mockRegion(3, 0)
 	originRules := addExtraRules(0)
 	originStores := mockStores(3)
-	cache := mockRegionRuleFitCache(originRegion, originRules, originStores)
+	cacheManager := NewRegionRuleFitCacheManager()
+	cache := cacheManager.mockRegionRuleFitCache(originRegion, originRules, originStores)
 	testCases := []struct {
 		name      string
 		region    *core.RegionInfo
@@ -192,10 +194,30 @@ func TestRegionRuleFitCache(t *testing.T) {
 	re.False(cache.IsUnchanged(originRegion, originRules, originStores))
 }
 
-func mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *RegionRuleFitCache {
-	return &RegionRuleFitCache{
+func TestPublicStoreCaches(t *testing.T) {
+	re := require.New(t)
+	cacheManager := NewRegionRuleFitCacheManager()
+
+	stores1 := mockStores(3)
+	rules1 := addExtraRules(0)
+	region1 := mockRegion(3, 0)
+	cache1 := cacheManager.mockRegionRuleFitCache(region1, rules1, stores1)
+
+	stores2 := mockStores(3)
+	rules2 := addExtraRules(0)
+	region2 := mockRegion(3, 0)
+	cache2 := cacheManager.mockRegionRuleFitCache(region2, rules2, stores2)
+
+	for i, storeCache1 := range cache1.regionStores {
+		storeCache2 := cache2.regionStores[i]
+		re.Equal(unsafe.Pointer(storeCache2), unsafe.Pointer(storeCache1))
+	}
+}
+
+func (manager *RegionRuleFitCacheManager) mockRegionRuleFitCache(region *core.RegionInfo, rules []*Rule, regionStores []*core.StoreInfo) *regionRuleFitCache {
+	return &regionRuleFitCache{
 		region:       toRegionCache(region),
-		regionStores: toStoreCacheList(regionStores),
+		regionStores: manager.toStoreCacheList(regionStores),
 		rules:        toRuleCacheList(rules),
 		bestFit: &RegionFit{
 			regionStores: regionStores,
