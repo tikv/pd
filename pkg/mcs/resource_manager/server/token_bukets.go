@@ -182,6 +182,8 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	}
 	res.Tokens = grantedTokens
 	var trickleDuration time.Duration
+	// can't directly treat targetPeriodTime as trickleTime when there is a token remaining.
+	// If treat, client consumption will be slowed down (actually cloud be increased).
 	if hasRemaining {
 		trickleDuration = time.Duration(math.Min(trickleTime, targetPeriodTime.Seconds()) * float64(time.Second))
 	} else {

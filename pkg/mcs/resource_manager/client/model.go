@@ -131,7 +131,7 @@ func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitTyp
 	return 0
 }
 
-func getResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
+func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
 	switch typ {
 	case 0:
 		return custom.TotalCpuTimeMs

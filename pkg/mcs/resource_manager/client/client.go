@@ -59,6 +59,9 @@ type resourceGroupsController struct {
 	groupsController sync.Map
 	config           *Config
 
+	loopCtx    context.Context
+	loopCancel func()
+
 	calculators []ResourceCalculator
 
 	// tokenResponseChan receives token bucket response from server.
@@ -113,7 +116,16 @@ func (c *resourceGroupsController) Start(ctx context.Context) error {
 		log.Error("update ResourceGroup failed", zap.Error(err))
 	}
 	c.initRunState()
+	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	go c.mainLoop(ctx)
+	return nil
+}
+
+func (c *resourceGroupsController) Stop() error {
+	if c.loopCancel == nil {
+		return errors.Errorf("resourceGroupsController does not start.")
+	}
+	c.loopCancel()
 	return nil
 }
 
@@ -124,6 +136,7 @@ func (c *resourceGroupsController) putResourceGroup(ctx context.Context, name st
 	}
 	log.Info("create resource group cost controller", zap.String("name", group.GetName()))
 	gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan)
+	// A future case: If user change mode from RU to RAW mode. How to re-init?
 	gc.initRunState()
 	c.groupsController.Store(group.GetName(), gc)
 	return gc, nil
@@ -462,7 +475,7 @@ func (gc *groupCostController) updateRunState(ctx context.Context) {
 		}
 	case rmpb.GroupMode_RawMode:
 		for typ, counter := range gc.run.resourceTokens {
-			if v := getResourceValueFromConsumption(deltaConsumption, typ); v > 0 {
+			if v := getRawResourceValueFromConsumption(deltaConsumption, typ); v > 0 {
 				counter.limiter.RemoveTokens(newTime, v)
 			}
 		}
@@ -474,7 +487,7 @@ func (gc *groupCostController) updateRunState(ctx context.Context) {
 func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
-		gc.updateAvgResourcePerSec()
+		gc.updateAvgRaWResourcePerSec()
 	case rmpb.GroupMode_RUMode:
 		gc.updateAvgRUPerSec()
 	}
@@ -507,12 +520,12 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 	}
 }
 
-func (gc *groupCostController) updateAvgResourcePerSec() {
+func (gc *groupCostController) updateAvgRaWResourcePerSec() {
 	for typ, counter := range gc.run.resourceTokens {
-		if !gc.calcAvg(counter, getResourceValueFromConsumption(gc.run.consumption, typ)) {
+		if !gc.calcAvg(counter, getRawResourceValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
-		log.Debug("[resource group controllor] update avg ru per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
+		log.Debug("[resource group controllor] update avg raw resource per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
 	}
 }
 
@@ -547,7 +560,7 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 		}
 	case rmpb.GroupMode_RawMode:
 		for typ := range requestResourceList {
-			if getResourceValueFromConsumption(gc.run.consumption, typ)-getResourceValueFromConsumption(gc.run.lastRequestConsumption, typ) >= consumptionsReportingThreshold {
+			if getRawResourceValueFromConsumption(gc.run.consumption, typ)-getRawResourceValueFromConsumption(gc.run.lastRequestConsumption, typ) >= consumptionsReportingThreshold {
 				return true
 			}
 		}
@@ -615,12 +628,15 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 	}
 
 	var cfg tokenBucketReconfigureArgs
+	// when trickleTimeMs equals zero, server has enough tokens and does not need to
+	// limit client consume token. So all token is granted to client right now.
 	if trickleTimeMs == 0 {
 		cfg.NewTokens = granted
 		cfg.NewRate = float64(bucket.GetSettings().FillRate)
 		cfg.NotifyThreshold = notifyThreshold
 		counter.lastDeadline = time.Time{}
 	} else {
+		// Otherwise the granted token is delivered to the client by fillrate.
 		cfg.NewTokens = 0
 		trickleDuration := time.Duration(trickleTimeMs) * time.Millisecond
 		deadline := gc.run.now.Add(trickleDuration)
@@ -719,7 +735,7 @@ retryLoop:
 		case rmpb.GroupMode_RawMode:
 			res := make([]*Reservation, 0, len(requestResourceList))
 			for typ, counter := range gc.run.resourceTokens {
-				if v := getResourceValueFromConsumption(delta, typ); v > 0 {
+				if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
 					res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
 				}
 			}
@@ -757,7 +773,7 @@ func (gc *groupCostController) OnResponse(ctx context.Context, req RequestInfo, 
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for typ, counter := range gc.run.resourceTokens {
-			if v := getResourceValueFromConsumption(delta, typ); v > 0 {
+			if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
 				counter.limiter.RemoveTokens(time.Now(), v)
 			}
 		}
