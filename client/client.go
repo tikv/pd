@@ -1821,18 +1821,69 @@ func trimHTTPPrefix(str string) string {
 }
 
 func (c *client) LoadGlobalConfig(ctx context.Context, configPath string) ([]GlobalConfigItem, int64, error) {
-	// TODO: complete this function with new implementation.
-	return nil, 0, nil
+	resp, err := c.getClient().LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{ConfigPath: configPath})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	res := make([]GlobalConfigItem, len(resp.GetItems()))
+	for i, item := range resp.GetItems() {
+		cfg := GlobalConfigItem{Name: item.GetName()}
+		cfg.Value = item.GetValue()
+		res[i] = cfg
+	}
+	return res, resp.GetRevision(), nil
 }
 
 func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error {
-	// TODO: complete this function with new implementation.
+	resArr := make([]*pdpb.GlobalConfigItem, len(items))
+	for i, it := range items {
+		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType}
+	}
+	_, err := c.getClient().StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr, ConfigPath: configPath})
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error) {
-	// TODO: complete this function with new implementation.
-	return nil, nil
+	// TODO: Add retry mechanism
+	// register watch components there
+	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
+	res, err := c.getClient().WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{
+		ConfigPath: configPath,
+		Revision:   revision,
+	})
+	if err != nil {
+		close(globalConfigWatcherCh)
+		return nil, err
+	}
+	go func() {
+		defer func() {
+			close(globalConfigWatcherCh)
+			if r := recover(); r != nil {
+				log.Error("[pd] panic in client `WatchGlobalConfig`", zap.Any("error", r))
+				return
+			}
+		}()
+		for {
+			m, err := res.Recv()
+			if err != nil {
+				return
+			}
+			arr := make([]GlobalConfigItem, len(m.Changes))
+			for j, i := range m.Changes {
+				arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue()}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case globalConfigWatcherCh <- arr:
+			}
+		}
+	}()
+	return globalConfigWatcherCh, err
 }
 
 func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
