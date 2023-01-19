@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,9 @@ var defaultWhiteList = map[string]struct{}{
 
 // ResourceGroupKVInterceptor is used as quato limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
+	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
 	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) error
+	// OnResponse is used to consume tokens atfer receiving response
 	OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error
 }
 
@@ -53,6 +55,7 @@ type ResourceGroupProvider interface {
 
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
+// ResourceGroupsController impls ResourceGroupKVInterceptor.
 type ResourceGroupsController struct {
 	clientUniqueID   uint64
 	provider         ResourceGroupProvider
@@ -110,17 +113,17 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 	}, nil
 }
 
-// Start starts resourceGroupController service
-func (c *ResourceGroupsController) Start(ctx context.Context) error {
+// Start starts ResourceGroupController service.
+func (c *ResourceGroupsController) Start(ctx context.Context) {
 	if err := c.updateAllResourceGroups(ctx); err != nil {
 		log.Error("update ResourceGroup failed", zap.Error(err))
 	}
 	c.initRunState()
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	go c.mainLoop(ctx)
-	return nil
 }
 
+// Stop stops ResourceGroupController service.
 func (c *ResourceGroupsController) Stop() error {
 	if c.loopCancel == nil {
 		return errors.Errorf("resourceGroupsController does not start.")
@@ -219,6 +222,7 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 		v, ok := c.groupsController.Load(name)
 		if !ok {
 			log.Warn("A non-existent resource group was found when handle token response.", zap.String("name", name))
+			return
 		}
 		gc := v.(*groupCostController)
 		gc.handleTokenBucketResponse(res)
@@ -720,6 +724,7 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 	return value
 }
 
+// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
 func (gc *groupCostController) OnRequestWait(
 	ctx context.Context, info RequestInfo,
 ) (err error) {
@@ -764,6 +769,7 @@ retryLoop:
 	return nil
 }
 
+// OnResponse is used to consume tokens atfer receiving response
 func (gc *groupCostController) OnResponse(ctx context.Context, req RequestInfo, resp ResponseInfo) {
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
