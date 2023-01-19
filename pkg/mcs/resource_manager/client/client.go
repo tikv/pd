@@ -150,16 +150,16 @@ func (c *ResourceGroupsController) updateAllResourceGroups(ctx context.Context) 
 	if err != nil {
 		return err
 	}
-	lastedGroups := make(map[string]struct{})
+	latestGroups := make(map[string]struct{})
 	for _, group := range groups {
 		log.Info("create resource group cost controller", zap.String("name", group.GetName()))
 		gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan)
 		c.groupsController.Store(group.GetName(), gc)
-		lastedGroups[group.GetName()] = struct{}{}
+		latestGroups[group.GetName()] = struct{}{}
 	}
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
-		if _, ok := lastedGroups[resourceGroupName]; !ok {
+		if _, ok := latestGroups[resourceGroupName]; !ok {
 			c.groupsController.Delete(key)
 		}
 		return true
