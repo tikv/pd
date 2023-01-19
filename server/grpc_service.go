@@ -1920,6 +1920,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 
 // WatchGlobalConfig if the connection of WatchGlobalConfig is end
 // or stopped by whatever reason, just reconnect to it.
+// Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()

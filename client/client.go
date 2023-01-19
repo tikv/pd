@@ -1868,19 +1868,18 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 			}
 		}()
 		for {
+			m, err := res.Recv()
+			if err != nil {
+				return
+			}
+			arr := make([]GlobalConfigItem, len(m.Changes))
+			for j, i := range m.Changes {
+				arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue()}
+			}
 			select {
 			case <-ctx.Done():
 				return
-			default:
-				m, err := res.Recv()
-				if err != nil {
-					return
-				}
-				arr := make([]GlobalConfigItem, len(m.Changes))
-				for j, i := range m.Changes {
-					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue()}
-				}
-				globalConfigWatcherCh <- arr
+			case globalConfigWatcherCh <- arr:
 			}
 		}
 	}()
