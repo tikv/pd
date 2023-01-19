@@ -406,7 +406,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator)
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -728,6 +728,11 @@ func (s *Server) GetClient() *clientv3.Client {
 // GetHTTPClient returns builtin etcd client.
 func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
+}
+
+// GetFinalPathWithinPD returns the etcd path.
+func (s *Server) GetFinalPathWithinPD(configPath string) string {
+	return strings.Join([]string{s.rootPath, configPath}, "/")
 }
 
 // GetLeader returns the leader of PD cluster(i.e the PD leader).

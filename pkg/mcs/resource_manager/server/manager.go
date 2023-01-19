@@ -15,21 +15,32 @@
 package server
 
 import (
-	"encoding/json"
+	"context"
 	"sort"
 	"sync"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/storage"
+	"go.uber.org/zap"
 )
+
+const defaultConsumptionChanSize = 1024
 
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
 	groups  map[string]*ResourceGroup
 	storage func() storage.Storage
+	// consumptionChan is used to send the consumption
+	// info to the background metrics flusher.
+	consumptionDispatcher chan struct {
+		resourceGroupName string
+		*rmpb.Consumption
+	}
 }
 
 // NewManager returns a new Manager.
@@ -37,21 +48,27 @@ func NewManager(srv *server.Server) *Manager {
 	m := &Manager{
 		groups:  make(map[string]*ResourceGroup),
 		storage: srv.GetStorage,
+		consumptionDispatcher: make(chan struct {
+			resourceGroupName string
+			*rmpb.Consumption
+		}, defaultConsumptionChanSize),
 	}
 	srv.AddStartCallback(m.Init)
+	go m.backgroundMetricsFlush(srv.Context())
 	return m
 }
 
 // Init initializes the resource group manager.
 func (m *Manager) Init() {
 	handler := func(k, v string) {
-		var group ResourceGroup
-		if err := json.Unmarshal([]byte(v), &group); err != nil {
+		group := &rmpb.ResourceGroup{}
+		if err := proto.Unmarshal([]byte(v), group); err != nil {
+			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
-		m.groups[group.Name] = &group
+		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
-	m.storage().LoadResourceGroups(handler)
+	m.storage().LoadResourceGroupSettings(handler)
 }
 
 // AddResourceGroup puts a resource group.
@@ -100,7 +117,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(name string) error {
-	if err := m.storage().DeleteResourceGroup(name); err != nil {
+	if err := m.storage().DeleteResourceGroupSetting(name); err != nil {
 		return err
 	}
 	m.Lock()
@@ -119,6 +136,16 @@ func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
 	return nil
 }
 
+// GetMutableResourceGroup returns a mutable resource group.
+func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
+	m.RLock()
+	defer m.RUnlock()
+	if group, ok := m.groups[name]; ok {
+		return group
+	}
+	return nil
+}
+
 // GetResourceGroupList returns copies of resource group list.
 func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 	m.RLock()
@@ -131,4 +158,56 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 		return res[i].Name < res[j].Name
 	})
 	return res
+}
+
+// Receive the consumption and flush it to the metrics.
+func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case consumptionInfo := <-m.consumptionDispatcher:
+			consumption := consumptionInfo.Consumption
+			if consumption == nil {
+				continue
+			}
+			var (
+				name                     = consumptionInfo.resourceGroupName
+				rruMetrics               = readRequestUnitCost.WithLabelValues(name)
+				wruMetrics               = writeRequestUnitCost.WithLabelValues(name)
+				readByteMetrics          = readByteCost.WithLabelValues(name)
+				writeByteMetrics         = writeByteCost.WithLabelValues(name)
+				kvCPUMetrics             = kvCPUCost.WithLabelValues(name)
+				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name)
+				readRequestCountMetrics  = requestCount.WithLabelValues(name, readTypeLabel)
+				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
+			)
+			// RU info.
+			if consumption.RRU != 0 {
+				rruMetrics.Observe(consumption.RRU)
+			}
+			if consumption.WRU != 0 {
+				wruMetrics.Observe(consumption.WRU)
+			}
+			// Byte info.
+			if consumption.ReadBytes != 0 {
+				readByteMetrics.Observe(consumption.ReadBytes)
+			}
+			if consumption.WriteBytes != 0 {
+				writeByteMetrics.Observe(consumption.WriteBytes)
+			}
+			// CPU time info.
+			if consumption.SqlLayerCpuTimeMs != 0 {
+				sqlCPUMetrics.Observe(consumption.SqlLayerCpuTimeMs)
+				kvCPUMetrics.Observe(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
+			}
+			// RPC count info.
+			if consumption.KvReadRpcCount != 0 {
+				readRequestCountMetrics.Add(consumption.KvReadRpcCount)
+			}
+			if consumption.KvWriteRpcCount != 0 {
+				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
+			}
+		}
+	}
 }

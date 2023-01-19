@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +77,87 @@ func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 }
 
+func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
+	re := suite.Require()
+	cli := suite.client
+	group := &rmpb.ResourceGroup{
+		Name: "test",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RRU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 10000,
+				},
+				Tokens: 100000,
+			},
+		},
+	}
+	// Mock get revision by listing
+	for i := 0; i < 3; i++ {
+		group.Name += strconv.Itoa(i)
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		group.Name = "test"
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	lresp, err := cli.ListResourceGroups(suite.ctx)
+	re.NoError(err)
+	re.Equal(len(lresp), 3)
+	// Start watcher
+	watchChan, err := suite.client.WatchResourceGroup(suite.ctx, int64(0))
+	suite.NoError(err)
+	// Mock add resource groups
+	for i := 3; i < 9; i++ {
+		group.Name = "test" + strconv.Itoa(i)
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	// Mock modify resource groups
+	modifySettings := func(gs *rmpb.ResourceGroup) {
+		gs.RUSettings = &rmpb.GroupRequestUnitSettings{
+			RRU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 20000,
+				},
+			},
+		}
+	}
+	for i := 0; i < 9; i++ {
+		group.Name = "test" + strconv.Itoa(i)
+		modifySettings(group)
+		resp, err := cli.ModifyResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	// Mock delete resource groups
+	for i := 0; i < 9; i++ {
+		resp, err := cli.DeleteResourceGroup(suite.ctx, "test"+strconv.Itoa(i))
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	// Check watch result
+	i := 0
+	for {
+		select {
+		case <-time.After(time.Second):
+			return
+		case res := <-watchChan:
+			if i < 6 {
+				for _, r := range res {
+					suite.Equal(uint64(10000), r.RUSettings.RRU.Settings.FillRate)
+					i++
+				}
+			} else { // after modify
+				for _, r := range res {
+					suite.Equal(uint64(20000), r.RUSettings.RRU.Settings.FillRate)
+					i++
+				}
+			}
+		}
+	}
+}
+
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re := suite.Require()
 	cli := suite.client
@@ -115,6 +197,8 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		Requests:              make([]*rmpb.TokenBucketRequest, 0),
 		TargetRequestPeriodMs: uint64(time.Second * 10 / time.Millisecond),
 	}
+
+	groups = append(groups, &rmpb.ResourceGroup{Name: "test3"})
 	for _, group := range groups {
 		requests := make([]*rmpb.RequestUnitItem, 0)
 		requests = append(requests, &rmpb.RequestUnitItem{
@@ -137,6 +221,29 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		re.Len(resp.GrantedRUTokens, 1)
 		re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(10000.))
 	}
+	gresp, err := cli.GetResourceGroup(suite.ctx, groups[0].GetName())
+	re.NoError(err)
+	re.Less(gresp.RUSettings.RRU.Tokens, groups[0].RUSettings.RRU.Tokens)
+
+	checkFunc := func(g1 *rmpb.ResourceGroup, g2 *rmpb.ResourceGroup) {
+		re.Equal(g1.GetName(), g2.GetName())
+		re.Equal(g1.GetMode(), g2.GetMode())
+		re.Equal(g1.GetRUSettings().RRU.Settings.FillRate, g2.GetRUSettings().RRU.Settings.FillRate)
+		// now we don't persistent tokens in running state, so tokens is original.
+		re.Equal(g1.GetRUSettings().RRU.Tokens, g2.GetRUSettings().RRU.Tokens)
+		re.NoError(err)
+	}
+
+	// to test persistent
+	leaderName := suite.cluster.WaitLeader()
+	leader := suite.cluster.GetServer(leaderName)
+	leader.Stop()
+	suite.cluster.RunServers([]*tests.TestServer{leader})
+	suite.cluster.WaitLeader()
+	gresp, err = cli.GetResourceGroup(suite.ctx, groups[0].GetName())
+	re.NoError(err)
+	checkFunc(gresp, groups[0])
+
 	for _, g := range groups {
 		// Delete Resource Group
 		dresp, err := cli.DeleteResourceGroup(suite.ctx, g.Name)
@@ -145,9 +252,12 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	}
 }
 
-func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
+func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re := suite.Require()
 	cli := suite.client
+
+	leaderName := suite.cluster.WaitLeader()
+	leader := suite.cluster.GetServer(leaderName)
 
 	testCasesSet1 := []struct {
 		name           string
@@ -207,9 +317,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 			},
 		},
 		{"test3", rmpb.GroupMode_RawMode, false, true,
-			`{"name":"test3","mode":2,"resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
+			`{"name":"test3","mode":2,"raw_resource_settings":{"cpu":{"token_bucket":{"settings":{"fill_rate":1000000}},"initialized":false},"io_read_bandwidth":{"initialized":false},"io_write_bandwidth":{"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
-				gs.ResourceSettings = &rmpb.GroupResourceSettings{
+				gs.RawResourceSettings = &rmpb.GroupRawResourceSettings{
 					Cpu: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate: 1000000,
@@ -261,7 +371,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 
 		// Last one, Check list and delete all resource groups
 		if i == len(testCasesSet1)-1 {
-			// List Resource Group
+			// List Resource Groups
 			lresp, err := cli.ListResourceGroups(suite.ctx)
 			re.NoError(err)
 			re.Equal(finalNum, len(lresp))
@@ -274,11 +384,19 @@ func (suite *resourceManagerClientTestSuite) TestBasicReourceGroupCURD() {
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
 				re.EqualError(err, "rpc error: code = Unknown desc = resource group not found")
 			}
+
+			// to test the deletion of persistence
+			leader.Stop()
+			suite.cluster.RunServers([]*tests.TestServer{leader})
+			suite.cluster.WaitLeader()
+
+			// List Resource Group
+			lresp, err = cli.ListResourceGroups(suite.ctx)
+			re.NoError(err)
+			re.Equal(0, len(lresp))
 		}
 	}
 
-	leaderName := suite.cluster.WaitLeader()
-	leader := suite.cluster.GetServer(leaderName)
 	// Test Resource Group CURD via HTTP
 	finalNum = 0
 	for i, tcase := range testCasesSet1 {

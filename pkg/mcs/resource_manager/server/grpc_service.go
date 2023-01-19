@@ -145,11 +145,18 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		targetPeriodMs := request.GetTargetRequestPeriodMs()
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
-			rg := s.manager.GetResourceGroup(req.ResourceGroupName)
+			resourceGroupName := req.GetResourceGroupName()
+			// Get the resource group from manager to acquire token buckets.
+			rg := s.manager.GetMutableResourceGroup(resourceGroupName)
 			if rg == nil {
-				log.Warn("resource group not found", zap.String("resource-group", req.ResourceGroupName))
+				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
 				continue
 			}
+			// Send the consumption to update the metrics.
+			s.manager.consumptionDispatcher <- struct {
+				resourceGroupName string
+				*rmpb.Consumption
+			}{resourceGroupName, req.GetConsumptionSinceLastRequest()}
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
@@ -167,10 +174,10 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}
 			case rmpb.GroupMode_RawMode:
-				log.Warn("not supports the resource type", zap.String("resource-group", req.ResourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
+				log.Warn("not supports the resource type", zap.String("resource-group", resourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
 				continue
 			}
-			log.Debug("finish token request from", zap.String("resource group", req.ResourceGroupName))
+			log.Debug("finish token request from", zap.String("resource group", resourceGroupName))
 			resps.Responses = append(resps.Responses, resp)
 		}
 		stream.Send(resps)
