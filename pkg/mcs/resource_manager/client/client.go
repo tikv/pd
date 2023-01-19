@@ -30,11 +30,6 @@ const (
 	maxRetry               = 3
 )
 
-var defaultWhiteList = map[string]struct{}{
-	"default": {},
-	"":        {},
-}
-
 // ResourceGroupKVInterceptor is used as quato limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
@@ -319,9 +314,6 @@ func (c *ResourceGroupsController) mainLoop(ctx context.Context) {
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
 ) (err error) {
-	if _, ok := defaultWhiteList[resourceGroupName]; ok {
-		return nil
-	}
 	var gc *groupCostController
 	if tmp, ok := c.groupsController.Load(resourceGroupName); ok {
 		gc = tmp.(*groupCostController)
@@ -337,9 +329,6 @@ func (c *ResourceGroupsController) OnRequestWait(
 
 // OnResponse is used to consume tokens atfer receiving response
 func (c *ResourceGroupsController) OnResponse(_ context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
-	if _, ok := defaultWhiteList[resourceGroupName]; ok {
-		return nil
-	}
 	tmp, ok := c.groupsController.Load(resourceGroupName)
 	if !ok {
 		log.Warn("[resource group] resourceGroupName is not existed.", zap.String("resourceGroupName", resourceGroupName))
