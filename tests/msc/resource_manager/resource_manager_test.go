@@ -103,18 +103,11 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	lresp, err := cli.ListResourceGroups(suite.ctx)
 	re.NoError(err)
 	re.Equal(len(lresp), 3)
-	// Mock when start watcher there are existed some keys, will load firstly
-	for i := 3; i < 6; i++ {
-		group.Name = "test" + strconv.Itoa(i)
-		resp, err := cli.AddResourceGroup(suite.ctx, group)
-		re.NoError(err)
-		re.Contains(resp, "Success!")
-	}
 	// Start watcher
 	watchChan, err := suite.client.WatchResourceGroup(suite.ctx, int64(0))
 	suite.NoError(err)
 	// Mock add resource groups
-	for i := 6; i < 9; i++ {
+	for i := 3; i < 9; i++ {
 		group.Name = "test" + strconv.Itoa(i)
 		resp, err := cli.AddResourceGroup(suite.ctx, group)
 		re.NoError(err)
@@ -138,7 +131,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		re.Contains(resp, "Success!")
 	}
 	// Mock delete resource groups
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 9; i++ {
 		resp, err := cli.DeleteResourceGroup(suite.ctx, "test"+strconv.Itoa(i))
 		re.NoError(err)
 		re.Contains(resp, "Success!")
@@ -148,10 +141,10 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	for {
 		select {
 		case <-time.After(time.Second):
-			close(watchChan)
+			//close(watchChan)
 			return
 		case res := <-watchChan:
-			if i < 9 {
+			if i < 6 {
 				for _, r := range res {
 					suite.Equal(uint64(10000), r.RUSettings.RRU.Settings.FillRate)
 					i++

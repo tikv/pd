@@ -1848,7 +1848,8 @@ func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items
 }
 
 func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error) {
-	// register watch components
+	// TODO: Add retry mechanism
+	// register watch components there
 	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
 	res, err := c.getClient().WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{
 		ConfigPath: configPath,
@@ -1860,6 +1861,7 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 	}
 	go func() {
 		defer func() {
+			close(globalConfigWatcherCh)
 			if r := recover(); r != nil {
 				log.Error("[pd] panic in client `WatchGlobalConfig`", zap.Any("error", r))
 				return
@@ -1868,7 +1870,6 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 		for {
 			select {
 			case <-ctx.Done():
-				close(globalConfigWatcherCh)
 				return
 			default:
 				m, err := res.Recv()

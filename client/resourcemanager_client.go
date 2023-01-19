@@ -134,9 +134,13 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 // all subsequent messages contains new events[PUT/DELETE] for all resource groups.
 func (c *client) WatchResourceGroup(ctx context.Context, revision int64) (chan []*rmpb.ResourceGroup, error) {
 	configChan, err := c.WatchGlobalConfig(ctx, groupSettingsPathPrefix, revision)
+	if err != nil {
+		return nil, err
+	}
 	resourceGroupWatcherChan := make(chan []*rmpb.ResourceGroup)
 	go func() {
 		defer func() {
+			close(resourceGroupWatcherChan)
 			if r := recover(); r != nil {
 				log.Error("[pd] panic in ResourceManagerClient `WatchResourceGroups`", zap.Any("error", r))
 				return
@@ -145,11 +149,9 @@ func (c *client) WatchResourceGroup(ctx context.Context, revision int64) (chan [
 		for {
 			select {
 			case <-ctx.Done():
-				close(resourceGroupWatcherChan)
 				return
 			case res, ok := <-configChan:
 				if !ok {
-					close(resourceGroupWatcherChan)
 					return
 				}
 				groups := make([]*rmpb.ResourceGroup, 0, len(res))

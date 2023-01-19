@@ -1933,11 +1933,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 		case <-ctx.Done():
 			return nil
 		case res := <-watchChan:
-			// update revision by every resp
-			if revision > res.Header.GetRevision() {
-				revision = res.Header.GetRevision()
-			}
-			if res.CompactRevision != 0 && revision < res.CompactRevision {
+			if revision < res.CompactRevision {
 				if err := server.Send(&pdpb.WatchGlobalConfigResponse{
 					Revision: res.CompactRevision,
 					Header: s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
@@ -1946,6 +1942,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 					return err
 				}
 			}
+			revision = res.Header.GetRevision()
 
 			cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
 			for _, e := range res.Events {
