@@ -222,7 +222,7 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 		v, ok := c.groupsController.Load(name)
 		if !ok {
 			log.Warn("A non-existent resource group was found when handle token response.", zap.String("name", name))
-			return
+			continue
 		}
 		gc := v.(*groupCostController)
 		gc.handleTokenBucketResponse(res)
