@@ -31,6 +31,7 @@ type ReplicaStrategy struct {
 	isolationLevel string
 	region         *core.RegionInfo
 	extraFilters   []filter.Filter
+	fastFailover   bool
 }
 
 // SelectStoreToAdd returns the store to add a replica to a region.
@@ -69,7 +70,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	}
 
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
-	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true}
+	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowFastFailover: s.fastFailover}
 	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
 		FilterTarget(s.cluster.GetOpts(), nil, nil, filters...).
 		KeepTheTopStores(isolationComparer, false) // greater isolation score is better

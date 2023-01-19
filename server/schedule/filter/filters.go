@@ -321,6 +321,8 @@ type StoreStateFilter struct {
 	MoveRegion bool
 	// Set true if the scatter move the region
 	ScatterRegion bool
+	// Set true if allows failover (through witness)
+	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
 	// Reason is used to distinguish the reason of store state filter
@@ -530,6 +532,11 @@ func (f *StoreStateFilter) Target(opts *config.PersistOptions, store *core.Store
 	}
 	if f.MoveRegion && f.ScatterRegion {
 		if status = f.anyConditionMatch(scatterRegionTarget, opts, store); !status.IsOK() {
+			return
+		}
+	}
+	if f.MoveRegion && f.AllowFastFailover {
+		if status = f.anyConditionMatch(witnessTarget, opts, store); !status.IsOK() {
 			return
 		}
 	}
