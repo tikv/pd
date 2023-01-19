@@ -180,7 +180,7 @@ func (s storeCache) storeEqual(store *core.StoreInfo) bool {
 func (manager *RegionRuleFitCacheManager) toStoreCacheList(stores []*core.StoreInfo) (c []*storeCache) {
 	for _, s := range stores {
 		sCache, ok := manager.storeCaches[s.GetID()]
-		if !(ok && sCache.storeEqual(s)) {
+		if !ok || !sCache.storeEqual(s) {
 			m := make(map[string]string)
 			for _, label := range s.GetLabels() {
 				m[label.GetKey()] = label.GetValue()
