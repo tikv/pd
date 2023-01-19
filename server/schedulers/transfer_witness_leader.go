@@ -80,12 +80,7 @@ func (s *trasferWitnessLeaderScheduler) GetType() string {
 }
 
 func (s *trasferWitnessLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	// TODO: make sure the restriction is reasonable
-	allowed := s.OpController.OperatorCount(operator.OpWitnessLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
-	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpWitnessLeader.String()).Inc()
-	}
-	return allowed
+	return true
 }
 
 func (s *trasferWitnessLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {

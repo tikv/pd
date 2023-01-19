@@ -670,8 +670,6 @@ type ScheduleConfig struct {
 	MaxStorePreparingTime typeutil.Duration `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
-	// WitnessLeaderScheduleLimit is the max coexist witness leader schedules.
-	WitnessLeaderScheduleLimit uint64 `toml:"witness-leader-schedule-limit" json:"witness-leader-schedule-limit"`
 	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
 	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
 	// RegionScheduleLimit is the max coexist region schedules.
@@ -802,26 +800,25 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 }
 
 const (
-	defaultMaxReplicas                = 3
-	defaultMaxSnapshotCount           = 64
-	defaultMaxPendingPeerCount        = 64
-	defaultMaxMergeRegionSize         = 20
-	defaultSplitMergeInterval         = time.Hour
-	defaultSwitchWitnessInterval      = time.Hour
-	defaultEnableDiagnostic           = false
-	defaultPatrolRegionInterval       = 10 * time.Millisecond
-	defaultMaxStoreDownTime           = 30 * time.Minute
-	defaultLeaderScheduleLimit        = 4
-	defaultWitnessLeaderScheduleLimit = 2048
-	defaultRegionScheduleLimit        = 2048
-	defaultWitnessScheduleLimit       = 4
-	defaultReplicaScheduleLimit       = 64
-	defaultMergeScheduleLimit         = 8
-	defaultHotRegionScheduleLimit     = 4
-	defaultTolerantSizeRatio          = 0
-	defaultLowSpaceRatio              = 0.8
-	defaultHighSpaceRatio             = 0.7
-	defaultRegionScoreFormulaVersion  = "v2"
+	defaultMaxReplicas               = 3
+	defaultMaxSnapshotCount          = 64
+	defaultMaxPendingPeerCount       = 64
+	defaultMaxMergeRegionSize        = 20
+	defaultSplitMergeInterval        = time.Hour
+	defaultSwitchWitnessInterval     = time.Hour
+	defaultEnableDiagnostic          = false
+	defaultPatrolRegionInterval      = 10 * time.Millisecond
+	defaultMaxStoreDownTime          = 30 * time.Minute
+	defaultLeaderScheduleLimit       = 4
+	defaultRegionScheduleLimit       = 2048
+	defaultWitnessScheduleLimit      = 4
+	defaultReplicaScheduleLimit      = 64
+	defaultMergeScheduleLimit        = 8
+	defaultHotRegionScheduleLimit    = 4
+	defaultTolerantSizeRatio         = 0
+	defaultLowSpaceRatio             = 0.8
+	defaultHighSpaceRatio            = 0.7
+	defaultRegionScoreFormulaVersion = "v2"
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
@@ -855,9 +852,6 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	adjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
 	if !meta.IsDefined("leader-schedule-limit") {
 		adjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
-	}
-	if !meta.IsDefined("witness-leader-schedule-limit") {
-		adjustUint64(&c.WitnessLeaderScheduleLimit, defaultWitnessLeaderScheduleLimit)
 	}
 	if !meta.IsDefined("region-schedule-limit") {
 		adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
