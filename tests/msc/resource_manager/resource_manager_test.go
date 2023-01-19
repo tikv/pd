@@ -141,7 +141,6 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	for {
 		select {
 		case <-time.After(time.Second):
-			//close(watchChan)
 			return
 		case res := <-watchChan:
 			if i < 6 {

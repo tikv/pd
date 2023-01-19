@@ -15,10 +15,11 @@
 package client_test
 
 import (
-	pd "github.com/tikv/pd/client"
 	"strconv"
 	"testing"
 	"time"
+
+	pd "github.com/tikv/pd/client"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -204,7 +205,6 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 	for {
 		select {
 		case <-time.After(time.Second):
-			close(configChan)
 			return
 		case res := <-configChan:
 			for _, r := range res {
