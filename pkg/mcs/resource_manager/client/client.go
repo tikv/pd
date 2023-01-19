@@ -336,7 +336,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 }
 
 // OnResponse is used to consume tokens atfer receiving response
-func (c *ResourceGroupsController) OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
+func (c *ResourceGroupsController) OnResponse(_ context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
 	if _, ok := defaultWhiteList[resourceGroupName]; ok {
 		return nil
 	}
@@ -345,7 +345,7 @@ func (c *ResourceGroupsController) OnResponse(ctx context.Context, resourceGroup
 		log.Warn("[resource group] resourceGroupName is not existed.", zap.String("resourceGroupName", resourceGroupName))
 	}
 	gc := tmp.(*groupCostController)
-	gc.onResponse(ctx, req, resp)
+	gc.onResponse(req, resp)
 	return nil
 }
 
@@ -770,7 +770,7 @@ retryLoop:
 	return nil
 }
 
-func (gc *groupCostController) onResponse(ctx context.Context, req RequestInfo, resp ResponseInfo) {
+func (gc *groupCostController) onResponse(req RequestInfo, resp ResponseInfo) {
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
