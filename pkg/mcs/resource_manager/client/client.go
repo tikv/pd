@@ -315,6 +315,7 @@ func (c *ResourceGroupsController) mainLoop(ctx context.Context) {
 	}
 }
 
+// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
 ) (err error) {
@@ -330,10 +331,11 @@ func (c *ResourceGroupsController) OnRequestWait(
 			return errors.Errorf("[resource group] resourceGroupName %s is not existed.", resourceGroupName)
 		}
 	}
-	err = gc.OnRequestWait(ctx, info)
+	err = gc.onRequestWait(ctx, info)
 	return err
 }
 
+// OnResponse is used to consume tokens atfer receiving response
 func (c *ResourceGroupsController) OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
 	if _, ok := defaultWhiteList[resourceGroupName]; ok {
 		return nil
@@ -343,7 +345,7 @@ func (c *ResourceGroupsController) OnResponse(ctx context.Context, resourceGroup
 		log.Warn("[resource group] resourceGroupName is not existed.", zap.String("resourceGroupName", resourceGroupName))
 	}
 	gc := tmp.(*groupCostController)
-	gc.OnResponse(ctx, req, resp)
+	gc.onResponse(ctx, req, resp)
 	return nil
 }
 
@@ -724,8 +726,7 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 	return value
 }
 
-// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
-func (gc *groupCostController) OnRequestWait(
+func (gc *groupCostController) onRequestWait(
 	ctx context.Context, info RequestInfo,
 ) (err error) {
 	delta := &rmpb.Consumption{}
@@ -769,8 +770,7 @@ retryLoop:
 	return nil
 }
 
-// OnResponse is used to consume tokens atfer receiving response
-func (gc *groupCostController) OnResponse(ctx context.Context, req RequestInfo, resp ResponseInfo) {
+func (gc *groupCostController) onResponse(ctx context.Context, req RequestInfo, resp ResponseInfo) {
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
