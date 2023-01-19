@@ -133,7 +133,7 @@ func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ 
 	for _, t := range targets {
 		targetIDs = append(targetIDs, t.GetID())
 	}
-	return operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), targetIDs, operator.OpLeader)
+	return operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), targetIDs, operator.OpWitnessLeader)
 }
 
 // RecvRegionInfo receives a checked region from coordinator
