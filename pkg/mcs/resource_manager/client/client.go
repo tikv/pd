@@ -51,9 +51,9 @@ type ResourceGroupProvider interface {
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 }
 
-var _ ResourceGroupKVInterceptor = (*resourceGroupsController)(nil)
+var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
-type resourceGroupsController struct {
+type ResourceGroupsController struct {
 	clientUniqueID   uint64
 	provider         ResourceGroupProvider
 	groupsController sync.Map
@@ -92,15 +92,15 @@ type resourceGroupsController struct {
 	}
 }
 
-// NewResourceGroupController returns a new resourceGroupsController which impls ResourceGroupKVInterceptor
-func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupProvider, requestUnitConfig *RequestUnitConfig) (*resourceGroupsController, error) {
+// NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
+func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupProvider, requestUnitConfig *RequestUnitConfig) (*ResourceGroupsController, error) {
 	var config *Config
 	if requestUnitConfig != nil {
 		config = generateConfig(requestUnitConfig)
 	} else {
 		config = DefaultConfig()
 	}
-	return &resourceGroupsController{
+	return &ResourceGroupsController{
 		clientUniqueID:     clientUniqueID,
 		provider:           provider,
 		config:             config,
@@ -111,7 +111,7 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 }
 
 // Start starts resourceGroupController service
-func (c *resourceGroupsController) Start(ctx context.Context) error {
+func (c *ResourceGroupsController) Start(ctx context.Context) error {
 	if err := c.updateAllResourceGroups(ctx); err != nil {
 		log.Error("update ResourceGroup failed", zap.Error(err))
 	}
@@ -121,7 +121,7 @@ func (c *resourceGroupsController) Start(ctx context.Context) error {
 	return nil
 }
 
-func (c *resourceGroupsController) Stop() error {
+func (c *ResourceGroupsController) Stop() error {
 	if c.loopCancel == nil {
 		return errors.Errorf("resourceGroupsController does not start.")
 	}
@@ -129,7 +129,7 @@ func (c *resourceGroupsController) Stop() error {
 	return nil
 }
 
-func (c *resourceGroupsController) putResourceGroup(ctx context.Context, name string) (*groupCostController, error) {
+func (c *ResourceGroupsController) putResourceGroup(ctx context.Context, name string) (*groupCostController, error) {
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
 		return nil, err
@@ -142,7 +142,7 @@ func (c *resourceGroupsController) putResourceGroup(ctx context.Context, name st
 	return gc, nil
 }
 
-func (c *resourceGroupsController) updateAllResourceGroups(ctx context.Context) error {
+func (c *ResourceGroupsController) updateAllResourceGroups(ctx context.Context) error {
 	groups, err := c.provider.ListResourceGroups(ctx)
 	if err != nil {
 		return err
@@ -164,7 +164,7 @@ func (c *resourceGroupsController) updateAllResourceGroups(ctx context.Context) 
 	return nil
 }
 
-func (c *resourceGroupsController) initRunState() {
+func (c *ResourceGroupsController) initRunState() {
 	now := time.Now()
 	c.run.now = now
 	c.run.lastRequestTime = now
@@ -176,7 +176,7 @@ func (c *resourceGroupsController) initRunState() {
 	})
 }
 
-func (c *resourceGroupsController) updateRunState(ctx context.Context) {
+func (c *ResourceGroupsController) updateRunState(ctx context.Context) {
 	c.run.now = time.Now()
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
@@ -185,7 +185,7 @@ func (c *resourceGroupsController) updateRunState(ctx context.Context) {
 	})
 }
 
-func (c *resourceGroupsController) shouldReportConsumption() bool {
+func (c *ResourceGroupsController) shouldReportConsumption() bool {
 	if c.run.requestInProgress {
 		return false
 	}
@@ -205,7 +205,7 @@ func (c *resourceGroupsController) shouldReportConsumption() bool {
 	return false
 }
 
-func (c *resourceGroupsController) updateAvgRequestResourcePerSec() {
+func (c *ResourceGroupsController) updateAvgRequestResourcePerSec() {
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
 		gc.updateAvgRequestResourcePerSec()
@@ -213,7 +213,7 @@ func (c *resourceGroupsController) updateAvgRequestResourcePerSec() {
 	})
 }
 
-func (c *resourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenBucketResponse) {
+func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenBucketResponse) {
 	for _, res := range resp {
 		name := res.GetResourceGroupName()
 		v, ok := c.groupsController.Load(name)
@@ -225,7 +225,7 @@ func (c *resourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 	}
 }
 
-func (c *resourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, low bool) {
+func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, low bool) {
 	requests := make([]*rmpb.TokenBucketRequest, 0)
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
@@ -240,7 +240,7 @@ func (c *resourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 	}
 }
 
-func (c *resourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, source string) {
+func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, source string) {
 	now := time.Now()
 	c.run.lastRequestTime = now
 	c.run.requestInProgress = true
@@ -249,7 +249,7 @@ func (c *resourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		TargetRequestPeriodMs: uint64(c.config.targetPeriod / time.Millisecond),
 	}
 	go func() {
-		log.Info("[resource group controllor] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
+		log.Debug("[resource group controllor] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
 		resp, err := c.provider.AcquireTokenBuckets(ctx, req)
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
@@ -258,12 +258,12 @@ func (c *resourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			}
 			resp = nil
 		}
-		log.Info("[resource group controllor] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", time.Since(now)))
+		log.Debug("[resource group controllor] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", time.Since(now)))
 		c.tokenResponseChan <- resp
 	}()
 }
 
-func (c *resourceGroupsController) handleTokenBucketTrickEvent(ctx context.Context) {
+func (c *ResourceGroupsController) handleTokenBucketTrickEvent(ctx context.Context) {
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
 		gc.handleTokenBucketTrickEvent(ctx)
@@ -271,7 +271,7 @@ func (c *resourceGroupsController) handleTokenBucketTrickEvent(ctx context.Conte
 	})
 }
 
-func (c *resourceGroupsController) mainLoop(ctx context.Context) {
+func (c *ResourceGroupsController) mainLoop(ctx context.Context) {
 	interval := c.config.groupLoopUpdateInterval
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -311,7 +311,7 @@ func (c *resourceGroupsController) mainLoop(ctx context.Context) {
 	}
 }
 
-func (c *resourceGroupsController) OnRequestWait(
+func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
 ) (err error) {
 	if _, ok := defaultWhiteList[resourceGroupName]; ok {
@@ -330,7 +330,7 @@ func (c *resourceGroupsController) OnRequestWait(
 	return err
 }
 
-func (c *resourceGroupsController) OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
+func (c *ResourceGroupsController) OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
 	if _, ok := defaultWhiteList[resourceGroupName]; ok {
 		return nil
 	}

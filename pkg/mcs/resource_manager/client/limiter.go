@@ -194,6 +194,8 @@ func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now
 
 // SetupNotificationThreshold enables the notification at the given threshold.
 func (lim *Limiter) SetupNotificationThreshold(now time.Time, threshold float64) {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
 	lim.advance(now)
 	lim.notifyThreshold = threshold
 }
@@ -215,17 +217,23 @@ func (lim *Limiter) notify() {
 // maybeNotify checks if it's time to send the notification and if so, performs
 // the notification.
 func (lim *Limiter) maybeNotify() {
-	if lim.IsLowTokens() {
+	if lim.isLowTokensLocked() {
 		lim.notify()
 	}
 }
 
-// IsLowTokens returns whether the limiter is in low tokens
-func (lim *Limiter) IsLowTokens() bool {
+func (lim *Limiter) isLowTokensLocked() bool {
 	if lim.isLowProcess || (lim.notifyThreshold > 0 && lim.tokens < lim.notifyThreshold) {
 		return true
 	}
 	return false
+}
+
+// IsLowTokens returns whether the limiter is in low tokens
+func (lim *Limiter) IsLowTokens() bool {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	return lim.isLowTokensLocked()
 }
 
 // RemoveTokens decreases the amount of tokens currently available.
