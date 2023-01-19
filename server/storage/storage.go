@@ -43,6 +43,7 @@ type Storage interface {
 	endpoint.KeyspaceGCSafePointStorage
 	endpoint.KeyspaceStorage
 	endpoint.ResourceGroupStorage
+	endpoint.TSOStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.
