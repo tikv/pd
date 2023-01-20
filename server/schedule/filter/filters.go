@@ -476,6 +476,7 @@ const (
 	regionTarget
 	witnessTarget
 	scatterRegionTarget
+	fastFailoverTarget
 )
 
 func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
@@ -497,6 +498,8 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	case scatterRegionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
+	case fastFailoverTarget:
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected}
 	}
 	for _, cf := range funcs {
 		if status := cf(opt, store); !status.IsOK() {
@@ -530,13 +533,11 @@ func (f *StoreStateFilter) Target(opts *config.PersistOptions, store *core.Store
 			return
 		}
 	}
+	if f.MoveRegion && f.AllowFastFailover {
+		return f.anyConditionMatch(fastFailoverTarget, opts, store)
+	}
 	if f.MoveRegion && f.ScatterRegion {
 		if status = f.anyConditionMatch(scatterRegionTarget, opts, store); !status.IsOK() {
-			return
-		}
-	}
-	if f.MoveRegion && f.AllowFastFailover {
-		if status = f.anyConditionMatch(witnessTarget, opts, store); !status.IsOK() {
 			return
 		}
 	}
