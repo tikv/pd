@@ -15,10 +15,16 @@
 package placement
 
 import (
+	"sync/atomic"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+)
+
+const (
+	minHitCountToCacheHit = 10 // RegionHit is cached only when the number of hits exceeds this
 )
 
 // RegionRuleFitCacheManager stores each region's RegionFit Result and involving variables
@@ -65,7 +71,7 @@ func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionIn
 	}
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
-	if cache, ok := manager.regionCaches[region.GetID()]; ok && cache.bestFit != nil {
+	if cache, ok := manager.regionCaches[region.GetID()]; ok {
 		if cache.IsUnchanged(region, rules, stores) {
 			return true, cache.bestFit
 		}
@@ -80,7 +86,12 @@ func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit 
 	}
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	fit.SetCached(true)
+	if cache, ok := manager.regionCaches[region.GetID()]; ok {
+		if atomic.AddUint32(&cache.hitCount, 1) >= minHitCountToCacheHit {
+			cache.bestFit = fit
+		}
+		return
+	}
 	manager.regionCaches[region.GetID()] = manager.toRegionRuleFitCache(region, fit)
 }
 
@@ -90,6 +101,7 @@ type regionRuleFitCache struct {
 	regionStores []*storeCache
 	rules        []ruleCache
 	bestFit      *RegionFit
+	hitCount     uint32
 }
 
 // IsUnchanged checks whether the region and rules unchanged for the cache
@@ -132,7 +144,8 @@ func (manager *RegionRuleFitCacheManager) toRegionRuleFitCache(region *core.Regi
 		region:       toRegionCache(region),
 		regionStores: manager.toStoreCacheList(fit.regionStores),
 		rules:        toRuleCacheList(fit.rules),
-		bestFit:      fit,
+		bestFit:      nil,
+		hitCount:     0,
 	}
 }
 
