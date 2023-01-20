@@ -57,7 +57,7 @@ type Operator struct {
 func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, approximateSize int64, steps ...OpStep) *Operator {
 	level := core.Medium
 	if kind&OpAdmin != 0 {
-		level = core.High
+		level = core.Urgent
 	}
 	maxDuration := float64(0)
 	for _, v := range steps {
