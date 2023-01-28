@@ -47,7 +47,6 @@ const (
 	extendedReportingPeriodFactor  = 4
 	defaultGroupLoopUpdateInterval = 1 * time.Second
 	defaultTargetPeriod            = 10 * time.Second
-	defaultMaxRequestTokens        = 1e8
 )
 
 const (
@@ -93,7 +92,6 @@ func DefaultRequestUnitConfig() *RequestUnitConfig {
 type Config struct {
 	groupLoopUpdateInterval time.Duration
 	targetPeriod            time.Duration
-	maxRequestTokens        float64
 
 	ReadBaseCost   RequestUnit
 	ReadBytesCost  RequestUnit
@@ -121,6 +119,5 @@ func generateConfig(ruConfig *RequestUnitConfig) *Config {
 	}
 	cfg.groupLoopUpdateInterval = defaultGroupLoopUpdateInterval
 	cfg.targetPeriod = defaultTargetPeriod
-	cfg.maxRequestTokens = defaultMaxRequestTokens
 	return cfg
 }

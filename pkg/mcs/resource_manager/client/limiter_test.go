@@ -83,7 +83,7 @@ func checkTokens(re *require.Assertions, lim *Limiter, t time.Time, expected flo
 }
 
 func TestSimpleReserve(t *testing.T) {
-	lim := NewLimiter(t0, 1, 2, 1000, make(chan struct{}, 1))
+	lim := NewLimiter(t0, 1, 2, make(chan struct{}, 1))
 
 	runReserveMax(t, lim, request{t0, 3, t1, true})
 	runReserveMax(t, lim, request{t0, 3, t4, true})
@@ -97,7 +97,7 @@ func TestSimpleReserve(t *testing.T) {
 
 func TestReconfig(t *testing.T) {
 	re := require.New(t)
-	lim := NewLimiter(t0, 1, 2, 1000, make(chan struct{}, 1))
+	lim := NewLimiter(t0, 1, 2, make(chan struct{}, 1))
 
 	runReserveMax(t, lim, request{t0, 4, t2, true})
 	args := tokenBucketReconfigureArgs{
@@ -111,7 +111,7 @@ func TestReconfig(t *testing.T) {
 
 func TestNotify(t *testing.T) {
 	nc := make(chan struct{}, 1)
-	lim := NewLimiter(t0, 1, 0, 1000, nc)
+	lim := NewLimiter(t0, 1, 0, nc)
 
 	args := tokenBucketReconfigureArgs{
 		NewTokens:       1000.,
@@ -132,8 +132,8 @@ func TestCancel(t *testing.T) {
 	ctx1, cancel1 := context.WithDeadline(ctx, t2)
 	re := require.New(t)
 	nc := make(chan struct{}, 1)
-	lim1 := NewLimiter(t0, 1, 10, 100, nc)
-	lim2 := NewLimiter(t0, 1, 0, 100, nc)
+	lim1 := NewLimiter(t0, 1, 10, nc)
+	lim2 := NewLimiter(t0, 1, 0, nc)
 
 	r1 := runReserveMax(t, lim1, request{t0, 5, t0, true})
 	checkTokens(re, lim1, t0, 5)

@@ -248,7 +248,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		TargetRequestPeriodMs: uint64(c.config.targetPeriod / time.Millisecond),
 	}
 	go func() {
-		log.Debug("[resource group controllor] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
+		log.Debug("[resource group controller] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
 		resp, err := c.provider.AcquireTokenBuckets(ctx, req)
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
@@ -257,7 +257,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			}
 			resp = nil
 		}
-		log.Debug("[resource group controllor] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", time.Since(now)))
+		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", time.Since(now)))
 		c.tokenResponseChan <- resp
 	}()
 }
@@ -327,7 +327,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 	return err
 }
 
-// OnResponse is used to consume tokens atfer receiving response
+// OnResponse is used to consume tokens after receiving response
 func (c *ResourceGroupsController) OnResponse(_ context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
 	tmp, ok := c.groupsController.Load(resourceGroupName)
 	if !ok {
@@ -410,7 +410,7 @@ func newGroupCostController(group *rmpb.ResourceGroup, mainCfg *Config, lowRUNot
 	case rmpb.GroupMode_RUMode:
 		gc.handleRespFunc = gc.handleRUTokenResponse
 	case rmpb.GroupMode_RawMode:
-		gc.handleRespFunc = gc.handleResourceTokenResponse
+		gc.handleRespFunc = gc.handleRawResourceTokenResponse
 	}
 
 	gc.mu.consumption = &rmpb.Consumption{}
@@ -431,7 +431,7 @@ func (gc *groupCostController) initRunState() {
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.mainCfg.maxRequestTokens, gc.lowRUNotifyChan),
+				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
@@ -441,7 +441,7 @@ func (gc *groupCostController) initRunState() {
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.mainCfg.maxRequestTokens, gc.lowRUNotifyChan),
+				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
@@ -475,7 +475,7 @@ func (gc *groupCostController) updateRunState(ctx context.Context) {
 			}
 		}
 	}
-	log.Debug("update run state", zap.Any("request unit comsumption", gc.run.consumption))
+	log.Debug("update run state", zap.Any("request unit consumption", gc.run.consumption))
 	gc.run.now = newTime
 }
 
@@ -520,7 +520,7 @@ func (gc *groupCostController) updateAvgRaWResourcePerSec() {
 		if !gc.calcAvg(counter, getRawResourceValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
-		log.Debug("[resource group controllor] update avg raw resource per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
+		log.Debug("[resource group controller] update avg raw resource per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
 	}
 }
 
@@ -529,7 +529,7 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 		if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
-		log.Debug("[resource group controllor] update avg ru per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
+		log.Debug("[resource group controller] update avg ru per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
 	}
 }
 
@@ -578,7 +578,7 @@ func (gc *groupCostController) handleTokenBucketResponse(resp *rmpb.TokenBucketR
 	}
 }
 
-func (gc *groupCostController) handleResourceTokenResponse(resp *rmpb.TokenBucketResponse) {
+func (gc *groupCostController) handleRawResourceTokenResponse(resp *rmpb.TokenBucketResponse) {
 	for _, grantedTB := range resp.GetGrantedResourceTokens() {
 		typ := grantedTB.GetType()
 		counter, ok := gc.run.resourceTokens[typ]
@@ -631,7 +631,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		cfg.NotifyThreshold = notifyThreshold
 		counter.lastDeadline = time.Time{}
 	} else {
-		// Otherwise the granted token is delivered to the client by fillrate.
+		// Otherwise the granted token is delivered to the client by fill rate.
 		cfg.NewTokens = 0
 		trickleDuration := time.Duration(trickleTimeMs) * time.Millisecond
 		deadline := gc.run.now.Add(trickleDuration)
