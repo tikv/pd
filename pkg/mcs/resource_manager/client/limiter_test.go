@@ -90,7 +90,7 @@ func TestSimpleReserve(t *testing.T) {
 	runReserveMax(t, lim, request{t3, 2, t6, true})
 
 	runReserve(t, lim, request{t3, 2, t7, false}, time.Second*4)
-	runReserveMax(t, lim, request{t5, 2000, t6, false})
+	runReserve(t, lim, request{t5, 2000, t6, false}, time.Second*100)
 
 	runReserve(t, lim, request{t3, 2, t8, true}, time.Second*8)
 }
