@@ -31,18 +31,20 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/id"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/replication"
 	"github.com/tikv/pd/server/schedule"
@@ -54,8 +56,6 @@ import (
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/statistics/buckets"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/storage/endpoint"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -64,8 +64,12 @@ var (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
 	// If interval in config is zero, it means not to persist resolved ts and check config with this DefaultMinResolvedTSPersistenceInterval
 	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
-	regionUpdateCacheEventCounter           = regionEventCounter.WithLabelValues("update_cache")
-	regionUpdateKVEventCounter              = regionEventCounter.WithLabelValues("update_kv")
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
+	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
+	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
+	versionNotMatchCounter        = bucketEventCounter.WithLabelValues("version_not_match")
+	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -795,7 +799,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	region := c.core.GetRegion(buckets.GetRegionId())
 	if region == nil {
-		bucketEventCounter.WithLabelValues("region_cache_miss").Inc()
+		regionCacheMissCounter.Inc()
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
 	// use CAS to update the bucket information.
@@ -806,7 +810,7 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 		old := region.GetBuckets()
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && buckets.GetVersion() <= old.GetVersion() {
-			bucketEventCounter.WithLabelValues("version_not_match").Inc()
+			versionNotMatchCounter.Inc()
 			return nil
 		}
 		failpoint.Inject("concurrentBucketHeartbeat", func() {
@@ -816,7 +820,7 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 			return nil
 		}
 	}
-	bucketEventCounter.WithLabelValues("update_failed").Inc()
+	updateFailedCounter.Inc()
 	return nil
 }
 
@@ -881,6 +885,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 				c.regionStats.ClearDefunctRegion(item.GetID())
 			}
 			c.labelLevelStats.ClearDefunctRegion(item.GetID())
+			c.ruleManager.InvalidCache(item.GetID())
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
@@ -1003,9 +1008,19 @@ func (c *RaftCluster) RandLearnerRegions(storeID uint64, ranges []core.KeyRange)
 	return c.core.RandLearnerRegions(storeID, ranges)
 }
 
+// RandWitnessRegions returns some random regions that has a witness peer on the store.
+func (c *RaftCluster) RandWitnessRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+	return c.core.RandWitnessRegions(storeID, ranges)
+}
+
 // GetLeaderStore returns all stores that contains the region's leader peer.
 func (c *RaftCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
 	return c.core.GetLeaderStore(region)
+}
+
+// GetNonWitnessVoterStores returns all stores that contains the region's non-witness voter peer.
+func (c *RaftCluster) GetNonWitnessVoterStores(region *core.RegionInfo) []*core.StoreInfo {
+	return c.core.GetNonWitnessVoterStores(region)
 }
 
 // GetFollowerStores returns all stores that contains the region's follower peer.

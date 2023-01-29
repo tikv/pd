@@ -27,16 +27,16 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/tso"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -51,9 +51,6 @@ const (
 	// tso
 	maxMergeTSORequests    = 10000
 	defaultTSOProxyTimeout = 3 * time.Second
-
-	// global config
-	globalConfigPath = "/global/config/"
 )
 
 // gRPC errors
@@ -1888,83 +1885,77 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
-		name := globalConfigPath + item.GetName()
-		value := item.GetValue()
-		ops[i] = clientv3.OpPut(name, value)
+		name := item.GetName()
+		switch item.GetKind() {
+		case pdpb.EventType_PUT:
+			ops[i] = clientv3.OpPut(s.GetFinalPathWithinPD(request.GetConfigPath()+name), item.GetValue())
+		case pdpb.EventType_DELETE:
+			ops[i] = clientv3.OpDelete(s.GetFinalPathWithinPD(request.GetConfigPath() + name))
+		}
 	}
 	res, err :=
 		kv.NewSlowLogTxn(s.client).Then(ops...).Commit()
 	if err != nil {
-		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}, err
+		return &pdpb.StoreGlobalConfigResponse{}, err
 	}
 	if !res.Succeeded {
-		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "failed to execute StoreGlobalConfig transaction"}}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
+		return &pdpb.StoreGlobalConfigResponse{}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
 	}
-	return &pdpb.StoreGlobalConfigResponse{}, err
+	return &pdpb.StoreGlobalConfigResponse{}, nil
 }
 
 // LoadGlobalConfig load global config from etcd
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
-	names := request.Names
-	res := make([]*pdpb.GlobalConfigItem, len(names))
-	for i, name := range names {
-		r, err := s.client.Get(ctx, globalConfigPath+name)
-		if err != nil {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
-		} else if len(r.Kvs) == 0 {
-			msg := "key " + name + " not found"
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
-		} else {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Value: string(r.Kvs[0].Value)}
-		}
+	configPath := request.GetConfigPath()
+	r, err := s.client.Get(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix())
+	if err != nil {
+		return &pdpb.LoadGlobalConfigResponse{}, err
 	}
-	return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
+	res := make([]*pdpb.GlobalConfigItem, len(r.Kvs))
+	for i, value := range r.Kvs {
+		res[i] = &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: string(value.Key), Value: string(value.Value)}
+	}
+	return &pdpb.LoadGlobalConfigResponse{Items: res, Revision: r.Header.GetRevision()}, nil
 }
 
 // WatchGlobalConfig if the connection of WatchGlobalConfig is end
-// or stoped by whatever reason
-// just reconnect to it.
-func (s *GrpcServer) WatchGlobalConfig(_ *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
+// or stopped by whatever reason, just reconnect to it.
+// Watch on revision which greater than or equal to the required revision.
+func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
-	err := s.sendAllGlobalConfig(ctx, server)
-	if err != nil {
-		return err
-	}
-	watchChan := s.client.Watch(ctx, globalConfigPath, clientv3.WithPrefix())
+	revision := req.GetRevision()
+	// If the revision is compacted, will meet required revision has been compacted error.
+	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
+	// - If required revision >= CompactRevision, just keep watching.
+	watchChan := s.client.Watch(ctx, s.GetFinalPathWithinPD(req.GetConfigPath()), clientv3.WithPrefix(), clientv3.WithRev(revision))
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case res := <-watchChan:
+			if revision < res.CompactRevision {
+				if err := server.Send(&pdpb.WatchGlobalConfigResponse{
+					Revision: res.CompactRevision,
+					Header: s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision. %d", revision, res.CompactRevision)),
+				}); err != nil {
+					return err
+				}
+			}
+			revision = res.Header.GetRevision()
+
 			cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
 			for _, e := range res.Events {
-				if e.Type != clientv3.EventTypePut {
-					continue
-				}
-				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Value: string(e.Kv.Value)})
+				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Value: string(e.Kv.Value), Kind: pdpb.EventType(e.Type)})
 			}
 			if len(cfgs) > 0 {
-				err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs})
-				if err != nil {
+				if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs, Revision: res.Header.GetRevision()}); err != nil {
 					return err
 				}
 			}
 		}
 	}
-}
-
-func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_WatchGlobalConfigServer) error {
-	configList, err := s.client.Get(ctx, globalConfigPath, clientv3.WithPrefix())
-	if err != nil {
-		return err
-	}
-	ls := make([]*pdpb.GlobalConfigItem, configList.Count)
-	for i, kv := range configList.Kvs {
-		ls[i] = &pdpb.GlobalConfigItem{Name: string(kv.Key), Value: string(kv.Value)}
-	}
-	err = server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
-	return err
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors

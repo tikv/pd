@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -34,8 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo"
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
@@ -165,6 +165,8 @@ type Config struct {
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
+
+	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 }
 
 // NewConfig creates a new config.
@@ -253,8 +255,8 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
-	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
-	DefaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
+	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
+	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 
@@ -550,7 +552,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	adjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 
-	adjustDuration(&c.TSOUpdatePhysicalInterval, DefaultTSOUpdatePhysicalInterval)
+	adjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
@@ -672,6 +674,8 @@ type ScheduleConfig struct {
 	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
+	// WitnessScheduleLimit is the max coexist witness schedules.
+	WitnessScheduleLimit uint64 `toml:"witness-schedule-limit" json:"witness-schedule-limit"`
 	// ReplicaScheduleLimit is the max coexist replica schedules.
 	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
 	// MergeScheduleLimit is the max coexist merge schedules.
@@ -807,6 +811,7 @@ const (
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
 	defaultRegionScheduleLimit       = 2048
+	defaultWitnessScheduleLimit      = 4
 	defaultReplicaScheduleLimit      = 64
 	defaultMergeScheduleLimit        = 8
 	defaultHotRegionScheduleLimit    = 4
@@ -850,6 +855,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	}
 	if !meta.IsDefined("region-schedule-limit") {
 		adjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
+	}
+	if !meta.IsDefined("witness-schedule-limit") {
+		adjustUint64(&c.WitnessScheduleLimit, defaultWitnessScheduleLimit)
 	}
 	if !meta.IsDefined("replica-schedule-limit") {
 		adjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
@@ -1052,6 +1060,7 @@ type SchedulerConfig struct {
 var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
+	{Type: "balance-witness"},
 	{Type: "hot-region"},
 	{Type: "split-bucket"},
 }
@@ -1296,6 +1305,26 @@ func (c *Config) GetConfigFile() string {
 	return c.configFile
 }
 
+// IsLocalTSOEnabled returns if the local TSO is enabled.
+func (c *Config) IsLocalTSOEnabled() bool {
+	return c.EnableLocalTSO
+}
+
+// GetTSOUpdatePhysicalInterval returns TSO update physical interval.
+func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
+	return c.TSOUpdatePhysicalInterval.Duration
+}
+
+// GetTSOSaveInterval returns TSO save interval.
+func (c *Config) GetTSOSaveInterval() time.Duration {
+	return c.TSOSaveInterval.Duration
+}
+
+// GetTLSConfig returns the TLS config.
+func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
+	return &c.Security.TLSConfig
+}
+
 // GenEmbedEtcdConfig generates a configuration for embedded etcd.
 func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg := embed.NewConfig()
@@ -1449,4 +1478,10 @@ type SecurityConfig struct {
 	// RedactInfoLog indicates that whether enabling redact log
 	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
 	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
+}
+
+// KeyspaceConfig is the configuration for keyspace management.
+type KeyspaceConfig struct {
+	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
+	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
 }

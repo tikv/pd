@@ -43,6 +43,7 @@ func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []f
 	re.Len(data, len(expected))
 	for i, x := range data {
 		ma.Add(x)
+		re.Equal(x, ma.GetInstantaneous())
 		re.LessOrEqual(math.Abs(ma.Get()-expected[i]), 1e-7)
 	}
 }

@@ -26,12 +26,12 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 )
@@ -348,6 +348,24 @@ func (m *RuleManager) SetRegionFitCache(region *core.RegionInfo, fit *RegionFit)
 // InvalidCache invalids the cache.
 func (m *RuleManager) InvalidCache(regionID uint64) {
 	m.cache.Invalid(regionID)
+}
+
+// SetPlaceholderRegionFitCache sets a placeholder region fit cache information
+// Only used for testing
+func (m *RuleManager) SetPlaceholderRegionFitCache(region *core.RegionInfo) {
+	placeholderCache := &regionRuleFitCache{region: toRegionCache(region)}
+	m.cache.mu.Lock()
+	defer m.cache.mu.Unlock()
+	m.cache.regionCaches[region.GetID()] = placeholderCache
+}
+
+// CheckIsCachedDirectly returns whether the region's fit is cached
+// Only used for testing
+func (m *RuleManager) CheckIsCachedDirectly(regionID uint64) bool {
+	m.cache.mu.RLock()
+	defer m.cache.mu.RUnlock()
+	_, ok := m.cache.regionCaches[regionID]
+	return ok
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {

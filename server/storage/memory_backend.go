@@ -15,8 +15,8 @@
 package storage
 
 import (
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 // memoryStorage is a storage that stores data in a memory B-Tree without any locks,

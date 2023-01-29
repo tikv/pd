@@ -16,14 +16,14 @@ package schedulers
 
 import (
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
 
@@ -32,6 +32,15 @@ const (
 	LabelName = "label-scheduler"
 	// LabelType is label scheduler type.
 	LabelType = "label"
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	labelCounter            = schedulerCounter.WithLabelValues(LabelName, "schedule")
+	labelNewOperatorCounter = schedulerCounter.WithLabelValues(LabelName, "new-operator")
+	labelNoTargetCounter    = schedulerCounter.WithLabelValues(LabelName, "no-target")
+	labelSkipCounter        = schedulerCounter.WithLabelValues(LabelName, "skip")
+	labelNoRegionCounter    = schedulerCounter.WithLabelValues(LabelName, "no-region")
 )
 
 func init() {
@@ -101,7 +110,7 @@ func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 }
 
 func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	labelCounter.Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
 	for _, s := range stores {
@@ -110,7 +119,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*ope
 		}
 	}
 	if len(rejectLeaderStores) == 0 {
-		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+		labelSkipCounter.Inc()
 		return nil, nil
 	}
 	log.Debug("label scheduler reject leader store list", zap.Reflect("stores", rejectLeaderStores))
@@ -131,7 +140,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*ope
 				RandomPick()
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))
-				schedulerCounter.WithLabelValues(s.GetName(), "no-target").Inc()
+				labelNoTargetCounter.Inc()
 				continue
 			}
 
@@ -140,10 +149,10 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*ope
 				log.Debug("fail to create transfer label reject leader operator", errs.ZapError(err))
 				return nil, nil
 			}
-			op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+			op.Counters = append(op.Counters, labelNewOperatorCounter)
 			return []*operator.Operator{op}, nil
 		}
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
+	labelNoRegionCounter.Inc()
 	return nil, nil
 }

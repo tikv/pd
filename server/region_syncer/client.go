@@ -22,9 +22,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -220,7 +220,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {
-						if old := region.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
+						if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
 							region.UpdateBuckets(buckets[i], old)
 						}
 					}

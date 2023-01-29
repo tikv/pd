@@ -24,11 +24,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 type createOperatorTestSuite struct {
@@ -1207,7 +1207,7 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner, IsWitness: true},
 			},
-			OpRegion,
+			OpRegion | OpWitness,
 			false,
 			[]OpStep{
 				BecomeNonWitness{StoreID: 2, PeerID: 2},
@@ -1218,7 +1218,7 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
 			},
-			OpRegion,
+			OpRegion | OpWitness,
 			false,
 			[]OpStep{
 				ChangePeerV2Enter{

@@ -25,14 +25,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 func TestRuleCheckerTestSuite(t *testing.T) {
@@ -604,7 +604,7 @@ func (suite *ruleCheckerTestSuite) TestIssue2419() {
 	suite.Equal(uint64(3), op.Step(2).(operator.RemovePeer).FromStore)
 }
 
-// Ref https://github.com/tikv/pd/issues/3521
+// Ref https://github.com/tikv/pd/issues/3521 https://github.com/tikv/pd/issues/5786
 // The problem is when offline a store, we may add learner multiple times if
 // the operator is timeout.
 func (suite *ruleCheckerTestSuite) TestPriorityFixOrphanPeer() {
@@ -618,18 +618,33 @@ func (suite *ruleCheckerTestSuite) TestPriorityFixOrphanPeer() {
 	suite.Nil(op)
 	var add operator.AddLearner
 	var remove operator.RemovePeer
+	// Ref 5786
+	originRegion := suite.cluster.GetRegion(1)
+	learner4 := &metapb.Peer{Id: 114, StoreId: 4, Role: metapb.PeerRole_Learner}
+	testRegion := originRegion.Clone(
+		core.WithAddPeer(learner4),
+		core.WithAddPeer(&metapb.Peer{Id: 115, StoreId: 5, Role: metapb.PeerRole_Learner}),
+		core.WithPendingPeers([]*metapb.Peer{originRegion.GetStorePeer(2), learner4}),
+	)
+	suite.cluster.PutRegion(testRegion)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("remove-orphan-peer", op.Desc())
+	suite.IsType(remove, op.Step(0))
+	// Ref #3521
 	suite.cluster.SetStoreOffline(2)
+	suite.cluster.PutRegion(originRegion)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.IsType(add, op.Step(0))
 	suite.Equal("replace-rule-offline-peer", op.Desc())
-	r := suite.cluster.GetRegion(1).Clone(core.WithAddPeer(
+	testRegion = suite.cluster.GetRegion(1).Clone(core.WithAddPeer(
 		&metapb.Peer{
-			Id:      5,
+			Id:      125,
 			StoreId: 4,
 			Role:    metapb.PeerRole_Learner,
 		}))
-	suite.cluster.PutRegion(r)
+	suite.cluster.PutRegion(testRegion)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.IsType(remove, op.Step(0))
 	suite.Equal("remove-orphan-peer", op.Desc())

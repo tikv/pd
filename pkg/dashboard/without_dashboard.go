@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	serviceGroup = server.ServiceGroup{
+	serviceGroup = server.APIServiceGroup{
 		Name:       "dashboard",
 		Version:    "v1",
 		IsCore:     false,
@@ -43,7 +43,7 @@ func SetCheckInterval(time.Duration) {}
 // GetServiceBuilders returns a empty Dashboard Builder
 func GetServiceBuilders() []server.HandlerBuilder {
 	return []server.HandlerBuilder{
-		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
+		func(context.Context, *server.Server) (http.Handler, server.APIServiceGroup, error) {
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.WriteString(w, "Dashboard is not built.\n")
 			})

@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -41,6 +41,25 @@ const (
 )
 
 const nonIsolation = "none"
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	regionMissPeerRegionCounter    = regionStatusGauge.WithLabelValues("miss-peer-region-count")
+	regionExtraPeerRegionCounter   = regionStatusGauge.WithLabelValues("extra-peer-region-count")
+	regionDownPeerRegionCounter    = regionStatusGauge.WithLabelValues("down-peer-region-count")
+	regionPendingPeerRegionCounter = regionStatusGauge.WithLabelValues("pending-peer-region-count")
+	regionLearnerPeerRegionCounter = regionStatusGauge.WithLabelValues("learner-peer-region-count")
+	regionEmptyRegionCounter       = regionStatusGauge.WithLabelValues("empty-region-count")
+	regionOversizedRegionCounter   = regionStatusGauge.WithLabelValues("oversized-region-count")
+	regionUndersizedRegionCounter  = regionStatusGauge.WithLabelValues("undersized-region-count")
+
+	offlineMissPeerRegionCounter    = offlineRegionStatusGauge.WithLabelValues("miss-peer-region-count")
+	offlineExtraPeerRegionCounter   = offlineRegionStatusGauge.WithLabelValues("extra-peer-region-count")
+	offlineDownPeerRegionCounter    = offlineRegionStatusGauge.WithLabelValues("down-peer-region-count")
+	offlinePendingPeerRegionCounter = offlineRegionStatusGauge.WithLabelValues("pending-peer-region-count")
+	offlineLearnerPeerRegionCounter = offlineRegionStatusGauge.WithLabelValues("learner-peer-region-count")
+	offlineOfflinePeerRegionCounter = offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count")
+)
 
 // RegionInfo is used to record the status of region.
 type RegionInfo struct {
@@ -274,21 +293,21 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 func (r *RegionStatistics) Collect() {
 	r.RLock()
 	defer r.RUnlock()
-	regionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.stats[MissPeer])))
-	regionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.stats[ExtraPeer])))
-	regionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.stats[DownPeer])))
-	regionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.stats[PendingPeer])))
-	regionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.stats[LearnerPeer])))
-	regionStatusGauge.WithLabelValues("empty-region-count").Set(float64(len(r.stats[EmptyRegion])))
-	regionStatusGauge.WithLabelValues("oversized-region-count").Set(float64(len(r.stats[OversizedRegion])))
-	regionStatusGauge.WithLabelValues("undersized-region-count").Set(float64(len(r.stats[UndersizedRegion])))
+	regionMissPeerRegionCounter.Set(float64(len(r.stats[MissPeer])))
+	regionExtraPeerRegionCounter.Set(float64(len(r.stats[ExtraPeer])))
+	regionDownPeerRegionCounter.Set(float64(len(r.stats[DownPeer])))
+	regionPendingPeerRegionCounter.Set(float64(len(r.stats[PendingPeer])))
+	regionLearnerPeerRegionCounter.Set(float64(len(r.stats[LearnerPeer])))
+	regionEmptyRegionCounter.Set(float64(len(r.stats[EmptyRegion])))
+	regionOversizedRegionCounter.Set(float64(len(r.stats[OversizedRegion])))
+	regionUndersizedRegionCounter.Set(float64(len(r.stats[UndersizedRegion])))
 
-	offlineRegionStatusGauge.WithLabelValues("miss-peer-region-count").Set(float64(len(r.offlineStats[MissPeer])))
-	offlineRegionStatusGauge.WithLabelValues("extra-peer-region-count").Set(float64(len(r.offlineStats[ExtraPeer])))
-	offlineRegionStatusGauge.WithLabelValues("down-peer-region-count").Set(float64(len(r.offlineStats[DownPeer])))
-	offlineRegionStatusGauge.WithLabelValues("pending-peer-region-count").Set(float64(len(r.offlineStats[PendingPeer])))
-	offlineRegionStatusGauge.WithLabelValues("learner-peer-region-count").Set(float64(len(r.offlineStats[LearnerPeer])))
-	offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count").Set(float64(len(r.offlineStats[OfflinePeer])))
+	offlineMissPeerRegionCounter.Set(float64(len(r.offlineStats[MissPeer])))
+	offlineExtraPeerRegionCounter.Set(float64(len(r.offlineStats[ExtraPeer])))
+	offlineDownPeerRegionCounter.Set(float64(len(r.offlineStats[DownPeer])))
+	offlinePendingPeerRegionCounter.Set(float64(len(r.offlineStats[PendingPeer])))
+	offlineLearnerPeerRegionCounter.Set(float64(len(r.offlineStats[LearnerPeer])))
+	offlineOfflinePeerRegionCounter.Set(float64(len(r.offlineStats[OfflinePeer])))
 }
 
 // Reset resets the metrics of the regions' status.

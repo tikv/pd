@@ -48,4 +48,5 @@ var (
 	statusRegionEmpty         = plan.NewStatus(plan.StatusRegionEmpty)
 	statusRegionNotMatchRule  = plan.NewStatus(plan.StatusRegionNotMatchRule)
 	statusRegionNotReplicated = plan.NewStatus(plan.StatusRegionNotReplicated)
+	statusRegionWitnessPeer   = plan.NewStatus(plan.StatusRegionNotMatchRule)
 )

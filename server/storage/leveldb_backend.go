@@ -25,10 +25,9 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/encryptionkm"
-	"github.com/tikv/pd/server/storage/endpoint"
 )
 
 const (
@@ -42,7 +41,7 @@ const (
 // which is mainly used by the PD region storage.
 type levelDBBackend struct {
 	*endpoint.StorageEndpoint
-	ekm                 *encryptionkm.KeyManager
+	ekm                 *encryption.Manager
 	mu                  syncutil.RWMutex
 	batchRegions        map[string]*metapb.Region
 	batchSize           int
@@ -57,7 +56,7 @@ type levelDBBackend struct {
 func newLevelDBBackend(
 	ctx context.Context,
 	filePath string,
-	ekm *encryptionkm.KeyManager,
+	ekm *encryption.Manager,
 ) (*levelDBBackend, error) {
 	levelDB, err := kv.NewLevelDBKV(filePath)
 	if err != nil {

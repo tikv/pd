@@ -19,11 +19,11 @@ import (
 	"sync/atomic"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/encryption"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/encryptionkm"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -40,8 +40,9 @@ type Storage interface {
 	endpoint.GCSafePointStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
-	endpoint.KeySpaceGCSafePointStorage
+	endpoint.KeyspaceGCSafePointStorage
 	endpoint.KeyspaceStorage
+	endpoint.ResourceGroupStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.
@@ -58,7 +59,7 @@ func NewStorageWithEtcdBackend(client *clientv3.Client, rootPath string) Storage
 func NewStorageWithLevelDBBackend(
 	ctx context.Context,
 	filePath string,
-	ekm *encryptionkm.KeyManager,
+	ekm *encryption.Manager,
 ) (Storage, error) {
 	return newLevelDBBackend(ctx, filePath, ekm)
 }

@@ -17,7 +17,7 @@ package statistics
 import (
 	"context"
 
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 // FlowItemTask indicates the task in flowItem queue
@@ -140,17 +140,14 @@ func (t *checkRegionHotTask) waitRet(ctx context.Context) bool {
 }
 
 type collectMetricsTask struct {
-	typ string
 }
 
-func newCollectMetricsTask(typ string) *collectMetricsTask {
-	return &collectMetricsTask{
-		typ: typ,
-	}
+func newCollectMetricsTask() *collectMetricsTask {
+	return &collectMetricsTask{}
 }
 
 func (t *collectMetricsTask) runTask(cache *hotPeerCache) {
-	cache.collectMetrics(t.typ)
+	cache.collectMetrics()
 }
 
 type getHotPeerStatTask struct {

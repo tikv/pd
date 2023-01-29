@@ -170,7 +170,7 @@ func (suite *leaderServerTestSuite) TestCheckClusterID() {
 }
 
 func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
+	mokHandler := func(ctx context.Context, s *Server) (http.Handler, APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
@@ -178,7 +178,7 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
 			suite.Equal("127.0.0.1", clientIP)
 		})
-		info := ServiceGroup{
+		info := APIServiceGroup{
 			Name:    "mok",
 			Version: "v1",
 		}
@@ -209,7 +209,7 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
+	mokHandler := func(ctx context.Context, s *Server) (http.Handler, APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
@@ -217,7 +217,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
 			suite.Equal("127.0.0.2", clientIP)
 		})
-		info := ServiceGroup{
+		info := APIServiceGroup{
 			Name:    "mok",
 			Version: "v1",
 		}
@@ -252,7 +252,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
+	mokHandler := func(ctx context.Context, s *Server) (http.Handler, APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
@@ -260,7 +260,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
 			suite.Equal("127.0.0.2", clientIP)
 		})
-		info := ServiceGroup{
+		info := APIServiceGroup{
 			Name:    "mok",
 			Version: "v1",
 		}
@@ -295,7 +295,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
-	mokHandler := func(ctx context.Context, s *Server) (http.Handler, ServiceGroup, error) {
+	mokHandler := func(ctx context.Context, s *Server) (http.Handler, APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
@@ -303,7 +303,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
 			suite.Equal("127.0.0.2", clientIP)
 		})
-		info := ServiceGroup{
+		info := APIServiceGroup{
 			Name:    "mok",
 			Version: "v1",
 		}

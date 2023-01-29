@@ -19,13 +19,13 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 func TestRetryQuota(t *testing.T) {
 	re := require.New(t)
 
-	q := newRetryQuota(10, 1, 2)
+	q := newRetryQuota()
 	store1 := core.NewStoreInfo(&metapb.Store{Id: 1})
 	store2 := core.NewStoreInfo(&metapb.Store{Id: 2})
 	keepStores := []*core.StoreInfo{store1}

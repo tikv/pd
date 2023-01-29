@@ -42,29 +42,36 @@ const (
 	OpRegion
 	// Include leader transfer.
 	OpLeader
+	// Include witness leader transfer.
+	OpWitnessLeader
+	// Include witness transfer.
+	OpWitness
 	opMax
 )
 
 var flagToName = map[OpKind]string{
-	OpLeader:    "leader",
-	OpRegion:    "region",
-	OpSplit:     "split",
-	OpAdmin:     "admin",
-	OpHotRegion: "hot-region",
-	OpReplica:   "replica",
-	OpMerge:     "merge",
-	OpRange:     "range",
+	OpLeader:        "leader",
+	OpRegion:        "region",
+	OpSplit:         "split",
+	OpAdmin:         "admin",
+	OpHotRegion:     "hot-region",
+	OpReplica:       "replica",
+	OpMerge:         "merge",
+	OpRange:         "range",
+	OpWitness:       "witness",
+	OpWitnessLeader: "witness-leader",
 }
 
 var nameToFlag = map[string]OpKind{
-	"leader":     OpLeader,
-	"region":     OpRegion,
-	"split":      OpSplit,
-	"admin":      OpAdmin,
-	"hot-region": OpHotRegion,
-	"replica":    OpReplica,
-	"merge":      OpMerge,
-	"range":      OpRange,
+	"leader":         OpLeader,
+	"region":         OpRegion,
+	"split":          OpSplit,
+	"admin":          OpAdmin,
+	"hot-region":     OpHotRegion,
+	"replica":        OpReplica,
+	"merge":          OpMerge,
+	"range":          OpRange,
+	"witness-leader": OpWitnessLeader,
 }
 
 func (k OpKind) String() string {

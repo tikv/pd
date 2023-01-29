@@ -20,9 +20,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 )
 
 type operatorStepTestSuite struct {
@@ -569,5 +569,12 @@ func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []
 		err := step.CheckInProgress(suite.cluster, region)
 		testCase.CheckInProgress(err)
 		_ = step.GetCmd(region, true)
+
+		if _, ok := step.(ChangePeerV2Leave); ok {
+			// Ref https://github.com/tikv/pd/issues/5788
+			pendingPeers := region.GetLearners()
+			region = region.Clone(core.WithPendingPeers(pendingPeers))
+			suite.Equal(testCase.IsFinish, step.IsFinish(region))
+		}
 	}
 }

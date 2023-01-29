@@ -22,11 +22,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -35,12 +38,27 @@ const (
 	testConfig2 = "config_entry_2"
 )
 
-func mustNewKeyspaceManager(re *require.Assertions) *Manager {
+type keyspaceTestSuite struct {
+	suite.Suite
+	manager *Manager
+}
+
+func TestKeyspaceTestSuite(t *testing.T) {
+	suite.Run(t, new(keyspaceTestSuite))
+}
+
+func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	manager, err := NewKeyspaceManager(store, allocator)
-	re.NoError(err)
-	return manager
+	suite.manager = NewKeyspaceManager(store, nil, allocator, config.KeyspaceConfig{})
+	suite.NoError(suite.manager.Bootstrap())
+}
+
+func (suite *keyspaceTestSuite) SetupSuite() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/keyspace/skipSplitRegion", "return(true)"))
+}
+func (suite *keyspaceTestSuite) TearDownSuite() {
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/keyspace/skipSplitRegion"))
 }
 
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
@@ -59,9 +77,9 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	return requests
 }
 
-func TestCreateKeyspace(t *testing.T) {
-	re := require.New(t)
-	manager := mustNewKeyspaceManager(re)
+func (suite *keyspaceTestSuite) TestCreateKeyspace() {
+	re := suite.Require()
+	manager := suite.manager
 	requests := makeCreateKeyspaceRequests(10)
 
 	for i, request := range requests {
@@ -104,9 +122,9 @@ func makeMutations() []*Mutation {
 	}
 }
 
-func TestUpdateKeyspaceConfig(t *testing.T) {
-	re := require.New(t)
-	manager := mustNewKeyspaceManager(re)
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
+	re := suite.Require()
+	manager := suite.manager
 	requests := makeCreateKeyspaceRequests(5)
 	mutations := makeMutations()
 	for _, createRequest := range requests {
@@ -116,9 +134,9 @@ func TestUpdateKeyspaceConfig(t *testing.T) {
 		re.NoError(err)
 		checkMutations(re, createRequest.Config, updated.Config, mutations)
 		// Changing config of a ARCHIVED keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, 0)
+		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
 		re.NoError(err)
-		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, 0)
+		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
 		re.NoError(err)
 		_, err = manager.UpdateKeyspaceConfig(createRequest.Name, mutations)
 		re.Error(err)
@@ -129,9 +147,9 @@ func TestUpdateKeyspaceConfig(t *testing.T) {
 	checkMutations(re, nil, updated.Config, mutations)
 }
 
-func TestUpdateKeyspaceState(t *testing.T) {
-	re := require.New(t)
-	manager := mustNewKeyspaceManager(re)
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
+	re := suite.Require()
+	manager := suite.manager
 	requests := makeCreateKeyspaceRequests(5)
 	for _, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)
@@ -166,9 +184,9 @@ func TestUpdateKeyspaceState(t *testing.T) {
 	}
 }
 
-func TestLoadRangeKeyspace(t *testing.T) {
-	re := require.New(t)
-	manager := mustNewKeyspaceManager(re)
+func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
+	re := suite.Require()
+	manager := suite.manager
 	// Test with 100 keyspaces.
 	// Created keyspace ids are 1 - 100.
 	total := 100
@@ -238,9 +256,9 @@ func TestLoadRangeKeyspace(t *testing.T) {
 
 // TestUpdateMultipleKeyspace checks that updating multiple keyspace's config simultaneously
 // will be successful.
-func TestUpdateMultipleKeyspace(t *testing.T) {
-	re := require.New(t)
-	manager := mustNewKeyspaceManager(re)
+func (suite *keyspaceTestSuite) TestUpdateMultipleKeyspace() {
+	re := suite.Require()
+	manager := suite.manager
 	requests := makeCreateKeyspaceRequests(50)
 	for _, createRequest := range requests {
 		_, err := manager.CreateKeyspace(createRequest)

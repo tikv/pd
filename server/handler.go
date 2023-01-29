@@ -29,14 +29,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -297,6 +297,16 @@ func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler(schedulers.BalanceLeaderType)
+}
+
+// AddBalanceWitnessScheduler adds a balance-witness-scheduler.
+func (h *Handler) AddBalanceWitnessScheduler() error {
+	return h.AddScheduler(schedulers.BalanceWitnessType)
+}
+
+// AddTransferWitnessLeaderScheduler adds a transfer-witness-leader-scheduler.
+func (h *Handler) AddTransferWitnessLeaderScheduler() error {
+	return h.AddScheduler(schedulers.TransferWitnessLeaderType)
 }
 
 // AddBalanceRegionScheduler adds a balance-region-scheduler.

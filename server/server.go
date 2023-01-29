@@ -40,8 +40,13 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -51,23 +56,17 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/encryptionkm"
 	"github.com/tikv/pd/server/gc"
-	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/keyspace"
-	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/tikv/pd/server/tso"
-	"github.com/tikv/pd/server/versioninfo"
-	"github.com/urfave/negroni"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
@@ -92,6 +91,13 @@ const (
 
 // EtcdStartTimeout the timeout of the startup etcd.
 var EtcdStartTimeout = time.Minute * 5
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	etcdTermGauge           = etcdStateGauge.WithLabelValues("term")
+	etcdAppliedIndexGauge   = etcdStateGauge.WithLabelValues("appliedIndex")
+	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
+)
 
 // Server is the pd server.
 // nolint
@@ -132,7 +138,7 @@ type Server struct {
 	// a unique ID.
 	idAllocator id.Allocator
 	// for encryption
-	encryptionKeyManager *encryptionkm.KeyManager
+	encryptionKeyManager *encryption.Manager
 	// for storage operation.
 	storage storage.Storage
 	// safepoint manager
@@ -173,15 +179,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, ServiceGroup, error)
-
-// ServiceGroup used to register the service.
-type ServiceGroup struct {
-	Name       string
-	Version    string
-	IsCore     bool
-	PathPrefix string
-}
+type HandlerBuilder func(context.Context, *Server) (http.Handler, APIServiceGroup, error)
 
 const (
 	// CorePath the core group, is at REST path `/pd/api/v1`.
@@ -190,60 +188,8 @@ const (
 	ExtensionsPath = "/pd/apis"
 )
 
-func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
-	userHandlers := make(map[string]http.Handler)
-	registerMap := make(map[string]struct{})
-
-	apiService := negroni.New()
-	recovery := negroni.NewRecovery()
-	apiService.Use(recovery)
-	router := mux.NewRouter()
-
-	for _, build := range serviceBuilders {
-		handler, info, err := build(ctx, svr)
-		if err != nil {
-			return nil, err
-		}
-		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
-			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
-		}
-		var pathPrefix string
-		if len(info.PathPrefix) != 0 {
-			pathPrefix = info.PathPrefix
-		} else if info.IsCore {
-			pathPrefix = CorePath
-		} else {
-			pathPrefix = path.Join(ExtensionsPath, info.Name, info.Version)
-		}
-		if _, ok := registerMap[pathPrefix]; ok {
-			return nil, errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
-		}
-
-		log.Info("register REST path", zap.String("path", pathPrefix))
-		registerMap[pathPrefix] = struct{}{}
-		if len(info.PathPrefix) != 0 {
-			// If PathPrefix is specified, register directly into userHandlers
-			userHandlers[pathPrefix] = handler
-		} else {
-			// If PathPrefix is not specified, register into apiService,
-			// and finally apiService is registered in userHandlers.
-			router.PathPrefix(pathPrefix).Handler(handler)
-			if info.IsCore {
-				// Deprecated
-				router.Path("/pd/health").Handler(handler)
-				// Deprecated
-				router.Path("/pd/ping").Handler(handler)
-			}
-		}
-	}
-	apiService.UseHandler(router)
-	userHandlers[pdAPIPrefix] = apiService
-
-	return userHandlers, nil
-}
-
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...HandlerBuilder) (*Server, error) {
+func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
 	rand.Seed(time.Now().UnixNano())
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
@@ -267,7 +213,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	}
 	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
-	s.serviceRateLimiter = ratelimit.NewLimiter()
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
@@ -276,19 +221,28 @@ func CreateServer(ctx context.Context, cfg *config.Config, serviceBuilders ...Ha
 	if err != nil {
 		return nil, err
 	}
-	if len(serviceBuilders) != 0 {
-		userHandlers, err := combineBuilderServerHTTPService(ctx, s, serviceBuilders...)
+	if len(legacyServiceBuilders) != 0 {
+		userHandlers, err := combineBuilderServerHTTPService(ctx, s, legacyServiceBuilders...)
 		if err != nil {
 			return nil, err
 		}
 		etcdCfg.UserHandlers = userHandlers
 	}
+	// New way to register services.
+	registry := NewServiceRegistry()
+
+	// Register the micro services REST path.
+	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
+
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
+		// Register the micro services GRPC service.
+		registry.InstallAllGRPCServices(s, gs)
 	}
+
 	s.etcdCfg = etcdCfg
 	s.lg = cfg.GetZapLogger()
 	s.logProps = cfg.GetZapLogProperties()
@@ -325,8 +279,46 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		return errs.ErrCancelStartEtcd.FastGenByArgs()
 	}
 
-	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
+	// start client
+	s.client, s.httpClient, err = startClient(s.cfg)
+	if err != nil {
+		return err
+	}
+
+	// update advertise peer urls.
+	etcdMembers, err := etcdutil.ListEtcdMembers(s.client)
+	if err != nil {
+		return err
+	}
+	etcdServerID := uint64(etcd.Server.ID())
+	for _, m := range etcdMembers.Members {
+		if etcdServerID == m.ID {
+			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
+			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
+				log.Info("update advertise peer urls", zap.String("from", s.cfg.AdvertisePeerUrls), zap.String("to", etcdPeerURLs))
+				s.cfg.AdvertisePeerUrls = etcdPeerURLs
+			}
+		}
+	}
+	failpoint.Inject("memberNil", func() {
+		time.Sleep(1500 * time.Millisecond)
+	})
+	s.member = member.NewMember(etcd, s.client, etcdServerID)
+	return nil
+}
+
+func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
+	tlsConfig, err := cfg.Security.ToTLSConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	endpoints := []string{etcdCfg.ACUrls[0].String()}
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", cfg.Security))
 
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
@@ -337,38 +329,16 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		LogConfig:   &lgc,
 	})
 	if err != nil {
-		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 
-	etcdServerID := uint64(etcd.Server.ID())
-
-	// update advertise peer urls.
-	etcdMembers, err := etcdutil.ListEtcdMembers(client)
-	if err != nil {
-		return err
-	}
-	for _, m := range etcdMembers.Members {
-		if etcdServerID == m.ID {
-			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
-			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
-				log.Info("update advertise peer urls", zap.String("from", s.cfg.AdvertisePeerUrls), zap.String("to", etcdPeerURLs))
-				s.cfg.AdvertisePeerUrls = etcdPeerURLs
-			}
-		}
-	}
-	s.client = client
-	s.httpClient = &http.Client{
+	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 			TLSClientConfig:   tlsConfig,
 		},
 	}
-
-	failpoint.Inject("memberNil", func() {
-		time.Sleep(1500 * time.Millisecond)
-	})
-	s.member = member.NewMember(etcd, client, etcdServerID)
-	return nil
+	return client, httpClient, nil
 }
 
 // AddStartCallback adds a callback in the startServer phase.
@@ -415,7 +385,7 @@ func (s *Server) startServer(ctx context.Context) error {
 			return err
 		}
 	}
-	s.encryptionKeyManager, err = encryptionkm.NewKeyManager(s.client, &s.cfg.Security.Encryption)
+	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
@@ -426,6 +396,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
+	s.basicCluster = core.NewBasicCluster()
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -434,12 +406,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.storage, keyspaceIDAllocator)
-	if err != nil {
-		return err
-	}
-	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -620,9 +587,9 @@ func (s *Server) encryptionKeyManagerLoop() {
 }
 
 func (s *Server) collectEtcdStateMetrics() {
-	etcdStateGauge.WithLabelValues("term").Set(float64(s.member.Etcd().Server.Term()))
-	etcdStateGauge.WithLabelValues("appliedIndex").Set(float64(s.member.Etcd().Server.AppliedIndex()))
-	etcdStateGauge.WithLabelValues("committedIndex").Set(float64(s.member.Etcd().Server.CommittedIndex()))
+	etcdTermGauge.Set(float64(s.member.Etcd().Server.Term()))
+	etcdAppliedIndexGauge.Set(float64(s.member.Etcd().Server.AppliedIndex()))
+	etcdCommittedIndexGauge.Set(float64(s.member.Etcd().Server.CommittedIndex()))
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
@@ -703,6 +670,10 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, err
 	}
 
+	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
+		log.Warn("bootstrap keyspace manager failed", errs.ZapError(err))
+	}
+
 	return &pdpb.BootstrapResponse{
 		ReplicationStatus: s.cluster.GetReplicationMode().GetReplicationStatus(),
 	}, nil
@@ -757,6 +728,11 @@ func (s *Server) GetClient() *clientv3.Client {
 // GetHTTPClient returns builtin etcd client.
 func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
+}
+
+// GetFinalPathWithinPD returns the etcd path.
+func (s *Server) GetFinalPathWithinPD(configPath string) string {
+	return strings.Join([]string{s.rootPath, configPath}, "/")
 }
 
 // GetLeader returns the leader of PD cluster(i.e the PD leader).

@@ -21,14 +21,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 )
 
 func newTestManager(t *testing.T) (endpoint.RuleStorage, *RuleManager) {
 	re := require.New(t)
-	store := storage.NewStorageWithMemoryBackend()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
 	manager := NewRuleManager(store, nil, nil)
 	err = manager.Initialize(3, []string{"zone", "rack", "host"})

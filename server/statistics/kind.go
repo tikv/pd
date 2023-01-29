@@ -15,7 +15,7 @@
 package statistics
 
 import (
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 const (
@@ -263,6 +263,7 @@ const (
 	Add ActionType = iota
 	Remove
 	Update
+	ActionTypeLen
 )
 
 func (t ActionType) String() string {
