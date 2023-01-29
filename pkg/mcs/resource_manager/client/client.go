@@ -338,6 +338,17 @@ func (c *ResourceGroupsController) OnResponse(_ context.Context, resourceGroupNa
 	return nil
 }
 
+// GetRRUTokens returns RRU tokens for the specific resource group.
+// Only uesd for test.
+func (c *ResourceGroupsController) GetRRUTokens(resourceGroupName string) float64 {
+	tmp, ok := c.groupsController.Load(resourceGroupName)
+	if !ok {
+		return 0.
+	}
+	gc := tmp.(*groupCostController)
+	return gc.getRRUTokens()
+}
+
 type groupCostController struct {
 	*rmpb.ResourceGroup
 	mainCfg     *Config
@@ -793,4 +804,14 @@ func (gc *groupCostController) onResponse(req RequestInfo, resp ResponseInfo) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
+}
+
+func (gc *groupCostController) getRRUTokens() float64 {
+	if gc.run.requestUnitTokens == nil {
+		return 0.
+	}
+	if counter, ok := gc.run.requestUnitTokens[rmpb.RequestUnitType_RRU]; ok {
+		return counter.limiter.AvailableTokens(time.Now())
+	}
+	return 0.
 }

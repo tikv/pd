@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -342,6 +343,80 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		re.NoError(err)
 		re.Contains(dresp, "Success!")
 	}
+}
+
+func (suite *resourceManagerClientTestSuite) TestClientTokens() {
+	re := suite.Require()
+	cli := suite.client
+
+	group := &rmpb.ResourceGroup{
+		Name: "temp1",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RRU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 1,
+				},
+				Tokens: 100000,
+			},
+			WRU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 20000,
+				},
+				Tokens: 50000,
+			},
+		},
+	}
+
+	resp, err := cli.AddResourceGroup(suite.ctx, group)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+
+	cfg := &rgcli.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		ReadCPUMsCost:    1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+	}
+
+	begin := time.Now()
+	controller, _ := rgcli.NewResourceGroupController(1, cli, cfg)
+	controller.Start(suite.ctx)
+	time.Sleep(100 * time.Millisecond)
+	tcs := &tokenConsumptionPerSecond{rruTokensAtATime: 20, wruTokensAtATime: 0, times: 2475, waitDuration: 0}
+	var wg sync.WaitGroup
+	var lock sync.Mutex
+	sum := 0
+	wg.Add(2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			cnt := 0
+			for cnt < tcs.times {
+				rreq := tcs.makeReadRequest()
+				rres := tcs.makeReadResponse()
+				err := controller.OnRequestWait(suite.ctx, group.Name, rreq)
+				if err == nil {
+					cnt++
+				}
+				controller.OnResponse(suite.ctx, group.Name, rreq, rres)
+			}
+			lock.Lock()
+			sum += cnt
+			lock.Unlock()
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	time.Sleep(2 * time.Second)
+	// Total tokens is 100000 + target_period(10) * k(2) * fill_rate(1),
+	// so left token is (100020 -  2475 * 20 * 2)
+	re.LessOrEqual(controller.GetRRUTokens(group.Name), time.Since(begin).Seconds()+100000-2*20*2475+10*2*1)
+
+	// Delete Resource Group
+	dresp, err := cli.DeleteResourceGroup(suite.ctx, group.Name)
+	re.NoError(err)
+	re.Contains(dresp, "Success!")
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
