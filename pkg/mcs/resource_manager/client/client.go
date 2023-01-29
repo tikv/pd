@@ -203,7 +203,7 @@ func (c *ResourceGroupsController) shouldReportConsumption() bool {
 	return false
 }
 
-func (c *ResourceGroupsController) updateAvgRequestResourcePerSec() {
+func (c *ResourceGroupsController) updateResourceCounterState() {
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
 		gc.updateAvgRequestResourcePerSec()
@@ -293,14 +293,14 @@ func (c *ResourceGroupsController) mainLoop(ctx context.Context) {
 			}
 		case <-ticker.C:
 			c.updateRunState(ctx)
-			c.updateAvgRequestResourcePerSec()
+			c.updateResourceCounterState()
 			if c.run.requestNeedsRetry || c.shouldReportConsumption() {
 				c.run.requestNeedsRetry = false
 				c.collectTokenBucketRequests(ctx, "report", false /* select all */)
 			}
 		case <-c.lowTokenNotifyChan:
 			c.updateRunState(ctx)
-			c.updateAvgRequestResourcePerSec()
+			c.updateResourceCounterState()
 			if !c.run.requestInProgress {
 				c.collectTokenBucketRequests(ctx, "low_ru", true /* only select low tokens resource group */)
 			}
@@ -391,8 +391,10 @@ type tokenCounter struct {
 	setupNotificationThreshold float64
 	setupNotificationTimer     *time.Timer
 
-	lastDeadline time.Time
-	lastRate     float64
+	fillRateDeadline      time.Time
+	fillRateDeadlineCh    <-chan time.Time
+	lastFillRate          float64
+	fillRateDeadlineTimer *time.Timer
 
 	limiter *Limiter
 }
@@ -492,26 +494,28 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
-			select {
-			case <-counter.setupNotificationCh:
-				counter.setupNotificationTimer = nil
-				counter.setupNotificationCh = nil
-				counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
-				gc.updateRunState(ctx)
-			default:
-			}
+			gc.handleCounterEvent(ctx, counter)
 		}
 	case rmpb.GroupMode_RUMode:
 		for _, counter := range gc.run.requestUnitTokens {
-			select {
-			case <-counter.setupNotificationCh:
-				counter.setupNotificationTimer = nil
-				counter.setupNotificationCh = nil
-				counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
-				gc.updateRunState(ctx)
-			default:
-			}
+			gc.handleCounterEvent(ctx, counter)
 		}
+	}
+}
+
+func (gc *groupCostController) handleCounterEvent(ctx context.Context, counter *tokenCounter) {
+	select {
+	case <-counter.setupNotificationCh:
+		counter.setupNotificationTimer = nil
+		counter.setupNotificationCh = nil
+		counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
+		gc.updateRunState(ctx)
+	case <-counter.fillRateDeadlineCh:
+		counter.fillRateDeadlineCh = nil
+		counter.fillRateDeadlineTimer = nil
+		counter.limiter.SetLimit(counter.fillRateDeadline, 0)
+		counter.fillRateDeadline = time.Time{}
+	default:
 	}
 }
 
@@ -604,18 +608,24 @@ func (gc *groupCostController) handleRUTokenResponse(resp *rmpb.TokenBucketRespo
 
 func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket *rmpb.TokenBucket, trickleTimeMs int64) {
 	granted := bucket.Tokens
-	if !counter.lastDeadline.IsZero() {
+	if !counter.fillRateDeadline.IsZero() {
 		// If last request came with a trickle duration, we may have RUs that were
 		// not made available to the bucket yet; throw them together with the newly
 		// granted RUs.
-		if since := counter.lastDeadline.Sub(gc.run.now); since > 0 {
-			granted += counter.lastRate * since.Seconds()
+		if since := counter.fillRateDeadline.Sub(gc.run.now); since > 0 {
+			granted += counter.lastFillRate * since.Seconds()
 		}
 	}
 	if counter.setupNotificationTimer != nil {
 		counter.setupNotificationTimer.Stop()
 		counter.setupNotificationTimer = nil
 		counter.setupNotificationCh = nil
+	}
+	if counter.fillRateDeadlineTimer != nil {
+		counter.fillRateDeadlineTimer.Stop()
+		counter.fillRateDeadlineTimer = nil
+		counter.fillRateDeadlineCh = nil
+		counter.fillRateDeadline = time.Time{}
 	}
 	notifyThreshold := granted * notifyFraction
 	if notifyThreshold < bufferRUs {
@@ -629,7 +639,6 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		cfg.NewTokens = granted
 		cfg.NewRate = float64(bucket.GetSettings().FillRate)
 		cfg.NotifyThreshold = notifyThreshold
-		counter.lastDeadline = time.Time{}
 	} else {
 		// Otherwise the granted token is delivered to the client by fillrate.
 		cfg.NewTokens = 0
@@ -645,9 +654,11 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		counter.setupNotificationCh = counter.setupNotificationTimer.C
 		counter.setupNotificationThreshold = notifyThreshold
 
-		counter.lastDeadline = deadline
+		counter.fillRateDeadlineTimer = time.NewTimer(trickleDuration)
+		counter.fillRateDeadlineCh = counter.fillRateDeadlineTimer.C
+		counter.fillRateDeadline = deadline
 	}
-	counter.lastRate = cfg.NewRate
+	counter.lastFillRate = cfg.NewRate
 	counter.limiter.Reconfigure(gc.run.now, cfg)
 }
 

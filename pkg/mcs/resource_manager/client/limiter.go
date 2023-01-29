@@ -192,6 +192,20 @@ func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now
 	return &r
 }
 
+// SetLimit sets a new Limit for the limiter. The new Limit may be violated
+// or underutilized by those which reserved (using Reserve) but did not yet act
+// before SetLimit was called.
+func (lim *Limiter) SetLimit(t time.Time, newLimit Limit) {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+
+	t, _, tokens := lim.advance(t)
+
+	lim.last = t
+	lim.tokens = tokens
+	lim.limit = newLimit
+}
+
 // SetupNotificationThreshold enables the notification at the given threshold.
 func (lim *Limiter) SetupNotificationThreshold(now time.Time, threshold float64) {
 	lim.mu.Lock()
