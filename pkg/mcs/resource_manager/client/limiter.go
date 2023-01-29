@@ -60,10 +60,16 @@ func Every(interval time.Duration) Limit {
 // If no token is available, Reserve returns a reservation for a future token
 // and the amount of time the caller must wait before using it,
 // or its associated context.Context is canceled.
+//
+// Some changes about burst(b):
+//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst within a capacity).
+//   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within a unlimited capacity).
+//   - If b > 0, that means the limiter is limited capacity. (current not used).
 type Limiter struct {
 	mu     sync.Mutex
 	limit  Limit
 	tokens float64
+	burst  int64
 	// last is the last time the limiter's tokens field was updated
 	last                time.Time
 	notifyThreshold     float64
@@ -83,11 +89,12 @@ func (lim *Limiter) Limit() Limit {
 
 // NewLimiter returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiter(now time.Time, r Limit, tokens float64, lowTokensNotifyChan chan struct{}) *Limiter {
+func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan struct{}) *Limiter {
 	lim := &Limiter{
 		limit:               r,
 		last:                now,
 		tokens:              tokens,
+		burst:               b,
 		lowTokensNotifyChan: lowTokensNotifyChan,
 	}
 	log.Info("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
@@ -234,6 +241,13 @@ func (lim *Limiter) IsLowTokens() bool {
 	return lim.isLowTokensLocked()
 }
 
+// GetBurst returns the burst size of the limiter
+func (lim *Limiter) GetBurst() int64 {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	return lim.burst
+}
+
 // RemoveTokens decreases the amount of tokens currently available.
 func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	lim.mu.Lock()
@@ -249,6 +263,8 @@ type tokenBucketReconfigureArgs struct {
 
 	NewRate float64
 
+	NewBurst int64
+
 	NotifyThreshold float64
 }
 
@@ -261,6 +277,7 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	lim.last = now
 	lim.tokens = tokens + args.NewTokens
 	lim.limit = Limit(args.NewRate)
+	lim.burst = args.NewBurst
 	lim.notifyThreshold = args.NotifyThreshold
 	lim.isLowProcess = false
 	lim.maybeNotify()
@@ -282,7 +299,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 
-	if lim.limit == Inf {
+	if lim.limit == Inf || lim.burst < 0 {
 		return Reservation{
 			ok:        true,
 			lim:       lim,

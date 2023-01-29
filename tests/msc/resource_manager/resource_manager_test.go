@@ -95,13 +95,15 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 			RUSettings: &rmpb.GroupRequestUnitSettings{
 				RRU: &rmpb.TokenBucket{
 					Settings: &rmpb.TokenLimitSettings{
-						FillRate: 40000,
+						FillRate:   40000,
+						BurstLimit: -1,
 					},
 					Tokens: 100000,
 				},
 				WRU: &rmpb.TokenBucket{
 					Settings: &rmpb.TokenLimitSettings{
-						FillRate: 20000,
+						FillRate:   20000,
+						BurstLimit: -1,
 					},
 					Tokens: 50000,
 				},
@@ -382,6 +384,9 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	for _, resp := range aresp {
 		re.Len(resp.GrantedRUTokens, 1)
 		re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(100.))
+		if resp.ResourceGroupName == "test2" {
+			re.Equal(int64(-1), resp.GrantedRUTokens[0].GrantedTokens.GetSettings().GetBurstLimit())
+		}
 	}
 	gresp, err := cli.GetResourceGroup(suite.ctx, groups[0].GetName())
 	re.NoError(err)
@@ -391,6 +396,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		re.Equal(g1.GetName(), g2.GetName())
 		re.Equal(g1.GetMode(), g2.GetMode())
 		re.Equal(g1.GetRUSettings().RRU.Settings.FillRate, g2.GetRUSettings().RRU.Settings.FillRate)
+		re.Equal(g1.GetRUSettings().RRU.Settings.BurstLimit, g2.GetRUSettings().RRU.Settings.BurstLimit)
 		// now we don't persistent tokens in running state, so tokens is original.
 		re.Equal(g1.GetRUSettings().RRU.Tokens, g2.GetRUSettings().RRU.Tokens)
 		re.NoError(err)
