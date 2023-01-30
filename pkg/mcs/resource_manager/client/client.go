@@ -429,7 +429,7 @@ func (gc *groupCostController) initRunState() {
 	switch gc.mode {
 	case rmpb.GroupMode_RUMode:
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
-		for typ := range requestUnitList {
+		for typ := range requestUnitLimitTypeList {
 			counter := &tokenCounter{
 				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
@@ -439,7 +439,7 @@ func (gc *groupCostController) initRunState() {
 		}
 	case rmpb.GroupMode_RawMode:
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
-		for typ := range requestResourceList {
+		for typ := range requestResourceLimitTypeList {
 			counter := &tokenCounter{
 				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
@@ -548,13 +548,13 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 func (gc *groupCostController) shouldReportConsumption() bool {
 	switch gc.Mode {
 	case rmpb.GroupMode_RUMode:
-		for typ := range requestUnitList {
+		for typ := range requestUnitLimitTypeList {
 			if getRUValueFromConsumption(gc.run.consumption, typ)-getRUValueFromConsumption(gc.run.lastRequestConsumption, typ) >= consumptionsReportingThreshold {
 				return true
 			}
 		}
 	case rmpb.GroupMode_RawMode:
-		for typ := range requestResourceList {
+		for typ := range requestResourceLimitTypeList {
 			if getRawResourceValueFromConsumption(gc.run.consumption, typ)-getRawResourceValueFromConsumption(gc.run.lastRequestConsumption, typ) >= consumptionsReportingThreshold {
 				return true
 			}
@@ -659,7 +659,7 @@ func (gc *groupCostController) collectRequestAndConsumption(low bool) *rmpb.Toke
 	selected := !low
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
-		requests := make([]*rmpb.RawResourceItem, 0, len(requestResourceList))
+		requests := make([]*rmpb.RawResourceItem, 0, len(requestResourceLimitTypeList))
 		for typ, counter := range gc.run.resourceTokens {
 			if low && counter.limiter.IsLowTokens() {
 				selected = true
@@ -676,7 +676,7 @@ func (gc *groupCostController) collectRequestAndConsumption(low bool) *rmpb.Toke
 			},
 		}
 	case rmpb.GroupMode_RUMode:
-		requests := make([]*rmpb.RequestUnitItem, 0, len(requestUnitList))
+		requests := make([]*rmpb.RequestUnitItem, 0, len(requestUnitLimitTypeList))
 		for typ, counter := range gc.run.requestUnitTokens {
 			if low && counter.limiter.IsLowTokens() {
 				selected = true
@@ -728,7 +728,7 @@ retryLoop:
 	for i := 0; i < maxRetry; i++ {
 		switch gc.mode {
 		case rmpb.GroupMode_RawMode:
-			res := make([]*Reservation, 0, len(requestResourceList))
+			res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
 			for typ, counter := range gc.run.resourceTokens {
 				if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
 					res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
@@ -738,7 +738,7 @@ retryLoop:
 				break retryLoop
 			}
 		case rmpb.GroupMode_RUMode:
-			res := make([]*Reservation, 0, len(requestUnitList))
+			res := make([]*Reservation, 0, len(requestUnitLimitTypeList))
 			for typ, counter := range gc.run.requestUnitTokens {
 				if v := getRUValueFromConsumption(delta, typ); v > 0 {
 					res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
