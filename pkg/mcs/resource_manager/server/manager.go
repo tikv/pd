@@ -23,8 +23,9 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
 )
 
@@ -33,8 +34,9 @@ const defaultConsumptionChanSize = 1024
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	groups  map[string]*ResourceGroup
-	storage func() storage.Storage
+	groups            map[string]*ResourceGroup
+	storage           endpoint.ResourceGroupStorage
+	createStorageFunc func() endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
@@ -46,8 +48,12 @@ type Manager struct {
 // NewManager returns a new Manager.
 func NewManager(srv *server.Server) *Manager {
 	m := &Manager{
-		groups:  make(map[string]*ResourceGroup),
-		storage: srv.GetStorage,
+		groups: make(map[string]*ResourceGroup),
+		createStorageFunc: func() endpoint.ResourceGroupStorage {
+			return endpoint.NewStorageEndpoint(
+				kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
+				nil)
+		},
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
@@ -60,6 +66,7 @@ func NewManager(srv *server.Server) *Manager {
 
 // Init initializes the resource group manager.
 func (m *Manager) Init() {
+	m.storage = m.createStorageFunc()
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {
@@ -68,7 +75,7 @@ func (m *Manager) Init() {
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
-	m.storage().LoadResourceGroupSettings(handler)
+	m.storage.LoadResourceGroupSettings(handler)
 }
 
 // AddResourceGroup puts a resource group.
@@ -84,7 +91,7 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 		return err
 	}
 	m.Lock()
-	if err := group.persistSettings(m.storage()); err != nil {
+	if err := group.persistSettings(m.storage); err != nil {
 		return err
 	}
 	m.groups[group.Name] = group
@@ -108,7 +115,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if err != nil {
 		return err
 	}
-	if err := newGroup.persistSettings(m.storage()); err != nil {
+	if err := newGroup.persistSettings(m.storage); err != nil {
 		return err
 	}
 	m.groups[group.Name] = newGroup
@@ -117,7 +124,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(name string) error {
-	if err := m.storage().DeleteResourceGroupSetting(name); err != nil {
+	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
 		return err
 	}
 	m.Lock()
