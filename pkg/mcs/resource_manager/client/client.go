@@ -17,12 +17,12 @@ package client
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -408,7 +408,7 @@ func newGroupCostController(group *rmpb.ResourceGroup, mainCfg *Config, lowRUNot
 		calculators:     []ResourceCalculator{newKVCalculator(mainCfg), newSQLCalculator(mainCfg)},
 		mode:            group.GetMode(),
 		lowRUNotifyChan: lowRUNotifyChan,
-		burstable:       atomic.NewBool(false),
+		burstable:       &atomic.Bool{},
 	}
 
 	switch gc.mode {
@@ -537,11 +537,11 @@ func (gc *groupCostController) updateAvgRaWResourcePerSec() {
 func (gc *groupCostController) updateAvgRUPerSec() {
 	isBurstable := true
 	for typ, counter := range gc.run.requestUnitTokens {
-		if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption, typ)) {
-			continue
-		}
 		if counter.limiter.GetBurst() >= 0 {
 			isBurstable = false
+		}
+		if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption, typ)) {
+			continue
 		}
 		log.Debug("[resource group controller] update avg ru per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
 	}
@@ -638,6 +638,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 	}
 
 	var cfg tokenBucketReconfigureArgs
+	cfg.NewBurst = bucket.GetSettings().GetBurstLimit()
 	// when trickleTimeMs equals zero, server has enough tokens and does not need to
 	// limit client consume token. So all token is granted to client right now.
 	if trickleTimeMs == 0 {

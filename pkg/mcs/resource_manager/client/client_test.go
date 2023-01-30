@@ -20,6 +20,7 @@ package client
 
 import (
 	"testing"
+	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
@@ -33,8 +34,7 @@ func TestGroupControlBurstable(t *testing.T) {
 		RUSettings: &rmpb.GroupRequestUnitSettings{
 			RRU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   1000,
-					BurstLimit: -1,
+					FillRate: 1000,
 				},
 			},
 		},
@@ -42,6 +42,13 @@ func TestGroupControlBurstable(t *testing.T) {
 	ch := make(chan struct{})
 	gc := newGroupCostController(group, DefaultConfig(), ch)
 	gc.initRunState()
+	args := tokenBucketReconfigureArgs{
+		NewRate:  1000,
+		NewBurst: -1,
+	}
+	for _, counter := range gc.run.requestUnitTokens {
+		counter.limiter.Reconfigure(time.Now(), args)
+	}
 	gc.updateAvgRequestResourcePerSec()
 	re.Equal(gc.burstable.Load(), true)
 }

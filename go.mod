@@ -155,7 +155,7 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 	go.etcd.io/bbolt v1.3.6 // indirect
-	go.uber.org/atomic v1.9.0
+	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
 	go.uber.org/multierr v1.7.0 // indirect
