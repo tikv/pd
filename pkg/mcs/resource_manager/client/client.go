@@ -389,9 +389,12 @@ type tokenCounter struct {
 	avgRUPerSecLastRU float64
 	avgLastTime       time.Time
 
-	setupNotificationCh        <-chan time.Time
-	setupNotificationThreshold float64
-	setupNotificationTimer     *time.Timer
+	notify struct {
+		mu                         sync.Mutex
+		setupNotificationCh        <-chan time.Time
+		setupNotificationThreshold float64
+		setupNotificationTimer     *time.Timer
+	}
 
 	lastDeadline time.Time
 	lastRate     float64
@@ -496,11 +499,20 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
+			counter.notify.mu.Lock()
+			ch := counter.notify.setupNotificationCh
+			counter.notify.mu.Unlock()
+			if ch == nil {
+				continue
+			}
 			select {
-			case <-counter.setupNotificationCh:
-				counter.setupNotificationTimer = nil
-				counter.setupNotificationCh = nil
-				counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
+			case <-ch:
+				counter.notify.mu.Lock()
+				counter.notify.setupNotificationTimer = nil
+				counter.notify.setupNotificationCh = nil
+				threshold := counter.notify.setupNotificationThreshold
+				counter.notify.mu.Unlock()
+				counter.limiter.SetupNotificationThreshold(gc.run.now, threshold)
 				gc.updateRunState(ctx)
 			case <-ctx.Done():
 				return
@@ -509,11 +521,20 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 
 	case rmpb.GroupMode_RUMode:
 		for _, counter := range gc.run.requestUnitTokens {
+			counter.notify.mu.Lock()
+			ch := counter.notify.setupNotificationCh
+			counter.notify.mu.Unlock()
+			if ch == nil {
+				continue
+			}
 			select {
-			case <-counter.setupNotificationCh:
-				counter.setupNotificationTimer = nil
-				counter.setupNotificationCh = nil
-				counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
+			case <-ch:
+				counter.notify.mu.Lock()
+				counter.notify.setupNotificationTimer = nil
+				counter.notify.setupNotificationCh = nil
+				threshold := counter.notify.setupNotificationThreshold
+				counter.notify.mu.Unlock()
+				counter.limiter.SetupNotificationThreshold(gc.run.now, threshold)
 				gc.updateRunState(ctx)
 			case <-ctx.Done():
 				return
@@ -629,11 +650,13 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 			granted += counter.lastRate * since.Seconds()
 		}
 	}
-	if counter.setupNotificationTimer != nil {
-		counter.setupNotificationTimer.Stop()
-		counter.setupNotificationTimer = nil
-		counter.setupNotificationCh = nil
+	counter.notify.mu.Lock()
+	if counter.notify.setupNotificationTimer != nil {
+		counter.notify.setupNotificationTimer.Stop()
+		counter.notify.setupNotificationTimer = nil
+		counter.notify.setupNotificationCh = nil
 	}
+	counter.notify.mu.Unlock()
 	notifyThreshold := granted * notifyFraction
 	if notifyThreshold < bufferRUs {
 		notifyThreshold = bufferRUs
@@ -659,9 +682,11 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		if timerDuration <= 0 {
 			timerDuration = (trickleDuration + time.Second) / 2
 		}
-		counter.setupNotificationTimer = time.NewTimer(timerDuration)
-		counter.setupNotificationCh = counter.setupNotificationTimer.C
-		counter.setupNotificationThreshold = notifyThreshold
+		counter.notify.mu.Lock()
+		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
+		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
+		counter.notify.setupNotificationThreshold = notifyThreshold
+		counter.notify.mu.Unlock()
 		counter.lastDeadline = deadline
 		select {
 		case gc.groupNotificationCh <- gc:
