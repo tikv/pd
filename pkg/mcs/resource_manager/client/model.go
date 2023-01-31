@@ -76,13 +76,11 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		consumption.WriteBytes += writeBytes
 		wru := float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
 		consumption.WRU += wru
-		consumption.RU += wru
 	} else {
 		consumption.KvReadRpcCount += 1
 		// Read bytes could not be known before the request is executed,
 		// so we only add the base cost here.
 		consumption.RRU += float64(kc.ReadBaseCost)
-		consumption.RU += float64(kc.ReadBaseCost)
 	}
 }
 
@@ -100,7 +98,6 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	consumption.ReadBytes += readBytes
 	rru += float64(kc.ReadBytesCost) * readBytes
 	consumption.RRU += rru
-	consumption.RU += rru
 }
 
 // SQLCalculator is used to calculate the SQL-side consumption.
@@ -130,11 +127,7 @@ func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Requ
 func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
 	switch typ {
 	case 0:
-		return custom.RU
-	case 1:
-		return custom.RRU
-	case 2:
-		return custom.WRU
+		return custom.RRU + custom.WRU
 	}
 	return 0
 }
@@ -152,7 +145,6 @@ func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawRe
 }
 
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
-	custom1.RU += custom2.RU
 	custom1.RRU += custom2.RRU
 	custom1.WRU += custom2.WRU
 	custom1.ReadBytes += custom2.ReadBytes
@@ -164,7 +156,6 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 }
 
 func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
-	custom1.RU -= custom2.RU
 	custom1.RRU -= custom2.RRU
 	custom1.WRU -= custom2.WRU
 	custom1.ReadBytes -= custom2.ReadBytes
