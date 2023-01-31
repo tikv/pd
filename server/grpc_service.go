@@ -1898,7 +1898,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 		switch item.GetKind() {
 		case pdpb.EventType_PUT:
 			value := item.GetValue()
-			if len(value) == 0 {
+			if value == "" {
 				value = string(item.GetValuePayload())
 			}
 			ops[i] = clientv3.OpPut(name, value)
