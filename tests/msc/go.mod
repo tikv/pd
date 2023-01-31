@@ -162,5 +162,7 @@ replace (
 	github.com/tikv/pd/client => ../../client
 )
 
+replace github.com/pingcap/kvproto => github.com/CabinfeverB/kvproto v0.0.0-20230130100540-c8385fbaf594
+
 // reset grpc and protobuf deps in order to import client and server at the same time
 replace google.golang.org/grpc v1.51.0 => google.golang.org/grpc v1.26.0

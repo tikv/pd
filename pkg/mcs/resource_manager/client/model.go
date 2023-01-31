@@ -74,7 +74,8 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		// Write bytes are knowable in advance, so we can calculate the WRU cost here.
 		writeBytes := float64(req.WriteBytes())
 		consumption.WriteBytes += writeBytes
-		consumption.WRU += float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
+		wru := float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
+		consumption.WRU += wru
 	} else {
 		consumption.KvReadRpcCount += 1
 		// Read bytes could not be known before the request is executed,
@@ -85,16 +86,18 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 
 // AfterKVRequest ...
 func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
+	rru := 0.
 	// For now, we can only collect the KV CPU cost for a read request.
 	if !req.IsWrite() {
 		kvCPUMs := float64(res.KVCPUMs())
 		consumption.TotalCpuTimeMs += kvCPUMs
-		consumption.RRU += float64(kc.ReadCPUMsCost) * kvCPUMs
+		rru += float64(kc.ReadCPUMsCost) * kvCPUMs
 	}
 	// A write request may also read data, which should be counted into the RRU cost.
 	readBytes := float64(res.ReadBytes())
 	consumption.ReadBytes += readBytes
-	consumption.RRU += float64(kc.ReadBytesCost) * readBytes
+	rru += float64(kc.ReadBytesCost) * readBytes
+	consumption.RRU += rru
 }
 
 // SQLCalculator is used to calculate the SQL-side consumption.
@@ -124,9 +127,7 @@ func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Requ
 func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
 	switch typ {
 	case 0:
-		return custom.RRU
-	case 1:
-		return custom.WRU
+		return custom.RRU + custom.WRU
 	}
 	return 0
 }
