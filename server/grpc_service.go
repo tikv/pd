@@ -1924,7 +1924,6 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 		for i, name := range request.Names {
 			r, err := s.client.Get(ctx, path.Join(configPath, name))
 			if err != nil {
-				println("get err", err)
 				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
 			} else if len(r.Kvs) == 0 {
 				msg := "key " + name + " not found"
@@ -1935,6 +1934,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 		}
 		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
 	}
+	// TODO: after remove `GetFinalPathWithinPD` will combine `if else`
 	r, err := s.client.Get(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix())
 	if err != nil {
 		return &pdpb.LoadGlobalConfigResponse{}, err
@@ -1952,11 +1952,15 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
+	configPath := req.GetConfigPath()
+	if configPath == "" {
+		configPath = globalConfigPath
+	}
 	revision := req.GetRevision()
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
-	watchChan := s.client.Watch(ctx, s.GetFinalPathWithinPD(req.GetConfigPath()), clientv3.WithPrefix(), clientv3.WithRev(revision))
+	watchChan := s.client.Watch(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix(), clientv3.WithRev(revision))
 	for {
 		select {
 		case <-ctx.Done():
