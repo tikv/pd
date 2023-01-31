@@ -302,7 +302,8 @@ func (c *ResourceGroupsController) mainLoop(ctx context.Context) {
 				c.collectTokenBucketRequests(ctx, "low_ru", true /* only select low tokens resource group */)
 			}
 		case gc := <-c.groupNotificationCh:
-			go gc.handleTokenBucketTrickEvent(ctx)
+			now := gc.run.now
+			go gc.handleTokenBucketTrickEvent(ctx, now)
 		}
 	}
 }
@@ -495,7 +496,7 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	}
 }
 
-func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) {
+func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context, now time.Time) {
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
@@ -512,8 +513,7 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 				counter.notify.setupNotificationCh = nil
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(gc.run.now, threshold)
-				gc.updateRunState(ctx)
+				counter.limiter.SetupNotificationThreshold(now, threshold)
 			case <-ctx.Done():
 				return
 			}
@@ -534,7 +534,7 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 				counter.notify.setupNotificationCh = nil
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(gc.run.now, threshold)
+				counter.limiter.SetupNotificationThreshold(now, threshold)
 				gc.updateRunState(ctx)
 			case <-ctx.Done():
 				return
