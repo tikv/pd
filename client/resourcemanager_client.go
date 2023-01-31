@@ -234,7 +234,7 @@ type resourceManagerConnectionContext struct {
 	cancel context.CancelFunc
 }
 
-func (c *client) createTokenispatcher() {
+func (c *client) createTokenDispatcher() {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
 	dispatcher := &tokenDispatcher{
 		dispatcherCancel: dispatcherCancel,

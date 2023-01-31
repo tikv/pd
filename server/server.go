@@ -731,8 +731,9 @@ func (s *Server) GetHTTPClient() *http.Client {
 }
 
 // GetFinalPathWithinPD returns the etcd path.
+// TODO: remove it after changing resource manager storage prefix.
 func (s *Server) GetFinalPathWithinPD(configPath string) string {
-	return strings.Join([]string{s.rootPath, configPath}, "/")
+	return path.Join(s.rootPath, configPath)
 }
 
 // GetLeader returns the leader of PD cluster(i.e the PD leader).

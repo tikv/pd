@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -1881,16 +1882,24 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	<-done
 }
 
+const globalConfigPath = "/global/config/"
+
 // StoreGlobalConfig store global config into etcd by transaction
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
+	configPath := request.GetConfigPath()
+	if configPath == "" {
+		configPath = globalConfigPath
+	} else {
+		configPath = s.GetFinalPathWithinPD(configPath)
+	}
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
-		name := item.GetName()
+		name := path.Join(configPath, item.GetName())
 		switch item.GetKind() {
 		case pdpb.EventType_PUT:
-			ops[i] = clientv3.OpPut(s.GetFinalPathWithinPD(request.GetConfigPath()+name), item.GetValue())
+			ops[i] = clientv3.OpPut(name, item.GetValue())
 		case pdpb.EventType_DELETE:
-			ops[i] = clientv3.OpDelete(s.GetFinalPathWithinPD(request.GetConfigPath() + name))
+			ops[i] = clientv3.OpDelete(name)
 		}
 	}
 	res, err :=
@@ -1907,6 +1916,25 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 // LoadGlobalConfig load global config from etcd
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
 	configPath := request.GetConfigPath()
+	if configPath == "" {
+		configPath = globalConfigPath
+	}
+	if len(request.Names) != 0 && request.Names[0] != "" {
+		res := make([]*pdpb.GlobalConfigItem, len(request.Names))
+		for i, name := range request.Names {
+			r, err := s.client.Get(ctx, path.Join(configPath, name))
+			if err != nil {
+				println("get err", err)
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
+			} else if len(r.Kvs) == 0 {
+				msg := "key " + name + " not found"
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
+			} else {
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Value: string(r.Kvs[0].Value), Kind: pdpb.EventType_PUT}
+			}
+		}
+		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
+	}
 	r, err := s.client.Get(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix())
 	if err != nil {
 		return &pdpb.LoadGlobalConfigResponse{}, err

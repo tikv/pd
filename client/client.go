@@ -122,7 +122,7 @@ type Client interface {
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 
 	// LoadGlobalConfig gets the global config from etcd
-	LoadGlobalConfig(ctx context.Context, configPath string) ([]GlobalConfigItem, int64, error)
+	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error)
 	// StoreGlobalConfig set the config from etcd
 	StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error
 	// WatchGlobalConfig returns an stream with all global config and updates
@@ -419,7 +419,7 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	}
 	// Start the daemons.
 	c.updateTSODispatcher()
-	c.createTokenispatcher()
+	c.createTokenDispatcher()
 	c.wg.Add(3)
 	go c.tsLoop()
 	go c.tsCancelLoop()
@@ -1820,17 +1820,15 @@ func trimHTTPPrefix(str string) string {
 	return str
 }
 
-func (c *client) LoadGlobalConfig(ctx context.Context, configPath string) ([]GlobalConfigItem, int64, error) {
-	resp, err := c.getClient().LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{ConfigPath: configPath})
+func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error) {
+	resp, err := c.getClient().LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names, ConfigPath: configPath})
 	if err != nil {
 		return nil, 0, err
 	}
 
 	res := make([]GlobalConfigItem, len(resp.GetItems()))
 	for i, item := range resp.GetItems() {
-		cfg := GlobalConfigItem{Name: item.GetName()}
-		cfg.Value = item.GetValue()
-		res[i] = cfg
+		res[i] = GlobalConfigItem{Name: item.GetName(), Value: item.GetValue(), EventType: item.GetKind()}
 	}
 	return res, resp.GetRevision(), nil
 }
