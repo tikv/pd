@@ -100,6 +100,7 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	consumption.ReadBytes += readBytes
 	rru += float64(kc.ReadBytesCost) * readBytes
 	consumption.RRU += rru
+	consumption.RU += rru
 }
 
 // SQLCalculator is used to calculate the SQL-side consumption.
