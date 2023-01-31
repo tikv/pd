@@ -1828,7 +1828,13 @@ func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPat
 
 	res := make([]GlobalConfigItem, len(resp.GetItems()))
 	for i, item := range resp.GetItems() {
-		res[i] = GlobalConfigItem{Name: item.GetName(), Value: item.GetValue(), EventType: item.GetKind()}
+		cfg := GlobalConfigItem{Name: item.GetName(), EventType: item.GetKind()}
+		if item.GetValue() == "" {
+			cfg.Value = string(item.GetValuePayload())
+		} else {
+			cfg.Value = item.GetValue()
+		}
+		res[i] = cfg
 	}
 	return res, resp.GetRevision(), nil
 }
@@ -1872,7 +1878,11 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 			}
 			arr := make([]GlobalConfigItem, len(m.Changes))
 			for j, i := range m.Changes {
-				arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue()}
+				if i.GetValue() == "" {
+					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), string(i.GetValuePayload())}
+				} else {
+					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue()}
+				}
 			}
 			select {
 			case <-ctx.Done():
