@@ -523,11 +523,11 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 func (gc *groupCostController) updateAvgRaWResourcePerSec() {
 	isBurstable := true
 	for typ, counter := range gc.run.resourceTokens {
-		if !gc.calcAvg(counter, getRawResourceValueFromConsumption(gc.run.consumption, typ)) {
-			continue
-		}
 		if counter.limiter.GetBurst() >= 0 {
 			isBurstable = false
+		}
+		if !gc.calcAvg(counter, getRawResourceValueFromConsumption(gc.run.consumption, typ)) {
+			continue
 		}
 		log.Debug("[resource group controller] update avg raw resource per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
 	}
