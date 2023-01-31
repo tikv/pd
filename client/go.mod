@@ -16,4 +16,4 @@ require (
 	google.golang.org/grpc v1.51.0
 )
 
-replace github.com/pingcap/kvproto => github.com/HuSharp/kvproto v0.0.0-20230131064415-77242d951cce
+replace github.com/pingcap/kvproto => github.com/HuSharp/kvproto v0.0.0-20230131100049-8b7eea9c5c86

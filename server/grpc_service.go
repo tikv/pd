@@ -1899,7 +1899,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 		case pdpb.EventType_PUT:
 			value := item.GetValue()
 			if value == "" {
-				value = string(item.GetValuePayload())
+				value = string(item.GetPayload())
 			}
 			ops[i] = clientv3.OpPut(name, value)
 		case pdpb.EventType_DELETE:
@@ -1945,7 +1945,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	}
 	res := make([]*pdpb.GlobalConfigItem, len(r.Kvs))
 	for i, value := range r.Kvs {
-		res[i] = &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: string(value.Key), ValuePayload: value.Value}
+		res[i] = &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: string(value.Key), Payload: value.Value}
 	}
 	return &pdpb.LoadGlobalConfigResponse{Items: res, Revision: r.Header.GetRevision()}, nil
 }
@@ -1983,7 +1983,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 
 			cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
 			for _, e := range res.Events {
-				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), ValuePayload: e.Kv.Value, Kind: pdpb.EventType(e.Type)})
+				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.Kv.Value, Kind: pdpb.EventType(e.Type)})
 			}
 			if len(cfgs) > 0 {
 				if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs, Revision: res.Header.GetRevision()}); err != nil {

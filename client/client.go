@@ -1830,7 +1830,7 @@ func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPat
 	for i, item := range resp.GetItems() {
 		cfg := GlobalConfigItem{Name: item.GetName(), EventType: item.GetKind()}
 		if item.GetValue() == "" {
-			cfg.Value = string(item.GetValuePayload())
+			cfg.Value = string(item.GetPayload())
 		} else {
 			cfg.Value = item.GetValue()
 		}
@@ -1879,7 +1879,7 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 			arr := make([]GlobalConfigItem, len(m.Changes))
 			for j, i := range m.Changes {
 				if i.GetValue() == "" {
-					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), string(i.GetValuePayload())}
+					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), string(i.GetPayload())}
 				} else {
 					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue()}
 				}
