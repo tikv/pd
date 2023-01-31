@@ -263,7 +263,6 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		// to non-witness gradually to improve availability.
 		if status == "down" {
 			fastFailover = true
-			status = "fast-failover"
 		} else {
 			fastFailover = rf.Rule.IsWitness
 		}
@@ -304,7 +303,13 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		if newLeader != nil && newLeader.GetId() != peer.GetId() {
 			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
 		}
-		return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+		var desc string
+		if fastFailover {
+			desc = "fast-replace-rule-"+status+"-peer"
+		} else {
+			desc = "replace-rule-"+status+"-peer"
+		}
+		return operator.CreateMovePeerOperator(desc, c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 	}
 	op, err := createOp()
 	if err != nil {
@@ -313,7 +318,7 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	if newLeader != nil {
 		c.record.incOfflineLeaderCount(newLeader.GetStoreId())
 	}
-	if status == "fast-failover" {
+	if fastFailover {
 		op.SetPriorityLevel(core.Urgent)
 	} else {
 		op.SetPriorityLevel(core.High)
