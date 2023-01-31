@@ -785,7 +785,7 @@ func (gc *groupCostController) onResponse(req RequestInfo, resp ResponseInfo) {
 		calc.AfterKVRequest(delta, req, resp)
 	}
 	if gc.burstable.Load() {
-		return
+		goto ret
 	}
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
@@ -801,6 +801,7 @@ func (gc *groupCostController) onResponse(req RequestInfo, resp ResponseInfo) {
 			}
 		}
 	}
+ret:
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
