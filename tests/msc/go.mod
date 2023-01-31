@@ -3,7 +3,7 @@ module github.com/tikv/pd/tests/msc
 go 1.19
 
 require (
-	github.com/pingcap/kvproto v0.0.0-20230119031034-25f1909b7934
+	github.com/pingcap/kvproto v0.0.0-20230131104319-a7c51106dfe7
 	github.com/stretchr/testify v1.8.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
@@ -89,7 +89,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.0.1 // indirect
 	github.com/petermattis/goid v0.0.0-20211229010228-4d14c490ee36 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
-	github.com/pingcap/check v0.0.0-20211026125417-57bd13f7b5f0 // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00 // indirect
@@ -161,8 +160,6 @@ replace (
 	github.com/tikv/pd => ../../
 	github.com/tikv/pd/client => ../../client
 )
-
-replace github.com/pingcap/kvproto => github.com/CabinfeverB/kvproto v0.0.0-20230130100540-c8385fbaf594
 
 // reset grpc and protobuf deps in order to import client and server at the same time
 replace google.golang.org/grpc v1.51.0 => google.golang.org/grpc v1.26.0
