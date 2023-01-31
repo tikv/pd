@@ -29,6 +29,7 @@ import (
 const (
 	defaultMaxWaitDuration = time.Second
 	maxRetry               = 3
+	maxNotificationChanLen = 200
 )
 
 // ResourceGroupKVInterceptor is used as quato limit controller for resource group using kv store.
@@ -107,7 +108,7 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 		config:              config,
 		lowTokenNotifyChan:  make(chan struct{}, 1),
 		tokenResponseChan:   make(chan []*rmpb.TokenBucketResponse, 1),
-		groupNotificationCh: make(chan *groupCostController, 1000),
+		groupNotificationCh: make(chan *groupCostController, maxNotificationChanLen),
 		calculators:         []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
 	}, nil
 }
@@ -495,20 +496,28 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
-			<-counter.setupNotificationCh
-			counter.setupNotificationTimer = nil
-			counter.setupNotificationCh = nil
-			counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
-			gc.updateRunState(ctx)
+			select {
+			case <-counter.setupNotificationCh:
+				counter.setupNotificationTimer = nil
+				counter.setupNotificationCh = nil
+				counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
+				gc.updateRunState(ctx)
+			case <-ctx.Done():
+				return
+			}
 		}
 
 	case rmpb.GroupMode_RUMode:
 		for _, counter := range gc.run.requestUnitTokens {
-			<-counter.setupNotificationCh
-			counter.setupNotificationTimer = nil
-			counter.setupNotificationCh = nil
-			counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
-			gc.updateRunState(ctx)
+			select {
+			case <-counter.setupNotificationCh:
+				counter.setupNotificationTimer = nil
+				counter.setupNotificationCh = nil
+				counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
+				gc.updateRunState(ctx)
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }
