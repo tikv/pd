@@ -17,6 +17,7 @@ package client
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -351,6 +352,9 @@ type groupCostController struct {
 		consumption *rmpb.Consumption
 	}
 
+	// fast path to make once token limit with un-limit burst.
+	burstable *atomic.Bool
+
 	lowRUNotifyChan chan struct{}
 	// run contains the state that is updated by the main loop.
 	run struct {
@@ -404,6 +408,7 @@ func newGroupCostController(group *rmpb.ResourceGroup, mainCfg *Config, lowRUNot
 		calculators:     []ResourceCalculator{newKVCalculator(mainCfg), newSQLCalculator(mainCfg)},
 		mode:            group.GetMode(),
 		lowRUNotifyChan: lowRUNotifyChan,
+		burstable:       &atomic.Bool{},
 	}
 
 	switch gc.mode {
@@ -431,7 +436,7 @@ func (gc *groupCostController) initRunState() {
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitLimitTypeList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.lowRUNotifyChan),
+				limiter:     NewLimiter(now, 0, 0, initialRequestUnits, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
@@ -441,7 +446,7 @@ func (gc *groupCostController) initRunState() {
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceLimitTypeList {
 			counter := &tokenCounter{
-				limiter:     NewLimiter(now, 0, initialRequestUnits, gc.lowRUNotifyChan),
+				limiter:     NewLimiter(now, 0, 0, initialRequestUnits, gc.lowRUNotifyChan),
 				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
 				avgLastTime: now,
 			}
@@ -516,21 +521,31 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) 
 }
 
 func (gc *groupCostController) updateAvgRaWResourcePerSec() {
+	isBurstable := true
 	for typ, counter := range gc.run.resourceTokens {
+		if counter.limiter.GetBurst() >= 0 {
+			isBurstable = false
+		}
 		if !gc.calcAvg(counter, getRawResourceValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
 		log.Debug("[resource group controller] update avg raw resource per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
 	}
+	gc.burstable.Store(isBurstable)
 }
 
 func (gc *groupCostController) updateAvgRUPerSec() {
+	isBurstable := true
 	for typ, counter := range gc.run.requestUnitTokens {
+		if counter.limiter.GetBurst() >= 0 {
+			isBurstable = false
+		}
 		if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
 		log.Debug("[resource group controller] update avg ru per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
 	}
+	gc.burstable.Store(isBurstable)
 }
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
@@ -623,6 +638,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 	}
 
 	var cfg tokenBucketReconfigureArgs
+	cfg.NewBurst = bucket.GetSettings().GetBurstLimit()
 	// when trickleTimeMs equals zero, server has enough tokens and does not need to
 	// limit client consume token. So all token is granted to client right now.
 	if trickleTimeMs == 0 {
@@ -723,6 +739,9 @@ func (gc *groupCostController) onRequestWait(
 		calc.BeforeKVRequest(delta, info)
 	}
 	now := time.Now()
+	if gc.burstable.Load() {
+		goto ret
+	}
 	// retry
 retryLoop:
 	for i := 0; i < maxRetry; i++ {
@@ -753,6 +772,7 @@ retryLoop:
 	if err != nil {
 		return err
 	}
+ret:
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
@@ -764,7 +784,9 @@ func (gc *groupCostController) onResponse(req RequestInfo, resp ResponseInfo) {
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
-
+	if gc.burstable.Load() {
+		goto ret
+	}
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for typ, counter := range gc.run.resourceTokens {
@@ -779,6 +801,7 @@ func (gc *groupCostController) onResponse(req RequestInfo, resp ResponseInfo) {
 			}
 		}
 	}
+ret:
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()

@@ -89,7 +89,8 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 			RUSettings: &rmpb.GroupRequestUnitSettings{
 				RU: &rmpb.TokenBucket{
 					Settings: &rmpb.TokenLimitSettings{
-						FillRate: 40000,
+						FillRate:   40000,
+						BurstLimit: -1,
 					},
 					Tokens: 100000,
 				},
@@ -370,6 +371,9 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	for _, resp := range aresp {
 		re.Len(resp.GrantedRUTokens, 1)
 		re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(100.))
+		if resp.ResourceGroupName == "test2" {
+			re.Equal(int64(-1), resp.GrantedRUTokens[0].GrantedTokens.GetSettings().GetBurstLimit())
+		}
 	}
 	gresp, err := cli.GetResourceGroup(suite.ctx, groups[0].GetName())
 	re.NoError(err)
