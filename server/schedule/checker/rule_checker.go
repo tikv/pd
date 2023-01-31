@@ -305,9 +305,9 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		}
 		var desc string
 		if fastFailover {
-			desc = "fast-replace-rule-"+status+"-peer"
+			desc = "fast-replace-rule-" + status + "-peer"
 		} else {
-			desc = "replace-rule-"+status+"-peer"
+			desc = "replace-rule-" + status + "-peer"
 		}
 		return operator.CreateMovePeerOperator(desc, c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 	}
