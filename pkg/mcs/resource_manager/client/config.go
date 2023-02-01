@@ -21,11 +21,10 @@ import (
 )
 
 var (
-	requestUnitList map[rmpb.RequestUnitType]struct{} = map[rmpb.RequestUnitType]struct{}{
-		rmpb.RequestUnitType_RRU: {},
-		rmpb.RequestUnitType_WRU: {},
+	requestUnitLimitTypeList map[rmpb.RequestUnitType]struct{} = map[rmpb.RequestUnitType]struct{}{
+		rmpb.RequestUnitType_RU: {},
 	}
-	requestResourceList map[rmpb.RawResourceType]struct{} = map[rmpb.RawResourceType]struct{}{
+	requestResourceLimitTypeList map[rmpb.RawResourceType]struct{} = map[rmpb.RawResourceType]struct{}{
 		rmpb.RawResourceType_IOReadFlow:  {},
 		rmpb.RawResourceType_IOWriteFlow: {},
 		rmpb.RawResourceType_CPU:         {},
