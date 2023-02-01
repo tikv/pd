@@ -38,20 +38,22 @@ const (
 	EmptyRegion
 	OversizedRegion
 	UndersizedRegion
+	WitnessLeader
 )
 
 const nonIsolation = "none"
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	regionMissPeerRegionCounter    = regionStatusGauge.WithLabelValues("miss-peer-region-count")
-	regionExtraPeerRegionCounter   = regionStatusGauge.WithLabelValues("extra-peer-region-count")
-	regionDownPeerRegionCounter    = regionStatusGauge.WithLabelValues("down-peer-region-count")
-	regionPendingPeerRegionCounter = regionStatusGauge.WithLabelValues("pending-peer-region-count")
-	regionLearnerPeerRegionCounter = regionStatusGauge.WithLabelValues("learner-peer-region-count")
-	regionEmptyRegionCounter       = regionStatusGauge.WithLabelValues("empty-region-count")
-	regionOversizedRegionCounter   = regionStatusGauge.WithLabelValues("oversized-region-count")
-	regionUndersizedRegionCounter  = regionStatusGauge.WithLabelValues("undersized-region-count")
+	regionMissPeerRegionCounter       = regionStatusGauge.WithLabelValues("miss-peer-region-count")
+	regionExtraPeerRegionCounter      = regionStatusGauge.WithLabelValues("extra-peer-region-count")
+	regionDownPeerRegionCounter       = regionStatusGauge.WithLabelValues("down-peer-region-count")
+	regionPendingPeerRegionCounter    = regionStatusGauge.WithLabelValues("pending-peer-region-count")
+	regionLearnerPeerRegionCounter    = regionStatusGauge.WithLabelValues("learner-peer-region-count")
+	regionEmptyRegionCounter          = regionStatusGauge.WithLabelValues("empty-region-count")
+	regionOversizedRegionCounter      = regionStatusGauge.WithLabelValues("oversized-region-count")
+	regionUndersizedRegionCounter     = regionStatusGauge.WithLabelValues("undersized-region-count")
+	regionWitnesssLeaderRegionCounter = regionStatusGauge.WithLabelValues("witness-leader-region-count")
 
 	offlineMissPeerRegionCounter    = offlineRegionStatusGauge.WithLabelValues("miss-peer-region-count")
 	offlineExtraPeerRegionCounter   = offlineRegionStatusGauge.WithLabelValues("extra-peer-region-count")
@@ -99,6 +101,7 @@ func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.Rule
 	r.stats[EmptyRegion] = make(map[uint64]*RegionInfo)
 	r.stats[OversizedRegion] = make(map[uint64]*RegionInfo)
 	r.stats[UndersizedRegion] = make(map[uint64]*RegionInfo)
+	r.stats[WitnessLeader] = make(map[uint64]*RegionInfo)
 
 	r.offlineStats[MissPeer] = make(map[uint64]*core.RegionInfo)
 	r.offlineStats[ExtraPeer] = make(map[uint64]*core.RegionInfo)
@@ -226,6 +229,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			int64(r.opt.GetMaxMergeRegionSize()),
 			int64(r.opt.GetMaxMergeRegionKeys()),
 		),
+		WitnessLeader: region.GetLeader().GetIsWitness(),
 	}
 
 	for typ, c := range conditions {
@@ -301,6 +305,7 @@ func (r *RegionStatistics) Collect() {
 	regionEmptyRegionCounter.Set(float64(len(r.stats[EmptyRegion])))
 	regionOversizedRegionCounter.Set(float64(len(r.stats[OversizedRegion])))
 	regionUndersizedRegionCounter.Set(float64(len(r.stats[UndersizedRegion])))
+	regionWitnesssLeaderRegionCounter.Set(float64(len(r.stats[WitnessLeader])))
 
 	offlineMissPeerRegionCounter.Set(float64(len(r.offlineStats[MissPeer])))
 	offlineExtraPeerRegionCounter.Set(float64(len(r.offlineStats[ExtraPeer])))

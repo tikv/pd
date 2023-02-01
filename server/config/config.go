@@ -1063,6 +1063,7 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-witness"},
 	{Type: "hot-region"},
 	{Type: "split-bucket"},
+	{Type: "transfer-witness-leader"},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enable by default.

@@ -75,17 +75,11 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 			Name: "test1",
 			Mode: rmpb.GroupMode_RUMode,
 			RUSettings: &rmpb.GroupRequestUnitSettings{
-				RRU: &rmpb.TokenBucket{
+				RU: &rmpb.TokenBucket{
 					Settings: &rmpb.TokenLimitSettings{
 						FillRate: 10000,
 					},
 					Tokens: 100000,
-				},
-				WRU: &rmpb.TokenBucket{
-					Settings: &rmpb.TokenLimitSettings{
-						FillRate: 20000,
-					},
-					Tokens: 50000,
 				},
 			},
 		},
@@ -93,17 +87,12 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 			Name: "test2",
 			Mode: rmpb.GroupMode_RUMode,
 			RUSettings: &rmpb.GroupRequestUnitSettings{
-				RRU: &rmpb.TokenBucket{
+				RU: &rmpb.TokenBucket{
 					Settings: &rmpb.TokenLimitSettings{
-						FillRate: 40000,
+						FillRate:   40000,
+						BurstLimit: -1,
 					},
 					Tokens: 100000,
-				},
-				WRU: &rmpb.TokenBucket{
-					Settings: &rmpb.TokenLimitSettings{
-						FillRate: 20000,
-					},
-					Tokens: 50000,
 				},
 			},
 		},
@@ -125,7 +114,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		Name: "test",
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RRU: &rmpb.TokenBucket{
+			RU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
 					FillRate: 10000,
 				},
@@ -157,7 +146,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	// Mock modify resource groups
 	modifySettings := func(gs *rmpb.ResourceGroup) {
 		gs.RUSettings = &rmpb.GroupRequestUnitSettings{
-			RRU: &rmpb.TokenBucket{
+			RU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
 					FillRate: 20000,
 				},
@@ -186,12 +175,12 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		case res := <-watchChan:
 			if i < 6 {
 				for _, r := range res {
-					suite.Equal(uint64(10000), r.RUSettings.RRU.Settings.FillRate)
+					suite.Equal(uint64(10000), r.RUSettings.RU.Settings.FillRate)
 					i++
 				}
 			} else { // after modify
 				for _, r := range res {
-					suite.Equal(uint64(20000), r.RUSettings.RRU.Settings.FillRate)
+					suite.Equal(uint64(20000), r.RUSettings.RU.Settings.FillRate)
 					i++
 				}
 			}
@@ -292,14 +281,14 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 			resourceGroupName: suite.initGroups[0].Name,
 			len:               8,
 			tcs: []tokenConsumptionPerSecond{
-				{rruTokensAtATime: 50, wruTokensAtATime: 20, times: 200, waitDuration: 0},
-				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 200, waitDuration: 0},
-				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 200, waitDuration: 0},
-				{rruTokensAtATime: 20, wruTokensAtATime: 40, times: 500, waitDuration: 0},
-				{rruTokensAtATime: 25, wruTokensAtATime: 50, times: 400, waitDuration: 0},
-				{rruTokensAtATime: 30, wruTokensAtATime: 60, times: 330, waitDuration: 0},
-				{rruTokensAtATime: 40, wruTokensAtATime: 80, times: 250, waitDuration: 0},
-				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 200, waitDuration: 0},
+				{rruTokensAtATime: 50, wruTokensAtATime: 20, times: 100, waitDuration: 0},
+				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 100, waitDuration: 0},
+				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 100, waitDuration: 0},
+				{rruTokensAtATime: 20, wruTokensAtATime: 40, times: 250, waitDuration: 0},
+				{rruTokensAtATime: 25, wruTokensAtATime: 50, times: 200, waitDuration: 0},
+				{rruTokensAtATime: 30, wruTokensAtATime: 60, times: 165, waitDuration: 0},
+				{rruTokensAtATime: 40, wruTokensAtATime: 80, times: 125, waitDuration: 0},
+				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 100, waitDuration: 0},
 			},
 		},
 	}
@@ -364,7 +353,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	for _, group := range groups {
 		requests := make([]*rmpb.RequestUnitItem, 0)
 		requests = append(requests, &rmpb.RequestUnitItem{
-			Type:  rmpb.RequestUnitType_RRU,
+			Type:  rmpb.RequestUnitType_RU,
 			Value: 100,
 		})
 		req := &rmpb.TokenBucketRequest{
@@ -382,17 +371,20 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	for _, resp := range aresp {
 		re.Len(resp.GrantedRUTokens, 1)
 		re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(100.))
+		if resp.ResourceGroupName == "test2" {
+			re.Equal(int64(-1), resp.GrantedRUTokens[0].GrantedTokens.GetSettings().GetBurstLimit())
+		}
 	}
 	gresp, err := cli.GetResourceGroup(suite.ctx, groups[0].GetName())
 	re.NoError(err)
-	re.Less(gresp.RUSettings.RRU.Tokens, groups[0].RUSettings.RRU.Tokens)
+	re.Less(gresp.RUSettings.RU.Tokens, groups[0].RUSettings.RU.Tokens)
 
 	checkFunc := func(g1 *rmpb.ResourceGroup, g2 *rmpb.ResourceGroup) {
 		re.Equal(g1.GetName(), g2.GetName())
 		re.Equal(g1.GetMode(), g2.GetMode())
-		re.Equal(g1.GetRUSettings().RRU.Settings.FillRate, g2.GetRUSettings().RRU.Settings.FillRate)
+		re.Equal(g1.GetRUSettings().RU.Settings.FillRate, g2.GetRUSettings().RU.Settings.FillRate)
 		// now we don't persistent tokens in running state, so tokens is original.
-		re.Equal(g1.GetRUSettings().RRU.Tokens, g2.GetRUSettings().RRU.Tokens)
+		re.Equal(g1.GetRUSettings().RU.Tokens, g2.GetRUSettings().RU.Tokens)
 		re.NoError(err)
 	}
 
@@ -430,10 +422,10 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		modifySettings func(*rmpb.ResourceGroup)
 	}{
 		{"test1", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test1","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":10000}},"initialized":false},"wru":{"initialized":false}}}`,
+			`{"name":"test1","mode":1,"r_u_settings":{"ru":{"token_bucket":{"settings":{"fill_rate":10000}},"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
-					RRU: &rmpb.TokenBucket{
+					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate: 10000,
 						},
@@ -443,10 +435,10 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":20000}},"initialized":false},"wru":{"initialized":false}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"token_bucket":{"settings":{"fill_rate":20000}},"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
-					RRU: &rmpb.TokenBucket{
+					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate: 20000,
 						},
@@ -455,10 +447,10 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"rru":{"token_bucket":{"settings":{"fill_rate":30000}},"initialized":false},"wru":{"initialized":false}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"token_bucket":{"settings":{"fill_rate":30000}},"initialized":false}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
-					RRU: &rmpb.TokenBucket{
+					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate: 30000,
 						},
@@ -470,7 +462,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			`{"name":"test3","mode":2}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
-					RRU: &rmpb.TokenBucket{
+					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate: 10000,
 						},
