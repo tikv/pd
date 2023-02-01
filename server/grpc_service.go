@@ -1895,6 +1895,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 		name := path.Join(configPath, item.GetName())
 		switch item.GetKind() {
 		case pdpb.EventType_PUT:
+			// for CDC compatibility, we need to check the Value field firstly.
 			value := item.GetValue()
 			if value == "" {
 				value = string(item.GetPayload())
@@ -1924,7 +1925,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	// `TiKV` cannot use `Names` field Since item value needs to support marshal of different struct types,
 	// it should be set to bytes instead of string.
 	// But for CDC compatibility, we need to keep the Value field.
-	if len(request.Names) != 0 && request.Names[0] != "" {
+	if request.Names != nil {
 		res := make([]*pdpb.GlobalConfigItem, len(request.Names))
 		for i, name := range request.Names {
 			r, err := s.client.Get(ctx, path.Join(configPath, name))
@@ -1934,7 +1935,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 				msg := "key " + name + " not found"
 				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
 			} else {
-				res[i] = &pdpb.GlobalConfigItem{Name: name, Value: string(r.Kvs[0].Value), Kind: pdpb.EventType_PUT}
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Value: string(r.Kvs[0].Value), Kind: pdpb.EventType_PUT, Payload: r.Kvs[0].Value}
 			}
 		}
 		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil

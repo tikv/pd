@@ -53,6 +53,7 @@ type GlobalConfigItem struct {
 	EventType pdpb.EventType
 	Name      string
 	Value     string
+	PayLoad   []byte
 }
 
 // Client is a PD (Placement Driver) client.
@@ -1828,8 +1829,10 @@ func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPat
 
 	res := make([]GlobalConfigItem, len(resp.GetItems()))
 	for i, item := range resp.GetItems() {
-		cfg := GlobalConfigItem{Name: item.GetName(), EventType: item.GetKind()}
+		cfg := GlobalConfigItem{Name: item.GetName(), EventType: item.GetKind(), PayLoad: item.GetPayload()}
 		if item.GetValue() == "" {
+			// We need to keep the Value field for CDC compatibility.
+			// But if you not use `Names`, will only have `Payload` field.
 			cfg.Value = string(item.GetPayload())
 		} else {
 			cfg.Value = item.GetValue()
@@ -1842,7 +1845,7 @@ func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPat
 func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error {
 	resArr := make([]*pdpb.GlobalConfigItem, len(items))
 	for i, it := range items {
-		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType}
+		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType, Payload: it.PayLoad}
 	}
 	_, err := c.getClient().StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr, ConfigPath: configPath})
 	if err != nil {
@@ -1879,9 +1882,9 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 			arr := make([]GlobalConfigItem, len(m.Changes))
 			for j, i := range m.Changes {
 				if i.GetValue() == "" {
-					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), string(i.GetPayload())}
+					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), string(i.GetPayload()), i.GetPayload()}
 				} else {
-					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue()}
+					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue(), i.GetPayload()}
 				}
 			}
 			select {
