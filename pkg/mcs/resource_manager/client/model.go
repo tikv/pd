@@ -125,8 +125,7 @@ func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Requ
 }
 
 func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
-	switch typ {
-	case 0:
+	if typ == 0 {
 		return custom.RRU + custom.WRU
 	}
 	return 0

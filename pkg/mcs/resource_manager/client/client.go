@@ -29,6 +29,7 @@ import (
 const (
 	defaultMaxWaitDuration = time.Second
 	maxRetry               = 3
+	maxNotificationChanLen = 200
 )
 
 // ResourceGroupKVInterceptor is used as quato limit controller for resource group using kv store.
@@ -67,6 +68,8 @@ type ResourceGroupsController struct {
 	// And it handles all resource group and runs in main loop
 	tokenResponseChan chan []*rmpb.TokenBucketResponse
 
+	groupNotificationCh chan *groupCostController
+
 	// lowTokenNotifyChan receives chan notification when the number of available token is low
 	lowTokenNotifyChan chan struct{}
 
@@ -100,12 +103,13 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 		config = DefaultConfig()
 	}
 	return &ResourceGroupsController{
-		clientUniqueID:     clientUniqueID,
-		provider:           provider,
-		config:             config,
-		lowTokenNotifyChan: make(chan struct{}, 1),
-		tokenResponseChan:  make(chan []*rmpb.TokenBucketResponse, 1),
-		calculators:        []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
+		clientUniqueID:      clientUniqueID,
+		provider:            provider,
+		config:              config,
+		lowTokenNotifyChan:  make(chan struct{}, 1),
+		tokenResponseChan:   make(chan []*rmpb.TokenBucketResponse, 1),
+		groupNotificationCh: make(chan *groupCostController, maxNotificationChanLen),
+		calculators:         []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
 	}, nil
 }
 
@@ -134,7 +138,7 @@ func (c *ResourceGroupsController) putResourceGroup(ctx context.Context, name st
 		return nil, err
 	}
 	log.Info("create resource group cost controller", zap.String("name", group.GetName()))
-	gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan)
+	gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.groupNotificationCh)
 	// A future case: If user change mode from RU to RAW mode. How to re-init?
 	gc.initRunState()
 	c.groupsController.Store(group.GetName(), gc)
@@ -149,7 +153,7 @@ func (c *ResourceGroupsController) updateAllResourceGroups(ctx context.Context) 
 	latestGroups := make(map[string]struct{})
 	for _, group := range groups {
 		log.Info("create resource group cost controller", zap.String("name", group.GetName()))
-		gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan)
+		gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.groupNotificationCh)
 		c.groupsController.Store(group.GetName(), gc)
 		latestGroups[group.GetName()] = struct{}{}
 	}
@@ -263,14 +267,6 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 	}()
 }
 
-func (c *ResourceGroupsController) handleTokenBucketTrickEvent(ctx context.Context) {
-	c.groupsController.Range(func(name, value any) bool {
-		gc := value.(*groupCostController)
-		gc.handleTokenBucketTrickEvent(ctx)
-		return true
-	})
-}
-
 func (c *ResourceGroupsController) mainLoop(ctx context.Context) {
 	interval := c.config.groupLoopUpdateInterval
 	ticker := time.NewTicker(interval)
@@ -305,8 +301,9 @@ func (c *ResourceGroupsController) mainLoop(ctx context.Context) {
 			if !c.run.requestInProgress {
 				c.collectTokenBucketRequests(ctx, "low_ru", true /* only select low tokens resource group */)
 			}
-		default:
-			c.handleTokenBucketTrickEvent(ctx)
+		case gc := <-c.groupNotificationCh:
+			now := gc.run.now
+			go gc.handleTokenBucketTrickEvent(ctx, now)
 		}
 	}
 }
@@ -356,6 +353,8 @@ type groupCostController struct {
 	burstable *atomic.Bool
 
 	lowRUNotifyChan chan struct{}
+
+	groupNotificationCh chan *groupCostController
 	// run contains the state that is updated by the main loop.
 	run struct {
 		now time.Time
@@ -391,9 +390,12 @@ type tokenCounter struct {
 	avgRUPerSecLastRU float64
 	avgLastTime       time.Time
 
-	setupNotificationCh        <-chan time.Time
-	setupNotificationThreshold float64
-	setupNotificationTimer     *time.Timer
+	notify struct {
+		mu                         sync.Mutex
+		setupNotificationCh        <-chan time.Time
+		setupNotificationThreshold float64
+		setupNotificationTimer     *time.Timer
+	}
 
 	lastDeadline time.Time
 	lastRate     float64
@@ -401,14 +403,15 @@ type tokenCounter struct {
 	limiter *Limiter
 }
 
-func newGroupCostController(group *rmpb.ResourceGroup, mainCfg *Config, lowRUNotifyChan chan struct{}) *groupCostController {
+func newGroupCostController(group *rmpb.ResourceGroup, mainCfg *Config, lowRUNotifyChan chan struct{}, groupNotificationCh chan *groupCostController) *groupCostController {
 	gc := &groupCostController{
-		ResourceGroup:   group,
-		mainCfg:         mainCfg,
-		calculators:     []ResourceCalculator{newKVCalculator(mainCfg), newSQLCalculator(mainCfg)},
-		mode:            group.GetMode(),
-		lowRUNotifyChan: lowRUNotifyChan,
-		burstable:       &atomic.Bool{},
+		ResourceGroup:       group,
+		mainCfg:             mainCfg,
+		calculators:         []ResourceCalculator{newKVCalculator(mainCfg), newSQLCalculator(mainCfg)},
+		mode:                group.GetMode(),
+		groupNotificationCh: groupNotificationCh,
+		lowRUNotifyChan:     lowRUNotifyChan,
+		burstable:           &atomic.Bool{},
 	}
 
 	switch gc.mode {
@@ -493,28 +496,48 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	}
 }
 
-func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context) {
+func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context, now time.Time) {
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
+			counter.notify.mu.Lock()
+			ch := counter.notify.setupNotificationCh
+			counter.notify.mu.Unlock()
+			if ch == nil {
+				continue
+			}
 			select {
-			case <-counter.setupNotificationCh:
-				counter.setupNotificationTimer = nil
-				counter.setupNotificationCh = nil
-				counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
-				gc.updateRunState(ctx)
-			default:
+			case <-ch:
+				counter.notify.mu.Lock()
+				counter.notify.setupNotificationTimer = nil
+				counter.notify.setupNotificationCh = nil
+				threshold := counter.notify.setupNotificationThreshold
+				counter.notify.mu.Unlock()
+				counter.limiter.SetupNotificationThreshold(now, threshold)
+			case <-ctx.Done():
+				return
 			}
 		}
+
 	case rmpb.GroupMode_RUMode:
 		for _, counter := range gc.run.requestUnitTokens {
+			counter.notify.mu.Lock()
+			ch := counter.notify.setupNotificationCh
+			counter.notify.mu.Unlock()
+			if ch == nil {
+				continue
+			}
 			select {
-			case <-counter.setupNotificationCh:
-				counter.setupNotificationTimer = nil
-				counter.setupNotificationCh = nil
-				counter.limiter.SetupNotificationThreshold(gc.run.now, counter.setupNotificationThreshold)
+			case <-ch:
+				counter.notify.mu.Lock()
+				counter.notify.setupNotificationTimer = nil
+				counter.notify.setupNotificationCh = nil
+				threshold := counter.notify.setupNotificationThreshold
+				counter.notify.mu.Unlock()
+				counter.limiter.SetupNotificationThreshold(now, threshold)
 				gc.updateRunState(ctx)
-			default:
+			case <-ctx.Done():
+				return
 			}
 		}
 	}
@@ -627,11 +650,13 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 			granted += counter.lastRate * since.Seconds()
 		}
 	}
-	if counter.setupNotificationTimer != nil {
-		counter.setupNotificationTimer.Stop()
-		counter.setupNotificationTimer = nil
-		counter.setupNotificationCh = nil
+	counter.notify.mu.Lock()
+	if counter.notify.setupNotificationTimer != nil {
+		counter.notify.setupNotificationTimer.Stop()
+		counter.notify.setupNotificationTimer = nil
+		counter.notify.setupNotificationCh = nil
 	}
+	counter.notify.mu.Unlock()
 	notifyThreshold := granted * notifyFraction
 	if notifyThreshold < bufferRUs {
 		notifyThreshold = bufferRUs
@@ -657,12 +682,18 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		if timerDuration <= 0 {
 			timerDuration = (trickleDuration + time.Second) / 2
 		}
-		counter.setupNotificationTimer = time.NewTimer(timerDuration)
-		counter.setupNotificationCh = counter.setupNotificationTimer.C
-		counter.setupNotificationThreshold = notifyThreshold
-
+		counter.notify.mu.Lock()
+		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
+		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
+		counter.notify.setupNotificationThreshold = notifyThreshold
+		counter.notify.mu.Unlock()
 		counter.lastDeadline = deadline
+		select {
+		case gc.groupNotificationCh <- gc:
+		default:
+		}
 	}
+
 	counter.lastRate = cfg.NewRate
 	counter.limiter.Reconfigure(gc.run.now, cfg)
 }

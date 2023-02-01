@@ -28,7 +28,6 @@ const (
 	schedulePath               = "schedule"
 	gcPath                     = "gc"
 	rulesPath                  = "rules"
-	resourceGroupSettingsPath  = "resource_group/settings"
 	ruleGroupPath              = "rule_group"
 	regionLabelPath            = "region_label"
 	replicationPath            = "replication_mode"
@@ -43,6 +42,8 @@ const (
 	keyspaceIDInfix            = "id"
 	keyspaceAllocID            = "alloc_id"
 	regionPathPrefix           = "raft/r"
+	// resource group storage endpoint has prefix `resource_group`
+	resourceGroupSettingsPath = "settings"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20

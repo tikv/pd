@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
 )
 
@@ -205,7 +205,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
-func (rg *ResourceGroup) persistSettings(storage storage.Storage) error {
+func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) error {
 	metaGroup := rg.IntoProtoResourceGroup()
 	return storage.SaveResourceGroupSetting(rg.Name, metaGroup)
 }
