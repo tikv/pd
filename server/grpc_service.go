@@ -1882,6 +1882,7 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	<-done
 }
 
+// for CDC compatibility, we need to initialize config path to `globalConfigPath`
 const globalConfigPath = "/global/config/"
 
 // StoreGlobalConfig store global config into etcd by transaction
