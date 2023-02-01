@@ -1,4 +1,4 @@
-// Copyright 2015 The Go Authors. All rights reserved.
+// Copyright 2023 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -83,7 +83,7 @@ func checkTokens(re *require.Assertions, lim *Limiter, t time.Time, expected flo
 }
 
 func TestSimpleReserve(t *testing.T) {
-	lim := NewLimiter(t0, 1, 2, make(chan struct{}, 1))
+	lim := NewLimiter(t0, 1, 0, 2, make(chan struct{}, 1))
 
 	runReserveMax(t, lim, request{t0, 3, t1, true})
 	runReserveMax(t, lim, request{t0, 3, t4, true})
@@ -93,25 +93,33 @@ func TestSimpleReserve(t *testing.T) {
 	runReserve(t, lim, request{t5, 2000, t6, false}, time.Second*100)
 
 	runReserve(t, lim, request{t3, 2, t8, true}, time.Second*8)
+	// unlimited
+	args := tokenBucketReconfigureArgs{
+		NewBurst: -1,
+	}
+	lim.Reconfigure(t1, args)
+	runReserveMax(t, lim, request{t5, 2000, t5, true})
 }
 
 func TestReconfig(t *testing.T) {
 	re := require.New(t)
-	lim := NewLimiter(t0, 1, 2, make(chan struct{}, 1))
+	lim := NewLimiter(t0, 1, 0, 2, make(chan struct{}, 1))
 
 	runReserveMax(t, lim, request{t0, 4, t2, true})
 	args := tokenBucketReconfigureArgs{
 		NewTokens: 6.,
 		NewRate:   2,
+		NewBurst:  -1,
 	}
 	lim.Reconfigure(t1, args)
 	checkTokens(re, lim, t1, 5)
 	checkTokens(re, lim, t2, 7)
+	re.Equal(int64(-1), lim.GetBurst())
 }
 
 func TestNotify(t *testing.T) {
 	nc := make(chan struct{}, 1)
-	lim := NewLimiter(t0, 1, 0, nc)
+	lim := NewLimiter(t0, 1, 0, 0, nc)
 
 	args := tokenBucketReconfigureArgs{
 		NewTokens:       1000.,
@@ -132,8 +140,8 @@ func TestCancel(t *testing.T) {
 	ctx1, cancel1 := context.WithDeadline(ctx, t2)
 	re := require.New(t)
 	nc := make(chan struct{}, 1)
-	lim1 := NewLimiter(t0, 1, 10, nc)
-	lim2 := NewLimiter(t0, 1, 0, nc)
+	lim1 := NewLimiter(t0, 1, 0, 10, nc)
+	lim2 := NewLimiter(t0, 1, 0, 0, nc)
 
 	r1 := runReserveMax(t, lim1, request{t0, 5, t0, true})
 	checkTokens(re, lim1, t0, 5)

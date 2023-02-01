@@ -103,7 +103,7 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	}
 
 	var res rmpb.TokenBucket
-	res.Settings = &rmpb.TokenLimitSettings{}
+	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: t.GetSettings().GetBurstLimit()}
 	// FillRate is used for the token server unavailable in abnormal situation.
 	if neededTokens <= 0 {
 		return &res, 0
