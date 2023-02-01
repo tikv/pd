@@ -15,7 +15,6 @@
 package client_test
 
 import (
-	"path"
 	"strconv"
 	"testing"
 	"time"
@@ -81,9 +80,8 @@ func (suite *globalConfigTestSuite) TearDownSuite() {
 	suite.cleanup()
 }
 
-// TODO: remove it after changing resource manager storage prefix.
 func (suite *globalConfigTestSuite) GetEtcdPath(configPath string) string {
-	return suite.server.GetFinalPathWithinPD(path.Join(globalConfigPath, configPath))
+	return globalConfigPath + configPath
 }
 
 func (suite *globalConfigTestSuite) TestLoadWithoutNames() {
@@ -95,7 +93,7 @@ func (suite *globalConfigTestSuite) TestLoadWithoutNames() {
 	r, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath("test"), "test")
 	suite.NoError(err)
 	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
-		ConfigPath: path.Join(globalConfigPath, "test"),
+		ConfigPath: globalConfigPath,
 	})
 	suite.NoError(err)
 	suite.Len(res.Items, 1)
@@ -106,10 +104,10 @@ func (suite *globalConfigTestSuite) TestLoadWithoutNames() {
 func (suite *globalConfigTestSuite) TestLoadWithoutConfigPath() {
 	defer func() {
 		// clean up
-		_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+"source_id")
+		_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath("source_id"))
 		suite.NoError(err)
 	}()
-	_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+"source_id", "1")
+	_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath("source_id"), "1")
 	suite.NoError(err)
 	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
 		Names: []string{"source_id"},
@@ -122,12 +120,12 @@ func (suite *globalConfigTestSuite) TestLoadWithoutConfigPath() {
 func (suite *globalConfigTestSuite) TestLoadGlobalConfigPath() {
 	defer func() {
 		for i := 0; i < 3; i++ {
-			_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+strconv.Itoa(i))
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
 			suite.NoError(err)
 		}
 	}()
 	for i := 0; i < 3; i++ {
-		_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+strconv.Itoa(i), strconv.Itoa(i))
+		_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		suite.NoError(err)
 	}
 	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
@@ -224,10 +222,10 @@ func (suite *globalConfigTestSuite) TestClientLoadWithoutNames() {
 
 func (suite *globalConfigTestSuite) TestClientLoadWithoutConfigPath() {
 	defer func() {
-		_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+"source_id")
+		_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath("source_id"))
 		suite.NoError(err)
 	}()
-	_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+"source_id", "1")
+	_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath("source_id"), "1")
 	suite.NoError(err)
 	res, _, err := suite.client.LoadGlobalConfig(suite.server.Context(), []string{"source_id"}, "")
 	suite.NoError(err)
@@ -238,12 +236,12 @@ func (suite *globalConfigTestSuite) TestClientLoadWithoutConfigPath() {
 func (suite *globalConfigTestSuite) TestClientLoadGlobalConfigPath() {
 	defer func() {
 		for i := 0; i < 3; i++ {
-			_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+strconv.Itoa(i))
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
 			suite.NoError(err)
 		}
 	}()
 	for i := 0; i < 3; i++ {
-		_, err := suite.server.GetClient().Put(suite.server.Context(), globalConfigPath+strconv.Itoa(i), strconv.Itoa(i))
+		_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		suite.NoError(err)
 	}
 	res, _, err := suite.client.LoadGlobalConfig(suite.server.Context(), []string{"0", "1"}, globalConfigPath)

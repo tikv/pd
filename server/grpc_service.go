@@ -1889,8 +1889,6 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 	configPath := request.GetConfigPath()
 	if configPath == "" {
 		configPath = globalConfigPath
-	} else {
-		configPath = s.GetFinalPathWithinPD(configPath)
 	}
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
@@ -1923,6 +1921,9 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	if configPath == "" {
 		configPath = globalConfigPath
 	}
+	// `TiKV` cannot use `Names` field Since item value needs to support marshal of different struct types,
+	// it should be set to bytes instead of string.
+	// But for CDC compatibility, we need to keep the Value field.
 	if len(request.Names) != 0 && request.Names[0] != "" {
 		res := make([]*pdpb.GlobalConfigItem, len(request.Names))
 		for i, name := range request.Names {
@@ -1938,8 +1939,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 		}
 		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
 	}
-	// TODO: after remove `GetFinalPathWithinPD` will combine `if else`
-	r, err := s.client.Get(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix())
+	r, err := s.client.Get(ctx, configPath, clientv3.WithPrefix())
 	if err != nil {
 		return &pdpb.LoadGlobalConfigResponse{}, err
 	}
@@ -1964,7 +1964,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
-	watchChan := s.client.Watch(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix(), clientv3.WithRev(revision))
+	watchChan := s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision))
 	for {
 		select {
 		case <-ctx.Done():
