@@ -1881,6 +1881,8 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 			}
 			arr := make([]GlobalConfigItem, len(m.Changes))
 			for j, i := range m.Changes {
+				// We need to keep the Value field for CDC compatibility.
+				// But if you not use `Names`, will only have `Payload` field.
 				if i.GetValue() == "" {
 					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), string(i.GetPayload()), i.GetPayload()}
 				} else {

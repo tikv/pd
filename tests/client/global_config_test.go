@@ -15,6 +15,7 @@
 package client_test
 
 import (
+	"path"
 	"strconv"
 	"testing"
 	"time"
@@ -114,10 +115,10 @@ func (suite *globalConfigTestSuite) TestLoadWithoutConfigPath() {
 	})
 	suite.NoError(err)
 	suite.Len(res.Items, 1)
-	suite.Equal("1", res.Items[0].Value)
+	suite.Equal([]byte("1"), res.Items[0].Payload)
 }
 
-func (suite *globalConfigTestSuite) TestLoadGlobalConfigPath() {
+func (suite *globalConfigTestSuite) TestLoadOtherConfigPath() {
 	defer func() {
 		for i := 0; i < 3; i++ {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
@@ -125,17 +126,17 @@ func (suite *globalConfigTestSuite) TestLoadGlobalConfigPath() {
 		}
 	}()
 	for i := 0; i < 3; i++ {
-		_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
+		_, err := suite.server.GetClient().Put(suite.server.Context(), path.Join("OtherConfigPath", strconv.Itoa(i)), strconv.Itoa(i))
 		suite.NoError(err)
 	}
 	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
 		Names:      []string{"0", "1"},
-		ConfigPath: globalConfigPath,
+		ConfigPath: "OtherConfigPath",
 	})
 	suite.NoError(err)
 	suite.Len(res.Items, 2)
 	for i, item := range res.Items {
-		suite.Equal(&pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: strconv.Itoa(i), Payload: []byte(strconv.Itoa(i)), Value: strconv.Itoa(i)}, item)
+		suite.Equal(&pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: strconv.Itoa(i), Payload: []byte(strconv.Itoa(i))}, item)
 	}
 }
 
@@ -233,7 +234,7 @@ func (suite *globalConfigTestSuite) TestClientLoadWithoutConfigPath() {
 	suite.Equal(pd.GlobalConfigItem{EventType: pdpb.EventType_PUT, Name: "source_id", PayLoad: []byte("1"), Value: "1"}, res[0])
 }
 
-func (suite *globalConfigTestSuite) TestClientLoadGlobalConfigPath() {
+func (suite *globalConfigTestSuite) TestClientLoadOtherConfigPath() {
 	defer func() {
 		for i := 0; i < 3; i++ {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
@@ -241,10 +242,10 @@ func (suite *globalConfigTestSuite) TestClientLoadGlobalConfigPath() {
 		}
 	}()
 	for i := 0; i < 3; i++ {
-		_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
+		_, err := suite.server.GetClient().Put(suite.server.Context(), path.Join("OtherConfigPath", strconv.Itoa(i)), strconv.Itoa(i))
 		suite.NoError(err)
 	}
-	res, _, err := suite.client.LoadGlobalConfig(suite.server.Context(), []string{"0", "1"}, globalConfigPath)
+	res, _, err := suite.client.LoadGlobalConfig(suite.server.Context(), []string{"0", "1"}, "OtherConfigPath")
 	suite.NoError(err)
 	suite.Len(res, 2)
 	for i, item := range res {

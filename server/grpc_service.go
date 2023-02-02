@@ -1886,6 +1886,8 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 const globalConfigPath = "/global/config/"
 
 // StoreGlobalConfig store global config into etcd by transaction
+// Since item value needs to support marshal of different struct types,
+// it should be set to `Payload bytes` instead of `Value string`
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
 	configPath := request.GetConfigPath()
 	if configPath == "" {
@@ -1896,7 +1898,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 		name := path.Join(configPath, item.GetName())
 		switch item.GetKind() {
 		case pdpb.EventType_PUT:
-			// for CDC compatibility, we need to check the Value field firstly.
+			// For CDC compatibility, we need to check the Value field firstly.
 			value := item.GetValue()
 			if value == "" {
 				value = string(item.GetPayload())
@@ -1917,14 +1919,14 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 	return &pdpb.StoreGlobalConfigResponse{}, nil
 }
 
-// LoadGlobalConfig load global config from etcd
+// LoadGlobalConfig support 2 ways to load global config from etcd
+// - `Names` iteratively get value from `ConfigPath/Name` but not care about revision
+// - `ConfigPath` if `Names` is nil can get all values and revision of current path
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
 	configPath := request.GetConfigPath()
 	if configPath == "" {
 		configPath = globalConfigPath
 	}
-	// For CDC compatibility, we need to keep the Names field and do not care about revision.
-	// `TiKV` use `ConfigPath` field instead of `Names` field,
 	// Since item value needs to support marshal of different struct types,
 	// it should be set to `Payload bytes` instead of `Value string`.
 	if request.Names != nil {
@@ -1937,7 +1939,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 				msg := "key " + name + " not found"
 				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
 			} else {
-				res[i] = &pdpb.GlobalConfigItem{Name: name, Value: string(r.Kvs[0].Value), Kind: pdpb.EventType_PUT, Payload: r.Kvs[0].Value}
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Payload: r.Kvs[0].Value, Kind: pdpb.EventType_PUT}
 			}
 		}
 		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
