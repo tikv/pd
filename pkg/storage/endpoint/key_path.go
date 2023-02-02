@@ -44,7 +44,7 @@ const (
 	regionPathPrefix           = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
-
+	// tso storage endpoint has prefix `tso`
 	microserviceKey = "microservice"
 	tsoServiceKey   = "tso"
 	timestampKey    = "timestamp"

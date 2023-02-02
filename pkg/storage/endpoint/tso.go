@@ -46,10 +46,10 @@ func (se *StorageEndpoint) LoadTimestamp(keyspaceGroupName string, dcLocationKey
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
-		return time.Time{}, err
+		return typeutil.ZeroTime, err
 	}
 	if len(keys) == 0 {
-		return time.Time{}, nil
+		return typeutil.ZeroTime, nil
 	}
 
 	maxTSWindow := typeutil.ZeroTime
