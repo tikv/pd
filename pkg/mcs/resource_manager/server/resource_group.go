@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
 )
 
@@ -40,8 +40,7 @@ type ResourceGroup struct {
 
 // RequestUnitSettings is the definition of the RU settings.
 type RequestUnitSettings struct {
-	RRU GroupTokenBucket `json:"rru,omitempty"`
-	WRU GroupTokenBucket `json:"wru,omitempty"`
+	RU GroupTokenBucket `json:"ru,omitempty"`
 }
 
 // RawResourceSettings is the definition of the native resource settings.
@@ -119,8 +118,7 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 		if metaGroup.GetRUSettings() == nil {
 			return errors.New("invalid resource group settings, RU mode should set RU settings")
 		}
-		rg.RUSettings.RRU.patch(metaGroup.GetRUSettings().GetRRU())
-		rg.RUSettings.WRU.patch(metaGroup.GetRUSettings().GetWRU())
+		rg.RUSettings.RU.patch(metaGroup.GetRUSettings().GetRU())
 	case rmpb.GroupMode_RawMode:
 		if metaGroup.GetRawResourceSettings() == nil {
 			return errors.New("invalid resource group settings, raw mode should set resource settings")
@@ -148,8 +146,7 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	case rmpb.GroupMode_RUMode:
 		if settings := group.GetRUSettings(); settings != nil {
 			ruSettings = &RequestUnitSettings{
-				RRU: NewGroupTokenBucket(settings.GetRRU()),
-				WRU: NewGroupTokenBucket(settings.GetWRU()),
+				RU: NewGroupTokenBucket(settings.GetRU()),
 			}
 			rg.RUSettings = ruSettings
 		}
@@ -166,26 +163,15 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	return rg
 }
 
-// RequestRRU requests the RRU of the resource group.
-func (rg *ResourceGroup) RequestRRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
+// RequestRU requests the RU of the resource group.
+func (rg *ResourceGroup) RequestRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
 	if rg.RUSettings == nil {
 		return nil
 	}
-	tb, trickleTimeMs := rg.RUSettings.RRU.request(now, neededTokens, targetPeriodMs)
-	return &rmpb.GrantedRUTokenBucket{Type: rmpb.RequestUnitType_RRU, GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
-}
-
-// RequestWRU requests the WRU of the resource group.
-func (rg *ResourceGroup) RequestWRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
-	rg.Lock()
-	defer rg.Unlock()
-	if rg.RUSettings == nil {
-		return nil
-	}
-	tb, trickleTimeMs := rg.RUSettings.WRU.request(now, neededTokens, targetPeriodMs)
-	return &rmpb.GrantedRUTokenBucket{Type: rmpb.RequestUnitType_WRU, GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
+	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs)
+	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
@@ -198,8 +184,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RUMode,
 			RUSettings: &rmpb.GroupRequestUnitSettings{
-				RRU: rg.RUSettings.RRU.TokenBucket,
-				WRU: rg.RUSettings.WRU.TokenBucket,
+				RU: rg.RUSettings.RU.TokenBucket,
 			},
 		}
 		return group
@@ -220,7 +205,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
-func (rg *ResourceGroup) persistSettings(storage storage.Storage) error {
+func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) error {
 	metaGroup := rg.IntoProtoResourceGroup()
 	return storage.SaveResourceGroupSetting(rg.Name, metaGroup)
 }

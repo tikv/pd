@@ -32,15 +32,16 @@ func TestGroupControlBurstable(t *testing.T) {
 		Name: "test",
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RRU: &rmpb.TokenBucket{
+			RU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
 					FillRate: 1000,
 				},
 			},
 		},
 	}
-	ch := make(chan struct{})
-	gc := newGroupCostController(group, DefaultConfig(), ch)
+	ch1 := make(chan struct{})
+	ch2 := make(chan *groupCostController)
+	gc := newGroupCostController(group, DefaultConfig(), ch1, ch2)
 	gc.initRunState()
 	args := tokenBucketReconfigureArgs{
 		NewRate:  1000,
