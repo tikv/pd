@@ -1923,9 +1923,10 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	if configPath == "" {
 		configPath = globalConfigPath
 	}
-	// `TiKV` cannot use `Names` field Since item value needs to support marshal of different struct types,
-	// it should be set to bytes instead of string.
-	// But for CDC compatibility, we need to keep the Value field.
+	// For CDC compatibility, we need to keep the Names field and do not care about revision.
+	// `TiKV` use `ConfigPath` field instead of `Names` field,
+	// Since item value needs to support marshal of different struct types,
+	// it should be set to `Payload bytes` instead of `Value string`.
 	if request.Names != nil {
 		res := make([]*pdpb.GlobalConfigItem, len(request.Names))
 		for i, name := range request.Names {
