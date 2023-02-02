@@ -61,7 +61,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -636,4 +636,53 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			re.Equal(0, len(groups1))
 		}
 	}
+}
+
+func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover() {
+	re := suite.Require()
+	cli := suite.client
+
+	group := &rmpb.ResourceGroup{
+		Name: "test3",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 10000,
+				},
+				Tokens: 100000,
+			},
+		},
+	}
+	addResp, err := cli.AddResourceGroup(suite.ctx, group)
+	re.NoError(err)
+	re.Contains(addResp, "Success!")
+	getResp, err := cli.GetResourceGroup(suite.ctx, group.GetName())
+	re.NoError(err)
+	re.NotNil(getResp)
+	re.Equal(*group, *getResp)
+
+	// Change the leader after each time we modify the resource group.
+	for i := 0; i < 4; i++ {
+		group.RUSettings.RU.Settings.FillRate += uint64(i)
+		modifyResp, err := cli.ModifyResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(modifyResp, "Success!")
+		err = suite.cluster.ResignLeader()
+		re.NoError(err)
+		leaderName := suite.cluster.WaitLeader()
+		leader := suite.cluster.GetServer(leaderName)
+		suite.client, err = pd.NewClientWithContext(suite.ctx, []string{leader.GetAddr()}, pd.SecurityOption{})
+		re.NoError(err)
+		cli = suite.client
+		getResp, err = cli.GetResourceGroup(suite.ctx, group.GetName())
+		re.NoError(err)
+		re.NotNil(getResp)
+		re.Equal(group.RUSettings.RU.Settings.FillRate, getResp.RUSettings.RU.Settings.FillRate)
+	}
+
+	// Cleanup the resource group.
+	delResp, err := cli.DeleteResourceGroup(suite.ctx, group.GetName())
+	re.NoError(err)
+	re.Contains(delResp, "Success!")
 }

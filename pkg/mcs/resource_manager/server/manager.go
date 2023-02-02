@@ -34,9 +34,8 @@ const defaultConsumptionChanSize = 1024
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	groups            map[string]*ResourceGroup
-	storage           endpoint.ResourceGroupStorage
-	createStorageFunc func() endpoint.ResourceGroupStorage
+	groups  map[string]*ResourceGroup
+	storage endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
@@ -49,33 +48,39 @@ type Manager struct {
 func NewManager(srv *server.Server) *Manager {
 	m := &Manager{
 		groups: make(map[string]*ResourceGroup),
-		createStorageFunc: func() endpoint.ResourceGroupStorage {
-			return endpoint.NewStorageEndpoint(
-				kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
-				nil)
-		},
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
 		}, defaultConsumptionChanSize),
 	}
-	srv.AddStartCallback(m.Init)
-	go m.backgroundMetricsFlush(srv.Context())
+	// Initialize the manager storage after the server is started.
+	srv.AddStartCallback(func() {
+		m.storage = endpoint.NewStorageEndpoint(
+			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
+			nil,
+		)
+		log.Info("resource group manager storage has been initialized")
+	})
+	// Initialize the manager after the leader is elected.
+	srv.AddLeaderCallback(m.Init)
 	return m
 }
 
 // Init initializes the resource group manager.
-func (m *Manager) Init() {
-	m.storage = m.createStorageFunc()
-	handler := func(k, v string) {
+func (m *Manager) Init(ctx context.Context) {
+	// Reset the resource groups first.
+	m.groups = make(map[string]*ResourceGroup)
+	m.storage.LoadResourceGroupSettings(func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {
 			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
-	}
-	m.storage.LoadResourceGroupSettings(handler)
+	})
+	// Start the background metrics flusher.
+	go m.backgroundMetricsFlush(ctx)
+	log.Info("resource group manager has been initialized")
 }
 
 // AddResourceGroup puts a resource group.
