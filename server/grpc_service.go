@@ -1988,6 +1988,8 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 
 			cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
 			for _, e := range res.Events {
+				// Since item value needs to support marshal of different struct types,
+				// it should be set to `Payload bytes` instead of `Value string`.
 				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.Kv.Value, Kind: pdpb.EventType(e.Type)})
 			}
 			if len(cfgs) > 0 {
