@@ -4393,7 +4393,7 @@
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": "witness",
+          "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 3,
           "description": "The witness count of each TiKV instance",
           "fieldConfig": {
@@ -4409,7 +4409,7 @@
             "y": 111
           },
           "hiddenSeries": false,
-          "id": 1460,
+          "id": 1463,
           "legend": {
             "alignAsTable": true,
             "avg": false,
