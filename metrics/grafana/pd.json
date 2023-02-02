@@ -1670,7 +1670,7 @@
           "tableColumn": "idalloc",
           "targets": [
             {
-              "expr": "pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
+              "expr": "pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"idalloc\"}",
               "format": "time_series",
               "hide": false,
               "instant": true,
