@@ -32,7 +32,7 @@ func TestGroupControlBurstable(t *testing.T) {
 		Name: "test",
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RRU: &rmpb.TokenBucket{
+			RU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
 					FillRate: 1000,
 				},

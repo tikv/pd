@@ -1888,9 +1888,9 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 		name := item.GetName()
 		switch item.GetKind() {
 		case pdpb.EventType_PUT:
-			ops[i] = clientv3.OpPut(s.GetFinalPathWithinPD(request.GetConfigPath()+name), item.GetValue())
+			ops[i] = clientv3.OpPut(request.GetConfigPath()+name, item.GetValue())
 		case pdpb.EventType_DELETE:
-			ops[i] = clientv3.OpDelete(s.GetFinalPathWithinPD(request.GetConfigPath() + name))
+			ops[i] = clientv3.OpDelete(request.GetConfigPath() + name)
 		}
 	}
 	res, err :=
@@ -1907,7 +1907,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 // LoadGlobalConfig load global config from etcd
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
 	configPath := request.GetConfigPath()
-	r, err := s.client.Get(ctx, s.GetFinalPathWithinPD(configPath), clientv3.WithPrefix())
+	r, err := s.client.Get(ctx, configPath, clientv3.WithPrefix())
 	if err != nil {
 		return &pdpb.LoadGlobalConfigResponse{}, err
 	}
@@ -1928,7 +1928,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
-	watchChan := s.client.Watch(ctx, s.GetFinalPathWithinPD(req.GetConfigPath()), clientv3.WithPrefix(), clientv3.WithRev(revision))
+	watchChan := s.client.Watch(ctx, req.GetConfigPath(), clientv3.WithPrefix(), clientv3.WithRev(revision))
 	for {
 		select {
 		case <-ctx.Done():

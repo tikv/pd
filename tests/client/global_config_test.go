@@ -81,7 +81,7 @@ func (suite *globalConfigTestSuite) TearDownSuite() {
 }
 
 func (suite *globalConfigTestSuite) GetEtcdPath(configPath string) string {
-	return suite.server.GetFinalPathWithinPD(globalConfigPath + configPath)
+	return globalConfigPath + configPath
 }
 
 func (suite *globalConfigTestSuite) TestLoad() {
