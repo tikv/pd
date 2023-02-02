@@ -134,17 +134,18 @@ type AllocatorManager struct {
 func NewAllocatorManager(
 	m *member.Member,
 	rootPath string,
-	cfg config,
+	cfg Config,
+	tlsConfig *grpcutil.TLSConfig,
 	maxResetTSGap func() time.Duration,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
-		enableLocalTSO:         cfg.IsLocalTSOEnabled(),
+		enableLocalTSO:         cfg.EnableLocalTSO,
 		member:                 m,
 		rootPath:               rootPath,
-		saveInterval:           cfg.GetTSOSaveInterval(),
-		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
+		saveInterval:           cfg.SaveInterval.Duration,
+		updatePhysicalInterval: cfg.UpdatePhysicalInterval.Duration,
 		maxResetTSGap:          maxResetTSGap,
-		securityConfig:         cfg.GetTLSConfig(),
+		securityConfig:         tlsConfig,
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	allocatorManager.mu.clusterDCLocations = make(map[string]*DCLocationInfo)

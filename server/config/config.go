@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -110,6 +111,8 @@ type Config struct {
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
+
+	TSOConfig tso.Config `toml:"tso" json:"tso"`
 
 	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
 
@@ -409,6 +412,27 @@ func (c *Config) Parse(arguments []string) error {
 				c.Log.Level = c.LogLevelDeprecated
 			}
 		}
+		if c.EnableLocalTSO {
+			msg := fmt.Sprintf("enable-local-tso in %s is deprecated, use [tso.enable-local-tso] instead", c.configFile)
+			c.WarningMsgs = append(c.WarningMsgs, msg)
+			if !meta.IsDefined("tso", "enable-local-tso") {
+				c.TSOConfig.EnableLocalTSO = c.EnableLocalTSO
+			}
+		}
+		if c.TSOSaveInterval.Duration != defaultTSOSaveInterval {
+			msg := fmt.Sprintf("tso-save-interval in %s is deprecated, use [tso.save-interval] instead", c.configFile)
+			c.WarningMsgs = append(c.WarningMsgs, msg)
+			if !meta.IsDefined("tso", "save-interval") {
+				c.TSOConfig.SaveInterval = c.TSOSaveInterval
+			}
+		}
+		if c.TSOUpdatePhysicalInterval.Duration != defaultTSOUpdatePhysicalInterval {
+			msg := fmt.Sprintf("tso-update-physical-interval in %s is deprecated, use [tso.update-physical-interval] instead", c.configFile)
+			c.WarningMsgs = append(c.WarningMsgs, msg)
+			if !meta.IsDefined("tso", "update-physical-interval") {
+				c.TSOConfig.UpdatePhysicalInterval = c.TSOUpdatePhysicalInterval
+			}
+		}
 		if meta.IsDefined("schedule", "disable-raft-learner") {
 			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
@@ -589,6 +613,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
+	c.adjustTSOConfig(configMetaData.Child("tso"))
 	adjustDuration(&c.HeartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
 	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
@@ -616,6 +641,21 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 func (c *Config) adjustLog(meta *configMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
+	}
+}
+
+func (c *Config) adjustTSOConfig(meta *configMetaData) {
+	if !meta.IsDefined("save-interval") {
+		c.TSOConfig.SaveInterval.Duration = defaultTSOSaveInterval
+	}
+
+	if !meta.IsDefined("update-physical-interval") {
+		c.TSOConfig.UpdatePhysicalInterval.Duration = defaultTSOUpdatePhysicalInterval
+	}
+	if c.TSOConfig.UpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
+		c.TSOConfig.UpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
+	} else if c.TSOConfig.UpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
+		c.TSOConfig.UpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
 	}
 }
 
@@ -1306,19 +1346,14 @@ func (c *Config) GetConfigFile() string {
 	return c.configFile
 }
 
-// IsLocalTSOEnabled returns if the local TSO is enabled.
-func (c *Config) IsLocalTSOEnabled() bool {
-	return c.EnableLocalTSO
-}
-
 // GetTSOUpdatePhysicalInterval returns TSO update physical interval.
 func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
-	return c.TSOUpdatePhysicalInterval.Duration
+	return c.TSOConfig.UpdatePhysicalInterval.Duration
 }
 
 // GetTSOSaveInterval returns TSO save interval.
 func (c *Config) GetTSOSaveInterval() time.Duration {
-	return c.TSOSaveInterval.Duration
+	return c.TSOConfig.SaveInterval.Duration
 }
 
 // GetTLSConfig returns the TLS config.

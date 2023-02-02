@@ -39,7 +39,7 @@ func TestTSOTestSuite(t *testing.T) {
 func (suite *tsoTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
-		cfg.EnableLocalTSO = true
+		cfg.TSOConfig.EnableLocalTSO = true
 		cfg.Labels[config.ZoneLabel] = "dc-1"
 	})
 	server.MustWaitLeader(re, []*server.Server{suite.svr})

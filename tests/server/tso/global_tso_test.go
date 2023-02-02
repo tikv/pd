@@ -195,7 +195,7 @@ func TestLogicalOverflow(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
-			conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
+			conf.TSOConfig.UpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
 		})
 		defer cluster.Destroy()
 		re.NoError(err)

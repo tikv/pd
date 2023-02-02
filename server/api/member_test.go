@@ -45,7 +45,7 @@ func TestMemberTestSuite(t *testing.T) {
 
 func (suite *memberTestSuite) SetupSuite() {
 	suite.cfgs, suite.servers, suite.clean = mustNewCluster(suite.Require(), 3, func(cfg *config.Config) {
-		cfg.EnableLocalTSO = true
+		cfg.TSOConfig.EnableLocalTSO = true
 		cfg.Labels = map[string]string{
 			config.ZoneLabel: "dc-1",
 		}

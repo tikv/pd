@@ -391,7 +391,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
 		if resp.GetLogical() >= maxLogical {
-			log.Warn("logical part outside of max logical interval, please check ntp time, or adjust config item `tso-update-physical-interval`",
+			log.Warn("logical part outside of max logical interval, please check ntp time, or adjust config item `tso.update-physical-interval`",
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			tsoCounter.WithLabelValues("logical_overflow", t.dcLocation).Inc()

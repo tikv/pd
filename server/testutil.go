@@ -76,6 +76,7 @@ func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 		TSOSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
 	}
 
+	cfg.TSOConfig.SaveInterval = typeutil.NewDuration(200 * time.Millisecond)
 	cfg.AdvertiseClientUrls = cfg.ClientUrls
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
 	cfg.DataDir, _ = os.MkdirTemp("/tmp", "test_pd")
