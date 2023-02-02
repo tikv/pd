@@ -15,6 +15,7 @@
 package client_test
 
 import (
+	"path"
 	"strconv"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-const globalConfigPath = "global/config/"
+const globalConfigPath = "/global/config/"
 
 type testReceiver struct {
 	re *require.Assertions
@@ -43,9 +44,9 @@ func (s testReceiver) Send(m *pdpb.WatchGlobalConfigResponse) error {
 	for _, change := range m.GetChanges() {
 		switch change.GetKind() {
 		case pdpb.EventType_PUT:
-			s.re.Contains(change.Name, globalConfigPath+change.Value)
+			s.re.Contains(change.Name, globalConfigPath+string(change.Payload))
 		case pdpb.EventType_DELETE:
-			s.re.Empty(change.Value)
+			s.re.Empty(change.Payload)
 		}
 	}
 	return nil
@@ -84,7 +85,7 @@ func (suite *globalConfigTestSuite) GetEtcdPath(configPath string) string {
 	return globalConfigPath + configPath
 }
 
-func (suite *globalConfigTestSuite) TestLoad() {
+func (suite *globalConfigTestSuite) TestLoadWithoutNames() {
 	defer func() {
 		// clean up
 		_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath("test"))
@@ -98,17 +99,78 @@ func (suite *globalConfigTestSuite) TestLoad() {
 	suite.NoError(err)
 	suite.Len(res.Items, 1)
 	suite.Equal(r.Header.GetRevision(), res.Revision)
-	suite.Equal("test", res.Items[0].Value)
+	suite.Equal("test", string(res.Items[0].Payload))
+}
+
+func (suite *globalConfigTestSuite) TestLoadWithoutConfigPath() {
+	defer func() {
+		// clean up
+		_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath("source_id"))
+		suite.NoError(err)
+	}()
+	_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath("source_id"), "1")
+	suite.NoError(err)
+	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+		Names: []string{"source_id"},
+	})
+	suite.NoError(err)
+	suite.Len(res.Items, 1)
+	suite.Equal([]byte("1"), res.Items[0].Payload)
+}
+
+func (suite *globalConfigTestSuite) TestLoadOtherConfigPath() {
+	defer func() {
+		for i := 0; i < 3; i++ {
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
+			suite.NoError(err)
+		}
+	}()
+	for i := 0; i < 3; i++ {
+		_, err := suite.server.GetClient().Put(suite.server.Context(), path.Join("OtherConfigPath", strconv.Itoa(i)), strconv.Itoa(i))
+		suite.NoError(err)
+	}
+	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+		Names:      []string{"0", "1"},
+		ConfigPath: "OtherConfigPath",
+	})
+	suite.NoError(err)
+	suite.Len(res.Items, 2)
+	for i, item := range res.Items {
+		suite.Equal(&pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: strconv.Itoa(i), Payload: []byte(strconv.Itoa(i))}, item)
+	}
+}
+
+func (suite *globalConfigTestSuite) TestLoadAndStore() {
+	defer func() {
+		for i := 0; i < 3; i++ {
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath("test"))
+			suite.NoError(err)
+		}
+	}()
+	changes := []*pdpb.GlobalConfigItem{{Kind: pdpb.EventType_PUT, Name: "0", Payload: []byte("0")}, {Kind: pdpb.EventType_PUT, Name: "1", Payload: []byte("1")}, {Kind: pdpb.EventType_PUT, Name: "2", Payload: []byte("2")}}
+	_, err := suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+		Changes:    changes,
+	})
+	suite.NoError(err)
+	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+	})
+	suite.Len(res.Items, 3)
+	suite.NoError(err)
+	for i, item := range res.Items {
+		suite.Equal(&pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: suite.GetEtcdPath(strconv.Itoa(i)), Payload: []byte(strconv.Itoa(i))}, item)
+	}
 }
 
 func (suite *globalConfigTestSuite) TestStore() {
 	defer func() {
 		for i := 0; i < 3; i++ {
-			_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+"test")
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath("test"))
 			suite.NoError(err)
 		}
 	}()
-	changes := []*pdpb.GlobalConfigItem{{Kind: pdpb.EventType_PUT, Name: "0", Value: "0"}, {Kind: pdpb.EventType_PUT, Name: "1", Value: "1"}, {Kind: pdpb.EventType_PUT, Name: "2", Value: "2"}}
+	changes := []*pdpb.GlobalConfigItem{{Kind: pdpb.EventType_PUT, Name: "0", Payload: []byte("0")}, {Kind: pdpb.EventType_PUT, Name: "1", Payload: []byte("1")}, {Kind: pdpb.EventType_PUT, Name: "2", Payload: []byte("2")}}
 	_, err := suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
 		ConfigPath: globalConfigPath,
 		Changes:    changes,
@@ -140,18 +202,55 @@ func (suite *globalConfigTestSuite) TestWatch() {
 	}
 }
 
-func (suite *globalConfigTestSuite) TestClientLoad() {
+func (suite *globalConfigTestSuite) TestClientLoadWithoutNames() {
 	defer func() {
-		_, err := suite.server.GetClient().Delete(suite.server.Context(), globalConfigPath+"test")
+		for i := 0; i < 3; i++ {
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
+			suite.NoError(err)
+		}
+	}()
+	for i := 0; i < 3; i++ {
+		_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
+		suite.NoError(err)
+	}
+	res, _, err := suite.client.LoadGlobalConfig(suite.server.Context(), nil, globalConfigPath)
+	suite.NoError(err)
+	suite.Len(res, 3)
+	for i, item := range res {
+		suite.Equal(pd.GlobalConfigItem{EventType: pdpb.EventType_PUT, Name: suite.GetEtcdPath(strconv.Itoa(i)), PayLoad: []byte(strconv.Itoa(i)), Value: strconv.Itoa(i)}, item)
+	}
+}
+
+func (suite *globalConfigTestSuite) TestClientLoadWithoutConfigPath() {
+	defer func() {
+		_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath("source_id"))
 		suite.NoError(err)
 	}()
-	r, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath("test"), "test")
+	_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath("source_id"), "1")
 	suite.NoError(err)
-	res, revision, err := suite.client.LoadGlobalConfig(suite.server.Context(), globalConfigPath)
+	res, _, err := suite.client.LoadGlobalConfig(suite.server.Context(), []string{"source_id"}, "")
 	suite.NoError(err)
 	suite.Len(res, 1)
-	suite.Equal(r.Header.GetRevision(), revision)
-	suite.Equal(pd.GlobalConfigItem{Name: suite.GetEtcdPath("test"), Value: "test", EventType: pdpb.EventType_PUT}, res[0])
+	suite.Equal(pd.GlobalConfigItem{EventType: pdpb.EventType_PUT, Name: "source_id", PayLoad: []byte("1"), Value: "1"}, res[0])
+}
+
+func (suite *globalConfigTestSuite) TestClientLoadOtherConfigPath() {
+	defer func() {
+		for i := 0; i < 3; i++ {
+			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
+			suite.NoError(err)
+		}
+	}()
+	for i := 0; i < 3; i++ {
+		_, err := suite.server.GetClient().Put(suite.server.Context(), path.Join("OtherConfigPath", strconv.Itoa(i)), strconv.Itoa(i))
+		suite.NoError(err)
+	}
+	res, _, err := suite.client.LoadGlobalConfig(suite.server.Context(), []string{"0", "1"}, "OtherConfigPath")
+	suite.NoError(err)
+	suite.Len(res, 2)
+	for i, item := range res {
+		suite.Equal(pd.GlobalConfigItem{EventType: pdpb.EventType_PUT, Name: strconv.Itoa(i), PayLoad: []byte(strconv.Itoa(i)), Value: strconv.Itoa(i)}, item)
+	}
 }
 
 func (suite *globalConfigTestSuite) TestClientStore() {
@@ -184,11 +283,11 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 	// Mock get revision by loading
 	r, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath("test"), "test")
 	suite.NoError(err)
-	res, revision, err := suite.client.LoadGlobalConfig(suite.server.Context(), globalConfigPath)
+	res, revision, err := suite.client.LoadGlobalConfig(suite.server.Context(), nil, globalConfigPath)
 	suite.NoError(err)
 	suite.Len(res, 1)
 	suite.Equal(r.Header.GetRevision(), revision)
-	suite.Equal(pd.GlobalConfigItem{Name: suite.GetEtcdPath("test"), Value: "test", EventType: pdpb.EventType_PUT}, res[0])
+	suite.Equal(pd.GlobalConfigItem{EventType: pdpb.EventType_PUT, Name: suite.GetEtcdPath("test"), PayLoad: []byte("test"), Value: "test"}, res[0])
 	// Mock when start watcher there are existed some keys, will load firstly
 	for i := 3; i < 6; i++ {
 		_, err = suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))

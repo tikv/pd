@@ -53,6 +53,7 @@ type GlobalConfigItem struct {
 	EventType pdpb.EventType
 	Name      string
 	Value     string
+	PayLoad   []byte
 }
 
 // Client is a PD (Placement Driver) client.
@@ -122,7 +123,7 @@ type Client interface {
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 
 	// LoadGlobalConfig gets the global config from etcd
-	LoadGlobalConfig(ctx context.Context, configPath string) ([]GlobalConfigItem, int64, error)
+	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error)
 	// StoreGlobalConfig set the config from etcd
 	StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error
 	// WatchGlobalConfig returns an stream with all global config and updates
@@ -419,7 +420,7 @@ func NewClientWithContext(ctx context.Context, pdAddrs []string, security Securi
 	}
 	// Start the daemons.
 	c.updateTSODispatcher()
-	c.createTokenispatcher()
+	c.createTokenDispatcher()
 	c.wg.Add(3)
 	go c.tsLoop()
 	go c.tsCancelLoop()
@@ -1820,16 +1821,22 @@ func trimHTTPPrefix(str string) string {
 	return str
 }
 
-func (c *client) LoadGlobalConfig(ctx context.Context, configPath string) ([]GlobalConfigItem, int64, error) {
-	resp, err := c.getClient().LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{ConfigPath: configPath})
+func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error) {
+	resp, err := c.getClient().LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names, ConfigPath: configPath})
 	if err != nil {
 		return nil, 0, err
 	}
 
 	res := make([]GlobalConfigItem, len(resp.GetItems()))
 	for i, item := range resp.GetItems() {
-		cfg := GlobalConfigItem{Name: item.GetName()}
-		cfg.Value = item.GetValue()
+		cfg := GlobalConfigItem{Name: item.GetName(), EventType: item.GetKind(), PayLoad: item.GetPayload()}
+		if item.GetValue() == "" {
+			// We need to keep the Value field for CDC compatibility.
+			// But if you not use `Names`, will only have `Payload` field.
+			cfg.Value = string(item.GetPayload())
+		} else {
+			cfg.Value = item.GetValue()
+		}
 		res[i] = cfg
 	}
 	return res, resp.GetRevision(), nil
@@ -1838,7 +1845,7 @@ func (c *client) LoadGlobalConfig(ctx context.Context, configPath string) ([]Glo
 func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error {
 	resArr := make([]*pdpb.GlobalConfigItem, len(items))
 	for i, it := range items {
-		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType}
+		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType, Payload: it.PayLoad}
 	}
 	_, err := c.getClient().StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr, ConfigPath: configPath})
 	if err != nil {
@@ -1874,7 +1881,13 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 			}
 			arr := make([]GlobalConfigItem, len(m.Changes))
 			for j, i := range m.Changes {
-				arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue()}
+				// We need to keep the Value field for CDC compatibility.
+				// But if you not use `Names`, will only have `Payload` field.
+				if i.GetValue() == "" {
+					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), string(i.GetPayload()), i.GetPayload()}
+				} else {
+					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue(), i.GetPayload()}
+				}
 			}
 			select {
 			case <-ctx.Done():

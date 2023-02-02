@@ -204,8 +204,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				writeByteMetrics.Observe(consumption.WriteBytes)
 			}
 			// CPU time info.
-			if consumption.SqlLayerCpuTimeMs != 0 {
-				sqlCPUMetrics.Observe(consumption.SqlLayerCpuTimeMs)
+			if consumption.TotalCpuTimeMs > 0 {
+				if consumption.SqlLayerCpuTimeMs > 0 {
+					sqlCPUMetrics.Observe(consumption.SqlLayerCpuTimeMs)
+				}
 				kvCPUMetrics.Observe(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
 			}
 			// RPC count info.
