@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -1881,16 +1882,30 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	<-done
 }
 
+// for CDC compatibility, we need to initialize config path to `globalConfigPath`
+const globalConfigPath = "/global/config/"
+
 // StoreGlobalConfig store global config into etcd by transaction
+// Since item value needs to support marshal of different struct types,
+// it should be set to `Payload bytes` instead of `Value string`
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
+	configPath := request.GetConfigPath()
+	if configPath == "" {
+		configPath = globalConfigPath
+	}
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
-		name := item.GetName()
+		name := path.Join(configPath, item.GetName())
 		switch item.GetKind() {
 		case pdpb.EventType_PUT:
-			ops[i] = clientv3.OpPut(request.GetConfigPath()+name, item.GetValue())
+			// For CDC compatibility, we need to check the Value field firstly.
+			value := item.GetValue()
+			if value == "" {
+				value = string(item.GetPayload())
+			}
+			ops[i] = clientv3.OpPut(name, value)
 		case pdpb.EventType_DELETE:
-			ops[i] = clientv3.OpDelete(request.GetConfigPath() + name)
+			ops[i] = clientv3.OpDelete(name)
 		}
 	}
 	res, err :=
@@ -1904,16 +1919,38 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 	return &pdpb.StoreGlobalConfigResponse{}, nil
 }
 
-// LoadGlobalConfig load global config from etcd
+// LoadGlobalConfig support 2 ways to load global config from etcd
+// - `Names` iteratively get value from `ConfigPath/Name` but not care about revision
+// - `ConfigPath` if `Names` is nil can get all values and revision of current path
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
 	configPath := request.GetConfigPath()
+	if configPath == "" {
+		configPath = globalConfigPath
+	}
+	// Since item value needs to support marshal of different struct types,
+	// it should be set to `Payload bytes` instead of `Value string`.
+	if request.Names != nil {
+		res := make([]*pdpb.GlobalConfigItem, len(request.Names))
+		for i, name := range request.Names {
+			r, err := s.client.Get(ctx, path.Join(configPath, name))
+			if err != nil {
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
+			} else if len(r.Kvs) == 0 {
+				msg := "key " + name + " not found"
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
+			} else {
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Payload: r.Kvs[0].Value, Kind: pdpb.EventType_PUT}
+			}
+		}
+		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
+	}
 	r, err := s.client.Get(ctx, configPath, clientv3.WithPrefix())
 	if err != nil {
 		return &pdpb.LoadGlobalConfigResponse{}, err
 	}
 	res := make([]*pdpb.GlobalConfigItem, len(r.Kvs))
 	for i, value := range r.Kvs {
-		res[i] = &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: string(value.Key), Value: string(value.Value)}
+		res[i] = &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: string(value.Key), Payload: value.Value}
 	}
 	return &pdpb.LoadGlobalConfigResponse{Items: res, Revision: r.Header.GetRevision()}, nil
 }
@@ -1924,11 +1961,15 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
+	configPath := req.GetConfigPath()
+	if configPath == "" {
+		configPath = globalConfigPath
+	}
 	revision := req.GetRevision()
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
-	watchChan := s.client.Watch(ctx, req.GetConfigPath(), clientv3.WithPrefix(), clientv3.WithRev(revision))
+	watchChan := s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision))
 	for {
 		select {
 		case <-ctx.Done():
@@ -1947,7 +1988,9 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 
 			cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
 			for _, e := range res.Events {
-				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Value: string(e.Kv.Value), Kind: pdpb.EventType(e.Type)})
+				// Since item value needs to support marshal of different struct types,
+				// it should be set to `Payload bytes` instead of `Value string`.
+				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.Kv.Value, Kind: pdpb.EventType(e.Type)})
 			}
 			if len(cfgs) > 0 {
 				if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs, Revision: res.Header.GetRevision()}); err != nil {
