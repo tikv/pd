@@ -44,26 +44,18 @@ type RegistrableService interface {
 // It implements the `ServiceRegistry` interface.
 type ServiceRegistry struct {
 	builders map[string]ServiceBuilder
-	services map[string]RegistrableService
 }
 
 func newServiceRegistry() *ServiceRegistry {
 	return &ServiceRegistry{
 		builders: make(map[string]ServiceBuilder),
-		services: make(map[string]RegistrableService),
 	}
 }
 
 // InstallAllGRPCServices installs all registered grpc services.
 func (r *ServiceRegistry) InstallAllGRPCServices(srv *server.Server, g *grpc.Server) {
 	for name, builder := range r.builders {
-		if l, ok := r.services[name]; ok {
-			l.RegisterGRPCService(g)
-			log.Info("gRPC service already registered", zap.String("service-name", name))
-			continue
-		}
 		l := builder(srv)
-		r.services[name] = l
 		l.RegisterGRPCService(g)
 		log.Info("gRPC service registered successfully", zap.String("service-name", name))
 	}
@@ -72,13 +64,7 @@ func (r *ServiceRegistry) InstallAllGRPCServices(srv *server.Server, g *grpc.Ser
 // InstallAllRESTHandler installs all registered REST services.
 func (r *ServiceRegistry) InstallAllRESTHandler(srv *server.Server, h map[string]http.Handler) {
 	for name, builder := range r.builders {
-		if l, ok := r.services[name]; ok {
-			l.RegisterRESTHandler(h)
-			log.Info("restful API service already registered", zap.String("service-name", name))
-			continue
-		}
 		l := builder(srv)
-		r.services[name] = l
 		l.RegisterRESTHandler(h)
 		log.Info("restful API service registered successfully", zap.String("service-name", name))
 	}

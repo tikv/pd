@@ -16,6 +16,7 @@ package pd
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -24,7 +25,6 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 type actionType int
@@ -33,6 +33,8 @@ const (
 	add                     actionType = 0
 	modify                  actionType = 1
 	groupSettingsPathPrefix            = "resource_group/settings"
+	// errNotLeaderMsg is returned when the requested server is not the leader.
+	errNotLeaderMsg = "not leader"
 )
 
 // ResourceManagerClient manages resource group info and token request.
@@ -48,10 +50,17 @@ type ResourceManagerClient interface {
 
 // resourceManagerClient gets the ResourceManager client of current PD leader.
 func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
-	if cc, ok := c.clientConns.Load(c.GetLeaderAddr()); ok {
-		return rmpb.NewResourceManagerClient(cc.(*grpc.ClientConn))
+	if cc, err := c.getOrCreateGRPCConn(c.GetLeaderAddr()); err == nil {
+		return rmpb.NewResourceManagerClient(cc)
 	}
 	return nil
+}
+
+// gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
+func (c *client) gRPCErrorHandler(err error) {
+	if strings.Contains(err.Error(), errNotLeaderMsg) {
+		c.ScheduleCheckLeader()
+	}
 }
 
 // ListResourceGroups loads and returns all metadata of resource groups.
@@ -59,11 +68,12 @@ func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 	req := &rmpb.ListResourceGroupsRequest{}
 	resp, err := c.resourceManagerClient().ListResourceGroups(ctx, req)
 	if err != nil {
+		c.gRPCErrorHandler(err)
 		return nil, err
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return nil, errors.Errorf("[resource_manager]" + resErr.Message)
+		return nil, errors.Errorf("[resource_manager] %s", resErr.Message)
 	}
 	return resp.GetGroups(), nil
 }
@@ -74,11 +84,12 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string)
 	}
 	resp, err := c.resourceManagerClient().GetResourceGroup(ctx, req)
 	if err != nil {
+		c.gRPCErrorHandler(err)
 		return nil, err
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return nil, errors.Errorf("[resource_manager]" + resErr.Message)
+		return nil, errors.Errorf("[resource_manager] %s", resErr.Message)
 	}
 	return resp.GetGroup(), nil
 }
@@ -103,11 +114,12 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 		resp, err = c.resourceManagerClient().ModifyResourceGroup(ctx, req)
 	}
 	if err != nil {
+		c.gRPCErrorHandler(err)
 		return str, err
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return str, errors.Errorf("[resource_manager]" + resErr.Message)
+		return str, errors.Errorf("[resource_manager] %s", resErr.Message)
 	}
 	str = resp.GetBody()
 	return
@@ -119,11 +131,12 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	}
 	resp, err := c.resourceManagerClient().DeleteResourceGroup(ctx, req)
 	if err != nil {
+		c.gRPCErrorHandler(err)
 		return "", err
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return "", errors.Errorf("[resource_manager]" + resErr.Message)
+		return "", errors.Errorf("[resource_manager] %s", resErr.Message)
 	}
 	return resp.GetBody(), nil
 }
@@ -248,9 +261,10 @@ func (c *client) createTokenDispatcher() {
 func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tbc *tokenBatchController) {
 	var connection resourceManagerConnectionContext
 	if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
-		log.Warn("get stream error", zap.Error(err))
+		log.Warn("[resource_manager] get token stream error", zap.Error(err))
 	}
 
+	lastLeaderAddr := c.GetLeaderAddr()
 	for {
 		var firstRequest *tokenRequest
 		select {
@@ -258,25 +272,42 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 			return
 		case firstRequest = <-tbc.tokenRequestCh:
 		}
-		stream, streamCtx, cancel := connection.stream, connection.ctx, connection.cancel
-		if stream == nil {
+		var (
+			stream       rmpb.ResourceManager_AcquireTokenBucketsClient
+			streamCtx    context.Context
+			streamCancel context.CancelFunc
+		)
+		for i := 0; i < maxRetryTimes; i++ {
+			stream, streamCtx, streamCancel = connection.stream, connection.ctx, connection.cancel
+			curLeaderAddr := c.GetLeaderAddr()
+			if curLeaderAddr == lastLeaderAddr && stream != nil {
+				break
+			}
+			connection.stream = nil
+			if streamCancel != nil {
+				streamCancel()
+			}
 			c.tryResourceManagerConnect(dispatcherCtx, &connection)
-			firstRequest.done <- errors.Errorf("no stream")
+			lastLeaderAddr = curLeaderAddr
+			log.Info("[resource_manager] token leader may change, try to reconnect stream", zap.String("leader", curLeaderAddr))
+		}
+		if stream == nil {
+			firstRequest.done <- errors.Errorf("failed to get the stream connection")
+			c.ScheduleCheckLeader()
 			continue
 		}
 		select {
 		case <-streamCtx.Done():
-			log.Info("[resource_manager] resource manager stream is canceled")
-			cancel()
 			connection.stream = nil
+			log.Info("[resource_manager] token stream is canceled")
 			continue
 		default:
 		}
-		err := c.processTokenRequests(stream, firstRequest)
-		if err != nil {
-			log.Info("processTokenRequests error", zap.Error(err))
-			cancel()
+		if err := c.processTokenRequests(stream, firstRequest); err != nil {
+			c.ScheduleCheckLeader()
 			connection.stream = nil
+			streamCancel()
+			log.Info("[resource_manager] token request error", zap.Error(err))
 		}
 	}
 }
@@ -290,15 +321,15 @@ func (c *client) processTokenRequests(stream rmpb.ResourceManager_AcquireTokenBu
 	}
 	resp, err := stream.Recv()
 	if err != nil {
+		c.gRPCErrorHandler(err)
 		err = errors.WithStack(err)
 		t.done <- err
 		return err
 	}
 	if resp.GetError() != nil {
-		return errors.Errorf("[resource_manager]" + resp.GetError().Message)
+		return errors.Errorf("[resource_manager] %s", resp.GetError().Message)
 	}
-	tokenBuckets := resp.GetResponses()
-	t.TokenBuckets = tokenBuckets
+	t.TokenBuckets = resp.GetResponses()
 	t.done <- nil
 	return nil
 }

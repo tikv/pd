@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/server"
@@ -34,6 +35,7 @@ const defaultConsumptionChanSize = 1024
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
+	member  *member.Member
 	groups  map[string]*ResourceGroup
 	storage endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
@@ -47,21 +49,23 @@ type Manager struct {
 // NewManager returns a new Manager.
 func NewManager(srv *server.Server) *Manager {
 	m := &Manager{
+		member: &member.Member{},
 		groups: make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
 		}, defaultConsumptionChanSize),
 	}
-	// Initialize the manager storage after the server is started.
+	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
+		log.Info("resource group manager starts to initialize", zap.String("name", srv.Name()))
 		m.storage = endpoint.NewStorageEndpoint(
 			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
 			nil,
 		)
-		log.Info("resource group manager storage has been initialized")
+		m.member = srv.GetMember()
 	})
-	// Initialize the manager after the leader is elected.
+	// The second initialization after the leader is elected.
 	srv.AddLeaderCallback(m.Init)
 	return m
 }
@@ -80,7 +84,7 @@ func (m *Manager) Init(ctx context.Context) {
 	})
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
-	log.Info("resource group manager has been initialized")
+	log.Info("resource group manager finishes initialization")
 }
 
 // AddResourceGroup puts a resource group.
