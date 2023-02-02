@@ -1105,7 +1105,7 @@ func (suite *ruleCheckerTestSuite) TestFixPendingVoterWithAvailableWitness2() {
 	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
 
 	r := suite.cluster.GetRegion(1)
-	// set peer2 as pending learner 
+	// set peer2 as pending learner
 	peer := r.GetPeer(2)
 	peer.Role = metapb.PeerRole_Learner
 	r = r.Clone(core.WithPendingPeers([]*metapb.Peer{peer}))
