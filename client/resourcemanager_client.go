@@ -266,22 +266,26 @@ func (c *client) createTokenDispatcher() {
 }
 
 func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tbc *tokenBatchController) {
-	var connection resourceManagerConnectionContext
-	if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
+	var (
+		connection   resourceManagerConnectionContext
+		firstRequest *tokenRequest
+		stream       rmpb.ResourceManager_AcquireTokenBucketsClient
+		streamCtx    context.Context
+		toReconnect  bool
+		err          error
+	)
+	if err = c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
 		log.Warn("[resource_manager] get token stream error", zap.Error(err))
 	}
-
-	toReconnect := false
 	for {
 		// Fetch the request from the channel.
-		var firstRequest *tokenRequest
 		select {
 		case <-dispatcherCtx.Done():
 			return
 		case firstRequest = <-tbc.tokenRequestCh:
 		}
 		// Try to get a stream connection.
-		stream, streamCtx := connection.stream, connection.ctx
+		stream, streamCtx = connection.stream, connection.ctx
 		select {
 		case <-c.updateTokenConnectionCh:
 			toReconnect = true
@@ -309,7 +313,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 			continue
 		default:
 		}
-		if err := c.processTokenRequests(stream, firstRequest); err != nil {
+		if err = c.processTokenRequests(stream, firstRequest); err != nil {
 			c.ScheduleCheckLeader()
 			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
