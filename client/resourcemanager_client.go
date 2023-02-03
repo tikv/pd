@@ -247,6 +247,13 @@ type resourceManagerConnectionContext struct {
 	cancel context.CancelFunc
 }
 
+func (cc *resourceManagerConnectionContext) reset() {
+	cc.stream = nil
+	if cc.cancel != nil {
+		cc.cancel()
+	}
+}
+
 func (c *client) createTokenDispatcher() {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
 	dispatcher := &tokenDispatcher{
@@ -264,49 +271,47 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		log.Warn("[resource_manager] get token stream error", zap.Error(err))
 	}
 
-	lastLeaderAddr := c.GetLeaderAddr()
+	toReconnect := false
 	for {
+		// Fetch the request from the channel.
 		var firstRequest *tokenRequest
 		select {
 		case <-dispatcherCtx.Done():
 			return
 		case firstRequest = <-tbc.tokenRequestCh:
 		}
-		var (
-			stream       rmpb.ResourceManager_AcquireTokenBucketsClient
-			streamCtx    context.Context
-			streamCancel context.CancelFunc
-		)
-		for i := 0; i < maxRetryTimes; i++ {
-			stream, streamCtx, streamCancel = connection.stream, connection.ctx, connection.cancel
-			curLeaderAddr := c.GetLeaderAddr()
-			if curLeaderAddr == lastLeaderAddr && stream != nil {
-				break
-			}
-			connection.stream = nil
-			if streamCancel != nil {
-				streamCancel()
-			}
-			c.tryResourceManagerConnect(dispatcherCtx, &connection)
-			lastLeaderAddr = curLeaderAddr
-			log.Info("[resource_manager] token leader may change, try to reconnect stream", zap.String("leader", curLeaderAddr))
+		// Try to get a stream connection.
+		stream, streamCtx := connection.stream, connection.ctx
+		select {
+		case <-c.updateTokenConnectionCh:
+			toReconnect = true
+		default:
+			toReconnect = stream == nil
 		}
+		// If the stream is nil or the leader has changed, try to reconnect.
+		if toReconnect {
+			connection.reset()
+			c.tryResourceManagerConnect(dispatcherCtx, &connection)
+			log.Info("[resource_manager] token leader may change, try to reconnect the stream")
+			stream, streamCtx = connection.stream, connection.ctx
+		}
+		// If the stream is still nil, return an error.
 		if stream == nil {
 			firstRequest.done <- errors.Errorf("failed to get the stream connection")
 			c.ScheduleCheckLeader()
+			connection.reset()
 			continue
 		}
 		select {
 		case <-streamCtx.Done():
-			connection.stream = nil
+			connection.reset()
 			log.Info("[resource_manager] token stream is canceled")
 			continue
 		default:
 		}
 		if err := c.processTokenRequests(stream, firstRequest); err != nil {
 			c.ScheduleCheckLeader()
-			connection.stream = nil
-			streamCancel()
+			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
 		}
 	}
