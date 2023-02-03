@@ -44,6 +44,7 @@ const (
 	regionPathPrefix           = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
+	resourceGroupStatesPath   = "states"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
@@ -108,6 +109,10 @@ func RegionPath(regionID uint64) string {
 
 func resourceGroupSettingKeyPath(groupName string) string {
 	return path.Join(resourceGroupSettingsPath, groupName)
+}
+
+func resourceGroupStateKeyPath(groupName string) string {
+	return path.Join(resourceGroupStatesPath, groupName)
 }
 
 func ruleKeyPath(ruleKey string) string {

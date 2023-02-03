@@ -367,6 +367,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		reqs.Requests = append(reqs.Requests, req)
 	}
 	aresp, err := cli.AcquireTokenBuckets(suite.ctx, reqs)
+	re.Len(aresp, 2)
 	re.NoError(err)
 	for _, resp := range aresp {
 		re.Len(resp.GrantedRUTokens, 1)
@@ -384,7 +385,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		re.Equal(g1.GetMode(), g2.GetMode())
 		re.Equal(g1.GetRUSettings().RU.Settings.FillRate, g2.GetRUSettings().RU.Settings.FillRate)
 		// now we don't persistent tokens in running state, so tokens is original.
-		re.Equal(g1.GetRUSettings().RU.Tokens, g2.GetRUSettings().RU.Tokens)
+		re.Less(g1.GetRUSettings().RU.Tokens, g2.GetRUSettings().RU.Tokens)
 		re.NoError(err)
 	}
 

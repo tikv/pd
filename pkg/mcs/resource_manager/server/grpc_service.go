@@ -166,7 +166,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs)
+						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, s.manager.storage)
 					}
 					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}

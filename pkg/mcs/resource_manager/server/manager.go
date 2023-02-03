@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"sync"
 
@@ -76,7 +77,32 @@ func (m *Manager) Init() {
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
 	m.storage.LoadResourceGroupSettings(handler)
+	tokenHandler := func(k, v string) {
+		tokens := &GroupStates{}
+		if err := json.Unmarshal([]byte(v), tokens); err != nil {
+			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
+			panic(err)
+		}
+		if group, ok := m.groups[k]; ok {
+			group.SetStatesIntoResourceGroup(tokens)
+		}
+	}
+	m.storage.LoadResourceGroupStates(tokenHandler)
 }
+
+// SaveResourceGroupStates save the states of resource group.
+// func (m *Manager) SaveResourceGroupStates(group *ResourceGroup) error {
+// 	m.RLock()
+// 	_, ok := m.groups[group.Name]
+// 	m.RUnlock()
+// 	if ok {
+// 		return errors.New("this group already exists")
+// 	}
+// 	if err := group.persistStates(m.storage); err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
 
 // AddResourceGroup puts a resource group.
 func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
@@ -94,6 +120,9 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 	if err := group.persistSettings(m.storage); err != nil {
 		return err
 	}
+	if err := group.persistStates(m.storage); err != nil {
+		return err
+	}
 	m.groups[group.Name] = group
 	m.Unlock()
 	return nil
@@ -105,20 +134,20 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 		return errors.New("invalid group name")
 	}
 	m.Lock()
-	defer m.Unlock()
 	curGroup, ok := m.groups[group.Name]
 	if !ok {
 		return errors.New("not exists the group")
 	}
-	newGroup := curGroup.Copy()
-	err := newGroup.PatchSettings(group)
+
+	m.Unlock()
+	err := curGroup.PatchSettings(group)
 	if err != nil {
 		return err
 	}
-	if err := newGroup.persistSettings(m.storage); err != nil {
+	if err := curGroup.persistSettings(m.storage); err != nil {
 		return err
 	}
-	m.groups[group.Name] = newGroup
+	m.groups[group.Name] = curGroup
 	return nil
 }
 

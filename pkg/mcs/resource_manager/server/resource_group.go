@@ -34,7 +34,7 @@ type ResourceGroup struct {
 	Mode rmpb.GroupMode `json:"mode"`
 	// RU settings
 	RUSettings *RequestUnitSettings `json:"r_u_settings,omitempty"`
-	// Native resource settings
+	// raw resource settings
 	RawResourceSettings *RawResourceSettings `json:"raw_resource_settings,omitempty"`
 }
 
@@ -87,15 +87,15 @@ func (rg *ResourceGroup) CheckAndInit() error {
 	}
 	if rg.Mode == rmpb.GroupMode_RUMode {
 		if rg.RUSettings == nil {
-			rg.RUSettings = &RequestUnitSettings{}
+			return errors.New("invalid resource group settings, RU mode should set RU settings")
 		}
 		if rg.RawResourceSettings != nil {
-			return errors.New("invalid resource group settings, RU mode should not set resource settings")
+			return errors.New("invalid resource group settings, RU mode should not set raw resource settings")
 		}
 	}
 	if rg.Mode == rmpb.GroupMode_RawMode {
 		if rg.RawResourceSettings == nil {
-			rg.RawResourceSettings = &RawResourceSettings{}
+			return errors.New("invalid resource group settings, raw mode should set raw resource settings")
 		}
 		if rg.RUSettings != nil {
 			return errors.New("invalid resource group settings, raw mode should not set RU settings")
@@ -164,9 +164,16 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 }
 
 // RequestRU requests the RU of the resource group.
-func (rg *ResourceGroup) RequestRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
+func (rg *ResourceGroup) RequestRU(now time.Time, neededTokens float64, targetPeriodMs uint64, storage endpoint.ResourceGroupStorage) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
+	grant := rg.requestRU(now, neededTokens, targetPeriodMs)
+	rg.persistStates(storage)
+	return grant
+}
+
+// requestRU requests the RU of the resource group.
+func (rg *ResourceGroup) requestRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
 	if rg.RUSettings == nil {
 		return nil
 	}
@@ -184,7 +191,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RUMode,
 			RUSettings: &rmpb.GroupRequestUnitSettings{
-				RU: rg.RUSettings.RU.TokenBucket,
+				RU: rg.RUSettings.RU.GetTokenBucket(),
 			},
 		}
 		return group
@@ -193,9 +200,9 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RawMode,
 			RawResourceSettings: &rmpb.GroupRawResourceSettings{
-				Cpu:     rg.RawResourceSettings.CPU.TokenBucket,
-				IoRead:  rg.RawResourceSettings.IOReadBandwidth.TokenBucket,
-				IoWrite: rg.RawResourceSettings.IOWriteBandwidth.TokenBucket,
+				Cpu:     rg.RawResourceSettings.CPU.GetTokenBucket(),
+				IoRead:  rg.RawResourceSettings.IOReadBandwidth.GetTokenBucket(),
+				IoWrite: rg.RawResourceSettings.IOWriteBandwidth.GetTokenBucket(),
 			},
 		}
 		return group
@@ -208,4 +215,58 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) error {
 	metaGroup := rg.IntoProtoResourceGroup()
 	return storage.SaveResourceGroupSetting(rg.Name, metaGroup)
+}
+
+// GroupStates is the tokens set of a resource group.
+type GroupStates struct {
+	// RU tokens
+	RU *GroupTokenBucketState `json:"r_u,omitempty"`
+	// raw resource tokens
+	CPU     *GroupTokenBucketState `json:"cpu,omitempty"`
+	IORead  *GroupTokenBucketState `json:"io_read,omitempty"`
+	IOWrite *GroupTokenBucketState `json:"io_write,omitempty"`
+}
+
+// getGroupStates get the token set of ResourceGroup.
+func (rg *ResourceGroup) getGroupStates() *GroupStates {
+	switch rg.Mode {
+	case rmpb.GroupMode_RUMode: // RU mode
+		tokens := &GroupStates{
+			RU: rg.RUSettings.RU.GroupTokenBucketState.Clone(),
+		}
+		return tokens
+	case rmpb.GroupMode_RawMode: // Raw mode
+		tokens := &GroupStates{
+			CPU:     rg.RawResourceSettings.CPU.GroupTokenBucketState.Clone(),
+			IORead:  rg.RawResourceSettings.IOReadBandwidth.GroupTokenBucketState.Clone(),
+			IOWrite: rg.RawResourceSettings.IOWriteBandwidth.GroupTokenBucketState.Clone(),
+		}
+		return tokens
+	}
+	return nil
+}
+
+func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
+	switch rg.Mode {
+	case rmpb.GroupMode_RUMode:
+		if state := states.RU; state != nil {
+			rg.RUSettings.RU.GroupTokenBucketState = *state
+		}
+	case rmpb.GroupMode_RawMode:
+		if state := states.CPU; state != nil {
+			rg.RawResourceSettings.CPU.GroupTokenBucketState = *state
+		}
+		if state := states.IORead; state != nil {
+			rg.RawResourceSettings.IOReadBandwidth.GroupTokenBucketState = *state
+		}
+		if state := states.IOWrite; state != nil {
+			rg.RawResourceSettings.IOWriteBandwidth.GroupTokenBucketState = *state
+		}
+	}
+}
+
+// persistTokens persists the resource group tokens.
+func (rg *ResourceGroup) persistStates(storage endpoint.ResourceGroupStorage) error {
+	states := rg.getGroupStates()
+	return storage.SaveResourceGroupStates(rg.Name, states)
 }
