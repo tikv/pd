@@ -151,6 +151,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewEvictSlowStoreSchedulerCommand())
 	c.AddCommand(NewGrantHotRegionSchedulerCommand())
 	c.AddCommand(NewSplitBucketSchedulerCommand())
+	c.AddCommand(NewSlowTrendEvictLeaderSchedulerCommand())
 	c.AddCommand(NewBalanceWitnessSchedulerCommand())
 	c.AddCommand(NewTransferWitnessLeaderSchedulerCommand())
 	return c
@@ -369,6 +370,16 @@ func NewTransferWitnessLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "transfer-witness-leader-scheduler",
 		Short: "add a scheduler to transfer witness leader",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewSlowTrendEvictLeaderSchedulerCommand returns a command to add a evict-slow-trend-scheduler.
+func NewSlowTrendEvictLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-slow-trend-scheduler",
+		Short: "add a scheduler to detect and evict slow stores by trend",
 		Run:   addSchedulerCommandFunc,
 	}
 	return c

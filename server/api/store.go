@@ -42,6 +42,13 @@ type MetaStore struct {
 	StateName string `json:"state_name"`
 }
 
+type SlowTrend struct {
+	CauseValue  float64 `json:"cause_value"`
+	CauseRate   float64 `json:"cause_rate"`
+	ResultValue float64 `json:"result_value"`
+	ResultRate  float64 `json:"result_rate"`
+}
+
 // StoreStatus contains status about a store.
 type StoreStatus struct {
 	Capacity           typeutil.ByteSize  `json:"capacity"`
@@ -57,6 +64,7 @@ type StoreStatus struct {
 	RegionSize         int64              `json:"region_size"`
 	WitnessCount       int                `json:"witness_count"`
 	SlowScore          uint64             `json:"slow_score"`
+	SlowTrend          SlowTrend          `json:"slow_trend"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	IsBusy             bool               `json:"is_busy,omitempty"`
@@ -77,6 +85,7 @@ const (
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
+	slowTrend := store.GetSlowTrend()
 	s := &StoreInfo{
 		Store: &MetaStore{
 			Store:     store.GetMeta(),
@@ -96,6 +105,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			RegionSize:         store.GetRegionSize(),
 			WitnessCount:       store.GetWitnessCount(),
 			SlowScore:          store.GetSlowScore(),
+			SlowTrend:          SlowTrend{slowTrend.CauseValue, slowTrend.CauseRate, slowTrend.ResultValue, slowTrend.ResultRate},
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			IsBusy:             store.IsBusy(),
