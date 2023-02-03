@@ -37,13 +37,9 @@ var _ TSOStorage = (*StorageEndpoint)(nil)
 
 // LoadTimestamp loads a timestamp from the storage according to the keyspaceGroupName and dcLocation.
 func (se *StorageEndpoint) LoadTimestamp(keyspaceGroupName string, dcLocationKey ...string) (time.Time, error) {
-	var prefix string
-	if len(dcLocationKey) != 0 {
-		prefix = timestampPrefix(keyspaceGroupName) + dcLocationKey[0] + "/"
-	} else {
-		prefix = timestampPrefix(keyspaceGroupName)
-	}
+	prefix := timestampPrefix(keyspaceGroupName, dcLocationKey...)
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return typeutil.ZeroTime, err

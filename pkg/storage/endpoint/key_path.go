@@ -48,6 +48,8 @@ const (
 	microserviceKey = "microservice"
 	tsoServiceKey   = "tso"
 	timestampKey    = "timestamp"
+	// localTSOSuffix is the same as `localTSOSuffixEtcdPrefix` defined in `pkg/tso/allocator_manager.go`.
+	localTSOSuffix = "lts"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
@@ -218,11 +220,28 @@ func encodeKeyspaceID(spaceID uint32) string {
 
 func timestampPath(keyspaceGroupName string, dcLocationKey ...string) string {
 	if len(dcLocationKey) != 0 {
-		return path.Join(microserviceKey, tsoServiceKey, keyspaceGroupName, dcLocationKey[0], timestampKey)
+		return buildPath(false, []string{microserviceKey, tsoServiceKey, keyspaceGroupName, localTSOSuffix, dcLocationKey[0], timestampKey}...)
 	}
-	return path.Join(microserviceKey, tsoServiceKey, keyspaceGroupName, timestampKey)
+	return buildPath(false, []string{microserviceKey, tsoServiceKey, keyspaceGroupName, timestampKey}...)
 }
 
-func timestampPrefix(keyspaceGroupName string) string {
-	return path.Join(microserviceKey, tsoServiceKey, keyspaceGroupName) + "/"
+func timestampPrefix(keyspaceGroupName string, dcLocationKey ...string) string {
+	if len(dcLocationKey) != 0 {
+		return buildPath(true, []string{microserviceKey, tsoServiceKey, keyspaceGroupName, localTSOSuffix, dcLocationKey[0]}...)
+	}
+	return buildPath(true, []string{microserviceKey, tsoServiceKey, keyspaceGroupName}...)
+}
+
+func buildPath(withSuffix bool, str ...string) string {
+	var sb strings.Builder
+	for i := 0; i < len(str); i++ {
+		if i != 0 {
+			sb.WriteString("/")
+		}
+		sb.WriteString(str[i])
+	}
+	if withSuffix {
+		sb.WriteString("/")
+	}
+	return sb.String()
 }

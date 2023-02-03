@@ -68,7 +68,7 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 	storage := NewStorageWithEtcdBackend(client, rootPath)
 
 	keyspaceGroupName := "test"
-	dc1LocationKey, dc2LocationKey := "lts/dc1", "lts/dc2"
+	dc1LocationKey, dc2LocationKey := "dc1", "dc2"
 	localTS1 := time.Now().Round(0)
 	err = storage.SaveTimestamp(keyspaceGroupName, localTS1, dc1LocationKey)
 	re.NoError(err)
