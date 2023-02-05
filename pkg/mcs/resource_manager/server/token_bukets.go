@@ -79,6 +79,9 @@ func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
 }
 
 func (t *GroupTokenBucket) GetTokenBucket() *rmpb.TokenBucket {
+	if t.Settings == nil {
+		return nil
+	}
 	return &rmpb.TokenBucket{
 		Settings: t.Settings,
 		Tokens:   t.Tokens,
@@ -91,15 +94,16 @@ func (t *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 		return
 	}
 	if setting := tb.GetSettings(); setting != nil {
-		if t.Settings == nil {
-			t.Settings = setting
-		} else {
+		if t.Settings != nil {
 			// If not patch MaxTokens, use past value.
 			if setting.MaxTokens == 0 {
 				setting.MaxTokens = t.Settings.MaxTokens
 			}
-			t.Settings = setting
 		}
+		if setting.MaxTokens == 0 {
+			setting.MaxTokens = defaultMaxTokens
+		}
+		t.Settings = setting
 	}
 
 	// the settings in token is delta of the last update and now.

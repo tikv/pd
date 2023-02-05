@@ -90,20 +90,6 @@ func (m *Manager) Init() {
 	m.storage.LoadResourceGroupStates(tokenHandler)
 }
 
-// SaveResourceGroupStates save the states of resource group.
-// func (m *Manager) SaveResourceGroupStates(group *ResourceGroup) error {
-// 	m.RLock()
-// 	_, ok := m.groups[group.Name]
-// 	m.RUnlock()
-// 	if ok {
-// 		return errors.New("this group already exists")
-// 	}
-// 	if err := group.persistStates(m.storage); err != nil {
-// 		return err
-// 	}
-// 	return nil
-// }
-
 // AddResourceGroup puts a resource group.
 func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 	m.RLock()
@@ -117,6 +103,7 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 		return err
 	}
 	m.Lock()
+	defer m.Unlock()
 	if err := group.persistSettings(m.storage); err != nil {
 		return err
 	}
@@ -124,7 +111,6 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 		return err
 	}
 	m.groups[group.Name] = group
-	m.Unlock()
 	return nil
 }
 
@@ -136,6 +122,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	m.Lock()
 	curGroup, ok := m.groups[group.Name]
 	if !ok {
+		m.Unlock()
 		return errors.New("not exists the group")
 	}
 

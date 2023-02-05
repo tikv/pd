@@ -145,17 +145,23 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
 		if settings := group.GetRUSettings(); settings != nil {
-			ruSettings = &RequestUnitSettings{
-				RU: NewGroupTokenBucket(settings.GetRU()),
+			ruSettings = &RequestUnitSettings{}
+			if settings.GetRU() != nil {
+				ruSettings.RU = NewGroupTokenBucket(settings.GetRU())
 			}
 			rg.RUSettings = ruSettings
 		}
 	case rmpb.GroupMode_RawMode:
 		if settings := group.GetRawResourceSettings(); settings != nil {
-			resourceSettings = &RawResourceSettings{
-				CPU:              NewGroupTokenBucket(settings.GetCpu()),
-				IOReadBandwidth:  NewGroupTokenBucket(settings.GetIoRead()),
-				IOWriteBandwidth: NewGroupTokenBucket(settings.GetIoWrite()),
+			resourceSettings = &RawResourceSettings{}
+			if settings.GetCpu() != nil {
+				resourceSettings.CPU = NewGroupTokenBucket(settings.GetCpu())
+			}
+			if settings.GetIoRead() != nil {
+				resourceSettings.IOReadBandwidth = NewGroupTokenBucket(settings.GetIoRead())
+			}
+			if settings.GetIoWrite() != nil {
+				resourceSettings.IOWriteBandwidth = NewGroupTokenBucket(settings.GetIoWrite())
 			}
 			rg.RawResourceSettings = resourceSettings
 		}
@@ -174,7 +180,7 @@ func (rg *ResourceGroup) RequestRU(now time.Time, neededTokens float64, targetPe
 
 // requestRU requests the RU of the resource group.
 func (rg *ResourceGroup) requestRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
-	if rg.RUSettings == nil {
+	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs)
