@@ -23,6 +23,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/member"
@@ -145,7 +146,6 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if err := curGroup.persistSettings(m.storage); err != nil {
 		return err
 	}
-	m.groups[group.Name] = curGroup
 	return nil
 }
 
@@ -196,11 +196,14 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 
 func (m *Manager) persistLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
+	failpoint.Inject("fastPersist", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(100 * time.Millisecond)
+	})
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			m.persistResourceGroupRunningState()
 			return
 		case <-ticker.C:
 			m.persistResourceGroupRunningState()

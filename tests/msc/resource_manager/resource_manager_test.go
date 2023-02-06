@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
@@ -116,8 +117,8 @@ func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAdd
 
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.client.Close()
-	suite.clean()
 	suite.cluster.Destroy()
+	suite.clean()
 }
 
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
@@ -370,7 +371,8 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		Requests:              make([]*rmpb.TokenBucketRequest, 0),
 		TargetRequestPeriodMs: uint64(time.Second * 10 / time.Millisecond),
 	}
-
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/fastPersist", `return(true)`))
+	suite.resignAndWaitLeader()
 	groups = append(groups, &rmpb.ResourceGroup{Name: "test3"})
 	for i := 0; i < 3; i++ {
 		for _, group := range groups {
@@ -410,13 +412,14 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 			re.Less(g1.GetRUSettings().RU.Tokens, g2.GetRUSettings().RU.Tokens)
 			re.NoError(err)
 		}
-
+		time.Sleep(250 * time.Millisecond)
 		// to test persistent
 		suite.resignAndWaitLeader()
 		gresp, err = cli.GetResourceGroup(suite.ctx, groups[0].GetName())
 		re.NoError(err)
 		checkFunc(gresp, groups[0])
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/fastPersist"))
 	suite.cleanupResourceGroups()
 }
 
