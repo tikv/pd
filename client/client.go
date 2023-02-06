@@ -1186,6 +1186,8 @@ func (c *client) Close() {
 		return true
 	})
 
+	tokenErr := errors.WithStack(errClosing)
+	c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
 	c.tokenDispatcher.dispatcherCancel()
 }
 

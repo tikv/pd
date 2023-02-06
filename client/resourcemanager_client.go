@@ -366,3 +366,8 @@ func (c *client) tryResourceManagerConnect(ctx context.Context, connection *reso
 	}
 	return err
 }
+
+func (tbc *tokenBatchController) revokePendingTokenRequest(err error) {
+	req := <-tbc.tokenRequestCh
+	req.done <- err
+}
