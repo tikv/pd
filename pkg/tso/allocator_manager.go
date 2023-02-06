@@ -758,7 +758,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 	if !txnResp.Succeeded {
 		log.Warn("write local tso suffix into etcd failed",
 			zap.String("dc-location", dcLocation),
-			zap.String("local-tso-surfix", localTSOSuffixValue),
+			zap.String("local-tso-suffix", localTSOSuffixValue),
 			zap.String("server-name", am.member.Member().Name),
 			zap.Uint64("server-id", am.member.ID()))
 		return -1, errs.ErrEtcdTxnConflict.FastGenByArgs()

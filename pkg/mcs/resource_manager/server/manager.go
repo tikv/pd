@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/server"
@@ -34,9 +35,9 @@ const defaultConsumptionChanSize = 1024
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	groups            map[string]*ResourceGroup
-	storage           endpoint.ResourceGroupStorage
-	createStorageFunc func() endpoint.ResourceGroupStorage
+	member  *member.Member
+	groups  map[string]*ResourceGroup
+	storage endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
@@ -48,34 +49,42 @@ type Manager struct {
 // NewManager returns a new Manager.
 func NewManager(srv *server.Server) *Manager {
 	m := &Manager{
+		member: &member.Member{},
 		groups: make(map[string]*ResourceGroup),
-		createStorageFunc: func() endpoint.ResourceGroupStorage {
-			return endpoint.NewStorageEndpoint(
-				kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
-				nil)
-		},
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
 		}, defaultConsumptionChanSize),
 	}
-	srv.AddStartCallback(m.Init)
-	go m.backgroundMetricsFlush(srv.Context())
+	// The first initialization after the server is started.
+	srv.AddStartCallback(func() {
+		log.Info("resource group manager starts to initialize", zap.String("name", srv.Name()))
+		m.storage = endpoint.NewStorageEndpoint(
+			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
+			nil,
+		)
+		m.member = srv.GetMember()
+	})
+	// The second initialization after the leader is elected.
+	srv.AddLeaderCallback(m.Init)
 	return m
 }
 
 // Init initializes the resource group manager.
-func (m *Manager) Init() {
-	m.storage = m.createStorageFunc()
-	handler := func(k, v string) {
+func (m *Manager) Init(ctx context.Context) {
+	// Reset the resource groups first.
+	m.groups = make(map[string]*ResourceGroup)
+	m.storage.LoadResourceGroupSettings(func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {
 			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
-	}
-	m.storage.LoadResourceGroupSettings(handler)
+	})
+	// Start the background metrics flusher.
+	go m.backgroundMetricsFlush(ctx)
+	log.Info("resource group manager finishes initialization")
 }
 
 // AddResourceGroup puts a resource group.

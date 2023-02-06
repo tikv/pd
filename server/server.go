@@ -157,11 +157,15 @@ type Server struct {
 	lg       *zap.Logger
 	logProps *log.ZapProperties
 
-	// Add callback functions at different stages
+	// Callback functions for different stages
+	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
+	// leaderCallbacks will be called after the server becomes leader.
+	leaderCallbacks []func(context.Context)
+	// closeCallbacks will be called before the server is closed.
 	closeCallbacks []func()
 
-	// hot region history info storeage
+	// hot region history info storage
 	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
@@ -415,6 +419,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	// Run callbacks
+	log.Info("triggering the start callback functions")
 	for _, cb := range s.startCallbacks {
 		cb()
 	}
@@ -482,6 +487,7 @@ func (s *Server) Close() {
 	}
 
 	// Run callbacks
+	log.Info("triggering the close callback functions")
 	for _, cb := range s.closeCallbacks {
 		cb()
 	}
@@ -1349,6 +1355,11 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	return nil
 }
 
+// AddLeaderCallback adds a callback in the leader campaign phase.
+func (s *Server) AddLeaderCallback(callbacks ...func(context.Context)) {
+	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
+}
+
 func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
@@ -1457,6 +1468,11 @@ func (s *Server) campaignLeader() {
 	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
 		log.Error("failed to initialize encryption", errs.ZapError(err))
 		return
+	}
+
+	log.Info("triggering the leader callback functions")
+	for _, cb := range s.leaderCallbacks {
+		cb(ctx)
 	}
 
 	// Try to create raft cluster.
