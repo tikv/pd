@@ -70,7 +70,7 @@ endif
 PD_SERVER_DEP += dashboard-ui
 
 pd-server: ${PD_SERVER_DEP}
-	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go cmd/pd-server/legacy.go
+	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server

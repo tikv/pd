@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mode"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/server"
@@ -79,7 +80,7 @@ func main() {
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	svr := legacyStart(ctx, cfg)
+	svr := mode.LegacyStart(ctx, cfg)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,

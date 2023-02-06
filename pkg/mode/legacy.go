@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package mode
 
 import (
 	"context"
@@ -36,7 +36,8 @@ import (
 	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/install"
 )
 
-func legacyStart(ctx context.Context, cfg *config.Config) *server.Server {
+// LegacyStart starts the legacy mode, where are all services are started.
+func LegacyStart(ctx context.Context, cfg *config.Config) ServiceServer {
 	err := join.PrepareJoinCluster(cfg)
 	if err != nil {
 		log.Fatal("join meet error", errs.ZapError(err))
