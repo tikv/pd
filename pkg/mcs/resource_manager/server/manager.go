@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
@@ -62,6 +63,7 @@ func NewManager(srv *server.Server) *Manager {
 	}
 	srv.AddStartCallback(m.Init)
 	go m.backgroundMetricsFlush(srv.Context())
+	go m.persistLoop(srv.Context())
 	return m
 }
 
@@ -181,6 +183,36 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 		return res[i].Name < res[j].Name
 	})
 	return res
+}
+
+func (m *Manager) persistLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.persistResourceGroupRunningState()
+		}
+	}
+}
+
+func (m *Manager) persistResourceGroupRunningState() {
+	m.Lock()
+	keys := make([]string, 0, len(m.groups))
+	for k := range m.groups {
+		keys = append(keys, k)
+	}
+	m.Unlock()
+	for idx := 0; idx < len(keys); idx++ {
+		m.Lock()
+		group, ok := m.groups[keys[idx]]
+		m.Unlock()
+		if ok {
+			group.persistStates(m.storage)
+		}
+	}
 }
 
 // Receive the consumption and flush it to the metrics.

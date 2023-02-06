@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
@@ -335,6 +336,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/noFastExitPersist", `return(true)`))
 	cli := suite.client
 
 	groups := make([]*rmpb.ResourceGroup, 0)
@@ -405,6 +407,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		re.NoError(err)
 		re.Contains(dresp, "Success!")
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/noFastExitPersist"))
 }
 
 func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {

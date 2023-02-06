@@ -41,17 +41,18 @@ type GroupTokenBucket struct {
 	//   - If b < 0, that means the Token Bucket is unlimited burst and capacity is ignored.
 	//   - If b > 0, that means the Token Bucket is limited burst. (current not used).
 	// MaxTokens limits the number of tokens that can be accumulated
-	Settings *rmpb.TokenLimitSettings `json:"settings,omitempty"`
-	// State is the running state of TokenBucket.
+	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
 	GroupTokenBucketState `json:"state,omitempty"`
 }
 
+// GroupTokenBucketState is the running state of TokenBucket.
 type GroupTokenBucketState struct {
 	Tokens      float64    `json:"tokens,omitempty"`
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
 }
 
+// Clone returns the copy of GroupTokenBucketState
 func (s *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 	return &GroupTokenBucketState{
 		Tokens:      s.Tokens,
@@ -78,6 +79,7 @@ func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
 	}
 }
 
+// GetTokenBucket returns the grpc protoc struct of GroupTokenBucket.
 func (t *GroupTokenBucket) GetTokenBucket() *rmpb.TokenBucket {
 	if t.Settings == nil {
 		return nil

@@ -170,16 +170,9 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 }
 
 // RequestRU requests the RU of the resource group.
-func (rg *ResourceGroup) RequestRU(now time.Time, neededTokens float64, targetPeriodMs uint64, storage endpoint.ResourceGroupStorage) *rmpb.GrantedRUTokenBucket {
+func (rg *ResourceGroup) RequestRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
-	grant := rg.requestRU(now, neededTokens, targetPeriodMs)
-	rg.persistStates(storage)
-	return grant
-}
-
-// requestRU requests the RU of the resource group.
-func (rg *ResourceGroup) requestRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
@@ -233,8 +226,10 @@ type GroupStates struct {
 	IOWrite *GroupTokenBucketState `json:"io_write,omitempty"`
 }
 
-// getGroupStates get the token set of ResourceGroup.
-func (rg *ResourceGroup) getGroupStates() *GroupStates {
+// GetGroupStates get the token set of ResourceGroup.
+func (rg *ResourceGroup) GetGroupStates() *GroupStates {
+	rg.RLock()
+	defer rg.RUnlock()
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
 		tokens := &GroupStates{
@@ -252,6 +247,7 @@ func (rg *ResourceGroup) getGroupStates() *GroupStates {
 	return nil
 }
 
+// SetStatesIntoResourceGroup updates the state of resource group.
 func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -271,8 +267,8 @@ func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 	}
 }
 
-// persistTokens persists the resource group tokens.
+// persistStates persists the resource group tokens.
 func (rg *ResourceGroup) persistStates(storage endpoint.ResourceGroupStorage) error {
-	states := rg.getGroupStates()
+	states := rg.GetGroupStates()
 	return storage.SaveResourceGroupStates(rg.Name, states)
 }

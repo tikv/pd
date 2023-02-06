@@ -166,7 +166,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, s.manager.storage)
+						tokens = rg.RequestRU(now, re.Value, targetPeriodMs)
 					}
 					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}
@@ -174,6 +174,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				log.Warn("not supports the resource type", zap.String("resource-group", resourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
 				continue
 			}
+			//rg.persistStates(s.manager.storage)
 			log.Debug("finish token request from", zap.String("resource group", resourceGroupName))
 			resps.Responses = append(resps.Responses, resp)
 		}
