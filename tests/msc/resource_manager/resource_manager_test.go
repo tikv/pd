@@ -28,7 +28,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	rgcli "github.com/tikv/pd/pkg/mcs/resource_manager/client"
+	rgcli "github.com/tikv/pd/client/resource_manager/client"
 	"github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -292,9 +292,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	cfg := &rgcli.RequestUnitConfig{
 		ReadBaseCost:     1,
 		ReadCostPerByte:  1,
-		ReadCPUMsCost:    1,
 		WriteBaseCost:    1,
 		WriteCostPerByte: 1,
+		CPUMsCost:        1,
 	}
 
 	controller, _ := rgcli.NewResourceGroupController(1, cli, cfg)

@@ -89,7 +89,7 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	if !req.IsWrite() {
 		kvCPUMs := float64(res.KVCPUMs())
 		consumption.TotalCpuTimeMs += kvCPUMs
-		consumption.RRU += float64(kc.ReadCPUMsCost) * kvCPUMs
+		consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
 	}
 	// A write request may also read data, which should be counted into the RRU cost.
 	readBytes := float64(res.ReadBytes())
