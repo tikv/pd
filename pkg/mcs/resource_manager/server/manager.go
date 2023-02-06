@@ -133,12 +133,11 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	}
 	m.Lock()
 	curGroup, ok := m.groups[group.Name]
+	m.Unlock()
 	if !ok {
-		m.Unlock()
 		return errors.New("not exists the group")
 	}
 
-	m.Unlock()
 	err := curGroup.PatchSettings(group)
 	if err != nil {
 		return err
@@ -210,16 +209,16 @@ func (m *Manager) persistLoop(ctx context.Context) {
 }
 
 func (m *Manager) persistResourceGroupRunningState() {
-	m.Lock()
+	m.RLock()
 	keys := make([]string, 0, len(m.groups))
 	for k := range m.groups {
 		keys = append(keys, k)
 	}
-	m.Unlock()
+	m.RUnlock()
 	for idx := 0; idx < len(keys); idx++ {
-		m.Lock()
+		m.RLock()
 		group, ok := m.groups[keys[idx]]
-		m.Unlock()
+		m.RUnlock()
 		if ok {
 			group.persistStates(m.storage)
 		}
