@@ -1185,6 +1185,8 @@ func (c *client) Close() {
 		}
 		return true
 	})
+
+	c.tokenDispatcher.dispatcherCancel()
 }
 
 // leaderClient gets the client of current PD leader.
