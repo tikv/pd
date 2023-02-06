@@ -26,7 +26,7 @@ tidy:
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
-test: enable-codegen dashboard-ui
+test: enable-codegen
 	CGO_ENABLED=1 go test -tags deadlock -race -cover || { $(MAKE) disable-codegen && exit 1; }
 	$(MAKE) disable-codegen
 
@@ -46,6 +46,3 @@ enable-codegen:
 disable-codegen:
 	cd ../../ && $(MAKE) failpoint-disable
 	go mod tidy
-
-dashboard-ui:
-	cd ../../ && $(MAKE) dashboard-ui

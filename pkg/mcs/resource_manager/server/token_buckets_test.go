@@ -66,13 +66,13 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 
 	gtb := NewGroupTokenBucket(tbSetting)
 	time1 := time.Now()
-	tb, trickle := gtb.request(time1, 100000, uint64(time.Second)*10/uint64(time.Millisecond))
-	re.LessOrEqual(math.Abs(tb.Tokens-100000), 1e-7)
+	tb, trickle := gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond))
+	re.LessOrEqual(math.Abs(tb.Tokens-190000), 1e-7)
 	re.Equal(trickle, int64(0))
 	// need to lend token
-	tb, trickle = gtb.request(time1, 101000, uint64(time.Second)*10/uint64(time.Millisecond))
-	re.LessOrEqual(math.Abs(tb.Tokens-101000), 1e-7)
-	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
+	tb, trickle = gtb.request(time1, 11000, uint64(time.Second)*10/uint64(time.Millisecond))
+	re.LessOrEqual(math.Abs(tb.Tokens-11000), 1e-7)
+	re.Equal(trickle, int64(time.Second)*11000./4000./int64(time.Millisecond))
 	tb, trickle = gtb.request(time1, 35000, uint64(time.Second)*10/uint64(time.Millisecond))
 	re.LessOrEqual(math.Abs(tb.Tokens-35000), 1e-7)
 	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))

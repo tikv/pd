@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -60,6 +61,8 @@ type Manager struct {
 	rc *cluster.RaftCluster
 	// ctx is the context of the manager, to be used in transaction.
 	ctx context.Context
+	// config is the configurations of the manager.
+	config config.KeyspaceConfig
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -73,13 +76,18 @@ type CreateKeyspaceRequest struct {
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
-func NewKeyspaceManager(store endpoint.KeyspaceStorage, rc *cluster.RaftCluster, idAllocator id.Allocator) *Manager {
+func NewKeyspaceManager(store endpoint.KeyspaceStorage,
+	rc *cluster.RaftCluster,
+	idAllocator id.Allocator,
+	config config.KeyspaceConfig,
+) *Manager {
 	return &Manager{
 		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
 		idAllocator: idAllocator,
 		store:       store,
 		rc:          rc,
 		ctx:         context.TODO(),
+		config:      config,
 	}
 }
 
@@ -102,6 +110,19 @@ func (manager *Manager) Bootstrap() error {
 	// so we ignore the keyspaceExists error.
 	if err != nil && err != ErrKeyspaceExists {
 		return err
+	}
+
+	// Initialize pre-alloc keyspace.
+	preAlloc := manager.config.PreAlloc
+	for _, keyspaceName := range preAlloc {
+		_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{
+			Name: keyspaceName,
+			Now:  now,
+		})
+		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
+		if err != nil && err != ErrKeyspaceExists {
+			return err
+		}
 	}
 	return nil
 }
@@ -212,26 +233,6 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		if !loaded {
 			return ErrKeyspaceNotFound
 		}
-		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
-		if err != nil {
-			return err
-		}
-		if meta == nil {
-			return ErrKeyspaceNotFound
-		}
-		return nil
-	})
-	return meta, err
-}
-
-// LoadKeyspaceByID returns the keyspace specified by id.
-// It returns error if loading or unmarshalling met error or if keyspace does not exist.
-func (manager *Manager) LoadKeyspaceByID(id uint32) (*keyspacepb.KeyspaceMeta, error) {
-	var (
-		meta *keyspacepb.KeyspaceMeta
-		err  error
-	)
-	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
 			return err

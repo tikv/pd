@@ -27,6 +27,13 @@ import (
 	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+var (
+	// errNotLeader is returned when current server is not the leader.
+	errNotLeader = status.Errorf(codes.Unavailable, "not leader")
 )
 
 var _ rmpb.ResourceManagerServer = (*Service)(nil)
@@ -76,8 +83,18 @@ func (s *Service) GetManager() *Manager {
 	return s.manager
 }
 
+func (s *Service) checkLeader() error {
+	if !s.manager.member.IsLeader() {
+		return errNotLeader
+	}
+	return nil
+}
+
 // GetResourceGroup implements ResourceManagerServer.GetResourceGroup.
 func (s *Service) GetResourceGroup(ctx context.Context, req *rmpb.GetResourceGroupRequest) (*rmpb.GetResourceGroupResponse, error) {
+	if err := s.checkLeader(); err != nil {
+		return nil, err
+	}
 	rg := s.manager.GetResourceGroup(req.ResourceGroupName)
 	if rg == nil {
 		return nil, errors.New("resource group not found")
@@ -89,6 +106,9 @@ func (s *Service) GetResourceGroup(ctx context.Context, req *rmpb.GetResourceGro
 
 // ListResourceGroups implements ResourceManagerServer.ListResourceGroups.
 func (s *Service) ListResourceGroups(ctx context.Context, req *rmpb.ListResourceGroupsRequest) (*rmpb.ListResourceGroupsResponse, error) {
+	if err := s.checkLeader(); err != nil {
+		return nil, err
+	}
 	groups := s.manager.GetResourceGroupList()
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
@@ -101,6 +121,9 @@ func (s *Service) ListResourceGroups(ctx context.Context, req *rmpb.ListResource
 
 // AddResourceGroup implements ResourceManagerServer.AddResourceGroup.
 func (s *Service) AddResourceGroup(ctx context.Context, req *rmpb.PutResourceGroupRequest) (*rmpb.PutResourceGroupResponse, error) {
+	if err := s.checkLeader(); err != nil {
+		return nil, err
+	}
 	rg := FromProtoResourceGroup(req.GetGroup())
 	err := s.manager.AddResourceGroup(rg)
 	if err != nil {
@@ -111,6 +134,9 @@ func (s *Service) AddResourceGroup(ctx context.Context, req *rmpb.PutResourceGro
 
 // DeleteResourceGroup implements ResourceManagerServer.DeleteResourceGroup.
 func (s *Service) DeleteResourceGroup(ctx context.Context, req *rmpb.DeleteResourceGroupRequest) (*rmpb.DeleteResourceGroupResponse, error) {
+	if err := s.checkLeader(); err != nil {
+		return nil, err
+	}
 	err := s.manager.DeleteResourceGroup(req.ResourceGroupName)
 	if err != nil {
 		return nil, err
@@ -120,6 +146,9 @@ func (s *Service) DeleteResourceGroup(ctx context.Context, req *rmpb.DeleteResou
 
 // ModifyResourceGroup implements ResourceManagerServer.ModifyResourceGroup.
 func (s *Service) ModifyResourceGroup(ctx context.Context, req *rmpb.PutResourceGroupRequest) (*rmpb.PutResourceGroupResponse, error) {
+	if err := s.checkLeader(); err != nil {
+		return nil, err
+	}
 	err := s.manager.ModifyResourceGroup(req.GetGroup())
 	if err != nil {
 		return nil, err
@@ -142,14 +171,24 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		if err != nil {
 			return errors.WithStack(err)
 		}
+		if err := s.checkLeader(); err != nil {
+			return err
+		}
 		targetPeriodMs := request.GetTargetRequestPeriodMs()
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
-			rg := s.manager.GetResourceGroup(req.ResourceGroupName)
+			resourceGroupName := req.GetResourceGroupName()
+			// Get the resource group from manager to acquire token buckets.
+			rg := s.manager.GetMutableResourceGroup(resourceGroupName)
 			if rg == nil {
-				log.Warn("resource group not found", zap.String("resource-group", req.ResourceGroupName))
+				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
 				continue
 			}
+			// Send the consumption to update the metrics.
+			s.manager.consumptionDispatcher <- struct {
+				resourceGroupName string
+				*rmpb.Consumption
+			}{resourceGroupName, req.GetConsumptionSinceLastRequest()}
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
@@ -158,19 +197,16 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			case rmpb.GroupMode_RUMode:
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
-					switch re.Type {
-					case rmpb.RequestUnitType_RRU:
-						tokens = rg.RequestRRU(now, re.Value, targetPeriodMs)
-					case rmpb.RequestUnitType_WRU:
-						tokens = rg.RequestWRU(now, re.Value, targetPeriodMs)
+					if re.Type == rmpb.RequestUnitType_RU {
+						tokens = rg.RequestRU(now, re.Value, targetPeriodMs)
 					}
 					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}
 			case rmpb.GroupMode_RawMode:
-				log.Warn("not supports the resource type", zap.String("resource-group", req.ResourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
+				log.Warn("not supports the resource type", zap.String("resource-group", resourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
 				continue
 			}
-			log.Debug("finish token request from", zap.String("resource group", req.ResourceGroupName))
+			log.Debug("finish token request from", zap.String("resource group", resourceGroupName))
 			resps.Responses = append(resps.Responses, resp)
 		}
 		stream.Send(resps)

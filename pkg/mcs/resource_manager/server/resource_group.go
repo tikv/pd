@@ -17,20 +17,14 @@ package server
 
 import (
 	"encoding/json"
-	"path"
 	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/server/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
-)
-
-const (
-	// groupSettingsPathPrefix is the prefix of the resource group path to store group settings.
-	groupSettingsPathPrefix = "/settings"
 )
 
 // ResourceGroup is the definition of a resource group, for REST API.
@@ -41,17 +35,16 @@ type ResourceGroup struct {
 	// RU settings
 	RUSettings *RequestUnitSettings `json:"r_u_settings,omitempty"`
 	// Native resource settings
-	ResourceSettings *NativeResourceSettings `json:"resource_settings,omitempty"`
+	RawResourceSettings *RawResourceSettings `json:"raw_resource_settings,omitempty"`
 }
 
 // RequestUnitSettings is the definition of the RU settings.
 type RequestUnitSettings struct {
-	RRU GroupTokenBucket `json:"rru,omitempty"`
-	WRU GroupTokenBucket `json:"wru,omitempty"`
+	RU GroupTokenBucket `json:"ru,omitempty"`
 }
 
-// NativeResourceSettings is the definition of the native resource settings.
-type NativeResourceSettings struct {
+// RawResourceSettings is the definition of the native resource settings.
+type RawResourceSettings struct {
 	CPU              GroupTokenBucket `json:"cpu,omitempty"`
 	IOReadBandwidth  GroupTokenBucket `json:"io_read_bandwidth,omitempty"`
 	IOWriteBandwidth GroupTokenBucket `json:"io_write_bandwidth,omitempty"`
@@ -96,13 +89,13 @@ func (rg *ResourceGroup) CheckAndInit() error {
 		if rg.RUSettings == nil {
 			rg.RUSettings = &RequestUnitSettings{}
 		}
-		if rg.ResourceSettings != nil {
+		if rg.RawResourceSettings != nil {
 			return errors.New("invalid resource group settings, RU mode should not set resource settings")
 		}
 	}
 	if rg.Mode == rmpb.GroupMode_RawMode {
-		if rg.ResourceSettings == nil {
-			rg.ResourceSettings = &NativeResourceSettings{}
+		if rg.RawResourceSettings == nil {
+			rg.RawResourceSettings = &RawResourceSettings{}
 		}
 		if rg.RUSettings != nil {
 			return errors.New("invalid resource group settings, raw mode should not set RU settings")
@@ -125,15 +118,14 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 		if metaGroup.GetRUSettings() == nil {
 			return errors.New("invalid resource group settings, RU mode should set RU settings")
 		}
-		rg.RUSettings.RRU.patch(metaGroup.GetRUSettings().GetRRU())
-		rg.RUSettings.WRU.patch(metaGroup.GetRUSettings().GetWRU())
+		rg.RUSettings.RU.patch(metaGroup.GetRUSettings().GetRU())
 	case rmpb.GroupMode_RawMode:
-		if metaGroup.GetResourceSettings() == nil {
+		if metaGroup.GetRawResourceSettings() == nil {
 			return errors.New("invalid resource group settings, raw mode should set resource settings")
 		}
-		rg.ResourceSettings.CPU.patch(metaGroup.GetResourceSettings().GetCpu())
-		rg.ResourceSettings.IOReadBandwidth.patch(metaGroup.GetResourceSettings().GetIoRead())
-		rg.ResourceSettings.IOWriteBandwidth.patch(metaGroup.GetResourceSettings().GetIoWrite())
+		rg.RawResourceSettings.CPU.patch(metaGroup.GetRawResourceSettings().GetCpu())
+		rg.RawResourceSettings.IOReadBandwidth.patch(metaGroup.GetRawResourceSettings().GetIoRead())
+		rg.RawResourceSettings.IOWriteBandwidth.patch(metaGroup.GetRawResourceSettings().GetIoWrite())
 	}
 	log.Info("patch resource group settings", zap.String("name", rg.Name), zap.String("settings", rg.String()))
 	return nil
@@ -142,7 +134,7 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 // FromProtoResourceGroup converts a rmpb.ResourceGroup to a ResourceGroup.
 func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	var (
-		resourceSettings *NativeResourceSettings
+		resourceSettings *RawResourceSettings
 		ruSettings       *RequestUnitSettings
 	)
 
@@ -154,44 +146,32 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	case rmpb.GroupMode_RUMode:
 		if settings := group.GetRUSettings(); settings != nil {
 			ruSettings = &RequestUnitSettings{
-				RRU: NewGroupTokenBucket(settings.GetRRU()),
-				WRU: NewGroupTokenBucket(settings.GetWRU()),
+				RU: NewGroupTokenBucket(settings.GetRU()),
 			}
 			rg.RUSettings = ruSettings
 		}
 	case rmpb.GroupMode_RawMode:
-		if settings := group.GetResourceSettings(); settings != nil {
-			resourceSettings = &NativeResourceSettings{
+		if settings := group.GetRawResourceSettings(); settings != nil {
+			resourceSettings = &RawResourceSettings{
 				CPU:              NewGroupTokenBucket(settings.GetCpu()),
 				IOReadBandwidth:  NewGroupTokenBucket(settings.GetIoRead()),
 				IOWriteBandwidth: NewGroupTokenBucket(settings.GetIoWrite()),
 			}
-			rg.ResourceSettings = resourceSettings
+			rg.RawResourceSettings = resourceSettings
 		}
 	}
 	return rg
 }
 
-// RequestRRU requests the RRU of the resource group.
-func (rg *ResourceGroup) RequestRRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
+// RequestRU requests the RU of the resource group.
+func (rg *ResourceGroup) RequestRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
 	if rg.RUSettings == nil {
 		return nil
 	}
-	tb, trickleTimeMs := rg.RUSettings.RRU.request(now, neededTokens, targetPeriodMs)
-	return &rmpb.GrantedRUTokenBucket{Type: rmpb.RequestUnitType_RRU, GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
-}
-
-// RequestWRU requests the WRU of the resource group.
-func (rg *ResourceGroup) RequestWRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
-	rg.Lock()
-	defer rg.Unlock()
-	if rg.RUSettings == nil {
-		return nil
-	}
-	tb, trickleTimeMs := rg.RUSettings.WRU.request(now, neededTokens, targetPeriodMs)
-	return &rmpb.GrantedRUTokenBucket{Type: rmpb.RequestUnitType_WRU, GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
+	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs)
+	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
@@ -204,8 +184,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RUMode,
 			RUSettings: &rmpb.GroupRequestUnitSettings{
-				RRU: rg.RUSettings.RRU.TokenBucket,
-				WRU: rg.RUSettings.WRU.TokenBucket,
+				RU: rg.RUSettings.RU.TokenBucket,
 			},
 		}
 		return group
@@ -213,10 +192,10 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 		group := &rmpb.ResourceGroup{
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RawMode,
-			ResourceSettings: &rmpb.GroupResourceSettings{
-				Cpu:     rg.ResourceSettings.CPU.TokenBucket,
-				IoRead:  rg.ResourceSettings.IOReadBandwidth.TokenBucket,
-				IoWrite: rg.ResourceSettings.IOWriteBandwidth.TokenBucket,
+			RawResourceSettings: &rmpb.GroupRawResourceSettings{
+				Cpu:     rg.RawResourceSettings.CPU.TokenBucket,
+				IoRead:  rg.RawResourceSettings.IOReadBandwidth.TokenBucket,
+				IoWrite: rg.RawResourceSettings.IOWriteBandwidth.TokenBucket,
 			},
 		}
 		return group
@@ -226,7 +205,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
-func (rg *ResourceGroup) persistSettings(storage storage.Storage) error {
+func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) error {
 	metaGroup := rg.IntoProtoResourceGroup()
-	return storage.SaveResourceGroup(path.Join(groupSettingsPathPrefix, rg.Name), metaGroup)
+	return storage.SaveResourceGroupSetting(rg.Name, metaGroup)
 }

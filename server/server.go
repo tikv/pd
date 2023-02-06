@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/systimemon"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -66,7 +67,6 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
@@ -157,11 +157,15 @@ type Server struct {
 	lg       *zap.Logger
 	logProps *log.ZapProperties
 
-	// Add callback functions at different stages
+	// Callback functions for different stages
+	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
+	// leaderCallbacks will be called after the server becomes leader.
+	leaderCallbacks []func(context.Context)
+	// closeCallbacks will be called before the server is closed.
 	closeCallbacks []func()
 
-	// hot region history info storeage
+	// hot region history info storage
 	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
@@ -279,8 +283,46 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		return errs.ErrCancelStartEtcd.FastGenByArgs()
 	}
 
-	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
+	// start client
+	s.client, s.httpClient, err = startClient(s.cfg)
+	if err != nil {
+		return err
+	}
+
+	// update advertise peer urls.
+	etcdMembers, err := etcdutil.ListEtcdMembers(s.client)
+	if err != nil {
+		return err
+	}
+	etcdServerID := uint64(etcd.Server.ID())
+	for _, m := range etcdMembers.Members {
+		if etcdServerID == m.ID {
+			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
+			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
+				log.Info("update advertise peer urls", zap.String("from", s.cfg.AdvertisePeerUrls), zap.String("to", etcdPeerURLs))
+				s.cfg.AdvertisePeerUrls = etcdPeerURLs
+			}
+		}
+	}
+	failpoint.Inject("memberNil", func() {
+		time.Sleep(1500 * time.Millisecond)
+	})
+	s.member = member.NewMember(etcd, s.client, etcdServerID)
+	return nil
+}
+
+func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
+	tlsConfig, err := cfg.Security.ToTLSConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	endpoints := []string{etcdCfg.ACUrls[0].String()}
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", cfg.Security))
 
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
@@ -291,38 +333,16 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		LogConfig:   &lgc,
 	})
 	if err != nil {
-		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 
-	etcdServerID := uint64(etcd.Server.ID())
-
-	// update advertise peer urls.
-	etcdMembers, err := etcdutil.ListEtcdMembers(client)
-	if err != nil {
-		return err
-	}
-	for _, m := range etcdMembers.Members {
-		if etcdServerID == m.ID {
-			etcdPeerURLs := strings.Join(m.PeerURLs, ",")
-			if s.cfg.AdvertisePeerUrls != etcdPeerURLs {
-				log.Info("update advertise peer urls", zap.String("from", s.cfg.AdvertisePeerUrls), zap.String("to", etcdPeerURLs))
-				s.cfg.AdvertisePeerUrls = etcdPeerURLs
-			}
-		}
-	}
-	s.client = client
-	s.httpClient = &http.Client{
+	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 			TLSClientConfig:   tlsConfig,
 		},
 	}
-
-	failpoint.Inject("memberNil", func() {
-		time.Sleep(1500 * time.Millisecond)
-	})
-	s.member = member.NewMember(etcd, client, etcdServerID)
-	return nil
+	return client, httpClient, nil
 }
 
 // AddStartCallback adds a callback in the startServer phase.
@@ -390,7 +410,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator)
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -399,6 +419,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	// Run callbacks
+	log.Info("triggering the start callback functions")
 	for _, cb := range s.startCallbacks {
 		cb()
 	}
@@ -466,6 +487,7 @@ func (s *Server) Close() {
 	}
 
 	// Run callbacks
+	log.Info("triggering the close callback functions")
 	for _, cb := range s.closeCallbacks {
 		cb()
 	}
@@ -1333,6 +1355,11 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	return nil
 }
 
+// AddLeaderCallback adds a callback in the leader campaign phase.
+func (s *Server) AddLeaderCallback(callbacks ...func(context.Context)) {
+	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
+}
+
 func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
@@ -1441,6 +1468,11 @@ func (s *Server) campaignLeader() {
 	if err := s.encryptionKeyManager.SetLeadership(s.member.GetLeadership()); err != nil {
 		log.Error("failed to initialize encryption", errs.ZapError(err))
 		return
+	}
+
+	log.Info("triggering the leader callback functions")
+	for _, cb := range s.leaderCallbacks {
+		cb(ctx)
 	}
 
 	// Try to create raft cluster.
