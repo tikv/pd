@@ -31,7 +31,9 @@ import (
 )
 
 const (
+	// EvictSlowTrendName is evict leader by slow trend scheduler name.
 	EvictSlowTrendName = "evict-slow-trend-scheduler"
+	// EvictSlowTrendType is evict leader by slow trend scheduler type.
 	EvictSlowTrendType = "evict-slow-trend"
 )
 

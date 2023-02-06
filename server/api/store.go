@@ -42,6 +42,7 @@ type MetaStore struct {
 	StateName string `json:"state_name"`
 }
 
+// SlowTrend contains slow trend information about a store.
 type SlowTrend struct {
 	CauseValue  float64 `json:"cause_value"`
 	CauseRate   float64 `json:"cause_rate"`
