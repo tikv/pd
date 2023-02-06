@@ -18,6 +18,7 @@
 package registry
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/pingcap/log"
@@ -44,29 +45,51 @@ type RegistrableService interface {
 // It implements the `ServiceRegistry` interface.
 type ServiceRegistry struct {
 	builders map[string]ServiceBuilder
+	services map[string]RegistrableService
 }
 
 func newServiceRegistry() *ServiceRegistry {
 	return &ServiceRegistry{
 		builders: make(map[string]ServiceBuilder),
+		services: make(map[string]RegistrableService),
 	}
+}
+
+func createServiceName(prefix, name string) string {
+	return fmt.Sprintf("%s_%s", prefix, name)
 }
 
 // InstallAllGRPCServices installs all registered grpc services.
 func (r *ServiceRegistry) InstallAllGRPCServices(srv *server.Server, g *grpc.Server) {
+	prefix := srv.Name()
 	for name, builder := range r.builders {
+		serviceName := createServiceName(prefix, name)
+		if l, ok := r.services[serviceName]; ok {
+			l.RegisterGRPCService(g)
+			log.Info("gRPC service already registered", zap.String("prefix", prefix), zap.String("service-name", name))
+			continue
+		}
 		l := builder(srv)
+		r.services[serviceName] = l
 		l.RegisterGRPCService(g)
-		log.Info("gRPC service registered successfully", zap.String("service-name", name))
+		log.Info("gRPC service registered successfully", zap.String("prefix", prefix), zap.String("service-name", name))
 	}
 }
 
 // InstallAllRESTHandler installs all registered REST services.
 func (r *ServiceRegistry) InstallAllRESTHandler(srv *server.Server, h map[string]http.Handler) {
+	prefix := srv.Name()
 	for name, builder := range r.builders {
+		serviceName := createServiceName(prefix, name)
+		if l, ok := r.services[serviceName]; ok {
+			l.RegisterRESTHandler(h)
+			log.Info("restful API service already registered", zap.String("prefix", prefix), zap.String("service-name", name))
+			continue
+		}
 		l := builder(srv)
+		r.services[serviceName] = l
 		l.RegisterRESTHandler(h)
-		log.Info("restful API service registered successfully", zap.String("service-name", name))
+		log.Info("restful API service registered successfully", zap.String("prefix", prefix), zap.String("service-name", name))
 	}
 }
 
