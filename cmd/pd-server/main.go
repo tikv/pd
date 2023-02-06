@@ -24,25 +24,12 @@ import (
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/autoscaling"
-	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/api"
-	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/join"
 	"go.uber.org/zap"
-
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
-
-	// Register Service
-	_ "github.com/tikv/pd/pkg/mcs/registry"
-	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/install"
 )
 
 func main() {
@@ -90,19 +77,9 @@ func main() {
 
 	metricutil.Push(&cfg.Metric)
 
-	err = join.PrepareJoinCluster(cfg)
-	if err != nil {
-		log.Fatal("join meet error", errs.ZapError(err))
-	}
-
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
-	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
-	if err != nil {
-		log.Fatal("create server failed", errs.ZapError(err))
-	}
+	svr := legacyStart(ctx, cfg)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
