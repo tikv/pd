@@ -246,7 +246,7 @@ const (
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
-	defaultMode                = APIService.String()
+	defaultMode                = "all"
 	defaultInitialClusterState = embed.ClusterStateFlagNew
 	defaultInitialClusterToken = "pd-cluster"
 

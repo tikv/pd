@@ -14,20 +14,86 @@
 
 package mode
 
-// import (
-// 	"context"
+import (
+	"context"
+	"time"
 
-// 	// "github.com/pingcap/log"
+	// "github.com/pingcap/log"
 
-// 	"github.com/tikv/pd/pkg/mcs/registry"
-// 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
-// 	"github.com/tikv/pd/server/config"
-// 	"google.golang.org/grpc"
-// )
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/mcs/registry"
+	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/server/config"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+)
 
-// func ResourceManagerStart(ctx context.Context, cfg *config.Config) ServiceServer {
-// 	svr := grpc.NewServer()
-// 	service := rm_server.NewService()
-// 	registry.ServerServiceRegistry.InstallAllGRPCServices(service, svr)
-// 	return nil
-// }
+type ResourceManagerServer struct {
+	ctx    context.Context
+	name   string
+	client *clientv3.Client
+	member *member.Member
+}
+
+func (s *ResourceManagerServer) Context() context.Context {
+	return s.ctx
+}
+func (s *ResourceManagerServer) AddStartCallback(callbacks ...func()) {
+
+}
+
+func (s *ResourceManagerServer) Name() string {
+	return s.name
+}
+
+func (s *ResourceManagerServer) GetClient() *clientv3.Client {
+	return s.client
+}
+func (s *ResourceManagerServer) GetMember() *member.Member {
+	return s.member
+}
+func (s *ResourceManagerServer) AddLeaderCallback(callbacks ...func(context.Context)) {
+
+}
+
+func ResourceManagerStart(ctx context.Context, cfg *config.Config) ServiceServer {
+	// start client
+	etcdTimeout := time.Second * 3
+	tlsConfig, err := cfg.Security.ToTLSConfig()
+	if err != nil {
+		return nil
+	}
+	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	if err != nil {
+		return nil
+	}
+
+	endpoints := []string{etcdCfg.ACUrls[0].String()}
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", cfg.Security))
+
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: etcdTimeout,
+		TLS:         tlsConfig,
+		LogConfig:   &lgc,
+	})
+	if err != nil {
+		return nil
+	}
+	// start server
+	s := &ResourceManagerServer{
+		ctx:    ctx,
+		name:   "ResourceManager",
+		client: client,
+		member: nil, //todo
+	}
+	gs := grpc.NewServer()
+	registry.ServerServiceRegistry.RegisterService("ResourceManager", rm_server.NewService)
+	registry.ServerServiceRegistry.InstallAllGRPCServices(s, gs)
+
+	return nil
+}

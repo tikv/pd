@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -183,14 +184,7 @@ type Server struct {
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, APIServiceGroup, error)
-
-const (
-	// CorePath the core group, is at REST path `/pd/api/v1`.
-	CorePath = "/pd/api/v1"
-	// ExtensionsPath the named groups are REST at `/pd/apis/{GROUP_NAME}/{Version}`.
-	ExtensionsPath = "/pd/apis"
-)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APIServiceGroup, error)
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
@@ -233,7 +227,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		etcdCfg.UserHandlers = userHandlers
 	}
 	// New way to register services.
-	registry := NewServiceRegistry()
+	registry := registry.ServerServiceRegistry
 
 	// Register the micro services REST path.
 	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)

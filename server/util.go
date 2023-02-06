@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
-	"path"
 	"strings"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -35,7 +35,6 @@ import (
 	"github.com/urfave/negroni"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -164,63 +163,6 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	return nil
 }
 
-/// REST API and GRPC services relative Utils.
-
-// ServiceRegistry used to install the registered services, including gRPC and HTTP API.
-type ServiceRegistry interface {
-	InstallAllGRPCServices(srv *Server, g *grpc.Server)
-	InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler)
-}
-
-// NewServiceRegistry is a hook for msc code which implements the micro service.
-var NewServiceRegistry = func() ServiceRegistry {
-	return dummyServiceRegistry{}
-}
-
-type dummyServiceRegistry struct{}
-
-func (d dummyServiceRegistry) InstallAllGRPCServices(srv *Server, g *grpc.Server) {
-}
-
-func (d dummyServiceRegistry) InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler) {
-}
-
-// APIServiceGroup used to register the HTTP REST API.
-type APIServiceGroup struct {
-	Name       string
-	Version    string
-	IsCore     bool
-	PathPrefix string
-}
-
-// Path returns the path of the service.
-func (sg *APIServiceGroup) Path() string {
-	if len(sg.PathPrefix) > 0 {
-		return sg.PathPrefix
-	}
-	if sg.IsCore {
-		return CorePath
-	}
-	if len(sg.Name) > 0 && len(sg.Version) > 0 {
-		return path.Join(ExtensionsPath, sg.Name, sg.Version)
-	}
-	return ""
-}
-
-// RegisterUserDefinedHandlers register the user defined handlers.
-func RegisterUserDefinedHandlers(registerMap map[string]http.Handler, group *APIServiceGroup, handler http.Handler) error {
-	pathPrefix := group.Path()
-	if _, ok := registerMap[pathPrefix]; ok {
-		return errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
-	}
-	if len(pathPrefix) == 0 {
-		return errs.ErrAPIInformationInvalid.FastGenByArgs(group.Name, group.Version)
-	}
-	registerMap[pathPrefix] = handler
-	log.Info("register REST path", zap.String("path", pathPrefix))
-	return nil
-}
-
 func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
 	userHandlers := make(map[string]http.Handler)
 	registerMap := make(map[string]http.Handler)
@@ -239,16 +181,16 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
 		}
 
-		if err := RegisterUserDefinedHandlers(registerMap, &info, handler); err != nil {
+		if err := apiutil.RegisterUserDefinedHandlers(registerMap, &info, handler); err != nil {
 			return nil, err
 		}
 	}
 
 	// Combine the pd service to the router. the extension service will be added to the userHandlers.
 	for pathPrefix, handler := range registerMap {
-		if strings.Contains(pathPrefix, CorePath) || strings.Contains(pathPrefix, ExtensionsPath) {
+		if strings.Contains(pathPrefix, apiutil.CorePath) || strings.Contains(pathPrefix, apiutil.ExtensionsPath) {
 			router.PathPrefix(pathPrefix).Handler(handler)
-			if pathPrefix == CorePath {
+			if pathPrefix == apiutil.CorePath {
 				// Deprecated
 				router.Path("/pd/health").Handler(handler)
 				// Deprecated

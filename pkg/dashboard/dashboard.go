@@ -30,18 +30,19 @@ import (
 	"github.com/tikv/pd/pkg/dashboard/distroutil"
 	"github.com/tikv/pd/pkg/dashboard/keyvisual"
 	ui "github.com/tikv/pd/pkg/dashboard/uiserver"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
 
 var (
-	apiServiceGroup = server.APIServiceGroup{
+	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "dashboard-api",
 		Version:    "v1",
 		IsCore:     false,
 		PathPrefix: config.APIPathPrefix,
 	}
 
-	uiServiceGroup = server.APIServiceGroup{
+	uiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "dashboard-ui",
 		Version:    "v1",
 		IsCore:     false,
@@ -68,7 +69,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 	// The order of execution must be sequential.
 	return []server.HandlerBuilder{
 		// Dashboard API Service
-		func(ctx context.Context, srv *server.Server) (http.Handler, server.APIServiceGroup, error) {
+		func(ctx context.Context, srv *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 			distroutil.MustLoadAndReplaceStrings()
 
 			if cfg, err = adapter.GenDashboardConfig(srv); err != nil {
@@ -98,7 +99,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 			return apiserver.Handler(s), apiServiceGroup, nil
 		},
 		// Dashboard UI
-		func(context.Context, *server.Server) (http.Handler, server.APIServiceGroup, error) {
+		func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 			if err != nil {
 				return nil, uiServiceGroup, err
 			}

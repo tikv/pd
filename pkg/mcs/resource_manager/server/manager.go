@@ -24,9 +24,9 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/server"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 )
 
@@ -47,7 +47,7 @@ type Manager struct {
 }
 
 // NewManager returns a new Manager.
-func NewManager(srv *server.Server) *Manager {
+func NewManager(srv server.Server) *Manager {
 	m := &Manager{
 		member: &member.Member{},
 		groups: make(map[string]*ResourceGroup),

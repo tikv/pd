@@ -9,8 +9,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/server"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
@@ -30,7 +31,7 @@ func (t *testServiceRegistry) RegisterGRPCService(g *grpc.Server) {
 }
 
 func (t *testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
-	group := server.APIServiceGroup{
+	group := apiutil.APIServiceGroup{
 		Name:       "my-http-service",
 		Version:    "v1alpha1",
 		IsCore:     false,
@@ -40,22 +41,15 @@ func (t *testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Hello World!"))
 	})
-	server.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
-func newTestServiceRegistry(_ *server.Server) registry.RegistrableService {
+func newTestServiceRegistry(_ server.Server) registry.RegistrableService {
 	return &testServiceRegistry{}
 }
 
-func install(register *registry.ServiceRegistry) {
-	register.RegisterService("test", newTestServiceRegistry)
-	server.NewServiceRegistry = func() server.ServiceRegistry {
-		return register
-	}
-}
-
 func TestRegistryService(t *testing.T) {
-	install(registry.ServerServiceRegistry)
+	registry.ServerServiceRegistry.RegisterService("test", newTestServiceRegistry)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

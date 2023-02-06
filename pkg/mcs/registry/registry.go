@@ -13,7 +13,6 @@
 // limitations under the License.
 
 // Package registry is used to register the services.
-// TODO: Remove the `pd/server` dependencies
 // TODO: Use the `uber/fx` to manage the lifecycle of services.
 package registry
 
@@ -22,7 +21,8 @@ import (
 	"net/http"
 
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/server"
+
+	"github.com/tikv/pd/pkg/server"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -33,7 +33,7 @@ var (
 )
 
 // ServiceBuilder is a function that creates a grpc service.
-type ServiceBuilder func(*server.Server) RegistrableService
+type ServiceBuilder func(server.Server) RegistrableService
 
 // RegistrableService is the interface that should wraps the RegisterService method.
 type RegistrableService interface {
@@ -60,7 +60,7 @@ func createServiceName(prefix, name string) string {
 }
 
 // InstallAllGRPCServices installs all registered grpc services.
-func (r *ServiceRegistry) InstallAllGRPCServices(srv *server.Server, g *grpc.Server) {
+func (r *ServiceRegistry) InstallAllGRPCServices(srv server.Server, g *grpc.Server) {
 	prefix := srv.Name()
 	for name, builder := range r.builders {
 		serviceName := createServiceName(prefix, name)
@@ -77,7 +77,7 @@ func (r *ServiceRegistry) InstallAllGRPCServices(srv *server.Server, g *grpc.Ser
 }
 
 // InstallAllRESTHandler installs all registered REST services.
-func (r *ServiceRegistry) InstallAllRESTHandler(srv *server.Server, h map[string]http.Handler) {
+func (r *ServiceRegistry) InstallAllRESTHandler(srv server.Server, h map[string]http.Handler) {
 	prefix := srv.Name()
 	for name, builder := range r.builders {
 		serviceName := createServiceName(prefix, name)
@@ -98,8 +98,3 @@ func (r ServiceRegistry) RegisterService(name string, service ServiceBuilder) {
 	r.builders[name] = service
 }
 
-func init() {
-	server.NewServiceRegistry = func() server.ServiceRegistry {
-		return ServerServiceRegistry
-	}
-}
