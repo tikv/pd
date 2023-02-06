@@ -354,6 +354,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		}
 	}
 	suite.cleanupResourceGroups()
+	controller.Stop()
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {

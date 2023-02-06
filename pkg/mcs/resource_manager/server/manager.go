@@ -143,10 +143,7 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if err != nil {
 		return err
 	}
-	if err := curGroup.persistSettings(m.storage); err != nil {
-		return err
-	}
-	return nil
+	return curGroup.persistSettings(m.storage)
 }
 
 // DeleteResourceGroup deletes a resource group.
