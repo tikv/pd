@@ -191,7 +191,7 @@ func (s *StoreInfo) IsSlow() bool {
 	return s.slowTrendEvicted || s.rawStats.GetSlowScore() >= slowStoreThreshold
 }
 
-// GetSlowTrend returns the slow trend infomation of the store.
+// GetSlowTrend returns the slow trend information of the store.
 func (s *StoreInfo) GetSlowTrend() *pdpb.SlowTrend {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
