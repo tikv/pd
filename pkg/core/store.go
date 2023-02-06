@@ -130,8 +130,8 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 	return s.slowStoreEvicted
 }
 
-// EvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
-func (s *StoreInfo) EvictedAsSlowTrend() bool {
+// IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
+func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
 	return s.slowTrendEvicted
 }
 
@@ -682,7 +682,7 @@ func (s *StoresInfo) SlowTrendEvicted(storeID uint64) error {
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	if store.EvictedAsSlowTrend() {
+	if store.IsEvictedAsSlowTrend() {
 		return errs.ErrSlowTrendEvicted.FastGenByArgs(storeID)
 	}
 	s.stores[storeID] = store.Clone(SlowTrendEvicted())

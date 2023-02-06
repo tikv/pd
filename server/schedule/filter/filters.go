@@ -388,7 +388,7 @@ func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *c
 }
 
 func (f *StoreStateFilter) slowTrendEvicted(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
-	if store.EvictedAsSlowTrend() {
+	if store.IsEvictedAsSlowTrend() {
 		f.Reason = storeStateSlowTrend
 		return statusStoreRejectLeader
 	}
