@@ -86,7 +86,11 @@ const (
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
-	slowTrend := store.GetSlowTrend()
+	var slowTrend SlowTrend
+	coreSlowTrend := store.GetSlowTrend()
+	if coreSlowTrend != nil {
+		slowTrend = SlowTrend{coreSlowTrend.CauseValue, coreSlowTrend.CauseRate, coreSlowTrend.ResultValue, coreSlowTrend.ResultRate}
+	}
 	s := &StoreInfo{
 		Store: &MetaStore{
 			Store:     store.GetMeta(),
@@ -106,7 +110,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			RegionSize:         store.GetRegionSize(),
 			WitnessCount:       store.GetWitnessCount(),
 			SlowScore:          store.GetSlowScore(),
-			SlowTrend:          SlowTrend{slowTrend.CauseValue, slowTrend.CauseRate, slowTrend.ResultValue, slowTrend.ResultRate},
+			SlowTrend:          slowTrend,
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			IsBusy:             store.IsBusy(),

@@ -402,7 +402,7 @@ func checkStoreCanRecover(cluster schedule.Cluster, target *core.StoreInfo) bool
 	/*
 		//
 		// This might not be necessary,
-		//   and this also have tiny chances to cause `stuck in evicted`
+		//   and it also have tiny chances to cause `stuck in evicted`
 		//   status when this store restarted,
 		//   the `become fast` might be ignore on tikv side
 		//   because of the detecting windows are not fully filled yet.
