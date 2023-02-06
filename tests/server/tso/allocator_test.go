@@ -47,7 +47,7 @@ func TestAllocatorLeader(t *testing.T) {
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(ctx, dcLocationNum*2, func(conf *config.Config, serverName string) {
 		if zoneLabel, ok := dcLocationConfig[serverName]; ok {
-			conf.TSOConfig.EnableLocalTSO = true
+			conf.EnableLocalTSO = true
 			conf.Labels[config.ZoneLabel] = zoneLabel
 		}
 	})
@@ -119,7 +119,7 @@ func TestPriorityAndDifferentLocalTSO(t *testing.T) {
 	}
 	dcLocationNum := len(dcLocationConfig)
 	cluster, err := tests.NewTestCluster(ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.TSOConfig.EnableLocalTSO = true
+		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
@@ -133,7 +133,7 @@ func TestPriorityAndDifferentLocalTSO(t *testing.T) {
 
 	// Join a new dc-location
 	pd4, err := cluster.Join(ctx, func(conf *config.Config, serverName string) {
-		conf.TSOConfig.EnableLocalTSO = true
+		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
 	re.NoError(err)

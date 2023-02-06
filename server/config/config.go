@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -111,8 +111,6 @@ type Config struct {
 	Replication ReplicationConfig `toml:"replication" json:"replication"`
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
-
-	TSOConfig tso.Config `toml:"tso" json:"tso"`
 
 	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
 
@@ -392,7 +390,7 @@ func (c *Config) Parse(arguments []string) error {
 	// Load config file if specified.
 	var meta *toml.MetaData
 	if c.configFile != "" {
-		meta, err = c.configFromFile(c.configFile)
+		meta, err = configutil.ConfigFromFile(c, c.configFile)
 		if err != nil {
 			return err
 		}
@@ -410,27 +408,6 @@ func (c *Config) Parse(arguments []string) error {
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 			if c.Log.Level == "" {
 				c.Log.Level = c.LogLevelDeprecated
-			}
-		}
-		if c.EnableLocalTSO {
-			msg := fmt.Sprintf("enable-local-tso in %s is deprecated, use [tso.enable-local-tso] instead", c.configFile)
-			c.WarningMsgs = append(c.WarningMsgs, msg)
-			if !meta.IsDefined("tso", "enable-local-tso") {
-				c.TSOConfig.EnableLocalTSO = c.EnableLocalTSO
-			}
-		}
-		if c.TSOSaveInterval.Duration != defaultTSOSaveInterval {
-			msg := fmt.Sprintf("tso-save-interval in %s is deprecated, use [tso.save-interval] instead", c.configFile)
-			c.WarningMsgs = append(c.WarningMsgs, msg)
-			if !meta.IsDefined("tso", "save-interval") {
-				c.TSOConfig.SaveInterval = c.TSOSaveInterval
-			}
-		}
-		if c.TSOUpdatePhysicalInterval.Duration != defaultTSOUpdatePhysicalInterval {
-			msg := fmt.Sprintf("tso-update-physical-interval in %s is deprecated, use [tso.update-physical-interval] instead", c.configFile)
-			c.WarningMsgs = append(c.WarningMsgs, msg)
-			if !meta.IsDefined("tso", "update-physical-interval") {
-				c.TSOConfig.UpdatePhysicalInterval = c.TSOUpdatePhysicalInterval
 			}
 		}
 		if meta.IsDefined("schedule", "disable-raft-learner") {
@@ -481,52 +458,9 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Utility to test if a configuration is defined.
-type configMetaData struct {
-	meta *toml.MetaData
-	path []string
-}
-
-func newConfigMetadata(meta *toml.MetaData) *configMetaData {
-	return &configMetaData{meta: meta}
-}
-
-func (m *configMetaData) IsDefined(key string) bool {
-	if m.meta == nil {
-		return false
-	}
-	keys := append([]string(nil), m.path...)
-	keys = append(keys, key)
-	return m.meta.IsDefined(keys...)
-}
-
-func (m *configMetaData) Child(path ...string) *configMetaData {
-	newPath := append([]string(nil), m.path...)
-	newPath = append(newPath, path...)
-	return &configMetaData{
-		meta: m.meta,
-		path: newPath,
-	}
-}
-
-func (m *configMetaData) CheckUndecoded() error {
-	if m.meta == nil {
-		return nil
-	}
-	undecoded := m.meta.Undecoded()
-	if len(undecoded) == 0 {
-		return nil
-	}
-	errInfo := "Config contains undefined item: "
-	for _, key := range undecoded {
-		errInfo += key.String() + ", "
-	}
-	return errors.New(errInfo[:len(errInfo)-2])
-}
-
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
-	configMetaData := newConfigMetadata(meta)
+	configMetaData := configutil.NewConfigMetadata(meta)
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
 	}
@@ -613,7 +547,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	c.adjustTSOConfig(configMetaData.Child("tso"))
 	adjustDuration(&c.HeartbeatStreamBindInterval, defaultHeartbeatStreamRebindInterval)
 
 	adjustDuration(&c.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
@@ -638,24 +571,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	return nil
 }
 
-func (c *Config) adjustLog(meta *configMetaData) {
+func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
-	}
-}
-
-func (c *Config) adjustTSOConfig(meta *configMetaData) {
-	if !meta.IsDefined("save-interval") {
-		c.TSOConfig.SaveInterval.Duration = defaultTSOSaveInterval
-	}
-
-	if !meta.IsDefined("update-physical-interval") {
-		c.TSOConfig.UpdatePhysicalInterval.Duration = defaultTSOUpdatePhysicalInterval
-	}
-	if c.TSOConfig.UpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
-		c.TSOConfig.UpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
-	} else if c.TSOConfig.UpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
-		c.TSOConfig.UpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
 	}
 }
 
@@ -671,12 +589,6 @@ func (c *Config) String() string {
 		return "<nil>"
 	}
 	return string(data)
-}
-
-// configFromFile loads config from file.
-func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
-	meta, err := toml.DecodeFile(path, c)
-	return &meta, errors.WithStack(err)
 }
 
 // ScheduleConfig is the schedule configuration.
@@ -874,7 +786,7 @@ const (
 	defaultMaxStorePreparingTime = 48 * time.Hour
 )
 
-func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
+func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool) error {
 	if !meta.IsDefined("max-snapshot-count") {
 		adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	}
@@ -992,7 +904,7 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 	return c.MaxMergeRegionSize * 10000
 }
 
-func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {
+func (c *ScheduleConfig) parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
 	oldName, newName := "disable-"+name, "enable-"+name
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
 	switch {
@@ -1174,7 +1086,7 @@ func (c *ReplicationConfig) Validate() error {
 	return nil
 }
 
-func (c *ReplicationConfig) adjust(meta *configMetaData) error {
+func (c *ReplicationConfig) adjust(meta *configutil.ConfigMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("enable-placement-rules") {
 		c.EnablePlacementRules = defaultEnablePlacementRules
@@ -1214,7 +1126,7 @@ type PDServerConfig struct {
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
 }
 
-func (c *PDServerConfig) adjust(meta *configMetaData) error {
+func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
@@ -1241,7 +1153,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	return c.Validate()
 }
 
-func (c *PDServerConfig) migrateConfigurationFromFile(meta *configMetaData) error {
+func (c *PDServerConfig) migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
 	oldName, newName := "trace-region-flow", "flow-round-by-digit"
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
 	switch {
@@ -1346,14 +1258,19 @@ func (c *Config) GetConfigFile() string {
 	return c.configFile
 }
 
+// IsLocalTSOEnabled returns if the local TSO is enabled.
+func (c *Config) IsLocalTSOEnabled() bool {
+	return c.EnableLocalTSO
+}
+
 // GetTSOUpdatePhysicalInterval returns TSO update physical interval.
 func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
-	return c.TSOConfig.UpdatePhysicalInterval.Duration
+	return c.TSOUpdatePhysicalInterval.Duration
 }
 
 // GetTSOSaveInterval returns TSO save interval.
 func (c *Config) GetTSOSaveInterval() time.Duration {
-	return c.TSOConfig.SaveInterval.Duration
+	return c.TSOSaveInterval.Duration
 }
 
 // GetTLSConfig returns the TLS config.
@@ -1454,7 +1371,7 @@ func (c *DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 	return nil, nil
 }
 
-func (c *DashboardConfig) adjust(meta *configMetaData) {
+func (c *DashboardConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-telemetry") {
 		c.EnableTelemetry = defaultEnableTelemetry
 	}
@@ -1474,7 +1391,7 @@ func (c *ReplicationModeConfig) Clone() *ReplicationModeConfig {
 	return &cfg
 }
 
-func (c *ReplicationModeConfig) adjust(meta *configMetaData) {
+func (c *ReplicationModeConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("replication-mode") || NormalizeReplicationMode(c.ReplicationMode) == "" {
 		c.ReplicationMode = "majority"
 	}
@@ -1502,7 +1419,7 @@ type DRAutoSyncReplicationConfig struct {
 	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
-func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
+func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}

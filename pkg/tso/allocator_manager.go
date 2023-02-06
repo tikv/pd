@@ -50,8 +50,6 @@ const (
 	leaderTickInterval          = 50 * time.Millisecond
 	localTSOAllocatorEtcdPrefix = "lta"
 	localTSOSuffixEtcdPrefix    = "lts"
-	// The value should be the same as the variable defined in server's config.
-	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 )
 
 var (
@@ -134,16 +132,18 @@ type AllocatorManager struct {
 func NewAllocatorManager(
 	m *member.Member,
 	rootPath string,
-	cfg Config,
+	enableLocalTSO bool,
+	saveInterval time.Duration,
+	updatePhysicalInterval time.Duration,
 	tlsConfig *grpcutil.TLSConfig,
 	maxResetTSGap func() time.Duration,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
-		enableLocalTSO:         cfg.EnableLocalTSO,
+		enableLocalTSO:         enableLocalTSO,
 		member:                 m,
 		rootPath:               rootPath,
-		saveInterval:           cfg.SaveInterval.Duration,
-		updatePhysicalInterval: cfg.UpdatePhysicalInterval.Duration,
+		saveInterval:           saveInterval,
+		updatePhysicalInterval: updatePhysicalInterval,
 		maxResetTSGap:          maxResetTSGap,
 		securityConfig:         tlsConfig,
 	}

@@ -25,6 +25,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/server/storage"
 )
 
@@ -281,37 +282,6 @@ tso-update-physical-interval = "15s"
 	re.NoError(err)
 
 	re.Equal(maxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
-
-	// TSO config testings
-	cfgData = `
-[tso]
-update-physical-interval = "3m"
-save-interval = "1m"
-enable-local-tso = true
-`
-	cfg = NewConfig()
-	meta, err = toml.Decode(cfgData, &cfg)
-	re.NoError(err)
-	err = cfg.Adjust(&meta, false)
-	re.NoError(err)
-
-	re.Equal(maxTSOUpdatePhysicalInterval, cfg.TSOConfig.UpdatePhysicalInterval.Duration)
-	re.Equal(1*time.Minute, cfg.TSOConfig.SaveInterval.Duration)
-	re.True(cfg.TSOConfig.EnableLocalTSO)
-
-	cfgData = `
-[tso]
-update-physical-interval = "1ns"
-	`
-	cfg = NewConfig()
-	meta, err = toml.Decode(cfgData, &cfg)
-	re.NoError(err)
-	err = cfg.Adjust(&meta, false)
-	re.NoError(err)
-
-	re.Equal(minTSOUpdatePhysicalInterval, cfg.TSOConfig.UpdatePhysicalInterval.Duration)
-	re.Equal(defaultTSOSaveInterval, cfg.TSOConfig.SaveInterval.Duration)
-	re.False(cfg.TSOConfig.EnableLocalTSO)
 }
 
 func TestMigrateFlags(t *testing.T) {
@@ -525,7 +495,7 @@ func TestConfigClone(t *testing.T) {
 	cfg.Adjust(nil, false)
 	re.Equal(cfg, cfg.Clone())
 
-	emptyConfigMetaData := newConfigMetadata(nil)
+	emptyConfigMetaData := configutil.NewConfigMetadata(nil)
 
 	schedule := &ScheduleConfig{}
 	schedule.adjust(emptyConfigMetaData, false)
