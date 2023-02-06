@@ -124,7 +124,7 @@ func (c *testCluster) setStoreDown(storeID uint64) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(
 		core.UpStore(),
-		core.SetLastHeartbeatTS(time.Time{}),
+		core.SetLastHeartbeatTS(typeutil.ZeroTime),
 	)
 	c.Lock()
 	defer c.Unlock()

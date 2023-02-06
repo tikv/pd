@@ -298,16 +298,17 @@ type KeyspaceMeta struct {
 }
 
 // MarshalJSON creates custom marshal of KeyspaceMeta with the following:
-// 1. Keyspace ID are removed from marshal result to avoid exposure of internal mechanics.
-// 2. Keyspace State are marshaled to their corresponding name for better readability.
+// 1. Keyspace State are marshaled to their corresponding name for better readability.
 func (meta *KeyspaceMeta) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
+		ID             uint32            `json:"id,omitempty"`
 		Name           string            `json:"name,omitempty"`
 		State          string            `json:"state,omitempty"`
 		CreatedAt      int64             `json:"created_at,omitempty"`
 		StateChangedAt int64             `json:"state_changed_at,omitempty"`
 		Config         map[string]string `json:"config,omitempty"`
 	}{
+		meta.Id,
 		meta.Name,
 		meta.State.String(),
 		meta.CreatedAt,
@@ -319,6 +320,7 @@ func (meta *KeyspaceMeta) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON reverse KeyspaceMeta's the Custom JSON marshal.
 func (meta *KeyspaceMeta) UnmarshalJSON(data []byte) error {
 	aux := &struct {
+		ID             uint32            `json:"id,omitempty"`
 		Name           string            `json:"name,omitempty"`
 		State          string            `json:"state,omitempty"`
 		CreatedAt      int64             `json:"created_at,omitempty"`
@@ -330,6 +332,7 @@ func (meta *KeyspaceMeta) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	pbMeta := &keyspacepb.KeyspaceMeta{
+		Id:             aux.ID,
 		Name:           aux.Name,
 		State:          keyspacepb.KeyspaceState(keyspacepb.KeyspaceState_value[aux.State]),
 		CreatedAt:      aux.CreatedAt,
