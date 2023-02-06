@@ -17,7 +17,15 @@ package statistics
 import (
 	"context"
 
-	"github.com/tikv/pd/server/core"
+	"github.com/smallnest/chanx"
+	"github.com/tikv/pd/pkg/core"
+)
+
+const chanMaxLength = 6000000
+
+var (
+	readTaskMetrics  = hotCacheFlowQueueStatusGauge.WithLabelValues(Read.String())
+	writeTaskMetrics = hotCacheFlowQueueStatusGauge.WithLabelValues(Write.String())
 )
 
 // HotCache is a cache hold hot regions.
@@ -31,8 +39,8 @@ type HotCache struct {
 func NewHotCache(ctx context.Context) *HotCache {
 	w := &HotCache{
 		ctx:        ctx,
-		writeCache: NewHotPeerCache(Write),
-		readCache:  NewHotPeerCache(Read),
+		writeCache: NewHotPeerCache(ctx, Write),
+		readCache:  NewHotPeerCache(ctx, Read),
 	}
 	go w.updateItems(w.readCache.taskQueue, w.runReadTask)
 	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)
@@ -41,8 +49,11 @@ func NewHotCache(ctx context.Context) *HotCache {
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
+	if w.writeCache.taskQueue.Len() > chanMaxLength {
+		return false
+	}
 	select {
-	case w.writeCache.taskQueue <- task:
+	case w.writeCache.taskQueue.In <- task:
 		return true
 	default:
 		return false
@@ -51,8 +62,11 @@ func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
 func (w *HotCache) CheckReadAsync(task FlowItemTask) bool {
+	if w.readCache.taskQueue.Len() > chanMaxLength {
+		return false
+	}
 	select {
-	case w.readCache.taskQueue <- task:
+	case w.readCache.taskQueue.In <- task:
 		return true
 	default:
 		return false
@@ -105,10 +119,8 @@ func (w *HotCache) GetHotPeerStat(kind RWType, regionID, storeID uint64) *HotPee
 
 // CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics() {
-	writeMetricsTask := newCollectMetricsTask("write")
-	readMetricsTask := newCollectMetricsTask("read")
-	w.CheckWriteAsync(writeMetricsTask)
-	w.CheckReadAsync(readMetricsTask)
+	w.CheckWriteAsync(newCollectMetricsTask())
+	w.CheckReadAsync(newCollectMetricsTask())
 }
 
 // ResetMetrics resets the hot cache metrics.
@@ -116,22 +128,12 @@ func (w *HotCache) ResetMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 
-func incMetrics(name string, storeID uint64, kind RWType) {
-	store := storeTag(storeID)
-	switch kind {
-	case Write:
-		hotCacheStatusGauge.WithLabelValues(name, store, "write").Inc()
-	case Read:
-		hotCacheStatusGauge.WithLabelValues(name, store, "read").Inc()
-	}
-}
-
-func (w *HotCache) updateItems(queue <-chan FlowItemTask, runTask func(task FlowItemTask)) {
+func (w *HotCache) updateItems(queue *chanx.UnboundedChan[FlowItemTask], runTask func(task FlowItemTask)) {
 	for {
 		select {
 		case <-w.ctx.Done():
 			return
-		case task := <-queue:
+		case task := <-queue.Out:
 			runTask(task)
 		}
 	}
@@ -141,7 +143,7 @@ func (w *HotCache) runReadTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task.runTask(w.readCache)
-		hotCacheFlowQueueStatusGauge.WithLabelValues(Read.String()).Set(float64(len(w.readCache.taskQueue)))
+		readTaskMetrics.Set(float64(w.readCache.taskQueue.Len()))
 	}
 }
 
@@ -149,7 +151,7 @@ func (w *HotCache) runWriteTask(task FlowItemTask) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task.runTask(w.writeCache)
-		hotCacheFlowQueueStatusGauge.WithLabelValues(Write.String()).Set(float64(len(w.writeCache.taskQueue)))
+		writeTaskMetrics.Set(float64(w.writeCache.taskQueue.Len()))
 	}
 }
 

@@ -16,8 +16,8 @@ package checker
 
 import (
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 )
@@ -27,6 +27,11 @@ type LearnerChecker struct {
 	PauseController
 	cluster schedule.Cluster
 }
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	learnerCheckerPausedCounter = checkerCounter.WithLabelValues("learner_checker", "paused")
+)
 
 // NewLearnerChecker creates a learner checker.
 func NewLearnerChecker(cluster schedule.Cluster) *LearnerChecker {
@@ -38,7 +43,7 @@ func NewLearnerChecker(cluster schedule.Cluster) *LearnerChecker {
 // Check verifies a region's role, creating an Operator if need.
 func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if l.IsPaused() {
-		checkerCounter.WithLabelValues("learner_checker", "paused").Inc()
+		learnerCheckerPausedCounter.Inc()
 		return nil
 	}
 	for _, p := range region.GetLearners() {

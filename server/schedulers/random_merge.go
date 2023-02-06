@@ -18,9 +18,9 @@ import (
 	"math/rand"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -33,6 +33,16 @@ const (
 	RandomMergeName = "random-merge-scheduler"
 	// RandomMergeType is random merge scheduler type.
 	RandomMergeType = "random-merge"
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	randomMergeCounter              = schedulerCounter.WithLabelValues(RandomMergeName, "schedule")
+	randomMergeNewOperatorCounter   = schedulerCounter.WithLabelValues(RandomMergeName, "new-operator")
+	randomMergeNoSourceStoreCounter = schedulerCounter.WithLabelValues(RandomMergeName, "no-source-store")
+	randomMergeNoRegionCounter      = schedulerCounter.WithLabelValues(RandomMergeName, "no-region")
+	randomMergeNoTargetStoreCounter = schedulerCounter.WithLabelValues(RandomMergeName, "no-target-store")
+	randomMergeNotAllowedCounter    = schedulerCounter.WithLabelValues(RandomMergeName, "not-allowed")
 )
 
 func init() {
@@ -101,20 +111,20 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 }
 
 func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	randomMergeCounter.Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
 		FilterSource(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true}).
 		RandomPick()
 	if store == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-source-store").Inc()
+		randomMergeNoSourceStoreCounter.Inc()
 		return nil, nil
 	}
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	region := filter.SelectOneRegion(cluster.RandLeaderRegions(store.GetID(), s.conf.Ranges), nil, pendingFilter, downFilter)
 	if region == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
+		randomMergeNoRegionCounter.Inc()
 		return nil, nil
 	}
 
@@ -123,12 +133,12 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 		target = other
 	}
 	if target == nil {
-		schedulerCounter.WithLabelValues(s.GetName(), "no-target-store").Inc()
+		randomMergeNoTargetStoreCounter.Inc()
 		return nil, nil
 	}
 
 	if !s.allowMerge(cluster, region, target) {
-		schedulerCounter.WithLabelValues(s.GetName(), "not-allowed").Inc()
+		randomMergeNotAllowedCounter.Inc()
 		return nil, nil
 	}
 
@@ -139,7 +149,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 	}
 	ops[0].SetPriorityLevel(core.Low)
 	ops[1].SetPriorityLevel(core.Low)
-	ops[0].Counters = append(ops[0].Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+	ops[0].Counters = append(ops[0].Counters, randomMergeNewOperatorCounter)
 	return ops, nil
 }
 

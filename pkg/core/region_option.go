@@ -16,7 +16,9 @@ package core
 
 import (
 	"math"
+	"math/rand"
 	"sort"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -47,6 +49,17 @@ func WithPendingPeers(pendingPeers []*metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.pendingPeers = append(pendingPeers[:0:0], pendingPeers...)
 		sort.Sort(peerSlice(region.pendingPeers))
+	}
+}
+
+// WithWitness sets the witness for the region.
+func WithWitness(peerID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if p.GetId() == peerID {
+				p.IsWitness = true
+			}
+		}
 	}
 }
 
@@ -237,15 +250,6 @@ func SetWrittenQuery(v uint64) RegionCreateOption {
 	return SetQueryStats(q)
 }
 
-// SetQueryNum sets the read and write query with specific num.
-// This func is only used for test and simulator.
-func SetQueryNum(read, write uint64) RegionCreateOption {
-	r := RandomKindReadQuery(read)
-	w := RandomKindWriteQuery(write)
-	q := mergeQueryStat(r, w)
-	return SetQueryStats(q)
-}
-
 // SetQueryStats sets the query stats for the region, it will cover previous statistic.
 // This func is only used for unit test.
 func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
@@ -366,6 +370,64 @@ func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
 func SetFromHeartbeat(fromHeartbeat bool) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.fromHeartbeat = fromHeartbeat
+	}
+}
+
+// RandomKindReadQuery returns query stat with random query kind, only used for unit test.
+func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	switch r.Intn(3) {
+	case 0:
+		return &pdpb.QueryStats{
+			Coprocessor: queryRead,
+		}
+	case 1:
+		return &pdpb.QueryStats{
+			Scan: queryRead,
+		}
+	case 2:
+		return &pdpb.QueryStats{
+			Get: queryRead,
+		}
+	default:
+		return &pdpb.QueryStats{}
+	}
+}
+
+// RandomKindWriteQuery returns query stat with random query kind, only used for unit test.
+func RandomKindWriteQuery(queryWrite uint64) *pdpb.QueryStats {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	switch r.Intn(7) {
+	case 0:
+		return &pdpb.QueryStats{
+			Put: queryWrite,
+		}
+	case 1:
+		return &pdpb.QueryStats{
+			Delete: queryWrite,
+		}
+	case 2:
+		return &pdpb.QueryStats{
+			DeleteRange: queryWrite,
+		}
+	case 3:
+		return &pdpb.QueryStats{
+			AcquirePessimisticLock: queryWrite,
+		}
+	case 4:
+		return &pdpb.QueryStats{
+			Rollback: queryWrite,
+		}
+	case 5:
+		return &pdpb.QueryStats{
+			Prewrite: queryWrite,
+		}
+	case 6:
+		return &pdpb.QueryStats{
+			Commit: queryWrite,
+		}
+	default:
+		return &pdpb.QueryStats{}
 	}
 }
 

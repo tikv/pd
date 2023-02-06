@@ -18,8 +18,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
@@ -35,6 +35,9 @@ const (
 	slowStoreEvictThreshold   = 100
 	slowStoreRecoverThreshold = 1
 )
+
+// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+var evictSlowStoreCounter = schedulerCounter.WithLabelValues(EvictSlowStoreName, "schedule")
 
 func init() {
 	schedule.RegisterSliceDecoderBuilder(EvictSlowStoreType, func(args []string) schedule.ConfigDecoder {
@@ -171,7 +174,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster schedule.Cluster) bo
 }
 
 func (s *evictSlowStoreScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	evictSlowStoreCounter.Inc()
 	var ops []*operator.Operator
 
 	if s.conf.evictStore() != 0 {

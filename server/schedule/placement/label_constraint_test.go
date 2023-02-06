@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 func TestLabelConstraint(t *testing.T) {
@@ -50,7 +50,7 @@ func TestLabelConstraint(t *testing.T) {
 	for i, constraint := range constraints {
 		var matched []int
 		for j, store := range stores {
-			if constraint.MatchStore(core.NewStoreInfoWithLabel(uint64(j), 0, store)) {
+			if constraint.MatchStore(core.NewStoreInfoWithLabel(uint64(j), store)) {
 				matched = append(matched, j+1)
 			}
 		}
@@ -89,7 +89,7 @@ func TestLabelConstraints(t *testing.T) {
 	for i, cs := range constraints {
 		var matched []int
 		for j, store := range stores {
-			if MatchLabelConstraints(core.NewStoreInfoWithLabel(uint64(j), 0, store), cs) {
+			if MatchLabelConstraints(core.NewStoreInfoWithLabel(uint64(j), store), cs) {
 				matched = append(matched, j+1)
 			}
 		}

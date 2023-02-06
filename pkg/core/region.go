@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 	"strings"
@@ -373,6 +374,16 @@ func (r *RegionInfo) GetStoreLearner(storeID uint64) *metapb.Peer {
 	return nil
 }
 
+// GetStoreWitness returns the witness peer in specified store.
+func (r *RegionInfo) GetStoreWitness(storeID uint64) *metapb.Peer {
+	for _, peer := range r.witnesses {
+		if peer.GetStoreId() == storeID {
+			return peer
+		}
+	}
+	return nil
+}
+
 // GetStoreIDs returns a map indicate the region distributed.
 func (r *RegionInfo) GetStoreIDs() map[uint64]struct{} {
 	peers := r.meta.GetPeers()
@@ -403,6 +414,18 @@ func (r *RegionInfo) GetFollower() *metapb.Peer {
 		}
 	}
 	return nil
+}
+
+// GetNonWitnessVoters returns a map indicate the non-witness voter peers distributed.
+func (r *RegionInfo) GetNonWitnessVoters() map[uint64]*metapb.Peer {
+	peers := r.GetVoters()
+	nonWitnesses := make(map[uint64]*metapb.Peer, len(peers))
+	for _, peer := range peers {
+		if !peer.IsWitness {
+			nonWitnesses[peer.GetStoreId()] = peer
+		}
+	}
+	return nonWitnesses
 }
 
 // GetDiffFollowers returns the followers which is not located in the same
@@ -474,9 +497,27 @@ func (r *RegionInfo) GetBuckets() *metapb.Buckets {
 	return (*metapb.Buckets)(buckets)
 }
 
+// GetStorePeerApproximateSize returns the approximate size of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateSize(storeID uint64) int64 {
+	peer := r.GetStorePeer(storeID)
+	if storeID != 0 && peer != nil && peer.IsWitness {
+		return 0
+	}
+	return r.approximateSize
+}
+
 // GetApproximateSize returns the approximate size of the region.
 func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
+}
+
+// GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
+	peer := r.GetStorePeer(storeID)
+	if storeID != 0 && peer != nil && peer.IsWitness {
+		return 0
+	}
+	return r.approximateKeys
 }
 
 // GetApproximateKeys returns the approximate keys of the region.
@@ -621,9 +662,11 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	// Mark isNew if the region in cache does not have leader.
 	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
 		if origin == nil {
-			debug("insert new region",
-				zap.Uint64("region-id", region.GetID()),
-				logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
+			if log.GetLevel() <= zap.DebugLevel {
+				debug("insert new region",
+					zap.Uint64("region-id", region.GetID()),
+					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
+			}
 			saveKV, saveCache, isNew = true, true, true
 		} else {
 			if !origin.IsFromHeartbeat() {
@@ -632,27 +675,31 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
 			if r.GetVersion() > o.GetVersion() {
-				info("region Version changed",
-					zap.Uint64("region-id", region.GetID()),
-					logutil.ZapRedactString("detail", DiffRegionKeyInfo(origin, region)),
-					zap.Uint64("old-version", o.GetVersion()),
-					zap.Uint64("new-version", r.GetVersion()),
-				)
+				if log.GetLevel() <= zap.InfoLevel {
+					info("region Version changed",
+						zap.Uint64("region-id", region.GetID()),
+						logutil.ZapRedactString("detail", DiffRegionKeyInfo(origin, region)),
+						zap.Uint64("old-version", o.GetVersion()),
+						zap.Uint64("new-version", r.GetVersion()),
+					)
+				}
 				saveKV, saveCache = true, true
 			}
 			if r.GetConfVer() > o.GetConfVer() {
-				info("region ConfVer changed",
-					zap.Uint64("region-id", region.GetID()),
-					zap.String("detail", DiffRegionPeersInfo(origin, region)),
-					zap.Uint64("old-confver", o.GetConfVer()),
-					zap.Uint64("new-confver", r.GetConfVer()),
-				)
+				if log.GetLevel() <= zap.InfoLevel {
+					info("region ConfVer changed",
+						zap.Uint64("region-id", region.GetID()),
+						zap.String("detail", DiffRegionPeersInfo(origin, region)),
+						zap.Uint64("old-confver", o.GetConfVer()),
+						zap.Uint64("new-confver", r.GetConfVer()),
+					)
+				}
 				saveKV, saveCache = true, true
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
 				if origin.GetLeader().GetId() == 0 {
 					isNew = true
-				} else {
+				} else if log.GetLevel() <= zap.InfoLevel {
 					info("leader changed",
 						zap.Uint64("region-id", region.GetID()),
 						zap.Uint64("from", origin.GetLeader().GetStoreId()),
@@ -667,7 +714,9 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				return
 			}
 			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
-				debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
+				if log.GetLevel() <= zap.DebugLevel {
+					debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
+				}
 				saveKV, saveCache = true, true
 				return
 			}
@@ -680,12 +729,16 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				return
 			}
 			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
-				debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+				if log.GetLevel() <= zap.DebugLevel {
+					debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+				}
 				saveCache, needSync = true, true
 				return
 			}
 			if !SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
-				debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+				if log.GetLevel() <= zap.DebugLevel {
+					debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
+				}
 				saveCache, needSync = true, true
 				return
 			}
@@ -1335,6 +1388,20 @@ func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*R
 	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
+// RandWitnessRegion randomly gets a store's witness region.
+func (r *RegionsInfo) RandWitnessRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.witnesses[storeID].RandomRegion(ranges)
+}
+
+// RandWitnessRegions randomly gets a store's n witness regions.
+func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.witnesses[storeID].RandomRegions(randomRegionMaxRetry, ranges)
+}
+
 // GetLeader returns leader RegionInfo by storeID and regionID (now only used in test)
 func (r *RegionsInfo) GetLeader(storeID uint64, region *RegionInfo) *RegionInfo {
 	r.st.RLock()
@@ -1673,4 +1740,72 @@ func NeedTransferWitnessLeader(region *RegionInfo) bool {
 		return false
 	}
 	return region.GetLeader().IsWitness
+}
+
+// SplitRegions split a set of RegionInfo by the middle of regionKey. Only for test purpose.
+func SplitRegions(regions []*RegionInfo) []*RegionInfo {
+	results := make([]*RegionInfo, 0, len(regions)*2)
+	for _, region := range regions {
+		start, end := byte(0), byte(math.MaxUint8)
+		if len(region.GetStartKey()) > 0 {
+			start = region.GetStartKey()[0]
+		}
+		if len(region.GetEndKey()) > 0 {
+			end = region.GetEndKey()[0]
+		}
+		middle := []byte{start/2 + end/2}
+		left := region.Clone()
+		left.meta.Id = region.GetID() + uint64(len(regions))
+		left.meta.EndKey = middle
+		left.meta.RegionEpoch.Version++
+		right := region.Clone()
+		right.meta.Id = region.GetID() + uint64(len(regions)*2)
+		right.meta.StartKey = middle
+		right.meta.RegionEpoch.Version++
+		results = append(results, left, right)
+	}
+	return results
+}
+
+// MergeRegions merge a set of RegionInfo by regionKey. Only for test purpose.
+func MergeRegions(regions []*RegionInfo) []*RegionInfo {
+	results := make([]*RegionInfo, 0, len(regions)/2)
+	for i := 0; i < len(regions); i += 2 {
+		left := regions[i]
+		right := regions[i]
+		if i+1 < len(regions) {
+			right = regions[i+1]
+		}
+		region := &RegionInfo{meta: &metapb.Region{
+			Id:       left.GetID(),
+			StartKey: left.GetStartKey(),
+			EndKey:   right.GetEndKey(),
+			Peers:    left.meta.Peers,
+		}}
+		if left.GetRegionEpoch().GetVersion() > right.GetRegionEpoch().GetVersion() {
+			region.meta.RegionEpoch = left.GetRegionEpoch()
+		} else {
+			region.meta.RegionEpoch = right.GetRegionEpoch()
+		}
+		region.meta.RegionEpoch.Version++
+		region.leader = left.leader
+		results = append(results, region)
+	}
+	return results
+}
+
+// NewTestRegionInfo creates a new RegionInfo for test purpose.
+func NewTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...RegionCreateOption) *RegionInfo {
+	leader := &metapb.Peer{
+		Id:      regionID,
+		StoreId: storeID,
+	}
+	metaRegion := &metapb.Region{
+		Id:          regionID,
+		StartKey:    start,
+		EndKey:      end,
+		Peers:       []*metapb.Peer{leader},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	return NewRegionInfo(metaRegion, leader, opts...)
 }

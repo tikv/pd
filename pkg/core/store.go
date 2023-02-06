@@ -22,9 +22,9 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
 
@@ -78,6 +78,24 @@ func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 		opt(storeInfo)
 	}
 	return storeInfo
+}
+
+// NewStoreInfoWithLabel is create a store with specified labels. only for test purpose.
+func NewStoreInfoWithLabel(id uint64, labels map[string]string) *StoreInfo {
+	storeLabels := make([]*metapb.StoreLabel, 0, len(labels))
+	for k, v := range labels {
+		storeLabels = append(storeLabels, &metapb.StoreLabel{
+			Key:   k,
+			Value: v,
+		})
+	}
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id:     id,
+			Labels: storeLabels,
+		},
+	)
+	return store
 }
 
 // Clone creates a copy of current StoreInfo.
@@ -152,6 +170,11 @@ func (s *StoreInfo) GetSlowScore() uint64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.rawStats.GetSlowScore()
+}
+
+// WitnessScore returns the store's witness score.
+func (s *StoreInfo) WitnessScore(delta int64) float64 {
+	return float64(int64(s.GetWitnessCount()) + delta)
 }
 
 // IsSlow checks if the slow score reaches the threshold.
@@ -346,15 +369,19 @@ func (s *StoreInfo) regionScoreV1(highSpaceRatio, lowSpaceRatio float64, delta i
 func (s *StoreInfo) regionScoreV2(delta int64, lowSpaceRatio float64) float64 {
 	A := float64(s.GetAvgAvailable()) / units.GiB
 	C := float64(s.GetCapacity()) / units.GiB
+	// the used size always be accurate, it only statistics the raftDB|rocksDB|snap directory, so we use it directly.
+	U := float64(s.GetUsedSize()) / units.GiB
+	// the diff maybe not zero if the disk has other files.
+	diff := C - A - U
 	R := float64(s.GetRegionSize() + delta)
 	if R < 0 {
 		R = float64(s.GetRegionSize())
 	}
-	U := C - A
+
 	if s.GetRegionSize() != 0 {
 		U += U * (float64(delta)) / float64(s.GetRegionSize())
-		if U < C && U > 0 {
-			A = C - U
+		if A1 := C - U - diff; A1 > 0 && A1 < C {
+			A = A1
 		}
 	}
 	var (

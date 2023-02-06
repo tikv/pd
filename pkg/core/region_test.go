@@ -615,7 +615,7 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 }
 
 func BenchmarkUpdateBuckets(b *testing.B) {
-	region := NewTestRegionInfo([]byte{}, []byte{})
+	region := NewTestRegionInfo(1, 1, []byte{}, []byte{})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		buckets := &metapb.Buckets{RegionId: 0, Version: uint64(i)}

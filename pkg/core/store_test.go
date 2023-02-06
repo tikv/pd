@@ -44,7 +44,7 @@ func TestDistinctScore(t *testing.T) {
 					"rack": rack,
 					"host": host,
 				}
-				store := NewStoreInfoWithLabel(storeID, 1, storeLabels)
+				store := NewStoreInfoWithLabel(storeID, storeLabels)
 				stores = append(stores, store)
 
 				// Number of stores in different zones.
@@ -58,7 +58,7 @@ func TestDistinctScore(t *testing.T) {
 			}
 		}
 	}
-	store := NewStoreInfoWithLabel(100, 1, nil)
+	store := NewStoreInfoWithLabel(100, nil)
 	re.Equal(float64(0), DistinctScore(labels, stores, store))
 }
 
@@ -131,7 +131,8 @@ func TestRegionScore(t *testing.T) {
 
 func TestLowSpaceRatio(t *testing.T) {
 	re := require.New(t)
-	store := NewStoreInfoWithLabel(1, 20, nil)
+	store := NewStoreInfo(&metapb.Store{Id: 1})
+
 	store.rawStats.Capacity = initialMinSpace << 4
 	store.rawStats.Available = store.rawStats.Capacity >> 3
 
@@ -147,46 +148,88 @@ func TestLowSpaceScoreV2(t *testing.T) {
 	testdata := []struct {
 		bigger *StoreInfo
 		small  *StoreInfo
+		delta  int64
 	}{{
 		// store1 and store2 has same store available ratio and store1 less 50 GB
-		bigger: NewStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4),
-		small:  NewStoreInfoWithAvailable(2, 200*units.GiB, 1000*units.GiB, 1.4),
+		bigger: newStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4),
+		small:  newStoreInfoWithAvailable(2, 200*units.GiB, 1000*units.GiB, 1.4),
 	}, {
 		// store1 and store2 has same available space and less than 50 GB
-		bigger: NewStoreInfoWithAvailable(1, 10*units.GiB, 1000*units.GiB, 1.4),
-		small:  NewStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
+		bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 1000*units.GiB, 1.4),
+		small:  newStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
 	}, {
 		// store1 and store2 has same available ratio less than 0.2
-		bigger: NewStoreInfoWithAvailable(1, 20*units.GiB, 1000*units.GiB, 1.4),
-		small:  NewStoreInfoWithAvailable(2, 10*units.GiB, 500*units.GiB, 1.4),
+		bigger: newStoreInfoWithAvailable(1, 20*units.GiB, 1000*units.GiB, 1.4),
+		small:  newStoreInfoWithAvailable(2, 10*units.GiB, 500*units.GiB, 1.4),
 	}, {
 		// store1 and store2 has same available ratio
 		// but the store1 ratio less than store2 ((50-10)/50=0.8<(200-100)/200=0.5)
-		bigger: NewStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.4),
-		small:  NewStoreInfoWithAvailable(2, 100*units.GiB, 1000*units.GiB, 1.4),
+		bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.4),
+		small:  newStoreInfoWithAvailable(2, 100*units.GiB, 1000*units.GiB, 1.4),
 	}, {
 		// store1 and store2 has same usedSize and capacity
 		// but the bigger's amp is bigger
-		bigger: NewStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.5),
-		small:  NewStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
+		bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.5),
+		small:  newStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
 	}, {
 		// store1 and store2 has same capacity and regionSize（40g)
 		// but store1 has less available space size
-		bigger: NewStoreInfoWithAvailable(1, 60*units.GiB, 100*units.GiB, 1),
-		small:  NewStoreInfoWithAvailable(2, 80*units.GiB, 100*units.GiB, 2),
+		bigger: newStoreInfoWithAvailable(1, 60*units.GiB, 100*units.GiB, 1),
+		small:  newStoreInfoWithAvailable(2, 80*units.GiB, 100*units.GiB, 2),
 	}, {
 		// store1 and store2 has same capacity and store2 (40g) has twice usedSize than store1 (20g)
 		// but store1 has higher amp, so store1(60g) has more regionSize (40g)
-		bigger: NewStoreInfoWithAvailable(1, 80*units.GiB, 100*units.GiB, 3),
-		small:  NewStoreInfoWithAvailable(2, 60*units.GiB, 100*units.GiB, 1),
+		bigger: newStoreInfoWithAvailable(1, 80*units.GiB, 100*units.GiB, 3),
+		small:  newStoreInfoWithAvailable(2, 60*units.GiB, 100*units.GiB, 1),
 	}, {
 		// store1's capacity is less than store2's capacity, but store2 has more available space,
-		bigger: NewStoreInfoWithAvailable(1, 2*units.GiB, 100*units.GiB, 3),
-		small:  NewStoreInfoWithAvailable(2, 100*units.GiB, 10*1000*units.GiB, 3),
+		bigger: newStoreInfoWithAvailable(1, 2*units.GiB, 100*units.GiB, 3),
+		small:  newStoreInfoWithAvailable(2, 100*units.GiB, 10*1000*units.GiB, 3),
+	}, {
+		// store2 has extra file size (70GB), it can balance region from store1 to store2.
+		// See https://github.com/tikv/pd/issues/5790
+		small:  newStoreInfoWithDisk(1, 400*units.MiB, 6930*units.GiB, 7000*units.GiB, 400),
+		bigger: newStoreInfoWithAvailable(2, 1500*units.GiB, 7000*units.GiB, 1.32),
+		delta:  37794,
 	}}
 	for _, v := range testdata {
-		score1 := v.bigger.regionScoreV2(0, 0.8)
-		score2 := v.small.regionScoreV2(0, 0.8)
+		score1 := v.bigger.regionScoreV2(-v.delta, 0.8)
+		score2 := v.small.regionScoreV2(v.delta, 0.8)
 		re.Greater(score1, score2)
 	}
+}
+
+// newStoreInfoWithAvailable is created with available and capacity
+func newStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = capacity
+	stats.Available = available
+	usedSize := capacity - available
+	regionSize := (float64(usedSize) * amp) / units.MiB
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id: id,
+		},
+		SetStoreStats(stats),
+		SetRegionCount(int(regionSize/96)),
+		SetRegionSize(int64(regionSize)),
+	)
+	return store
+}
+
+// newStoreInfoWithDisk is created with all disk infos.
+func newStoreInfoWithDisk(id, used, available, capacity, regionSize uint64) *StoreInfo {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = capacity
+	stats.Available = available
+	stats.UsedSize = used
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id: id,
+		},
+		SetStoreStats(stats),
+		SetRegionCount(int(regionSize/96)),
+		SetRegionSize(int64(regionSize)),
+	)
+	return store
 }

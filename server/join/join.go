@@ -45,7 +45,7 @@ var listMemberRetryTimes = 20
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
 // and returns the initial configuration of the PD cluster.
 //
-// TL;TR: The join functionality is safe. With data, join does nothing, w/o data
+// TL;DR: The join functionality is safe. With data, join does nothing, w/o data
 //
 //	and it is not a member of cluster, join does MemberAdd, it returns an
 //	error if PD tries to join itself, missing data or join a duplicated PD.

@@ -14,26 +14,30 @@
 
 package endpoint
 
-// ResourceGroupStorage defines the storage operations on the rule.
+import (
+	"github.com/gogo/protobuf/proto"
+)
+
+// ResourceGroupStorage defines the storage operations on the resource group.
 type ResourceGroupStorage interface {
-	LoadResourceGroups(f func(k, v string)) error
-	SaveResourceGroup(groupName string, groupPayload interface{}) error
-	DeleteResourceGroup(groupName string) error
+	LoadResourceGroupSettings(f func(k, v string)) error
+	SaveResourceGroupSetting(name string, msg proto.Message) error
+	DeleteResourceGroupSetting(name string) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
 
-// SaveResourceGroup stores a resource group to storage.
-func (se *StorageEndpoint) SaveResourceGroup(groupName string, payload interface{}) error {
-	return se.saveJSON(resourceGroupPath, groupName, payload)
+// SaveResourceGroupSetting stores a resource group to storage.
+func (se *StorageEndpoint) SaveResourceGroupSetting(name string, msg proto.Message) error {
+	return se.saveProto(resourceGroupSettingKeyPath(name), msg)
 }
 
-// DeleteResourceGroup removes a resource group from storage.
-func (se *StorageEndpoint) DeleteResourceGroup(groupName string) error {
-	return se.Remove(resourceGroupKeyPath(groupName))
+// DeleteResourceGroupSetting removes a resource group from storage.
+func (se *StorageEndpoint) DeleteResourceGroupSetting(name string) error {
+	return se.Remove(resourceGroupSettingKeyPath(name))
 }
 
-// LoadResourceGroups loads all resource groups from storage.
-func (se *StorageEndpoint) LoadResourceGroups(f func(k, v string)) error {
-	return se.loadRangeByPrefix(resourceGroupPath+"/", f)
+// LoadResourceGroupSettings loads all resource groups from storage.
+func (se *StorageEndpoint) LoadResourceGroupSettings(f func(k, v string)) error {
+	return se.loadRangeByPrefix(resourceGroupSettingsPath, f)
 }

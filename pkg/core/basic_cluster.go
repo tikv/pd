@@ -16,8 +16,8 @@ package core
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/core/storelimit"
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
@@ -71,6 +71,19 @@ func (bc *BasicCluster) GetRegionStores(region *RegionInfo) []*StoreInfo {
 	defer bc.Stores.mu.RUnlock()
 	var Stores []*StoreInfo
 	for id := range region.GetStoreIDs() {
+		if store := bc.Stores.GetStore(id); store != nil {
+			Stores = append(Stores, store)
+		}
+	}
+	return Stores
+}
+
+// GetNonWitnessVoterStores returns all Stores that contains the non-witness's voter peer.
+func (bc *BasicCluster) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
+	bc.Stores.mu.RLock()
+	defer bc.Stores.mu.RUnlock()
+	var Stores []*StoreInfo
+	for id := range region.GetNonWitnessVoters() {
 		if store := bc.Stores.GetStore(id); store != nil {
 			Stores = append(Stores, store)
 		}
@@ -224,6 +237,7 @@ type RegionSetInformer interface {
 	RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
 	RandLeaderRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
 	RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
+	RandWitnessRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
 	RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
 	GetAverageRegionSize() int64
 	GetStoreRegionCount(storeID uint64) int
@@ -239,6 +253,7 @@ type StoreSetInformer interface {
 	GetStore(id uint64) *StoreInfo
 
 	GetRegionStores(region *RegionInfo) []*StoreInfo
+	GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo
 	GetFollowerStores(region *RegionInfo) []*StoreInfo
 	GetLeaderStore(region *RegionInfo) *StoreInfo
 }

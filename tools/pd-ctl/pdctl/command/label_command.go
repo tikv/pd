@@ -20,9 +20,9 @@ import (
 	"net/http"
 
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
 )
 

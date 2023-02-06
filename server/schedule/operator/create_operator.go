@@ -22,9 +22,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
 )
@@ -101,6 +101,14 @@ func CreateMovePeerOperator(desc string, ci ClusterInformer, region *core.Region
 		RemovePeer(oldStore).
 		AddPeer(peer).
 		Build(kind)
+}
+
+// CreateMoveWitnessOperator creates an operator that replaces an old witness with a new witness.
+func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
+		BecomeNonWitness(sourceStoreID).
+		BecomeWitness(targetStoreID).
+		Build(OpWitness)
 }
 
 // CreateReplaceLeaderPeerOperator creates an operator that replaces an old peer with a new peer, and move leader from old store firstly.
@@ -297,12 +305,12 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 func CreateWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		BecomeWitness(peer.GetStoreId()).
-		Build(0)
+		Build(OpWitness)
 }
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
 func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		BecomeNonWitness(peer.GetStoreId()).
-		Build(0)
+		Build(OpWitness)
 }

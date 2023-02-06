@@ -15,7 +15,7 @@
 package statistics
 
 import (
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 // RegionStats records a list of regions' statistics and distribution status.
@@ -73,7 +73,7 @@ func (s *RegionStats) Observe(r *core.RegionInfo) {
 	for _, p := range peers {
 		storeID := p.GetStoreId()
 		s.StorePeerCount[storeID]++
-		s.StorePeerSize[storeID] += approximateSize
-		s.StorePeerKeys[storeID] += approximateKeys
+		s.StorePeerSize[storeID] += r.GetStorePeerApproximateSize(storeID)
+		s.StorePeerKeys[storeID] += r.GetStorePeerApproximateKeys(storeID)
 	}
 }

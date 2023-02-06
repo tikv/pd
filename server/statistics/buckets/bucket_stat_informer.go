@@ -18,10 +18,10 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/rangetree"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/keyutil"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/rangetree"
 	"github.com/tikv/pd/server/statistics"
 )
 
