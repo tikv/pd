@@ -112,11 +112,12 @@ func parseUrls(s string) ([]url.URL, error) {
 	return urls, nil
 }
 
-func parseMode(modes string) ([]ServiceMode, error) {
+// ParseModes parses a string into multiple service modes.
+func ParseModes(modes string) ([]ServiceMode, error) {
 	items := strings.Split(modes, ",")
 	rets := make([]ServiceMode, 0)
 	for _, item := range items {
-		ret, err := parseServiceMode(item)
+		ret, err := ParseServiceMode(item)
 		if err != nil {
 			return nil, err
 		}
@@ -130,8 +131,9 @@ func parseMode(modes string) ([]ServiceMode, error) {
 	return rets, nil
 }
 
-func parseServiceMode(mode string) (ServiceMode, error) {
-	switch mode {
+// ParseServiceMode parses a string into a service mode.
+func ParseServiceMode(mode string) (ServiceMode, error) {
+	switch strings.ToLower(mode) {
 	case TSOService.String():
 		return TSOService, nil
 	case APIService.String():
@@ -143,12 +145,4 @@ func parseServiceMode(mode string) (ServiceMode, error) {
 	default:
 		return ServiceModeCount, errors.Errorf("invalid service mode %s", mode)
 	}
-}
-
-func allModes() string {
-	var modes []string
-	for i := 0; i < int(ServiceModeCount); i++ {
-		modes = append(modes, ServiceMode(i).String())
-	}
-	return strings.Join(modes, ",")
 }

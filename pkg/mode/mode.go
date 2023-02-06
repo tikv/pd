@@ -14,6 +14,7 @@
 
 package mode
 
+// ServiceServer is the interface for the server.
 type ServiceServer interface {
 	Run() error
 	Close()

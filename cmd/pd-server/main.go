@@ -115,15 +115,20 @@ func exit(code int) {
 	os.Exit(code)
 }
 
+// todo: add more service mode and multi service mode
 func startServer(ctx context.Context, cfg *config.Config) mode.ServiceServer {
-	switch cfg.ServiceModes {
-	case config.APIService.String():
+	m, err := config.ParseServiceMode(cfg.ServiceModes)
+	if err != nil {
+		log.Fatal("parse service mode error", errs.ZapError(err))
+	}
+	switch m {
+	case config.APIService:
 		log.Info("start pd api service, no implementation yet")
-	case config.SchedulerService.String():
+	case config.SchedulerService:
 		log.Info("start pd scheduler service, no implementation yet")
-	case config.TSOService.String():
+	case config.TSOService:
 		log.Info("start pd tso service, no implementation yet")
-	case config.ResourceManagerService.String():
+	case config.ResourceManagerService:
 		return mode.ResourceManagerStart(ctx, cfg)
 	default: // case all
 		return mode.LegacyStart(ctx, cfg)

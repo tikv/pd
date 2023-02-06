@@ -21,6 +21,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+// Server is the interface for the server.
 type Server interface {
 	Context() context.Context
 	AddStartCallback(callbacks ...func())

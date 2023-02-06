@@ -188,7 +188,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.AdvertiseClientUrls, "advertise-client-urls", "", "advertise url for client traffic (default '${client-urls}')")
 	fs.StringVar(&cfg.PeerUrls, "peer-urls", defaultPeerUrls, "url for peer traffic")
 	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", "", "advertise url for peer traffic (default '${peer-urls}')")
-	fs.StringVar(&cfg.ServiceModes, "service-modes", allModes(), "service modes support to start separately (default 'all')")
+	fs.StringVar(&cfg.ServiceModes, "service-modes", AllServices.String(), "service modes support to start separately (default 'all')")
 	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 
@@ -209,10 +209,17 @@ func NewConfig() *Config {
 type ServiceMode int
 
 const (
+	// APIService is the mode of the API service.
 	APIService ServiceMode = iota
+	// TSOService is the mode of the TSO service.
 	TSOService
+	// ResourceManagerService is the mode of the resource manager service.
 	ResourceManagerService
+	// SchedulerService is the mode of the scheduler service.
 	SchedulerService
+	// AllServices is the mode of all services.
+	AllServices
+	// ServiceModeCount is the count of the service mode.
 	ServiceModeCount
 )
 
@@ -227,6 +234,8 @@ func (s ServiceMode) String() string {
 		return "resource"
 	case SchedulerService:
 		return "scheduler"
+	case AllServices:
+		return "all"
 	default:
 		return "unknown"
 	}
@@ -246,7 +255,6 @@ const (
 	defaultName                = "pd"
 	defaultClientUrls          = "http://127.0.0.1:2379"
 	defaultPeerUrls            = "http://127.0.0.1:2380"
-	defaultMode                = "all"
 	defaultInitialClusterState = embed.ClusterStateFlagNew
 	defaultInitialClusterToken = "pd-cluster"
 
@@ -556,7 +564,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	adjustString(&c.PeerUrls, defaultPeerUrls)
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
 	adjustDuration(&c.Metric.PushInterval, defaultMetricsPushInterval)
-	adjustString(&c.ServiceModes, allModes())
+	adjustString(&c.ServiceModes, AllServices.String())
 
 	if len(c.InitialCluster) == 0 {
 		// The advertise peer urls may be http://127.0.0.1:2380,http://127.0.0.1:2381

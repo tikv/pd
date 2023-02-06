@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc"
 )
 
+// ResourceManagerServer is the server for resource manager.
 type ResourceManagerServer struct {
 	ctx    context.Context
 	name   string
@@ -37,27 +38,37 @@ type ResourceManagerServer struct {
 	member *member.Member
 }
 
+// Context returns the context.
 func (s *ResourceManagerServer) Context() context.Context {
 	return s.ctx
 }
+
+// AddStartCallback adds the callback function when the server starts.
 func (s *ResourceManagerServer) AddStartCallback(callbacks ...func()) {
 
 }
 
+// Name returns the name of the server.
 func (s *ResourceManagerServer) Name() string {
 	return s.name
 }
 
+// GetClient returns the etcd client.
 func (s *ResourceManagerServer) GetClient() *clientv3.Client {
 	return s.client
 }
+
+// GetMember returns the member.
 func (s *ResourceManagerServer) GetMember() *member.Member {
 	return s.member
 }
+
+// AddLeaderCallback adds the callback function when the server becomes leader.
 func (s *ResourceManagerServer) AddLeaderCallback(callbacks ...func(context.Context)) {
 
 }
 
+// ResourceManagerStart starts the resource manager server.
 func ResourceManagerStart(ctx context.Context, cfg *config.Config) ServiceServer {
 	// start client
 	etcdTimeout := time.Second * 3
@@ -89,7 +100,7 @@ func ResourceManagerStart(ctx context.Context, cfg *config.Config) ServiceServer
 		ctx:    ctx,
 		name:   "ResourceManager",
 		client: client,
-		member: nil, //todo
+		member: nil, // todo: add member
 	}
 	gs := grpc.NewServer()
 	registry.ServerServiceRegistry.RegisterService("ResourceManager", rm_server.NewService)
