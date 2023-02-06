@@ -97,4 +97,3 @@ func (r *ServiceRegistry) InstallAllRESTHandler(srv server.Server, h map[string]
 func (r ServiceRegistry) RegisterService(name string, service ServiceBuilder) {
 	r.builders[name] = service
 }
-

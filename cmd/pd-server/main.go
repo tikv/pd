@@ -80,8 +80,7 @@ func main() {
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	svr := mode.LegacyStart(ctx, cfg)
-
+	svr := startServer(ctx, cfg)
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
@@ -114,4 +113,20 @@ func main() {
 func exit(code int) {
 	log.Sync()
 	os.Exit(code)
+}
+
+func startServer(ctx context.Context, cfg *config.Config) mode.ServiceServer {
+	switch cfg.ServiceModes {
+	case config.APIService.String():
+		log.Info("start pd api service, no implementation yet")
+	case config.SchedulerService.String():
+		log.Info("start pd scheduler service, no implementation yet")
+	case config.TSOService.String():
+		log.Info("start pd tso service, no implementation yet")
+	case config.ResourceManagerService.String():
+		return mode.ResourceManagerStart(ctx, cfg)
+	default: // case all
+		return mode.LegacyStart(ctx, cfg)
+	}
+	return nil
 }
