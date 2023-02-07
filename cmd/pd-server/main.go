@@ -40,10 +40,6 @@ import (
 
 	// Register schedulers.
 	_ "github.com/tikv/pd/server/schedulers"
-
-	// Register Service
-	_ "github.com/tikv/pd/pkg/mcs/registry"
-	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/install"
 )
 
 func main() {

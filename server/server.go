@@ -45,6 +45,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -228,7 +230,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 	}
 	// New way to register services.
 	registry := registry.ServerServiceRegistry
-
+	registry.RegisterService("ResourceManager", rm_server.NewService)
 	// Register the micro services REST path.
 	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
