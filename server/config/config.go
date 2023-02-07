@@ -1166,7 +1166,7 @@ type PDServerConfig struct {
 	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
 	ServerMemoryLimitGCTrigger float64 `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
 	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC
-	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner"`
+	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
 	// GCTunerThreshold is the threshold of GC tuner.
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
 }
