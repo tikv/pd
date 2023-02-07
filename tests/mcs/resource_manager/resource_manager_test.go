@@ -27,7 +27,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	rgcli "github.com/tikv/pd/pkg/mcs/resource_manager/client"
+	rgcli "github.com/tikv/pd/client/resource_manager/client"
 	"github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -61,15 +61,17 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 
-	leaderName := suite.cluster.WaitLeader()
-	leader := suite.cluster.GetServer(leaderName)
-	suite.client, err = pd.NewClientWithContext(suite.ctx, []string{leader.GetAddr()}, pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	re.NoError(err)
+	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
+	suite.waitLeader(suite.client, leader.GetAddr())
+
 	suite.initGroups = []*rmpb.ResourceGroup{
 		{
 			Name: "test1",
@@ -97,14 +99,43 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 			},
 		},
 	}
+}
 
-	re.NoError(err)
+func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAddr string) {
+	innerCli, ok := cli.(interface {
+		GetLeaderAddr() string
+		ScheduleCheckLeader()
+	})
+	suite.True(ok)
+	suite.NotNil(innerCli)
+	testutil.Eventually(suite.Require(), func() bool {
+		innerCli.ScheduleCheckLeader()
+		return innerCli.GetLeaderAddr() == leaderAddr
+	})
 }
 
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.clean()
 	suite.cluster.Destroy()
+}
+
+func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
+	cli := suite.client
+	groups, err := cli.ListResourceGroups(suite.ctx)
+	suite.NoError(err)
+	for _, group := range groups {
+		deleteResp, err := cli.DeleteResourceGroup(suite.ctx, group.GetName())
+		suite.NoError(err)
+		suite.Contains(deleteResp, "Success!")
+	}
+}
+
+func (suite *resourceManagerClientTestSuite) resignAndWaitLeader() {
+	suite.NoError(suite.cluster.ResignLeader())
+	newLeader := suite.cluster.GetServer(suite.cluster.WaitLeader())
+	suite.NotNil(newLeader)
+	suite.waitLeader(suite.client, newLeader.GetAddr())
 }
 
 func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
@@ -161,11 +192,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		re.Contains(resp, "Success!")
 	}
 	// Mock delete resource groups
-	for i := 0; i < 9; i++ {
-		resp, err := cli.DeleteResourceGroup(suite.ctx, "test"+strconv.Itoa(i))
-		re.NoError(err)
-		re.Contains(resp, "Success!")
-	}
+	suite.cleanupResourceGroups()
 	// Check watch result
 	i := 0
 	for {
@@ -264,9 +291,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	cfg := &rgcli.RequestUnitConfig{
 		ReadBaseCost:     1,
 		ReadCostPerByte:  1,
-		ReadCPUMsCost:    1,
 		WriteBaseCost:    1,
 		WriteCostPerByte: 1,
+		CPUMsCost:        1,
 	}
 
 	controller, _ := rgcli.NewResourceGroupController(1, cli, cfg)
@@ -325,12 +352,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 			break
 		}
 	}
-	for _, g := range suite.initGroups {
-		// Delete Resource Group
-		dresp, err := cli.DeleteResourceGroup(suite.ctx, g.Name)
-		re.NoError(err)
-		re.Contains(dresp, "Success!")
-	}
+	suite.cleanupResourceGroups()
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
@@ -350,60 +372,52 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	}
 
 	groups = append(groups, &rmpb.ResourceGroup{Name: "test3"})
-	for _, group := range groups {
-		requests := make([]*rmpb.RequestUnitItem, 0)
-		requests = append(requests, &rmpb.RequestUnitItem{
-			Type:  rmpb.RequestUnitType_RU,
-			Value: 100,
-		})
-		req := &rmpb.TokenBucketRequest{
-			ResourceGroupName: group.Name,
-			Request: &rmpb.TokenBucketRequest_RuItems{
-				RuItems: &rmpb.TokenBucketRequest_RequestRU{
-					RequestRU: requests,
+	for i := 0; i < 3; i++ {
+		for _, group := range groups {
+			requests := make([]*rmpb.RequestUnitItem, 0)
+			requests = append(requests, &rmpb.RequestUnitItem{
+				Type:  rmpb.RequestUnitType_RU,
+				Value: 100,
+			})
+			req := &rmpb.TokenBucketRequest{
+				ResourceGroupName: group.Name,
+				Request: &rmpb.TokenBucketRequest_RuItems{
+					RuItems: &rmpb.TokenBucketRequest_RequestRU{
+						RequestRU: requests,
+					},
 				},
-			},
+			}
+			reqs.Requests = append(reqs.Requests, req)
 		}
-		reqs.Requests = append(reqs.Requests, req)
-	}
-	aresp, err := cli.AcquireTokenBuckets(suite.ctx, reqs)
-	re.NoError(err)
-	for _, resp := range aresp {
-		re.Len(resp.GrantedRUTokens, 1)
-		re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(100.))
-		if resp.ResourceGroupName == "test2" {
-			re.Equal(int64(-1), resp.GrantedRUTokens[0].GrantedTokens.GetSettings().GetBurstLimit())
+		aresp, err := cli.AcquireTokenBuckets(suite.ctx, reqs)
+		re.NoError(err)
+		for _, resp := range aresp {
+			re.Len(resp.GrantedRUTokens, 1)
+			re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(100.))
+			if resp.ResourceGroupName == "test2" {
+				re.Equal(int64(-1), resp.GrantedRUTokens[0].GrantedTokens.GetSettings().GetBurstLimit())
+			}
 		}
-	}
-	gresp, err := cli.GetResourceGroup(suite.ctx, groups[0].GetName())
-	re.NoError(err)
-	re.Less(gresp.RUSettings.RU.Tokens, groups[0].RUSettings.RU.Tokens)
-
-	checkFunc := func(g1 *rmpb.ResourceGroup, g2 *rmpb.ResourceGroup) {
-		re.Equal(g1.GetName(), g2.GetName())
-		re.Equal(g1.GetMode(), g2.GetMode())
-		re.Equal(g1.GetRUSettings().RU.Settings.FillRate, g2.GetRUSettings().RU.Settings.FillRate)
-		// now we don't persistent tokens in running state, so tokens is original.
-		re.Equal(g1.GetRUSettings().RU.Tokens, g2.GetRUSettings().RU.Tokens)
+		gresp, err := cli.GetResourceGroup(suite.ctx, groups[0].GetName())
 		re.NoError(err)
-	}
+		re.Less(gresp.RUSettings.RU.Tokens, groups[0].RUSettings.RU.Tokens)
 
-	// to test persistent
-	leaderName := suite.cluster.WaitLeader()
-	leader := suite.cluster.GetServer(leaderName)
-	leader.Stop()
-	suite.cluster.RunServers([]*tests.TestServer{leader})
-	suite.cluster.WaitLeader()
-	gresp, err = cli.GetResourceGroup(suite.ctx, groups[0].GetName())
-	re.NoError(err)
-	checkFunc(gresp, groups[0])
+		checkFunc := func(g1 *rmpb.ResourceGroup, g2 *rmpb.ResourceGroup) {
+			re.Equal(g1.GetName(), g2.GetName())
+			re.Equal(g1.GetMode(), g2.GetMode())
+			re.Equal(g1.GetRUSettings().RU.Settings.FillRate, g2.GetRUSettings().RU.Settings.FillRate)
+			// now we don't persistent tokens in running state, so tokens is original.
+			re.Equal(g1.GetRUSettings().RU.Tokens, g2.GetRUSettings().RU.Tokens)
+			re.NoError(err)
+		}
 
-	for _, g := range groups {
-		// Delete Resource Group
-		dresp, err := cli.DeleteResourceGroup(suite.ctx, g.Name)
+		// to test persistent
+		suite.resignAndWaitLeader()
+		gresp, err = cli.GetResourceGroup(suite.ctx, groups[0].GetName())
 		re.NoError(err)
-		re.Contains(dresp, "Success!")
+		checkFunc(gresp, groups[0])
 	}
+	suite.cleanupResourceGroups()
 }
 
 func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
@@ -540,10 +554,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			}
 
 			// to test the deletion of persistence
-			leader.Stop()
-			suite.cluster.RunServers([]*tests.TestServer{leader})
-			suite.cluster.WaitLeader()
-
+			suite.resignAndWaitLeader()
+			leader = suite.cluster.GetServer(suite.cluster.GetLeader())
 			// List Resource Group
 			lresp, err = cli.ListResourceGroups(suite.ctx)
 			re.NoError(err)
@@ -636,4 +648,45 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			re.Equal(0, len(groups1))
 		}
 	}
+}
+
+func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover() {
+	re := suite.Require()
+	cli := suite.client
+
+	group := &rmpb.ResourceGroup{
+		Name: "test3",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 10000,
+				},
+				Tokens: 100000,
+			},
+		},
+	}
+	addResp, err := cli.AddResourceGroup(suite.ctx, group)
+	re.NoError(err)
+	re.Contains(addResp, "Success!")
+	getResp, err := cli.GetResourceGroup(suite.ctx, group.GetName())
+	re.NoError(err)
+	re.NotNil(getResp)
+	re.Equal(*group, *getResp)
+
+	// Change the leader after each time we modify the resource group.
+	for i := 0; i < 4; i++ {
+		group.RUSettings.RU.Settings.FillRate += uint64(i)
+		modifyResp, err := cli.ModifyResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(modifyResp, "Success!")
+		suite.resignAndWaitLeader()
+		getResp, err = cli.GetResourceGroup(suite.ctx, group.GetName())
+		re.NoError(err)
+		re.NotNil(getResp)
+		re.Equal(group.RUSettings.RU.Settings.FillRate, getResp.RUSettings.RU.Settings.FillRate)
+	}
+
+	// Cleanup the resource group.
+	suite.cleanupResourceGroups()
 }

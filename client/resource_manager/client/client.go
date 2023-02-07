@@ -535,7 +535,6 @@ func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context, 
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
 				counter.limiter.SetupNotificationThreshold(now, threshold)
-				gc.updateRunState(ctx)
 			case <-ctx.Done():
 				return
 			}

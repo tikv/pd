@@ -21,7 +21,7 @@ const (
 	defaultEnableRateLimitMiddleware = false
 )
 
-// ServiceMiddlewareConfig is is the configuration for PD Service middleware.
+// ServiceMiddlewareConfig is the configuration for PD Service middleware.
 type ServiceMiddlewareConfig struct {
 	AuditConfig     `json:"audit"`
 	RateLimitConfig `json:"rate-limit"`
