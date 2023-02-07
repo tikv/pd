@@ -19,9 +19,9 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/autoscaling"
+	bs "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
-	interfaceServer "github.com/tikv/pd/pkg/server"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
@@ -39,7 +39,7 @@ import (
 )
 
 // LegacyStart starts the legacy mode, where are all services are started.
-func LegacyStart(ctx context.Context, cfg *config.Config) interfaceServer.Server {
+func LegacyStart(ctx context.Context, cfg *config.Config) bs.Server {
 	err := join.PrepareJoinCluster(cfg)
 	if err != nil {
 		log.Fatal("join meet error", errs.ZapError(err))

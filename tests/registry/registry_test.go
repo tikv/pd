@@ -9,7 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/server"
+	bs "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -44,7 +44,7 @@ func (t *testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]
 	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
-func newTestServiceRegistry(_ server.Server) registry.RegistrableService {
+func newTestServiceRegistry(_ bs.Server) registry.RegistrableService {
 	return &testServiceRegistry{}
 }
 

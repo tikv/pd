@@ -24,7 +24,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/server"
+	bs "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -59,7 +59,7 @@ type Service struct {
 }
 
 // NewService creates a new resource manager service.
-func NewService(svr server.Server) registry.RegistrableService {
+func NewService(svr bs.Server) registry.RegistrableService {
 	manager := NewManager(svr)
 
 	return &Service{

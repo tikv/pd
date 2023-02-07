@@ -24,9 +24,9 @@ import (
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	basicsvr "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mode"
-	interfaceServer "github.com/tikv/pd/pkg/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/server"
@@ -35,8 +35,40 @@ import (
 )
 
 func main() {
+	ctx, cancel, svr := createServerWrapper(os.Args[1:])
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	var sig os.Signal
+	go func() {
+		sig = <-sc
+		cancel()
+	}()
+
+	if err := svr.Run(); err != nil {
+		log.Fatal("run server failed", errs.ZapError(err))
+	}
+
+	<-ctx.Done()
+	log.Info("Got signal to exit", zap.String("signal", sig.String()))
+
+	svr.Close()
+	switch sig {
+	case syscall.SIGTERM:
+		exit(0)
+	default:
+		exit(1)
+	}
+}
+
+func createServerWrapper(args []string) (context.Context, context.CancelFunc, basicsvr.Server) {
 	cfg := config.NewConfig()
-	err := cfg.Parse(os.Args[1:])
+	err := cfg.Parse(args)
 
 	if cfg.Version {
 		server.PrintPDInfo()
@@ -79,45 +111,8 @@ func main() {
 
 	metricutil.Push(&cfg.Metric)
 
-	// Creates server.
+	// todo: add more service mode and multi service mode
 	ctx, cancel := context.WithCancel(context.Background())
-	svr := startServer(ctx, cfg)
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-
-	var sig os.Signal
-	go func() {
-		sig = <-sc
-		cancel()
-	}()
-
-	if err := svr.Run(); err != nil {
-		log.Fatal("run server failed", errs.ZapError(err))
-	}
-
-	<-ctx.Done()
-	log.Info("Got signal to exit", zap.String("signal", sig.String()))
-
-	svr.Close()
-	switch sig {
-	case syscall.SIGTERM:
-		exit(0)
-	default:
-		exit(1)
-	}
-}
-
-func exit(code int) {
-	log.Sync()
-	os.Exit(code)
-}
-
-// todo: add more service mode and multi service mode
-func startServer(ctx context.Context, cfg *config.Config) interfaceServer.Server {
 	m, err := config.ParseServiceMode(cfg.ServiceModes)
 	if err != nil {
 		log.Fatal("parse service mode error", errs.ZapError(err))
@@ -130,9 +125,16 @@ func startServer(ctx context.Context, cfg *config.Config) interfaceServer.Server
 	case config.TSOService:
 		log.Info("start pd tso service, no implementation yet")
 	case config.ResourceManagerService:
-		return mode.ResourceManagerStart(ctx, cfg)
+		return ctx, cancel, mode.ResourceManagerStart(ctx, cfg)
 	default: // case all
-		return mode.LegacyStart(ctx, cfg)
+		return ctx, cancel, mode.LegacyStart(ctx, cfg)
 	}
-	return nil
+	return ctx, cancel, nil
 }
+
+func exit(code int) {
+	log.Sync()
+	os.Exit(code)
+}
+
+

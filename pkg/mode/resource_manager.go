@@ -17,15 +17,14 @@ package mode
 import (
 	"context"
 	"time"
-
-	// "github.com/pingcap/log"
+	"net/http"
 
 	"github.com/pingcap/log"
+	bs "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/member"
-	"github.com/tikv/pd/pkg/server"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -50,7 +49,7 @@ func (s *ResourceManagerServer) Context() context.Context {
 	return s.ctx
 }
 
-// AddStartCallback adds the callback function when the server starts.
+// AddStartCallback adds a callback in the startServer phase.
 func (s *ResourceManagerServer) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
@@ -63,6 +62,12 @@ func (s *ResourceManagerServer) Name() string {
 // GetClient returns the etcd client.
 func (s *ResourceManagerServer) GetClient() *clientv3.Client {
 	return s.client
+}
+
+// GetHTTPClient returns builtin etcd client.
+func (s *ResourceManagerServer) GetHTTPClient() *http.Client {
+	//todo add http client
+	return nil
 }
 
 // GetMember returns the member.
@@ -94,7 +99,7 @@ func (s *ResourceManagerServer) Close() {
 }
 
 // ResourceManagerStart starts the resource manager server.
-func ResourceManagerStart(ctx context.Context, cfg *config.Config) server.Server {
+func ResourceManagerStart(ctx context.Context, cfg *config.Config) bs.Server {
 	// start client
 	etcdTimeout := time.Second * 3
 	tlsConfig, err := cfg.Security.ToTLSConfig()
@@ -130,6 +135,5 @@ func ResourceManagerStart(ctx context.Context, cfg *config.Config) server.Server
 	gs := grpc.NewServer()
 	registry.ServerServiceRegistry.RegisterService("ResourceManager", rm_server.NewService)
 	registry.ServerServiceRegistry.InstallAllGRPCServices(s, gs)
-
 	return nil
 }
