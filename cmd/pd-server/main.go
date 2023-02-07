@@ -136,5 +136,3 @@ func exit(code int) {
 	log.Sync()
 	os.Exit(code)
 }
-
-

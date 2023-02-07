@@ -16,8 +16,8 @@ package mode
 
 import (
 	"context"
-	"time"
 	"net/http"
+	"time"
 
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basic_server"
