@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.uber.org/zap"
@@ -250,12 +249,12 @@ func (m *Member) isSameLeader(leader *pdpb.Member) bool {
 }
 
 // MemberInfo initializes the member info.
-func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
+func (m *Member) MemberInfo(advertiseClientUrls, advertisePeerUrls, name string, rootPath string) {
 	leader := &pdpb.Member{
 		Name:       name,
 		MemberId:   m.ID(),
-		ClientUrls: strings.Split(cfg.AdvertiseClientUrls, ","),
-		PeerUrls:   strings.Split(cfg.AdvertisePeerUrls, ","),
+		ClientUrls: strings.Split(advertiseClientUrls, ","),
+		PeerUrls:   strings.Split(advertisePeerUrls, ","),
 	}
 
 	data, err := leader.Marshal()

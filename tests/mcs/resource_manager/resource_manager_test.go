@@ -27,7 +27,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	rgcli "github.com/tikv/pd/pkg/mcs/resource_manager/client"
+	rgcli "github.com/tikv/pd/client/resource_manager/client"
 	"github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
