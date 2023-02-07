@@ -243,7 +243,8 @@ func (w *fitWorker) fitRule(index int) bool {
 		// Only consider stores:
 		// 1. Match label constraints
 		// 2. Role match, or can match after transformed.
-		// 3. Not selected by other rules.
+		// 3. Don't select leader as witness.
+		// 4. Not selected by other rules.
 		for _, p := range w.peers {
 			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && !(p.isLeader && w.supportWitness && w.rules[index].IsWitness) {
 				candidates = append(candidates, p)
