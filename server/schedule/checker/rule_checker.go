@@ -208,7 +208,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			if c.isWitnessEnabled() && core.IsVoter(peer) {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					ruleCheckerPromoteWitnessCounter.Inc()
-					return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+					return operator.CreateNonWitnessPeerOperator("promote-witness-when-has-down-voter", c.cluster, region, witness)
 				}
 			}
 		}
@@ -220,7 +220,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 		if c.isWitnessEnabled() && c.isPendingVoter(region, peer) {
 			if witness, ok := c.hasAvailableWitness(region, peer); ok {
 				ruleCheckerPromoteWitnessCounter.Inc()
-				return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+				return operator.CreateNonWitnessPeerOperator("promote-witness-when-has-pending-peer", c.cluster, region, witness)
 			}
 		}
 	}
