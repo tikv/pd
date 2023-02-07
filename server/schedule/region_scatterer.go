@@ -310,6 +310,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 				// it is considered that the selected peer select itself.
 				// This origin peer re-selects.
 				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
+					selectedStores[peer.GetStoreId()] = struct{}{}
 					break
 				}
 			}
