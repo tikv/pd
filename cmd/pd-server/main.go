@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/autoscaling"
+	basicsvr "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/swaggerserver"
@@ -46,8 +47,40 @@ import (
 )
 
 func main() {
+	ctx, cancel, svr := createServerWrapper(os.Args[1:])
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	var sig os.Signal
+	go func() {
+		sig = <-sc
+		cancel()
+	}()
+
+	if err := svr.Run(); err != nil {
+		log.Fatal("run server failed", errs.ZapError(err))
+	}
+
+	<-ctx.Done()
+	log.Info("Got signal to exit", zap.String("signal", sig.String()))
+
+	svr.Close()
+	switch sig {
+	case syscall.SIGTERM:
+		exit(0)
+	default:
+		exit(1)
+	}
+}
+
+func createServerWrapper(args []string) (context.Context, context.CancelFunc, basicsvr.Server) {
 	cfg := config.NewConfig()
-	err := cfg.Parse(os.Args[1:])
+	err := cfg.Parse(args)
 
 	if cfg.Version {
 		server.PrintPDInfo()
@@ -104,33 +137,7 @@ func main() {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}
 
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-
-	var sig os.Signal
-	go func() {
-		sig = <-sc
-		cancel()
-	}()
-
-	if err := svr.Run(); err != nil {
-		log.Fatal("run server failed", errs.ZapError(err))
-	}
-
-	<-ctx.Done()
-	log.Info("Got signal to exit", zap.String("signal", sig.String()))
-
-	svr.Close()
-	switch sig {
-	case syscall.SIGTERM:
-		exit(0)
-	default:
-		exit(1)
-	}
+	return ctx, cancel, svr
 }
 
 func exit(code int) {

@@ -457,49 +457,6 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// Utility to test if a configuration is defined.
-type configMetaData struct {
-	meta *toml.MetaData
-	path []string
-}
-
-func newConfigMetadata(meta *toml.MetaData) *configMetaData {
-	return &configMetaData{meta: meta}
-}
-
-func (m *configMetaData) IsDefined(key string) bool {
-	if m.meta == nil {
-		return false
-	}
-	keys := append([]string(nil), m.path...)
-	keys = append(keys, key)
-	return m.meta.IsDefined(keys...)
-}
-
-func (m *configMetaData) Child(path ...string) *configMetaData {
-	newPath := append([]string(nil), m.path...)
-	newPath = append(newPath, path...)
-	return &configMetaData{
-		meta: m.meta,
-		path: newPath,
-	}
-}
-
-func (m *configMetaData) CheckUndecoded() error {
-	if m.meta == nil {
-		return nil
-	}
-	undecoded := m.meta.Undecoded()
-	if len(undecoded) == 0 {
-		return nil
-	}
-	errInfo := "Config contains undefined item: "
-	for _, key := range undecoded {
-		errInfo += key.String() + ", "
-	}
-	return errors.New(errInfo[:len(errInfo)-2])
-}
-
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configMetaData := newConfigMetadata(meta)
@@ -611,6 +568,49 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 
 	return nil
+}
+
+// Utility to test if a configuration is defined.
+type configMetaData struct {
+	meta *toml.MetaData
+	path []string
+}
+
+func newConfigMetadata(meta *toml.MetaData) *configMetaData {
+	return &configMetaData{meta: meta}
+}
+
+func (m *configMetaData) IsDefined(key string) bool {
+	if m.meta == nil {
+		return false
+	}
+	keys := append([]string(nil), m.path...)
+	keys = append(keys, key)
+	return m.meta.IsDefined(keys...)
+}
+
+func (m *configMetaData) Child(path ...string) *configMetaData {
+	newPath := append([]string(nil), m.path...)
+	newPath = append(newPath, path...)
+	return &configMetaData{
+		meta: m.meta,
+		path: newPath,
+	}
+}
+
+func (m *configMetaData) CheckUndecoded() error {
+	if m.meta == nil {
+		return nil
+	}
+	undecoded := m.meta.Undecoded()
+	if len(undecoded) == 0 {
+		return nil
+	}
+	errInfo := "Config contains undefined item: "
+	for _, key := range undecoded {
+		errInfo += key.String() + ", "
+	}
+	return errors.New(errInfo[:len(errInfo)-2])
 }
 
 func (c *Config) adjustLog(meta *configMetaData) {

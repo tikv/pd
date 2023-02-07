@@ -172,7 +172,7 @@ type ServiceRegistry interface {
 	InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler)
 }
 
-// NewServiceRegistry is a hook for msc code which implements the micro service.
+// NewServiceRegistry is a hook for mcs code which implements the micro service.
 var NewServiceRegistry = func() ServiceRegistry {
 	return dummyServiceRegistry{}
 }
