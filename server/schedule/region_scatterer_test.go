@@ -476,9 +476,102 @@ func (s *testScatterRegionSuite) TestRegionFromDifferentGroups(c *C) {
 	check(scatterer.ordinaryEngine.selectedPeer)
 }
 
+<<<<<<< HEAD
 // TestSelectedStores tests if the peer count has changed due to the picking strategy.
 // Ref https://github.com/tikv/pd/issues/4565
 func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
+=======
+func TestRegionHasLearner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 8 stores.
+	voterCount := uint64(6)
+	storeCount := uint64(8)
+	for i := uint64(1); i <= voterCount; i++ {
+		tc.AddLabelsStore(i, 0, map[string]string{"zone": "z1"})
+	}
+	for i := voterCount + 1; i <= 8; i++ {
+		tc.AddLabelsStore(i, 0, map[string]string{"zone": "z2"})
+	}
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   3,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z1"},
+			},
+		},
+	})
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "zone",
+				Op:     placement.In,
+				Values: []string{"z2"},
+			},
+		},
+	})
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	regionCount := 50
+	for i := 1; i <= regionCount; i++ {
+		_, err := scatterer.Scatter(tc.AddRegionWithLearner(uint64(i), uint64(1), []uint64{uint64(2), uint64(3)}, []uint64{7}), "group")
+		re.NoError(err)
+	}
+	check := func(ss *selectedStores) {
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		for i := uint64(1); i <= max; i++ {
+			count := ss.TotalCountByStore(i)
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+		}
+		re.LessOrEqual(max-min, uint64(2))
+	}
+	check(scatterer.ordinaryEngine.selectedPeer)
+	checkLeader := func(ss *selectedStores) {
+		max := uint64(0)
+		min := uint64(math.MaxUint64)
+		for i := uint64(1); i <= voterCount; i++ {
+			count := ss.TotalCountByStore(i)
+			if count > max {
+				max = count
+			}
+			if count < min {
+				min = count
+			}
+		}
+		re.LessOrEqual(max-2, uint64(regionCount)/voterCount)
+		re.LessOrEqual(min-1, uint64(regionCount)/voterCount)
+		for i := voterCount + 1; i <= storeCount; i++ {
+			count := ss.TotalCountByStore(i)
+			re.LessOrEqual(count, uint64(0))
+		}
+	}
+	checkLeader(scatterer.ordinaryEngine.selectedLeader)
+}
+
+// TestSelectedStoresTooFewPeers tests if the peer count has changed due to the picking strategy.
+// Ref https://github.com/tikv/pd/issues/4565
+func TestSelectedStoresTooFewPeers(t *testing.T) {
+	re := require.New(t)
+>>>>>>> f5b5391c0 (region_scatterer: fix the bug that could generate schedule with too many peers (#5920))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
@@ -507,6 +600,43 @@ func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
 		region := tc.AddLeaderRegion(i+200, i%3+2, (i+1)%3+2, (i+2)%3+2)
 		op := scatterer.scatterRegion(region, group)
 		c.Assert(isPeerCountChanged(op), IsFalse)
+	}
+}
+
+// TestSelectedStoresTooManyPeers tests if the peer count has changed due to the picking strategy.
+// Ref https://github.com/tikv/pd/issues/5909
+func TestSelectedStoresTooManyPeers(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 4 stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+	group := "group"
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	// priority 4 > 1 > 5 > 2 == 3
+	for i := 0; i < 1200; i++ {
+		scatterer.ordinaryEngine.selectedPeer.Put(2, group)
+		scatterer.ordinaryEngine.selectedPeer.Put(3, group)
+	}
+	for i := 0; i < 800; i++ {
+		scatterer.ordinaryEngine.selectedPeer.Put(5, group)
+	}
+	for i := 0; i < 400; i++ {
+		scatterer.ordinaryEngine.selectedPeer.Put(1, group)
+	}
+	// test region with peer 1 2 3
+	for i := uint64(1); i < 20; i++ {
+		region := tc.AddLeaderRegion(i+200, i%3+1, (i+1)%3+1, (i+2)%3+1)
+		op := scatterer.scatterRegion(region, group)
+		re.False(isPeerCountChanged(op))
 	}
 }
 
