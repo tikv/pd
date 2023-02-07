@@ -15,13 +15,10 @@
 package schedulers
 
 import (
-	"strconv"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -43,35 +40,6 @@ var (
 	shuffleHotRegionNewOperatorCounter = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "new-operator")
 	shuffleHotRegionSkipCounter        = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "skip")
 )
-
-func init() {
-	schedule.RegisterSliceDecoderBuilder(ShuffleHotRegionType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			conf, ok := v.(*shuffleHotRegionSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			conf.Limit = uint64(1)
-			if len(args) == 1 {
-				limit, err := strconv.ParseUint(args[0], 10, 64)
-				if err != nil {
-					return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
-				}
-				conf.Limit = limit
-			}
-			conf.Name = ShuffleHotRegionName
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(ShuffleHotRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &shuffleHotRegionSchedulerConfig{Limit: uint64(1)}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		return newShuffleHotRegionScheduler(opController, conf), nil
-	})
-}
 
 type shuffleHotRegionSchedulerConfig struct {
 	Name  string `json:"name"`
