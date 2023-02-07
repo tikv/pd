@@ -23,12 +23,12 @@ import (
 
 // Server defines the common basic behaviors of a server
 type Server interface {
-	// Name returns the unique etcd Name for this server in etcd cluster.
+	// Name returns the unique Name for this server in the cluster.
 	Name() string
 	// Context returns the context of server.
 	Context() context.Context
 
-	// Run runs the pd server.
+	// Run runs the server.
 	Run() error
 	// Close closes the server.
 	Close()
