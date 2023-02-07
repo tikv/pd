@@ -24,9 +24,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
-
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
 )
 
 func TestMain(m *testing.M) {

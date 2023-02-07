@@ -25,7 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
-	_ "github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage"
 )
 
