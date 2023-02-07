@@ -25,7 +25,6 @@ import (
 const (
 	defaultRefillRate    = 10000
 	defaultInitialTokens = 10 * 10000
-	defaultMaxTokens     = 1e7
 )
 
 const (
@@ -34,41 +33,60 @@ const (
 )
 
 // GroupTokenBucket is a token bucket for a resource group.
-// TODO: statistics consumption @JmPotato
+// Now we don't save consumption in `GroupTokenBucket`, only statistics it in prometheus.
 type GroupTokenBucket struct {
-	*rmpb.TokenBucket `json:"token_bucket,omitempty"`
+	// Settings is the setting of TokenBucket.
+	// BurstLimit is used as below:
+	//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within a unlimited capacity).
+	//   - If b < 0, that means the limiter is unlimited capacity and fillrate(r) is ignored, can be seen as r == Inf (burst within a unlimited capacity).
+	//   - If b > 0, that means the limiter is limited capacity. (current not used).
 	// MaxTokens limits the number of tokens that can be accumulated
-	MaxTokens float64 `json:"max_tokens,omitempty"`
+	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
+	GroupTokenBucketState `json:"state,omitempty"`
+}
 
-	Consumption *rmpb.Consumption `json:"consumption,omitempty"`
-	LastUpdate  *time.Time        `json:"last_update,omitempty"`
-	Initialized bool              `json:"initialized"`
+// GroupTokenBucketState is the running state of TokenBucket.
+type GroupTokenBucketState struct {
+	Tokens      float64    `json:"tokens,omitempty"`
+	LastUpdate  *time.Time `json:"last_update,omitempty"`
+	Initialized bool       `json:"initialized"`
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
 func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
+	if tokenBucket == nil || tokenBucket.Settings == nil {
+		return GroupTokenBucket{}
+	}
 	return GroupTokenBucket{
-		TokenBucket: tokenBucket,
-		MaxTokens:   defaultMaxTokens,
+		Settings: tokenBucket.Settings,
+		GroupTokenBucketState: GroupTokenBucketState{
+			Tokens: tokenBucket.Tokens,
+		},
+	}
+}
+
+// GetTokenBucket returns the grpc protoc struct of GroupTokenBucket.
+func (t *GroupTokenBucket) GetTokenBucket() *rmpb.TokenBucket {
+	if t.Settings == nil {
+		return nil
+	}
+	return &rmpb.TokenBucket{
+		Settings: t.Settings,
+		Tokens:   t.Tokens,
 	}
 }
 
 // patch patches the token bucket settings.
-func (t *GroupTokenBucket) patch(settings *rmpb.TokenBucket) {
-	if settings == nil {
+func (t *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
+	if tb == nil {
 		return
 	}
-	tb := proto.Clone(t.TokenBucket).(*rmpb.TokenBucket)
-	if settings.GetSettings() != nil {
-		if tb == nil {
-			tb = &rmpb.TokenBucket{}
-		}
-		tb.Settings = settings.GetSettings()
+	if setting := proto.Clone(tb.GetSettings()).(*rmpb.TokenLimitSettings); setting != nil {
+		t.Settings = setting
 	}
 
 	// the settings in token is delta of the last update and now.
-	tb.Tokens += settings.GetTokens()
-	t.TokenBucket = tb
+	t.Tokens += tb.GetTokens()
 }
 
 // init initializes the group token bucket.
@@ -78,10 +96,6 @@ func (t *GroupTokenBucket) init(now time.Time) {
 	}
 	if t.Tokens < defaultInitialTokens {
 		t.Tokens = defaultInitialTokens
-	}
-	// TODO: If we support init or modify MaxTokens in the future, we can move following code.
-	if t.Tokens > t.MaxTokens {
-		t.MaxTokens = t.Tokens
 	}
 	t.LastUpdate = &now
 	t.Initialized = true
@@ -97,13 +111,20 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 			t.Tokens += float64(t.Settings.FillRate) * delta.Seconds()
 			t.LastUpdate = &now
 		}
-		if t.Tokens > t.MaxTokens {
-			t.Tokens = t.MaxTokens
+		if t.Settings.BurstLimit != 0 {
+			if burst := float64(t.Settings.BurstLimit); t.Tokens > burst {
+				t.Tokens = burst
+			}
 		}
 	}
 
 	var res rmpb.TokenBucket
-	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: t.GetSettings().GetBurstLimit()}
+	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: t.Settings.GetBurstLimit()}
+	// If BurstLimit is -1, just return.
+	if res.Settings.BurstLimit < 0 {
+		res.Tokens = neededTokens
+		return &res, 0
+	}
 	// FillRate is used for the token server unavailable in abnormal situation.
 	if neededTokens <= 0 {
 		return &res, 0
