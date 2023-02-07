@@ -71,9 +71,9 @@ type GrpcServer struct {
 type forwardFn func(ctx context.Context, client *grpc.ClientConn) (interface{}, error)
 
 func (s *GrpcServer) unaryMiddleware(ctx context.Context, header *pdpb.RequestHeader, fn forwardFn) (rsp interface{}, err error) {
-	if _, _err_ := failpoint.Eval(_curpkg_("customTimeout")); _err_ == nil {
+	failpoint.Inject("customTimeout", func() {
 		time.Sleep(5 * time.Second)
-	}
+	})
 	forwardedHost := getForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
@@ -756,10 +756,10 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	}()
 	for {
 		request, err := server.Recv()
-		if _, _err_ := failpoint.Eval(_curpkg_("grpcClientClosed")); _err_ == nil {
+		failpoint.Inject("grpcClientClosed", func() {
 			err = status.Error(codes.Canceled, "grpc client closed")
 			request = nil
-		}
+		})
 		if err == io.EOF {
 			return nil
 		}
@@ -767,9 +767,9 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			return errors.WithStack(err)
 		}
 		forwardedHost := getForwardedHost(stream.Context())
-		if _, _err_ := failpoint.Eval(_curpkg_("grpcClientClosed")); _err_ == nil {
+		failpoint.Inject("grpcClientClosed", func() {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
-		}
+		})
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -1590,13 +1590,13 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 		}
 
-		if _, _err_ := failpoint.Eval(_curpkg_("mockLocalAllocatorLeaderChange")); _err_ == nil {
+		failpoint.Inject("mockLocalAllocatorLeaderChange", func() {
 			if !mockLocalAllocatorLeaderChangeFlag {
 				maxLocalTS = nil
 				request.MaxTs = nil
 				mockLocalAllocatorLeaderChangeFlag = true
 			}
-		}
+		})
 
 		if maxLocalTS == nil {
 			return &pdpb.SyncMaxTSResponse{
@@ -1798,9 +1798,9 @@ func getForwardedHost(ctx context.Context) string {
 }
 
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
-	if _, _err_ := failpoint.Eval(_curpkg_("useForwardRequest")); _err_ == nil {
-		return false
-	}
+	failpoint.Inject("useForwardRequest", func() {
+		failpoint.Return(false)
+	})
 	if forwardedHost == "" {
 		return true
 	}

@@ -304,9 +304,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 			}
 		}
 	}
-	if _, _err_ := failpoint.Eval(_curpkg_("memberNil")); _err_ == nil {
+	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
-	}
+	})
 	s.member = member.NewMember(etcd, s.client, etcdServerID)
 	return nil
 }
@@ -694,7 +694,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
-	failpoint.Eval(_curpkg_("raftclusterIsBusy"))
+	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
 }
 
@@ -1448,11 +1448,11 @@ func (s *Server) campaignLeader() {
 	}
 	defer func() {
 		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-		if _, _err_ := failpoint.Eval(_curpkg_("updateAfterResetTSO")); _err_ == nil {
+		failpoint.Inject("updateAfterResetTSO", func() {
 			if err = allocator.UpdateTSO(); err != nil {
 				panic(err)
 			}
-		}
+		})
 	}()
 
 	if err := s.reloadConfigFromKV(); err != nil {
