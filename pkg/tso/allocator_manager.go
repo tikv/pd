@@ -314,6 +314,10 @@ func CalSuffixBits(maxSuffix int32) int {
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
+	if am.updatePhysicalInterval != defaultTSOUpdatePhysicalInterval {
+		log.Warn("tso update physical interval is non-default",
+			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
+	}
 	if _, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		return
 	}

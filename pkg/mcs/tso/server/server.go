@@ -25,16 +25,17 @@ import (
 	"github.com/pingcap/log"
 	basicsvr "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
-// if server doesn't implement all methods of basicsvr.Server, this line will result in
-// clear error message "*MyTServerype does not implement basicsvr.Server (missing Method method)"
+// if server doesn't implement all methods of basicsvr.Server, this line will result in a clear
+// error message like "*Server does not implement basicsvr.Server (missing Method method)"
 var _ basicsvr.Server = (*Server)(nil)
 
-// Server is the TSO server. It implements basicsvr.Server
+// Server is the TSO server, and it implements basicsvr.Server.
 // nolint
 type Server struct {
 	ctx context.Context
@@ -78,7 +79,7 @@ func (s *Server) GetHTTPClient() *http.Client {
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, basicsvr.Server) {
-	cfg := NewConfig()
+	cfg := tso.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 
 	if cfg.Version {
@@ -120,7 +121,7 @@ func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, ba
 func printVersionInfo() {
 }
 
-func printConfigCheckMsg(cfg *Config) {
+func printConfigCheckMsg(cfg *tso.Config) {
 }
 
 func exit(code int) {

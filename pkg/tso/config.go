@@ -12,14 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package tso
 
 import (
 	"flag"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+)
+
+const (
+	defaultLeaderLease     = int64(3)
+	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
+	// DefaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
+	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
+	daxTSOUpdatePhysicalInterval     = 10 * time.Second
+	dinTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 )
 
 // Config is the configuration for the TSO.
