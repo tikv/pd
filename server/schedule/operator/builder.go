@@ -523,7 +523,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
-	// Although switch witness may have nothing to do with conf change (except switch witness voter to non-witness voter:
+	// Although switching witness may have nothing to do with conf change (except switch witness voter to non-witness voter:
 	// it will demote to learner first, then switch witness, finally promote the non-witness learner to voter back),
 	// the logic here is reused for batch switch.
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toWitness)+len(b.toNonWitness)+len(b.toPromoteNonWitness) <= 1 &&

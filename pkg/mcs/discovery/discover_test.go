@@ -41,10 +41,10 @@ func TestDiscover(t *testing.T) {
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", 1)
+	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
 	err = sr1.Register()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", 1)
+	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	err = sr2.Register()
 	re.NoError(err)
 
