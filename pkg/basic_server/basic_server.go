@@ -18,6 +18,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tikv/pd/pkg/member"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -27,14 +28,18 @@ type Server interface {
 	Name() string
 	// Context returns the context of server.
 	Context() context.Context
-
 	// Run runs the server.
 	Run() error
 	// Close closes the server.
 	Close()
-
 	// GetClient returns builtin etcd client.
 	GetClient() *clientv3.Client
 	// GetHTTPClient returns builtin etcd client.
 	GetHTTPClient() *http.Client
+	// AddStartCallback adds a callback in the startServer phase.
+	AddStartCallback(callbacks ...func())
+	// GetMember returns the member information.
+	GetMember() *member.Member
+	// AddLeaderCallback adds a callback in the leader campaign phase.
+	AddLeaderCallback(callbacks ...func(context.Context))
 }

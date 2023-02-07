@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
@@ -40,11 +41,11 @@ const (
 
 type runtimeServiceValidator struct {
 	s     *server.Server
-	group server.APIServiceGroup
+	group apiutil.APIServiceGroup
 }
 
 // NewRuntimeServiceValidator checks if the path is invalid.
-func NewRuntimeServiceValidator(s *server.Server, group server.APIServiceGroup) negroni.Handler {
+func NewRuntimeServiceValidator(s *server.Server, group apiutil.APIServiceGroup) negroni.Handler {
 	return &runtimeServiceValidator{s: s, group: group}
 }
 
@@ -58,7 +59,7 @@ func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Reque
 }
 
 // IsServiceAllowed checks the service through the path.
-func IsServiceAllowed(s *server.Server, group server.APIServiceGroup) bool {
+func IsServiceAllowed(s *server.Server, group apiutil.APIServiceGroup) bool {
 	// for core path
 	if group.IsCore {
 		return true

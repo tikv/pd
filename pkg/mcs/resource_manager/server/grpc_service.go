@@ -23,8 +23,9 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	bs "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -39,8 +40,8 @@ var (
 var _ rmpb.ResourceManagerServer = (*Service)(nil)
 
 // SetUpRestHandler is a hook to sets up the REST service.
-var SetUpRestHandler = func(srv *Service) (http.Handler, server.APIServiceGroup) {
-	return dummyRestService{}, server.APIServiceGroup{}
+var SetUpRestHandler = func(srv *Service) (http.Handler, apiutil.APIServiceGroup) {
+	return dummyRestService{}, apiutil.APIServiceGroup{}
 }
 
 type dummyRestService struct{}
@@ -58,7 +59,7 @@ type Service struct {
 }
 
 // NewService creates a new resource manager service.
-func NewService(svr *server.Server) registry.RegistrableService {
+func NewService(svr bs.Server) registry.RegistrableService {
 	manager := NewManager(svr)
 
 	return &Service{
@@ -75,7 +76,7 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 // RegisterRESTHandler registers the service to REST server.
 func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
 	handler, group := SetUpRestHandler(s)
-	server.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
 // GetManager returns the resource manager.
