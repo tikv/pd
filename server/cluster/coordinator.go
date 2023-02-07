@@ -27,11 +27,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
@@ -56,6 +56,12 @@ const (
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
 	PluginUnload = "PluginUnload"
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	waitingListGauge  = regionListGauge.WithLabelValues("waiting_list")
+	priorityListGauge = regionListGauge.WithLabelValues("priority_list")
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -181,7 +187,7 @@ func (c *coordinator) checkSuspectRegions() {
 
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
-	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
+	waitingListGauge.Set(float64(len(items)))
 	for _, item := range items {
 		region := c.cluster.GetRegion(item.Key)
 		c.tryAddOperators(region)
@@ -192,7 +198,7 @@ func (c *coordinator) checkWaitingRegions() {
 func (c *coordinator) checkPriorityRegions() {
 	items := c.checkers.GetPriorityRegions()
 	removes := make([]uint64, 0)
-	regionListGauge.WithLabelValues("priority_list").Set(float64(len(items)))
+	priorityListGauge.Set(float64(len(items)))
 	for _, id := range items {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
@@ -484,16 +490,26 @@ func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.Sto
 	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
 	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
+	var infos *statistics.StoreHotPeersInfos
 	switch typ {
 	case statistics.Write:
 		regionStats := c.cluster.RegionWriteStats()
-		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
 	case statistics.Read:
 		regionStats := c.cluster.RegionReadStats()
-		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
 	default:
 	}
-	return nil
+	// update params `IsLearner` and `LastUpdateTime`
+	for _, stores := range []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer} {
+		for _, store := range stores {
+			for _, hotPeer := range store.Stats {
+				region := c.cluster.GetRegion(hotPeer.RegionID)
+				hotPeer.UpdateHotPeerStatShow(region)
+			}
+		}
+	}
+	return infos
 }
 
 func (c *coordinator) getSchedulers() []string {
@@ -559,6 +575,7 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
 	for _, s := range stores {
+		// todo: pre-allocate gauge metrics
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)

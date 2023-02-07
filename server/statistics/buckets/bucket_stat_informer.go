@@ -18,10 +18,10 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/tikv/pd/pkg/btree"
-	"github.com/tikv/pd/pkg/keyutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/rangetree"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server/statistics"
 )
 
@@ -95,7 +95,7 @@ func (b *BucketTreeItem) String() string {
 }
 
 // Less returns true if the start key is less than the other.
-func (b *BucketTreeItem) Less(than btree.Item) bool {
+func (b *BucketTreeItem) Less(than rangetree.RangeItem) bool {
 	return bytes.Compare(b.startKey, than.(*BucketTreeItem).startKey) < 0
 }
 

@@ -21,15 +21,15 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 )
 
@@ -38,6 +38,13 @@ const (
 	GrantLeaderName = "grant-leader-scheduler"
 	// GrantLeaderType is grant leader scheduler type.
 	GrantLeaderType = "grant-leader"
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	grantLeaderCounter            = schedulerCounter.WithLabelValues(GrantLeaderName, "schedule")
+	grantLeaderNoFollowerCounter  = schedulerCounter.WithLabelValues(GrantLeaderName, "no-follower")
+	grantLeaderNewOperatorCounter = schedulerCounter.WithLabelValues(GrantLeaderName, "new-operator")
 )
 
 func init() {
@@ -233,7 +240,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 }
 
 func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	grantLeaderCounter.Inc()
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
@@ -242,7 +249,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 	for id, ranges := range s.conf.StoreIDWithRanges {
 		region := filter.SelectOneRegion(cluster.RandFollowerRegions(id, ranges), nil, pendingFilter, downFilter)
 		if region == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-follower").Inc()
+			grantLeaderNoFollowerCounter.Inc()
 			continue
 		}
 
@@ -251,7 +258,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 			log.Debug("fail to create grant leader operator", errs.ZapError(err))
 			continue
 		}
-		op.Counters = append(op.Counters, schedulerCounter.WithLabelValues(s.GetName(), "new-operator"))
+		op.Counters = append(op.Counters, grantLeaderNewOperatorCounter)
 		op.SetPriorityLevel(core.High)
 		ops = append(ops, op)
 	}

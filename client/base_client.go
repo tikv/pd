@@ -52,9 +52,10 @@ type baseClient struct {
 	// dc-location -> TSO allocator leader URL
 	allocators sync.Map // Store as map[string]string
 
-	checkLeaderCh          chan struct{}
-	checkTSODispatcherCh   chan struct{}
-	updateConnectionCtxsCh chan struct{}
+	checkLeaderCh           chan struct{}
+	checkTSODispatcherCh    chan struct{}
+	updateConnectionCtxsCh  chan struct{}
+	updateTokenConnectionCh chan struct{}
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -81,13 +82,14 @@ type SecurityOption struct {
 func newBaseClient(ctx context.Context, urls []string, security SecurityOption) *baseClient {
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	bc := &baseClient{
-		checkLeaderCh:          make(chan struct{}, 1),
-		checkTSODispatcherCh:   make(chan struct{}, 1),
-		updateConnectionCtxsCh: make(chan struct{}, 1),
-		ctx:                    clientCtx,
-		cancel:                 clientCancel,
-		security:               security,
-		option:                 newOption(),
+		checkLeaderCh:           make(chan struct{}, 1),
+		checkTSODispatcherCh:    make(chan struct{}, 1),
+		updateConnectionCtxsCh:  make(chan struct{}, 1),
+		updateTokenConnectionCh: make(chan struct{}, 1),
+		ctx:                     clientCtx,
+		cancel:                  clientCancel,
+		security:                security,
+		option:                  newOption(),
 	}
 	bc.urls.Store(urls)
 	return bc
@@ -164,6 +166,13 @@ func (c *baseClient) scheduleCheckTSODispatcher() {
 func (c *baseClient) scheduleUpdateConnectionCtxs() {
 	select {
 	case c.updateConnectionCtxsCh <- struct{}{}:
+	default:
+	}
+}
+
+func (c *baseClient) scheduleUpdateTokenConnection() {
+	select {
+	case c.updateTokenConnectionCh <- struct{}{}:
 	default:
 	}
 }
@@ -375,6 +384,7 @@ func (c *baseClient) switchLeader(addrs []string) error {
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
 	c.allocators.Store(globalDCLocation, addr)
+	c.scheduleUpdateTokenConnection()
 	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
 	return nil
 }

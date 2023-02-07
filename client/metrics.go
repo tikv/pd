@@ -100,6 +100,7 @@ var (
 	cmdDurationSplitRegions             = cmdDuration.WithLabelValues("split_regions")
 	cmdDurationSplitAndScatterRegions   = cmdDuration.WithLabelValues("split_and_scatter_regions")
 	cmdDurationLoadKeyspace             = cmdDuration.WithLabelValues("load_keyspace")
+	cmdDurationUpdateKeyspaceState      = cmdDuration.WithLabelValues("update_keyspace_state")
 
 	cmdFailDurationGetRegion                  = cmdFailedDuration.WithLabelValues("get_region")
 	cmdFailDurationTSO                        = cmdFailedDuration.WithLabelValues("tso")
@@ -112,6 +113,7 @@ var (
 	cmdFailedDurationUpdateGCSafePoint        = cmdFailedDuration.WithLabelValues("update_gc_safe_point")
 	cmdFailedDurationUpdateServiceGCSafePoint = cmdFailedDuration.WithLabelValues("update_service_gc_safe_point")
 	cmdFailedDurationLoadKeyspace             = cmdDuration.WithLabelValues("load_keyspace")
+	cmdFailedDurationUpdateKeyspaceState      = cmdDuration.WithLabelValues("update_keyspace_state")
 	requestDurationTSO                        = requestDuration.WithLabelValues("tso")
 )
 

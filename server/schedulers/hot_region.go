@@ -25,17 +25,48 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
+)
+
+var (
+	statisticsInterval = time.Second
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	hotSchedulerCounter                        = schedulerCounter.WithLabelValues(HotRegionName, "schedule")
+	hotSchedulerSkipCounter                    = schedulerCounter.WithLabelValues(HotRegionName, "skip")
+	hotSchedulerNeedSplitBeforeScheduleCounter = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
+	hotSchedulerSearchRevertRegionsCounter     = schedulerCounter.WithLabelValues(HotRegionName, "search_revert_regions")
+	hotSchedulerNotSameEngineCounter           = schedulerCounter.WithLabelValues(HotRegionName, "not_same_engine")
+	hotSchedulerNoRegionCounter                = schedulerCounter.WithLabelValues(HotRegionName, "no_region")
+	hotSchedulerUnhealthyReplicaCounter        = schedulerCounter.WithLabelValues(HotRegionName, "unhealthy_replica")
+	hotSchedulerAbnormalReplicaCounter         = schedulerCounter.WithLabelValues(HotRegionName, "abnormal_replica")
+	hotSchedulerCreateOperatorFailedCounter    = schedulerCounter.WithLabelValues(HotRegionName, "create_operator_failed")
+	hotSchedulerNewOperatorCounter             = schedulerCounter.WithLabelValues(HotRegionName, "new_operator")
+
+	hotSchedulerMoveLeaderCounter     = schedulerCounter.WithLabelValues(HotRegionName, moveLeader.String())
+	hotSchedulerMovePeerCounter       = schedulerCounter.WithLabelValues(HotRegionName, movePeer.String())
+	hotSchedulerTransferLeaderCounter = schedulerCounter.WithLabelValues(HotRegionName, transferLeader.String())
+
+	readSkipAllDimUniformStoreCounter    = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-all-dim-uniform-store")
+	writeSkipAllDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-all-dim-uniform-store")
+	readSkipByteDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-byte-uniform-store")
+	writeSkipByteDimUniformStoreCounter  = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-byte-uniform-store")
+	readSkipKeyDimUniformStoreCounter    = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-key-uniform-store")
+	writeSkipKeyDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-key-uniform-store")
+	readSkipQueryDimUniformStoreCounter  = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-query-uniform-store")
+	writeSkipQueryDimUniformStoreCounter = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-query-uniform-store")
+
+	pendingOpFails = schedulerStatus.WithLabelValues(HotRegionName, "pending_op_fails")
 )
 
 type baseHotScheduler struct {
@@ -52,9 +83,11 @@ type baseHotScheduler struct {
 	// regionPendings stores regionID -> pendingInfluence
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
-	regionPendings map[uint64]*pendingInfluence
-	types          []statistics.RWType
-	r              *rand.Rand
+	regionPendings  map[uint64]*pendingInfluence
+	types           []statistics.RWType
+	r               *rand.Rand
+	updateReadTime  time.Time
+	updateWriteTime time.Time
 }
 
 func newBaseHotScheduler(opController *schedule.OperatorController) *baseHotScheduler {
@@ -91,14 +124,20 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 	switch rw {
 	case statistics.Read:
 		// update read statistics
-		regionRead := cluster.RegionReadStats()
-		prepare(regionRead, core.LeaderKind)
-		prepare(regionRead, core.RegionKind)
+		if time.Since(h.updateReadTime) >= statisticsInterval {
+			regionRead := cluster.RegionReadStats()
+			prepare(regionRead, core.LeaderKind)
+			prepare(regionRead, core.RegionKind)
+			h.updateReadTime = time.Now()
+		}
 	case statistics.Write:
 		// update write statistics
-		regionWrite := cluster.RegionWriteStats()
-		prepare(regionWrite, core.LeaderKind)
-		prepare(regionWrite, core.RegionKind)
+		if time.Since(h.updateWriteTime) >= statisticsInterval {
+			regionWrite := cluster.RegionWriteStats()
+			prepare(regionWrite, core.LeaderKind)
+			prepare(regionWrite, core.RegionKind)
+			h.updateWriteTime = time.Now()
+		}
 	}
 }
 
@@ -244,7 +283,7 @@ func (h *hotScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 }
 
 func (h *hotScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(h.GetName(), "schedule").Inc()
+	hotSchedulerCounter.Inc()
 	rw := h.randomRWType()
 	return h.dispatch(rw, cluster), nil
 }
@@ -271,7 +310,7 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, d
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
 	if ok {
-		schedulerStatus.WithLabelValues(h.GetName(), "pending_op_fails").Inc()
+		pendingOpFails.Inc()
 		return false
 	}
 
@@ -290,21 +329,21 @@ func (h *hotScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operat
 	peerSolver := newBalanceSolver(h, cluster, statistics.Read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
-		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
+		hotSchedulerSkipCounter.Inc()
 		return nil
 	}
 	if len(leaderOps) == 0 {
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
 		}
-		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
+		hotSchedulerSkipCounter.Inc()
 		return nil
 	}
 	if len(peerOps) == 0 {
 		if leaderSolver.tryAddPendingInfluence() {
 			return leaderOps
 		}
-		schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
+		hotSchedulerSkipCounter.Inc()
 		return nil
 	}
 	leaderSolver.cur = leaderSolver.best
@@ -323,7 +362,7 @@ func (h *hotScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operat
 			return leaderOps
 		}
 	}
-	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
+	hotSchedulerSkipCounter.Inc()
 	return nil
 }
 
@@ -346,7 +385,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*opera
 		return ops
 	}
 
-	schedulerCounter.WithLabelValues(h.GetName(), "skip").Inc()
+	hotSchedulerSkipCounter.Inc()
 	return nil
 }
 
@@ -594,7 +633,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	bs.cur = &solution{}
 	tryUpdateBestSolution := func() {
 		if label, ok := bs.filterUniformStore(); ok {
-			schedulerCounter.WithLabelValues(bs.sche.GetName(), fmt.Sprintf("%s-skip-%s-uniform-store", bs.rwTy.String(), label)).Inc()
+			bs.skipCounter(label).Inc()
 			return
 		}
 		if bs.isAvailable(bs.cur) && bs.betterThan(bs.best) {
@@ -625,7 +664,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
 			} else if bs.opTy == movePeer && bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
-				schedulerCounter.WithLabelValues(bs.sche.GetName(), "need_split_before_move_peer").Inc()
+				hotSchedulerNeedSplitBeforeScheduleCounter.Inc()
 				continue
 			}
 			bs.cur.mainPeerStat = mainPeerStat
@@ -635,7 +674,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				bs.calcProgressiveRank()
 				tryUpdateBestSolution()
 				if bs.needSearchRevertRegions() {
-					schedulerCounter.WithLabelValues(bs.sche.GetName(), "search-revert-regions").Inc()
+					hotSchedulerSearchRevertRegionsCounter.Inc()
 					dstStoreID := dstStore.GetID()
 					for _, revertPeerStat := range bs.filterHotPeers(bs.cur.dstStore) {
 						revertRegion := bs.getRegion(revertPeerStat, dstStoreID)
@@ -659,12 +698,37 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	return bs.ops
 }
 
+func (bs *balanceSolver) skipCounter(label string) prometheus.Counter {
+	if bs.rwTy == statistics.Read {
+		switch label {
+		case "byte":
+			return readSkipByteDimUniformStoreCounter
+		case "key":
+			return readSkipKeyDimUniformStoreCounter
+		case "query":
+			return readSkipQueryDimUniformStoreCounter
+		default:
+			return readSkipAllDimUniformStoreCounter
+		}
+	}
+	switch label {
+	case "byte":
+		return writeSkipByteDimUniformStoreCounter
+	case "key":
+		return writeSkipKeyDimUniformStoreCounter
+	case "query":
+		return writeSkipQueryDimUniformStoreCounter
+	default:
+		return writeSkipAllDimUniformStoreCounter
+	}
+}
+
 func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	if bs.best == nil || len(bs.ops) == 0 {
 		return false
 	}
 	if bs.best.srcStore.IsTiFlash() != bs.best.dstStore.IsTiFlash() {
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "not-same-engine").Inc()
+		hotSchedulerNotSameEngineCounter.Inc()
 		return false
 	}
 	maxZombieDur := bs.calcMaxZombieDur()
@@ -762,7 +826,7 @@ func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *sta
 // The returned hotPeer count in controlled by `max-peer-number`.
 func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (ret []*statistics.HotPeerStat) {
 	appendItem := func(item *statistics.HotPeerStat) {
-		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree) {
+		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree, bs.rwTy) {
 			// no in pending operator and no need cool down after transfer leader
 			ret = append(ret, item)
 		}
@@ -822,18 +886,18 @@ func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statis
 // isRegionAvailable checks whether the given region is not available to schedule.
 func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 	if region == nil {
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "no-region").Inc()
+		hotSchedulerNoRegionCounter.Inc()
 		return false
 	}
 
 	if !filter.IsRegionHealthyAllowPending(region) {
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "unhealthy-replica").Inc()
+		hotSchedulerUnhealthyReplicaCounter.Inc()
 		return false
 	}
 
 	if !filter.IsRegionReplicated(bs.Cluster, region) {
 		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "abnormal-replica").Inc()
+		hotSchedulerAbnormalReplicaCounter.Inc()
 		return false
 	}
 
@@ -956,6 +1020,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		}
 		if filter.Target(bs.GetOpts(), store, filters) {
 			id := store.GetID()
+			// todo
 			if bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				ret[id] = detail
 				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(id, 10)).Inc()
@@ -1331,7 +1396,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 
 	if err != nil {
 		log.Debug("fail to create operator", zap.Stringer("rw-type", bs.rwTy), zap.Stringer("op-type", bs.opTy), errs.ZapError(err))
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "create-operator-fail").Inc()
+		hotSchedulerCreateOperatorFailedCounter.Inc()
 		return nil
 	}
 
@@ -1408,12 +1473,23 @@ func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, 
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),
 		balanceDirectionCounter.WithLabelValues(bs.sche.GetName(), sourceLabel, targetLabel))
 	op.Counters = append(op.Counters,
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), "new-operator"),
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), typ))
+		hotSchedulerNewOperatorCounter,
+		opCounter(typ))
 	if isRevert {
 		op.FinishedCounters = append(op.FinishedCounters,
 			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out-for-revert", dim),
 			hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in-for-revert", dim))
+	}
+}
+
+func opCounter(typ string) prometheus.Counter {
+	switch typ {
+	case "move-leader":
+		return hotSchedulerMoveLeaderCounter
+	case "move-peer":
+		return hotSchedulerMovePeerCounter
+	default: // transfer-leader
+		return hotSchedulerTransferLeaderCounter
 	}
 }
 
@@ -1474,12 +1550,15 @@ type opType int
 const (
 	movePeer opType = iota
 	transferLeader
+	moveLeader
 )
 
 func (ty opType) String() string {
 	switch ty {
 	case movePeer:
 		return "move-peer"
+	case moveLeader:
+		return "move-leader"
 	case transferLeader:
 		return "transfer-leader"
 	default:

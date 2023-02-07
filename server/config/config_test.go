@@ -199,7 +199,7 @@ leader-schedule-limit = 0
 	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionKeys)
 	re.Equal("http://127.0.0.1:9090", cfg.PDServerCfg.MetricStorage)
 
-	re.Equal(DefaultTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
+	re.Equal(defaultTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
 
 	// Check undefined config fields
 	cfgData = `

@@ -18,16 +18,23 @@ import (
 	"strconv"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage/kv"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
 
 const (
 	historyKey        = "historyIndex"
 	defaultFlushCount = 100
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	syncIndexGauge  = regionSyncerStatus.WithLabelValues("sync_index")
+	firstIndexGauge = regionSyncerStatus.WithLabelValues("first_index")
+	lastIndexGauge  = regionSyncerStatus.WithLabelValues("last_index")
 )
 
 type historyBuffer struct {
@@ -80,7 +87,7 @@ func (h *historyBuffer) firstIndex() uint64 {
 func (h *historyBuffer) Record(r *core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
-	regionSyncerStatus.WithLabelValues("sync_index").Set(float64(h.index))
+	syncIndexGauge.Set(float64(h.index))
 	h.records[h.tail] = r
 	h.tail = (h.tail + 1) % h.size
 	if h.tail == h.head {
@@ -148,8 +155,8 @@ func (h *historyBuffer) reload() {
 }
 
 func (h *historyBuffer) persist() {
-	regionSyncerStatus.WithLabelValues("first_index").Set(float64(h.firstIndex()))
-	regionSyncerStatus.WithLabelValues("last_index").Set(float64(h.nextIndex()))
+	firstIndexGauge.Set(float64(h.firstIndex()))
+	lastIndexGauge.Set(float64(h.nextIndex()))
 	err := h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
 	if err != nil {
 		log.Warn("persist history index failed", zap.Uint64("persist-index", h.nextIndex()), errs.ZapError(err))

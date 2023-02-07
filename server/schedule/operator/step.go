@@ -25,9 +25,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -152,7 +152,11 @@ func (ap AddPeer) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (ap AddPeer) String() string {
-	return fmt.Sprintf("add peer %v on store %v", ap.PeerID, ap.ToStore)
+	info := "peer"
+	if ap.IsWitness {
+		info = "witness peer"
+	}
+	return fmt.Sprintf("add %v %v on store %v", info, ap.PeerID, ap.ToStore)
 }
 
 // IsFinish checks if current step is finished.
@@ -175,9 +179,13 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
 	regionSize := region.GetApproximateSize()
-	to.RegionSize += regionSize
+	if ap.IsWitness {
+		to.WitnessCount += 1
+	} else {
+		to.RegionSize += regionSize
+	}
 	to.RegionCount++
-	if ap.IsLightWeight {
+	if ap.IsLightWeight || ap.IsWitness {
 		return
 	}
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
@@ -212,17 +220,17 @@ func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.Re
 
 // BecomeWitness is an OpStep that makes a peer become a witness.
 type BecomeWitness struct {
-	StoreID, PeerID uint64
+	PeerID, StoreID uint64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
 func (bw BecomeWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
 	peer := region.GetStorePeer(bw.StoreID)
-	return typeutil.BoolToUint64(peer.GetId() == bw.PeerID)
+	return typeutil.BoolToUint64((peer.GetId() == bw.PeerID) && peer.GetIsWitness())
 }
 
 func (bw BecomeWitness) String() string {
-	return fmt.Sprintf("change peer %v on store %v to witness", bw.PeerID, bw.StoreID)
+	return fmt.Sprintf("switch peer %v on store %v to witness", bw.PeerID, bw.StoreID)
 }
 
 // IsFinish checks if current step is finished.
@@ -254,6 +262,7 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 	to := opInfluence.GetStoreInfluence(bw.StoreID)
 
 	regionSize := region.GetApproximateSize()
+	to.WitnessCount += 1
 	to.RegionSize -= regionSize
 	to.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
@@ -264,26 +273,26 @@ func (bw BecomeWitness) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (bw BecomeWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	if core.IsLearner(region.GetStorePeer(bw.StoreID)) {
-		return createResponse(addLearnerNode(bw.PeerID, bw.StoreID, true), useConfChangeV2)
-	}
-	return createResponse(addNode(bw.PeerID, bw.StoreID, true), useConfChangeV2)
+func (bw BecomeWitness) GetCmd(_ *core.RegionInfo, _ bool) *pdpb.RegionHeartbeatResponse {
+	return switchWitness(bw.PeerID, true)
 }
 
 // BecomeNonWitness is an OpStep that makes a peer become a non-witness.
 type BecomeNonWitness struct {
-	StoreID, PeerID uint64
+	PeerID, StoreID uint64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
 func (bn BecomeNonWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
 	peer := region.GetStorePeer(bn.StoreID)
-	return typeutil.BoolToUint64(peer.GetId() == bn.PeerID)
+	// After TiKV has applied this raftcmd, the region ConfVer will be changed immediately,
+	// non-witness will be in pending state until apply snapshot completes, will check
+	// pending stat in `IsFinish`.
+	return typeutil.BoolToUint64((peer.GetId() == bn.PeerID) && !peer.GetIsWitness())
 }
 
 func (bn BecomeNonWitness) String() string {
-	return fmt.Sprintf("change peer %v on store %v to non-witness", bn.PeerID, bn.StoreID)
+	return fmt.Sprintf("switch peer %v on store %v to non-witness", bn.PeerID, bn.StoreID)
 }
 
 // IsFinish checks if current step is finished.
@@ -315,6 +324,8 @@ func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.Regio
 	to := opInfluence.GetStoreInfluence(bn.StoreID)
 
 	regionSize := region.GetApproximateSize()
+	to.WitnessCount -= 1
+	to.RegionSize += regionSize
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
@@ -325,7 +336,102 @@ func (bn BecomeNonWitness) Timeout(regionSize int64) time.Duration {
 
 // GetCmd returns the schedule command for heartbeat response.
 func (bn BecomeNonWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	return createResponse(addLearnerNode(bn.PeerID, bn.StoreID, false), useConfChangeV2)
+	return switchWitness(bn.PeerID, false)
+}
+
+// BatchSwitchWitness is an OpStep that batch switch witness.
+type BatchSwitchWitness struct {
+	ToWitnesses    []BecomeWitness
+	ToNonWitnesses []BecomeNonWitness
+}
+
+func (bsw BatchSwitchWitness) String() string {
+	b := &strings.Builder{}
+	_, _ = b.WriteString("batch switch witness")
+	for _, w := range bsw.ToWitnesses {
+		_, _ = fmt.Fprintf(b, ", switch peer %v on store %v to witness", w.PeerID, w.StoreID)
+	}
+	for _, nw := range bsw.ToNonWitnesses {
+		_, _ = fmt.Fprintf(b, ", switch peer %v on store %v to non-witness", nw.PeerID, nw.StoreID)
+	}
+	return b.String()
+}
+
+// ConfVerChanged returns the delta value for version increased by this step.
+func (bsw BatchSwitchWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
+	for _, w := range bsw.ToWitnesses {
+		if w.ConfVerChanged(region) == 0 {
+			return 0
+		}
+	}
+	for _, nw := range bsw.ToNonWitnesses {
+		if nw.ConfVerChanged(region) == 0 {
+			return 0
+		}
+	}
+	return uint64(len(bsw.ToWitnesses) + len(bsw.ToNonWitnesses))
+}
+
+// IsFinish checks if current step is finished.
+func (bsw BatchSwitchWitness) IsFinish(region *core.RegionInfo) bool {
+	for _, w := range bsw.ToWitnesses {
+		if !w.IsFinish(region) {
+			return false
+		}
+	}
+	for _, nw := range bsw.ToNonWitnesses {
+		if !nw.IsFinish(region) {
+			return false
+		}
+	}
+	return true
+}
+
+// CheckInProgress checks if the step is in the progress of advancing.
+func (bsw BatchSwitchWitness) CheckInProgress(ci ClusterInformer, region *core.RegionInfo) error {
+	for _, w := range bsw.ToWitnesses {
+		if err := w.CheckInProgress(ci, region); err != nil {
+			return err
+		}
+	}
+	for _, nw := range bsw.ToNonWitnesses {
+		if err := nw.CheckInProgress(ci, region); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Influence calculates the store difference that current step makes.
+func (bsw BatchSwitchWitness) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+	for _, w := range bsw.ToWitnesses {
+		w.Influence(opInfluence, region)
+	}
+	for _, nw := range bsw.ToNonWitnesses {
+		nw.Influence(opInfluence, region)
+	}
+}
+
+// Timeout returns duration that current step may take.
+func (bsw BatchSwitchWitness) Timeout(regionSize int64) time.Duration {
+	count := uint64(len(bsw.ToWitnesses)+len(bsw.ToNonWitnesses)) + 1
+	return fastStepWaitDuration(regionSize) * time.Duration(count)
+}
+
+// GetCmd returns the schedule command for heartbeat response.
+func (bsw BatchSwitchWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+	switches := make([]*pdpb.SwitchWitness, 0, len(bsw.ToWitnesses)+len(bsw.ToNonWitnesses))
+	for _, w := range bsw.ToWitnesses {
+		switches = append(switches, w.GetCmd(region, useConfChangeV2).SwitchWitnesses.SwitchWitnesses...)
+	}
+	for _, nw := range bsw.ToNonWitnesses {
+		switches = append(switches, nw.GetCmd(region, useConfChangeV2).SwitchWitnesses.SwitchWitnesses...)
+	}
+	return &pdpb.RegionHeartbeatResponse{
+		SwitchWitnesses: &pdpb.BatchSwitchWitness{
+			SwitchWitnesses: switches,
+		},
+	}
 }
 
 // AddLearner is an OpStep that adds a region learner peer.
@@ -342,7 +448,11 @@ func (al AddLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (al AddLearner) String() string {
-	return fmt.Sprintf("add learner peer %v on store %v", al.PeerID, al.ToStore)
+	info := "learner peer"
+	if al.IsWitness {
+		info = "witness learner peer"
+	}
+	return fmt.Sprintf("add %v %v on store %v", info, al.PeerID, al.ToStore)
 }
 
 // IsFinish checks if current step is finished.
@@ -383,9 +493,13 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 
 	regionSize := region.GetApproximateSize()
-	to.RegionSize += regionSize
+	if al.IsWitness {
+		to.WitnessCount += 1
+	} else {
+		to.RegionSize += regionSize
+	}
 	to.RegionCount++
-	if al.IsLightWeight {
+	if al.IsLightWeight || al.IsWitness {
 		return
 	}
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
@@ -497,9 +611,14 @@ func (rp RemovePeer) CheckInProgress(_ ClusterInformer, region *core.RegionInfo)
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
-	regionSize := region.GetApproximateSize()
+	regionSize := region.GetStorePeerApproximateSize(rp.FromStore)
 	from.RegionSize -= regionSize
 	from.RegionCount--
+	peer := region.GetStorePeer(rp.FromStore)
+	if peer != nil && peer.IsWitness {
+		from.WitnessCount--
+		return
+	}
 
 	if rp.IsDownStore && regionSize > storelimit.SmallRegionThreshold {
 		regionSize = storelimit.SmallRegionThreshold
@@ -646,11 +765,7 @@ type DemoteVoter struct {
 }
 
 func (dv DemoteVoter) String() string {
-	info := "non-witness"
-	if dv.IsWitness {
-		info = "witness"
-	}
-	return fmt.Sprintf("demote voter peer %v on store %v to %v learner", dv.PeerID, dv.ToStore, info)
+	return fmt.Sprintf("demote voter peer %v on store %v to learner", dv.PeerID, dv.ToStore)
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -667,10 +782,7 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.GetId()))
 			return false
 		}
-		if peer.IsWitness != dv.IsWitness {
-			return false
-		}
-		return region.GetPendingLearner(peer.GetId()) == nil
+		return peer.GetId() == dv.PeerID
 	}
 	return false
 }
@@ -1015,5 +1127,13 @@ func createResponse(change *pdpb.ChangePeer, useConfChangeV2 bool) *pdpb.RegionH
 	}
 	return &pdpb.RegionHeartbeatResponse{
 		ChangePeer: change,
+	}
+}
+
+func switchWitness(peerID uint64, isWitness bool) *pdpb.RegionHeartbeatResponse {
+	return &pdpb.RegionHeartbeatResponse{
+		SwitchWitnesses: &pdpb.BatchSwitchWitness{
+			SwitchWitnesses: []*pdpb.SwitchWitness{{PeerId: peerID, IsWitness: isWitness}},
+		},
 	}
 }

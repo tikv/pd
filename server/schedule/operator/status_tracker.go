@@ -17,7 +17,7 @@ package operator
 import (
 	"time"
 
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // Only record non-end status and one end status.

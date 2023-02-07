@@ -23,17 +23,17 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -43,6 +43,12 @@ const (
 	GrantHotRegionName = "grant-hot-region-scheduler"
 	// GrantHotRegionType is grant hot region scheduler type.
 	GrantHotRegionType = "grant-hot-region"
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	grantHotRegionCounter     = schedulerCounter.WithLabelValues(GrantHotRegionName, "schedule")
+	grantHotRegionSkipCounter = schedulerCounter.WithLabelValues(GrantHotRegionName, "skip")
 )
 
 func init() {
@@ -261,7 +267,7 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 }
 
 func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	grantHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
 	return s.dispatch(rw, cluster), nil
@@ -308,7 +314,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, srcSt
 			return []*operator.Operator{op}
 		}
 	}
-	schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+	grantHotRegionSkipCounter.Inc()
 	return nil
 }
 

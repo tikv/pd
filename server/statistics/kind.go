@@ -15,7 +15,7 @@
 package statistics
 
 import (
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 const (
@@ -208,12 +208,23 @@ func (rw RWType) Inverse() RWType {
 	}
 }
 
-// ForeachRegionStats foreach all region stats of read and write.
-func ForeachRegionStats(f func(RWType, int, RegionStatKind)) {
-	for _, rwTy := range []RWType{Read, Write} {
-		for dim, kind := range rwTy.RegionStats() {
-			f(rwTy, dim, kind)
-		}
+// ReportInterval returns the report interval of read or write.
+func (rw RWType) ReportInterval() int {
+	switch rw {
+	case Write:
+		return WriteReportInterval
+	default: // Case Read
+		return ReadReportInterval
+	}
+}
+
+// DefaultAntiCount returns the default anti count of read or write.
+func (rw RWType) DefaultAntiCount() int {
+	switch rw {
+	case Write:
+		return HotRegionAntiCount
+	default: // Case Read
+		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
 }
 
@@ -235,6 +246,15 @@ func (rw RWType) SetFullLoadRates(full []float64, loads []float64) {
 	}
 }
 
+// ForeachRegionStats foreach all region stats of read and write.
+func ForeachRegionStats(f func(RWType, int, RegionStatKind)) {
+	for _, rwTy := range []RWType{Read, Write} {
+		for dim, kind := range rwTy.RegionStats() {
+			f(rwTy, dim, kind)
+		}
+	}
+}
+
 // ActionType indicates the action type for the stat item.
 type ActionType int
 
@@ -243,6 +263,7 @@ const (
 	Add ActionType = iota
 	Remove
 	Update
+	ActionTypeLen
 )
 
 func (t ActionType) String() string {

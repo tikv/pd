@@ -22,9 +22,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 )
 
 func TestRegionPendingFilter(t *testing.T) {
@@ -108,4 +108,22 @@ func TestRegionEmptyFilter(t *testing.T) {
 		}, &metapb.Peer{StoreId: i + 1, Id: i + 1}))
 	}
 	re.Equal(filter.Select(region), statusRegionEmpty)
+}
+
+func TestRegionWitnessFilter(t *testing.T) {
+	re := require.New(t)
+
+	filter := NewRegionWitnessFilter(2)
+	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+		{StoreId: 1, Id: 1},
+		{StoreId: 2, Id: 2, IsWitness: true},
+		{StoreId: 3, Id: 3},
+	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	re.Equal(filter.Select(region), statusRegionWitnessPeer)
+	region = core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+		{StoreId: 1, Id: 1},
+		{StoreId: 2, Id: 2},
+		{StoreId: 3, Id: 3, IsWitness: true},
+	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	re.Equal(filter.Select(region), statusOK)
 }

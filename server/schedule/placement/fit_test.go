@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 func makeStores() StoreSet {
@@ -42,7 +42,7 @@ func makeStores() StoreSet {
 					if x == 5 {
 						labels["engine"] = "tiflash"
 					}
-					stores.SetStore(core.NewStoreInfoWithLabel(id, 0, labels))
+					stores.SetStore(core.NewStoreInfoWithLabel(id, labels))
 				}
 			}
 		}
@@ -145,9 +145,9 @@ func TestReplace(t *testing.T) {
 		for _, r := range tc.rules {
 			rules = append(rules, makeRule(r))
 		}
-		rf := fitRegion(stores.GetStores(), region, rules)
+		rf := fitRegion(stores.GetStores(), region, rules, false)
 		rf.regionStores = stores.GetStores()
-		re.Equal(rf.Replace(tc.srcStoreID, stores.GetStore(tc.dstStoreID), region), tc.ok)
+		re.Equal(rf.Replace(tc.srcStoreID, stores.GetStore(tc.dstStoreID)), tc.ok)
 	}
 }
 
@@ -186,7 +186,7 @@ func TestFitRegion(t *testing.T) {
 		for _, r := range testCase.rules {
 			rules = append(rules, makeRule(r))
 		}
-		rf := fitRegion(stores.GetStores(), region, rules)
+		rf := fitRegion(stores.GetStores(), region, rules, false)
 		expects := strings.Split(testCase.fitPeers, "/")
 		for i, f := range rf.RuleFits {
 			re.True(checkPeerMatch(f.Peers, expects[i]))

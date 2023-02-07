@@ -28,19 +28,20 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/autoscaling"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/swaggerserver"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/join"
-	"github.com/tikv/pd/server/tso"
+	"github.com/tikv/pd/server/keyspace"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -217,6 +218,13 @@ func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
 		return nil
 	}
 	return allocator.(*tso.LocalTSOAllocator).GetAllocatorLeader()
+}
+
+// GetKeyspaceManager returns the current TestServer's Keyspace Manager.
+func (s *TestServer) GetKeyspaceManager() *keyspace.Manager {
+	s.RLock()
+	defer s.RUnlock()
+	return s.server.GetKeyspaceManager()
 }
 
 // GetCluster returns PD cluster.

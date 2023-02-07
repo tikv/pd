@@ -23,8 +23,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -161,11 +161,6 @@ func (d *Driver) Check() bool {
 		stats[index] = *node.stats
 	}
 	return d.simCase.Checker(d.raftEngine.regionsInfo, stats)
-}
-
-// PrintStatistics prints the statistics of the scheduler.
-func (d *Driver) PrintStatistics() {
-	d.raftEngine.schedulerStats.PrintStatistics()
 }
 
 // Start starts all nodes.

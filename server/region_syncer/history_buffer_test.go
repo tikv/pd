@@ -19,8 +19,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage/kv"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/storage/kv"
 )
 
 func TestBufferSize(t *testing.T) {

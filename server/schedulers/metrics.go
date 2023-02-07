@@ -32,6 +32,7 @@ var schedulerStatus = prometheus.NewGaugeVec(
 		Help:      "Inner status of the scheduler.",
 	}, []string{"type", "name"})
 
+// todo: pre-allocate gauge metrics
 var opInfluenceStatus = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Namespace: "pd",
@@ -40,6 +41,7 @@ var opInfluenceStatus = prometheus.NewGaugeVec(
 		Help:      "Store status for schedule",
 	}, []string{"scheduler", "store", "type"})
 
+// todo: pre-allocate gauge metrics
 var tolerantResourceStatus = prometheus.NewGaugeVec(
 	prometheus.GaugeOpts{
 		Namespace: "pd",
@@ -56,6 +58,14 @@ var balanceLeaderCounter = prometheus.NewCounterVec(
 		Help:      "Counter of balance leader scheduler.",
 	}, []string{"type", "store"})
 
+var balanceWitnessCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "balance_witness",
+		Help:      "Counter of balance witness scheduler.",
+	}, []string{"type", "store"})
+
 var balanceRegionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",
@@ -64,6 +74,7 @@ var balanceRegionCounter = prometheus.NewCounterVec(
 		Help:      "Counter of balance region scheduler.",
 	}, []string{"type", "store"})
 
+// todo: pre-allocate gauge metrics
 var hotSchedulerResultCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",
@@ -80,6 +91,7 @@ var balanceDirectionCounter = prometheus.NewCounterVec(
 		Help:      "Counter of direction of balance related schedulers.",
 	}, []string{"type", "source", "target"})
 
+// todo: pre-allocate gauge metrics
 var hotDirectionCounter = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Namespace: "pd",
@@ -126,6 +138,7 @@ func init() {
 	prometheus.MustRegister(schedulerStatus)
 	prometheus.MustRegister(balanceLeaderCounter)
 	prometheus.MustRegister(balanceRegionCounter)
+	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)

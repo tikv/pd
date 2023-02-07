@@ -16,9 +16,9 @@ package placement
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // RegionRuleFitCacheManager stores each region's RegionFit Result and involving variables
@@ -35,22 +35,24 @@ import (
 // 6. any store label is changed
 // 7. any store state is changed
 type RegionRuleFitCacheManager struct {
-	mu     syncutil.RWMutex
-	caches map[uint64]*RegionRuleFitCache
+	mu           syncutil.RWMutex
+	regionCaches map[uint64]*regionRuleFitCache
+	storeCaches  map[uint64]*storeCache
 }
 
 // NewRegionRuleFitCacheManager returns RegionRuleFitCacheManager
 func NewRegionRuleFitCacheManager() *RegionRuleFitCacheManager {
 	return &RegionRuleFitCacheManager{
-		caches: map[uint64]*RegionRuleFitCache{},
+		regionCaches: make(map[uint64]*regionRuleFitCache),
+		storeCaches:  make(map[uint64]*storeCache),
 	}
 }
 
-// Invalid invalid cache by regionID
+// Invalid cache by regionID
 func (manager *RegionRuleFitCacheManager) Invalid(regionID uint64) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	delete(manager.caches, regionID)
+	delete(manager.regionCaches, regionID)
 }
 
 // CheckAndGetCache checks whether the region and rules are changed for the stored cache
@@ -63,7 +65,7 @@ func (manager *RegionRuleFitCacheManager) CheckAndGetCache(region *core.RegionIn
 	}
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
-	if cache, ok := manager.caches[region.GetID()]; ok && cache.bestFit != nil {
+	if cache, ok := manager.regionCaches[region.GetID()]; ok && cache.bestFit != nil {
 		if cache.IsUnchanged(region, rules, stores) {
 			return true, cache.bestFit
 		}
@@ -79,26 +81,26 @@ func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit 
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	fit.SetCached(true)
-	manager.caches[region.GetID()] = toRegionRuleFitCache(region, fit)
+	manager.regionCaches[region.GetID()] = manager.toRegionRuleFitCache(region, fit)
 }
 
-// RegionRuleFitCache stores regions RegionFit result and involving variables
-type RegionRuleFitCache struct {
+// regionRuleFitCache stores regions RegionFit result and involving variables
+type regionRuleFitCache struct {
 	region       regionCache
-	regionStores []storeCache
+	regionStores []*storeCache
 	rules        []ruleCache
 	bestFit      *RegionFit
 }
 
 // IsUnchanged checks whether the region and rules unchanged for the cache
-func (cache *RegionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule, stores []*core.StoreInfo) bool {
+func (cache *regionRuleFitCache) IsUnchanged(region *core.RegionInfo, rules []*Rule, stores []*core.StoreInfo) bool {
 	if !ValidateRegion(region) || !ValidateStores(stores) {
 		return false
 	}
 	return cache.isRegionUnchanged(region) && rulesEqual(cache.rules, rules) && storesEqual(cache.regionStores, stores)
 }
 
-func (cache *RegionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
+func (cache *regionRuleFitCache) isRegionUnchanged(region *core.RegionInfo) bool {
 	return region.GetLeader().StoreId == cache.region.leaderStoreID &&
 		cache.region.epochEqual(region)
 }
@@ -114,7 +116,7 @@ func rulesEqual(ruleCaches []ruleCache, rules []*Rule) bool {
 	})
 }
 
-func storesEqual(a []storeCache, b []*core.StoreInfo) bool {
+func storesEqual(a []*storeCache, b []*core.StoreInfo) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -125,10 +127,10 @@ func storesEqual(a []storeCache, b []*core.StoreInfo) bool {
 	})
 }
 
-func toRegionRuleFitCache(region *core.RegionInfo, fit *RegionFit) *RegionRuleFitCache {
-	return &RegionRuleFitCache{
+func (manager *RegionRuleFitCacheManager) toRegionRuleFitCache(region *core.RegionInfo, fit *RegionFit) *regionRuleFitCache {
+	return &regionRuleFitCache{
 		region:       toRegionCache(region),
-		regionStores: toStoreCacheList(fit.regionStores),
+		regionStores: manager.toStoreCacheList(fit.regionStores),
 		rules:        toRuleCacheList(fit.rules),
 		bestFit:      fit,
 	}
@@ -175,17 +177,22 @@ func (s storeCache) storeEqual(store *core.StoreInfo) bool {
 		labelEqual(s.labels, store.GetLabels())
 }
 
-func toStoreCacheList(stores []*core.StoreInfo) (c []storeCache) {
+func (manager *RegionRuleFitCacheManager) toStoreCacheList(stores []*core.StoreInfo) (c []*storeCache) {
 	for _, s := range stores {
-		m := make(map[string]string)
-		for _, label := range s.GetLabels() {
-			m[label.GetKey()] = label.GetValue()
+		sCache, ok := manager.storeCaches[s.GetID()]
+		if !ok || !sCache.storeEqual(s) {
+			m := make(map[string]string)
+			for _, label := range s.GetLabels() {
+				m[label.GetKey()] = label.GetValue()
+			}
+			sCache = &storeCache{
+				storeID: s.GetID(),
+				labels:  m,
+				state:   s.GetState(),
+			}
+			manager.storeCaches[s.GetID()] = sCache
 		}
-		c = append(c, storeCache{
-			storeID: s.GetID(),
-			labels:  m,
-			state:   s.GetState(),
-		})
+		c = append(c, sCache)
 	}
 	return c
 }

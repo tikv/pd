@@ -23,13 +23,13 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 	"github.com/tikv/pd/server/statistics/buckets"
-	"github.com/tikv/pd/server/storage/endpoint"
 	"github.com/unrolled/render"
 )
 
@@ -41,6 +41,20 @@ const (
 	// defaultHotDegree is the default hot region threshold.
 	defaultHotDegree  = 3
 	defaultSplitLimit = 10
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	splitBucketDisableCounter            = schedulerCounter.WithLabelValues(SplitBucketName, "bucket-disable")
+	splitBuckerSplitLimitCounter         = schedulerCounter.WithLabelValues(SplitBucketName, "split-limit")
+	splitBucketScheduleCounter           = schedulerCounter.WithLabelValues(SplitBucketName, "schedule")
+	splitBucketNoRegionCounter           = schedulerCounter.WithLabelValues(SplitBucketName, "no-region")
+	splitBucketRegionTooSmallCounter     = schedulerCounter.WithLabelValues(SplitBucketName, "region-too-small")
+	splitBucketOperatorExistCounter      = schedulerCounter.WithLabelValues(SplitBucketName, "operator-exist")
+	splitBucketKeyRangeNotMatchCounter   = schedulerCounter.WithLabelValues(SplitBucketName, "key-range-not-match")
+	splitBucketNoSplitKeysCounter        = schedulerCounter.WithLabelValues(SplitBucketName, "no-split-keys")
+	splitBucketCreateOpeartorFailCounter = schedulerCounter.WithLabelValues(SplitBucketName, "create-operator-fail")
+	splitBucketNewOperatorCounter        = schedulerCounter.WithLabelValues(SplitBucketName, "new-operator")
 )
 
 func init() {
@@ -171,12 +185,12 @@ func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 // IsScheduleAllowed return true if the sum of executing opSplit operator is less  .
 func (s *splitBucketScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	if !cluster.GetStoreConfig().IsEnableRegionBucket() {
-		schedulerCounter.WithLabelValues(s.GetName(), "bucket-disable").Inc()
+		splitBucketDisableCounter.Inc()
 		return false
 	}
 	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.SplitLimit
 	if !allowed {
-		schedulerCounter.WithLabelValues(s.GetName(), "split-limit").Inc()
+		splitBuckerSplitLimitCounter.Inc()
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpSplit.String()).Inc()
 	}
 	return allowed
@@ -191,7 +205,7 @@ type splitBucketPlan struct {
 
 // Schedule return operators if some bucket is too hot.
 func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
+	splitBucketScheduleCounter.Inc()
 	conf := s.conf.Clone()
 	plan := &splitBucketPlan{
 		conf:               conf,
@@ -208,16 +222,16 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 		region := plan.cluster.GetRegion(regionID)
 		// skip if the region doesn't exist
 		if region == nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "no-region").Inc()
+			splitBucketNoRegionCounter.Inc()
 			continue
 		}
 		// region size is less than split region size
 		if region.GetApproximateSize() <= plan.hotRegionSplitSize {
-			schedulerCounter.WithLabelValues(s.GetName(), "region-too-small").Inc()
+			splitBucketRegionTooSmallCounter.Inc()
 			continue
 		}
 		if op := s.OpController.GetOperator(regionID); op != nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "operator-exist").Inc()
+			splitBucketOperatorExistCounter.Inc()
 			continue
 		}
 		for _, bucket := range buckets {
@@ -225,11 +239,11 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 			// like bucket: [001 100] and region: [001 100] will not pass.
 			// like bucket: [003 100] and region: [002 100] will pass.
 			if bytes.Compare(bucket.StartKey, region.GetStartKey()) < 0 || bytes.Compare(bucket.EndKey, region.GetEndKey()) > 0 {
-				schedulerCounter.WithLabelValues(s.GetName(), "key-range-not-match").Inc()
+				splitBucketKeyRangeNotMatchCounter.Inc()
 				continue
 			}
 			if bytes.Equal(bucket.StartKey, region.GetStartKey()) && bytes.Equal(bucket.EndKey, region.GetEndKey()) {
-				schedulerCounter.WithLabelValues(s.GetName(), "no-split-keys").Inc()
+				splitBucketNoSplitKeysCounter.Inc()
 				continue
 			}
 
@@ -250,10 +264,10 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 		op, err := operator.CreateSplitRegionOperator(SplitBucketType, plan.cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKey)
 		if err != nil {
-			schedulerCounter.WithLabelValues(s.GetName(), "create-operator-fail").Inc()
+			splitBucketCreateOpeartorFailCounter.Inc()
 			return nil
 		}
-		schedulerCounter.WithLabelValues(s.GetName(), "new-operator").Inc()
+		splitBucketNewOperatorCounter.Inc()
 		op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
 		op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
 		op.AdditionalInfos["hot-degree"] = strconv.FormatInt(int64(splitBucket.HotDegree), 10)

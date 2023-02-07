@@ -28,12 +28,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
@@ -41,7 +42,6 @@ import (
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 func TestStoreHeartbeat(t *testing.T) {
@@ -61,7 +61,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	for _, region := range regions {
 		re.NoError(cluster.putRegion(region))
 	}
-	re.Equal(int(n), cluster.core.Regions.RegionsInfo.GetRegionCount())
+	re.Equal(int(n), cluster.GetRegionCount())
 
 	for i, store := range stores {
 		req := &pdpb.StoreHeartbeatRequest{}
@@ -270,6 +270,12 @@ func TestSetOfflineStore(t *testing.T) {
 			re.NoError(cluster.BuryStore(storeID, false))
 		}
 	}
+	// test clean up tombstone store
+	toCleanStore := cluster.GetStore(1).Clone().GetMeta()
+	toCleanStore.LastHeartbeat = time.Now().Add(-40 * 24 * time.Hour).UnixNano()
+	cluster.PutStore(toCleanStore)
+	cluster.checkStores()
+	re.Nil(cluster.GetStore(1))
 }
 
 func TestSetOfflineWithReplica(t *testing.T) {
@@ -709,25 +715,25 @@ func TestRegionHeartbeat(t *testing.T) {
 	for i, region := range regions {
 		// region does not exist.
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is the same, not updated.
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 		origin := region
 		// region is updated.
 		region = origin.Clone(core.WithIncVersion())
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is stale (Version).
 		stale := origin.Clone(core.WithIncConfVer())
 		re.Error(cluster.processRegionHeartbeat(stale))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is updated
@@ -737,13 +743,13 @@ func TestRegionHeartbeat(t *testing.T) {
 		)
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = origin.Clone(core.WithIncConfVer())
 		re.Error(cluster.processRegionHeartbeat(stale))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// Add a down peer.
@@ -755,38 +761,38 @@ func TestRegionHeartbeat(t *testing.T) {
 		}))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Add a pending peer.
 		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Clear down peers.
 		region = region.Clone(core.WithDownPeers(nil))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Clear pending peers.
 		region = region.Clone(core.WithPendingPeers(nil))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Remove peers.
 		origin = region
 		region = origin.Clone(core.SetPeers(region.GetPeers()[:1]))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 		// Add peers.
 		region = origin
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// Change one peer to witness
@@ -796,37 +802,37 @@ func TestRegionHeartbeat(t *testing.T) {
 		)
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change ApproximateSize.
 		region = region.Clone(core.SetApproximateSize(144))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change ApproximateKeys.
 		region = region.Clone(core.SetApproximateKeys(144000))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change bytes written.
 		region = region.Clone(core.SetWrittenBytes(24000))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change bytes read.
 		region = region.Clone(core.SetReadBytes(1080000))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
-		checkRegions(re, cluster.core.Regions.RegionsInfo, regions[:i+1])
+		checkRegions(re, cluster.core, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
@@ -896,6 +902,11 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(err)
 
 		// Check overlap
+		rm := cluster.GetRuleManager()
+		rm.SetPlaceholderRegionFitCache(regions[n-1])
+		rm.SetPlaceholderRegionFitCache(regions[n-2])
+		re.True(rm.CheckIsCachedDirectly(regions[n-1].GetID()))
+		re.True(rm.CheckIsCachedDirectly(regions[n-2].GetID()))
 		overlapRegion = regions[n-1].Clone(
 			core.WithStartKey(regions[n-2].GetStartKey()),
 			core.WithNewRegionID(regions[n-1].GetID()+1),
@@ -905,9 +916,11 @@ func TestRegionHeartbeat(t *testing.T) {
 		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
 		re.False(ok)
 		re.NoError(err)
+		re.False(rm.CheckIsCachedDirectly(regions[n-1].GetID()))
 		ok, err = storage.LoadRegion(regions[n-2].GetID(), region)
 		re.False(ok)
 		re.NoError(err)
+		re.False(rm.CheckIsCachedDirectly(regions[n-2].GetID()))
 		ok, err = storage.LoadRegion(overlapRegion.GetID(), region)
 		re.True(ok)
 		re.NoError(err)
@@ -924,7 +937,7 @@ func TestRegionFlowChanged(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
-	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 	processRegions := func(regions []*core.RegionInfo) {
 		for _, r := range regions {
 			cluster.processRegionHeartbeat(r)
@@ -993,12 +1006,12 @@ func TestConcurrentReportBucket(t *testing.T) {
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 
-	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 	heartbeatRegions(re, cluster, regions)
-	re.NotNil(cluster.GetRegion(0))
+	re.NotNil(cluster.GetRegion(1))
 
-	bucket1 := &metapb.Buckets{RegionId: 0, Version: 3}
-	bucket2 := &metapb.Buckets{RegionId: 0, Version: 2}
+	bucket1 := &metapb.Buckets{RegionId: 1, Version: 3}
+	bucket2 := &metapb.Buckets{RegionId: 1, Version: 2}
 	var wg sync.WaitGroup
 	wg.Add(1)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
@@ -1010,7 +1023,7 @@ func TestConcurrentReportBucket(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
 	re.NoError(cluster.processReportBuckets(bucket2))
 	wg.Wait()
-	re.Equal(bucket1, cluster.GetRegion(0).GetBuckets())
+	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }
 
 func TestConcurrentRegionHeartbeat(t *testing.T) {
@@ -1023,7 +1036,7 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 
-	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 	regions = core.SplitRegions(regions)
 	heartbeatRegions(re, cluster, regions)
 
@@ -1187,7 +1200,7 @@ func TestRegionSplitAndMerge(t *testing.T) {
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 
-	regions := []*core.RegionInfo{core.NewTestRegionInfo([]byte{}, []byte{})}
+	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 
 	// Byte will underflow/overflow if n > 7.
 	n := 7
@@ -1379,7 +1392,7 @@ func TestTopologyWeight(t *testing.T) {
 					"rack": rack,
 					"host": host,
 				}
-				store := core.NewStoreInfoWithLabel(storeID, 1, storeLabels)
+				store := core.NewStoreInfoWithLabel(storeID, storeLabels)
 				if i == 0 && j == 0 && k == 0 {
 					testStore = store
 				}
@@ -1395,12 +1408,12 @@ func TestTopologyWeight1(t *testing.T) {
 	re := require.New(t)
 
 	labels := []string{"dc", "zone", "host"}
-	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc2", "zone": "zone2", "host": "host2"})
-	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc3", "zone": "zone3", "host": "host3"})
-	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
-	store6 := core.NewStoreInfoWithLabel(6, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc2", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc3", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store6 := core.NewStoreInfoWithLabel(6, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
 	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6}
 
 	re.Equal(1.0/3, getStoreTopoWeight(store2, stores, labels, 3))
@@ -1412,11 +1425,11 @@ func TestTopologyWeight2(t *testing.T) {
 	re := require.New(t)
 
 	labels := []string{"dc", "zone", "host"}
-	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc2"})
-	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc3"})
-	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host1"})
-	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host1"})
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host1"})
+	store5 := core.NewStoreInfoWithLabel(5, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host1"})
 	stores := []*core.StoreInfo{store1, store2, store3, store4, store5}
 
 	re.Equal(1.0/3, getStoreTopoWeight(store2, stores, labels, 3))
@@ -1427,17 +1440,17 @@ func TestTopologyWeight3(t *testing.T) {
 	re := require.New(t)
 
 	labels := []string{"dc", "zone", "host"}
-	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
-	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
-	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host4"})
-	store5 := core.NewStoreInfoWithLabel(5, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host5"})
-	store6 := core.NewStoreInfoWithLabel(6, 1, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host6"})
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc1", "zone": "zone3", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host4"})
+	store5 := core.NewStoreInfoWithLabel(5, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host5"})
+	store6 := core.NewStoreInfoWithLabel(6, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host6"})
 
-	store7 := core.NewStoreInfoWithLabel(7, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host7"})
-	store8 := core.NewStoreInfoWithLabel(8, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host8"})
-	store9 := core.NewStoreInfoWithLabel(9, 1, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host9"})
-	store10 := core.NewStoreInfoWithLabel(10, 1, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host10"})
+	store7 := core.NewStoreInfoWithLabel(7, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host7"})
+	store8 := core.NewStoreInfoWithLabel(8, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host8"})
+	store9 := core.NewStoreInfoWithLabel(9, map[string]string{"dc": "dc2", "zone": "zone4", "host": "host9"})
+	store10 := core.NewStoreInfoWithLabel(10, map[string]string{"dc": "dc2", "zone": "zone5", "host": "host10"})
 	stores := []*core.StoreInfo{store1, store2, store3, store4, store5, store6, store7, store8, store9, store10}
 
 	re.Equal(1.0/5/2, getStoreTopoWeight(store7, stores, labels, 5))
@@ -1450,10 +1463,10 @@ func TestTopologyWeight4(t *testing.T) {
 	re := require.New(t)
 
 	labels := []string{"dc", "zone", "host"}
-	store1 := core.NewStoreInfoWithLabel(1, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
-	store2 := core.NewStoreInfoWithLabel(2, 1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host2"})
-	store3 := core.NewStoreInfoWithLabel(3, 1, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host3"})
-	store4 := core.NewStoreInfoWithLabel(4, 1, map[string]string{"dc": "dc2", "zone": "zone1", "host": "host4"})
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"dc": "dc1", "zone": "zone1", "host": "host2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"dc": "dc1", "zone": "zone2", "host": "host3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"dc": "dc2", "zone": "zone1", "host": "host4"})
 
 	stores := []*core.StoreInfo{store1, store2, store3, store4}
 
@@ -1662,7 +1675,7 @@ func Test(t *testing.T) {
 	_, opts, err := newTestScheduleConfig()
 	re.NoError(err)
 	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opts, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cache := tc.core.Regions.RegionsInfo
+	cache := tc.core
 
 	for i := uint64(0); i < n; i++ {
 		region := regions[i]
@@ -1672,7 +1685,8 @@ func Test(t *testing.T) {
 		re.Nil(cache.GetRegionByKey(regionKey))
 		checkRegions(re, cache, regions[0:i])
 
-		cache.SetRegion(region)
+		origin, overlaps, rangeChanged := cache.SetRegion(region)
+		cache.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), region)
 		checkRegion(re, cache.GetRegionByKey(regionKey), region)
 		checkRegions(re, cache, regions[0:(i+1)])
@@ -1685,12 +1699,14 @@ func Test(t *testing.T) {
 		// Update leader to peer np-1.
 		newRegion := region.Clone(core.WithLeader(region.GetPeers()[np-1]))
 		regions[i] = newRegion
-		cache.SetRegion(newRegion)
+		origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
+		cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
 		checkRegions(re, cache, regions[0:(i+1)])
 
 		cache.RemoveRegion(region)
+		cache.RemoveRegionFromSubTree(region)
 		re.Nil(cache.GetRegion(i))
 		re.Nil(cache.GetRegionByKey(regionKey))
 		checkRegions(re, cache, regions[0:i])
@@ -1698,7 +1714,8 @@ func Test(t *testing.T) {
 		// Reset leader to peer 0.
 		newRegion = region.Clone(core.WithLeader(region.GetPeers()[0]))
 		regions[i] = newRegion
-		cache.SetRegion(newRegion)
+		origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
+		cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		checkRegion(re, cache.GetRegion(i), newRegion)
 		checkRegions(re, cache, regions[0:(i+1)])
 		checkRegion(re, cache.GetRegionByKey(regionKey), newRegion)
@@ -1719,7 +1736,8 @@ func Test(t *testing.T) {
 	// check overlaps
 	// clone it otherwise there are two items with the same key in the tree
 	overlapRegion := regions[n-1].Clone(core.WithStartKey(regions[n-2].GetStartKey()))
-	cache.SetRegion(overlapRegion)
+	origin, overlaps, rangeChanged := cache.SetRegion(overlapRegion)
+	cache.UpdateSubTree(overlapRegion, origin, overlaps, rangeChanged)
 	re.Nil(cache.GetRegion(n - 2))
 	re.NotNil(cache.GetRegion(n - 1))
 
@@ -1728,7 +1746,8 @@ func Test(t *testing.T) {
 		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
 			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
-			cache.SetRegion(newRegion)
+			origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
+			cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		}
 		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
 	}
@@ -1741,8 +1760,8 @@ func TestCheckStaleRegion(t *testing.T) {
 	re := require.New(t)
 
 	// (0, 0) v.s. (0, 0)
-	region := core.NewTestRegionInfo([]byte{}, []byte{})
-	origin := core.NewTestRegionInfo([]byte{}, []byte{})
+	region := core.NewTestRegionInfo(1, 1, []byte{}, []byte{})
+	origin := core.NewTestRegionInfo(1, 1, []byte{}, []byte{})
 	re.NoError(checkStaleRegion(region.GetMeta(), origin.GetMeta()))
 	re.NoError(checkStaleRegion(origin.GetMeta(), region.GetMeta()))
 
@@ -1907,7 +1926,7 @@ func checkRegionsKV(re *require.Assertions, s storage.Storage, regions []*core.R
 	}
 }
 
-func checkRegions(re *require.Assertions, cache *core.RegionsInfo, regions []*core.RegionInfo) {
+func checkRegions(re *require.Assertions, cache *core.BasicCluster, regions []*core.RegionInfo) {
 	regionCount := make(map[uint64]int)
 	leaderCount := make(map[uint64]int)
 	followerCount := make(map[uint64]int)

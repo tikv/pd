@@ -21,16 +21,16 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 func TestShuffleLeader(t *testing.T) {
@@ -111,14 +111,15 @@ func TestRejectLeader(t *testing.T) {
 
 	// If the peer on store3 is pending, not transfer to store3 neither.
 	tc.SetStoreUp(3)
-	region := tc.Regions.GetRegion(1)
+	region := tc.GetRegion(1)
 	for _, p := range region.GetPeers() {
 		if p.GetStoreId() == 3 {
 			region = region.Clone(core.WithPendingPeers(append(region.GetPendingPeers(), p)))
 			break
 		}
 	}
-	tc.Regions.SetRegion(region)
+	origin, overlaps, rangeChanged := tc.SetRegion(region)
+	tc.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	ops, _ = sl.Schedule(tc, false)
 	testutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 }

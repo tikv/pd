@@ -22,8 +22,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 )
@@ -52,9 +53,9 @@ func (suite *minResolvedTSTestSuite) SetupSuite() {
 
 	mustBootstrapCluster(re, suite.svr)
 	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-	r1 := newTestRegionInfo(7, 1, []byte("a"), []byte("b"))
+	r1 := core.NewTestRegionInfo(7, 1, []byte("a"), []byte("b"))
 	mustRegionHeartbeat(re, suite.svr, r1)
-	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"))
+	r2 := core.NewTestRegionInfo(8, 1, []byte("b"), []byte("c"))
 	mustRegionHeartbeat(re, suite.svr, r2)
 }
 

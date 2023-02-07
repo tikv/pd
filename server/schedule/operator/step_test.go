@@ -20,9 +20,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 )
 
 type operatorStepTestSuite struct {
@@ -526,6 +526,40 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 	suite.check(cpl, desc, testCases)
 }
 
+func (suite *operatorStepTestSuite) TestSwitchToWitness() {
+	step := BecomeWitness{StoreID: 2, PeerID: 2}
+	testCases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
+			},
+			0,
+			false,
+			suite.NoError,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			suite.NoError,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			1,
+			true,
+			suite.NoError,
+		},
+	}
+	suite.check(step, "switch peer 2 on store 2 to witness", testCases)
+}
+
 func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []testCase) {
 	suite.Equal(desc, step.String())
 	for _, testCase := range testCases {
@@ -535,5 +569,12 @@ func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []
 		err := step.CheckInProgress(suite.cluster, region)
 		testCase.CheckInProgress(err)
 		_ = step.GetCmd(region, true)
+
+		if _, ok := step.(ChangePeerV2Leave); ok {
+			// Ref https://github.com/tikv/pd/issues/5788
+			pendingPeers := region.GetLearners()
+			region = region.Clone(core.WithPendingPeers(pendingPeers))
+			suite.Equal(testCase.IsFinish, step.IsFinish(region))
+		}
 	}
 }

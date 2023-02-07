@@ -25,10 +25,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/tests"
@@ -69,7 +70,7 @@ func TestHot(t *testing.T) {
 
 	// test hot store
 	ss := leaderServer.GetStore(1)
-	now := time.Now().Second()
+	now := time.Now().Unix()
 
 	newStats := typeutil.DeepClone(ss.GetStoreStats(), core.StoreStatsFactory)
 	bytesWritten := uint64(8 * units.MiB)
@@ -82,7 +83,7 @@ func TestHot(t *testing.T) {
 	newStats.KeysRead = keysRead
 	rc := leaderServer.GetRaftCluster()
 	for i := statistics.DefaultWriteMfSize; i > 0; i-- {
-		start := uint64(now - statistics.StoreHeartBeatReportInterval*i)
+		start := uint64(now - statistics.StoreHeartBeatReportInterval*int64(i))
 		end := start + statistics.StoreHeartBeatReportInterval
 		newStats.Interval = &pdpb.TimeInterval{StartTimestamp: start, EndTimestamp: end}
 		rc.GetStoresStats().Observe(ss.GetID(), newStats)
@@ -148,7 +149,10 @@ func TestHot(t *testing.T) {
 					Id: hotRegionID,
 				}, leader)
 				rc.GetHotStat().CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
-				time.Sleep(5000 * time.Millisecond)
+				testutil.Eventually(re, func() bool {
+					hotPeerStat := rc.GetHotPeerStat(statistics.Read, hotRegionID, hotStoreID)
+					return hotPeerStat != nil
+				})
 				if reportInterval >= statistics.ReadReportInterval {
 					count++
 				}
@@ -158,8 +162,11 @@ func TestHot(t *testing.T) {
 					re, cluster,
 					hotRegionID, hotStoreID,
 					[]byte("c"), []byte("d"),
-					core.SetWrittenBytes(1000000000*reportInterval), core.SetReportInterval(reportInterval))
-				time.Sleep(5000 * time.Millisecond)
+					core.SetWrittenBytes(1000000000*reportInterval), core.SetReportInterval(0, reportInterval))
+				testutil.Eventually(re, func() bool {
+					hotPeerStat := rc.GetHotPeerStat(statistics.Write, hotRegionID, hotStoreID)
+					return hotPeerStat != nil
+				})
 				if reportInterval >= statistics.WriteReportInterval {
 					count++
 				}
@@ -221,11 +228,16 @@ func TestHotWithStoreID(t *testing.T) {
 	}
 	defer cluster.Destroy()
 
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(0, statistics.WriteReportInterval))
+	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(0, statistics.WriteReportInterval))
 	// wait hot scheduler starts
-	time.Sleep(5000 * time.Millisecond)
+	rc := leaderServer.GetRaftCluster()
+	testutil.Eventually(re, func() bool {
+		return rc.GetHotPeerStat(statistics.Write, 1, 1) != nil &&
+			rc.GetHotPeerStat(statistics.Write, 2, 2) != nil &&
+			rc.GetHotPeerStat(statistics.Write, 3, 1) != nil
+	})
 	args := []string{"-u", pdAddr, "hot", "write", "1"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)
 	hotRegion := statistics.StoreHotPeersInfos{}
@@ -290,15 +302,24 @@ func TestHistoryHotRegions(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
-	startTime := time.Now().UnixNano() / int64(time.Millisecond)
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 4, 3, []byte("g"), []byte("h"), core.SetWrittenBytes(9000000000), core.SetReportInterval(statistics.WriteReportInterval))
+	startTime := time.Now().Unix()
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
+	pdctl.MustPutRegion(re, cluster, 4, 3, []byte("g"), []byte("h"), core.SetWrittenBytes(9000000000),
+		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	// wait hot scheduler starts
-	time.Sleep(5000 * time.Millisecond)
+	testutil.Eventually(re, func() bool {
+		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
+		iter := hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime*1000, time.Now().UnixNano()/int64(time.Millisecond))
+		next, err := iter.Next()
+		return err == nil && next != nil
+	})
 	endTime := time.Now().UnixNano() / int64(time.Millisecond)
-	start := strconv.FormatInt(startTime, 10)
+	start := strconv.FormatInt(startTime*1000, 10)
 	end := strconv.FormatInt(endTime, 10)
 	args := []string{"-u", pdAddr, "hot", "history",
 		start, end,
@@ -413,8 +434,6 @@ func TestHotWithoutHotPeer(t *testing.T) {
 	}
 	defer cluster.Destroy()
 
-	// wait hot scheduler starts
-	time.Sleep(5000 * time.Millisecond)
 	{
 		args := []string{"-u", pdAddr, "hot", "read"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)

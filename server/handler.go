@@ -29,14 +29,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -44,7 +45,6 @@ import (
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/tso"
 	"go.uber.org/zap"
 )
 
@@ -297,6 +297,16 @@ func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler(schedulers.BalanceLeaderType)
+}
+
+// AddBalanceWitnessScheduler adds a balance-witness-scheduler.
+func (h *Handler) AddBalanceWitnessScheduler() error {
+	return h.AddScheduler(schedulers.BalanceWitnessType)
+}
+
+// AddTransferWitnessLeaderScheduler adds a transfer-witness-leader-scheduler.
+func (h *Handler) AddTransferWitnessLeaderScheduler() error {
+	return h.AddScheduler(schedulers.TransferWitnessLeaderType)
 }
 
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
@@ -1032,12 +1042,14 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			}
 			stat := storage.HistoryHotRegion{
 				// store in ms.
-				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
+				// todo: distinguish store heartbeat interval and region heartbeat interval
+				// read statistic from store heartbeat, write statistic from region heartbeat
+				UpdateTime:     int64(region.GetInterval().GetEndTimestamp() * 1000),
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
 				PeerID:         region.GetStorePeer(hotPeerStat.StoreID).GetId(),
 				IsLeader:       hotPeerStat.IsLeader,
-				IsLearner:      hotPeerStat.IsLearner,
+				IsLearner:      core.IsLearner(region.GetPeer(hotPeerStat.StoreID)),
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
 				KeyRate:        hotPeerStat.KeyRate,

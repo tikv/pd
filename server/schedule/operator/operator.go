@@ -24,7 +24,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 const (
@@ -151,6 +151,11 @@ func (o *Operator) Status() OpStatus {
 	return o.status.Status()
 }
 
+// SetStatusReachTime sets the reach time of the operator, only for test purpose.
+func (o *Operator) SetStatusReachTime(st OpStatus, t time.Time) {
+	o.status.setTime(st, t)
+}
+
 // CheckAndGetStatus returns operator status after `CheckExpired` and `CheckTimeout`.
 func (o *Operator) CheckAndGetStatus() OpStatus {
 	switch {
@@ -248,6 +253,18 @@ func (o *Operator) Step(i int) OpStep {
 		return o.steps[i]
 	}
 	return nil
+}
+
+// ContainNonWitnessStep returns true if it contains the target OpStep
+func (o *Operator) ContainNonWitnessStep() bool {
+	for _, step := range o.steps {
+		switch step.(type) {
+		case BecomeNonWitness:
+			return true
+		default:
+		}
+	}
+	return false
 }
 
 // getCurrentTimeAndStep returns the start time of the i-th step.

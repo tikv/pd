@@ -26,10 +26,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -38,8 +38,19 @@ import (
 
 const regionScatterName = "region-scatter"
 
-var gcInterval = time.Minute
-var gcTTL = time.Minute * 3
+var (
+	gcInterval = time.Minute
+	gcTTL      = time.Minute * 3
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	scatterSkipEmptyRegionCounter   = scatterCounter.WithLabelValues("skip", "empty-region")
+	scatterSkipNoRegionCounter      = scatterCounter.WithLabelValues("skip", "no-region")
+	scatterSkipNoLeaderCounter      = scatterCounter.WithLabelValues("skip", "no-leader")
+	scatterSkipHotRegionCounter     = scatterCounter.WithLabelValues("skip", "hot")
+	scatterSkipNotReplicatedCounter = scatterCounter.WithLabelValues("skip", "not-replicated")
+	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
+	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
+	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
+)
 
 type selectedStores struct {
 	mu                syncutil.RWMutex
@@ -166,7 +177,7 @@ const maxRetryLimit = 30
 func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group string, retryLimit int) (int, map[uint64]error, error) {
 	regions := r.cluster.ScanRegions(startKey, endKey, -1)
 	if len(regions) < 1 {
-		scatterCounter.WithLabelValues("skip", "empty-region").Inc()
+		scatterSkipEmptyRegionCounter.Inc()
 		return 0, nil, errors.New("empty region")
 	}
 	failures := make(map[uint64]error, len(regions))
@@ -185,7 +196,7 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 // ScatterRegionsByID directly scatter regions by ScatterRegions
 func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int) (int, map[uint64]error, error) {
 	if len(regionsID) < 1 {
-		scatterCounter.WithLabelValues("skip", "empty-region").Inc()
+		scatterSkipEmptyRegionCounter.Inc()
 		return 0, nil, errors.New("empty region")
 	}
 	failures := make(map[uint64]error, len(regionsID))
@@ -193,7 +204,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 	for _, id := range regionsID {
 		region := r.cluster.GetRegion(id)
 		if region == nil {
-			scatterCounter.WithLabelValues("skip", "no-region").Inc()
+			scatterSkipNoRegionCounter.Inc()
 			log.Warn("failed to find region during scatter", zap.Uint64("region-id", id))
 			failures[id] = errors.New(fmt.Sprintf("failed to find region %v", id))
 			continue
@@ -220,7 +231,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 // and the value of the failures indicates the failure error.
 func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) (int, error) {
 	if len(regions) < 1 {
-		scatterCounter.WithLabelValues("skip", "empty-region").Inc()
+		scatterSkipEmptyRegionCounter.Inc()
 		return 0, errors.New("empty region")
 	}
 	if retryLimit > maxRetryLimit {
@@ -269,19 +280,19 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*operator.Operator, error) {
 	if !filter.IsRegionReplicated(r.cluster, region) {
 		r.cluster.AddSuspectRegions(region.GetID())
-		scatterCounter.WithLabelValues("skip", "not-replicated").Inc()
+		scatterSkipNotReplicatedCounter.Inc()
 		log.Warn("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
 	}
 
 	if region.GetLeader() == nil {
-		scatterCounter.WithLabelValues("skip", "no-leader").Inc()
+		scatterSkipNoLeaderCounter.Inc()
 		log.Warn("region no leader during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d has no leader", region.GetID())
 	}
 
 	if r.cluster.IsRegionHot(region) {
-		scatterCounter.WithLabelValues("skip", "hot").Inc()
+		scatterSkipHotRegionCounter.Inc()
 		log.Warn("region too hot during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d is hot", region.GetID())
 	}
@@ -339,7 +350,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
 	targetLeader := r.selectAvailableLeaderStore(group, region, targetPeers, r.ordinaryEngine)
 	if targetLeader == 0 {
-		scatterCounter.WithLabelValues("no-leader", "").Inc()
+		scatterSkipNoLeaderCounter.Inc()
 		return nil
 	}
 
@@ -355,13 +366,13 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
-		scatterCounter.WithLabelValues("unnecessary", "").Inc()
+		scatterUnnecessaryCounter.Inc()
 		r.Put(targetPeers, targetLeader, group)
 		return nil
 	}
 	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader)
 	if err != nil {
-		scatterCounter.WithLabelValues("fail", "").Inc()
+		scatterFailCounter.Inc()
 		for _, peer := range region.GetPeers() {
 			targetPeers[peer.GetStoreId()] = peer
 		}
@@ -370,7 +381,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		return nil
 	}
 	if op != nil {
-		scatterCounter.WithLabelValues("success", "").Inc()
+		scatterSuccessCounter.Inc()
 		r.Put(targetPeers, targetLeader, group)
 		op.SetPriorityLevel(core.High)
 	}

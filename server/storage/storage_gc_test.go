@@ -21,7 +21,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 func testGCSafePoints() ([]string, []uint64) {
@@ -97,31 +97,31 @@ func TestLoadMinServiceSafePoint(t *testing.T) {
 		{ServiceID: "2", ExpiredAt: expireAt3, SafePoint: 300},
 	}
 
-	testKeySpace := "test"
+	testKeyspace := "test"
 	for _, serviceSafePoint := range serviceSafePoints {
-		re.NoError(storage.SaveServiceSafePoint(testKeySpace, serviceSafePoint))
+		re.NoError(storage.SaveServiceSafePoint(testKeyspace, serviceSafePoint))
 	}
 	// enabling failpoint to make expired key removal immediately observable
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/storage/endpoint/removeExpiredKeys", "return(true)"))
-	minSafePoint, err := storage.LoadMinServiceSafePoint(testKeySpace, currentTime)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys", "return(true)"))
+	minSafePoint, err := storage.LoadMinServiceSafePoint(testKeyspace, currentTime)
 	re.NoError(err)
 	re.Equal(serviceSafePoints[0], minSafePoint)
 
 	// the safePoint with ServiceID 0 should be removed due to expiration
-	minSafePoint2, err := storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(150*time.Second))
+	minSafePoint2, err := storage.LoadMinServiceSafePoint(testKeyspace, currentTime.Add(150*time.Second))
 	re.NoError(err)
 	re.Equal(serviceSafePoints[1], minSafePoint2)
 
 	// verify that service safe point with ServiceID 0 has been removed
-	ssp, err := storage.LoadServiceSafePoint(testKeySpace, "0")
+	ssp, err := storage.LoadServiceSafePoint(testKeyspace, "0")
 	re.NoError(err)
 	re.Nil(ssp)
 
 	// all remaining service safePoints should be removed due to expiration
-	ssp, err = storage.LoadMinServiceSafePoint(testKeySpace, currentTime.Add(500*time.Second))
+	ssp, err = storage.LoadMinServiceSafePoint(testKeyspace, currentTime.Add(500*time.Second))
 	re.NoError(err)
 	re.Nil(ssp)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/storage/endpoint/removeExpiredKeys"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys"))
 }
 
 func TestRemoveServiceSafePoint(t *testing.T) {
@@ -151,23 +151,23 @@ func TestSaveLoadGCSafePoint(t *testing.T) {
 	for i := range testSpaceIDs {
 		testSpaceID := testSpaceIDs[i]
 		testSafePoint := testSafePoints[i]
-		err := storage.SaveKeySpaceGCSafePoint(testSpaceID, testSafePoint)
+		err := storage.SaveKeyspaceGCSafePoint(testSpaceID, testSafePoint)
 		re.NoError(err)
-		loaded, err := storage.LoadKeySpaceGCSafePoint(testSpaceID)
+		loaded, err := storage.LoadKeyspaceGCSafePoint(testSpaceID)
 		re.NoError(err)
 		re.Equal(testSafePoint, loaded)
 	}
 }
 
-func TestLoadAllKeySpaceGCSafePoints(t *testing.T) {
+func TestLoadAllKeyspaceGCSafePoints(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 	testSpaceIDs, testSafePoints := testGCSafePoints()
 	for i := range testSpaceIDs {
-		err := storage.SaveKeySpaceGCSafePoint(testSpaceIDs[i], testSafePoints[i])
+		err := storage.SaveKeyspaceGCSafePoint(testSpaceIDs[i], testSafePoints[i])
 		re.NoError(err)
 	}
-	loadedSafePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
+	loadedSafePoints, err := storage.LoadAllKeyspaceGCSafePoints(true)
 	re.NoError(err)
 	for i := range loadedSafePoints {
 		re.Equal(testSpaceIDs[i], loadedSafePoints[i].SpaceID)
@@ -181,7 +181,7 @@ func TestLoadAllKeySpaceGCSafePoints(t *testing.T) {
 	}
 
 	// verify that service safe points do not interfere with gc safe points.
-	loadedSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(true)
+	loadedSafePoints, err = storage.LoadAllKeyspaceGCSafePoints(true)
 	re.NoError(err)
 	for i := range loadedSafePoints {
 		re.Equal(testSpaceIDs[i], loadedSafePoints[i].SpaceID)
@@ -189,7 +189,7 @@ func TestLoadAllKeySpaceGCSafePoints(t *testing.T) {
 	}
 
 	// verify that when withGCSafePoint set to false, returned safePoints is 0
-	loadedSafePoints, err = storage.LoadAllKeySpaceGCSafePoints(false)
+	loadedSafePoints, err = storage.LoadAllKeyspaceGCSafePoints(false)
 	re.NoError(err)
 	for i := range loadedSafePoints {
 		re.Equal(testSpaceIDs[i], loadedSafePoints[i].SpaceID)
@@ -202,17 +202,17 @@ func TestLoadEmpty(t *testing.T) {
 	storage := NewStorageWithMemoryBackend()
 
 	// loading non-existing GC safepoint should return 0
-	gcSafePoint, err := storage.LoadKeySpaceGCSafePoint("testKeySpace")
+	gcSafePoint, err := storage.LoadKeyspaceGCSafePoint("testKeyspace")
 	re.NoError(err)
 	re.Equal(uint64(0), gcSafePoint)
 
 	// loading non-existing service safepoint should return nil
-	serviceSafePoint, err := storage.LoadServiceSafePoint("testKeySpace", "testService")
+	serviceSafePoint, err := storage.LoadServiceSafePoint("testKeyspace", "testService")
 	re.NoError(err)
 	re.Nil(serviceSafePoint)
 
 	// loading empty key spaces should return empty slices
-	safePoints, err := storage.LoadAllKeySpaceGCSafePoints(true)
+	safePoints, err := storage.LoadAllKeyspaceGCSafePoints(true)
 	re.NoError(err)
 	re.Empty(safePoints)
 }

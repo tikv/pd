@@ -18,12 +18,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 )
@@ -32,12 +33,12 @@ func TestDistinctScoreFilter(t *testing.T) {
 	re := require.New(t)
 	labels := []string{"zone", "rack", "host"}
 	allStores := []*core.StoreInfo{
-		core.NewStoreInfoWithLabel(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}),
-		core.NewStoreInfoWithLabel(2, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"}),
-		core.NewStoreInfoWithLabel(3, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"}),
-		core.NewStoreInfoWithLabel(4, 1, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"}),
-		core.NewStoreInfoWithLabel(5, 1, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"}),
-		core.NewStoreInfoWithLabel(6, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"}),
+		core.NewStoreInfoWithLabel(1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}),
+		core.NewStoreInfoWithLabel(2, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"}),
+		core.NewStoreInfoWithLabel(3, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"}),
+		core.NewStoreInfoWithLabel(4, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"}),
+		core.NewStoreInfoWithLabel(5, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"}),
+		core.NewStoreInfoWithLabel(6, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"}),
 	}
 
 	testCases := []struct {
@@ -70,7 +71,7 @@ func TestLabelConstraintsFilter(t *testing.T) {
 
 	opt := config.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
-	store := core.NewStoreInfoWithLabel(1, 1, map[string]string{"id": "1"})
+	store := core.NewStoreInfoWithLabel(1, map[string]string{"id": "1"})
 
 	testCases := []struct {
 		key    string
@@ -108,6 +109,7 @@ func TestRuleFitFilter(t *testing.T) {
 		{StoreId: 1, Id: 1},
 		{StoreId: 3, Id: 3},
 		{StoreId: 5, Id: 5},
+		{StoreId: 7, Id: 7, IsWitness: true},
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 
 	testCases := []struct {
@@ -126,6 +128,8 @@ func TestRuleFitFilter(t *testing.T) {
 		// store 5 and store 1 is the peers of this region, so it will allow transferring leader to store 3.
 		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusOK},
 		{6, 1, map[string]string{"zone": "z4"}, plan.StatusOK, plan.StatusOK},
+		// store 7 and store 1 is the peers of this region, but it's a witness, so it won't allow transferring leader to store 7.
+		{7, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
 	}
 	// Init cluster
 	for _, testCase := range testCases {
@@ -153,7 +157,7 @@ func TestStoreStateFilter(t *testing.T) {
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
 	}
 	opt := config.NewTestOptions()
-	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
+	store := core.NewStoreInfoWithLabel(1, map[string]string{})
 
 	type testCase struct {
 		filterIdx int
@@ -205,7 +209,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
 	}
 	opt := config.NewTestOptions()
-	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
+	store := core.NewStoreInfoWithLabel(1, map[string]string{})
 
 	type testCase struct {
 		filterIdx    int
@@ -372,7 +376,8 @@ func TestSpecialUseFilter(t *testing.T) {
 		{map[string]string{core.EngineKey: core.EngineTiKV}, []string{""}, plan.StatusOK, plan.StatusOK},
 	}
 	for _, testCase := range testCases {
-		store := core.NewStoreInfoWithLabel(1, 1, testCase.label)
+		store := core.NewStoreInfoWithLabel(1, testCase.label)
+		store = store.Clone(core.SetStoreStats(&pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB}))
 		filter := NewSpecialUseFilter("", testCase.allowUse...)
 		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), store).StatusCode)
 		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), store).StatusCode)

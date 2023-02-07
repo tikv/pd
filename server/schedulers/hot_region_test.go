@@ -24,18 +24,18 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/storage/endpoint"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 func init() {
@@ -137,8 +137,8 @@ func TestGCPendingOpInfos(t *testing.T) {
 		re.NoError(err)
 		re.NotNil(op)
 		op.Start()
-		operator.SetOperatorStatusReachTime(op, operator.CREATED, time.Now().Add(-5*statistics.StoreHeartBeatReportInterval*time.Second))
-		operator.SetOperatorStatusReachTime(op, operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))
+		op.SetStatusReachTime(operator.CREATED, time.Now().Add(-5*statistics.StoreHeartBeatReportInterval*time.Second))
+		op.SetStatusReachTime(operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))
 		return newPendingInfluence(op, 2, 4, statistics.Influence{}, hb.conf.GetStoreStatZombieDuration())
 	}
 	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
@@ -148,7 +148,7 @@ func TestGCPendingOpInfos(t *testing.T) {
 	}
 	shouldRemoveOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		infl := justDoneOpInfluence(region, ty)
-		operator.SetOperatorStatusReachTime(infl.op, operator.CANCELED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
+		infl.op.SetStatusReachTime(operator.CANCELED, time.Now().Add(-3*statistics.StoreHeartBeatReportInterval*time.Second))
 		return infl
 	}
 	opInfluenceCreators := [3]func(region *core.RegionInfo, ty opType) *pendingInfluence{shouldRemoveOpInfluence, notDoneOpInfluence, justDoneOpInfluence}
@@ -196,6 +196,7 @@ func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 
 	opt.SetPlacementRuleEnabled(false)
@@ -374,7 +375,9 @@ func checkByteRateOnly(re *require.Assertions, tc *mockcluster.Cluster, hb sched
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
-		tc.Regions.RemoveRegion(tc.GetRegion(i))
+		r := tc.GetRegion(i)
+		tc.RemoveRegion(r)
+		tc.RemoveRegionFromSubTree(r)
 	}
 	hb.Schedule(tc, false)
 	clearPendingInfluence(hb.(*hotScheduler))
@@ -385,6 +388,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
@@ -596,6 +600,7 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -632,6 +637,7 @@ func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -691,6 +697,7 @@ func TestHotWriteRegionScheduleUnhealthyStore(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -739,6 +746,7 @@ func TestHotWriteRegionScheduleCheckHot(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -774,6 +782,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
@@ -836,6 +845,7 @@ func TestHotWriteRegionScheduleWithPendingInfluence(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -927,6 +937,7 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetEnablePlacementRules(true)
@@ -1119,7 +1130,9 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 
 	// Should not panic if region not found.
 	for i := uint64(1); i <= 3; i++ {
-		tc.Regions.RemoveRegion(tc.GetRegion(i))
+		r := tc.GetRegion(i)
+		tc.RemoveRegion(r)
+		tc.RemoveRegionFromSubTree(r)
 	}
 	hb.Schedule(tc, false)
 	re.Contains(hb.regionPendings, uint64(4))
@@ -1132,6 +1145,7 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1167,6 +1181,7 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1345,6 +1360,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1450,6 +1466,10 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
+	statistics.ThresholdsUpdateInterval = 0
+	defer func() {
+		statistics.ThresholdsUpdateInterval = 8 * time.Second
+	}()
 	{ // only a few regions
 		tc := mockcluster.NewCluster(ctx, opt)
 		tc.SetHotRegionCacheHitsThreshold(0)
@@ -1526,6 +1546,10 @@ func TestHotCacheByteAndKey(t *testing.T) {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
+	statistics.ThresholdsUpdateInterval = 0
+	defer func() {
+		statistics.ThresholdsUpdateInterval = 8 * time.Second
+	}()
 	regions := []testRegionInfo{}
 	for i := 1; i <= 500; i++ {
 		regions = append(regions, testRegionInfo{
@@ -1717,6 +1741,10 @@ func TestHotCacheCheckRegionFlowWithDifferentThreshold(t *testing.T) {
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	statistics.ThresholdsUpdateInterval = 0
+	defer func() {
+		statistics.ThresholdsUpdateInterval = statistics.StoreHeartBeatReportInterval
+	}()
 	// some peers are hot, and some are cold #3198
 
 	rate := uint64(512 * units.KiB)
@@ -1726,7 +1754,7 @@ func TestHotCacheCheckRegionFlowWithDifferentThreshold(t *testing.T) {
 		}
 	}
 	items := tc.AddLeaderRegionWithWriteInfo(201, 1, rate*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{2, 3}, 1)
-	re.Equal(float64(rate)*statistics.HotThresholdRatio, items[0].GetThresholds()[0])
+	re.Equal(float64(rate)*statistics.HotThresholdRatio, tc.HotCache.GetThresholds(statistics.Write, items[0].StoreID)[0])
 	// Threshold of store 1,2,3 is 409.6 units.KiB and others are 1 units.KiB
 	// Make the hot threshold of some store is high and the others are low
 	rate = 10 * units.KiB
@@ -1804,6 +1832,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1923,6 +1952,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2029,6 +2059,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2089,6 +2120,7 @@ func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2132,6 +2164,7 @@ func TestCompatibility(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 	opt := config.NewTestOptions()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)

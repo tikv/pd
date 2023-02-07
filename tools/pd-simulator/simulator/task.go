@@ -24,7 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -252,7 +252,7 @@ func (m *mergeRegion) tick(engine *RaftEngine, region *core.RegionInfo) (newRegi
 		core.SetApproximateSize(targetRegion.GetApproximateSize()+region.GetApproximateSize()),
 		core.SetApproximateKeys(targetRegion.GetApproximateKeys()+region.GetApproximateKeys()),
 	)
-	engine.schedulerStats.taskStats.incMergeRegion()
+	schedulingCounter.WithLabelValues("merge").Inc()
 	return newRegion, true
 }
 
@@ -274,11 +274,11 @@ func (t *transferLeader) tick(engine *RaftEngine, region *core.RegionInfo) (newR
 	}
 
 	newRegion = region.Clone(core.WithLeader(toPeer))
-	engine.schedulerStats.taskStats.incTransferLeader(t.fromPeerStoreID, toPeer.GetStoreId())
+	schedulingCounter.WithLabelValues("transfer-leader").Inc()
 	return
 }
 
-func checkAndCreateChangePeerOption(engine *RaftEngine, region *core.RegionInfo,
+func checkAndCreateChangePeerOption(region *core.RegionInfo,
 	peer *metapb.Peer, from, to metapb.PeerRole) []core.RegionCreateOption {
 	// `from` and `to` need to satisfy the combination in switch.
 
@@ -298,9 +298,9 @@ func checkAndCreateChangePeerOption(engine *RaftEngine, region *core.RegionInfo,
 	// create option
 	switch to {
 	case metapb.PeerRole_Voter: // Learner/IncomingVoter -> Voter
-		engine.schedulerStats.taskStats.incPromoteLearner(region.GetID())
+		schedulingCounter.WithLabelValues("promote-learner").Inc()
 	case metapb.PeerRole_Learner: // Voter/DemotingVoter -> Learner
-		engine.schedulerStats.taskStats.incDemoteVoter(region.GetID())
+		schedulingCounter.WithLabelValues("demote-voter").Inc()
 	case metapb.PeerRole_IncomingVoter: // Learner -> IncomingVoter, only in joint state
 	case metapb.PeerRole_DemotingVoter: // Voter -> DemotingVoter, only in joint state
 	default:
@@ -316,7 +316,7 @@ type promoteLearner struct {
 func (pl *promoteLearner) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	peer := region.GetPeer(pl.peer.GetId())
-	opts := checkAndCreateChangePeerOption(engine, region, peer, metapb.PeerRole_Learner, metapb.PeerRole_Voter)
+	opts := checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_Learner, metapb.PeerRole_Voter)
 	if len(opts) > 0 {
 		newRegion = region.Clone(opts...)
 	}
@@ -330,7 +330,7 @@ type demoteVoter struct {
 func (dv *demoteVoter) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	peer := region.GetPeer(dv.peer.GetId())
-	opts := checkAndCreateChangePeerOption(engine, region, peer, metapb.PeerRole_Voter, metapb.PeerRole_Learner)
+	opts := checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_Voter, metapb.PeerRole_Learner)
 	if len(opts) > 0 {
 		newRegion = region.Clone(opts...)
 	}
@@ -347,7 +347,7 @@ func (ce *changePeerV2Enter) tick(engine *RaftEngine, region *core.RegionInfo) (
 	var opts []core.RegionCreateOption
 	for _, pl := range ce.promoteLearners {
 		peer := region.GetPeer(pl.GetId())
-		subOpts := checkAndCreateChangePeerOption(engine, region, peer, metapb.PeerRole_Learner, metapb.PeerRole_IncomingVoter)
+		subOpts := checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_Learner, metapb.PeerRole_IncomingVoter)
 		if len(subOpts) == 0 {
 			return
 		}
@@ -355,7 +355,7 @@ func (ce *changePeerV2Enter) tick(engine *RaftEngine, region *core.RegionInfo) (
 	}
 	for _, dv := range ce.demoteVoters {
 		peer := region.GetPeer(dv.GetId())
-		subOpts := checkAndCreateChangePeerOption(engine, region, peer, metapb.PeerRole_Voter, metapb.PeerRole_DemotingVoter)
+		subOpts := checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_Voter, metapb.PeerRole_DemotingVoter)
 		if len(subOpts) == 0 {
 			return
 		}
@@ -373,9 +373,9 @@ func (cl *changePeerV2Leave) tick(engine *RaftEngine, region *core.RegionInfo) (
 	for _, peer := range region.GetPeers() {
 		switch peer.GetRole() {
 		case metapb.PeerRole_IncomingVoter:
-			opts = append(opts, checkAndCreateChangePeerOption(engine, region, peer, metapb.PeerRole_IncomingVoter, metapb.PeerRole_Voter)...)
+			opts = append(opts, checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_IncomingVoter, metapb.PeerRole_Voter)...)
 		case metapb.PeerRole_DemotingVoter:
-			opts = append(opts, checkAndCreateChangePeerOption(engine, region, peer, metapb.PeerRole_DemotingVoter, metapb.PeerRole_Learner)...)
+			opts = append(opts, checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_DemotingVoter, metapb.PeerRole_Learner)...)
 		}
 	}
 	if len(opts) < 4 {
@@ -408,9 +408,9 @@ func (a *addPeer) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *
 	if region.GetPeer(a.peer.GetId()) == nil {
 		switch a.peer.GetRole() {
 		case metapb.PeerRole_Voter:
-			engine.schedulerStats.taskStats.incAddVoter(region.GetID())
+			schedulingCounter.WithLabelValues("add-voter").Inc()
 		case metapb.PeerRole_Learner:
-			engine.schedulerStats.taskStats.incAddLearner(region.GetID())
+			schedulingCounter.WithLabelValues("add-learner").Inc()
 		}
 		pendingPeers := append(region.GetPendingPeers(), a.peer)
 		return region.Clone(core.WithAddPeer(a.peer), core.WithIncConfVer(), core.WithPendingPeers(pendingPeers)), false
@@ -419,11 +419,13 @@ func (a *addPeer) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *
 	if !processSnapshot(sendNode, a.sendingStat) {
 		return nil, false
 	}
-	engine.schedulerStats.snapshotStats.incSendSnapshot(sendNode.Id)
+	sendStoreID := fmt.Sprintf("store-%d", sendNode.Id)
+	snapshotCounter.WithLabelValues(sendStoreID, "send").Inc()
 	if !processSnapshot(recvNode, a.receivingStat) {
 		return nil, false
 	}
-	engine.schedulerStats.snapshotStats.incReceiveSnapshot(recvNode.Id)
+	recvStoreID := fmt.Sprintf("store-%d", recvNode.Id)
+	snapshotCounter.WithLabelValues(recvStoreID, "recv").Inc()
 	recvNode.incUsedSize(uint64(region.GetApproximateSize()))
 	// Step 3: Remove the Pending state
 	newRegion = region.Clone(removePendingPeer(region, a.peer))
@@ -450,7 +452,7 @@ func (r *removePeer) tick(engine *RaftEngine, region *core.RegionInfo) (newRegio
 		return nil, false
 	}
 	// Step 2: Remove Peer
-	engine.schedulerStats.taskStats.incRemovePeer(region.GetID())
+	schedulingCounter.WithLabelValues("remove-peer").Inc()
 	newRegion = region.Clone(
 		core.WithIncConfVer(),
 		core.WithRemoveStorePeer(r.peer.GetStoreId()),
