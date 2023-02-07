@@ -21,9 +21,11 @@ import (
 	// "github.com/pingcap/log"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/server"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -36,6 +38,11 @@ type ResourceManagerServer struct {
 	name   string
 	client *clientv3.Client
 	member *member.Member
+	// Callback functions for different stages
+	// startCallbacks will be called after the server is started.
+	startCallbacks []func()
+	// leaderCallbacks will be called after the server becomes leader.
+	leaderCallbacks []func(context.Context)
 }
 
 // Context returns the context.
@@ -45,7 +52,7 @@ func (s *ResourceManagerServer) Context() context.Context {
 
 // AddStartCallback adds the callback function when the server starts.
 func (s *ResourceManagerServer) AddStartCallback(callbacks ...func()) {
-
+	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
 // Name returns the name of the server.
@@ -65,11 +72,29 @@ func (s *ResourceManagerServer) GetMember() *member.Member {
 
 // AddLeaderCallback adds the callback function when the server becomes leader.
 func (s *ResourceManagerServer) AddLeaderCallback(callbacks ...func(context.Context)) {
+	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
+}
 
+// Run runs the server.
+func (s *ResourceManagerServer) Run() error {
+	// todo: need blocking?
+	log.Info("resource manager server is running")
+	return nil
+}
+
+// Close closes the server.
+func (s *ResourceManagerServer) Close() {
+	log.Info("closing server")
+	if s.client != nil {
+		if err := s.client.Close(); err != nil {
+			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+	log.Info("close server")
 }
 
 // ResourceManagerStart starts the resource manager server.
-func ResourceManagerStart(ctx context.Context, cfg *config.Config) ServiceServer {
+func ResourceManagerStart(ctx context.Context, cfg *config.Config) server.Server {
 	// start client
 	etcdTimeout := time.Second * 3
 	tlsConfig, err := cfg.Security.ToTLSConfig()

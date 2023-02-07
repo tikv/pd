@@ -29,4 +29,6 @@ type Server interface {
 	GetClient() *clientv3.Client
 	GetMember() *member.Member
 	AddLeaderCallback(callbacks ...func(context.Context))
+	Run() error
+	Close()
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mode"
+	interfaceServer "github.com/tikv/pd/pkg/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/server"
@@ -116,7 +117,7 @@ func exit(code int) {
 }
 
 // todo: add more service mode and multi service mode
-func startServer(ctx context.Context, cfg *config.Config) mode.ServiceServer {
+func startServer(ctx context.Context, cfg *config.Config) interfaceServer.Server {
 	m, err := config.ParseServiceMode(cfg.ServiceModes)
 	if err != nil {
 		log.Fatal("parse service mode error", errs.ZapError(err))
