@@ -733,7 +733,7 @@ func (f *ruleWitnessFitFilter) Target(options *config.PersistOptions, store *cor
 		log.Warn("ruleWitnessFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
 		return statusStoreNotMatchRule
 	}
-	if targetPeer.Id == f.region.GetLeader().Id {
+	if targetPeer.Id == f.region.GetLeader().GetId() {
 		return statusStoreNotMatchRule
 	}
 	if f.oldFit.Replace(f.srcStore, store) {
