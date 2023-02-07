@@ -894,7 +894,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness() {
 	op := suite.rc.Check(r)
 
 	suite.NotNil(op)
-	suite.Equal("promote-witness", op.Desc())
+	suite.Equal("promote-witness-for-down", op.Desc())
 	suite.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
 	suite.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
 	suite.Equal(uint64(3), op.Step(2).(operator.BecomeNonWitness).StoreID)
@@ -1091,7 +1091,7 @@ func (suite *ruleCheckerTestSuite) TestFixPendingVoterWithAvailableWitness() {
 	op := suite.rc.Check(r)
 
 	suite.NotNil(op)
-	suite.Equal("promote-witness", op.Desc())
+	suite.Equal("promote-witness-for-pending", op.Desc())
 	suite.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
 	suite.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
 	suite.Equal(uint64(3), op.Step(2).(operator.BecomeNonWitness).StoreID)
