@@ -1,4 +1,4 @@
-// Copyright 2016 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-// if server doesn't implement all methods of basicsvr.Server, this line will result in a clear
+// If server doesn't implement all methods of basicsvr.Server, this line will result in a clear
 // error message like "*Server does not implement basicsvr.Server (missing Method method)"
 var _ basicsvr.Server = (*Server)(nil)
 
@@ -41,7 +41,7 @@ type Server struct {
 	ctx context.Context
 }
 
-// TODO: Implement the following methos
+// TODO: Implement the following methods defined in basicsvr.Server
 
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
@@ -62,17 +62,12 @@ func (s *Server) Run() error {
 func (s *Server) Close() {
 }
 
-// IsClosed checks whether server is closed or not.
-func (s *Server) IsClosed() bool {
-	return true
-}
-
 // GetClient returns builtin etcd client.
 func (s *Server) GetClient() *clientv3.Client {
 	return nil
 }
 
-// GetHTTPClient returns builtin etcd client.
+// GetHTTPClient returns builtin http client.
 func (s *Server) GetHTTPClient() *http.Client {
 	return nil
 }
@@ -109,18 +104,16 @@ func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, ba
 
 	metricutil.Push(&cfg.Metric)
 
-	// Joins the cluster
-	// ...
-
-	// Creates the server
-	// ...
+	// TODO: Create the server
 
 	return nil, nil, nil
 }
 
+// TODO: implement it
 func printVersionInfo() {
 }
 
+// TODO: implement it
 func printConfigCheckMsg(cfg *tso.Config) {
 }
 

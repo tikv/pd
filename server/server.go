@@ -101,7 +101,7 @@ var (
 )
 
 // if server doesn't implement all methods of basicsvr.Server, this line will result in
-// clear error message "*MyTServerype does not implement basicsvr.Server (missing Method method)"
+// clear error message "*Server does not implement basicsvr.Server (missing Method method)"
 var _ basicsvr.Server = (*Server)(nil)
 
 // Server is the pd server. It implements basicsvr.Server
@@ -737,7 +737,7 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
-// GetHTTPClient returns builtin etcd client.
+// GetHTTPClient returns builtin http client.
 func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
 }

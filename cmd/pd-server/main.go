@@ -19,7 +19,6 @@ import (
 	"flag"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -29,7 +28,6 @@ import (
 	basicsvr "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
-	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -48,20 +46,7 @@ import (
 )
 
 func main() {
-	var ctx context.Context
-	var cancel context.CancelFunc
-	var svr basicsvr.Server
-
-	if len(os.Args) < 2 {
-		ctx, cancel, svr = createServerWrapper(os.Args[1:])
-	} else {
-		switch strings.ToLower(os.Args[1]) {
-		case "service-mode-tso":
-			ctx, cancel, svr = tsoserver.CreateServerWrapper(os.Args[2:])
-		default:
-			ctx, cancel, svr = createServerWrapper(os.Args[2:])
-		}
-	}
+	ctx, cancel, svr := createServerWrapper(os.Args[1:])
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
