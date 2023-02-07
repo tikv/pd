@@ -1,4 +1,4 @@
-module github.com/tikv/pd/tests/msc
+module github.com/tikv/pd/tests/mcs
 
 go 1.19
 
