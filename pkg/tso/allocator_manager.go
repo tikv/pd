@@ -314,7 +314,6 @@ func CalSuffixBits(maxSuffix int32) int {
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	
 	if _, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		return
 	}

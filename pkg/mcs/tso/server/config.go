@@ -16,16 +16,10 @@ package server
 
 import (
 	"flag"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-)
-
-const (
-	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
-	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 )
 
 // Config is the configuration for the TSO.
@@ -35,7 +29,7 @@ type Config struct {
 	Version bool `json:"-"`
 
 	ConfigCheck bool `json:"-"`
-	configFile string
+	configFile  string
 
 	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
 	// which allows the PD server to generate Local TSO for certain DC-level transactions.

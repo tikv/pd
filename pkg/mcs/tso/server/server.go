@@ -76,6 +76,7 @@ func (s *Server) GetHTTPClient() *http.Client {
 	return nil
 }
 
+// CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, basicsvr.Server) {
 	cfg := NewConfig()
 	err := cfg.Parse(os.Args[1:])

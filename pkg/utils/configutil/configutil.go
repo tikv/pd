@@ -20,16 +20,18 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// Utility to test if a configuration is defined.
+// ConfigMetaData is an utility to test if a configuration is defined.
 type ConfigMetaData struct {
 	meta *toml.MetaData
 	path []string
 }
 
+// NewConfigMetadata is the a factory method to create a ConfigMetaData object
 func NewConfigMetadata(meta *toml.MetaData) *ConfigMetaData {
 	return &ConfigMetaData{meta: meta}
 }
 
+// IsDefined checks if the given key is defined in the configuration
 func (m *ConfigMetaData) IsDefined(key string) bool {
 	if m.meta == nil {
 		return false
@@ -39,6 +41,7 @@ func (m *ConfigMetaData) IsDefined(key string) bool {
 	return m.meta.IsDefined(keys...)
 }
 
+// Child gets the config metadata of the given path
 func (m *ConfigMetaData) Child(path ...string) *ConfigMetaData {
 	newPath := append([]string(nil), m.path...)
 	newPath = append(newPath, path...)
@@ -48,6 +51,7 @@ func (m *ConfigMetaData) Child(path ...string) *ConfigMetaData {
 	}
 }
 
+// CheckUndecoded checks if the configuration contains undefined items
 func (m *ConfigMetaData) CheckUndecoded() error {
 	if m.meta == nil {
 		return nil
