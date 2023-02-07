@@ -139,9 +139,9 @@ func (c *baseClient) memberLoop() {
 		case <-ctx.Done():
 			return
 		}
-		failpoint.Inject("skipUpdateMember", func() {
-			failpoint.Continue()
-		})
+		if _, _err_ := failpoint.Eval(_curpkg_("skipUpdateMember")); _err_ == nil {
+			continue
+		}
 		if err := c.updateMember(); err != nil {
 			log.Error("[pd] failed updateMember", errs.ZapError(err))
 		}
@@ -265,9 +265,9 @@ func (c *baseClient) initClusterID() error {
 			clusterID = members.GetHeader().GetClusterId()
 			continue
 		}
-		failpoint.Inject("skipClusterIDCheck", func() {
-			failpoint.Continue()
-		})
+		if _, _err_ := failpoint.Eval(_curpkg_("skipClusterIDCheck")); _err_ == nil {
+			continue
+		}
 		// All URLs passed in should have the same cluster ID.
 		if members.GetHeader().GetClusterId() != clusterID {
 			return errors.WithStack(errUnmatchedClusterID)
@@ -283,11 +283,11 @@ func (c *baseClient) initClusterID() error {
 
 func (c *baseClient) updateMember() error {
 	for i, u := range c.GetURLs() {
-		failpoint.Inject("skipFirstUpdateMember", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("skipFirstUpdateMember")); _err_ == nil {
 			if i == 0 {
-				failpoint.Continue()
+				continue
 			}
-		})
+		}
 		members, err := c.getMembers(c.ctx, u, updateMemberTimeout)
 		// Check the cluster ID.
 		if err == nil && members.GetHeader().GetClusterId() != c.clusterID {

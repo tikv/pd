@@ -18,13 +18,13 @@ import (
 	"math"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
 const (
 	defaultRefillRate    = 10000
 	defaultInitialTokens = 10 * 10000
-	defaultMaxTokens     = 1e7
 )
 
 const (
@@ -37,9 +37,9 @@ const (
 type GroupTokenBucket struct {
 	// Settings is the setting of TokenBucket.
 	// BurstLimit is used as below:
-	//   - If b == 0, that means the Token Bucket is unlimited burst within token capacity.
-	//   - If b < 0, that means the Token Bucket is unlimited burst and capacity is ignored.
-	//   - If b > 0, that means the Token Bucket is limited burst. (current not used).
+	//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within a unlimited capacity).
+	//   - If b < 0, that means the limiter is unlimited capacity and fillrate(r) is ignored, can be seen as r == Inf (burst within a unlimited capacity).
+	//   - If b > 0, that means the limiter is limited capacity. (current not used).
 	// MaxTokens limits the number of tokens that can be accumulated
 	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
 	GroupTokenBucketState `json:"state,omitempty"`
@@ -63,13 +63,8 @@ func (s *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
 func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
-	if tokenBucket == nil {
-		return GroupTokenBucket{
-			Settings: &rmpb.TokenLimitSettings{},
-		}
-	}
-	if tokenBucket.Settings.MaxTokens == 0 {
-		tokenBucket.Settings.MaxTokens = defaultMaxTokens
+	if tokenBucket == nil || tokenBucket.Settings == nil {
+		return GroupTokenBucket{}
 	}
 	return GroupTokenBucket{
 		Settings: tokenBucket.Settings,
@@ -95,16 +90,7 @@ func (t *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 	if tb == nil {
 		return
 	}
-	if setting := tb.GetSettings(); setting != nil {
-		if t.Settings != nil {
-			// If not patch MaxTokens, use past value.
-			if setting.MaxTokens == 0 {
-				setting.MaxTokens = t.Settings.MaxTokens
-			}
-		}
-		if setting.MaxTokens == 0 {
-			setting.MaxTokens = defaultMaxTokens
-		}
+	if setting := proto.Clone(tb.GetSettings()).(*rmpb.TokenLimitSettings); setting != nil {
 		t.Settings = setting
 	}
 
@@ -134,13 +120,20 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 			t.Tokens += float64(t.Settings.FillRate) * delta.Seconds()
 			t.LastUpdate = &now
 		}
-		if t.Tokens > t.Settings.MaxTokens {
-			t.Tokens = t.Settings.MaxTokens
+		if t.Settings.BurstLimit != 0 {
+			if burst := float64(t.Settings.BurstLimit); t.Tokens > burst {
+				t.Tokens = burst
+			}
 		}
 	}
 
 	var res rmpb.TokenBucket
 	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: t.Settings.GetBurstLimit()}
+	// If BurstLimit is -1, just return.
+	if res.Settings.BurstLimit < 0 {
+		res.Tokens = neededTokens
+		return &res, 0
+	}
 	// FillRate is used for the token server unavailable in abnormal situation.
 	if neededTokens <= 0 {
 		return &res, 0

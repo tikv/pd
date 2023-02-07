@@ -432,33 +432,20 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	leader := suite.cluster.GetServer(leaderName)
 
 	testCasesSet1 := []struct {
-		name                string
-		mode                rmpb.GroupMode
-		addSuccess          bool
-		modifySuccess       bool
-		createExpectMarshal string
-		createSettings      func(*rmpb.ResourceGroup)
-		modifyExpectMarshal string
-		modifySettings      func(*rmpb.ResourceGroup)
+		name           string
+		mode           rmpb.GroupMode
+		addSuccess     bool
+		modifySuccess  bool
+		expectMarshal  string
+		modifySettings func(*rmpb.ResourceGroup)
 	}{
 		{"test1", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test1","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":10000,"max_tokens":10000000},"state":{"initialized":false}}}}`,
+			`{"name":"test1","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":10000},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate: 10000,
-						},
-					},
-				}
-			},
-			`{"name":"test1","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":2000,"max_tokens":1000000},"state":{"initialized":false}}}}`,
-			func(gs *rmpb.ResourceGroup) {
-				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
-					RU: &rmpb.TokenBucket{
-						Settings: &rmpb.TokenLimitSettings{
-							FillRate:  2000,
-							MaxTokens: 1000000,
 						},
 					},
 				}
@@ -466,53 +453,32 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":20000,"max_tokens":1000000},"state":{"initialized":false}}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":20000},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							FillRate:  20000,
-							MaxTokens: 1000000,
-						},
-					},
-				}
-			},
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":2000,"max_tokens":1000000},"state":{"initialized":false}}}}`,
-			func(gs *rmpb.ResourceGroup) {
-				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
-					RU: &rmpb.TokenBucket{
-						Settings: &rmpb.TokenLimitSettings{
-							FillRate:  2000,
-							MaxTokens: 1000000,
+							FillRate: 20000,
 						},
 					},
 				}
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":2000,"max_tokens":1000000},"state":{"initialized":false}}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							FillRate: 30000,
-						},
-					},
-				}
-			},
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":30000,"max_tokens":10000000},"state":{"initialized":false}}}}`,
-			func(gs *rmpb.ResourceGroup) {
-				gs.RawResourceSettings = &rmpb.GroupRawResourceSettings{
-					Cpu: &rmpb.TokenBucket{
-						Settings: &rmpb.TokenLimitSettings{
-							FillRate: 30000,
+							FillRate:   30000,
+							BurstLimit: -1,
 						},
 					},
 				}
 			},
 		},
-		{"test3", rmpb.GroupMode_RawMode, false, false,
-			"",
+		{"test3", rmpb.GroupMode_RawMode, true, false,
+			`{"name":"test3","mode":2}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -522,28 +488,11 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 					},
 				}
 			},
-			"",
-			func(gs *rmpb.ResourceGroup) {},
 		},
-		{"test3", rmpb.GroupMode_RawMode, true, true,
-			`{"name":"test3","mode":2,"raw_resource_settings":{"cpu":{"settings":{"fill_rate":1000000,"max_tokens":10000000},"state":{"initialized":false}},"io_read_bandwidth":{"state":{"initialized":false}},"io_write_bandwidth":{"state":{"initialized":false}}}}`,
+		{"test3", rmpb.GroupMode_RawMode, false, true,
+			`{"name":"test3","mode":2,"raw_resource_settings":{"cpu":{"settings":{"fill_rate":1000000},"state":{"initialized":false}},"io_read_bandwidth":{"state":{"initialized":false}},"io_write_bandwidth":{"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RawResourceSettings = &rmpb.GroupRawResourceSettings{
-					Cpu: &rmpb.TokenBucket{
-						Settings: &rmpb.TokenLimitSettings{
-							FillRate: 1000000,
-						},
-					},
-				}
-			},
-			`{"name":"test3","mode":2,"raw_resource_settings":{"cpu":{"settings":{"fill_rate":1000000,"max_tokens":10000000},"state":{"initialized":false}},"io_read_bandwidth":{"settings":{"fill_rate":1000000,"max_tokens":10000000},"state":{"initialized":false}},"io_write_bandwidth":{"state":{"initialized":false}}}}`,
-			func(gs *rmpb.ResourceGroup) {
-				gs.RawResourceSettings = &rmpb.GroupRawResourceSettings{
-					IoRead: &rmpb.TokenBucket{
-						Settings: &rmpb.TokenLimitSettings{
-							FillRate: 1000000,
-						},
-					},
 					Cpu: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate: 1000000,
@@ -553,35 +502,12 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			},
 		},
 	}
+
 	checkErr := func(err error, success bool) {
 		if success {
 			re.NoError(err)
 		} else {
 			re.Error(err)
-		}
-	}
-	updateGroup := func(g *rmpb.ResourceGroup) {
-		switch g.Mode {
-		case rmpb.GroupMode_RUMode:
-			if g.RUSettings != nil {
-				if g.RUSettings.RU != nil && g.RUSettings.RU.Settings.MaxTokens == 0 {
-					g.RUSettings.RU.Settings.MaxTokens = 1e7
-				}
-			}
-			g.RawResourceSettings = nil
-		case rmpb.GroupMode_RawMode:
-			if g.RawResourceSettings != nil {
-				if g.RawResourceSettings.Cpu != nil && g.RawResourceSettings.Cpu.Settings.MaxTokens == 0 {
-					g.RawResourceSettings.Cpu.Settings.MaxTokens = 1e7
-				}
-				if g.RawResourceSettings.IoRead != nil && g.RawResourceSettings.IoRead.Settings.MaxTokens == 0 {
-					g.RawResourceSettings.IoRead.Settings.MaxTokens = 1e7
-				}
-				if g.RawResourceSettings.IoWrite != nil && g.RawResourceSettings.IoWrite.Settings.MaxTokens == 0 {
-					g.RawResourceSettings.IoWrite.Settings.MaxTokens = 1e7
-				}
-			}
-			g.RUSettings = nil
 		}
 	}
 
@@ -592,24 +518,17 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			Name: tcase.name,
 			Mode: tcase.mode,
 		}
-		tcase.createSettings(group)
 		// Create Resource Group
 		resp, err := cli.AddResourceGroup(suite.ctx, group)
-		updateGroup(group)
 		checkErr(err, tcase.addSuccess)
 		if tcase.addSuccess {
 			finalNum++
 			re.Contains(resp, "Success!")
-			// Get Resource Group
-			gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
-			re.NoError(err)
-			re.Equal(group, gresp)
 		}
 
 		// Modify Resource Group
 		tcase.modifySettings(group)
 		mresp, err := cli.ModifyResourceGroup(suite.ctx, group)
-		updateGroup(group)
 		checkErr(err, tcase.modifySuccess)
 		if tcase.modifySuccess {
 			re.Contains(mresp, "Success!")
@@ -617,13 +536,12 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 		// Get Resource Group
 		gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
-		if tcase.addSuccess || tcase.modifySuccess {
-			re.NoError(err)
-			re.Equal(tcase.name, gresp.Name)
-		}
+		re.NoError(err)
+		re.Equal(tcase.name, gresp.Name)
 		if tcase.modifySuccess {
 			re.Equal(group, gresp)
 		}
+
 		// Last one, Check list and delete all resource groups
 		if i == len(testCasesSet1)-1 {
 			// List Resource Groups
@@ -658,23 +576,13 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			Name: tcase.name,
 			Mode: tcase.mode,
 		}
-		tcase.createSettings(group)
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
 		resp, err := http.Post(leader.GetAddr()+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
-		updateGroup(group)
 		re.NoError(err)
 		defer resp.Body.Close()
 		if tcase.addSuccess {
 			re.Equal(http.StatusOK, resp.StatusCode)
-			resp, err = http.Get(leader.GetAddr() + "/resource-manager/api/v1/config/group/" + tcase.name)
-			re.NoError(err)
-			defer resp.Body.Close()
-			re.Equal(http.StatusOK, resp.StatusCode)
-			respString, err := io.ReadAll(resp.Body)
-			re.NoError(err)
-			re.Contains(string(respString), tcase.name)
-			re.Equal(string(respString), tcase.createExpectMarshal)
 			finalNum++
 		} else {
 			re.Equal(http.StatusInternalServerError, resp.StatusCode)
@@ -688,7 +596,6 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		re.NoError(err)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err = http.DefaultClient.Do(req)
-		updateGroup(group)
 		re.NoError(err)
 		defer resp.Body.Close()
 		if tcase.modifySuccess {
@@ -701,14 +608,12 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		resp, err = http.Get(leader.GetAddr() + "/resource-manager/api/v1/config/group/" + tcase.name)
 		re.NoError(err)
 		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
 		respString, err := io.ReadAll(resp.Body)
-		if tcase.addSuccess || tcase.modifySuccess {
-			re.Equal(http.StatusOK, resp.StatusCode)
-			re.NoError(err)
-			re.Contains(string(respString), tcase.name)
-		}
+		re.NoError(err)
+		re.Contains(string(respString), tcase.name)
 		if tcase.modifySuccess {
-			re.Equal(string(respString), tcase.modifyExpectMarshal)
+			re.Equal(string(respString), tcase.expectMarshal)
 		}
 
 		// Last one, Check list and delete all resource groups
@@ -760,8 +665,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 		RUSettings: &rmpb.GroupRequestUnitSettings{
 			RU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
-					FillRate:  10000,
-					MaxTokens: 10000000,
+					FillRate: 10000,
 				},
 				Tokens: 100000,
 			},

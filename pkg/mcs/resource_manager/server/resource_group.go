@@ -87,7 +87,7 @@ func (rg *ResourceGroup) CheckAndInit() error {
 	}
 	if rg.Mode == rmpb.GroupMode_RUMode {
 		if rg.RUSettings == nil {
-			return errors.New("invalid resource group settings, RU mode should set RU settings")
+			rg.RUSettings = &RequestUnitSettings{}
 		}
 		if rg.RawResourceSettings != nil {
 			return errors.New("invalid resource group settings, RU mode should not set raw resource settings")
@@ -95,7 +95,7 @@ func (rg *ResourceGroup) CheckAndInit() error {
 	}
 	if rg.Mode == rmpb.GroupMode_RawMode {
 		if rg.RawResourceSettings == nil {
-			return errors.New("invalid resource group settings, raw mode should set raw resource settings")
+			rg.RawResourceSettings = &RawResourceSettings{}
 		}
 		if rg.RUSettings != nil {
 			return errors.New("invalid resource group settings, raw mode should not set RU settings")
@@ -145,23 +145,17 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
 		if settings := group.GetRUSettings(); settings != nil {
-			ruSettings = &RequestUnitSettings{}
-			if settings.GetRU() != nil {
-				ruSettings.RU = NewGroupTokenBucket(settings.GetRU())
+			ruSettings = &RequestUnitSettings{
+				RU: NewGroupTokenBucket(settings.GetRU()),
 			}
 			rg.RUSettings = ruSettings
 		}
 	case rmpb.GroupMode_RawMode:
 		if settings := group.GetRawResourceSettings(); settings != nil {
-			resourceSettings = &RawResourceSettings{}
-			if settings.GetCpu() != nil {
-				resourceSettings.CPU = NewGroupTokenBucket(settings.GetCpu())
-			}
-			if settings.GetIoRead() != nil {
-				resourceSettings.IOReadBandwidth = NewGroupTokenBucket(settings.GetIoRead())
-			}
-			if settings.GetIoWrite() != nil {
-				resourceSettings.IOWriteBandwidth = NewGroupTokenBucket(settings.GetIoWrite())
+			resourceSettings = &RawResourceSettings{
+				CPU:              NewGroupTokenBucket(settings.GetCpu()),
+				IOReadBandwidth:  NewGroupTokenBucket(settings.GetIoRead()),
+				IOWriteBandwidth: NewGroupTokenBucket(settings.GetIoWrite()),
 			}
 			rg.RawResourceSettings = resourceSettings
 		}
