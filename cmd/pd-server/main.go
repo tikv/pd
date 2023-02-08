@@ -38,8 +38,7 @@ import (
 	"github.com/tikv/pd/server/join"
 	"go.uber.org/zap"
 
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedulers"
 
 	// Register Service
 	_ "github.com/tikv/pd/pkg/mcs/registry"
@@ -136,6 +135,7 @@ func createServerWrapper(args []string) (context.Context, context.CancelFunc, ba
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}
+	schedulers.Register()
 
 	return ctx, cancel, svr
 }

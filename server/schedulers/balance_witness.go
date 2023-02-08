@@ -51,35 +51,6 @@ const (
 	MaxBalanceWitnessBatchSize = 10
 )
 
-func init() {
-	schedule.RegisterSliceDecoderBuilder(BalanceWitnessType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			conf, ok := v.(*balanceWitnessSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			ranges, err := getKeyRanges(args)
-			if err != nil {
-				return err
-			}
-			conf.Ranges = ranges
-			conf.Batch = balanceWitnessBatchSize
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(BalanceWitnessType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &balanceWitnessSchedulerConfig{storage: storage}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		if conf.Batch == 0 {
-			conf.Batch = balanceWitnessBatchSize
-		}
-		return newBalanceWitnessScheduler(opController, conf), nil
-	})
-}
-
 type balanceWitnessSchedulerConfig struct {
 	mu      syncutil.RWMutex
 	storage endpoint.ConfigStorage

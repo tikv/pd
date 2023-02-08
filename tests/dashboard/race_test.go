@@ -23,8 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/tests"
 
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
+	_ "github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestCancelDuringStarting(t *testing.T) {
