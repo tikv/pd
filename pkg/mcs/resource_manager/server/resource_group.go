@@ -34,7 +34,7 @@ type ResourceGroup struct {
 	Mode rmpb.GroupMode `json:"mode"`
 	// RU settings
 	RUSettings *RequestUnitSettings `json:"r_u_settings,omitempty"`
-	// Native resource settings
+	// raw resource settings
 	RawResourceSettings *RawResourceSettings `json:"raw_resource_settings,omitempty"`
 }
 
@@ -90,7 +90,7 @@ func (rg *ResourceGroup) CheckAndInit() error {
 			rg.RUSettings = &RequestUnitSettings{}
 		}
 		if rg.RawResourceSettings != nil {
-			return errors.New("invalid resource group settings, RU mode should not set resource settings")
+			return errors.New("invalid resource group settings, RU mode should not set raw resource settings")
 		}
 	}
 	if rg.Mode == rmpb.GroupMode_RawMode {
@@ -167,7 +167,7 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 func (rg *ResourceGroup) RequestRU(now time.Time, neededTokens float64, targetPeriodMs uint64) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
-	if rg.RUSettings == nil {
+	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs)
@@ -184,7 +184,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RUMode,
 			RUSettings: &rmpb.GroupRequestUnitSettings{
-				RU: rg.RUSettings.RU.TokenBucket,
+				RU: rg.RUSettings.RU.GetTokenBucket(),
 			},
 		}
 		return group
@@ -193,9 +193,9 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RawMode,
 			RawResourceSettings: &rmpb.GroupRawResourceSettings{
-				Cpu:     rg.RawResourceSettings.CPU.TokenBucket,
-				IoRead:  rg.RawResourceSettings.IOReadBandwidth.TokenBucket,
-				IoWrite: rg.RawResourceSettings.IOWriteBandwidth.TokenBucket,
+				Cpu:     rg.RawResourceSettings.CPU.GetTokenBucket(),
+				IoRead:  rg.RawResourceSettings.IOReadBandwidth.GetTokenBucket(),
+				IoWrite: rg.RawResourceSettings.IOWriteBandwidth.GetTokenBucket(),
 			},
 		}
 		return group
