@@ -246,9 +246,9 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 	return meta, err
 }
 
-// LoadKeyspaceById returns the keyspace specified by id.
+// LoadKeyspaceByID returns the keyspace specified by id.
 // It returns error if loading or unmarshalling met error or if keyspace does not exist.
-func (manager *Manager) LoadKeyspaceById(spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
 	var (
 		meta *keyspacepb.KeyspaceMeta
 		err  error
