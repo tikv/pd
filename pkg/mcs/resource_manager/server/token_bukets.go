@@ -111,10 +111,10 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 			t.Tokens += float64(t.Settings.FillRate) * delta.Seconds()
 			t.LastUpdate = &now
 		}
-		if t.Settings.BurstLimit != 0 {
-			if burst := float64(t.Settings.BurstLimit); t.Tokens > burst {
-				t.Tokens = burst
-			}
+	}
+	if t.Settings.BurstLimit != 0 {
+		if burst := float64(t.Settings.BurstLimit); t.Tokens > burst {
+			t.Tokens = burst
 		}
 	}
 
