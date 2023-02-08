@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -44,31 +43,6 @@ var (
 	randomMergeNoTargetStoreCounter = schedulerCounter.WithLabelValues(RandomMergeName, "no-target-store")
 	randomMergeNotAllowedCounter    = schedulerCounter.WithLabelValues(RandomMergeName, "not-allowed")
 )
-
-func init() {
-	schedule.RegisterSliceDecoderBuilder(RandomMergeType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			conf, ok := v.(*randomMergeSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			ranges, err := getKeyRanges(args)
-			if err != nil {
-				return err
-			}
-			conf.Ranges = ranges
-			conf.Name = RandomMergeName
-			return nil
-		}
-	})
-	schedule.RegisterScheduler(RandomMergeType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &randomMergeSchedulerConfig{}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		return newRandomMergeScheduler(opController, conf), nil
-	})
-}
 
 type randomMergeSchedulerConfig struct {
 	Name   string          `json:"name"`

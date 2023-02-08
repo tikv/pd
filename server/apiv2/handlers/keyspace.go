@@ -39,6 +39,7 @@ func RegisterKeyspace(r *gin.RouterGroup) {
 	router.GET("/:name", LoadKeyspace)
 	router.PATCH("/:name/config", UpdateKeyspaceConfig)
 	router.PUT("/:name/state", UpdateKeyspaceState)
+	router.GET("/id/:id", LoadKeyspaceByID)
 }
 
 // CreateKeyspaceParams represents parameters needed when creating a new keyspace.
@@ -92,6 +93,30 @@ func LoadKeyspace(c *gin.Context) {
 	manager := svr.GetKeyspaceManager()
 	name := c.Param("name")
 	meta, err := manager.LoadKeyspace(name)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
+}
+
+// LoadKeyspaceByID returns target keyspace.
+// @Tags keyspaces
+// @Summary Get keyspace info.
+// @Param id path string true "Keyspace id"
+// @Produce json
+// @Success 200 {object} KeyspaceMeta
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /keyspaces/id/{id} [get]
+func LoadKeyspaceByID(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "invalid keyspace id")
+		return
+	}
+	svr := c.MustGet("server").(*server.Server)
+	manager := svr.GetKeyspaceManager()
+	meta, err := manager.LoadKeyspaceByID(uint32(id))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
