@@ -499,7 +499,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 	case scatterRegionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	case fastFailoverTarget:
-		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected}
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	}
 	for _, cf := range funcs {
 		if status := cf(opt, store); !status.IsOK() {

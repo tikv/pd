@@ -233,10 +233,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
 	ruleCheckerAddRulePeerCounter.Inc()
 	ruleStores := c.getRuleFitStores(rf)
-	isWitness := rf.Rule.IsWitness
-	if !c.isWitnessEnabled() {
-		isWitness = false
-	}
+	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
 	// If the peer to be added is a witness, since no snapshot is needed, we also reuse the fast failover logic.
 	store, filterByTempState := c.strategy(region, rf.Rule, isWitness).SelectStoreToAdd(ruleStores)
 	if store == 0 {
