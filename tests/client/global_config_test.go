@@ -42,12 +42,7 @@ type testReceiver struct {
 func (s testReceiver) Send(m *pdpb.WatchGlobalConfigResponse) error {
 	log.Info("received", zap.Any("received", m.GetChanges()))
 	for _, change := range m.GetChanges() {
-		switch change.GetKind() {
-		case pdpb.EventType_PUT:
-			s.re.Contains(change.Name, globalConfigPath+string(change.Payload))
-		case pdpb.EventType_DELETE:
-			s.re.Empty(change.Payload)
-		}
+		s.re.Contains(change.Name, globalConfigPath+string(change.Payload))
 	}
 	return nil
 }
@@ -196,10 +191,19 @@ func (suite *globalConfigTestSuite) TestWatch() {
 		ConfigPath: globalConfigPath,
 		Revision:   0,
 	}, server)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 6; i++ {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		suite.NoError(err)
 	}
+	for i := 3; i < 6; i++ {
+		_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
+		suite.NoError(err)
+	}
+	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+	})
+	suite.Len(res.Items, 3)
+	suite.NoError(err)
 }
 
 func (suite *globalConfigTestSuite) TestClientLoadWithoutNames() {
@@ -275,7 +279,7 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 		_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath("test"))
 		suite.NoError(err)
 
-		for i := 0; i < 9; i++ {
+		for i := 3; i < 9; i++ {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
 			suite.NoError(err)
 		}
@@ -289,13 +293,18 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 	suite.Equal(r.Header.GetRevision(), revision)
 	suite.Equal(pd.GlobalConfigItem{EventType: pdpb.EventType_PUT, Name: suite.GetEtcdPath("test"), PayLoad: []byte("test"), Value: "test"}, res[0])
 	// Mock when start watcher there are existed some keys, will load firstly
-	for i := 3; i < 6; i++ {
+	for i := 0; i < 6; i++ {
 		_, err = suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		suite.NoError(err)
 	}
 	// Start watcher at next revision
 	configChan, err := suite.client.WatchGlobalConfig(suite.server.Context(), globalConfigPath, revision)
 	suite.NoError(err)
+	// Mock delete
+	for i := 0; i < 3; i++ {
+		_, err = suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
+		suite.NoError(err)
+	}
 	// Mock put
 	for i := 6; i < 9; i++ {
 		_, err = suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
