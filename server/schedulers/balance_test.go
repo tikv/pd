@@ -1221,7 +1221,7 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 	operators, _ := sb.Schedule(tc, false)
 	re.NotEmpty(operators)
 
-	for i := uint64(10); i < 60; i++ {
+	for i := uint64(10); i < 111; i++ {
 		tc.PutRegionStores(i, 1, 3, 4)
 	}
 	operators, _ = sb.Schedule(tc, false)
