@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/tikv/pd/pkg/cgroup"
 	"go.uber.org/zap"
 	"golang.org/x/exp/constraints"
 )
