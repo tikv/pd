@@ -388,7 +388,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 }
 
 func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
-	if core.IsLearner(peer) {
+	if core.IsLearner(peer) || core.IsWitness(peer) {
 		return false
 	}
 	s := c.cluster.GetStore(peer.GetStoreId())
