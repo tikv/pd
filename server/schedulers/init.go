@@ -30,11 +30,11 @@ var registerOnce sync.Once
 // Register registers schedulers.
 func Register() {
 	registerOnce.Do(func() {
-		register()
+		schedulersRegister()
 	})
 }
 
-func register() {
+func schedulersRegister() {
 	// balance leader
 	schedule.RegisterSliceDecoderBuilder(BalanceLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
