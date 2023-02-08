@@ -902,6 +902,11 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(err)
 
 		// Check overlap
+		rm := cluster.GetRuleManager()
+		rm.SetPlaceholderRegionFitCache(regions[n-1])
+		rm.SetPlaceholderRegionFitCache(regions[n-2])
+		re.True(rm.CheckIsCachedDirectly(regions[n-1].GetID()))
+		re.True(rm.CheckIsCachedDirectly(regions[n-2].GetID()))
 		overlapRegion = regions[n-1].Clone(
 			core.WithStartKey(regions[n-2].GetStartKey()),
 			core.WithNewRegionID(regions[n-1].GetID()+1),
@@ -911,9 +916,11 @@ func TestRegionHeartbeat(t *testing.T) {
 		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
 		re.False(ok)
 		re.NoError(err)
+		re.False(rm.CheckIsCachedDirectly(regions[n-1].GetID()))
 		ok, err = storage.LoadRegion(regions[n-2].GetID(), region)
 		re.False(ok)
 		re.NoError(err)
+		re.False(rm.CheckIsCachedDirectly(regions[n-2].GetID()))
 		ok, err = storage.LoadRegion(overlapRegion.GetID(), region)
 		re.True(ok)
 		re.NoError(err)

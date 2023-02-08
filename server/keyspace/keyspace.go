@@ -240,6 +240,7 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		if meta == nil {
 			return ErrKeyspaceNotFound
 		}
+		meta.Id = id
 		return nil
 	})
 	return meta, err
@@ -247,13 +248,13 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 
 // LoadKeyspaceByID returns the keyspace specified by id.
 // It returns error if loading or unmarshalling met error or if keyspace does not exist.
-func (manager *Manager) LoadKeyspaceByID(id uint32) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
 	var (
 		meta *keyspacepb.KeyspaceMeta
 		err  error
 	)
 	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
+		meta, err = manager.store.LoadKeyspaceMeta(txn, spaceID)
 		if err != nil {
 			return err
 		}
@@ -262,6 +263,7 @@ func (manager *Manager) LoadKeyspaceByID(id uint32) (*keyspacepb.KeyspaceMeta, e
 		}
 		return nil
 	})
+	meta.Id = spaceID
 	return meta, err
 }
 

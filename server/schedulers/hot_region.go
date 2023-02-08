@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -175,37 +174,6 @@ func (h *baseHotScheduler) summaryPendingInfluence(cluster schedule.Cluster) {
 
 func (h *baseHotScheduler) randomRWType() statistics.RWType {
 	return h.types[h.r.Int()%len(h.types)]
-}
-
-func init() {
-	schedule.RegisterSliceDecoderBuilder(HotRegionType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			return nil
-		}
-	})
-	schedule.RegisterScheduler(HotRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := initHotRegionScheduleConfig()
-
-		var data map[string]interface{}
-		if err := decoder(&data); err != nil {
-			return nil, err
-		}
-		if len(data) != 0 {
-			// After upgrading, use compatible config.
-
-			// For clusters with the initial version >= v5.2, it will be overwritten by the default config.
-			conf.applyPrioritiesConfig(compatiblePrioritiesConfig)
-			// For clusters with the initial version >= v6.4, it will be overwritten by the default config.
-			conf.SetRankFormulaVersion("")
-
-			if err := decoder(conf); err != nil {
-				return nil, err
-			}
-		}
-
-		conf.storage = storage
-		return newHotScheduler(opController, conf), nil
-	})
 }
 
 const (

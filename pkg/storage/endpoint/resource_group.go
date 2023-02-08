@@ -18,7 +18,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 )
 
-// ResourceGroupStorage defines the storage operations on the rule.
+// ResourceGroupStorage defines the storage operations on the resource group.
 type ResourceGroupStorage interface {
 	LoadResourceGroupSettings(f func(k, v string)) error
 	SaveResourceGroupSetting(name string, msg proto.Message) error

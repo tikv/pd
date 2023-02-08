@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package tso
+package basicsvr
 
 import (
-	"time"
+	"context"
+	"net/http"
 
-	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"go.etcd.io/etcd/clientv3"
 )
 
-type config interface {
-	IsLocalTSOEnabled() bool
-	GetTSOSaveInterval() time.Duration
-	GetTSOUpdatePhysicalInterval() time.Duration
-	GetTLSConfig() *grpcutil.TLSConfig
+// Server defines the common basic behaviors of a server
+type Server interface {
+	// Name returns the unique Name for this server in the cluster.
+	Name() string
+	// Context returns the context of server.
+	Context() context.Context
+
+	// Run runs the server.
+	Run() error
+	// Close closes the server.
+	Close()
+
+	// GetClient returns builtin etcd client.
+	GetClient() *clientv3.Client
+	// GetHTTPClient returns builtin etcd client.
+	GetHTTPClient() *http.Client
 }

@@ -59,9 +59,9 @@ type KVCalculator struct {
 
 var _ ResourceCalculator = (*KVCalculator)(nil)
 
-// func newKVCalculator(cfg *Config) *KVCalculator {
-// 	return &KVCalculator{Config: cfg}
-// }
+func newKVCalculator(cfg *Config) *KVCalculator {
+	return &KVCalculator{Config: cfg}
+}
 
 // Trickle ...
 func (kc *KVCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumption) {
@@ -89,7 +89,7 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	if !req.IsWrite() {
 		kvCPUMs := float64(res.KVCPUMs())
 		consumption.TotalCpuTimeMs += kvCPUMs
-		consumption.RRU += float64(kc.ReadCPUMsCost) * kvCPUMs
+		consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
 	}
 	// A write request may also read data, which should be counted into the RRU cost.
 	readBytes := float64(res.ReadBytes())
@@ -104,9 +104,9 @@ type SQLCalculator struct {
 
 var _ ResourceCalculator = (*SQLCalculator)(nil)
 
-// func newSQLCalculator(cfg *Config) *SQLCalculator {
-// 	return &SQLCalculator{Config: cfg}
-// }
+func newSQLCalculator(cfg *Config) *SQLCalculator {
+	return &SQLCalculator{Config: cfg}
+}
 
 // Trickle ...
 // TODO: calculate the SQL CPU cost and related resource consumption.
@@ -119,4 +119,45 @@ func (dsc *SQLCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Req
 
 // AfterKVRequest ...
 func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
+}
+
+func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
+	if typ == 0 {
+		return custom.RRU + custom.WRU
+	}
+	return 0
+}
+
+func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
+	switch typ {
+	case 0:
+		return custom.TotalCpuTimeMs
+	case 1:
+		return custom.ReadBytes
+	case 2:
+		return custom.WriteBytes
+	}
+	return 0
+}
+
+func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	custom1.RRU += custom2.RRU
+	custom1.WRU += custom2.WRU
+	custom1.ReadBytes += custom2.ReadBytes
+	custom1.WriteBytes += custom2.WriteBytes
+	custom1.TotalCpuTimeMs += custom2.TotalCpuTimeMs
+	custom1.SqlLayerCpuTimeMs += custom2.SqlLayerCpuTimeMs
+	custom1.KvReadRpcCount += custom2.KvReadRpcCount
+	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
+}
+
+func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	custom1.RRU -= custom2.RRU
+	custom1.WRU -= custom2.WRU
+	custom1.ReadBytes -= custom2.ReadBytes
+	custom1.WriteBytes -= custom2.WriteBytes
+	custom1.TotalCpuTimeMs -= custom2.TotalCpuTimeMs
+	custom1.SqlLayerCpuTimeMs -= custom2.SqlLayerCpuTimeMs
+	custom1.KvReadRpcCount -= custom2.KvReadRpcCount
+	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
 }

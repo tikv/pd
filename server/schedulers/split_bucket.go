@@ -57,23 +57,6 @@ var (
 	splitBucketNewOperatorCounter        = schedulerCounter.WithLabelValues(SplitBucketName, "new-operator")
 )
 
-func init() {
-	schedule.RegisterSliceDecoderBuilder(SplitBucketType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(SplitBucketType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := initSplitBucketConfig()
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		conf.storage = storage
-		return newSplitBucketScheduler(opController, conf), nil
-	})
-}
-
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
 		Degree:     defaultHotDegree,

@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/swaggerserver"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
@@ -41,7 +42,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/keyspace"
-	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
 )
 

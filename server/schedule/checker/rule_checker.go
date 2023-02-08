@@ -208,13 +208,20 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			if c.isWitnessEnabled() && core.IsVoter(peer) {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					ruleCheckerPromoteWitnessCounter.Inc()
-					return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+					return operator.CreateNonWitnessPeerOperator("promote-witness-for-down", c.cluster, region, witness)
 				}
 			}
 		}
 		if c.isOfflinePeer(peer) {
 			ruleCheckerReplaceOfflineCounter.Inc()
 			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
+		}
+
+		if c.isWitnessEnabled() && c.isPendingVoter(region, peer) {
+			if witness, ok := c.hasAvailableWitness(region, peer); ok {
+				ruleCheckerPromoteWitnessCounter.Inc()
+				return operator.CreateNonWitnessPeerOperator("promote-witness-for-pending", c.cluster, region, witness)
+			}
 		}
 	}
 	// fix loose matched peers.
@@ -504,6 +511,10 @@ func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
 		return false
 	}
 	return !store.IsPreparing() && !store.IsServing()
+}
+
+func (c *RuleChecker) isPendingVoter(region *core.RegionInfo, peer *metapb.Peer) bool {
+	return region.GetPendingVoter(peer.Id) != nil
 }
 
 func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.Peer) (*metapb.Peer, bool) {

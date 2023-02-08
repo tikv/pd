@@ -14,12 +14,49 @@
 
 package client
 
+import (
+	"time"
+
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+)
+
+var (
+	requestUnitLimitTypeList map[rmpb.RequestUnitType]struct{} = map[rmpb.RequestUnitType]struct{}{
+		rmpb.RequestUnitType_RU: {},
+	}
+	requestResourceLimitTypeList map[rmpb.RawResourceType]struct{} = map[rmpb.RawResourceType]struct{}{
+		rmpb.RawResourceType_IOReadFlow:  {},
+		rmpb.RawResourceType_IOWriteFlow: {},
+		rmpb.RawResourceType_CPU:         {},
+	}
+)
+
 const (
-	defaultReadBaseCost     = 1
-	defaultReadCostPerByte  = 1. / 1024 / 1024
-	defaultReadCPUMsCost    = 1
-	defaultWriteBaseCost    = 3
-	defaultWriteCostPerByte = 5. / 1024 / 1024
+	initialRequestUnits = 10000
+	bufferRUs           = 2000
+	// movingAvgFactor is the weight applied to a new "sample" of RU usage (with one
+	// sample per mainLoopUpdateInterval).
+	//
+	// If we want a factor of 0.5 per second, this should be:
+	//
+	//	0.5^(1 second / mainLoopUpdateInterval)
+	movingAvgFactor                = 0.5
+	notifyFraction                 = 0.1
+	consumptionsReportingThreshold = 100
+	extendedReportingPeriodFactor  = 4
+	defaultGroupLoopUpdateInterval = 1 * time.Second
+	defaultTargetPeriod            = 10 * time.Second
+)
+
+const (
+	defaultReadBaseCost  = 0.25
+	defaultWriteBaseCost = 1.5
+	// 1 RU = 64 KiB read bytes
+	defaultReadCostPerByte = 1. / (64 * 1024)
+	// 1 RU = 1 KiB written bytes
+	defaultWriteCostPerByte = 1. / 1024
+	// 1 RU = 3 millisecond CPU time
+	defaultCPUMsCost = 1. / 3
 )
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
@@ -28,16 +65,16 @@ type RequestUnitConfig struct {
 	// ReadBaseCost is the base cost for a read request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	ReadBaseCost float64 `toml:"read-base-cost" json:"read-base-cost"`
-	// ReadCostPerByte is the cost for each byte read. It's 1 MiB = 1 RRU by default.
+	// ReadCostPerByte is the cost for each byte read. It's 1 RU = 64 KiB by default.
 	ReadCostPerByte float64 `toml:"read-cost-per-byte" json:"read-cost-per-byte"`
-	// ReadCPUMsCost is the cost for each millisecond of CPU time taken by a read request.
-	// It's 1 millisecond = 1 RRU by default.
-	ReadCPUMsCost float64 `toml:"read-cpu-ms-cost" json:"read-cpu-ms-cost"`
 	// WriteBaseCost is the base cost for a write request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	WriteBaseCost float64 `toml:"write-base-cost" json:"write-base-cost"`
-	// WriteCostPerByte is the cost for each byte written. It's 1 MiB = 5 WRU by default.
+	// WriteCostPerByte is the cost for each byte written. It's 1 RU = 1 KiB by default.
 	WriteCostPerByte float64 `toml:"write-cost-per-byte" json:"write-cost-per-byte"`
+	// CPUMsCost is the cost for each millisecond of CPU time taken.
+	// It's 1 RU = 3 millisecond by default.
+	CPUMsCost float64 `toml:"read-cpu-ms-cost" json:"read-cpu-ms-cost"`
 }
 
 // DefaultRequestUnitConfig returns the default request unit configuration.
@@ -45,9 +82,9 @@ func DefaultRequestUnitConfig() *RequestUnitConfig {
 	return &RequestUnitConfig{
 		ReadBaseCost:     defaultReadBaseCost,
 		ReadCostPerByte:  defaultReadCostPerByte,
-		ReadCPUMsCost:    defaultReadCPUMsCost,
 		WriteBaseCost:    defaultWriteBaseCost,
 		WriteCostPerByte: defaultWriteCostPerByte,
+		CPUMsCost:        defaultCPUMsCost,
 	}
 }
 
@@ -55,12 +92,14 @@ func DefaultRequestUnitConfig() *RequestUnitConfig {
 // units or request resource cost standards. It should be calculated by a given `RequestUnitConfig`
 // or `RequestResourceConfig`.
 type Config struct {
+	groupLoopUpdateInterval time.Duration
+	targetPeriod            time.Duration
+
 	ReadBaseCost   RequestUnit
 	ReadBytesCost  RequestUnit
-	ReadCPUMsCost  RequestUnit
 	WriteBaseCost  RequestUnit
 	WriteBytesCost RequestUnit
-	// TODO: add SQL computing CPU cost.
+	CPUMsCost      RequestUnit
 }
 
 // DefaultConfig returns the default configuration.
@@ -75,9 +114,11 @@ func generateConfig(ruConfig *RequestUnitConfig) *Config {
 	cfg := &Config{
 		ReadBaseCost:   RequestUnit(ruConfig.ReadBaseCost),
 		ReadBytesCost:  RequestUnit(ruConfig.ReadCostPerByte),
-		ReadCPUMsCost:  RequestUnit(ruConfig.ReadCPUMsCost),
 		WriteBaseCost:  RequestUnit(ruConfig.WriteBaseCost),
 		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
+		CPUMsCost:      RequestUnit(ruConfig.CPUMsCost),
 	}
+	cfg.groupLoopUpdateInterval = defaultGroupLoopUpdateInterval
+	cfg.targetPeriod = defaultTargetPeriod
 	return cfg
 }
