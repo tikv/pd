@@ -29,11 +29,13 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedulers"
 	"go.etcd.io/etcd/embed"
-
-	// Register schedulers
-	_ "github.com/tikv/pd/server/schedulers"
 )
+
+func init() {
+	schedulers.Register()
+}
 
 // CleanupFunc closes test pd server(s) and deletes any files left behind.
 type CleanupFunc func()

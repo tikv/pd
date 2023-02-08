@@ -19,8 +19,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -43,31 +41,6 @@ var (
 	shuffleRegionCreateOperatorFailCounter = schedulerCounter.WithLabelValues(ShuffleRegionName, "create-operator-fail")
 	shuffleRegionNoSourceStoreCounter      = schedulerCounter.WithLabelValues(ShuffleRegionName, "no-source-store")
 )
-
-func init() {
-	schedule.RegisterSliceDecoderBuilder(ShuffleRegionType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			conf, ok := v.(*shuffleRegionSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			ranges, err := getKeyRanges(args)
-			if err != nil {
-				return err
-			}
-			conf.Ranges = ranges
-			conf.Roles = allRoles
-			return nil
-		}
-	})
-	schedule.RegisterScheduler(ShuffleRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &shuffleRegionSchedulerConfig{storage: storage}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		return newShuffleRegionScheduler(opController, conf), nil
-	})
-}
 
 type shuffleRegionScheduler struct {
 	*BaseScheduler
