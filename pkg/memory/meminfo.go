@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/cgroup"
-
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/shirou/gopsutil/v3/mem"
