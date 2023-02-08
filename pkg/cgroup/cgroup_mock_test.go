@@ -797,6 +797,7 @@ thp_collapse_alloc 0
 
 	// Both /proc/<pid>/mountinfo and /proc/<pid>/cgroup will show the mount and the cgroup relative to the cgroup NS root
 	// This tests the case where the memory controller mount and the cgroup are not exactly the same (as is with k8s pods).
+	//#nosec G101
 	v1CgroupWithMemoryControllerNS = "12:memory:/cgroup_test"
 	v1MountsWithMemControllerNS    = "50 35 0:44 / /sys/fs/cgroup/memory rw,nosuid,nodev,noexec,relatime shared:25 - cgroup cgroup rw,memory"
 
@@ -806,22 +807,26 @@ thp_collapse_alloc 0
 	// echo 100000 > /sys/fs/cgroup/cpu/crdb_test/cpu.cfs_period_us
 	// echo 33300 > /sys/fs/cgroup/cpu/crdb_test/cpu.cfs_quota_us
 	// cgexec -g cpu:crdb_test ./cockroach ...
+	//#nosec G101
 	v1CgroupWithCPUControllerNS = "5:cpu,cpuacct:/crdb_test"
 	v1MountsWithCPUControllerNS = "43 35 0:37 / /sys/fs/cgroup/cpu,cpuacct rw,nosuid,nodev,noexec,relatime shared:18 - cgroup cgroup rw,cpu,cpuacct"
 
 	// Same as above but with unshare -C
 	// Can't determine the location of the mount
+	//#nosec G101
 	v1CgroupWithCPUControllerNSMountRel = "5:cpu,cpuacct:/"
 	v1MountsWithCPUControllerNSMountRel = "43 35 0:37 /.. /sys/fs/cgroup/cpu,cpuacct rw,nosuid,nodev,noexec,relatime shared:18 - cgroup cgroup rw,cpu,cpuacct"
 
 	// Same as above but with mounting the cgroup fs one more time in the NS
 	// sudo mount -t cgroup -o cpu,cpuacct none /sys/fs/cgroup/cpu,cpuacct/crdb_test
+	//#nosec G101
 	v1CgroupWithCPUControllerNSMountRelRemount = "5:cpu,cpuacct:/"
 	v1MountsWithCPUControllerNSMountRelRemount = `
 43 35 0:37 /.. /sys/fs/cgroup/cpu,cpuacct rw,nosuid,nodev,noexec,relatime shared:18 - cgroup cgroup rw,cpu,cpuacct
 161 43 0:37 / /sys/fs/cgroup/cpu,cpuacct/crdb_test rw,relatime shared:95 - cgroup none rw,cpu,cpuacct
 `
 	// Same as above but exiting the NS w/o unmounting
+	//#nosec G101
 	v1CgroupWithCPUControllerNS2 = "5:cpu,cpuacct:/crdb_test"
 	v1MountsWithCPUControllerNS2 = "161 43 0:37 /crdb_test /sys/fs/cgroup/cpu,cpuacct/crdb_test rw,relatime shared:95 - cgroup none rw,cpu,cpuacct"
 )
