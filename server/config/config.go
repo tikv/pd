@@ -1018,7 +1018,7 @@ func (c *ScheduleConfig) Validate() error {
 		}
 	}
 	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
-		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set", c.SlowStoreEvictingAffectedStoreRatioThreshold)
+		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
 	}
 	return nil
 }
