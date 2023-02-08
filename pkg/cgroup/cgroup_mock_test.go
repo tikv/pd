@@ -448,7 +448,7 @@ func TestCgroupsGetCPU(t *testing.T) {
 	} {
 		dir := createFiles(t, tc.paths)
 
-		cpuusage, err := getCgroupCPU(dir)
+		cpuusage, err := getCgroupCPUHelper(dir)
 		require.True(t, isError(err, tc.errMsg),
 			"%v %v", err, tc.errMsg)
 		require.Equal(t, tc.quota, cpuusage.Quota)

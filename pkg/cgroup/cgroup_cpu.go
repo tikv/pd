@@ -22,7 +22,7 @@ import (
 )
 
 // Helper function for getCgroupCPU. Root is always "/", except in tests.
-func getCgroupCPU(root string) (CPUUsage, error) {
+func getCgroupCPUHelper(root string) (CPUUsage, error) {
 	path, err := detectControlPath(filepath.Join(root, procPathCGroup), "cpu,cpuacct")
 	if err != nil {
 		return CPUUsage{}, err

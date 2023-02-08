@@ -25,7 +25,7 @@ import (
 
 // GetCgroupCPU returns the CPU usage and quota for the current cgroup.
 func GetCgroupCPU() (CPUUsage, error) {
-	cpuusage, err := getCgroupCPU("/")
+	cpuusage, err := getCgroupCPUHelper("/")
 	cpuusage.NumCPU = runtime.NumCPU()
 	return cpuusage, err
 }
