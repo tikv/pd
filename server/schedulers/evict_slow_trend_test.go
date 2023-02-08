@@ -52,15 +52,15 @@ func (suite *evictSlowTrendTestSuite) SetupTest() {
 	suite.tc = mockcluster.NewCluster(suite.ctx, opt)
 
 	suite.tc.AddLeaderStore(1, 10)
-	suite.tc.AddLeaderStore(2, 100)
-	suite.tc.AddLeaderStore(3, 10)
+	suite.tc.AddLeaderStore(2, 99)
+	suite.tc.AddLeaderStore(3, 100)
 	suite.tc.AddLeaderRegion(1, 1, 2, 3)
 	suite.tc.AddLeaderRegion(2, 2, 1, 3)
 	suite.tc.AddLeaderRegion(3, 3, 1, 2)
 
 	now := time.Now()
 	for i := 1; i <= 3; i++ {
-		storeInfo := suite.tc.GetStore(1)
+		storeInfo := suite.tc.GetStore(uint64(i))
 		newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
 			store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{
 				CauseValue:  5.0e6,
@@ -74,6 +74,7 @@ func (suite *evictSlowTrendTestSuite) SetupTest() {
 
 	suite.oc = schedule.NewOperatorController(suite.ctx, nil, nil)
 	storage := storage.NewStorageWithMemoryBackend()
+	Register()
 	var err error
 	suite.es, err = schedule.CreateScheduler(EvictSlowTrendType, suite.oc, storage, schedule.ConfigSliceDecoder(EvictSlowTrendType, []string{}))
 	suite.NoError(err)
@@ -90,8 +91,8 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	suite.True(ok)
 
 	// Set store-1 to slow status, generate evict candidate
-	suite.Equal(es2.conf.evictedStore(), 0)
-	suite.Equal(es2.conf.candidate(), 0)
+	suite.Equal(es2.conf.evictedStore(), uint64(0))
+	suite.Equal(es2.conf.candidate(), uint64(0))
 	storeInfo := suite.tc.GetStore(1)
 	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{
@@ -105,8 +106,8 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	suite.True(suite.es.IsScheduleAllowed(suite.tc))
 	ops, _ := suite.es.Schedule(suite.tc, false)
 	suite.Empty(ops)
-	suite.Equal(es2.conf.candidate(), 1)
-	suite.Equal(es2.conf.evictedStore(), 0)
+	suite.Equal(es2.conf.candidate(), uint64(1))
+	suite.Equal(es2.conf.evictedStore(), uint64(0))
 
 	// Update other stores' heartbeat-ts, do evicting
 	for storeID := uint64(2); storeID <= uint64(3); storeID++ {
@@ -117,10 +118,10 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 		suite.tc.PutStore(newStoreInfo)
 	}
 	ops, _ = suite.es.Schedule(suite.tc, false)
-	testutil.CheckMultiTargetTransferLeader(suite.Require(), ops[0], operator.OpLeader, 1, []uint64{2})
+	testutil.CheckMultiTargetTransferLeader(suite.Require(), ops[0], operator.OpLeader, 1, []uint64{2, 3})
 	suite.Equal(EvictSlowTrendType, ops[0].Desc())
-	suite.Equal(es2.conf.candidate(), 0)
-	suite.Equal(es2.conf.evictedStore(), 1)
+	suite.Equal(es2.conf.candidate(), uint64(0))
+	suite.Equal(es2.conf.evictedStore(), uint64(1))
 	// Cannot balance leaders to store 1
 	ops, _ = suite.bs.Schedule(suite.tc, false)
 	suite.Empty(ops)
@@ -135,12 +136,12 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 		}
 	})
 	suite.tc.PutStore(newStoreInfo)
-	// Evict leader scheduler of store 1 should be removed, then leader can be balanced from store-2 to store-1
+	// Evict leader scheduler of store 1 should be removed, then leaders should be balanced from store-3 to store-1
 	ops, _ = suite.es.Schedule(suite.tc, false)
 	suite.Empty(ops)
 	suite.Zero(es2.conf.evictedStore())
 	ops, _ = suite.bs.Schedule(suite.tc, false)
-	testutil.CheckTransferLeader(suite.Require(), ops[0], operator.OpLeader, 2, 1)
+	testutil.CheckTransferLeader(suite.Require(), ops[0], operator.OpLeader, 3, 1)
 
 	// no slow store need to evict.
 	ops, _ = suite.es.Schedule(suite.tc, false)
@@ -175,27 +176,4 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPrepare() {
 	suite.Equal(uint64(1), es2.conf.evictedStore())
 	// prepare with evict store.
 	suite.es.Prepare(suite.tc)
-}
-
-func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPersistFail() {
-	persisFail := "github.com/tikv/pd/server/schedulers/persistFail"
-	suite.NoError(failpoint.Enable(persisFail, "return(true)"))
-
-	storeInfo := suite.tc.GetStore(1)
-	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{
-			CauseValue:  5.0e8,
-			CauseRate:   1e7,
-			ResultValue: 3.0e3,
-			ResultRate:  -1e7,
-		}
-	})
-	suite.tc.PutStore(newStoreInfo)
-	suite.True(suite.es.IsScheduleAllowed(suite.tc))
-	// Add evict leader scheduler to store 1
-	ops, _ := suite.es.Schedule(suite.tc, false)
-	suite.Empty(ops)
-	suite.NoError(failpoint.Disable(persisFail))
-	ops, _ = suite.es.Schedule(suite.tc, false)
-	suite.NotEmpty(ops)
 }

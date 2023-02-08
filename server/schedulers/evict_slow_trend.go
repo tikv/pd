@@ -21,7 +21,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -285,7 +284,7 @@ func chooseEvictCandidate(cluster schedule.Cluster) (slowStore *core.StoreInfo) 
 		if slowTrend != nil && slowTrend.CauseRate > alterEpsilon && slowTrend.ResultRate < -alterEpsilon {
 			candidates = append(candidates, store)
 			storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
-			log.Info("evict-slow-trend-scheduler canptured candidate",
+			log.Info("evict-slow-trend-scheduler pre-canptured candidate",
 				zap.Uint64("store-id", store.GetID()),
 				zap.Float64("cause-rate", slowTrend.CauseRate),
 				zap.Float64("result-rate", slowTrend.ResultRate),
@@ -301,23 +300,28 @@ func chooseEvictCandidate(cluster schedule.Cluster) (slowStore *core.StoreInfo) 
 		return
 	}
 
-	affectedStoreThreshold := int(float64(len(stores)) * cluster.GetOpts().GetSlowStoreEvictingAffectedStoreRatioThreshold())
-	if affectedStoreCount < affectedStoreThreshold {
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:affect-a-few").Inc()
-		return
-	}
-
 	// TODO: Calculate to judge if one store is way slower than the others
 	if len(candidates) > 1 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-many").Inc()
 		return
 	}
-
 	store := candidates[0]
+
+	affectedStoreThreshold := int(float64(len(stores)) * cluster.GetOpts().GetSlowStoreEvictingAffectedStoreRatioThreshold())
+	if affectedStoreCount < affectedStoreThreshold {
+		log.Info("evict-slow-trend-scheduler failed to confirm candidate: it only affect a few stores", zap.Uint64("store-id", store.GetID()))
+		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:affect-a-few").Inc()
+		return
+	}
+
 	if !checkStoreSlowerThanOthers(cluster, store) {
+		log.Info("evict-slow-trend-scheduler failed to confirm candidate: it's not slower than others", zap.Uint64("store-id", store.GetID()))
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:not-slower").Inc()
 		return
 	}
+
+	storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
+	log.Info("evict-slow-trend-scheduler canptured candidate", zap.Uint64("store-id", store.GetID()))
 	return store
 }
 
@@ -433,7 +437,7 @@ func checkStoreFasterThanOthers(cluster schedule.Cluster, target *core.StoreInfo
 	}
 	storeSlowTrendMiscGauge.WithLabelValues("store.check-faster:count").Set(float64(fasterThanStores))
 	storeSlowTrendMiscGauge.WithLabelValues("store.check-faster:expected").Set(float64(expected))
-	return fasterThanStores > expected
+	return fasterThanStores >= expected
 }
 
 const alterEpsilon = 1e-9
