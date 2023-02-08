@@ -18,7 +18,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -42,32 +41,6 @@ var (
 	labelSkipCounter        = schedulerCounter.WithLabelValues(LabelName, "skip")
 	labelNoRegionCounter    = schedulerCounter.WithLabelValues(LabelName, "no-region")
 )
-
-func init() {
-	schedule.RegisterSliceDecoderBuilder(LabelType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			conf, ok := v.(*labelSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			ranges, err := getKeyRanges(args)
-			if err != nil {
-				return err
-			}
-			conf.Ranges = ranges
-			conf.Name = LabelName
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(LabelType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &labelSchedulerConfig{}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		return newLabelScheduler(opController, conf), nil
-	})
-}
 
 type labelSchedulerConfig struct {
 	Name   string          `json:"name"`

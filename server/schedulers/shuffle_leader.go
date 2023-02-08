@@ -18,7 +18,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -39,32 +38,6 @@ var (
 	shuffleLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(ShuffleLeaderName, "no-target-store")
 	shuffleLeaderNoFollowerCounter    = schedulerCounter.WithLabelValues(ShuffleLeaderName, "no-follower")
 )
-
-func init() {
-	schedule.RegisterSliceDecoderBuilder(ShuffleLeaderType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			conf, ok := v.(*shuffleLeaderSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			ranges, err := getKeyRanges(args)
-			if err != nil {
-				return err
-			}
-			conf.Ranges = ranges
-			conf.Name = ShuffleLeaderName
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(ShuffleLeaderType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &shuffleLeaderSchedulerConfig{}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		return newShuffleLeaderScheduler(opController, conf), nil
-	})
-}
 
 type shuffleLeaderSchedulerConfig struct {
 	Name   string          `json:"name"`
