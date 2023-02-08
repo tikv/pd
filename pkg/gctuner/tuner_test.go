@@ -25,7 +25,7 @@ var testHeap []byte
 
 func TestTuner(t *testing.T) {
 	EnableGOGCTuner.Store(true)
-	memLimit := uint64(1000 * 1024 * 1024) //1000 MB
+	memLimit := uint64(1000 * 1024 * 1024) // 1000 MB
 	threshold := memLimit / 2
 	tn := newTuner(threshold)
 	require.Equal(t, threshold, tn.threshold.Load())

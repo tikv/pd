@@ -464,12 +464,14 @@ func createFiles(t *testing.T, paths map[string]string) (dir string) {
 	for path, data := range paths {
 		path = filepath.Join(dir, path)
 		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0755))
+		//#nosec G306
 		require.NoError(t, os.WriteFile(path, []byte(data), 0755))
 	}
 	return dir
 }
 
 const (
+	//#nosec G101
 	v1CgroupWithMemoryController = `11:blkio:/kubepods/besteffort/pod1bf924dd-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 10:devices:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 9:perf_event:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
@@ -482,6 +484,7 @@ const (
 2:freezer:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 1:name=systemd:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 `
+	//#nosec G101
 	v1CgroupWithoutMemoryController = `10:blkio:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 9:devices:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 8:perf_event:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
@@ -493,6 +496,7 @@ const (
 2:freezer:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 1:name=systemd:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 `
+	//#nosec G101
 	v1CgroupWithCPUController = `11:blkio:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 10:devices:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 9:perf_event:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
@@ -505,6 +509,7 @@ const (
 2:freezer:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 1:name=systemd:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 `
+	//#nosec G101
 	v1CgroupWithoutCPUController = `10:blkio:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 9:devices:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 8:perf_event:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
@@ -516,9 +521,10 @@ const (
 2:freezer:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 1:name=systemd:/kubepods/besteffort/podcbfx2j5d-3f6f-11ea-983d-0abc95f90166/c17eb535a47774285717e40bbda777ee72e81471272a5b8ebffd51fdf7f624e3
 `
+	//#nosec G101
 	v2CgroupWithMemoryController = `0::/machine.slice/libpod-f1c6b44c0d61f273952b8daecf154cee1be2d503b7e9184ebf7fcaf48e139810.scope
 `
-
+	//#nosec G101
 	v1MountsWithMemController = `625 367 0:71 / / rw,relatime master:85 - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/DOLSFLPSKANL4GJ7XKF3OG6PKN:/var/lib/docker/overlay2/l/P7UJPLDFEUSRQ7CZILB7L4T5OP:/var/lib/docker/overlay2/l/FSKO5FFFNQ6XOSVF7T6R2DWZVZ:/var/lib/docker/overlay2/l/YNE4EZZE2GW2DIXRBUP47LB3GU:/var/lib/docker/overlay2/l/F2JNS7YWT5CU7FUXHNV5JUJWQY,upperdir=/var/lib/docker/overlay2/b12d4d510f3eaf4552a749f9d4f6da182d55bfcdc75755f1972fd8ca33f51278/diff,workdir=/var/lib/docker/overlay2/b12d4d510f3eaf4552a749f9d4f6da182d55bfcdc75755f1972fd8ca33f51278/work
 626 625 0:79 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw
 687 625 0:75 / /dev rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755
@@ -559,6 +565,7 @@ const (
 223 626 0:75 /null /proc/sched_debug rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755
 224 702 0:101 / /sys/firmware ro,relatime - tmpfs tmpfs ro
 `
+	//#nosec G101
 	v1MountsWithoutMemController = `625 367 0:71 / / rw,relatime master:85 - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/DOLSFLPSKANL4GJ7XKF3OG6PKN:/var/lib/docker/overlay2/l/P7UJPLDFEUSRQ7CZILB7L4T5OP:/var/lib/docker/overlay2/l/FSKO5FFFNQ6XOSVF7T6R2DWZVZ:/var/lib/docker/overlay2/l/YNE4EZZE2GW2DIXRBUP47LB3GU:/var/lib/docker/overlay2/l/F2JNS7YWT5CU7FUXHNV5JUJWQY,upperdir=/var/lib/docker/overlay2/b12d4d510f3eaf4552a749f9d4f6da182d55bfcdc75755f1972fd8ca33f51278/diff,workdir=/var/lib/docker/overlay2/b12d4d510f3eaf4552a749f9d4f6da182d55bfcdc75755f1972fd8ca33f51278/work
 626 625 0:79 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw
 687 625 0:75 / /dev rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755
@@ -598,6 +605,7 @@ const (
 223 626 0:75 /null /proc/sched_debug rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755
 224 702 0:101 / /sys/firmware ro,relatime - tmpfs tmpfs ro
 `
+	//#nosec G101
 	v1MountsWithCPUController = `625 367 0:71 / / rw,relatime master:85 - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/DOLSFLPSKANL4GJ7XKF3OG6PKN:/var/lib/docker/overlay2/l/P7UJPLDFEUSRQ7CZILB7L4T5OP:/var/lib/docker/overlay2/l/FSKO5FFFNQ6XOSVF7T6R2DWZVZ:/var/lib/docker/overlay2/l/YNE4EZZE2GW2DIXRBUP47LB3GU:/var/lib/docker/overlay2/l/F2JNS7YWT5CU7FUXHNV5JUJWQY,upperdir=/var/lib/docker/overlay2/b12d4d510f3eaf4552a749f9d4f6da182d55bfcdc75755f1972fd8ca33f51278/diff,workdir=/var/lib/docker/overlay2/b12d4d510f3eaf4552a749f9d4f6da182d55bfcdc75755f1972fd8ca33f51278/work
 626 625 0:79 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw
 687 625 0:75 / /dev rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755
@@ -638,6 +646,7 @@ const (
 223 626 0:75 /null /proc/sched_debug rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755
 224 702 0:101 / /sys/firmware ro,relatime - tmpfs tmpfs ro
 `
+	//#nosec G101
 	v1MountsWithoutCPUController = `625 367 0:71 / / rw,relatime master:85 - overlay overlay rw,lowerdir=/var/lib/docker/overlay2/l/DOLSFLPSKANL4GJ7XKF3OG6PKN:/var/lib/docker/overlay2/l/P7UJPLDFEUSRQ7CZILB7L4T5OP:/var/lib/docker/overlay2/l/FSKO5FFFNQ6XOSVF7T6R2DWZVZ:/var/lib/docker/overlay2/l/YNE4EZZE2GW2DIXRBUP47LB3GU:/var/lib/docker/overlay2/l/F2JNS7YWT5CU7FUXHNV5JUJWQY,upperdir=/var/lib/docker/overlay2/b12d4d510f3eaf4552a749f9d4f6da182d55bfcdc75755f1972fd8ca33f51278/diff,workdir=/var/lib/docker/overlay2/b12d4d510f3eaf4552a749f9d4f6da182d55bfcdc75755f1972fd8ca33f51278/work
 626 625 0:79 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw
 687 625 0:75 / /dev rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755
@@ -676,7 +685,7 @@ const (
 223 626 0:75 /null /proc/sched_debug rw,nosuid - tmpfs tmpfs rw,size=65536k,mode=755
 224 702 0:101 / /sys/firmware ro,relatime - tmpfs tmpfs ro
 `
-
+	//#nosec G101
 	v2Mounts = `371 344 0:35 / / rw,relatime - overlay overlay rw,context="system_u:object_r:container_file_t:s0:c200,c321",lowerdir=/var/lib/containers/storage/overlay/l/SPNDOAU3AZNJMNKU3F5THCA36R,upperdir=/var/lib/containers/storage/overlay/7dcd88f815bded7b833fb5dc0f25de897250bcfa828624c0d78393689d0bc312/diff,workdir=/var/lib/containers/storage/overlay/7dcd88f815bded7b833fb5dc0f25de897250bcfa828624c0d78393689d0bc312/work
 372 371 0:37 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw
 373 371 0:38 / /dev rw,nosuid - tmpfs tmpfs rw,context="system_u:object_r:container_file_t:s0:c200,c321",size=65536k,mode=755
