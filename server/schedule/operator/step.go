@@ -414,7 +414,7 @@ func (bsw BatchSwitchWitness) Influence(opInfluence OpInfluence, region *core.Re
 
 // Timeout returns duration that current step may take.
 func (bsw BatchSwitchWitness) Timeout(regionSize int64) time.Duration {
-	count := uint64(len(bsw.ToWitnesses)+len(bsw.ToNonWitnesses)) + 1
+	count := len(bsw.ToNonWitnesses)) + 1
 	return slowStepWaitDuration(regionSize) * time.Duration(count)
 }
 
