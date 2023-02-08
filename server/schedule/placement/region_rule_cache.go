@@ -15,8 +15,6 @@
 package placement
 
 import (
-	"sync/atomic"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
@@ -87,7 +85,8 @@ func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit 
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	if cache, ok := manager.regionCaches[region.GetID()]; ok {
-		if atomic.AddUint32(&cache.hitCount, 1) >= minHitCountToCacheHit {
+		cache.hitCount++
+		if cache.hitCount >= minHitCountToCacheHit {
 			cache.bestFit = fit
 		}
 		return
