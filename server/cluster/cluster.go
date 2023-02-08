@@ -319,6 +319,9 @@ func (c *RaftCluster) startGCTuner() {
 	enableGCTuner := cfg.EnableGOGCTuner
 	memoryLimitBytes := uint64(float64(totalMem) * cfg.ServerMemoryLimit)
 	gcThresholdBytes := uint64(float64(memoryLimitBytes) * cfg.GCTunerThreshold)
+	if memoryLimitBytes == 0 {
+		gcThresholdBytes = uint64(float64(totalMem) * cfg.GCTunerThreshold)
+	}
 	memoryLimitGCTriggerRatio := cfg.ServerMemoryLimitGCTrigger
 	memoryLimitGCTriggerBytes := uint64(float64(memoryLimitBytes) * memoryLimitGCTriggerRatio)
 	updateGCTuner := func() {
@@ -341,6 +344,9 @@ func (c *RaftCluster) startGCTuner() {
 		newEnableGCTuner := cfg.EnableGOGCTuner
 		newMemoryLimitBytes := uint64(float64(totalMem) * cfg.ServerMemoryLimit)
 		newGCThresholdBytes := uint64(float64(newMemoryLimitBytes) * cfg.GCTunerThreshold)
+		if newMemoryLimitBytes == 0 {
+			newGCThresholdBytes = uint64(float64(totalMem) * cfg.GCTunerThreshold)
+		}
 		newMemoryLimitGCTriggerRatio := cfg.ServerMemoryLimitGCTrigger
 		newMemoryLimitGCTriggerBytes := uint64(float64(newMemoryLimitBytes) * newMemoryLimitGCTriggerRatio)
 		if newEnableGCTuner != enableGCTuner || newGCThresholdBytes != gcThresholdBytes {
