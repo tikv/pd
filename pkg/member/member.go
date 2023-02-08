@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
@@ -302,7 +303,7 @@ func (m *Member) getMemberLeaderPriorityPath(id uint64) string {
 
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 func (m *Member) GetDCLocationPathPrefix() string {
-	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix)
+	return path.Join(m.rootPath, endpoint.MicroserviceKey, endpoint.TSOServiceKey, "default", dcLocationConfigEtcdPrefix)
 }
 
 // GetDCLocationPath returns the dc-location path of a member with the given member ID.

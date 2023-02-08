@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -50,6 +51,7 @@ type LocalTSOAllocator struct {
 // NewLocalTSOAllocator creates a new local TSO allocator.
 func NewLocalTSOAllocator(
 	am *AllocatorManager,
+	storage endpoint.TSOStorage,
 	leadership *election.Leadership,
 	dcLocation string,
 ) Allocator {
@@ -59,6 +61,7 @@ func NewLocalTSOAllocator(
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
 			rootPath:               leadership.GetLeaderKey(),
+			storage:                storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
@@ -78,7 +81,7 @@ func (lta *LocalTSOAllocator) GetDCLocation() string {
 func (lta *LocalTSOAllocator) Initialize(suffix int) error {
 	tsoAllocatorRole.WithLabelValues(lta.timestampOracle.dcLocation).Set(1)
 	lta.timestampOracle.suffix = suffix
-	return lta.timestampOracle.SyncTimestamp(lta.leadership)
+	return lta.timestampOracle.SyncTimestamp()
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.

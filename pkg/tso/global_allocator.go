@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
@@ -73,6 +74,7 @@ type GlobalTSOAllocator struct {
 // NewGlobalTSOAllocator creates a new global TSO allocator.
 func NewGlobalTSOAllocator(
 	am *AllocatorManager,
+	storage endpoint.TSOStorage,
 	leadership *election.Leadership,
 ) Allocator {
 	gta := &GlobalTSOAllocator{
@@ -80,7 +82,8 @@ func NewGlobalTSOAllocator(
 		leadership:       leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
-			rootPath:               am.rootPath,
+			rootPath:               leadership.GetLeaderKey(),
+			storage:                storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
@@ -127,7 +130,7 @@ func (gta *GlobalTSOAllocator) Initialize(int) error {
 	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(1)
 	// The suffix of a Global TSO should always be 0.
 	gta.timestampOracle.suffix = 0
-	return gta.timestampOracle.SyncTimestamp(gta.leadership)
+	return gta.timestampOracle.SyncTimestamp()
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.

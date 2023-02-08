@@ -326,6 +326,11 @@ error = '''
 etcd KV put failed
 '''
 
+["PD:etcd:ErrEtcdKVTxn"]
+error = '''
+etcd KV txn failed
+'''
+
 ["PD:etcd:ErrEtcdMemberList"]
 error = '''
 etcd member list failed

@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -48,8 +49,6 @@ const (
 	patrolStep                  = time.Second
 	defaultAllocatorLeaderLease = 3
 	leaderTickInterval          = 50 * time.Millisecond
-	localTSOAllocatorEtcdPrefix = "lta"
-	localTSOSuffixEtcdPrefix    = "lts"
 )
 
 var (
@@ -99,6 +98,7 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
 type AllocatorManager struct {
 	enableLocalTSO bool
+	storage        endpoint.TSOStorage
 	mu             struct {
 		syncutil.RWMutex
 		// There are two kinds of TSO Allocators:
@@ -131,6 +131,7 @@ type AllocatorManager struct {
 // NewAllocatorManager creates a new TSO Allocator Manager.
 func NewAllocatorManager(
 	m *member.Member,
+	storage endpoint.TSOStorage,
 	rootPath string,
 	enableLocalTSO bool,
 	saveInterval time.Duration,
@@ -141,6 +142,7 @@ func NewAllocatorManager(
 	allocatorManager := &AllocatorManager{
 		enableLocalTSO:         enableLocalTSO,
 		member:                 m,
+		storage:                storage,
 		rootPath:               rootPath,
 		saveInterval:           saveInterval,
 		updatePhysicalInterval: updatePhysicalInterval,
@@ -311,7 +313,7 @@ func CalSuffixBits(maxSuffix int32) int {
 
 // SetUpAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
 // One TSO Allocator should only be set once, and may be initialized and reset multiple times depending on the election.
-func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
+func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, storage endpoint.TSOStorage, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	if am.updatePhysicalInterval != defaultTSOUpdatePhysicalInterval {
@@ -323,9 +325,9 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 	}
 	var allocator Allocator
 	if dcLocation == GlobalDCLocation {
-		allocator = NewGlobalTSOAllocator(am, leadership)
+		allocator = NewGlobalTSOAllocator(am, storage, leadership)
 	} else {
-		allocator = NewLocalTSOAllocator(am, leadership, dcLocation)
+		allocator = NewLocalTSOAllocator(am, storage, leadership, dcLocation)
 	}
 	// Create a new allocatorGroup
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -350,15 +352,21 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
 	// For backward compatibility, the global timestamp's store path will still use the old one
 	if dcLocation == GlobalDCLocation {
-		return am.rootPath
+		return am.getGlobalTSOAllocatorPath()
 	}
 	return path.Join(am.getLocalTSOAllocatorPath(), dcLocation)
 }
 
 // Add a prefix to the root path to prevent being conflicted
 // with other system key paths such as leader, member, alloc_id, raft, etc.
+func (am *AllocatorManager) getGlobalTSOAllocatorPath() string {
+	return path.Join(am.rootPath, endpoint.MicroserviceKey, endpoint.TSOServiceKey, defaultKeyspaceGroup, endpoint.GlobalTSOKey)
+}
+
+// Add a prefix to the root path to prevent being conflicted
+// with other system key paths such as leader, member, alloc_id, raft, etc.
 func (am *AllocatorManager) getLocalTSOAllocatorPath() string {
-	return path.Join(am.rootPath, localTSOAllocatorEtcdPrefix)
+	return path.Join(am.rootPath, endpoint.MicroserviceKey, endpoint.TSOServiceKey, defaultKeyspaceGroup, endpoint.LocalTSOKey)
 }
 
 // similar logic with leaderLoop in server/server.go
@@ -646,7 +654,7 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 		if slice.NoneOf(allocatorGroups, func(i int) bool {
 			return allocatorGroups[i].dcLocation == dcLocation
 		}) {
-			am.SetUpAllocator(serverCtx, dcLocation, election.NewLeadership(
+			am.SetUpAllocator(serverCtx, am.storage, dcLocation, election.NewLeadership(
 				am.member.Client(),
 				am.getAllocatorPath(dcLocation),
 				fmt.Sprintf("%s local allocator leader election", dcLocation),
@@ -804,7 +812,7 @@ func (am *AllocatorManager) getMaxLocalTSOSuffix() (int32, error) {
 
 // GetLocalTSOSuffixPathPrefix returns the etcd key prefix of the Local TSO suffix for the given dc-location.
 func (am *AllocatorManager) GetLocalTSOSuffixPathPrefix() string {
-	return path.Join(am.rootPath, localTSOSuffixEtcdPrefix)
+	return path.Join(am.rootPath, endpoint.MicroserviceKey, endpoint.TSOServiceKey, defaultKeyspaceGroup, endpoint.LocalTSOAllocatorKey)
 }
 
 // GetLocalTSOSuffixPath returns the etcd key of the Local TSO suffix for the given dc-location.

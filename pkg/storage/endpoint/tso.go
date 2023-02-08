@@ -25,8 +25,8 @@ import (
 )
 
 // TSOStorage defines the storage operations on the TSO.
-// global tso: key is `/microservice/tso/{keyspaceGroupName}/timestamp`
-// local tso: key is `/microservice/tso/{keyspaceGroupName}/lts/{dcLocation}/timestamp`
+// global tso: key is `/ms/tso/{keyspaceGroupName}/gts/timestamp`
+// local tso: key is `/ms/tso/{keyspaceGroupName}/lts/{dcLocation}/timestamp`
 // FIXME: When we upgrade from the old version, there may be compatibility issues.
 type TSOStorage interface {
 	LoadTimestamp(keyspaceGroupName string, dcLocationKey ...string) (time.Time, error)
@@ -68,7 +68,7 @@ func (se *StorageEndpoint) LoadTimestamp(keyspaceGroupName string, dcLocationKey
 
 // SaveTimestamp saves the timestamp to the storage.
 func (se *StorageEndpoint) SaveTimestamp(keyspaceGroupName string, ts time.Time, dcLocationKey ...string) error {
-	key := timestampPath(keyspaceGroupName, dcLocationKey...)
+	key := TimestampPath(keyspaceGroupName, dcLocationKey...)
 	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
 	return se.Save(key, string(data))
 }

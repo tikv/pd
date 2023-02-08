@@ -74,7 +74,7 @@ func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) 
 
 	backInfo.AllocIDMax = allocIDMax
 
-	timestampPath := path.Join(rootPath, "timestamp")
+	timestampPath := path.Join(rootPath, "ms", "tso", "default", "gts", "timestamp")
 	resp, err = etcdutil.EtcdKVGet(client, timestampPath)
 	if err != nil {
 		return nil, err
