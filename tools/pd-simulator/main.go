@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"github.com/tikv/pd/tools/pd-simulator/simulator"
@@ -38,8 +39,7 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
+	_ "github.com/tikv/pd/pkg/utils/testutil"
 )
 
 var (
@@ -56,6 +56,7 @@ var (
 )
 
 func main() {
+	schedulers.Register()
 	// wait PD start. Otherwise it will happen error when getting cluster ID.
 	time.Sleep(3 * time.Second)
 	// ignore some undefined flag

@@ -51,47 +51,6 @@ var (
 	grantHotRegionSkipCounter = schedulerCounter.WithLabelValues(GrantHotRegionName, "skip")
 )
 
-func init() {
-	schedule.RegisterSliceDecoderBuilder(GrantHotRegionType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			if len(args) != 2 {
-				return errs.ErrSchedulerConfig.FastGenByArgs("id")
-			}
-
-			conf, ok := v.(*grantHotRegionSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			leaderID, err := strconv.ParseUint(args[0], 10, 64)
-			if err != nil {
-				return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
-			}
-
-			storeIDs := make([]uint64, 0)
-			for _, id := range strings.Split(args[1], ",") {
-				storeID, err := strconv.ParseUint(id, 10, 64)
-				if err != nil {
-					return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
-				}
-				storeIDs = append(storeIDs, storeID)
-			}
-			if !conf.setStore(leaderID, storeIDs) {
-				return errs.ErrSchedulerConfig
-			}
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(GrantHotRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &grantHotRegionSchedulerConfig{StoreIDs: make([]uint64, 0), storage: storage}
-		conf.cluster = opController.GetCluster()
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		return newGrantHotRegionScheduler(opController, conf), nil
-	})
-}
-
 type grantHotRegionSchedulerConfig struct {
 	mu            syncutil.RWMutex
 	storage       endpoint.ConfigStorage

@@ -22,39 +22,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 	"go.uber.org/zap"
 )
-
-func init() {
-	schedule.RegisterSliceDecoderBuilder(BalanceRegionType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			conf, ok := v.(*balanceRegionSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			ranges, err := getKeyRanges(args)
-			if err != nil {
-				return err
-			}
-			conf.Ranges = ranges
-			conf.Name = BalanceRegionName
-			return nil
-		}
-	})
-	schedule.RegisterScheduler(BalanceRegionType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &balanceRegionSchedulerConfig{}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		return newBalanceRegionScheduler(opController, conf), nil
-	})
-}
 
 const (
 	// BalanceRegionName is balance region scheduler name.
