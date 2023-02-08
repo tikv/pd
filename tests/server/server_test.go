@@ -22,18 +22,18 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
-
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
 )
 
 func TestMain(m *testing.M) {
+	schedulers.Register()
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
 func TestUpdateAdvertiseUrls(t *testing.T) {
+	schedulers.Register()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -75,6 +75,7 @@ func TestUpdateAdvertiseUrls(t *testing.T) {
 }
 
 func TestClusterID(t *testing.T) {
+	schedulers.Register()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -111,6 +112,7 @@ func TestClusterID(t *testing.T) {
 }
 
 func TestLeader(t *testing.T) {
+	schedulers.Register()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

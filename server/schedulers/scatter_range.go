@@ -48,42 +48,6 @@ var (
 	scatterRangeNoNeedBalanceLeaderCounter = schedulerCounter.WithLabelValues(ScatterRangeName, "no-need-balance-leader")
 )
 
-func init() {
-	// args: [start-key, end-key, range-name].
-	schedule.RegisterSliceDecoderBuilder(ScatterRangeType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			if len(args) != 3 {
-				return errs.ErrSchedulerConfig.FastGenByArgs("ranges and name")
-			}
-			if len(args[2]) == 0 {
-				return errs.ErrSchedulerConfig.FastGenByArgs("range name")
-			}
-			conf, ok := v.(*scatterRangeSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			conf.StartKey = args[0]
-			conf.EndKey = args[1]
-			conf.RangeName = args[2]
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(ScatterRangeType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &scatterRangeSchedulerConfig{
-			storage: storage,
-		}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		rangeName := conf.RangeName
-		if len(rangeName) == 0 {
-			return nil, errs.ErrSchedulerConfig.FastGenByArgs("range name")
-		}
-		return newScatterRangeScheduler(opController, conf), nil
-	})
-}
-
 type scatterRangeSchedulerConfig struct {
 	mu        syncutil.RWMutex
 	storage   endpoint.ConfigStorage

@@ -54,41 +54,6 @@ var (
 	evictLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(EvictLeaderName, "new-operator")
 )
 
-func init() {
-	schedule.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			if len(args) != 1 {
-				return errs.ErrSchedulerConfig.FastGenByArgs("id")
-			}
-			conf, ok := v.(*evictLeaderSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-
-			id, err := strconv.ParseUint(args[0], 10, 64)
-			if err != nil {
-				return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
-			}
-
-			ranges, err := getKeyRanges(args[1:])
-			if err != nil {
-				return err
-			}
-			conf.StoreIDWithRanges[id] = ranges
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(EvictLeaderType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange), storage: storage}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		conf.cluster = opController.GetCluster()
-		return newEvictLeaderScheduler(opController, conf), nil
-	})
-}
-
 type evictLeaderSchedulerConfig struct {
 	mu                syncutil.RWMutex
 	storage           endpoint.ConfigStorage

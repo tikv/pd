@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	_ "github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/storage"
 )
 

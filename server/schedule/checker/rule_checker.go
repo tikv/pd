@@ -208,13 +208,20 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			if c.isWitnessEnabled() && core.IsVoter(peer) {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					ruleCheckerPromoteWitnessCounter.Inc()
-					return operator.CreateNonWitnessPeerOperator("promote-witness", c.cluster, region, witness)
+					return operator.CreateNonWitnessPeerOperator("promote-witness-for-down", c.cluster, region, witness)
 				}
 			}
 		}
 		if c.isOfflinePeer(peer) {
 			ruleCheckerReplaceOfflineCounter.Inc()
 			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
+		}
+
+		if c.isWitnessEnabled() && c.isPendingVoter(region, peer) {
+			if witness, ok := c.hasAvailableWitness(region, peer); ok {
+				ruleCheckerPromoteWitnessCounter.Inc()
+				return operator.CreateNonWitnessPeerOperator("promote-witness-for-pending", c.cluster, region, witness)
+			}
 		}
 	}
 	// fix loose matched peers.
@@ -233,15 +240,13 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
 	ruleCheckerAddRulePeerCounter.Inc()
 	ruleStores := c.getRuleFitStores(rf)
-	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToAdd(ruleStores)
+	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
+	// If the peer to be added is a witness, since no snapshot is needed, we also reuse the fast failover logic.
+	store, filterByTempState := c.strategy(region, rf.Rule, isWitness).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		ruleCheckerNoStoreAddCounter.Inc()
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToAdd
-	}
-	isWitness := rf.Rule.IsWitness
-	if !c.isWitnessEnabled() {
-		isWitness = false
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
@@ -254,27 +259,28 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 
 // The peer's store may in Offline or Down, need to be replace.
 func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
+	var fastFailover bool
+	// If the store to which the original peer belongs is TiFlash, the new peer cannot be set to witness, nor can it perform fast failover
+	if c.isWitnessEnabled() && !c.cluster.GetStore(peer.StoreId).IsTiFlash() {
+		// No matter whether witness placement rule is enabled or disabled, when peer's downtime
+		// exceeds the threshold(30min), quickly add a witness to speed up failover, then promoted
+		// to non-witness gradually to improve availability.
+		if status == "down" {
+			fastFailover = true
+		} else {
+			fastFailover = rf.Rule.IsWitness
+		}
+	} else {
+		fastFailover = false
+	}
 	ruleStores := c.getRuleFitStores(rf)
-	store, filterByTempState := c.strategy(region, rf.Rule).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	store, filterByTempState := c.strategy(region, rf.Rule, fastFailover).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		ruleCheckerNoStoreReplaceCounter.Inc()
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToReplace
 	}
-	var isWitness bool
-	if c.isWitnessEnabled() && !core.IsStoreContainLabel(c.cluster.GetStore(store).GetMeta(), core.EngineKey, core.EngineTiFlash) {
-		// No matter whether witness placement rule is enabled or disabled, when peer's downtime
-		// exceeds the threshold(30min), add a witness and remove the down peer. Then witness is
-		// promoted to non-witness gradually to improve availability.
-		if status == "down" {
-			isWitness = true
-		} else {
-			isWitness = rf.Rule.IsWitness
-		}
-	} else {
-		isWitness = false
-	}
-	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
+	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: fastFailover}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
@@ -301,7 +307,13 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		if newLeader != nil && newLeader.GetId() != peer.GetId() {
 			return operator.CreateReplaceLeaderPeerOperator("replace-rule-"+status+"-leader-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer, newLeader)
 		}
-		return operator.CreateMovePeerOperator("replace-rule-"+status+"-peer", c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
+		var desc string
+		if fastFailover {
+			desc = "fast-replace-rule-" + status + "-peer"
+		} else {
+			desc = "replace-rule-" + status + "-peer"
+		}
+		return operator.CreateMovePeerOperator(desc, c.cluster, region, operator.OpReplica, peer.StoreId, newPeer)
 	}
 	op, err := createOp()
 	if err != nil {
@@ -310,7 +322,11 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 	if newLeader != nil {
 		c.record.incOfflineLeaderCount(newLeader.GetStoreId())
 	}
-	op.SetPriorityLevel(core.High)
+	if fastFailover {
+		op.SetPriorityLevel(core.Urgent)
+	} else {
+		op.SetPriorityLevel(core.High)
+	}
 	return op, nil
 }
 
@@ -397,7 +413,9 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 		return nil, nil
 	}
 
-	strategy := c.strategy(region, rf.Rule)
+	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
+	// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
+	strategy := c.strategy(region, rf.Rule, isWitness)
 	ruleStores := c.getRuleFitStores(rf)
 	oldStore := strategy.SelectStoreToRemove(ruleStores)
 	if oldStore == 0 {
@@ -410,10 +428,6 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 		return nil, nil
 	}
 	ruleCheckerMoveToBetterLocationCounter.Inc()
-	isWitness := rf.Rule.IsWitness
-	if !c.isWitnessEnabled() {
-		isWitness = false
-	}
 	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
 	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
 }
@@ -499,6 +513,10 @@ func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
 	return !store.IsPreparing() && !store.IsServing()
 }
 
+func (c *RuleChecker) isPendingVoter(region *core.RegionInfo, peer *metapb.Peer) bool {
+	return region.GetPendingVoter(peer.Id) != nil
+}
+
 func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.Peer) (*metapb.Peer, bool) {
 	witnesses := region.GetWitnesses()
 	if len(witnesses) == 0 {
@@ -521,7 +539,7 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 	return nil, false
 }
 
-func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *ReplicaStrategy {
+func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
 	return &ReplicaStrategy{
 		checkerName:    c.name,
 		cluster:        c.cluster,
@@ -529,6 +547,7 @@ func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule) *R
 		locationLabels: rule.LocationLabels,
 		region:         region,
 		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.name, rule.LabelConstraints)},
+		fastFailover:   fastFailover,
 	}
 }
 

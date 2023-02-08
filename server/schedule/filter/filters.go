@@ -321,6 +321,8 @@ type StoreStateFilter struct {
 	MoveRegion bool
 	// Set true if the scatter move the region
 	ScatterRegion bool
+	// Set true if allows failover (through witness)
+	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
 	// Reason is used to distinguish the reason of store state filter
@@ -474,6 +476,7 @@ const (
 	regionTarget
 	witnessTarget
 	scatterRegionTarget
+	fastFailoverTarget
 )
 
 func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
@@ -494,6 +497,8 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 	case witnessTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	case scatterRegionTarget:
+		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
+	case fastFailoverTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	}
 	for _, cf := range funcs {
@@ -527,6 +532,9 @@ func (f *StoreStateFilter) Target(opts *config.PersistOptions, store *core.Store
 		if status = f.anyConditionMatch(leaderTarget, opts, store); !status.IsOK() {
 			return
 		}
+	}
+	if f.MoveRegion && f.AllowFastFailover {
+		return f.anyConditionMatch(fastFailoverTarget, opts, store)
 	}
 	if f.MoveRegion && f.ScatterRegion {
 		if status = f.anyConditionMatch(scatterRegionTarget, opts, store); !status.IsOK() {
@@ -733,7 +741,7 @@ func (f *ruleWitnessFitFilter) Target(options *config.PersistOptions, store *cor
 		log.Warn("ruleWitnessFitFilter couldn't find peer on target Store", zap.Uint64("target-store", store.GetID()))
 		return statusStoreNotMatchRule
 	}
-	if targetPeer.Id == f.region.GetLeader().Id {
+	if targetPeer.Id == f.region.GetLeader().GetId() {
 		return statusStoreNotMatchRule
 	}
 	if f.oldFit.Replace(f.srcStore, store) {
