@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -49,6 +50,7 @@ func TestDashboardTestSuite(t *testing.T) {
 }
 
 func (suite *dashboardTestSuite) SetupSuite() {
+	schedulers.Register()
 	dashboard.SetCheckInterval(10 * time.Millisecond)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.httpClient = &http.Client{
