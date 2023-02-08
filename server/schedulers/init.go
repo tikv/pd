@@ -17,6 +17,7 @@ package schedulers
 import (
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -24,8 +25,16 @@ import (
 	"github.com/tikv/pd/server/schedule"
 )
 
+var registerOnce sync.Once
+
 // Register registers schedulers.
 func Register() {
+	registerOnce.Do(func() {
+		schedulersRegister()
+	})
+}
+
+func schedulersRegister() {
 	// balance leader
 	schedule.RegisterSliceDecoderBuilder(BalanceLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {

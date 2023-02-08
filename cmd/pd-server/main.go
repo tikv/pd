@@ -78,6 +78,7 @@ func main() {
 }
 
 func createServerWrapper(args []string) (context.Context, context.CancelFunc, basicsvr.Server) {
+	schedulers.Register()
 	cfg := config.NewConfig()
 	err := cfg.Parse(args)
 
@@ -135,7 +136,6 @@ func createServerWrapper(args []string) (context.Context, context.CancelFunc, ba
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}
-	schedulers.Register()
 
 	return ctx, cancel, svr
 }
