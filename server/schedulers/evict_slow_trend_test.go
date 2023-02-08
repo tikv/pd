@@ -62,7 +62,12 @@ func (suite *evictSlowTrendTestSuite) SetupTest() {
 	for i := 1; i <= 3; i++ {
 		storeInfo := suite.tc.GetStore(1)
 		newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
-			store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{5.0e6, 0.0, 5.0e3, 0.0, struct{}{}, nil, 0}
+			store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{
+				CauseValue:  5.0e6,
+				CauseRate:   0.0,
+				ResultValue: 5.0e3,
+				ResultRate:  0.0,
+			}
 		}, core.SetLastHeartbeatTS(now))
 		suite.tc.PutStore(newStoreInfo)
 	}
@@ -89,7 +94,12 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	suite.Equal(es2.conf.candidate(), 0)
 	storeInfo := suite.tc.GetStore(1)
 	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{5.0e8, 1e9, 3.0e3, -1e9, struct{}{}, nil, 0}
+		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{
+			CauseValue:  5.0e8,
+			CauseRate:   1e7,
+			ResultValue: 3.0e3,
+			ResultRate:  -1e7,
+		}
 	})
 	suite.tc.PutStore(newStoreInfo)
 	suite.True(suite.es.IsScheduleAllowed(suite.tc))
@@ -117,7 +127,12 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 
 	// Set store-1 to normal status
 	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{5.0e6, 0.0, 5.0e3, 0.0, struct{}{}, nil, 0}
+		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{
+			CauseValue:  5.0e6,
+			CauseRate:   0.0,
+			ResultValue: 5.0e3,
+			ResultRate:  0.0,
+		}
 	})
 	suite.tc.PutStore(newStoreInfo)
 	// Evict leader scheduler of store 1 should be removed, then leader can be balanced from store-2 to store-1
@@ -168,7 +183,12 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPersistFail() {
 
 	storeInfo := suite.tc.GetStore(1)
 	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
-		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{5.0e8, 1e9, 3.0e3, -1e9, struct{}{}, nil, 0}
+		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{
+			CauseValue:  5.0e8,
+			CauseRate:   1e7,
+			ResultValue: 3.0e3,
+			ResultRate:  -1e7,
+		}
 	})
 	suite.tc.PutStore(newStoreInfo)
 	suite.True(suite.es.IsScheduleAllowed(suite.tc))
