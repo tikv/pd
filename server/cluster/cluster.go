@@ -330,6 +330,7 @@ func (c *RaftCluster) startGCTuner() {
 	updateGCMemLimit := func() {
 		memory.ServerMemoryLimit.Store(memoryLimitBytes)
 		gctuner.GlobalMemoryLimitTuner.SetPercentage(memoryLimitGCTriggerRatio)
+		gctuner.GlobalMemoryLimitTuner.UpdateMemoryLimit()
 		log.Info("updateGCMemLimit", zap.Uint64("memoryLimitBytes", memoryLimitBytes),
 			zap.Float64("memoryLimitGCTriggerRatio", memoryLimitGCTriggerRatio))
 	}
