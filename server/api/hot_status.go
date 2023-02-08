@@ -21,9 +21,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage"
 	"github.com/unrolled/render"
 )
 
