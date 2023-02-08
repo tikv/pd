@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"github.com/tikv/pd/tools/pd-simulator/simulator"
@@ -55,6 +56,7 @@ var (
 )
 
 func main() {
+	schedulers.Register()
 	// wait PD start. Otherwise it will happen error when getting cluster ID.
 	time.Sleep(3 * time.Second)
 	// ignore some undefined flag
