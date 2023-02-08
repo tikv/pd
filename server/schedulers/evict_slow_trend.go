@@ -37,22 +37,6 @@ const (
 	EvictSlowTrendType = "evict-slow-trend"
 )
 
-func init() {
-	schedule.RegisterSliceDecoderBuilder(EvictSlowTrendType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(EvictSlowTrendType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &evictSlowTrendSchedulerConfig{storage: storage, EvictedStores: make([]uint64, 0), evictCandidate: 0}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		return newEvictSlowTrendScheduler(opController, conf), nil
-	})
-}
-
 type evictSlowTrendSchedulerConfig struct {
 	storage              endpoint.ConfigStorage
 	evictCandidate       uint64

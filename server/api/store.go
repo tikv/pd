@@ -49,16 +49,16 @@ type SlowTrend struct {
 	//   - The comparition result from store to store.
 	//   - The change magnitude along time (represented by CauseRate).
 	// Currently it's one of store's internal latency (duration of waiting in the task queue of raftstore.store).
-	CauseValue  float64 `json:"cause_value"`
+	CauseValue float64 `json:"cause_value"`
 	// CauseRate is for mesuring the change magnitude of CauseValue of the store,
 	//   - CauseRate > 0 means the store is become slower currently
 	//   - CauseRate < 0 means the store is become faster currently
 	//   - CauseRate == 0 means the store's performance and pressure does not have significant changes
-	CauseRate   float64 `json:"cause_rate"`
+	CauseRate float64 `json:"cause_rate"`
 	// ResultValue is the current gRPC QPS of the store.
 	ResultValue float64 `json:"result_value"`
 	// ResultRate is for mesuring the change magnitude of ResultValue of the store.
-	ResultRate  float64 `json:"result_rate"`
+	ResultRate float64 `json:"result_rate"`
 }
 
 // StoreStatus contains status about a store.
