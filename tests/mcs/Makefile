@@ -31,7 +31,7 @@ test: enable-codegen
 	$(MAKE) disable-codegen
 
 ci-test-job: enable-codegen
-	CGO_ENABLED=1 go test ./... -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=../../... github.com/tikv/pd/tests/msc
+	CGO_ENABLED=1 go test ./... -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=../../... github.com/tikv/pd/tests/mcs
 
 install-tools:
 	cd ../../ && $(MAKE) install-tools

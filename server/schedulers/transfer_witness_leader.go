@@ -33,10 +33,10 @@ const (
 	TransferWitnessLeaderType = "transfer-witness-leader"
 	// TransferWitnessLeaderBatchSize is the number of operators to to transfer
 	// leaders by one scheduling
-	transferWitnessLeaderBatchSize = 10
+	transferWitnessLeaderBatchSize = 3
 	// TransferWitnessLeaderRecvMaxRegionSize is the max number of region can receive
 	// TODO: make it a reasonable value
-	transferWitnessLeaderRecvMaxRegionSize = 1000
+	transferWitnessLeaderRecvMaxRegionSize = 10000
 )
 
 var (

@@ -50,8 +50,6 @@ const (
 	leaderTickInterval          = 50 * time.Millisecond
 	localTSOAllocatorEtcdPrefix = "lta"
 	localTSOSuffixEtcdPrefix    = "lts"
-	// The value should be the same as the variable defined in server's config.
-	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 )
 
 var (
@@ -134,17 +132,20 @@ type AllocatorManager struct {
 func NewAllocatorManager(
 	m *member.Member,
 	rootPath string,
-	cfg config,
+	enableLocalTSO bool,
+	saveInterval time.Duration,
+	updatePhysicalInterval time.Duration,
+	tlsConfig *grpcutil.TLSConfig,
 	maxResetTSGap func() time.Duration,
 ) *AllocatorManager {
 	allocatorManager := &AllocatorManager{
-		enableLocalTSO:         cfg.IsLocalTSOEnabled(),
+		enableLocalTSO:         enableLocalTSO,
 		member:                 m,
 		rootPath:               rootPath,
-		saveInterval:           cfg.GetTSOSaveInterval(),
-		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
+		saveInterval:           saveInterval,
+		updatePhysicalInterval: updatePhysicalInterval,
 		maxResetTSGap:          maxResetTSGap,
-		securityConfig:         cfg.GetTLSConfig(),
+		securityConfig:         tlsConfig,
 	}
 	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	allocatorManager.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -757,7 +758,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 	if !txnResp.Succeeded {
 		log.Warn("write local tso suffix into etcd failed",
 			zap.String("dc-location", dcLocation),
-			zap.String("local-tso-surfix", localTSOSuffixValue),
+			zap.String("local-tso-suffix", localTSOSuffixValue),
 			zap.String("server-name", am.member.Member().Name),
 			zap.Uint64("server-id", am.member.ID()))
 		return -1, errs.ErrEtcdTxnConflict.FastGenByArgs()
