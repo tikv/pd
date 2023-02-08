@@ -1969,7 +1969,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
-	// Use WithPrevKV() to get the previous key-value pair when get Delete Event
+	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 	watchChan := s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
 	for {
 		select {
