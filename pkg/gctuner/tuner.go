@@ -151,7 +151,7 @@ func (t *tuner) tuning() {
 	inuse := readMemoryInuse()
 	threshold := t.getThreshold()
 	log.Debug("tuning", zap.Uint64("inuse", inuse), zap.Uint64("threshold", threshold),
-		zap.Bool("EnableGOGCTuner", EnableGOGCTuner.Load()))
+		zap.Bool("enable-go-gc-tuner", EnableGOGCTuner.Load()))
 	// stop gc tuning
 	if threshold <= 0 {
 		return
