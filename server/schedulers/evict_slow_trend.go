@@ -317,7 +317,7 @@ func chooseEvictCandidate(cluster schedule.Cluster) (slowStore *core.StoreInfo) 
 		return
 	}
 
-	affectedStoreThreshold := int(len(stores) * cluster.GetOpts().GetSlowStoreEvictingAffectedStoreRatioThreshold())
+	affectedStoreThreshold := int(float64(len(stores)) * cluster.GetOpts().GetSlowStoreEvictingAffectedStoreRatioThreshold())
 	if affectedStoreCount < affectedStoreThreshold {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:affect-a-few").Inc()
 		return

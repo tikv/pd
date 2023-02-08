@@ -25,11 +25,11 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/storage"
 )
 
 type evictSlowTrendTestSuite struct {
