@@ -265,7 +265,7 @@ const (
 	defaultMaxMovableHotPeerSize = int64(512)
 
 	defaultServerMemoryLimit          = 0.8
-	minServerMemoryLimit              = 0.01
+	minServerMemoryLimit              = 0
 	maxServerMemoryLimit              = 0.99
 	defaultServerMemoryLimitGCTrigger = 0.7
 	minServerMemoryLimitGCTrigger     = 0.5
