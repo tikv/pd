@@ -38,8 +38,7 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
+	_ "github.com/tikv/pd/pkg/utils/testutil"
 )
 
 var (
