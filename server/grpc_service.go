@@ -1988,7 +1988,6 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 				if err := server.Send(&resp); err != nil {
 					return err
 				}
-				return res.Err()
 			}
 			revision = res.Header.GetRevision()
 
@@ -2003,8 +2002,8 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 					if e.PrevKv != nil {
 						cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.PrevKv.Value, Kind: pdpb.EventType(e.Type)})
 					} else {
-						msg := "previous key-value pair for key " + string(e.Kv.Key) + " has been compacted"
-						cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: msg}, Kind: pdpb.EventType(e.Type)})
+						log.Info("previous key-value pair has been compacted",
+							zap.String("previous key", string(e.Kv.Key)))
 					}
 				}
 			}
