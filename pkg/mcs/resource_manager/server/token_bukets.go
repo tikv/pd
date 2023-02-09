@@ -159,6 +159,10 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	var targetPeriodTime = time.Duration(targetPeriodMs) * time.Millisecond
 	var trickleTime = 0.
 
+	LoanCoefficient := defaultLoanCoefficient
+	if t.Settings.BurstLimit <= int64(t.Settings.FillRate) {
+		LoanCoefficient = 1
+	}
 	// When there are loan, the allotment will match the fill rate.
 	// We will have k threshold, beyond which the token allocation will be a minimum.
 	// The threshold unit is `fill rate * target period`.
@@ -173,18 +177,18 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	//               |
 	// grant_rate 0  ------------------------------------------------------------------------------------
 	//         loan      ***    k*period_token    (k+k-1)*period_token    ***      (k+k+1...+1)*period_token
-	p := make([]float64, defaultLoanCoefficient)
-	p[0] = float64(defaultLoanCoefficient) * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
-	for i := 1; i < defaultLoanCoefficient; i++ {
-		p[i] = float64(defaultLoanCoefficient-i)*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() + p[i-1]
+	p := make([]float64, LoanCoefficient)
+	p[0] = float64(LoanCoefficient) * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
+	for i := 1; i < LoanCoefficient; i++ {
+		p[i] = float64(LoanCoefficient-i)*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() + p[i-1]
 	}
-	for i := 0; i < defaultLoanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTime.Seconds(); i++ {
+	for i := 0; i < LoanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTime.Seconds(); i++ {
 		loan := -t.Tokens
 		if loan > p[i] {
 			continue
 		}
 		roundReserveTokens := p[i] - loan
-		fillRate := float64(defaultLoanCoefficient-i) * float64(t.Settings.FillRate)
+		fillRate := float64(LoanCoefficient-i) * float64(t.Settings.FillRate)
 		if roundReserveTokens > neededTokens {
 			t.Tokens -= neededTokens
 			grantedTokens += neededTokens

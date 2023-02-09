@@ -101,6 +101,21 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 	return lim
 }
 
+// NewLimiterWithCfg returns a new Limiter that allows events up to rate r and permits
+// bursts of at most b tokens.
+func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan struct{}) *Limiter {
+	lim := &Limiter{
+		limit:               Limit(cfg.NewRate),
+		last:                now,
+		tokens:              cfg.NewTokens,
+		burst:               cfg.NewBurst,
+		notifyThreshold:     cfg.NotifyThreshold,
+		lowTokensNotifyChan: lowTokensNotifyChan,
+	}
+	log.Info("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
+	return lim
+}
+
 // A Reservation holds information about events that are permitted by a Limiter to happen after a delay.
 // A Reservation may be canceled, which may enable the Limiter to permit additional events.
 type Reservation struct {
@@ -272,7 +287,7 @@ type tokenBucketReconfigureArgs struct {
 func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	log.Debug("[resource group controllor] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
+	log.Info("[resource group controllor] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 	now, _, tokens := lim.advance(now)
 	lim.last = now
 	lim.tokens = tokens + args.NewTokens
@@ -281,7 +296,7 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	lim.notifyThreshold = args.NotifyThreshold
 	lim.isLowProcess = false
 	lim.maybeNotify()
-	log.Debug("[resource group controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
+	log.Info("[resource group controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -354,6 +369,11 @@ func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time,
 	elapsed := now.Sub(last)
 	delta := lim.limit.tokensFromDuration(elapsed)
 	tokens := lim.tokens + delta
+	if lim.burst != 0 {
+		if burst := float64(lim.burst); tokens > burst {
+			tokens = burst
+		}
+	}
 	return now, last, tokens
 }
 

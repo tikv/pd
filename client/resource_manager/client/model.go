@@ -128,6 +128,13 @@ func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitTyp
 	return 0
 }
 
+func getRUTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RequestUnitType) *rmpb.TokenBucket {
+	if typ == 0 {
+		return group.RUSettings.RU
+	}
+	return nil
+}
+
 func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
 	switch typ {
 	case 0:
@@ -138,6 +145,18 @@ func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawRe
 		return custom.WriteBytes
 	}
 	return 0
+}
+
+func getRawResourceTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RawResourceType) *rmpb.TokenBucket {
+	switch typ {
+	case 0:
+		return group.RawResourceSettings.Cpu
+	case 1:
+		return group.RawResourceSettings.IoRead
+	case 2:
+		return group.RawResourceSettings.IoWrite
+	}
+	return nil
 }
 
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
