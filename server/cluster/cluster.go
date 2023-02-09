@@ -312,9 +312,9 @@ func (c *RaftCluster) startGCTuner() {
 	defer tick.Stop()
 	totalMem, err := memory.MemTotal()
 	if err != nil {
-		log.Fatal("fail to get MemTotal:%s", zap.Error(err))
+		log.Fatal("fail to get total-mem:%s", zap.Error(err))
 	}
-	log.Info("MemTotal", zap.Uint64("totalMem", totalMem))
+	log.Info("memory info", zap.Uint64("total-mem", totalMem))
 	cfg := c.opt.GetPDServerConfig()
 	enableGCTuner := cfg.EnableGOGCTuner
 	memoryLimitBytes := uint64(float64(totalMem) * cfg.ServerMemoryLimit)
@@ -327,15 +327,15 @@ func (c *RaftCluster) startGCTuner() {
 	updateGCTuner := func() {
 		gctuner.Tuning(gcThresholdBytes)
 		gctuner.EnableGOGCTuner.Store(enableGCTuner)
-		log.Info("updateGCTuner", zap.Bool("enableGCTuner", enableGCTuner),
-			zap.Uint64("gcThresholdBytes", gcThresholdBytes))
+		log.Info("update gc tuner", zap.Bool("enable-gc-tuner", enableGCTuner),
+			zap.Uint64("gc-threshold-bytes", gcThresholdBytes))
 	}
 	updateGCMemLimit := func() {
 		memory.ServerMemoryLimit.Store(memoryLimitBytes)
 		gctuner.GlobalMemoryLimitTuner.SetPercentage(memoryLimitGCTriggerRatio)
 		gctuner.GlobalMemoryLimitTuner.UpdateMemoryLimit()
-		log.Info("updateGCMemLimit", zap.Uint64("memoryLimitBytes", memoryLimitBytes),
-			zap.Float64("memoryLimitGCTriggerRatio", memoryLimitGCTriggerRatio))
+		log.Info("update gc memory limit", zap.Uint64("memory-limit-bytes", memoryLimitBytes),
+			zap.Float64("memory-limit-gc-trigger-ratio", memoryLimitGCTriggerRatio))
 	}
 	updateGCTuner()
 	updateGCMemLimit()
