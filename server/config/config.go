@@ -264,13 +264,13 @@ const (
 
 	defaultMaxMovableHotPeerSize = int64(512)
 
-	defaultServerMemoryLimit          = 0.8
+	defaultServerMemoryLimit          = 0
 	minServerMemoryLimit              = 0
 	maxServerMemoryLimit              = 0.99
 	defaultServerMemoryLimitGCTrigger = 0.7
 	minServerMemoryLimitGCTrigger     = 0.5
 	maxServerMemoryLimitGCTrigger     = 0.99
-	defaultEnableGOGCTuner            = true
+	defaultEnableGOGCTuner            = false
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
