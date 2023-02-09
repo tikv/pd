@@ -1976,14 +1976,24 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 		case <-ctx.Done():
 			return nil
 		case res := <-watchChan:
-			if revision < res.CompactRevision {
-				if err := server.Send(&pdpb.WatchGlobalConfigResponse{
-					Revision: res.CompactRevision,
-					Header: s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
-						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision. %d", revision, res.CompactRevision)),
-				}); err != nil {
-					return err
+			if res.Err() != nil {
+				if revision < res.CompactRevision {
+					if err := server.Send(&pdpb.WatchGlobalConfigResponse{
+						Revision: res.CompactRevision,
+						Header: s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+							fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision. %d", revision, res.CompactRevision)),
+					}); err != nil {
+						return err
+					}
+				} else {
+					if err := server.Send(&pdpb.WatchGlobalConfigResponse{
+						Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+							fmt.Sprintf("watch channel meet error %s", res.Err().Error())),
+					}); err != nil {
+						return err
+					}
 				}
+				return res.Err()
 			}
 			revision = res.Header.GetRevision()
 
