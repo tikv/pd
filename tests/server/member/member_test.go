@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -307,7 +308,7 @@ func TestGetLeader(t *testing.T) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	done := make(chan bool)
-	svr, err := server.CreateServer(ctx, cfg)
+	svr, err := server.CreateServer(ctx, cfg, api.NewHandler)
 	re.NoError(err)
 	defer svr.Close()
 	re.NoError(svr.Run())

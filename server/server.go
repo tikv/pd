@@ -229,7 +229,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		etcdCfg.UserHandlers = userHandlers
 	}
 	// New way to register services.
-	registry := registry.ServerServiceRegistry
+	registry := registry.NewServerServiceRegistry()
 	registry.RegisterService("ResourceManager", rm_server.NewService)
 	// Register the micro services REST path.
 	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
