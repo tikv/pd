@@ -121,6 +121,11 @@ error = '''
 store %v is evicted as a slow store
 '''
 
+["PD:core:ErrSlowTrendEvicted"]
+error = '''
+store %v is evicted as a slow store by trend
+'''
+
 ["PD:core:ErrStoreDestroyed"]
 error = '''
 store %v has been physically destroyed

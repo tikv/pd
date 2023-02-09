@@ -401,9 +401,6 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	if longestDelayDuration <= 0 {
 		return nil
 	}
-	if longestDelayDuration > 500*time.Millisecond {
-		log.Warn("[resource group controllor] limiter needs wait ", zap.Time("now", now), zap.Duration("delay", longestDelayDuration))
-	}
 	t := time.NewTimer(longestDelayDuration)
 	defer t.Stop()
 

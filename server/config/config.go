@@ -780,6 +780,10 @@ type ScheduleConfig struct {
 
 	// EnableWitness is the option to enable using witness
 	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
+
+	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
+	// A store's slowness must affected more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
+	SlowStoreEvictingAffectedStoreRatioThreshold float64 `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -832,6 +836,8 @@ const (
 	defaultHotRegionsReservedDays      = 7
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
+	// When a slow store affected more than 30% of total stores, it will trigger evicting.
+	defaultSlowStoreEvictingAffectedStoreRatioThreshold = 0.3
 )
 
 func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
@@ -930,6 +936,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 		adjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
+	if !meta.IsDefined("SlowStoreEvictingAffectedStoreRatioThreshold") {
+		adjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
+	}
 	return c.Validate()
 }
 
@@ -1007,6 +1016,9 @@ func (c *ScheduleConfig) Validate() error {
 		if !IsSchedulerRegistered(scheduleConfig.Type) {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
 		}
+	}
+	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
+		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
 	}
 	return nil
 }
