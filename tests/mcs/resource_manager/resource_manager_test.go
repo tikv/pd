@@ -116,8 +116,8 @@ func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAdd
 
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.client.Close()
-	suite.clean()
 	suite.cluster.Destroy()
+	suite.clean()
 }
 
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
@@ -353,6 +353,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		}
 	}
 	suite.cleanupResourceGroups()
+	controller.Stop()
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
