@@ -126,6 +126,7 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	if t.settingChanged && t.Tokens <= 0 {
 		t.Tokens = 0
 	}
+	t.settingChanged = false
 	if t.Settings.BurstLimit != 0 {
 		if burst := float64(t.Settings.BurstLimit); t.Tokens > burst {
 			t.Tokens = burst
