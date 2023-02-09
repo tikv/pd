@@ -88,10 +88,11 @@ const (
 	gcTombstoreInterval          = 30 * 24 * time.Hour
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
 	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
-	persistLimitRetryTimes = 5
-	persistLimitWaitTime   = 100 * time.Millisecond
-	removingAction         = "removing"
-	preparingAction        = "preparing"
+	persistLimitRetryTimes  = 5
+	persistLimitWaitTime    = 100 * time.Millisecond
+	removingAction          = "removing"
+	preparingAction         = "preparing"
+	gcTunerCheckCfgInterval = 10 * time.Second
 )
 
 // Server is the interface for cluster.
@@ -308,7 +309,7 @@ func (c *RaftCluster) startGCTuner() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	tick := time.NewTicker(10 * time.Second)
+	tick := time.NewTicker(gcTunerCheckCfgInterval)
 	defer tick.Stop()
 	totalMem, err := memory.MemTotal()
 	if err != nil {
