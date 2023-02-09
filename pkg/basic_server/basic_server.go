@@ -35,6 +35,6 @@ type Server interface {
 
 	// GetClient returns builtin etcd client.
 	GetClient() *clientv3.Client
-	// GetHTTPClient returns builtin etcd client.
+	// GetHTTPClient returns builtin http client.
 	GetHTTPClient() *http.Client
 }
