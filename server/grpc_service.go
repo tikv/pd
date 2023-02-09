@@ -1995,7 +1995,12 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 				case clientv3.EventTypePut:
 					cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.Kv.Value, Kind: pdpb.EventType(e.Type)})
 				case clientv3.EventTypeDelete:
-					cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.PrevKv.Value, Kind: pdpb.EventType(e.Type)})
+					if e.PrevKv != nil {
+						cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.PrevKv.Value, Kind: pdpb.EventType(e.Type)})
+					} else {
+						msg := "previous key-value pair for key " + string(e.Kv.Key) + " has been compacted"
+						cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: msg}, Kind: pdpb.EventType(e.Type)})
+					}
 				}
 			}
 			if len(cfgs) > 0 {
