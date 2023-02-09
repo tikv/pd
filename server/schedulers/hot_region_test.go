@@ -831,11 +831,11 @@ func TestHotWriteRegionScheduleWithPendingInfluence(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	statisticsInterval = 0
-	testHotWriteRegionScheduleWithPendingInfluence(re, 0) // 0: byte rate
-	testHotWriteRegionScheduleWithPendingInfluence(re, 1) // 1: key rate
+	checkHotWriteRegionScheduleWithPendingInfluence(re, 0) // 0: byte rate
+	checkHotWriteRegionScheduleWithPendingInfluence(re, 1) // 1: key rate
 }
 
-func testHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim int) {
+func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim int) {
 	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
@@ -1220,11 +1220,11 @@ func TestHotReadRegionScheduleWithPendingInfluence(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	statisticsInterval = 0
-	testHotReadRegionScheduleWithPendingInfluence(re, 0) // 0: byte rate
-	testHotReadRegionScheduleWithPendingInfluence(re, 1) // 1: key rate
+	checkHotReadRegionScheduleWithPendingInfluence(re, 0) // 0: byte rate
+	checkHotReadRegionScheduleWithPendingInfluence(re, 1) // 1: key rate
 }
 
-func testHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim int) {
+func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim int) {
 	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
