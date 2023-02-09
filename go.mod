@@ -55,11 +55,6 @@ require (
 )
 
 require (
-	github.com/samber/lo v1.37.0 // indirect
-	gorm.io/datatypes v1.1.0 // indirect
-)
-
-require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
@@ -144,6 +139,7 @@ require (
 	github.com/prometheus/procfs v0.0.3 // indirect
 	github.com/rs/cors v1.7.0 // indirect
 	github.com/russross/blackfriday/v2 v2.0.1 // indirect
+	github.com/samber/lo v1.37.0 // indirect
 	github.com/sergi/go-diff v1.0.1-0.20180205163309-da645544ed44 // indirect
 	github.com/shirou/gopsutil v3.21.3+incompatible // indirect
 	github.com/shurcooL/httpgzip v0.0.0-20190720172056-320755c1c1b0 // indirect
@@ -182,6 +178,7 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gorm.io/datatypes v1.1.0 // indirect
 	gorm.io/driver/mysql v1.4.5 // indirect
 	gorm.io/driver/sqlite v1.4.3 // indirect
 	gorm.io/gorm v1.24.3 // indirect
