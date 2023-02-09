@@ -18,6 +18,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/server"
@@ -64,6 +65,11 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 	server.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
+// GetMembers implements gRPC PDServer.
+func (s *Service) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	return nil, nil
+}
+
 // Tso returns a stream of timestamps
 func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 	return nil
@@ -71,21 +77,21 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
 // and write it into all Local TSO Allocators then if it's indeed the biggest one.
-func (s *Service) SyncMaxTS(_ context.Context, request *tsopb.SyncMaxTSRequest) (*tsopb.SyncMaxTSResponse, error) {
+func (s *Service) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	return nil, nil
 }
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
-func (s *Service) GetDCLocationInfo(ctx context.Context, request *tsopb.GetDCLocationInfoRequest) (*tsopb.GetDCLocationInfoResponse, error) {
+func (s *Service) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	return nil, nil
 }
 
 // SetExternalTimestamp sets a given external timestamp to perform stale read.
-func (s *Service) SetExternalTimestamp(ctx context.Context, request *tsopb.SetExternalTimestampRequest) (*tsopb.SetExternalTimestampResponse, error) {
+func (s *Service) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
 	return nil, nil
 }
 
 // GetExternalTimestamp gets the saved external timstamp.
-func (s *Service) GetExternalTimestamp(ctx context.Context, request *tsopb.GetExternalTimestampRequest) (*tsopb.GetExternalTimestampResponse, error) {
+func (s *Service) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
 	return nil, nil
 }
