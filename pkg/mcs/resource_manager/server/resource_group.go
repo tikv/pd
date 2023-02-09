@@ -209,3 +209,60 @@ func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) 
 	metaGroup := rg.IntoProtoResourceGroup()
 	return storage.SaveResourceGroupSetting(rg.Name, metaGroup)
 }
+
+// GroupStates is the tokens set of a resource group.
+type GroupStates struct {
+	// RU tokens
+	RU *GroupTokenBucketState `json:"r_u,omitempty"`
+	// raw resource tokens
+	CPU     *GroupTokenBucketState `json:"cpu,omitempty"`
+	IORead  *GroupTokenBucketState `json:"io_read,omitempty"`
+	IOWrite *GroupTokenBucketState `json:"io_write,omitempty"`
+}
+
+// GetGroupStates get the token set of ResourceGroup.
+func (rg *ResourceGroup) GetGroupStates() *GroupStates {
+	rg.RLock()
+	defer rg.RUnlock()
+	switch rg.Mode {
+	case rmpb.GroupMode_RUMode: // RU mode
+		tokens := &GroupStates{
+			RU: rg.RUSettings.RU.GroupTokenBucketState.Clone(),
+		}
+		return tokens
+	case rmpb.GroupMode_RawMode: // Raw mode
+		tokens := &GroupStates{
+			CPU:     rg.RawResourceSettings.CPU.GroupTokenBucketState.Clone(),
+			IORead:  rg.RawResourceSettings.IOReadBandwidth.GroupTokenBucketState.Clone(),
+			IOWrite: rg.RawResourceSettings.IOWriteBandwidth.GroupTokenBucketState.Clone(),
+		}
+		return tokens
+	}
+	return nil
+}
+
+// SetStatesIntoResourceGroup updates the state of resource group.
+func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
+	switch rg.Mode {
+	case rmpb.GroupMode_RUMode:
+		if state := states.RU; state != nil {
+			rg.RUSettings.RU.GroupTokenBucketState = *state
+		}
+	case rmpb.GroupMode_RawMode:
+		if state := states.CPU; state != nil {
+			rg.RawResourceSettings.CPU.GroupTokenBucketState = *state
+		}
+		if state := states.IORead; state != nil {
+			rg.RawResourceSettings.IOReadBandwidth.GroupTokenBucketState = *state
+		}
+		if state := states.IOWrite; state != nil {
+			rg.RawResourceSettings.IOWriteBandwidth.GroupTokenBucketState = *state
+		}
+	}
+}
+
+// persistStates persists the resource group tokens.
+func (rg *ResourceGroup) persistStates(storage endpoint.ResourceGroupStorage) error {
+	states := rg.GetGroupStates()
+	return storage.SaveResourceGroupStates(rg.Name, states)
+}

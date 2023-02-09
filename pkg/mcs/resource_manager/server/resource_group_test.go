@@ -10,7 +10,7 @@ import (
 
 func TestPatchResourceGroup(t *testing.T) {
 	re := require.New(t)
-	rg1 := &ResourceGroup{Name: "test", Mode: rmpb.GroupMode_RUMode}
+	rg1 := &ResourceGroup{Name: "test", Mode: rmpb.GroupMode_RUMode, RUSettings: &RequestUnitSettings{}}
 	err := rg1.CheckAndInit()
 	re.NoError(err)
 	testCaseRU := []struct {
@@ -35,7 +35,7 @@ func TestPatchResourceGroup(t *testing.T) {
 		re.Equal(ca.expectJSONString, string(res))
 	}
 
-	rg2 := &ResourceGroup{Name: "test", Mode: rmpb.GroupMode_RawMode}
+	rg2 := &ResourceGroup{Name: "test", Mode: rmpb.GroupMode_RawMode, RawResourceSettings: &RawResourceSettings{}}
 	err = rg2.CheckAndInit()
 	re.NoError(err)
 	testCaseResource := []struct {

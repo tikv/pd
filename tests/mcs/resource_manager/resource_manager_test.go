@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
@@ -91,7 +92,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 			RUSettings: &rmpb.GroupRequestUnitSettings{
 				RU: &rmpb.TokenBucket{
 					Settings: &rmpb.TokenLimitSettings{
-						FillRate:   40000,
+						FillRate:   20000,
 						BurstLimit: -1,
 					},
 					Tokens: 100000,
@@ -116,8 +117,8 @@ func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAdd
 
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.client.Close()
-	suite.clean()
 	suite.cluster.Destroy()
+	suite.clean()
 }
 
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
@@ -353,6 +354,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		}
 	}
 	suite.cleanupResourceGroups()
+	controller.Stop()
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
@@ -370,14 +372,15 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		Requests:              make([]*rmpb.TokenBucketRequest, 0),
 		TargetRequestPeriodMs: uint64(time.Second * 10 / time.Millisecond),
 	}
-
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/fastPersist", `return(true)`))
+	suite.resignAndWaitLeader()
 	groups = append(groups, &rmpb.ResourceGroup{Name: "test3"})
 	for i := 0; i < 3; i++ {
 		for _, group := range groups {
 			requests := make([]*rmpb.RequestUnitItem, 0)
 			requests = append(requests, &rmpb.RequestUnitItem{
 				Type:  rmpb.RequestUnitType_RU,
-				Value: 100,
+				Value: 30000,
 			})
 			req := &rmpb.TokenBucketRequest{
 				ResourceGroupName: group.Name,
@@ -393,7 +396,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		re.NoError(err)
 		for _, resp := range aresp {
 			re.Len(resp.GrantedRUTokens, 1)
-			re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(100.))
+			re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(30000.))
 			if resp.ResourceGroupName == "test2" {
 				re.Equal(int64(-1), resp.GrantedRUTokens[0].GrantedTokens.GetSettings().GetBurstLimit())
 			}
@@ -407,16 +410,17 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 			re.Equal(g1.GetMode(), g2.GetMode())
 			re.Equal(g1.GetRUSettings().RU.Settings.FillRate, g2.GetRUSettings().RU.Settings.FillRate)
 			// now we don't persistent tokens in running state, so tokens is original.
-			re.Equal(g1.GetRUSettings().RU.Tokens, g2.GetRUSettings().RU.Tokens)
+			re.Less(g1.GetRUSettings().RU.Tokens, g2.GetRUSettings().RU.Tokens)
 			re.NoError(err)
 		}
-
+		time.Sleep(250 * time.Millisecond)
 		// to test persistent
 		suite.resignAndWaitLeader()
 		gresp, err = cli.GetResourceGroup(suite.ctx, groups[0].GetName())
 		re.NoError(err)
 		checkFunc(gresp, groups[0])
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/fastPersist"))
 	suite.cleanupResourceGroups()
 }
 
@@ -461,12 +465,13 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":30000},"state":{"initialized":false}}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
-							FillRate: 30000,
+							FillRate:   30000,
+							BurstLimit: -1,
 						},
 					},
 				}

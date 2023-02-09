@@ -264,6 +264,17 @@ const (
 	defaultLogFormat = "text"
 
 	defaultMaxMovableHotPeerSize = int64(512)
+
+	defaultServerMemoryLimit          = 0
+	minServerMemoryLimit              = 0
+	maxServerMemoryLimit              = 0.99
+	defaultServerMemoryLimitGCTrigger = 0.7
+	minServerMemoryLimitGCTrigger     = 0.5
+	maxServerMemoryLimitGCTrigger     = 0.99
+	defaultEnableGOGCTuner            = false
+	defaultGCTunerThreshold           = 0.6
+	minGCTunerThreshold               = 0
+	maxGCTunerThreshold               = 0.9
 )
 
 // Special keys for Labels
@@ -1142,6 +1153,14 @@ type PDServerConfig struct {
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
+	// ServerMemoryLimit indicates the memory limit of current process.
+	ServerMemoryLimit float64 `toml:"server-memory-limit" json:"server-memory-limit"`
+	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
+	ServerMemoryLimitGCTrigger float64 `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
+	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC
+	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
+	// GCTunerThreshold is the threshold of GC tuner.
+	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
@@ -1166,6 +1185,33 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
 		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
+	}
+	if !meta.IsDefined("server-memory-limit") {
+		adjustFloat64(&c.ServerMemoryLimit, defaultServerMemoryLimit)
+	}
+	if c.ServerMemoryLimit < minServerMemoryLimit {
+		c.ServerMemoryLimit = minServerMemoryLimit
+	} else if c.ServerMemoryLimit > maxServerMemoryLimit {
+		c.ServerMemoryLimit = maxServerMemoryLimit
+	}
+	if !meta.IsDefined("server-memory-limit-gc-trigger") {
+		adjustFloat64(&c.ServerMemoryLimitGCTrigger, defaultServerMemoryLimitGCTrigger)
+	}
+	if c.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger {
+		c.ServerMemoryLimitGCTrigger = minServerMemoryLimitGCTrigger
+	} else if c.ServerMemoryLimitGCTrigger > maxServerMemoryLimitGCTrigger {
+		c.ServerMemoryLimitGCTrigger = maxServerMemoryLimitGCTrigger
+	}
+	if !meta.IsDefined("enable-gogc-tuner") {
+		c.EnableGOGCTuner = defaultEnableGOGCTuner
+	}
+	if !meta.IsDefined("gc-tuner-threshold") {
+		adjustFloat64(&c.GCTunerThreshold, defaultGCTunerThreshold)
+	}
+	if c.GCTunerThreshold < minGCTunerThreshold {
+		c.GCTunerThreshold = minGCTunerThreshold
+	} else if c.GCTunerThreshold > maxGCTunerThreshold {
+		c.GCTunerThreshold = maxGCTunerThreshold
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
@@ -1219,6 +1265,16 @@ func (c *PDServerConfig) Validate() error {
 	}
 	if c.FlowRoundByDigit < 0 {
 		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
+	}
+	if c.ServerMemoryLimit < minServerMemoryLimit || c.ServerMemoryLimit > maxServerMemoryLimit {
+		return errors.New(fmt.Sprintf("server-memory-limit should between %v and %v", minServerMemoryLimit, maxServerMemoryLimit))
+	}
+	if c.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger || c.ServerMemoryLimitGCTrigger > maxServerMemoryLimitGCTrigger {
+		return errors.New(fmt.Sprintf("server-memory-limit-gc-trigger should between %v and %v",
+			minServerMemoryLimitGCTrigger, maxServerMemoryLimitGCTrigger))
+	}
+	if c.GCTunerThreshold < minGCTunerThreshold || c.GCTunerThreshold > maxGCTunerThreshold {
+		return errors.New(fmt.Sprintf("gc-tuner-threshold should between %v and %v", minGCTunerThreshold, maxGCTunerThreshold))
 	}
 
 	return nil

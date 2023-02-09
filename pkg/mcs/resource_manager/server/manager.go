@@ -16,11 +16,14 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/member"
@@ -74,16 +77,29 @@ func NewManager(srv *server.Server) *Manager {
 func (m *Manager) Init(ctx context.Context) {
 	// Reset the resource groups first.
 	m.groups = make(map[string]*ResourceGroup)
-	m.storage.LoadResourceGroupSettings(func(k, v string) {
+	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {
 			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
-	})
+	}
+	m.storage.LoadResourceGroupSettings(handler)
+	tokenHandler := func(k, v string) {
+		tokens := &GroupStates{}
+		if err := json.Unmarshal([]byte(v), tokens); err != nil {
+			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
+			panic(err)
+		}
+		if group, ok := m.groups[k]; ok {
+			group.SetStatesIntoResourceGroup(tokens)
+		}
+	}
+	m.storage.LoadResourceGroupStates(tokenHandler)
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
+	go m.persistLoop(ctx)
 	log.Info("resource group manager finishes initialization")
 }
 
@@ -100,11 +116,14 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 		return err
 	}
 	m.Lock()
+	defer m.Unlock()
 	if err := group.persistSettings(m.storage); err != nil {
 		return err
 	}
+	if err := group.persistStates(m.storage); err != nil {
+		return err
+	}
 	m.groups[group.Name] = group
-	m.Unlock()
 	return nil
 }
 
@@ -114,21 +133,17 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 		return errors.New("invalid group name")
 	}
 	m.Lock()
-	defer m.Unlock()
 	curGroup, ok := m.groups[group.Name]
+	m.Unlock()
 	if !ok {
 		return errors.New("not exists the group")
 	}
-	newGroup := curGroup.Copy()
-	err := newGroup.PatchSettings(group)
+
+	err := curGroup.PatchSettings(group)
 	if err != nil {
 		return err
 	}
-	if err := newGroup.persistSettings(m.storage); err != nil {
-		return err
-	}
-	m.groups[group.Name] = newGroup
-	return nil
+	return curGroup.persistSettings(m.storage)
 }
 
 // DeleteResourceGroup deletes a resource group.
@@ -174,6 +189,40 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 		return res[i].Name < res[j].Name
 	})
 	return res
+}
+
+func (m *Manager) persistLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	failpoint.Inject("fastPersist", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(100 * time.Millisecond)
+	})
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.persistResourceGroupRunningState()
+		}
+	}
+}
+
+func (m *Manager) persistResourceGroupRunningState() {
+	m.RLock()
+	keys := make([]string, 0, len(m.groups))
+	for k := range m.groups {
+		keys = append(keys, k)
+	}
+	m.RUnlock()
+	for idx := 0; idx < len(keys); idx++ {
+		m.RLock()
+		group, ok := m.groups[keys[idx]]
+		m.RUnlock()
+		if ok {
+			group.persistStates(m.storage)
+		}
+	}
 }
 
 // Receive the consumption and flush it to the metrics.
