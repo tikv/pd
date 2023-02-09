@@ -1955,8 +1955,8 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	return &pdpb.LoadGlobalConfigResponse{Items: res, Revision: r.Header.GetRevision()}, nil
 }
 
-// WatchGlobalConfig if the connection of WatchGlobalConfig is end
-// or stopped by whatever reason, just reconnect to it.
+// WatchGlobalConfig will retry on recoverable errors forever until reconnected
+// by Etcd.Watch() as long as the context has not been canceled or timed out.
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
@@ -1988,6 +1988,8 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 				if err := server.Send(&resp); err != nil {
 					return err
 				}
+				// Err() indicates that this WatchResponse holds a channel-closing error.
+				return res.Err()
 			}
 			revision = res.Header.GetRevision()
 
@@ -2002,8 +2004,9 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 					if e.PrevKv != nil {
 						cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.PrevKv.Value, Kind: pdpb.EventType(e.Type)})
 					} else {
-						log.Info("previous key-value pair has been compacted",
-							zap.String("previous key", string(e.Kv.Key)))
+						// Prev-kv is compacted means there must have been a delete event before this event,
+						// which means that this is just a duplicated event, so we can just ignore it.
+						log.Info("previous key-value pair has been compacted", zap.String("previous key", string(e.Kv.Key)))
 					}
 				}
 			}
