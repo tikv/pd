@@ -1308,6 +1308,16 @@ func (c *PDServerConfig) Validate() error {
 	if c.FlowRoundByDigit < 0 {
 		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
 	}
+	if c.ServerMemoryLimit < minServerMemoryLimit || c.ServerMemoryLimit > maxServerMemoryLimit {
+		return errors.New(fmt.Sprintf("server-memory-limit should between %v and %v", minServerMemoryLimit, maxServerMemoryLimit))
+	}
+	if c.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger || c.ServerMemoryLimitGCTrigger > maxServerMemoryLimitGCTrigger {
+		return errors.New(fmt.Sprintf("server-memory-limit-gc-trigger should between %v and %v",
+			minServerMemoryLimitGCTrigger, maxServerMemoryLimitGCTrigger))
+	}
+	if c.GCTunerThreshold < minGCTunerThreshold || c.GCTunerThreshold > maxGCTunerThreshold {
+		return errors.New(fmt.Sprintf("gc-tuner-threshold should between %v and %v", minGCTunerThreshold, maxGCTunerThreshold))
+	}
 
 	return nil
 }
