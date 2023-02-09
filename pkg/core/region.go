@@ -139,7 +139,7 @@ const (
 	statsReportMinInterval = 3      // 3s
 	statsReportMaxInterval = 5 * 60 // 5min
 	// InitClusterRegionThreshold is a threshold which represent a new cluster.
-	InitClusterRegionThreshold = 50
+	InitClusterRegionThreshold = 100
 )
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.

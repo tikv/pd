@@ -497,6 +497,11 @@ func (o *PersistOptions) GetLowSpaceRatio() float64 {
 	return o.GetScheduleConfig().LowSpaceRatio
 }
 
+// GetSlowStoreEvictingAffectedStoreRatioThreshold returns the affected ratio threshold when judging a store is slow.
+func (o *PersistOptions) GetSlowStoreEvictingAffectedStoreRatioThreshold() float64 {
+	return o.GetScheduleConfig().SlowStoreEvictingAffectedStoreRatioThreshold
+}
+
 // GetHighSpaceRatio returns the high space ratio.
 func (o *PersistOptions) GetHighSpaceRatio() float64 {
 	return o.GetScheduleConfig().HighSpaceRatio
@@ -535,6 +540,26 @@ func (o *PersistOptions) GetDashboardAddress() string {
 // IsUseRegionStorage returns if the independent region storage is enabled.
 func (o *PersistOptions) IsUseRegionStorage() bool {
 	return o.GetPDServerConfig().UseRegionStorage
+}
+
+// GetServerMemoryLimit gets ServerMemoryLimit config.
+func (o *PersistOptions) GetServerMemoryLimit() float64 {
+	return o.GetPDServerConfig().ServerMemoryLimit
+}
+
+// GetServerMemoryLimitGCTrigger gets the ServerMemoryLimitGCTrigger config.
+func (o *PersistOptions) GetServerMemoryLimitGCTrigger() float64 {
+	return o.GetPDServerConfig().ServerMemoryLimitGCTrigger
+}
+
+// GetEnableGOGCTuner gets the EnableGOGCTuner config.
+func (o *PersistOptions) GetEnableGOGCTuner() bool {
+	return o.GetPDServerConfig().EnableGOGCTuner
+}
+
+// GetGCTunerThreshold gets the GC tuner threshold.
+func (o *PersistOptions) GetGCTunerThreshold() float64 {
+	return o.GetPDServerConfig().GCTunerThreshold
 }
 
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
