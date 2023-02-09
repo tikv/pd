@@ -21,7 +21,7 @@ import (
 	"net/http"
 
 	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basic_server"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )

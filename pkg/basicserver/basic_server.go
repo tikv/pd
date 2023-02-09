@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package basicsvr
+package server
 
 import (
 	"context"
@@ -38,6 +38,7 @@ type Server interface {
 	GetHTTPClient() *http.Client
 	// AddStartCallback adds a callback in the startServer phase.
 	AddStartCallback(callbacks ...func())
+	// TODO: replace these two methods with `primary` function without etcd server dependency.
 	// GetMember returns the member information.
 	GetMember() *member.Member
 	// AddLeaderCallback adds a callback in the leader campaign phase.

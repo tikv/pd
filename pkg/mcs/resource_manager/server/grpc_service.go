@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basic_server"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.uber.org/zap"

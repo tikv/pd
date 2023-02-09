@@ -102,7 +102,7 @@ var (
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
 )
 
-// Server is the pd server.
+// Server is the pd server. It implements bs.Server
 // nolint
 type Server struct {
 	diagnosticspb.DiagnosticsServer
