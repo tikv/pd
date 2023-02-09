@@ -23,11 +23,11 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/tests"
 
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedulers"
 )
 
 func TestCancelDuringStarting(t *testing.T) {
+	schedulers.Register()
 	prepareTestConfig()
 	defer resetTestConfig()
 	ctx, cancel := context.WithCancel(context.Background())

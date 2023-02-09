@@ -325,18 +325,30 @@ func (m *RuleManager) GetRulesForApplyRange(start, end []byte) []*Rule {
 	return m.ruleList.getRulesForApplyRange(start, end)
 }
 
-// FitRegion fits a region to the rules it matches.
-func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *RegionFit {
+// IsRegionFitCached returns whether the RegionFit can be cached.
+func (m *RuleManager) IsRegionFitCached(storeSet StoreSet, region *core.RegionInfo) bool {
 	regionStores := getStoresByRegion(storeSet, region)
 	rules := m.GetRulesForApplyRegion(region)
+	isCached, _ := m.cache.CheckAndGetCache(region, rules, regionStores)
+	return isCached
+}
+
+// FitRegion fits a region to the rules it matches.
+func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) (fit *RegionFit) {
+	regionStores := getStoresByRegion(storeSet, region)
+	rules := m.GetRulesForApplyRegion(region)
+	var isCached bool
 	if m.opt.IsPlacementRulesCacheEnabled() {
-		if ok, fit := m.cache.CheckAndGetCache(region, rules, regionStores); fit != nil && ok {
+		if isCached, fit = m.cache.CheckAndGetCache(region, rules, regionStores); isCached && fit != nil {
 			return fit
 		}
 	}
-	fit := fitRegion(regionStores, region, rules, m.opt.IsWitnessAllowed())
+	fit = fitRegion(regionStores, region, rules, m.opt.IsWitnessAllowed())
 	fit.regionStores = regionStores
 	fit.rules = rules
+	if isCached {
+		m.SetRegionFitCache(region, fit)
+	}
 	return fit
 }
 

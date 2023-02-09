@@ -21,7 +21,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const replicaBaseScore = 100
@@ -30,28 +29,10 @@ const replicaBaseScore = 100
 // All peers are divided into corresponding rules according to the matching
 // rules, and the remaining Peers are placed in the OrphanPeers list.
 type RegionFit struct {
-	mu struct {
-		syncutil.RWMutex
-		cached bool
-	}
 	RuleFits     []*RuleFit     `json:"rule-fits"`
 	OrphanPeers  []*metapb.Peer `json:"orphan-peers"`
 	regionStores []*core.StoreInfo
 	rules        []*Rule
-}
-
-// SetCached indicates this RegionFit is fetch form cache
-func (f *RegionFit) SetCached(cached bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.mu.cached = cached
-}
-
-// IsCached indicates whether this result is fetched from caches
-func (f *RegionFit) IsCached() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.mu.cached
 }
 
 // Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.
@@ -243,9 +224,10 @@ func (w *fitWorker) fitRule(index int) bool {
 		// Only consider stores:
 		// 1. Match label constraints
 		// 2. Role match, or can match after transformed.
-		// 3. Not selected by other rules.
+		// 3. Don't select leader as witness.
+		// 4. Not selected by other rules.
 		for _, p := range w.peers {
-			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) {
+			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && !(p.isLeader && w.supportWitness && w.rules[index].IsWitness) {
 				candidates = append(candidates, p)
 			}
 		}

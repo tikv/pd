@@ -133,6 +133,30 @@ var hotPeerHist = prometheus.NewHistogramVec(
 		Buckets:   prometheus.ExponentialBuckets(1, 2, 30),
 	}, []string{"type", "rw", "dim"})
 
+var storeSlowTrendEvictedStatusGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "store_slow_trend_evicted_status",
+		Help:      "Store evited by slow trend status for schedule",
+	}, []string{"address", "store"})
+
+var storeSlowTrendActionStatusGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "store_slow_trend_action_status",
+		Help:      "Store trend scheduler calculating actions",
+	}, []string{"reason"})
+
+var storeSlowTrendMiscGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "store_slow_trend_misc",
+		Help:      "Store trend internal uncatelogued values",
+	}, []string{"type"})
+
 func init() {
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
@@ -148,4 +172,7 @@ func init() {
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)
 	prometheus.MustRegister(hotPeerHist)
+	prometheus.MustRegister(storeSlowTrendEvictedStatusGauge)
+	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
+	prometheus.MustRegister(storeSlowTrendMiscGauge)
 }

@@ -42,6 +42,25 @@ type MetaStore struct {
 	StateName string `json:"state_name"`
 }
 
+// SlowTrend contains slow trend information about a store.
+type SlowTrend struct {
+	// CauseValue is the slow trend detecting raw input, it changes by the performance and pressure along time of the store.
+	// The value itself is not important, what matter is:
+	//   - The comparition result from store to store.
+	//   - The change magnitude along time (represented by CauseRate).
+	// Currently it's one of store's internal latency (duration of waiting in the task queue of raftstore.store).
+	CauseValue float64 `json:"cause_value"`
+	// CauseRate is for mesuring the change magnitude of CauseValue of the store,
+	//   - CauseRate > 0 means the store is become slower currently
+	//   - CauseRate < 0 means the store is become faster currently
+	//   - CauseRate == 0 means the store's performance and pressure does not have significant changes
+	CauseRate float64 `json:"cause_rate"`
+	// ResultValue is the current gRPC QPS of the store.
+	ResultValue float64 `json:"result_value"`
+	// ResultRate is for mesuring the change magnitude of ResultValue of the store.
+	ResultRate float64 `json:"result_rate"`
+}
+
 // StoreStatus contains status about a store.
 type StoreStatus struct {
 	Capacity           typeutil.ByteSize  `json:"capacity"`
@@ -57,6 +76,7 @@ type StoreStatus struct {
 	RegionSize         int64              `json:"region_size"`
 	WitnessCount       int                `json:"witness_count"`
 	SlowScore          uint64             `json:"slow_score"`
+	SlowTrend          SlowTrend          `json:"slow_trend"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	IsBusy             bool               `json:"is_busy,omitempty"`
@@ -77,6 +97,11 @@ const (
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
+	var slowTrend SlowTrend
+	coreSlowTrend := store.GetSlowTrend()
+	if coreSlowTrend != nil {
+		slowTrend = SlowTrend{coreSlowTrend.CauseValue, coreSlowTrend.CauseRate, coreSlowTrend.ResultValue, coreSlowTrend.ResultRate}
+	}
 	s := &StoreInfo{
 		Store: &MetaStore{
 			Store:     store.GetMeta(),
@@ -96,6 +121,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			RegionSize:         store.GetRegionSize(),
 			WitnessCount:       store.GetWitnessCount(),
 			SlowScore:          store.GetSlowScore(),
+			SlowTrend:          slowTrend,
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
 			IsBusy:             store.IsBusy(),

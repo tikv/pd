@@ -16,7 +16,6 @@ package endpoint
 
 import (
 	"encoding/json"
-	"path"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/tikv/pd/pkg/errs"
@@ -42,10 +41,10 @@ func (se *StorageEndpoint) saveProto(key string, msg proto.Message) error {
 	return se.Save(key, string(value))
 }
 
-func (se *StorageEndpoint) saveJSON(prefix, key string, data interface{}) error {
+func (se *StorageEndpoint) saveJSON(key string, data interface{}) error {
 	value, err := json.Marshal(data)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
 	}
-	return se.Save(path.Join(prefix, key), string(value))
+	return se.Save(key, string(value))
 }
