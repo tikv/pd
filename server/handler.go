@@ -319,6 +319,11 @@ func (h *Handler) AddBalanceHotRegionScheduler() error {
 	return h.AddScheduler(schedulers.HotRegionType)
 }
 
+// AddEvictSlowTrendScheduler adds a evict-slow-trend-scheduler.
+func (h *Handler) AddEvictSlowTrendScheduler() error {
+	return h.AddScheduler(schedulers.EvictSlowTrendType)
+}
+
 // AddLabelScheduler adds a label-scheduler.
 func (h *Handler) AddLabelScheduler() error {
 	return h.AddScheduler(schedulers.LabelType)
