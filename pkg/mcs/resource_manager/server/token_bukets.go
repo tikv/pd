@@ -47,9 +47,10 @@ type GroupTokenBucket struct {
 
 // GroupTokenBucketState is the running state of TokenBucket.
 type GroupTokenBucketState struct {
-	Tokens      float64    `json:"tokens,omitempty"`
-	LastUpdate  *time.Time `json:"last_update,omitempty"`
-	Initialized bool       `json:"initialized"`
+	Tokens         float64    `json:"tokens,omitempty"`
+	LastUpdate     *time.Time `json:"last_update,omitempty"`
+	Initialized    bool       `json:"initialized"`
+	settingChanged bool
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
@@ -83,6 +84,7 @@ func (t *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 	}
 	if setting := proto.Clone(tb.GetSettings()).(*rmpb.TokenLimitSettings); setting != nil {
 		t.Settings = setting
+		t.settingChanged = true
 	}
 
 	// the settings in token is delta of the last update and now.
@@ -111,6 +113,9 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 			t.Tokens += float64(t.Settings.FillRate) * delta.Seconds()
 			t.LastUpdate = &now
 		}
+	}
+	if t.settingChanged && t.Tokens <= 0 {
+		t.Tokens = 0
 	}
 	if t.Settings.BurstLimit != 0 {
 		if burst := float64(t.Settings.BurstLimit); t.Tokens > burst {
