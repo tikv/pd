@@ -40,6 +40,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	basicsvr "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -99,7 +100,11 @@ var (
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
 )
 
-// Server is the pd server.
+// if server doesn't implement all methods of basicsvr.Server, this line will result in
+// clear error message "*Server does not implement basicsvr.Server (missing Method method)"
+var _ basicsvr.Server = (*Server)(nil)
+
+// Server is the pd server. It implements basicsvr.Server
 // nolint
 type Server struct {
 	diagnosticspb.DiagnosticsServer
@@ -373,6 +378,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Label:     idAllocLabel,
 		Member:    s.member.MemberValue(),
 	})
+
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
 		s.member, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
@@ -731,7 +737,7 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
-// GetHTTPClient returns builtin etcd client.
+// GetHTTPClient returns builtin http client.
 func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
 }

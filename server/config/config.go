@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -459,7 +460,7 @@ func (c *Config) Validate() error {
 
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
-	configMetaData := newConfigMetadata(meta)
+	configMetaData := configutil.NewConfigMetadata(meta)
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
 	}
@@ -570,50 +571,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	return nil
 }
 
-// Utility to test if a configuration is defined.
-type configMetaData struct {
-	meta *toml.MetaData
-	path []string
-}
-
-func newConfigMetadata(meta *toml.MetaData) *configMetaData {
-	return &configMetaData{meta: meta}
-}
-
-func (m *configMetaData) IsDefined(key string) bool {
-	if m.meta == nil {
-		return false
-	}
-	keys := append([]string(nil), m.path...)
-	keys = append(keys, key)
-	return m.meta.IsDefined(keys...)
-}
-
-func (m *configMetaData) Child(path ...string) *configMetaData {
-	newPath := append([]string(nil), m.path...)
-	newPath = append(newPath, path...)
-	return &configMetaData{
-		meta: m.meta,
-		path: newPath,
-	}
-}
-
-func (m *configMetaData) CheckUndecoded() error {
-	if m.meta == nil {
-		return nil
-	}
-	undecoded := m.meta.Undecoded()
-	if len(undecoded) == 0 {
-		return nil
-	}
-	errInfo := "Config contains undefined item: "
-	for _, key := range undecoded {
-		errInfo += key.String() + ", "
-	}
-	return errors.New(errInfo[:len(errInfo)-2])
-}
-
-func (c *Config) adjustLog(meta *configMetaData) {
+func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
 	}
@@ -840,7 +798,7 @@ const (
 	defaultSlowStoreEvictingAffectedStoreRatioThreshold = 0.3
 )
 
-func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
+func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool) error {
 	if !meta.IsDefined("max-snapshot-count") {
 		adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	}
@@ -961,7 +919,7 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 	return c.MaxMergeRegionSize * 10000
 }
 
-func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {
+func (c *ScheduleConfig) parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
 	oldName, newName := "disable-"+name, "enable-"+name
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
 	switch {
@@ -1146,7 +1104,7 @@ func (c *ReplicationConfig) Validate() error {
 	return nil
 }
 
-func (c *ReplicationConfig) adjust(meta *configMetaData) error {
+func (c *ReplicationConfig) adjust(meta *configutil.ConfigMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("enable-placement-rules") {
 		c.EnablePlacementRules = defaultEnablePlacementRules
@@ -1186,7 +1144,7 @@ type PDServerConfig struct {
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
 }
 
-func (c *PDServerConfig) adjust(meta *configMetaData) error {
+func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
@@ -1213,7 +1171,7 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	return c.Validate()
 }
 
-func (c *PDServerConfig) migrateConfigurationFromFile(meta *configMetaData) error {
+func (c *PDServerConfig) migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
 	oldName, newName := "trace-region-flow", "flow-round-by-digit"
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
 	switch {
@@ -1431,7 +1389,7 @@ func (c *DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 	return nil, nil
 }
 
-func (c *DashboardConfig) adjust(meta *configMetaData) {
+func (c *DashboardConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-telemetry") {
 		c.EnableTelemetry = defaultEnableTelemetry
 	}
@@ -1451,7 +1409,7 @@ func (c *ReplicationModeConfig) Clone() *ReplicationModeConfig {
 	return &cfg
 }
 
-func (c *ReplicationModeConfig) adjust(meta *configMetaData) {
+func (c *ReplicationModeConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("replication-mode") || NormalizeReplicationMode(c.ReplicationMode) == "" {
 		c.ReplicationMode = "majority"
 	}
@@ -1479,7 +1437,7 @@ type DRAutoSyncReplicationConfig struct {
 	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
-func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
+func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}
