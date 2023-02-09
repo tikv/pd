@@ -40,6 +40,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	basicsvr "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -49,6 +50,7 @@ import (
 	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/systimemon"
@@ -69,7 +71,6 @@ import (
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/storage"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
@@ -369,6 +370,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Label:     idAllocLabel,
 		Member:    s.member.MemberValue(),
 	})
+
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
 		s.member, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
 		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
@@ -727,7 +729,7 @@ func (s *Server) GetClient() *clientv3.Client {
 	return s.client
 }
 
-// GetHTTPClient returns builtin etcd client.
+// GetHTTPClient returns builtin http client.
 func (s *Server) GetHTTPClient() *http.Client {
 	return s.httpClient
 }

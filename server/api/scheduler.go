@@ -170,6 +170,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case schedulers.EvictSlowTrendName:
+		if err := h.AddEvictSlowTrendScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	case schedulers.BalanceRegionName:
 		if err := h.AddBalanceRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())

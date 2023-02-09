@@ -66,35 +66,6 @@ var (
 	balanceLeaderNewOpCounter            = schedulerCounter.WithLabelValues(BalanceLeaderName, "new-operator")
 )
 
-func init() {
-	schedule.RegisterSliceDecoderBuilder(BalanceLeaderType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			conf, ok := v.(*balanceLeaderSchedulerConfig)
-			if !ok {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
-			}
-			ranges, err := getKeyRanges(args)
-			if err != nil {
-				return err
-			}
-			conf.Ranges = ranges
-			conf.Batch = BalanceLeaderBatchSize
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(BalanceLeaderType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &balanceLeaderSchedulerConfig{storage: storage}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		if conf.Batch == 0 {
-			conf.Batch = BalanceLeaderBatchSize
-		}
-		return newBalanceLeaderScheduler(opController, conf), nil
-	})
-}
-
 type balanceLeaderSchedulerConfig struct {
 	mu      syncutil.RWMutex
 	storage endpoint.ConfigStorage

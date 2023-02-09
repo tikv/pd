@@ -137,7 +137,7 @@ func TestLowSpaceRatio(t *testing.T) {
 	store.rawStats.Available = store.rawStats.Capacity >> 3
 
 	re.False(store.IsLowSpace(0.8))
-	store.regionCount = 51
+	store.regionCount = 101
 	re.True(store.IsLowSpace(0.8))
 	store.rawStats.Available = store.rawStats.Capacity >> 2
 	re.False(store.IsLowSpace(0.8))

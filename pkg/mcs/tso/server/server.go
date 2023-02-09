@@ -23,7 +23,11 @@ import (
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+<<<<<<< HEAD
 	bs "github.com/tikv/pd/pkg/basicserver"
+=======
+	basicsvr "github.com/tikv/pd/pkg/basic_server"
+>>>>>>> 2be26ff534692fb3de17b7ce69cff46a67359fc3
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -31,13 +35,25 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+<<<<<<< HEAD
 // Server is the TSO server, and it implements bs.Server.
+=======
+// If server doesn't implement all methods of basicsvr.Server, this line will result in a clear
+// error message like "*Server does not implement basicsvr.Server (missing Method method)"
+var _ basicsvr.Server = (*Server)(nil)
+
+// Server is the TSO server, and it implements basicsvr.Server.
+>>>>>>> 2be26ff534692fb3de17b7ce69cff46a67359fc3
 // nolint
 type Server struct {
 	ctx context.Context
 }
 
+<<<<<<< HEAD
 // TODO: Implement the following methods defined in bs.Server
+=======
+// TODO: Implement the following methods defined in basicsvr.Server
+>>>>>>> 2be26ff534692fb3de17b7ce69cff46a67359fc3
 
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
@@ -69,7 +85,11 @@ func (s *Server) GetHTTPClient() *http.Client {
 }
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
+<<<<<<< HEAD
 func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, bs.Server) {
+=======
+func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, basicsvr.Server) {
+>>>>>>> 2be26ff534692fb3de17b7ce69cff46a67359fc3
 	cfg := tso.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 

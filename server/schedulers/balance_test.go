@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
@@ -34,7 +35,6 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/storage"
 )
 
 type testBalanceSpeedCase struct {
@@ -252,6 +252,7 @@ func (suite *balanceLeaderSchedulerTestSuite) SetupTest() {
 	suite.opt = config.NewTestOptions()
 	suite.tc = mockcluster.NewCluster(suite.ctx, suite.opt)
 	suite.oc = schedule.NewOperatorController(suite.ctx, suite.tc, nil)
+	Register()
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	suite.NoError(err)
 	suite.lb = lb
@@ -1221,7 +1222,7 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 	operators, _ := sb.Schedule(tc, false)
 	re.NotEmpty(operators)
 
-	for i := uint64(10); i < 60; i++ {
+	for i := uint64(10); i < 111; i++ {
 		tc.PutRegionStores(i, 1, 3, 4)
 	}
 	operators, _ = sb.Schedule(tc, false)

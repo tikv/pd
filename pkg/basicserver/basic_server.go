@@ -34,7 +34,7 @@ type Server interface {
 	Close()
 	// GetClient returns builtin etcd client.
 	GetClient() *clientv3.Client
-	// GetHTTPClient returns builtin etcd client.
+	// GetHTTPClient returns builtin http client.
 	GetHTTPClient() *http.Client
 	// AddStartCallback adds a callback in the startServer phase.
 	AddStartCallback(callbacks ...func())
