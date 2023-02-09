@@ -497,6 +497,11 @@ func (o *PersistOptions) GetLowSpaceRatio() float64 {
 	return o.GetScheduleConfig().LowSpaceRatio
 }
 
+// GetSlowStoreEvictingAffectedStoreRatioThreshold returns the affected ratio threshold when judging a store is slow.
+func (o *PersistOptions) GetSlowStoreEvictingAffectedStoreRatioThreshold() float64 {
+	return o.GetScheduleConfig().SlowStoreEvictingAffectedStoreRatioThreshold
+}
+
 // GetHighSpaceRatio returns the high space ratio.
 func (o *PersistOptions) GetHighSpaceRatio() float64 {
 	return o.GetScheduleConfig().HighSpaceRatio

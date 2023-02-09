@@ -129,6 +129,21 @@ func SlowStoreEvicted() StoreCreateOption {
 	}
 }
 
+// SlowTrendEvicted marks a store as a slow store by trend and prevents transferring
+// leader to the store
+func SlowTrendEvicted() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowTrendEvicted = true
+	}
+}
+
+// SlowTrendRecovered cleans the evicted by slow trend state of a store.
+func SlowTrendRecovered() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowTrendEvicted = false
+	}
+}
+
 // SlowStoreRecovered cleans the evicted state of a store.
 func SlowStoreRecovered() StoreCreateOption {
 	return func(store *StoreInfo) {

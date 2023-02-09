@@ -252,6 +252,7 @@ func (suite *balanceLeaderSchedulerTestSuite) SetupTest() {
 	suite.opt = config.NewTestOptions()
 	suite.tc = mockcluster.NewCluster(suite.ctx, suite.opt)
 	suite.oc = schedule.NewOperatorController(suite.ctx, suite.tc, nil)
+	Register()
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	suite.NoError(err)
 	suite.lb = lb
