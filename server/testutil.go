@@ -33,10 +33,6 @@ import (
 	"go.etcd.io/etcd/embed"
 )
 
-func init() {
-	schedulers.Register()
-}
-
 // CleanupFunc closes test pd server(s) and deletes any files left behind.
 type CleanupFunc func()
 
@@ -67,6 +63,7 @@ var zapLogOnce sync.Once
 // NewTestSingleConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
 func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
+	schedulers.Register()
 	cfg := &config.Config{
 		Name:       "pd",
 		ClientUrls: tempurl.Alloc(),

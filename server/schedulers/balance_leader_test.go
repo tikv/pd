@@ -15,14 +15,12 @@
 package schedulers
 
 import (
-	"context"
 	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
 )
 
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
@@ -43,9 +41,8 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 }
 
 func BenchmarkCandidateStores(b *testing.B) {
-	ctx := context.Background()
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
+	cancel, _, tc, _ := newTestCluster()
+	defer cancel()
 
 	for id := uint64(1); id < uint64(10000); id++ {
 		leaderCount := int(rand.Int31n(10000))

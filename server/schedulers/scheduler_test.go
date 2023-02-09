@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"context"
 	"testing"
 
 	"github.com/docker/go-units"
@@ -35,13 +34,10 @@ import (
 
 func TestShuffleLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
 
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-
-	sl, err := schedule.CreateScheduler(ShuffleLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleLeaderType, []string{"", ""}))
+	sl, err := schedule.CreateScheduler(ShuffleLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleLeaderType, []string{"", ""}))
 	re.NoError(err)
 	ops, _ := sl.Schedule(tc, false)
 	re.Empty(ops)
@@ -66,14 +62,11 @@ func TestShuffleLeader(t *testing.T) {
 
 func TestRejectLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, opt, tc, oc := newTestCluster()
 	defer cancel()
-
-	opts := config.NewTestOptions()
-	opts.SetLabelPropertyConfig(config.LabelPropertyConfig{
+	opt.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		config.RejectLeader: {{Key: "noleader", Value: "true"}},
 	})
-	tc := mockcluster.NewCluster(ctx, opts)
 
 	// Add 3 stores 1,2,3.
 	tc.AddLabelsStore(1, 1, map[string]string{"noleader": "true"})
@@ -85,7 +78,6 @@ func TestRejectLeader(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 1, 3)
 
 	// The label scheduler transfers leader out of store1.
-	oc := schedule.NewOperatorController(ctx, nil, nil)
 	sl, err := schedule.CreateScheduler(LabelType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(LabelType, []string{"", ""}))
 	re.NoError(err)
 	ops, _ := sl.Schedule(tc, false)
@@ -126,13 +118,10 @@ func TestRejectLeader(t *testing.T) {
 
 func TestRemoveRejectLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
-	opts := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opts)
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 1)
-	oc := schedule.NewOperatorController(ctx, tc, nil)
 	el, err := schedule.CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
 	re.NoError(err)
 	tc.DeleteStore(tc.GetStore(1))
@@ -142,16 +131,14 @@ func TestRemoveRejectLeader(t *testing.T) {
 
 func TestShuffleHotRegionScheduleBalance(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
+	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
 	re.NoError(err)
-
+	tc.SetEnablePlacementRules(false)
 	checkBalance(re, tc, hb)
 	tc.SetEnablePlacementRules(true)
 	checkBalance(re, tc, hb)
@@ -200,13 +187,10 @@ func checkBalance(re *require.Assertions, tc *mockcluster.Cluster, hb schedule.S
 
 func TestHotRegionScheduleAbnormalReplica(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
-
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionScheduleLimit(0)
-	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 
 	tc.AddRegionStore(1, 3)
@@ -228,13 +212,10 @@ func TestHotRegionScheduleAbnormalReplica(t *testing.T) {
 
 func TestShuffleRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
 
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-
-	sl, err := schedule.CreateScheduler(ShuffleRegionType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
+	sl, err := schedule.CreateScheduler(ShuffleRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
 	re.NoError(err)
 	re.True(sl.IsScheduleAllowed(tc))
 	ops, _ := sl.Schedule(tc, false)
@@ -260,11 +241,8 @@ func TestShuffleRegion(t *testing.T) {
 
 func TestShuffleRegionRole(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
-
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
 	// update rule to 1leader+1follower+1learner
@@ -301,7 +279,7 @@ func TestShuffleRegionRole(t *testing.T) {
 	}, peers[0])
 	tc.PutRegion(region)
 
-	sl, err := schedule.CreateScheduler(ShuffleRegionType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
+	sl, err := schedule.CreateScheduler(ShuffleRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
 	re.NoError(err)
 
 	conf := sl.(*shuffleRegionScheduler).conf
@@ -317,10 +295,9 @@ func TestShuffleRegionRole(t *testing.T) {
 
 func TestSpecialUseHotRegion(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
 
-	oc := schedule.NewOperatorController(ctx, nil, nil)
 	storage := storage.NewStorageWithMemoryBackend()
 	cd := schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
 	bs, err := schedule.CreateScheduler(BalanceRegionType, oc, storage, cd)
@@ -328,8 +305,6 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	hs, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage, cd)
 	re.NoError(err)
 
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 10)
@@ -372,17 +347,14 @@ func TestSpecialUseHotRegion(t *testing.T) {
 
 func TestSpecialUseReserved(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
 
-	oc := schedule.NewOperatorController(ctx, nil, nil)
 	storage := storage.NewStorageWithMemoryBackend()
 	cd := schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
 	bs, err := schedule.CreateScheduler(BalanceRegionType, oc, storage, cd)
 	re.NoError(err)
 
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 10)
@@ -411,14 +383,11 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 	// Leaders:    1    0    0
 	// Region1:    L    F    F
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
+	cancel, _, tc, oc := newTestCluster()
+	defer cancel()
 	tc.SetEnablePlacementRules(true)
-	oc := schedule.NewOperatorController(ctx, nil, nil)
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
-	defer cancel()
 
 	tc.AddLeaderStore(1, 1)
 	tc.AddLeaderStore(2, 0)

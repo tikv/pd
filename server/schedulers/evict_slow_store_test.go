@@ -26,14 +26,12 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
 type evictSlowStoreTestSuite struct {
 	suite.Suite
-	ctx    context.Context
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
 	es     schedule.Scheduler
@@ -46,9 +44,7 @@ func TestEvictSlowStoreTestSuite(t *testing.T) {
 }
 
 func (suite *evictSlowStoreTestSuite) SetupTest() {
-	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	opt := config.NewTestOptions()
-	suite.tc = mockcluster.NewCluster(suite.ctx, opt)
+	suite.cancel, _, suite.tc, suite.oc = newTestCluster()
 
 	// Add stores 1, 2
 	suite.tc.AddLeaderStore(1, 0)
@@ -59,9 +55,7 @@ func (suite *evictSlowStoreTestSuite) SetupTest() {
 	suite.tc.AddLeaderRegion(2, 2, 1)
 	suite.tc.UpdateLeaderCount(2, 16)
 
-	suite.oc = schedule.NewOperatorController(suite.ctx, nil, nil)
 	storage := storage.NewStorageWithMemoryBackend()
-	Register()
 	var err error
 	suite.es, err = schedule.CreateScheduler(EvictSlowStoreType, suite.oc, storage, schedule.ConfigSliceDecoder(EvictSlowStoreType, []string{}))
 	suite.NoError(err)
