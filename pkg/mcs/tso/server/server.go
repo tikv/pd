@@ -16,32 +16,44 @@ package server
 
 import (
 	"context"
-	"flag"
 	"net/http"
-	"os"
 
-	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/tso"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/metricutil"
+	basicsvr "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/member"
 	"go.etcd.io/etcd/clientv3"
 )
 
-// Server is the TSO server, and it implements bs.Server.
-// nolint
+// If server doesn't implement all methods of basicsvr.Server, this line will result in a clear
+// error message like "*Server does not implement basicsvr.Server (missing Method method)"
+var _ basicsvr.Server = (*Server)(nil)
+
+// Server is the TSO server, and it implements basicsvr.Server.
 type Server struct {
-	ctx context.Context
+	ctx    context.Context
+	name   string
+	client *clientv3.Client
+	member *member.Member
+	// Callback functions for different stages
+	// startCallbacks will be called after the server is started.
+	startCallbacks []func()
+	// leaderCallbacks will be called after the server becomes leader.
+	leaderCallbacks []func(context.Context)
+}
+
+// NewServer creates a new TSO server.
+func NewServer(ctx context.Context, client *clientv3.Client) *Server {
+	return &Server{
+		ctx:    ctx,
+		name:   "TSO",
+		client: client,
+	}
 }
 
 // TODO: Implement the following methods defined in bs.Server
 
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
-	return ""
+	return s.name
 }
 
 // Context returns the context of server.
@@ -60,7 +72,7 @@ func (s *Server) Close() {
 
 // GetClient returns builtin etcd client.
 func (s *Server) GetClient() *clientv3.Client {
-	return nil
+	return s.client
 }
 
 // GetHTTPClient returns builtin http client.
@@ -68,52 +80,17 @@ func (s *Server) GetHTTPClient() *http.Client {
 	return nil
 }
 
-// CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
-func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, bs.Server) {
-	cfg := tso.NewConfig()
-	err := cfg.Parse(os.Args[1:])
-
-	if cfg.Version {
-		printVersionInfo()
-		exit(0)
-	}
-
-	defer logutil.LogPanic()
-
-	switch errors.Cause(err) {
-	case nil:
-	case flag.ErrHelp:
-		exit(0)
-	default:
-		log.Fatal("parse cmd flags error", errs.ZapError(err))
-	}
-
-	if cfg.ConfigCheck {
-		printConfigCheckMsg(cfg)
-		exit(0)
-	}
-
-	// TODO: Initialize logger
-
-	// TODO: Make it configurable if it has big impact on performance.
-	grpcprometheus.EnableHandlingTimeHistogram()
-
-	metricutil.Push(&cfg.Metric)
-
-	// TODO: Create the server
-
-	return nil, nil, nil
+// AddStartCallback adds a callback in the startServer phase.
+func (s *Server) AddStartCallback(callbacks ...func()) {
+	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
-// TODO: implement it
-func printVersionInfo() {
+// GetMember returns the member.
+func (s *Server) GetMember() *member.Member {
+	return s.member
 }
 
-// TODO: implement it
-func printConfigCheckMsg(cfg *tso.Config) {
-}
-
-func exit(code int) {
-	log.Sync()
-	os.Exit(code)
+// AddLeaderCallback adds the callback function when the server becomes leader.
+func (s *Server) AddLeaderCallback(callbacks ...func(context.Context)) {
+	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
