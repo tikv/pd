@@ -18,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -91,13 +92,26 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	if c.opts.IsPlacementRulesEnabled() {
-		fit := c.priorityInspector.Inspect(region)
-		if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
-			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
-				return []*operator.Operator{op}
+		skipRuleCheck := c.cluster.GetOpts().IsPlacementRulesCacheEnabled() &&
+			c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
+		if skipRuleCheck {
+			// If the fit is fetched from cache, it seems that the region doesn't need check
+			failpoint.Inject("assertShouldNotCache", func() {
+				panic("cached shouldn't be used")
+			})
+			ruleCheckerGetCacheCounter.Inc()
+		} else {
+			failpoint.Inject("assertShouldCache", func() {
+				panic("cached should be used")
+			})
+			fit := c.priorityInspector.Inspect(region)
+			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
+				if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+					return []*operator.Operator{op}
+				}
+				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
+				c.regionWaitingList.Put(region.GetID(), nil)
 			}
-			operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
-			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 	} else {
 		if op := c.learnerChecker.Check(region); op != nil {

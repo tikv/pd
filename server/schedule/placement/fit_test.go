@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
@@ -28,6 +29,7 @@ import (
 
 func makeStores() StoreSet {
 	stores := core.NewStoresInfo()
+	now := time.Now()
 	for zone := 1; zone <= 5; zone++ {
 		for rack := 1; rack <= 5; rack++ {
 			for host := 1; host <= 5; host++ {
@@ -42,7 +44,7 @@ func makeStores() StoreSet {
 					if x == 5 {
 						labels["engine"] = "tiflash"
 					}
-					stores.SetStore(core.NewStoreInfoWithLabel(id, labels))
+					stores.SetStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now)))
 				}
 			}
 		}
