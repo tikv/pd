@@ -43,10 +43,11 @@ func init() {
 type CleanupFunc func()
 
 // NewTestServer creates a pd server for testing.
-func NewTestServer(c *assertutil.Checker) (*Server, CleanupFunc, error) {
+func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
-	s, err := CreateServer(ctx, cfg)
+	mokHandler := CreateMokHandler(re, "127.0.0.1")
+	s, err := CreateServer(ctx, cfg, mokHandler)
 	if err != nil {
 		cancel()
 		return nil, nil, err
