@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -44,7 +45,6 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
 )
 
@@ -317,6 +317,11 @@ func (h *Handler) AddBalanceRegionScheduler() error {
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
 	return h.AddScheduler(schedulers.HotRegionType)
+}
+
+// AddEvictSlowTrendScheduler adds a evict-slow-trend-scheduler.
+func (h *Handler) AddEvictSlowTrendScheduler() error {
+	return h.AddScheduler(schedulers.EvictSlowTrendType)
 }
 
 // AddLabelScheduler adds a label-scheduler.

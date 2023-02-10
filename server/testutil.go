@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -24,25 +25,29 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedulers"
 	"go.etcd.io/etcd/embed"
-
-	// Register schedulers
-	_ "github.com/tikv/pd/server/schedulers"
 )
+
+func init() {
+	schedulers.Register()
+}
 
 // CleanupFunc closes test pd server(s) and deletes any files left behind.
 type CleanupFunc func()
 
 // NewTestServer creates a pd server for testing.
-func NewTestServer(c *assertutil.Checker) (*Server, CleanupFunc, error) {
+func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
-	s, err := CreateServer(ctx, cfg)
+	mockHandler := CreateMockHandler(re, "127.0.0.1")
+	s, err := CreateServer(ctx, cfg, mockHandler)
 	if err != nil {
 		cancel()
 		return nil, nil, err
@@ -134,4 +139,22 @@ func MustWaitLeader(re *require.Assertions, svrs []*Server) *Server {
 		return true
 	})
 	return leader
+}
+
+// CreateMockHandler creates a mock handler for test.
+func CreateMockHandler(re *require.Assertions, ip string) HandlerBuilder {
+	return func(ctx context.Context, s *Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintln(w, "Hello World")
+			// test getting ip
+			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
+			re.Equal(ip, clientIP)
+		})
+		info := apiutil.APIServiceGroup{
+			Name:    "mock",
+			Version: "v1",
+		}
+		return mux, info, nil
+	}
 }

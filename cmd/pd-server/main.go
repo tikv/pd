@@ -24,13 +24,14 @@ import (
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	basicsvr "github.com/tikv/pd/pkg/basic_server"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mode"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedulers"
 	"go.uber.org/zap"
 )
 
@@ -66,7 +67,8 @@ func main() {
 	}
 }
 
-func createServerWrapper(args []string) (context.Context, context.CancelFunc, basicsvr.Server) {
+func createServerWrapper(args []string) (context.Context, context.CancelFunc, bs.Server) {
+	schedulers.Register()
 	cfg := config.NewConfig()
 	err := cfg.Parse(args)
 

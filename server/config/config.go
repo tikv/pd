@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -301,6 +302,17 @@ const (
 	defaultLogFormat = "text"
 
 	defaultMaxMovableHotPeerSize = int64(512)
+
+	defaultServerMemoryLimit          = 0
+	minServerMemoryLimit              = 0
+	maxServerMemoryLimit              = 0.99
+	defaultServerMemoryLimitGCTrigger = 0.7
+	minServerMemoryLimitGCTrigger     = 0.5
+	maxServerMemoryLimitGCTrigger     = 0.99
+	defaultEnableGOGCTuner            = false
+	defaultGCTunerThreshold           = 0.6
+	minGCTunerThreshold               = 0
+	maxGCTunerThreshold               = 0.9
 )
 
 // Special keys for Labels
@@ -497,7 +509,7 @@ func (c *Config) Validate() error {
 
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
-	configMetaData := newConfigMetadata(meta)
+	configMetaData := configutil.NewConfigMetadata(meta)
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
 	}
@@ -609,50 +621,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	return nil
 }
 
-// Utility to test if a configuration is defined.
-type configMetaData struct {
-	meta *toml.MetaData
-	path []string
-}
-
-func newConfigMetadata(meta *toml.MetaData) *configMetaData {
-	return &configMetaData{meta: meta}
-}
-
-func (m *configMetaData) IsDefined(key string) bool {
-	if m.meta == nil {
-		return false
-	}
-	keys := append([]string(nil), m.path...)
-	keys = append(keys, key)
-	return m.meta.IsDefined(keys...)
-}
-
-func (m *configMetaData) Child(path ...string) *configMetaData {
-	newPath := append([]string(nil), m.path...)
-	newPath = append(newPath, path...)
-	return &configMetaData{
-		meta: m.meta,
-		path: newPath,
-	}
-}
-
-func (m *configMetaData) CheckUndecoded() error {
-	if m.meta == nil {
-		return nil
-	}
-	undecoded := m.meta.Undecoded()
-	if len(undecoded) == 0 {
-		return nil
-	}
-	errInfo := "Config contains undefined item: "
-	for _, key := range undecoded {
-		errInfo += key.String() + ", "
-	}
-	return errors.New(errInfo[:len(errInfo)-2])
-}
-
-func (c *Config) adjustLog(meta *configMetaData) {
+func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
 	}
@@ -819,6 +788,10 @@ type ScheduleConfig struct {
 
 	// EnableWitness is the option to enable using witness
 	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
+
+	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
+	// A store's slowness must affected more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
+	SlowStoreEvictingAffectedStoreRatioThreshold float64 `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -871,9 +844,11 @@ const (
 	defaultHotRegionsReservedDays      = 7
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
+	// When a slow store affected more than 30% of total stores, it will trigger evicting.
+	defaultSlowStoreEvictingAffectedStoreRatioThreshold = 0.3
 )
 
-func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
+func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool) error {
 	if !meta.IsDefined("max-snapshot-count") {
 		adjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
 	}
@@ -969,6 +944,9 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 		adjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
+	if !meta.IsDefined("SlowStoreEvictingAffectedStoreRatioThreshold") {
+		adjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
+	}
 	return c.Validate()
 }
 
@@ -991,7 +969,7 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 	return c.MaxMergeRegionSize * 10000
 }
 
-func (c *ScheduleConfig) parseDeprecatedFlag(meta *configMetaData, name string, old, new bool) (bool, error) {
+func (c *ScheduleConfig) parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
 	oldName, newName := "disable-"+name, "enable-"+name
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
 	switch {
@@ -1046,6 +1024,9 @@ func (c *ScheduleConfig) Validate() error {
 		if !IsSchedulerRegistered(scheduleConfig.Type) {
 			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
 		}
+	}
+	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
+		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
 	}
 	return nil
 }
@@ -1173,7 +1154,7 @@ func (c *ReplicationConfig) Validate() error {
 	return nil
 }
 
-func (c *ReplicationConfig) adjust(meta *configMetaData) error {
+func (c *ReplicationConfig) adjust(meta *configutil.ConfigMetaData) error {
 	adjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("enable-placement-rules") {
 		c.EnablePlacementRules = defaultEnablePlacementRules
@@ -1211,9 +1192,17 @@ type PDServerConfig struct {
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
 	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
+	// ServerMemoryLimit indicates the memory limit of current process.
+	ServerMemoryLimit float64 `toml:"server-memory-limit" json:"server-memory-limit"`
+	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
+	ServerMemoryLimitGCTrigger float64 `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
+	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC
+	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
+	// GCTunerThreshold is the threshold of GC tuner.
+	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
 }
 
-func (c *PDServerConfig) adjust(meta *configMetaData) error {
+func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	adjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	if !meta.IsDefined("use-region-storage") {
 		c.UseRegionStorage = defaultUseRegionStorage
@@ -1236,11 +1225,38 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
 		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
 	}
+	if !meta.IsDefined("server-memory-limit") {
+		adjustFloat64(&c.ServerMemoryLimit, defaultServerMemoryLimit)
+	}
+	if c.ServerMemoryLimit < minServerMemoryLimit {
+		c.ServerMemoryLimit = minServerMemoryLimit
+	} else if c.ServerMemoryLimit > maxServerMemoryLimit {
+		c.ServerMemoryLimit = maxServerMemoryLimit
+	}
+	if !meta.IsDefined("server-memory-limit-gc-trigger") {
+		adjustFloat64(&c.ServerMemoryLimitGCTrigger, defaultServerMemoryLimitGCTrigger)
+	}
+	if c.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger {
+		c.ServerMemoryLimitGCTrigger = minServerMemoryLimitGCTrigger
+	} else if c.ServerMemoryLimitGCTrigger > maxServerMemoryLimitGCTrigger {
+		c.ServerMemoryLimitGCTrigger = maxServerMemoryLimitGCTrigger
+	}
+	if !meta.IsDefined("enable-gogc-tuner") {
+		c.EnableGOGCTuner = defaultEnableGOGCTuner
+	}
+	if !meta.IsDefined("gc-tuner-threshold") {
+		adjustFloat64(&c.GCTunerThreshold, defaultGCTunerThreshold)
+	}
+	if c.GCTunerThreshold < minGCTunerThreshold {
+		c.GCTunerThreshold = minGCTunerThreshold
+	} else if c.GCTunerThreshold > maxGCTunerThreshold {
+		c.GCTunerThreshold = maxGCTunerThreshold
+	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
 }
 
-func (c *PDServerConfig) migrateConfigurationFromFile(meta *configMetaData) error {
+func (c *PDServerConfig) migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
 	oldName, newName := "trace-region-flow", "flow-round-by-digit"
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
 	switch {
@@ -1288,6 +1304,16 @@ func (c *PDServerConfig) Validate() error {
 	}
 	if c.FlowRoundByDigit < 0 {
 		return errs.ErrConfigItem.GenWithStack("flow round by digit cannot be negative number")
+	}
+	if c.ServerMemoryLimit < minServerMemoryLimit || c.ServerMemoryLimit > maxServerMemoryLimit {
+		return errors.New(fmt.Sprintf("server-memory-limit should between %v and %v", minServerMemoryLimit, maxServerMemoryLimit))
+	}
+	if c.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger || c.ServerMemoryLimitGCTrigger > maxServerMemoryLimitGCTrigger {
+		return errors.New(fmt.Sprintf("server-memory-limit-gc-trigger should between %v and %v",
+			minServerMemoryLimitGCTrigger, maxServerMemoryLimitGCTrigger))
+	}
+	if c.GCTunerThreshold < minGCTunerThreshold || c.GCTunerThreshold > maxGCTunerThreshold {
+		return errors.New(fmt.Sprintf("gc-tuner-threshold should between %v and %v", minGCTunerThreshold, maxGCTunerThreshold))
 	}
 
 	return nil
@@ -1458,7 +1484,7 @@ func (c *DashboardConfig) ToTiDBTLSConfig() (*tls.Config, error) {
 	return nil, nil
 }
 
-func (c *DashboardConfig) adjust(meta *configMetaData) {
+func (c *DashboardConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-telemetry") {
 		c.EnableTelemetry = defaultEnableTelemetry
 	}
@@ -1478,7 +1504,7 @@ func (c *ReplicationModeConfig) Clone() *ReplicationModeConfig {
 	return &cfg
 }
 
-func (c *ReplicationModeConfig) adjust(meta *configMetaData) {
+func (c *ReplicationModeConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("replication-mode") || NormalizeReplicationMode(c.ReplicationMode) == "" {
 		c.ReplicationMode = "majority"
 	}
@@ -1506,7 +1532,7 @@ type DRAutoSyncReplicationConfig struct {
 	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
-func (c *DRAutoSyncReplicationConfig) adjust(meta *configMetaData) {
+func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}

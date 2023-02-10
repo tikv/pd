@@ -39,22 +39,6 @@ const (
 // WithLabelValues is a heavy operation, define variable to avoid call it every time.
 var evictSlowStoreCounter = schedulerCounter.WithLabelValues(EvictSlowStoreName, "schedule")
 
-func init() {
-	schedule.RegisterSliceDecoderBuilder(EvictSlowStoreType, func(args []string) schedule.ConfigDecoder {
-		return func(v interface{}) error {
-			return nil
-		}
-	})
-
-	schedule.RegisterScheduler(EvictSlowStoreType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
-		conf := &evictSlowStoreSchedulerConfig{storage: storage, EvictedStores: make([]uint64, 0)}
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		return newEvictSlowStoreScheduler(opController, conf), nil
-	})
-}
-
 type evictSlowStoreSchedulerConfig struct {
 	storage       endpoint.ConfigStorage
 	EvictedStores []uint64 `json:"evict-stores"`

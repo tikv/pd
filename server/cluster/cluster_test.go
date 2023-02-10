@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
@@ -41,7 +42,6 @@ import (
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedulers"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage"
 )
 
 func TestStoreHeartbeat(t *testing.T) {
@@ -1812,6 +1812,7 @@ type testCluster struct {
 }
 
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
+	schedulers.Register()
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
 	if err := cfg.Adjust(nil, false); err != nil {

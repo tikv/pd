@@ -21,14 +21,14 @@ import (
 	"net/http"
 
 	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basic_server"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
 var (
 	// ServerServiceRegistry is the global grpc service registry.
-	ServerServiceRegistry = newServiceRegistry()
+	ServerServiceRegistry = NewServerServiceRegistry()
 )
 
 // ServiceBuilder is a function that creates a grpc service.
@@ -47,7 +47,8 @@ type ServiceRegistry struct {
 	services map[string]RegistrableService
 }
 
-func newServiceRegistry() *ServiceRegistry {
+// NewServerServiceRegistry creates a new ServiceRegistry.
+func NewServerServiceRegistry() *ServiceRegistry {
 	return &ServiceRegistry{
 		builders: make(map[string]ServiceBuilder),
 		services: make(map[string]RegistrableService),
@@ -93,6 +94,6 @@ func (r *ServiceRegistry) InstallAllRESTHandler(srv bs.Server, h map[string]http
 }
 
 // RegisterService registers a grpc service.
-func (r ServiceRegistry) RegisterService(name string, service ServiceBuilder) {
+func (r *ServiceRegistry) RegisterService(name string, service ServiceBuilder) {
 	r.builders[name] = service
 }

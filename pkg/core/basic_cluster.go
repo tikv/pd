@@ -144,6 +144,21 @@ func (bc *BasicCluster) SlowStoreEvicted(storeID uint64) error {
 	return bc.Stores.SlowStoreEvicted(storeID)
 }
 
+// SlowTrendEvicted marks a store as a slow store by trend and prevents transferring
+// leader to the store
+func (bc *BasicCluster) SlowTrendEvicted(storeID uint64) error {
+	bc.Stores.mu.Lock()
+	defer bc.Stores.mu.Unlock()
+	return bc.Stores.SlowTrendEvicted(storeID)
+}
+
+// SlowTrendRecovered cleans the evicted by slow trend state of a store.
+func (bc *BasicCluster) SlowTrendRecovered(storeID uint64) {
+	bc.Stores.mu.Lock()
+	defer bc.Stores.mu.Unlock()
+	bc.Stores.SlowTrendRecovered(storeID)
+}
+
 // SlowStoreRecovered cleans the evicted state of a store.
 func (bc *BasicCluster) SlowStoreRecovered(storeID uint64) {
 	bc.Stores.mu.Lock()
@@ -265,6 +280,8 @@ type StoreSetController interface {
 
 	SlowStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
+	SlowTrendEvicted(id uint64) error
+	SlowTrendRecovered(id uint64)
 }
 
 // KeyRange is a key range.
