@@ -17,31 +17,29 @@ package mode
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
-	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
 // ResourceManagerServer is the server for resource manager.
 type ResourceManagerServer struct {
-	ctx    context.Context
-	name   string
-	client *clientv3.Client
-	member *member.Member
+	ctx        context.Context
+	name       string
+	etcdClient *clientv3.Client
+	httpClient *http.Client
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
-	// leaderCallbacks will be called after the server becomes leader.
-	leaderCallbacks []func(context.Context)
+	// primaryCallbacks will be called after the server becomes leader.
+	primaryCallbacks []func(context.Context)
 }
 
 // Context returns the context.
@@ -61,23 +59,23 @@ func (s *ResourceManagerServer) Name() string {
 
 // GetClient returns the etcd client.
 func (s *ResourceManagerServer) GetClient() *clientv3.Client {
-	return s.client
+	return s.etcdClient
 }
 
 // GetHTTPClient returns builtin etcd client.
 func (s *ResourceManagerServer) GetHTTPClient() *http.Client {
-	//todo add http client
-	return nil
+	return s.httpClient
 }
 
 // GetMember returns the member.
-func (s *ResourceManagerServer) GetMember() *member.Member {
-	return s.member
+func (s *ResourceManagerServer) IsPrimary() bool {
+	// TODO: implement this
+	return true
 }
 
-// AddLeaderCallback adds the callback function when the server becomes leader.
-func (s *ResourceManagerServer) AddLeaderCallback(callbacks ...func(context.Context)) {
-	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
+// AddPrimaryCallback adds the callback function when the server becomes leader.
+func (s *ResourceManagerServer) AddPrimaryCallback(callbacks ...func(context.Context)) {
+	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 
 // Run runs the server.
@@ -90,8 +88,8 @@ func (s *ResourceManagerServer) Run() error {
 // Close closes the server.
 func (s *ResourceManagerServer) Close() {
 	log.Info("closing server")
-	if s.client != nil {
-		if err := s.client.Close(); err != nil {
+	if s.etcdClient != nil {
+		if err := s.etcdClient.Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
 		}
 	}
@@ -100,8 +98,7 @@ func (s *ResourceManagerServer) Close() {
 
 // ResourceManagerStart starts the resource manager server.
 func ResourceManagerStart(ctx context.Context, cfg *config.Config) bs.Server {
-	// start client
-	etcdTimeout := time.Second * 3
+	// TODO: use resource manager config
 	tlsConfig, err := cfg.Security.ToTLSConfig()
 	if err != nil {
 		return nil
@@ -111,26 +108,17 @@ func ResourceManagerStart(ctx context.Context, cfg *config.Config) bs.Server {
 		return nil
 	}
 
-	endpoints := []string{etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", cfg.Security))
-
-	lgc := zap.NewProductionConfig()
-	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: etcdTimeout,
-		TLS:         tlsConfig,
-		LogConfig:   &lgc,
-	})
+	// create client
+	etcdClient, httpClient, err := etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls)
 	if err != nil {
 		return nil
 	}
 	// start server
 	s := &ResourceManagerServer{
-		ctx:    ctx,
-		name:   "ResourceManager",
-		client: client,
-		member: nil, // todo: add member
+		ctx:        ctx,
+		name:       "ResourceManager",
+		etcdClient: etcdClient,
+		httpClient: httpClient,
 	}
 	gs := grpc.NewServer()
 	registry.ServerServiceRegistry.RegisterService("ResourceManager", rm_server.NewService)
