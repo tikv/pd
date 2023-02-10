@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -60,7 +59,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 		cfg := cfgs[i]
 
 		go func() {
-			mokHandler := suite.createMokHandler("127.0.0.1")
+			mokHandler := CreateMokHandler(suite.Require(), "127.0.0.1")
 			svr, err := CreateServer(suite.ctx, cfg, mokHandler)
 			suite.NoError(err)
 			err = svr.Run()
@@ -90,7 +89,7 @@ func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, 
 	ch := make(chan *Server)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
-			mokHandler := suite.createMokHandler("127.0.0.1")
+			mokHandler := CreateMokHandler(suite.Require(), "127.0.0.1")
 			svr, err := CreateServer(ctx, cfg, mokHandler)
 			// prevent blocking if Asserts fails
 			failed := true
@@ -156,7 +155,7 @@ func (suite *leaderServerTestSuite) TestCheckClusterID() {
 
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
-	mokHandler := suite.createMokHandler("127.0.0.1")
+	mokHandler := CreateMokHandler(suite.Require(), "127.0.0.1")
 	svr, err := CreateServer(ctx, cfgA, mokHandler)
 	suite.NoError(err)
 
@@ -172,27 +171,10 @@ func (suite *leaderServerTestSuite) TestCheckClusterID() {
 	testutil.CleanServer(cfgA.DataDir)
 }
 
-func (suite *leaderServerTestSuite) createMokHandler(ip string) HandlerBuilder {
-	return func(ctx context.Context, s *Server) (http.Handler, apiutil.APIServiceGroup, error) {
-		mux := http.NewServeMux()
-		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintln(w, "Hello World")
-			// test getting ip
-			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
-			suite.Equal(ip, clientIP)
-		})
-		info := apiutil.APIServiceGroup{
-			Name:    "mok",
-			Version: "v1",
-		}
-		return mux, info, nil
-	}
-}
-
 func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
-	mokHandler := suite.createMokHandler("127.0.0.1")
+	mokHandler := CreateMokHandler(suite.Require(), "127.0.0.1")
 	svr, err := CreateServer(ctx, cfg, mokHandler)
 	suite.NoError(err)
 	_, err = CreateServer(ctx, cfg, mokHandler, mokHandler)
@@ -216,7 +198,7 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
-	mokHandler := suite.createMokHandler("127.0.0.2")
+	mokHandler := CreateMokHandler(suite.Require(), "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
@@ -246,7 +228,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
-	mokHandler := suite.createMokHandler("127.0.0.2")
+	mokHandler := CreateMokHandler(suite.Require(), "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)
@@ -276,7 +258,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
-	mokHandler := suite.createMokHandler("127.0.0.2")
+	mokHandler := CreateMokHandler(suite.Require(), "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mokHandler)

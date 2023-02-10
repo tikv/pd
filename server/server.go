@@ -232,7 +232,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
-	failpoint.Inject("testRegistry", func() {
+	failpoint.Inject("useGlobalRegistry", func() {
 		s.registry = registry.ServerServiceRegistry
 	})
 	s.registry.RegisterService("ResourceManager", rm_server.NewService)

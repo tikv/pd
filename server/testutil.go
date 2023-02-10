@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -136,4 +138,22 @@ func MustWaitLeader(re *require.Assertions, svrs []*Server) *Server {
 		return true
 	})
 	return leader
+}
+
+// CreateMokHandler creates a mock handler for test.
+func CreateMokHandler(re *require.Assertions, ip string) HandlerBuilder {
+	return func(ctx context.Context, s *Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintln(w, "Hello World")
+			// test getting ip
+			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
+			re.Equal(ip, clientIP)
+		})
+		info := apiutil.APIServiceGroup{
+			Name:    "mok",
+			Version: "v1",
+		}
+		return mux, info, nil
+	}
 }

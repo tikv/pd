@@ -51,8 +51,8 @@ func newTestServiceRegistry(_ bs.Server) registry.RegistrableService {
 
 func TestRegistryService(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/testRegistry", `return(true)`))
-	defer re.NoError(failpoint.Disable("github.com/tikv/pd/server/testRegistry"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/useGlobalRegistry", `return(true)`))
+	defer re.NoError(failpoint.Disable("github.com/tikv/pd/server/useGlobalRegistry"))
 	registry.ServerServiceRegistry.RegisterService("test", newTestServiceRegistry)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
