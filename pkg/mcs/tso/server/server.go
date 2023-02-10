@@ -17,22 +17,38 @@ package server
 import (
 	"context"
 	"net/http"
+	"sync"
+	"time"
 
-	basicsvr "github.com/tikv/pd/pkg/basicserver"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
+	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/server/cluster"
 	"go.etcd.io/etcd/clientv3"
+	"google.golang.org/grpc"
 )
 
-// If server doesn't implement all methods of basicsvr.Server, this line will result in a clear
-// error message like "*Server does not implement basicsvr.Server (missing Method method)"
-var _ basicsvr.Server = (*Server)(nil)
+// If server doesn't implement all methods of bs.Server, this line will result in a clear
+// error message like "*Server does not implement bs.Server (missing Method method)"
+var _ bs.Server = (*Server)(nil)
+var _ tso.GrpcServer = (*Server)(nil)
 
-// Server is the TSO server, and it implements basicsvr.Server.
+// Server is the TSO server, and it implements bs.Server and tso.GrpcServer.
 type Server struct {
-	ctx    context.Context
-	name   string
-	client *clientv3.Client
-	member *member.Member
+	ctx                 context.Context
+	name                string
+	clusterID           uint64
+	client              *clientv3.Client
+	member              *member.Member
+	tsoAllocatorManager *tso.AllocatorManager
+	// Store as map[string]*grpc.ClientConn
+	clientConns sync.Map
+	// Store as map[string]chan *tsoRequest
+	tsoDispatcher sync.Map
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
@@ -93,4 +109,99 @@ func (s *Server) GetMember() *member.Member {
 // AddLeaderCallback adds the callback function when the server becomes leader.
 func (s *Server) AddLeaderCallback(callbacks ...func(context.Context)) {
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
+}
+
+// Implement the following methods defined in tso.GrpcServer
+
+// ClusterID returns the cluster ID of this server.
+func (s *Server) ClusterID() uint64 {
+	return s.clusterID
+}
+
+// IsClosed checks if the server loop is closed
+func (s *Server) IsClosed() bool {
+	// TODO: implement it
+	return true
+}
+
+// IsLocalRequest checks if the forwarded host is the current host
+func (s *Server) IsLocalRequest(forwardedHost string) bool {
+	if forwardedHost == "" {
+		return true
+	}
+	memberAddrs := s.GetMember().Member().GetClientUrls()
+	for _, addr := range memberAddrs {
+		if addr == forwardedHost {
+			return true
+		}
+	}
+	return false
+}
+
+// GetTSOAllocatorManager returns the manager of TSO Allocator.
+func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
+	return s.tsoAllocatorManager
+}
+
+// GetTSODispatcher gets the TSO Dispatcher
+func (s *Server) GetTSODispatcher() *sync.Map {
+	return &s.tsoDispatcher
+}
+
+// CreateTsoForwardStream creats the forward stream in the type of pdpb.PD_TsoClient
+// which is the same type as tsopb.TSO_TsoClient.
+func (s *Server) CreateTsoForwardStream(client *grpc.ClientConn) (pdpb.PD_TsoClient, context.CancelFunc, error) {
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(s.ctx)
+	go checkStream(ctx, cancel, done)
+	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
+	done <- struct{}{}
+	return (pdpb.PD_TsoClient)(forwardStream), cancel, err
+}
+
+// GetDelegateClient returns grpc client connection talking to the forwarded host
+func (s *Server) GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
+	client, ok := s.clientConns.Load(forwardedHost)
+	if !ok {
+		tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+		if err != nil {
+			return nil, err
+		}
+		cc, err := grpcutil.GetClientConn(ctx, forwardedHost, tlsConfig)
+		if err != nil {
+			return nil, err
+		}
+		client = cc
+		s.clientConns.Store(forwardedHost, cc)
+	}
+	return client.(*grpc.ClientConn), nil
+}
+
+// TODO: If goroutine here timeout after a stream is created successfully, we need to handle it correctly.
+func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	select {
+	case <-done:
+		return
+	case <-time.After(3 * time.Second):
+		cancel()
+	case <-streamCtx.Done():
+	}
+	<-done
+}
+
+// GetTLSConfig get the security config.
+// TODO: implement it
+func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
+	return nil
+}
+
+// Implement other methods
+
+// GetMembers returns TSO server list.
+func (s *Server) GetMembers() ([]*pdpb.Member, error) {
+	if s.IsClosed() {
+		return nil, errs.ErrServerNotStarted.FastGenByArgs()
+	}
+	members, err := cluster.GetMembers(s.GetClient())
+	return members, err
 }

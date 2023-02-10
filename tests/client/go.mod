@@ -170,4 +170,4 @@ replace (
 // reset grpc and protobuf deps in order to import client and server at the same time
 replace google.golang.org/grpc v1.51.0 => google.golang.org/grpc v1.26.0
 
-replace github.com/pingcap/kvproto => github.com/binshi-bing/kvproto d4c6f1888b87b9be694edb116fc5f3a2869617d7
+replace github.com/pingcap/kvproto => github.com/binshi-bing/kvproto v0.0.0-20230209214751-d4c6f1888b87

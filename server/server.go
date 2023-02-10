@@ -771,6 +771,11 @@ func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.tsoAllocatorManager
 }
 
+// GetTSODispatcher gets the TSO Dispatcher
+func (s *Server) GetTSODispatcher() *sync.Map {
+	return &s.tsoDispatcher
+}
+
 // GetKeyspaceManager returns the keyspace manager of server.
 func (s *Server) GetKeyspaceManager() *keyspace.Manager {
 	return s.keyspaceManager

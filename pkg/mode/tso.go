@@ -19,17 +19,17 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	basicsvr "github.com/tikv/pd/pkg/basic_server"
-	_ "github.com/tikv/pd/pkg/mcs/registry"
+	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/mcs/registry"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
-	_ "google.golang.org/grpc"
+	"google.golang.org/grpc"
 )
 
 // TSOStart starts the TSO server.
-func TSOStart(ctx context.Context, cfg *config.Config) basicsvr.Server {
+func TSOStart(ctx context.Context, cfg *config.Config) bs.Server {
 	// start client
 	etcdTimeout := time.Second * 3
 	tlsConfig, err := cfg.Security.ToTLSConfig()
@@ -55,11 +55,11 @@ func TSOStart(ctx context.Context, cfg *config.Config) basicsvr.Server {
 	if err != nil {
 		return nil
 	}
+
 	// start server
 	svr := tsosvr.NewServer(ctx, client)
-	// TODO: wait for #5933 to check-in
-	//gs := grpc.NewServer()
-	//registry.ServerServiceRegistry.RegisterService("TSO", tsosvr.NewService)
-	//registry.ServerServiceRegistry.InstallAllGRPCServices(svr, gs)
+	gs := grpc.NewServer()
+	registry.ServerServiceRegistry.RegisterService("TSO", tsosvr.NewService)
+	registry.ServerServiceRegistry.InstallAllGRPCServices(svr, gs)
 	return svr
 }

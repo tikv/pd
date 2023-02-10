@@ -54,6 +54,33 @@ var (
 			Name:      "role",
 			Help:      "Indicate the PD server role info, whether it's a TSO allocator.",
 		}, []string{dcLabel})
+
+	tsoHandleDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
+
+	tsoProxyHandleDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_proxy_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled tso proxy requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
+
+	tsoProxyBatchSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_proxy_batch_size",
+			Help:      "Bucketed histogram of the batch size of handled tso proxy requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
+		})
 )
 
 func init() {
@@ -61,4 +88,7 @@ func init() {
 	prometheus.MustRegister(tsoGauge)
 	prometheus.MustRegister(tsoGap)
 	prometheus.MustRegister(tsoAllocatorRole)
+	prometheus.MustRegister(tsoHandleDuration)
+	prometheus.MustRegister(tsoProxyHandleDuration)
+	prometheus.MustRegister(tsoProxyBatchSize)
 }

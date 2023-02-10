@@ -20,16 +20,19 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
+	"github.com/pingcap/log"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"google.golang.org/grpc"
 )
 
 var _ tsopb.TSOServer = (*Service)(nil)
 
 // SetUpRestHandler is a hook to sets up the REST service.
-var SetUpRestHandler = func(srv *Service) (http.Handler, server.APIServiceGroup) {
-	return dummyRestService{}, server.APIServiceGroup{}
+var SetUpRestHandler = func(srv *Service) (http.Handler, apiutil.APIServiceGroup) {
+	return dummyRestService{}, apiutil.APIServiceGroup{}
 }
 
 type dummyRestService struct{}
@@ -39,7 +42,7 @@ func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("not implemented"))
 }
 
-// Service is the gRPC service for TSO.
+// Service is the TSO grpc service.
 type Service struct {
 	ctx    context.Context
 	server *Server
@@ -47,10 +50,14 @@ type Service struct {
 }
 
 // NewService creates a new TSO service.
-func NewService(svr *Server) registry.RegistrableService {
+func NewService(svr bs.Server) registry.RegistrableService {
+	server, ok := svr.(*Server)
+	if !ok {
+		log.Fatal("create tso server failed")
+	}
 	return &Service{
 		ctx:    svr.Context(),
-		server: svr,
+		server: server,
 	}
 }
 
@@ -62,17 +69,40 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 // RegisterRESTHandler registers the service to REST server.
 func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
 	handler, group := SetUpRestHandler(s)
-	server.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
-// GetMembers implements gRPC PDServer.
+// GetMembers implements gRPC Server.
 func (s *Service) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
-	return nil, nil
+	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
+	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
+	members, err := s.server.GetMembers()
+	if err != nil {
+		return &pdpb.GetMembersResponse{
+			Header: tso.WrapErrorToHeader(s.server.clusterID, pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+
+	tsoAllocatorManager := s.server.GetTSOAllocatorManager()
+	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	if err != nil {
+		return &pdpb.GetMembersResponse{
+			Header: tso.WrapErrorToHeader(s.server.clusterID, pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+
+	return &pdpb.GetMembersResponse{
+		Header:              tso.Header(s.server.clusterID),
+		Members:             members,
+		Leader:              nil,
+		EtcdLeader:          nil,
+		TsoAllocatorLeaders: tsoAllocatorLeaders,
+	}, nil
 }
 
 // Tso returns a stream of timestamps
 func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
-	return nil
+	return tso.Tso(s.server, stream)
 }
 
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
