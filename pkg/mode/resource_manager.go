@@ -16,6 +16,7 @@ package mode
 
 import (
 	"context"
+	"net"
 	"net/http"
 
 	"github.com/pingcap/log"
@@ -33,8 +34,10 @@ import (
 type ResourceManagerServer struct {
 	ctx        context.Context
 	name       string
+	serverURL  string
 	etcdClient *clientv3.Client
 	httpClient *http.Client
+	grpcServer *grpc.Server
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
@@ -80,8 +83,12 @@ func (s *ResourceManagerServer) AddPrimaryCallback(callbacks ...func(context.Con
 
 // Run runs the server.
 func (s *ResourceManagerServer) Run() error {
-	// todo: need blocking?
 	log.Info("resource manager server is running")
+	lis, err := net.Listen("tcp", s.serverURL)
+	if err != nil {
+		return err
+	}
+	s.grpcServer.Serve(lis)
 	return nil
 }
 
@@ -115,13 +122,14 @@ func ResourceManagerStart(ctx context.Context, cfg *config.Config) bs.Server {
 	}
 	// start server
 	s := &ResourceManagerServer{
+		serverURL:  "127.0.0.1:50051", // TODO: use resource manager config
 		ctx:        ctx,
 		name:       "ResourceManager",
 		etcdClient: etcdClient,
 		httpClient: httpClient,
+		grpcServer: grpc.NewServer(),
 	}
-	gs := grpc.NewServer()
 	registry.ServerServiceRegistry.RegisterService("ResourceManager", rm_server.NewService)
-	registry.ServerServiceRegistry.InstallAllGRPCServices(s, gs)
-	return nil
+	registry.ServerServiceRegistry.InstallAllGRPCServices(s, s.grpcServer)
+	return s
 }

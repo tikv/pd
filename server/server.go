@@ -78,7 +78,6 @@ import (
 )
 
 const (
-	etcdTimeout           = time.Second * 3
 	serverMetricsInterval = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
