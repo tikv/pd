@@ -145,14 +145,14 @@ func MustWaitLeader(re *require.Assertions, svrs []*Server) *Server {
 func CreateMockHandler(re *require.Assertions, ip string) HandlerBuilder {
 	return func(ctx context.Context, s *Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 			// test getting ip
 			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
 			re.Equal(ip, clientIP)
 		})
 		info := apiutil.APIServiceGroup{
-			Name:    "mok",
+			Name:    "mock",
 			Version: "v1",
 		}
 		return mux, info, nil

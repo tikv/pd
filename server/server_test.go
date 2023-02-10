@@ -187,7 +187,7 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 	}()
 	err = svr.Run()
 	suite.NoError(err)
-	resp, err := http.Get(fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr()))
+	resp, err := http.Get(fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()))
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
@@ -214,7 +214,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 	err = svr.Run()
 	suite.NoError(err)
 
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr()), nil)
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), nil)
 	suite.NoError(err)
 	req.Header.Add("X-Forwarded-For", "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
@@ -244,7 +244,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 	err = svr.Run()
 	suite.NoError(err)
 
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr()), nil)
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), nil)
 	suite.NoError(err)
 	req.Header.Add("X-Real-Ip", "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
@@ -274,7 +274,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	err = svr.Run()
 	suite.NoError(err)
 
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mok/v1/hello", svr.GetAddr()), nil)
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), nil)
 	suite.NoError(err)
 	req.Header.Add("X-Forwarded-For", "127.0.0.2")
 	req.Header.Add("X-Real-Ip", "127.0.0.3")
