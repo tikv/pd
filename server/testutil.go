@@ -46,8 +46,8 @@ type CleanupFunc func()
 func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
-	mokHandler := CreateMokHandler(re, "127.0.0.1")
-	s, err := CreateServer(ctx, cfg, mokHandler)
+	MockHandler := CreateMockHandler(re, "127.0.0.1")
+	s, err := CreateServer(ctx, cfg, MockHandler)
 	if err != nil {
 		cancel()
 		return nil, nil, err
@@ -141,8 +141,8 @@ func MustWaitLeader(re *require.Assertions, svrs []*Server) *Server {
 	return leader
 }
 
-// CreateMokHandler creates a mock handler for test.
-func CreateMokHandler(re *require.Assertions, ip string) HandlerBuilder {
+// CreateMockHandler creates a mock handler for test.
+func CreateMockHandler(re *require.Assertions, ip string) HandlerBuilder {
 	return func(ctx context.Context, s *Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mok/v1/hello", func(w http.ResponseWriter, r *http.Request) {
