@@ -122,7 +122,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 	}
 	c.initRunState()
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
-	go c.mainLoop(ctx)
+	go c.mainLoop(c.loopCtx)
 }
 
 // Stop stops ResourceGroupController service.

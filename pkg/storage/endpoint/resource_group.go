@@ -23,6 +23,9 @@ type ResourceGroupStorage interface {
 	LoadResourceGroupSettings(f func(k, v string)) error
 	SaveResourceGroupSetting(name string, msg proto.Message) error
 	DeleteResourceGroupSetting(name string) error
+	LoadResourceGroupStates(f func(k, v string)) error
+	SaveResourceGroupStates(name string, obj interface{}) error
+	DeleteResourceGroupStates(name string) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
@@ -39,5 +42,20 @@ func (se *StorageEndpoint) DeleteResourceGroupSetting(name string) error {
 
 // LoadResourceGroupSettings loads all resource groups from storage.
 func (se *StorageEndpoint) LoadResourceGroupSettings(f func(k, v string)) error {
-	return se.loadRangeByPrefix(resourceGroupSettingsPath, f)
+	return se.loadRangeByPrefix(resourceGroupSettingsPath+"/", f)
+}
+
+// SaveResourceGroupStates stores a resource group to storage.
+func (se *StorageEndpoint) SaveResourceGroupStates(name string, obj interface{}) error {
+	return se.saveJSON(resourceGroupStateKeyPath(name), obj)
+}
+
+// DeleteResourceGroupStates removes a resource group from storage.
+func (se *StorageEndpoint) DeleteResourceGroupStates(name string) error {
+	return se.Remove(resourceGroupStateKeyPath(name))
+}
+
+// LoadResourceGroupStates loads all resource groups from storage.
+func (se *StorageEndpoint) LoadResourceGroupStates(f func(k, v string)) error {
+	return se.loadRangeByPrefix(resourceGroupStatesPath+"/", f)
 }

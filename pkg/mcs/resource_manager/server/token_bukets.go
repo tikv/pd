@@ -54,6 +54,15 @@ type GroupTokenBucketState struct {
 	settingChanged bool
 }
 
+// Clone returns the copy of GroupTokenBucketState
+func (s *GroupTokenBucketState) Clone() *GroupTokenBucketState {
+	return &GroupTokenBucketState{
+		Tokens:      s.Tokens,
+		LastUpdate:  s.LastUpdate,
+		Initialized: s.Initialized,
+	}
+}
+
 // NewGroupTokenBucket returns a new GroupTokenBucket
 func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
 	if tokenBucket == nil || tokenBucket.Settings == nil {

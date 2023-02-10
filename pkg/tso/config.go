@@ -18,6 +18,8 @@ import (
 	"flag"
 	"time"
 
+	"github.com/pingcap/errors"
+	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -30,7 +32,11 @@ const (
 type Config struct {
 	flagSet *flag.FlagSet
 
-	configFile string
+	Version bool `json:"-"`
+
+	ConfigCheck bool `json:"-"`
+	configFile  string
+
 	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
 	// which allows the PD server to generate Local TSO for certain DC-level transactions.
 	// To make this feature meaningful, user has to set the "zone" label for the PD server
@@ -46,6 +52,11 @@ type Config struct {
 	// This config is only valid in 1ms to 10s. If it's configured too long or too short, it will
 	// be automatically clamped to the range.
 	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
+
+	// MaxResetTSGap is the max gap to reset the TSO.
+	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
+
+	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 }
 
 // NewConfig creates a new config.
@@ -57,4 +68,17 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
 
 	return cfg
+}
+
+// Parse parses flag definitions from the argument list.
+func (c *Config) Parse(arguments []string) error {
+	// Parse first to get config file.
+	err := c.flagSet.Parse(arguments)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	// TODO: Implement the main function body
+
+	return nil
 }

@@ -44,6 +44,7 @@ const (
 	regionPathPrefix           = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
+	resourceGroupStatesPath   = "states"
 	// tso storage endpoint has prefix `tso`
 	microserviceKey = "microservice"
 	tsoServiceKey   = "tso"
@@ -114,6 +115,10 @@ func RegionPath(regionID uint64) string {
 
 func resourceGroupSettingKeyPath(groupName string) string {
 	return path.Join(resourceGroupSettingsPath, groupName)
+}
+
+func resourceGroupStateKeyPath(groupName string) string {
+	return path.Join(resourceGroupStatesPath, groupName)
 }
 
 func ruleKeyPath(ruleKey string) string {

@@ -26,6 +26,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/configutil"
 )
 
 func TestSecurity(t *testing.T) {
@@ -494,7 +495,7 @@ func TestConfigClone(t *testing.T) {
 	cfg.Adjust(nil, false)
 	re.Equal(cfg, cfg.Clone())
 
-	emptyConfigMetaData := newConfigMetadata(nil)
+	emptyConfigMetaData := configutil.NewConfigMetadata(nil)
 
 	schedule := &ScheduleConfig{}
 	schedule.adjust(emptyConfigMetaData, false)
