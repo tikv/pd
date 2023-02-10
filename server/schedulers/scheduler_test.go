@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -131,20 +130,19 @@ func TestRemoveRejectLeader(t *testing.T) {
 
 func TestShuffleHotRegionScheduleBalance(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
-	defer cancel()
-	tc.SetMaxReplicas(3)
-	tc.SetLocationLabels([]string{"zone", "host"})
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
-	re.NoError(err)
-	tc.SetEnablePlacementRules(false)
-	checkBalance(re, tc, hb)
-	tc.SetEnablePlacementRules(true)
-	checkBalance(re, tc, hb)
+	checkBalance(re, false /* disable placement rules */)
+	checkBalance(re, true /* enable placement rules */)
 }
 
-func checkBalance(re *require.Assertions, tc *mockcluster.Cluster, hb schedule.Scheduler) {
+func checkBalance(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := newTestCluster()
+	defer cancel()
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	labels := []string{"zone", "host"}
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
+	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
+	re.NoError(err)
 	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})

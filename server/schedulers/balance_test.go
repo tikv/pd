@@ -737,17 +737,18 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestReSortStores() {
 
 func TestBalanceRegionSchedule1(t *testing.T) {
 	re := require.New(t)
-	cancel, opt, tc, oc := newTestCluster()
-	defer cancel()
-	// TODO: enable placement rules
-	opt.SetPlacementRuleEnabled(false)
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	checkBalanceRegionSchedule1(re, false /* disable placement rules */)
+	checkBalanceRegionSchedule1(re, true /* enable placement rules */)
+}
 
+func checkBalanceRegionSchedule1(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := newTestCluster()
+	defer cancel()
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 1)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
-
-	opt.SetMaxReplicas(1)
-
 	// Add stores 1,2,3,4.
 	tc.AddRegionStore(1, 6)
 	tc.AddRegionStore(2, 8)
@@ -770,14 +771,18 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 2)
 	tc.SetStoreUp(1)
 	// test region replicate not match
-	opt.SetMaxReplicas(3)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
 	ops, plans := sb.Schedule(tc, true)
 	re.Len(plans, 101)
 	re.Empty(ops)
-	re.Equal(int(plans[1].GetStatus().StatusCode), plan.StatusRegionNotReplicated)
+	if enablePlacementRules {
+		re.Equal(int(plans[1].GetStatus().StatusCode), plan.StatusRegionNotMatchRule)
+	} else {
+		re.Equal(int(plans[1].GetStatus().StatusCode), plan.StatusRegionNotReplicated)
+	}
 
 	tc.SetStoreOffline(1)
-	opt.SetMaxReplicas(1)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 1)
 	ops, plans = sb.Schedule(tc, true)
 	re.NotEmpty(ops)
 	re.Len(plans, 4)
@@ -786,21 +791,19 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 
 func TestBalanceRegionReplicas3(t *testing.T) {
 	re := require.New(t)
-	// TODO: enable placement rules
-	// checkReplica3(re, true)
-	checkReplica3(re, false)
+	checkReplica3(re, false /* disable placement rules */)
+	checkReplica3(re, true /* enable placement rules */)
 }
 
 func checkReplica3(re *require.Assertions, enablePlacementRules bool) {
-	cancel, opt, tc, oc := newTestCluster()
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
-	opt.SetPlacementRuleEnabled(enablePlacementRules)
-	tc.SetMaxReplicas(3)
-	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
+
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
-	tc.SetEnablePlacementRules(enablePlacementRules)
 	// Store 1 has the largest region score, so the balance scheduler tries to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 15, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -862,21 +865,19 @@ func checkReplica3(re *require.Assertions, enablePlacementRules bool) {
 
 func TestBalanceRegionReplicas5(t *testing.T) {
 	re := require.New(t)
-	// TODO: enable placement rules
-	// checkReplica5(re, true)
-	checkReplica5(re, false)
+	checkReplica5(re, false /* disable placement rules */)
+	checkReplica5(re, true /* enable placement rules */)
 }
 
 func checkReplica5(re *require.Assertions, enablePlacementRules bool) {
-	cancel, opt, tc, oc := newTestCluster()
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
-	opt.SetPlacementRuleEnabled(enablePlacementRules)
-	tc.SetMaxReplicas(5)
-	tc.SetLocationLabels([]string{"zone", "rack", "host"})
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 5)
+
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
-	tc.SetEnablePlacementRules(enablePlacementRules)
 	tc.AddLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 5, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(3, 6, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
@@ -932,11 +933,16 @@ func checkReplica5(re *require.Assertions, enablePlacementRules bool) {
 // the source region is more likely distributed in store[1, 2, 3].
 func TestBalanceRegionSchedule2(t *testing.T) {
 	re := require.New(t)
+	checkBalanceRegionSchedule2(re, false /* disable placement rules */)
+	checkBalanceRegionSchedule2(re, true /* enable placement rules */)
+}
 
-	cancel, opt, tc, oc := newTestCluster()
+func checkBalanceRegionSchedule2(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
-	opt.SetPlacementRuleEnabled(false)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
 	tc.SetTolerantSizeRatio(1)
 	tc.SetRegionScheduleLimit(1)
 	tc.SetRegionScoreFormulaVersion("v1")
@@ -1017,15 +1023,18 @@ func TestBalanceRegionSchedule2(t *testing.T) {
 
 func TestBalanceRegionStoreWeight(t *testing.T) {
 	re := require.New(t)
-	cancel, opt, tc, oc := newTestCluster()
-	defer cancel()
-	// TODO: enable placement rules
-	tc.SetPlacementRuleEnabled(false)
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	checkBalanceRegionStoreWeight(re, false /* disable placement rules */)
+	checkBalanceRegionStoreWeight(re, true /* enable placement rules */)
+}
 
+func checkBalanceRegionStoreWeight(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := newTestCluster()
+	defer cancel()
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 1)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
-	opt.SetMaxReplicas(1)
 
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 10)
@@ -1047,32 +1056,20 @@ func TestBalanceRegionStoreWeight(t *testing.T) {
 	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 3)
 }
 
-func TestBalanceRegionReplacePendingRegion(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
-	defer cancel()
-	tc.SetMaxReplicas(3)
-	tc.SetLocationLabels([]string{"zone", "rack", "host"})
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
-	re.NoError(err)
-
-	tc.SetEnablePlacementRules(false)
-	checkReplacePendingRegion(re, tc, sb)
-	tc.SetEnablePlacementRules(true)
-	checkReplacePendingRegion(re, tc, sb)
-}
-
 func TestBalanceRegionOpInfluence(t *testing.T) {
 	re := require.New(t)
-	cancel, opt, tc, oc := newTestCluster(false /* no need to run stream*/)
+	checkBalanceRegionOpInfluence(re, false /* disable placement rules */)
+	checkBalanceRegionOpInfluence(re, true /* enable placement rules */)
+}
+
+func checkBalanceRegionOpInfluence(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := newTestCluster(false /* no need to run stream*/)
 	defer cancel()
-	// TODO: enable placement rules
-	tc.SetEnablePlacementRules(false)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 1)
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
-	opt.SetMaxReplicas(1)
 	// Add stores 1,2,3,4.
 	tc.AddRegionStoreWithLeader(1, 2)
 	tc.AddRegionStoreWithLeader(2, 8)
@@ -1095,7 +1092,20 @@ func TestBalanceRegionOpInfluence(t *testing.T) {
 	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 2, 1)
 }
 
-func checkReplacePendingRegion(re *require.Assertions, tc *mockcluster.Cluster, sb schedule.Scheduler) {
+func TestBalanceRegionReplacePendingRegion(t *testing.T) {
+	re := require.New(t)
+	checkReplacePendingRegion(re, false /* disable placement rules */)
+	checkReplacePendingRegion(re, true /* enable placement rules */)
+}
+
+func checkReplacePendingRegion(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := newTestCluster()
+	defer cancel()
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
+	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	re.NoError(err)
 	// Store 1 has the largest region score, so the balance scheduler try to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 7, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -1171,11 +1181,16 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 
 func TestRandomMergeSchedule(t *testing.T) {
 	re := require.New(t)
-	cancel, opt, tc, oc := newTestCluster(true /* need to run stream*/)
-	defer cancel()
+	checkRandomMergeSchedule(re, false /* disable placement rules */)
+	checkRandomMergeSchedule(re, true /* enable placement rules */)
+}
 
-	// TODO: enable placementrules
-	opt.SetPlacementRuleEnabled(false)
+func checkRandomMergeSchedule(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := newTestCluster(true /* need to run stream*/)
+	defer cancel()
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
 	tc.SetMergeScheduleLimit(1)
 
 	mb, err := schedule.CreateScheduler(RandomMergeType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(RandomMergeType, []string{"", ""}))
@@ -1191,7 +1206,7 @@ func TestRandomMergeSchedule(t *testing.T) {
 	ops, _ := mb.Schedule(tc, false)
 	re.Empty(ops) // regions are not fully replicated
 
-	tc.SetMaxReplicas(1)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 1)
 	ops, _ = mb.Schedule(tc, false)
 	re.Len(ops, 2)
 	re.NotZero(ops[0].Kind() & operator.OpMerge)
@@ -1203,11 +1218,16 @@ func TestRandomMergeSchedule(t *testing.T) {
 
 func TestScatterRangeBalance(t *testing.T) {
 	re := require.New(t)
-	cancel, opt, tc, oc := newTestCluster()
+	checkScatterRangeBalance(re, false /* disable placement rules */)
+	checkScatterRangeBalance(re, true /* enable placement rules */)
+}
+
+func checkScatterRangeBalance(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
-	// TODO: enable placementrules
-	opt.SetPlacementRuleEnabled(false)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
 	// range cluster use a special tolerant ratio, cluster opt take no impact
 	tc.SetTolerantSizeRatio(10000)
 	// Add stores 1,2,3,4,5.
@@ -1269,10 +1289,16 @@ func TestScatterRangeBalance(t *testing.T) {
 
 func TestBalanceLeaderLimit(t *testing.T) {
 	re := require.New(t)
-	cancel, opt, tc, oc := newTestCluster()
+	checkBalanceLeaderLimit(re, false /* disable placement rules */)
+	checkBalanceLeaderLimit(re, true /* enable placement rules */)
+}
+
+func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := newTestCluster()
 	defer cancel()
-	opt.SetPlacementRuleEnabled(false)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
 	tc.SetTolerantSizeRatio(2.5)
 	// Add stores 1,2,3,4,5.
 	tc.AddRegionStore(1, 0)
