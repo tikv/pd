@@ -2227,11 +2227,9 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	newStore := store.Clone(
-		core.SetMinResolvedTS(minResolvedTS),
-	)
-
-	return c.putStoreLocked(newStore)
+	newStore := store.Clone(core.SetMinResolvedTS(minResolvedTS))
+	c.core.PutStore(newStore)
+	return nil
 }
 
 func (c *RaftCluster) checkAndUpdateMinResolvedTS() (uint64, bool) {
