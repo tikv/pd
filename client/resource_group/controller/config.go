@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package controller
 
 import (
 	"time"
@@ -40,12 +40,13 @@ const (
 	// If we want a factor of 0.5 per second, this should be:
 	//
 	//	0.5^(1 second / mainLoopUpdateInterval)
-	movingAvgFactor                = 0.5
-	notifyFraction                 = 0.1
-	consumptionsReportingThreshold = 100
-	extendedReportingPeriodFactor  = 4
-	defaultGroupLoopUpdateInterval = 1 * time.Second
-	defaultTargetPeriod            = 10 * time.Second
+	movingAvgFactor                 = 0.5
+	notifyFraction                  = 0.1
+	consumptionsReportingThreshold  = 100
+	extendedReportingPeriodFactor   = 4
+	defaultGroupListUpdateInterval  = 1 * time.Minute
+	defaultGroupStateUpdateInterval = 1 * time.Second
+	defaultTargetPeriod             = 10 * time.Second
 )
 
 const (
@@ -92,9 +93,7 @@ func DefaultRequestUnitConfig() *RequestUnitConfig {
 // units or request resource cost standards. It should be calculated by a given `RequestUnitConfig`
 // or `RequestResourceConfig`.
 type Config struct {
-	groupLoopUpdateInterval time.Duration
-	targetPeriod            time.Duration
-
+	// RU model config
 	ReadBaseCost   RequestUnit
 	ReadBytesCost  RequestUnit
 	WriteBaseCost  RequestUnit
@@ -118,7 +117,5 @@ func generateConfig(ruConfig *RequestUnitConfig) *Config {
 		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
 		CPUMsCost:      RequestUnit(ruConfig.CPUMsCost),
 	}
-	cfg.groupLoopUpdateInterval = defaultGroupLoopUpdateInterval
-	cfg.targetPeriod = defaultTargetPeriod
 	return cfg
 }

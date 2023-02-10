@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package controller
 
 import (
 	"context"
@@ -32,11 +32,11 @@ const (
 	maxNotificationChanLen = 200
 )
 
-// ResourceGroupKVInterceptor is used as quato limit controller for resource group using kv store.
+// ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
 	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) error
-	// OnResponse is used to consume tokens atfer receiving response
+	// OnResponse is used to consume tokens after receiving response
 	OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error
 }
 
@@ -116,7 +116,7 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 // Start starts ResourceGroupController service.
 func (c *ResourceGroupsController) Start(ctx context.Context) {
 	if err := c.updateAllResourceGroups(ctx); err != nil {
-		log.Error("update ResourceGroup failed", zap.Error(err))
+		log.Error("[resource group controller] update all resource groups failed", zap.Error(err))
 	}
 	c.initRunState()
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
@@ -126,7 +126,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 // Stop stops ResourceGroupController service.
 func (c *ResourceGroupsController) Stop() error {
 	if c.loopCancel == nil {
-		return errors.Errorf("resourceGroupsController does not start.")
+		return errors.Errorf("resourceGroupsController does not start")
 	}
 	c.loopCancel()
 	return nil
@@ -137,7 +137,7 @@ func (c *ResourceGroupsController) putResourceGroup(ctx context.Context, name st
 	if err != nil {
 		return nil, err
 	}
-	log.Info("create resource group cost controller", zap.String("name", group.GetName()))
+	log.Info("[resource group controller] create resource group cost controller", zap.String("name", group.GetName()))
 	gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.groupNotificationCh)
 	// A future case: If user change mode from RU to RAW mode. How to re-init?
 	gc.initRunState()
@@ -152,7 +152,7 @@ func (c *ResourceGroupsController) updateAllResourceGroups(ctx context.Context) 
 	}
 	latestGroups := make(map[string]struct{})
 	for _, group := range groups {
-		log.Info("create resource group cost controller", zap.String("name", group.GetName()))
+		log.Info("[resource group controller] create resource group cost controller", zap.String("name", group.GetName()))
 		gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.groupNotificationCh)
 		c.groupsController.Store(group.GetName(), gc)
 		latestGroups[group.GetName()] = struct{}{}
@@ -171,7 +171,7 @@ func (c *ResourceGroupsController) initRunState() {
 	now := time.Now()
 	c.run.now = now
 	c.run.lastRequestTime = now
-	c.run.targetPeriod = c.config.targetPeriod
+	c.run.targetPeriod = defaultTargetPeriod
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
 		gc.initRunState()
@@ -221,7 +221,7 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 		name := res.GetResourceGroupName()
 		v, ok := c.groupsController.Load(name)
 		if !ok {
-			log.Warn("A non-existent resource group was found when handle token response.", zap.String("name", name))
+			log.Warn("[resource group controller] a non-existent resource group was found when handle token response", zap.String("name", name))
 			continue
 		}
 		gc := v.(*groupCostController)
@@ -250,7 +250,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 	c.run.requestInProgress = true
 	req := &rmpb.TokenBucketsRequest{
 		Requests:              requests,
-		TargetRequestPeriodMs: uint64(c.config.targetPeriod / time.Millisecond),
+		TargetRequestPeriodMs: uint64(defaultTargetPeriod / time.Millisecond),
 	}
 	go func() {
 		log.Debug("[resource group controller] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
@@ -258,7 +258,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
 			if !errors.ErrorEqual(err, context.Canceled) {
-				log.L().Sugar().Infof("TokenBucket RPC error: %v", err)
+				log.L().Sugar().Infof("[resource group controller] token bucket rpc error: %v", err)
 			}
 			resp = nil
 		}
@@ -268,9 +268,10 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 }
 
 func (c *ResourceGroupsController) mainLoop(ctx context.Context) {
-	interval := c.config.groupLoopUpdateInterval
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	listUpdateTicker := time.NewTicker(defaultGroupListUpdateInterval)
+	defer listUpdateTicker.Stop()
+	stateUpdateTicker := time.NewTicker(defaultGroupStateUpdateInterval)
+	defer stateUpdateTicker.Stop()
 
 	c.updateRunState(ctx)
 	c.collectTokenBucketRequests(ctx, "init", false /* select all */)
@@ -288,7 +289,11 @@ func (c *ResourceGroupsController) mainLoop(ctx context.Context) {
 				// A nil response indicates a failure (which would have been logged).
 				c.run.requestNeedsRetry = true
 			}
-		case <-ticker.C:
+		case <-listUpdateTicker.C:
+			if err := c.updateAllResourceGroups(ctx); err != nil {
+				log.Error("[resource group controller] update all resource groups failed", zap.Error(err))
+			}
+		case <-stateUpdateTicker.C:
 			c.updateRunState(ctx)
 			c.updateAvgRequestResourcePerSec()
 			if c.run.requestNeedsRetry || c.shouldReportConsumption() {
@@ -318,7 +323,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 	} else {
 		gc, err = c.putResourceGroup(ctx, resourceGroupName)
 		if err != nil {
-			return errors.Errorf("[resource group] resourceGroupName %s is not existed.", resourceGroupName)
+			return errors.Errorf("[resource group] resourceGroupName %s is not existed", resourceGroupName)
 		}
 	}
 	err = gc.onRequestWait(ctx, info)
@@ -329,7 +334,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 func (c *ResourceGroupsController) OnResponse(_ context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
 	tmp, ok := c.groupsController.Load(resourceGroupName)
 	if !ok {
-		log.Warn("[resource group] resourceGroupName is not existed.", zap.String("resourceGroupName", resourceGroupName))
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
 	}
 	gc := tmp.(*groupCostController)
 	gc.onResponse(req, resp)
@@ -428,12 +433,9 @@ func newGroupCostController(group *rmpb.ResourceGroup, mainCfg *Config, lowRUNot
 func (gc *groupCostController) initRunState() {
 	now := time.Now()
 	gc.run.now = now
-	gc.run.targetPeriod = gc.mainCfg.targetPeriod
-
+	gc.run.targetPeriod = defaultTargetPeriod
 	gc.run.consumption = &rmpb.Consumption{}
-
 	gc.run.lastRequestConsumption = &rmpb.Consumption{}
-
 	switch gc.mode {
 	case rmpb.GroupMode_RUMode:
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
@@ -483,7 +485,7 @@ func (gc *groupCostController) updateRunState(ctx context.Context) {
 			}
 		}
 	}
-	log.Debug("update run state", zap.Any("request unit consumption", gc.run.consumption))
+	log.Debug("[resource group controller] update run state", zap.Any("request unit consumption", gc.run.consumption))
 	gc.run.now = newTime
 }
 
@@ -620,7 +622,7 @@ func (gc *groupCostController) handleRawResourceTokenResponse(resp *rmpb.TokenBu
 		typ := grantedTB.GetType()
 		counter, ok := gc.run.resourceTokens[typ]
 		if !ok {
-			log.Warn("not support this resource type", zap.String("type", rmpb.RawResourceType_name[int32(typ)]))
+			log.Warn("[resource group controller] not support this resource type", zap.String("type", rmpb.RawResourceType_name[int32(typ)]))
 			continue
 		}
 		gc.modifyTokenCounter(counter, grantedTB.GetGrantedTokens(), grantedTB.GetTrickleTimeMs())
@@ -632,7 +634,7 @@ func (gc *groupCostController) handleRUTokenResponse(resp *rmpb.TokenBucketRespo
 		typ := grantedTB.GetType()
 		counter, ok := gc.run.requestUnitTokens[typ]
 		if !ok {
-			log.Warn("not support this resource type", zap.String("type", rmpb.RawResourceType_name[int32(typ)]))
+			log.Warn("[resource group controller] not support this resource type", zap.String("type", rmpb.RawResourceType_name[int32(typ)]))
 			continue
 		}
 		gc.modifyTokenCounter(counter, grantedTB.GetGrantedTokens(), grantedTB.GetTrickleTimeMs())
