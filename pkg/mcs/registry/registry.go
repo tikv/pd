@@ -94,6 +94,6 @@ func (r *ServiceRegistry) InstallAllRESTHandler(srv bs.Server, h map[string]http
 }
 
 // RegisterService registers a grpc service.
-func (r ServiceRegistry) RegisterService(name string, service ServiceBuilder) {
+func (r *ServiceRegistry) RegisterService(name string, service ServiceBuilder) {
 	r.builders[name] = service
 }
