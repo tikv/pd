@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
@@ -49,8 +50,10 @@ func newTestServiceRegistry(_ bs.Server) registry.RegistrableService {
 }
 
 func TestRegistryService(t *testing.T) {
-	registry.ServerServiceRegistry.RegisterService("test", newTestServiceRegistry)
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/testRegistry", `return(true)`))
+	defer re.NoError(failpoint.Disable("github.com/tikv/pd/server/testRegistry"))
+	registry.ServerServiceRegistry.RegisterService("test", newTestServiceRegistry)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)

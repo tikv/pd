@@ -183,6 +183,8 @@ type Server struct {
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
 	auditBackends []audit.Backend
+
+	registry *registry.ServiceRegistry
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -229,10 +231,13 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		etcdCfg.UserHandlers = userHandlers
 	}
 	// New way to register services.
-	registry := registry.NewServerServiceRegistry()
-	registry.RegisterService("ResourceManager", rm_server.NewService)
+	s.registry = registry.NewServerServiceRegistry()
+	failpoint.Inject("testRegistry", func() {
+		s.registry = registry.ServerServiceRegistry
+	})
+	s.registry.RegisterService("ResourceManager", rm_server.NewService)
 	// Register the micro services REST path.
-	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
+	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
@@ -240,7 +245,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 		// Register the micro services GRPC service.
-		registry.InstallAllGRPCServices(s, gs)
+		s.registry.InstallAllGRPCServices(s, gs)
 	}
 
 	s.etcdCfg = etcdCfg
