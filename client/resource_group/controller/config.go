@@ -44,7 +44,7 @@ const (
 	notifyFraction                  = 0.1
 	consumptionsReportingThreshold  = 100
 	extendedReportingPeriodFactor   = 4
-	defaultGroupListUpdateInterval  = 1 * time.Minute
+	defaultGroupCleanupInterval     = 1 * time.Minute
 	defaultGroupStateUpdateInterval = 1 * time.Second
 	defaultTargetPeriod             = 10 * time.Second
 )

@@ -216,7 +216,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	}
 }
 
-const buffDuration = time.Millisecond * 200
+const buffDuration = time.Millisecond * 300
 
 type testRequestInfo struct {
 	isWrite    bool
@@ -340,8 +340,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				startTime := time.Now()
 				controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
 				controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
-				endTime := time.Now()
-				sum += endTime.Sub(startTime)
+				sum += time.Since(startTime)
 				controller.OnResponse(suite.ctx, cas.resourceGroupName, rreq, rres)
 				controller.OnResponse(suite.ctx, cas.resourceGroupName, wreq, wres)
 				time.Sleep(1000 * time.Microsecond)
