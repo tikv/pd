@@ -170,7 +170,7 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	LoanCoefficient := defaultLoanCoefficient
 	// when BurstLimit less or equal FillRate, the server does not accumulate a significant number of tokens.
 	// So we don't need to smooth the token allocation speed.
-	if t.Settings.BurstLimit <= int64(t.Settings.FillRate) {
+	if t.Settings.BurstLimit > 0 && t.Settings.BurstLimit <= int64(t.Settings.FillRate) {
 		LoanCoefficient = 1
 	}
 	// When there are loan, the allotment will match the fill rate.

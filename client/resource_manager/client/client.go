@@ -16,6 +16,7 @@ package client
 
 import (
 	"context"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -463,7 +464,7 @@ func (gc *groupCostController) initRunState() {
 			NewTokens: initialRequestUnits,
 			NewBurst:  tb.Settings.BurstLimit,
 			// This is to trigger token requests as soon as resource group start consuming tokens.
-			NotifyThreshold: initialRequestUnits - 1,
+			NotifyThreshold: math.Max(initialRequestUnits-float64(tb.Settings.FillRate)*0.2, 1),
 		}
 		if cfg.NewBurst >= 0 {
 			cfg.NewBurst = 0
