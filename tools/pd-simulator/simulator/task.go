@@ -531,7 +531,7 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 	}
 
 	// store should Generate/Receive snapshot by chunk size.
-	// todo: the process of snapshot is single thread, the later snapshot task must wait the first one.
+	// TODO: the process of snapshot is single thread, the later snapshot task must wait the first one.
 	for stat.remainSize > 0 && n.limiter.AllowN(chunkSize) {
 		stat.remainSize -= chunkSize
 	}

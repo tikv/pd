@@ -46,8 +46,8 @@ type CleanupFunc func()
 func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
-	MockHandler := CreateMockHandler(re, "127.0.0.1")
-	s, err := CreateServer(ctx, cfg, MockHandler)
+	mockHandler := CreateMockHandler(re, "127.0.0.1")
+	s, err := CreateServer(ctx, cfg, mockHandler)
 	if err != nil {
 		cancel()
 		return nil, nil, err

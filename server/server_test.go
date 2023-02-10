@@ -59,8 +59,8 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 		cfg := cfgs[i]
 
 		go func() {
-			MockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
-			svr, err := CreateServer(suite.ctx, cfg, MockHandler)
+			mockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
+			svr, err := CreateServer(suite.ctx, cfg, mockHandler)
 			suite.NoError(err)
 			err = svr.Run()
 			suite.NoError(err)
@@ -89,8 +89,8 @@ func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, 
 	ch := make(chan *Server)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
-			MockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
-			svr, err := CreateServer(ctx, cfg, MockHandler)
+			mockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
+			svr, err := CreateServer(ctx, cfg, mockHandler)
 			// prevent blocking if Asserts fails
 			failed := true
 			defer func() {
@@ -155,8 +155,8 @@ func (suite *leaderServerTestSuite) TestCheckClusterID() {
 
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
-	MockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
-	svr, err := CreateServer(ctx, cfgA, MockHandler)
+	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
+	svr, err := CreateServer(ctx, cfgA, mockHandler)
 	suite.NoError(err)
 
 	etcd, err := embed.StartEtcd(svr.etcdCfg)
@@ -174,10 +174,10 @@ func (suite *leaderServerTestSuite) TestCheckClusterID() {
 func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
-	MockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
-	svr, err := CreateServer(ctx, cfg, MockHandler)
+	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
+	svr, err := CreateServer(ctx, cfg, mockHandler)
 	suite.NoError(err)
-	_, err = CreateServer(ctx, cfg, MockHandler, MockHandler)
+	_, err = CreateServer(ctx, cfg, mockHandler, mockHandler)
 	// Repeat register.
 	suite.Error(err)
 	defer func() {
@@ -198,12 +198,12 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
-	MockHandler := CreateMockHandler(suite.Require(), "127.0.0.2")
+	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, MockHandler)
+	svr, err := CreateServer(ctx, cfg, mockHandler)
 	suite.NoError(err)
-	_, err = CreateServer(ctx, cfg, MockHandler, MockHandler)
+	_, err = CreateServer(ctx, cfg, mockHandler, mockHandler)
 	// Repeat register.
 	suite.Error(err)
 	defer func() {
@@ -228,12 +228,12 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
-	MockHandler := CreateMockHandler(suite.Require(), "127.0.0.2")
+	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, MockHandler)
+	svr, err := CreateServer(ctx, cfg, mockHandler)
 	suite.NoError(err)
-	_, err = CreateServer(ctx, cfg, MockHandler, MockHandler)
+	_, err = CreateServer(ctx, cfg, mockHandler, mockHandler)
 	// Repeat register.
 	suite.Error(err)
 	defer func() {
@@ -258,12 +258,12 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
-	MockHandler := CreateMockHandler(suite.Require(), "127.0.0.2")
+	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, MockHandler)
+	svr, err := CreateServer(ctx, cfg, mockHandler)
 	suite.NoError(err)
-	_, err = CreateServer(ctx, cfg, MockHandler, MockHandler)
+	_, err = CreateServer(ctx, cfg, mockHandler, mockHandler)
 	// Repeat register.
 	suite.Error(err)
 	defer func() {
