@@ -64,14 +64,14 @@ type ResourceGroupsController struct {
 
 	calculators []ResourceCalculator
 
-	// tokenResponseChan receives token bucket response from server.
-	// And it handles all resource group and runs in main loop
-	tokenResponseChan chan []*rmpb.TokenBucketResponse
-
-	groupNotificationCh chan *groupCostController
-
-	// lowTokenNotifyChan receives chan notification when the number of available token is low
+	// When a signal is received, the controller will try to update the resource group states.
+	groupUpdateChan chan struct{}
+	// When a signal is received, it means the number of available token is low.
 	lowTokenNotifyChan chan struct{}
+	// When a token bucket response received from server, it will be sent to the channel.
+	tokenResponseChan chan []*rmpb.TokenBucketResponse
+	// When the token bucket of a resource group is updated, it will be sent to the channel.
+	tokenBucketUpdateChan chan *groupCostController
 
 	run struct {
 		now             time.Time
@@ -103,13 +103,14 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 		config = DefaultConfig()
 	}
 	return &ResourceGroupsController{
-		clientUniqueID:      clientUniqueID,
-		provider:            provider,
-		config:              config,
-		lowTokenNotifyChan:  make(chan struct{}, 1),
-		tokenResponseChan:   make(chan []*rmpb.TokenBucketResponse, 1),
-		groupNotificationCh: make(chan *groupCostController, maxNotificationChanLen),
-		calculators:         []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
+		clientUniqueID:        clientUniqueID,
+		provider:              provider,
+		config:                config,
+		groupUpdateChan:       make(chan struct{}, 1),
+		lowTokenNotifyChan:    make(chan struct{}, 1),
+		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
+		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
+		calculators:           []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
 	}, nil
 }
 
@@ -147,15 +148,21 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					c.run.requestNeedsRetry = false
 					c.collectTokenBucketRequests(c.loopCtx, "report", false /* select all */)
 				}
+			case <-c.groupUpdateChan:
+				c.updateRunState(c.loopCtx)
+				c.updateAvgRequestResourcePerSec()
+				if !c.run.requestInProgress {
+					c.collectTokenBucketRequests(c.loopCtx, "update", false /* select all */)
+				}
 			case <-c.lowTokenNotifyChan:
 				c.updateRunState(c.loopCtx)
 				c.updateAvgRequestResourcePerSec()
 				if !c.run.requestInProgress {
 					c.collectTokenBucketRequests(c.loopCtx, "low_ru", true /* only select low tokens resource group */)
 				}
-			case gc := <-c.groupNotificationCh:
+			case gc := <-c.tokenBucketUpdateChan:
 				now := gc.run.now
-				go gc.handleTokenBucketTrickEvent(c.loopCtx, now)
+				go gc.handleTokenBucketUpdateEvent(c.loopCtx, now)
 			}
 		}
 	}()
@@ -183,11 +190,11 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 		return nil, err
 	}
 	log.Info("[resource group controller] create resource group controller", zap.String("name", group.GetName()))
-	gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.groupNotificationCh)
+	gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 	// A future case: If user change mode from RU to RAW mode. How to re-init?
 	gc.initRunState()
-	c.sendTokenBucketRequests(ctx, []*rmpb.TokenBucketRequest{gc.collectRequestAndConsumption(false)}, "init")
 	c.groupsController.Store(group.GetName(), gc)
+	c.groupUpdateChan <- struct{}{}
 	return gc, nil
 }
 
@@ -343,9 +350,9 @@ type groupCostController struct {
 	// fast path to make once token limit with un-limit burst.
 	burstable *atomic.Bool
 
-	lowRUNotifyChan chan struct{}
+	lowRUNotifyChan       chan<- struct{}
+	tokenBucketUpdateChan chan<- *groupCostController
 
-	groupNotificationCh chan *groupCostController
 	// run contains the state that is updated by the main loop.
 	run struct {
 		now time.Time
@@ -397,8 +404,8 @@ type tokenCounter struct {
 func newGroupCostController(
 	group *rmpb.ResourceGroup,
 	mainCfg *Config,
-	lowRUNotifyChan chan struct{},
-	groupNotificationCh chan *groupCostController,
+	lowRUNotifyChan chan<- struct{},
+	tokenBucketUpdateChan chan<- *groupCostController,
 ) *groupCostController {
 	gc := &groupCostController{
 		ResourceGroup: group,
@@ -407,10 +414,10 @@ func newGroupCostController(
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
 		},
-		mode:                group.GetMode(),
-		groupNotificationCh: groupNotificationCh,
-		lowRUNotifyChan:     lowRUNotifyChan,
-		burstable:           &atomic.Bool{},
+		mode:                  group.GetMode(),
+		tokenBucketUpdateChan: tokenBucketUpdateChan,
+		lowRUNotifyChan:       lowRUNotifyChan,
+		burstable:             &atomic.Bool{},
 	}
 
 	switch gc.mode {
@@ -492,7 +499,7 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	}
 }
 
-func (gc *groupCostController) handleTokenBucketTrickEvent(ctx context.Context, now time.Time) {
+func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context, now time.Time) {
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
@@ -684,7 +691,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		counter.notify.mu.Unlock()
 		counter.lastDeadline = deadline
 		select {
-		case gc.groupNotificationCh <- gc:
+		case gc.tokenBucketUpdateChan <- gc:
 		default:
 		}
 	}
