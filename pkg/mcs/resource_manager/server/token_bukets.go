@@ -39,7 +39,7 @@ type GroupTokenBucket struct {
 	// BurstLimit is used as below:
 	//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within a unlimited capacity).
 	//   - If b < 0, that means the limiter is unlimited capacity and fillrate(r) is ignored, can be seen as r == Inf (burst within a unlimited capacity).
-	//   - If b > 0, that means the limiter is limited capacity. (current not used).
+	//   - If b > 0, that means the limiter is limited capacity.
 	// MaxTokens limits the number of tokens that can be accumulated
 	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
 	GroupTokenBucketState `json:"state,omitempty"`
@@ -47,9 +47,10 @@ type GroupTokenBucket struct {
 
 // GroupTokenBucketState is the running state of TokenBucket.
 type GroupTokenBucketState struct {
-	Tokens         float64    `json:"tokens,omitempty"`
-	LastUpdate     *time.Time `json:"last_update,omitempty"`
-	Initialized    bool       `json:"initialized"`
+	Tokens      float64    `json:"tokens,omitempty"`
+	LastUpdate  *time.Time `json:"last_update,omitempty"`
+	Initialized bool       `json:"initialized"`
+	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
 	settingChanged bool
 }
 
@@ -123,6 +124,7 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 			t.LastUpdate = &now
 		}
 	}
+	// reloan when setting changed
 	if t.settingChanged && t.Tokens <= 0 {
 		t.Tokens = 0
 	}
@@ -166,6 +168,8 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	var trickleTime = 0.
 
 	LoanCoefficient := defaultLoanCoefficient
+	// when BurstLimit less or equal FillRate, the server does not accumulate a significant number of tokens.
+	// So we don't need to smooth the token allocation speed.
 	if t.Settings.BurstLimit <= int64(t.Settings.FillRate) {
 		LoanCoefficient = 1
 	}

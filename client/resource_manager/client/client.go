@@ -135,6 +135,7 @@ func (c *ResourceGroupsController) Stop() error {
 }
 
 func (c *ResourceGroupsController) putResourceGroup(ctx context.Context, name string) (*groupCostController, error) {
+	// ref https://github.com/tikv/pd/issues/5955
 	c.createGroupsControllerLock.Lock()
 	defer c.createGroupsControllerLock.Unlock()
 	if tmp, ok := c.groupsController.Load(name); ok {
@@ -267,7 +268,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		TargetRequestPeriodMs: uint64(c.config.targetPeriod / time.Millisecond),
 	}
 	go func() {
-		log.Info("[resource group controller] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
+		log.Debug("[resource group controller] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
 		resp, err := c.provider.AcquireTokenBuckets(ctx, req)
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
@@ -276,7 +277,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			}
 			resp = nil
 		}
-		log.Info("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", time.Since(now)))
+		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", time.Since(now)))
 		c.tokenResponseChan <- resp
 	}()
 }
@@ -459,8 +460,9 @@ func (gc *groupCostController) initRunState() {
 
 	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
 		cfg := tokenBucketReconfigureArgs{
-			NewTokens:       initialRequestUnits,
-			NewBurst:        tb.Settings.BurstLimit,
+			NewTokens: initialRequestUnits,
+			NewBurst:  tb.Settings.BurstLimit,
+			// This is to trigger token requests as soon as resource group start consuming tokens.
 			NotifyThreshold: initialRequestUnits - 1,
 		}
 		if cfg.NewBurst >= 0 {
@@ -711,6 +713,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		cfg.NewRate = float64(bucket.GetSettings().FillRate)
 		cfg.NotifyThreshold = notifyThreshold
 		counter.lastDeadline = time.Time{}
+		// In the non-trickle case, clients can be allowed to accumulate more tokens.
 		if cfg.NewBurst >= 0 {
 			cfg.NewBurst = 0
 		}
@@ -720,9 +723,6 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		trickleDuration := time.Duration(trickleTimeMs) * time.Millisecond
 		deadline := gc.run.now.Add(trickleDuration)
 		cfg.NewRate = float64(bucket.GetSettings().FillRate) + granted/trickleDuration.Seconds()
-		if cfg.NewBurst >= 0 && cfg.NewBurst <= int64(cfg.NewRate) {
-			cfg.NewBurst = int64(cfg.NewRate)
-		}
 
 		timerDuration := trickleDuration - time.Second
 		if timerDuration <= 0 {
