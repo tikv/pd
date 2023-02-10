@@ -19,7 +19,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/autoscaling"
-	bs "github.com/tikv/pd/pkg/basic_server"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/swaggerserver"

@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basic_server"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
