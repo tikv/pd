@@ -62,9 +62,9 @@ func Every(interval time.Duration) Limit {
 // or its associated context.Context is canceled.
 //
 // Some changes about burst(b):
-//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst within a capacity).
+//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within a unlimited capacity).
 //   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within a unlimited capacity).
-//   - If b > 0, that means the limiter is limited capacity. (current not used).
+//   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
 	mu     sync.Mutex
 	limit  Limit
@@ -287,7 +287,7 @@ type tokenBucketReconfigureArgs struct {
 func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	log.Info("[resource group controllor] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
+	log.Debug("[resource group controllor] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 	now, _, tokens := lim.advance(now)
 	lim.last = now
 	lim.tokens = tokens + args.NewTokens
@@ -296,7 +296,7 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	lim.notifyThreshold = args.NotifyThreshold
 	lim.isLowProcess = false
 	lim.maybeNotify()
-	log.Info("[resource group controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
+	log.Debug("[resource group controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
