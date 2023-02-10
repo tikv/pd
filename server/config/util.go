@@ -142,6 +142,8 @@ func ParseServiceMode(mode string) (ServiceMode, error) {
 		return ResourceManagerService, nil
 	case SchedulerService.String():
 		return SchedulerService, nil
+	case AllServices.String():
+		return AllServices, nil
 	default:
 		return ServiceModeCount, errors.Errorf("invalid service mode %s", mode)
 	}

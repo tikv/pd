@@ -68,7 +68,7 @@ func main() {
 }
 
 func createServerWrapper(args []string) (context.Context, context.CancelFunc, bs.Server) {
-	schedulers.Register()
+	schedulers.Register() // TODO: move to server after removing config dependency.
 	cfg := config.NewConfig()
 	err := cfg.Parse(args)
 
@@ -113,7 +113,7 @@ func createServerWrapper(args []string) (context.Context, context.CancelFunc, bs
 
 	metricutil.Push(&cfg.Metric)
 
-	// todo: add more service mode and multi service mode
+	// TODO: add more service modes and multi service modes support.
 	ctx, cancel := context.WithCancel(context.Background())
 	m, err := config.ParseServiceMode(cfg.ServiceModes)
 	if err != nil {

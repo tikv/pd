@@ -28,14 +28,6 @@ import (
 	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
-
-	// Register Service
-	_ "github.com/tikv/pd/pkg/mcs/registry"
-	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/install"
-	// todo init function
 )
 
 // LegacyStart starts the legacy mode, where are all services are started.
