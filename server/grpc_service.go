@@ -1305,105 +1305,14 @@ func (s *GrpcServer) invalidValue(msg string) *pdpb.ResponseHeader {
 	})
 }
 
-// Only used for the TestLocalAllocatorLeaderChange.
-var mockLocalAllocatorLeaderChangeFlag = false
-
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
 // and write it into all Local TSO Allocators then if it's indeed the biggest one.
-func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
+func (s *GrpcServer) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	// There is no dc-location found in this server, return err.
-	if tsoAllocatorManager.GetClusterDCLocationsNumber() == 0 {
-		return &pdpb.SyncMaxTSResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-				"empty cluster dc-location found, checker may not work properly"),
-		}, nil
-	}
-	// Get all Local TSO Allocator leaders
-	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
-	if err != nil {
-		return &pdpb.SyncMaxTSResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-	if !request.GetSkipCheck() {
-		var maxLocalTS *pdpb.Timestamp
-		syncedDCs := make([]string, 0, len(allocatorLeaders))
-		for _, allocator := range allocatorLeaders {
-			// No longer leader, just skip here because
-			// the global allocator will check if all DCs are handled.
-			if !allocator.IsAllocatorLeader() {
-				continue
-			}
-			currentLocalTSO, err := allocator.GetCurrentTSO()
-			if err != nil {
-				return &pdpb.SyncMaxTSResponse{
-					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-				}, nil
-			}
-			if tsoutil.CompareTimestamp(currentLocalTSO, maxLocalTS) > 0 {
-				maxLocalTS = currentLocalTSO
-			}
-			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
-		}
 
-		failpoint.Inject("mockLocalAllocatorLeaderChange", func() {
-			if !mockLocalAllocatorLeaderChangeFlag {
-				maxLocalTS = nil
-				request.MaxTs = nil
-				mockLocalAllocatorLeaderChangeFlag = true
-			}
-		})
-
-		if maxLocalTS == nil {
-			return &pdpb.SyncMaxTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-					"local tso allocator leaders have changed during the sync, should retry"),
-			}, nil
-		}
-		if request.GetMaxTs() == nil {
-			return &pdpb.SyncMaxTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-					"empty maxTS in the request, should retry"),
-			}, nil
-		}
-		// Found a bigger or equal maxLocalTS, return it directly.
-		cmpResult := tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs())
-		if cmpResult >= 0 {
-			// Found an equal maxLocalTS, plus 1 to logical part before returning it.
-			// For example, we have a Global TSO t1 and a Local TSO t2, they have the
-			// same physical and logical parts. After being differentiating with suffix,
-			// there will be (t1.logical << suffixNum + 0) < (t2.logical << suffixNum + N),
-			// where N is bigger than 0, which will cause a Global TSO fallback than the previous Local TSO.
-			if cmpResult == 0 {
-				maxLocalTS.Logical += 1
-			}
-			return &pdpb.SyncMaxTSResponse{
-				Header:     s.header(),
-				MaxLocalTs: maxLocalTS,
-				SyncedDcs:  syncedDCs,
-			}, nil
-		}
-	}
-	syncedDCs := make([]string, 0, len(allocatorLeaders))
-	for _, allocator := range allocatorLeaders {
-		if !allocator.IsAllocatorLeader() {
-			continue
-		}
-		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
-			return &pdpb.SyncMaxTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
-		}
-		syncedDCs = append(syncedDCs, allocator.GetDCLocation())
-	}
-	return &pdpb.SyncMaxTSResponse{
-		Header:    s.header(),
-		SyncedDcs: syncedDCs,
-	}, nil
+	return tso.SyncMaxTS(ctx, s, request)
 }
 
 // SplitRegions split regions by the given split keys
@@ -1477,40 +1386,13 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
 func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
-	var err error
-	if err = s.validateInternalRequest(request.GetHeader(), false); err != nil {
+	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
 	}
 	if !s.member.IsLeader() {
 		return nil, ErrNotLeader
 	}
-	am := s.tsoAllocatorManager
-	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
-	if !ok {
-		am.ClusterDCLocationChecker()
-		return &pdpb.GetDCLocationInfoResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-				fmt.Sprintf("dc-location %s is not found", request.GetDcLocation())),
-		}, nil
-	}
-	resp := &pdpb.GetDCLocationInfoResponse{
-		Header: s.header(),
-		Suffix: info.Suffix,
-	}
-	// Because the number of suffix bits is changing dynamically according to the dc-location number,
-	// there is a corner case may cause the Local TSO is not unique while member changing.
-	// Example:
-	//     t1: xxxxxxxxxxxxxxx1 | 11
-	//     t2: xxxxxxxxxxxxxxx | 111
-	// So we will force the newly added Local TSO Allocator to have a Global TSO synchronization
-	// when it becomes the Local TSO Allocator leader.
-	// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
-	if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
-		return &pdpb.GetDCLocationInfoResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-	return resp, nil
+	return tso.GetDCLocationInfo(ctx, s, request)
 }
 
 // validateInternalRequest checks if server is closed, which is used to validate

@@ -16,19 +16,23 @@ package server
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
+	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -175,6 +179,42 @@ func (s *Server) GetDelegateClient(ctx context.Context, forwardedHost string) (*
 		s.clientConns.Store(forwardedHost, cc)
 	}
 	return client.(*grpc.ClientConn), nil
+}
+
+// GetGlobalTS returns global tso.
+func (s *Server) GetGlobalTS() (uint64, error) {
+	ts, err := s.tsoAllocatorManager.GetGlobalTSO()
+	if err != nil {
+		return 0, err
+	}
+	return tsoutil.GenerateTS(ts), nil
+}
+
+// GetExternalTS returns external timestamp.
+// TODO: Implement GetExternalTS. Get extentTS from the persistent storage
+func (s *Server) GetExternalTS() uint64 {
+	return 0
+}
+
+// SetExternalTS returns external timestamp.
+func (s *Server) SetExternalTS(externalTS uint64) error {
+	globalTS, err := s.GetGlobalTS()
+	if err != nil {
+		return err
+	}
+	if tsoutil.CompareTimestampUint64(externalTS, globalTS) == 1 {
+		desc := "the external timestamp should not be larger than global ts"
+		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("global ts", globalTS))
+		return errors.New(desc)
+	}
+	currentExternalTS := s.GetExternalTS()
+	if tsoutil.CompareTimestampUint64(externalTS, currentExternalTS) != 1 {
+		desc := "the external timestamp should be larger than now"
+		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("current external timestamp", currentExternalTS))
+		return errors.New(desc)
+	}
+	// TODO: persistent externalTS
+	return nil
 }
 
 // TODO: If goroutine here timeout after a stream is created successfully, we need to handle it correctly.

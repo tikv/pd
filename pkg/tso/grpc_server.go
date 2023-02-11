@@ -16,15 +16,18 @@ package tso
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -47,7 +50,13 @@ type GrpcServer interface {
 	GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error)
 }
 
-// Tso implements gRPC PDServer.
+type tsoRequest struct {
+	forwardedHost string
+	request       *pdpb.TsoRequest
+	stream        pdpb.PD_TsoServer
+}
+
+// Tso implements gRPC Server.
 func Tso(s GrpcServer, stream pdpb.PD_TsoServer) error {
 	var (
 		doneCh chan struct{}
@@ -113,6 +122,136 @@ func Tso(s GrpcServer, stream pdpb.PD_TsoServer) error {
 	}
 }
 
+// Only used for the TestLocalAllocatorLeaderChange.
+var mockLocalAllocatorLeaderChangeFlag = false
+
+// SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs is holding when skipCheck is set,
+// and write it into all Local TSO Allocators then if it's indeed the biggest one.
+func SyncMaxTS(_ context.Context, s GrpcServer, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	// There is no dc-location found in this server, return err.
+	if tsoAllocatorManager.GetClusterDCLocationsNumber() == 0 {
+		return &pdpb.SyncMaxTSResponse{
+			Header: WrapErrorToHeader(s.ClusterID(), pdpb.ErrorType_UNKNOWN,
+				"empty cluster dc-location found, checker may not work properly"),
+		}, nil
+	}
+	// Get all Local TSO Allocator leaders
+	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
+	if err != nil {
+		return &pdpb.SyncMaxTSResponse{
+			Header: WrapErrorToHeader(s.ClusterID(), pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+	if !request.GetSkipCheck() {
+		var maxLocalTS *pdpb.Timestamp
+		syncedDCs := make([]string, 0, len(allocatorLeaders))
+		for _, allocator := range allocatorLeaders {
+			// No longer leader, just skip here because
+			// the global allocator will check if all DCs are handled.
+			if !allocator.IsAllocatorLeader() {
+				continue
+			}
+			currentLocalTSO, err := allocator.GetCurrentTSO()
+			if err != nil {
+				return &pdpb.SyncMaxTSResponse{
+					Header: WrapErrorToHeader(s.ClusterID(), pdpb.ErrorType_UNKNOWN, err.Error()),
+				}, nil
+			}
+			if tsoutil.CompareTimestamp(currentLocalTSO, maxLocalTS) > 0 {
+				maxLocalTS = currentLocalTSO
+			}
+			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
+		}
+
+		failpoint.Inject("mockLocalAllocatorLeaderChange", func() {
+			if !mockLocalAllocatorLeaderChangeFlag {
+				maxLocalTS = nil
+				request.MaxTs = nil
+				mockLocalAllocatorLeaderChangeFlag = true
+			}
+		})
+
+		if maxLocalTS == nil {
+			return &pdpb.SyncMaxTSResponse{
+				Header: WrapErrorToHeader(s.ClusterID(), pdpb.ErrorType_UNKNOWN,
+					"local tso allocator leaders have changed during the sync, should retry"),
+			}, nil
+		}
+		if request.GetMaxTs() == nil {
+			return &pdpb.SyncMaxTSResponse{
+				Header: WrapErrorToHeader(s.ClusterID(), pdpb.ErrorType_UNKNOWN,
+					"empty maxTS in the request, should retry"),
+			}, nil
+		}
+		// Found a bigger or equal maxLocalTS, return it directly.
+		cmpResult := tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs())
+		if cmpResult >= 0 {
+			// Found an equal maxLocalTS, plus 1 to logical part before returning it.
+			// For example, we have a Global TSO t1 and a Local TSO t2, they have the
+			// same physical and logical parts. After being differentiating with suffix,
+			// there will be (t1.logical << suffixNum + 0) < (t2.logical << suffixNum + N),
+			// where N is bigger than 0, which will cause a Global TSO fallback than the previous Local TSO.
+			if cmpResult == 0 {
+				maxLocalTS.Logical += 1
+			}
+			return &pdpb.SyncMaxTSResponse{
+				Header:     Header(s.ClusterID()),
+				MaxLocalTs: maxLocalTS,
+				SyncedDcs:  syncedDCs,
+			}, nil
+		}
+	}
+	syncedDCs := make([]string, 0, len(allocatorLeaders))
+	for _, allocator := range allocatorLeaders {
+		if !allocator.IsAllocatorLeader() {
+			continue
+		}
+		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
+			return &pdpb.SyncMaxTSResponse{
+				Header: WrapErrorToHeader(s.ClusterID(), pdpb.ErrorType_UNKNOWN, err.Error()),
+			}, nil
+		}
+		syncedDCs = append(syncedDCs, allocator.GetDCLocation())
+	}
+	return &pdpb.SyncMaxTSResponse{
+		Header:    Header(s.ClusterID()),
+		SyncedDcs: syncedDCs,
+	}, nil
+}
+
+// GetDCLocationInfo gets the dc-location info of the given dc-location from the primary's TSO allocator manager.
+func GetDCLocationInfo(ctx context.Context, s GrpcServer, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
+	am := s.GetTSOAllocatorManager()
+	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
+	if !ok {
+		am.ClusterDCLocationChecker()
+		return &pdpb.GetDCLocationInfoResponse{
+			Header: WrapErrorToHeader(s.ClusterID(), pdpb.ErrorType_UNKNOWN,
+				fmt.Sprintf("dc-location %s is not found", request.GetDcLocation())),
+		}, nil
+	}
+	resp := &pdpb.GetDCLocationInfoResponse{
+		Header: Header(s.ClusterID()),
+		Suffix: info.Suffix,
+	}
+	// Because the number of suffix bits is changing dynamically according to the dc-location number,
+	// there is a corner case may cause the Local TSO is not unique while member changing.
+	// Example:
+	//     t1: xxxxxxxxxxxxxxx1 | 11
+	//     t2: xxxxxxxxxxxxxxx | 111
+	// So we will force the newly added Local TSO Allocator to have a Global TSO synchronization
+	// when it becomes the Local TSO Allocator leader.
+	// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
+	var err error
+	if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
+		return &pdpb.GetDCLocationInfoResponse{
+			Header: WrapErrorToHeader(s.ClusterID(), pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+	return resp, nil
+}
+
 // Header is a helper function to wrapper the response header for the given cluster id
 func Header(clusterID uint64) *pdpb.ResponseHeader {
 	if clusterID == 0 {
@@ -137,12 +276,6 @@ func ErrorHeader(clusterID uint64, err *pdpb.Error) *pdpb.ResponseHeader {
 		ClusterId: clusterID,
 		Error:     err,
 	}
-}
-
-type tsoRequest struct {
-	forwardedHost string
-	request       *pdpb.TsoRequest
-	stream        pdpb.PD_TsoServer
 }
 
 func dispatchTSORequest(ctx context.Context, s GrpcServer, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error) {

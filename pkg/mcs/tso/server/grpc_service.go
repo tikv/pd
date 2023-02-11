@@ -26,6 +26,16 @@ import (
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// gRPC errors
+var (
+	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
+	// TODO: work as proxy.
+	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
 )
 
 var _ tsopb.TSOServer = (*Service)(nil)
@@ -107,21 +117,52 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
 // and write it into all Local TSO Allocators then if it's indeed the biggest one.
-func (s *Service) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	return nil, nil
+func (s *Service) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
+	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+	return tso.SyncMaxTS(ctx, s.server, request)
 }
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
 func (s *Service) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
-	return nil, nil
+	if err := s.validateInternalRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+	return tso.GetDCLocationInfo(ctx, s.server, request)
 }
 
 // SetExternalTimestamp sets a given external timestamp to perform stale read.
 func (s *Service) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
 // GetExternalTimestamp gets the saved external timstamp.
 func (s *Service) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
 	return nil, nil
+}
+
+// validateInternalRequest checks if server is closed, which is used to validate
+// the gRPC communication between TSO servers internally.
+// TODO: check if the sender is from the global TSO allocator
+func (s *Service) validateInternalRequest(_ *pdpb.RequestHeader) error {
+	if s.server.IsClosed() {
+		return ErrNotStarted
+	}
+	return nil
+}
+
+// validateRequest checks if Server is leader and clusterID is matched.
+// TODO: Call it in gRPC interceptor.
+func (s *Service) validateRequest(header *pdpb.RequestHeader) error {
+	if s.server.IsClosed() || !s.server.GetMember().IsLeader() {
+		return ErrNotLeader
+	}
+	if header.GetClusterId() != s.server.clusterID {
+		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.server.clusterID, header.GetClusterId())
+	}
+	return nil
 }

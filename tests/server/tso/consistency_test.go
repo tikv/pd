@@ -232,7 +232,7 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSOOverflow() {
 }
 
 func (suite *tsoConsistencyTestSuite) TestLocalAllocatorLeaderChange() {
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/mockLocalAllocatorLeaderChange", `return(true)`))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/mockLocalAllocatorLeaderChange", `return(true)`))
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 	}
@@ -259,7 +259,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalAllocatorLeaderChange() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	suite.getTimestampByDC(ctx, cluster, tso.GlobalDCLocation)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/mockLocalAllocatorLeaderChange"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/mockLocalAllocatorLeaderChange"))
 }
 
 func (suite *tsoConsistencyTestSuite) TestLocalTSO() {
