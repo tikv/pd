@@ -6,7 +6,8 @@ RUN apk add --no-cache \
     bash \
     curl \
     gcc \
-    g++
+    g++ \
+    binutils-gold
 
 # Install jq for pd-ctl
 RUN cd / && \
