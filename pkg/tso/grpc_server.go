@@ -48,6 +48,10 @@ type GrpcServer interface {
 	GetTSODispatcher() *sync.Map
 	CreateTsoForwardStream(client *grpc.ClientConn) (pdpb.PD_TsoClient, context.CancelFunc, error)
 	GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error)
+	ValidateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error
+	ValidateRequest(header *pdpb.RequestHeader) error
+	GetExternalTS() uint64
+	SetExternalTS(externalTS uint64) error
 }
 
 type tsoRequest struct {
@@ -128,6 +132,9 @@ var mockLocalAllocatorLeaderChangeFlag = false
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs is holding when skipCheck is set,
 // and write it into all Local TSO Allocators then if it's indeed the biggest one.
 func SyncMaxTS(_ context.Context, s GrpcServer, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
+	if err := s.ValidateInternalRequest(request.GetHeader(), true); err != nil {
+		return nil, err
+	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
 	// There is no dc-location found in this server, return err.
 	if tsoAllocatorManager.GetClusterDCLocationsNumber() == 0 {
@@ -222,6 +229,10 @@ func SyncMaxTS(_ context.Context, s GrpcServer, request *pdpb.SyncMaxTSRequest) 
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from the primary's TSO allocator manager.
 func GetDCLocationInfo(ctx context.Context, s GrpcServer, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
+	var err error
+	if err = s.ValidateInternalRequest(request.GetHeader(), false); err != nil {
+		return nil, err
+	}
 	am := s.GetTSOAllocatorManager()
 	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
 	if !ok {
@@ -243,13 +254,68 @@ func GetDCLocationInfo(ctx context.Context, s GrpcServer, request *pdpb.GetDCLoc
 	// So we will force the newly added Local TSO Allocator to have a Global TSO synchronization
 	// when it becomes the Local TSO Allocator leader.
 	// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
-	var err error
 	if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
 		return &pdpb.GetDCLocationInfoResponse{
 			Header: WrapErrorToHeader(s.ClusterID(), pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 	return resp, nil
+}
+
+type forwardSetExternalTSRequest func(context.Context, *grpc.ClientConn, *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error)
+
+// SetExternalTimestamp implements gRPC Server.
+func SetExternalTimestamp(ctx context.Context, s GrpcServer, request *pdpb.SetExternalTimestampRequest,
+	forward forwardSetExternalTSRequest) (*pdpb.SetExternalTimestampResponse, error) {
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
+	if !s.IsLocalRequest(forwardedHost) {
+		client, err := s.GetDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return forward(ctx, client, request)
+	}
+
+	if err := s.ValidateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	timestamp := request.GetTimestamp()
+	if err := setExternalTS(s, timestamp); err != nil {
+		return &pdpb.SetExternalTimestampResponse{Header: invalidValue(s.ClusterID(), err.Error())}, nil
+	}
+	log.Debug("set external timestamp",
+		zap.Uint64("timestamp", timestamp))
+	return &pdpb.SetExternalTimestampResponse{
+		Header: Header(s.ClusterID()),
+	}, nil
+}
+
+type forwardGetExternalTSRequest func(context.Context, *grpc.ClientConn, *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error)
+
+// GetExternalTimestamp implements gRPC Server.
+func GetExternalTimestamp(ctx context.Context, s GrpcServer, request *pdpb.GetExternalTimestampRequest,
+	forward forwardGetExternalTSRequest) (*pdpb.GetExternalTimestampResponse, error) {
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
+	if !s.IsLocalRequest(forwardedHost) {
+		client, err := s.GetDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return forward(ctx, client, request)
+	}
+
+	if err := s.ValidateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	timestamp := s.GetExternalTS()
+	return &pdpb.GetExternalTimestampResponse{
+		Header:    Header(s.ClusterID()),
+		Timestamp: timestamp,
+	}, nil
 }
 
 // Header is a helper function to wrapper the response header for the given cluster id
@@ -262,7 +328,7 @@ func Header(clusterID uint64) *pdpb.ResponseHeader {
 
 // WrapErrorToHeader is a helper function to wrapper the response header for the given cluster id and the error info
 func WrapErrorToHeader(clusterID uint64, errorType pdpb.ErrorType, message string) *pdpb.ResponseHeader {
-	return ErrorHeader(
+	return errorHeader(
 		clusterID,
 		&pdpb.Error{
 			Type:    errorType,
@@ -271,11 +337,20 @@ func WrapErrorToHeader(clusterID uint64, errorType pdpb.ErrorType, message strin
 }
 
 // ErrorHeader is a helper function to wrapper the response header for the given cluster id and the error
-func ErrorHeader(clusterID uint64, err *pdpb.Error) *pdpb.ResponseHeader {
+func errorHeader(clusterID uint64, err *pdpb.Error) *pdpb.ResponseHeader {
 	return &pdpb.ResponseHeader{
 		ClusterId: clusterID,
 		Error:     err,
 	}
+}
+
+func invalidValue(clusterID uint64, msg string) *pdpb.ResponseHeader {
+	return errorHeader(
+		clusterID,
+		&pdpb.Error{
+			Type:    pdpb.ErrorType_INVALID_VALUE,
+			Message: msg,
+		})
 }
 
 func dispatchTSORequest(ctx context.Context, s GrpcServer, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error) {
@@ -446,4 +521,32 @@ func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
 			return
 		}
 	}
+}
+
+func getGlobalTS(s GrpcServer) (uint64, error) {
+	ts, err := s.GetTSOAllocatorManager().GetGlobalTSO()
+	if err != nil {
+		return 0, err
+	}
+	return tsoutil.GenerateTS(ts), nil
+}
+
+// SetExternalTS returns external timestamp.
+func setExternalTS(s GrpcServer, externalTS uint64) error {
+	globalTS, err := getGlobalTS(s)
+	if err != nil {
+		return err
+	}
+	if tsoutil.CompareTimestampUint64(externalTS, globalTS) == 1 {
+		desc := "the external timestamp should not be larger than global ts"
+		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("global ts", globalTS))
+		return errors.New(desc)
+	}
+	currentExternalTS := s.GetExternalTS()
+	if tsoutil.CompareTimestampUint64(externalTS, currentExternalTS) != 1 {
+		desc := "the external timestamp should be larger than now"
+		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("current external timestamp", currentExternalTS))
+		return errors.New(desc)
+	}
+	return s.SetExternalTS(externalTS)
 }

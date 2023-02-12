@@ -80,7 +80,7 @@ func (s *GrpcServer) unaryMiddleware(ctx context.Context, header *pdpb.RequestHe
 		ctx = grpcutil.ResetForwardContext(ctx)
 		return fn(ctx, client)
 	}
-	if err := s.validateRequest(header); err != nil {
+	if err := s.ValidateRequest(header); err != nil {
 		return nil, err
 	}
 	return nil, nil
@@ -567,7 +567,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			err := server.Send(resp)
 			return errors.WithStack(err)
 		}
-		if err := s.validateRequest(request.GetHeader()); err != nil {
+		if err := s.ValidateRequest(request.GetHeader()); err != nil {
 			return err
 		}
 		buckets := request.GetBuckets()
@@ -661,7 +661,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			return errors.WithStack(err)
 		}
 
-		if err = s.validateRequest(request.GetHeader()); err != nil {
+		if err = s.ValidateRequest(request.GetHeader()); err != nil {
 			return err
 		}
 
@@ -1257,9 +1257,9 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 	}, nil
 }
 
-// validateRequest checks if Server is leader and clusterID is matched.
+// ValidateRequest checks if Server is leader and clusterID is matched.
 // TODO: Call it in gRPC interceptor.
-func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
+func (s *GrpcServer) ValidateRequest(header *pdpb.RequestHeader) error {
 	if s.IsClosed() || !s.member.IsLeader() {
 		return ErrNotLeader
 	}
@@ -1298,20 +1298,9 @@ func (s *GrpcServer) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	})
 }
 
-func (s *GrpcServer) invalidValue(msg string) *pdpb.ResponseHeader {
-	return s.errorHeader(&pdpb.Error{
-		Type:    pdpb.ErrorType_INVALID_VALUE,
-		Message: msg,
-	})
-}
-
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
 // and write it into all Local TSO Allocators then if it's indeed the biggest one.
 func (s *GrpcServer) SyncMaxTS(ctx context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
-		return nil, err
-	}
-
 	return tso.SyncMaxTS(ctx, s, request)
 }
 
@@ -1386,18 +1375,15 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
 func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
-	if err := s.validateInternalRequest(request.GetHeader(), false); err != nil {
-		return nil, err
-	}
 	if !s.member.IsLeader() {
 		return nil, ErrNotLeader
 	}
 	return tso.GetDCLocationInfo(ctx, s, request)
 }
 
-// validateInternalRequest checks if server is closed, which is used to validate
+// ValidateInternalRequest checks if server is closed, which is used to validate
 // the gRPC communication between PD servers internally.
-func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
+func (s *GrpcServer) ValidateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
 	if s.IsClosed() {
 		return ErrNotStarted
 	}
@@ -1688,7 +1674,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		return pdpb.NewPDClient(client).ReportMinResolvedTS(ctx, request)
 	}
 
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if err := s.ValidateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
 
@@ -1712,50 +1698,16 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 
 // SetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.IsLocalRequest(forwardedHost) {
-		client, err := s.GetDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
+	forward := func(ctx context.Context, client *grpc.ClientConn, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
 		return pdpb.NewPDClient(client).SetExternalTimestamp(ctx, request)
 	}
-
-	if err := s.validateRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-
-	timestamp := request.GetTimestamp()
-	if err := s.SetExternalTS(timestamp); err != nil {
-		return &pdpb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
-	}
-	log.Debug("set external timestamp",
-		zap.Uint64("timestamp", timestamp))
-	return &pdpb.SetExternalTimestampResponse{
-		Header: s.header(),
-	}, nil
+	return tso.SetExternalTimestamp(ctx, s, request, forward)
 }
 
 // GetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.IsLocalRequest(forwardedHost) {
-		client, err := s.GetDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
+	forward := func(ctx context.Context, client *grpc.ClientConn, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
 		return pdpb.NewPDClient(client).GetExternalTimestamp(ctx, request)
 	}
-
-	if err := s.validateRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-
-	timestamp := s.GetExternalTS()
-	return &pdpb.GetExternalTimestampResponse{
-		Header:    s.header(),
-		Timestamp: timestamp,
-	}, nil
+	return tso.GetExternalTimestamp(ctx, s, request, forward)
 }

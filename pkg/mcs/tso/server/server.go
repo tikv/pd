@@ -16,14 +16,12 @@ package server
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
-	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
@@ -32,8 +30,9 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/cluster"
 	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // If server doesn't implement all methods of bs.Server, this line will result in a clear
@@ -181,6 +180,30 @@ func (s *Server) GetDelegateClient(ctx context.Context, forwardedHost string) (*
 	return client.(*grpc.ClientConn), nil
 }
 
+// ValidateInternalRequest checks if server is closed, which is used to validate
+// the gRPC communication between TSO servers internally.
+// TODO: Check if the sender is from the global TSO allocator
+func (s *Server) ValidateInternalRequest(_ *pdpb.RequestHeader, _ bool) error {
+	if s.IsClosed() {
+		return ErrNotStarted
+	}
+	return nil
+}
+
+// ValidateRequest checks if the keyspace replica is the primary and clusterID is matched.
+// TODO: Check if the keyspace replica is the primary
+func (s *Server) ValidateRequest(header *pdpb.RequestHeader) error {
+	if s.IsClosed() {
+		return ErrNotLeader
+	}
+	if header.GetClusterId() != s.clusterID {
+		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
+	}
+	return nil
+}
+
+// Implement other methods
+
 // GetGlobalTS returns global tso.
 func (s *Server) GetGlobalTS() (uint64, error) {
 	ts, err := s.tsoAllocatorManager.GetGlobalTSO()
@@ -190,30 +213,15 @@ func (s *Server) GetGlobalTS() (uint64, error) {
 	return tsoutil.GenerateTS(ts), nil
 }
 
-// GetExternalTS returns external timestamp.
-// TODO: Implement GetExternalTS. Get extentTS from the persistent storage
+// GetExternalTS returns external timestamp from the cache or the persistent storage.
+// TODO: Implement GetExternalTS
 func (s *Server) GetExternalTS() uint64 {
 	return 0
 }
 
-// SetExternalTS returns external timestamp.
+// SetExternalTS saves external timestamp to cache and the persistent storage.
+// TODO: Implement SetExternalTS
 func (s *Server) SetExternalTS(externalTS uint64) error {
-	globalTS, err := s.GetGlobalTS()
-	if err != nil {
-		return err
-	}
-	if tsoutil.CompareTimestampUint64(externalTS, globalTS) == 1 {
-		desc := "the external timestamp should not be larger than global ts"
-		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("global ts", globalTS))
-		return errors.New(desc)
-	}
-	currentExternalTS := s.GetExternalTS()
-	if tsoutil.CompareTimestampUint64(externalTS, currentExternalTS) != 1 {
-		desc := "the external timestamp should be larger than now"
-		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("current external timestamp", currentExternalTS))
-		return errors.New(desc)
-	}
-	// TODO: persistent externalTS
 	return nil
 }
 
@@ -234,8 +242,6 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return nil
 }
-
-// Implement other methods
 
 // GetMembers returns TSO server list.
 func (s *Server) GetMembers() ([]*pdpb.Member, error) {

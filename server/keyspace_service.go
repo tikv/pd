@@ -49,7 +49,7 @@ func (s *KeyspaceServer) getErrorHeader(err error) *pdpb.ResponseHeader {
 // On Error, keyspaceMeta in response will be nil,
 // error information will be encoded in response header with corresponding error type.
 func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.LoadKeyspaceRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if err := s.ValidateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
 	rc := s.GetRaftCluster()
@@ -71,7 +71,7 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 // WatchKeyspaces captures and sends keyspace metadata changes to the client via gRPC stream.
 // Note: It sends all existing keyspaces as it's first package to the client.
 func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesRequest, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if err := s.ValidateRequest(request.GetHeader()); err != nil {
 		return err
 	}
 	rc := s.GetRaftCluster()
@@ -130,7 +130,7 @@ func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspac
 
 // UpdateKeyspaceState updates the state of keyspace specified in the request.
 func (s *KeyspaceServer) UpdateKeyspaceState(_ context.Context, request *keyspacepb.UpdateKeyspaceStateRequest) (*keyspacepb.UpdateKeyspaceStateResponse, error) {
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if err := s.ValidateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
 	rc := s.GetRaftCluster()
