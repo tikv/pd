@@ -37,9 +37,9 @@ const (
 type GroupTokenBucket struct {
 	// Settings is the setting of TokenBucket.
 	// BurstLimit is used as below:
-	//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within a unlimited capacity).
+	//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within an unlimited capacity).
 	//   - If b < 0, that means the limiter is unlimited capacity and fillrate(r) is ignored, can be seen as r == Inf (burst within a unlimited capacity).
-	//   - If b > 0, that means the limiter is limited capacity. (current not used).
+	//   - If b > 0, that means the limiter is limited capacity.
 	// MaxTokens limits the number of tokens that can be accumulated
 	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
 	GroupTokenBucketState `json:"state,omitempty"`
@@ -50,6 +50,8 @@ type GroupTokenBucketState struct {
 	Tokens      float64    `json:"tokens,omitempty"`
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
+	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
+	settingChanged bool
 }
 
 // Clone returns the copy of GroupTokenBucketState
@@ -92,6 +94,7 @@ func (t *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 	}
 	if setting := proto.Clone(tb.GetSettings()).(*rmpb.TokenLimitSettings); setting != nil {
 		t.Settings = setting
+		t.settingChanged = true
 	}
 
 	// the settings in token is delta of the last update and now.
@@ -121,6 +124,11 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 			t.LastUpdate = &now
 		}
 	}
+	// reloan when setting changed
+	if t.settingChanged && t.Tokens <= 0 {
+		t.Tokens = 0
+	}
+	t.settingChanged = false
 	if t.Settings.BurstLimit != 0 {
 		if burst := float64(t.Settings.BurstLimit); t.Tokens > burst {
 			t.Tokens = burst
@@ -159,6 +167,12 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	var targetPeriodTime = time.Duration(targetPeriodMs) * time.Millisecond
 	var trickleTime = 0.
 
+	LoanCoefficient := defaultLoanCoefficient
+	// when BurstLimit less or equal FillRate, the server does not accumulate a significant number of tokens.
+	// So we don't need to smooth the token allocation speed.
+	if t.Settings.BurstLimit > 0 && t.Settings.BurstLimit <= int64(t.Settings.FillRate) {
+		LoanCoefficient = 1
+	}
 	// When there are loan, the allotment will match the fill rate.
 	// We will have k threshold, beyond which the token allocation will be a minimum.
 	// The threshold unit is `fill rate * target period`.
@@ -173,18 +187,18 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	//               |
 	// grant_rate 0  ------------------------------------------------------------------------------------
 	//         loan      ***    k*period_token    (k+k-1)*period_token    ***      (k+k+1...+1)*period_token
-	p := make([]float64, defaultLoanCoefficient)
-	p[0] = float64(defaultLoanCoefficient) * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
-	for i := 1; i < defaultLoanCoefficient; i++ {
-		p[i] = float64(defaultLoanCoefficient-i)*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() + p[i-1]
+	p := make([]float64, LoanCoefficient)
+	p[0] = float64(LoanCoefficient) * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
+	for i := 1; i < LoanCoefficient; i++ {
+		p[i] = float64(LoanCoefficient-i)*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() + p[i-1]
 	}
-	for i := 0; i < defaultLoanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTime.Seconds(); i++ {
+	for i := 0; i < LoanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTime.Seconds(); i++ {
 		loan := -t.Tokens
 		if loan > p[i] {
 			continue
 		}
 		roundReserveTokens := p[i] - loan
-		fillRate := float64(defaultLoanCoefficient-i) * float64(t.Settings.FillRate)
+		fillRate := float64(LoanCoefficient-i) * float64(t.Settings.FillRate)
 		if roundReserveTokens > neededTokens {
 			t.Tokens -= neededTokens
 			grantedTokens += neededTokens
