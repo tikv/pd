@@ -36,8 +36,8 @@ import (
 )
 
 const (
-	// DefaultEtcdClientTimeout is the default timeout for etcd client.
-	DefaultEtcdClientTimeout = 3 * time.Second
+	// defaultEtcdClientTimeout is the default timeout for etcd client.
+	defaultEtcdClientTimeout = 3 * time.Second
 
 	// DefaultDialTimeout is the maximum amount of time a dial will wait for a
 	// connection to setup. 30s is long enough for most of the network conditions.
@@ -213,7 +213,7 @@ func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *
 	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
-		DialTimeout: DefaultEtcdClientTimeout,
+		DialTimeout: defaultEtcdClientTimeout,
 		TLS:         tlsConfig,
 		LogConfig:   &lgc,
 	})
