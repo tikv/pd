@@ -274,6 +274,13 @@ func SetApproximateSize(v int64) RegionCreateOption {
 	}
 }
 
+// SetApproximateKvSize sets the approximate size for the region.
+func SetApproximateKvSize(v int64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.approximateKvSize = v
+	}
+}
+
 // SetApproximateKeys sets the approximate keys for the region.
 func SetApproximateKeys(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {
