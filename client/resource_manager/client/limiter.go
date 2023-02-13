@@ -62,9 +62,9 @@ func Every(interval time.Duration) Limit {
 // or its associated context.Context is canceled.
 //
 // Some changes about burst(b):
-//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst within a capacity).
+//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within an unlimited capacity).
 //   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within a unlimited capacity).
-//   - If b > 0, that means the limiter is limited capacity. (current not used).
+//   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
 	mu     sync.Mutex
 	limit  Limit
@@ -97,7 +97,22 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 		burst:               b,
 		lowTokensNotifyChan: lowTokensNotifyChan,
 	}
-	log.Info("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
+	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
+	return lim
+}
+
+// NewLimiterWithCfg returns a new Limiter that allows events up to rate r and permits
+// bursts of at most b tokens.
+func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan struct{}) *Limiter {
+	lim := &Limiter{
+		limit:               Limit(cfg.NewRate),
+		last:                now,
+		tokens:              cfg.NewTokens,
+		burst:               cfg.NewBurst,
+		notifyThreshold:     cfg.NotifyThreshold,
+		lowTokensNotifyChan: lowTokensNotifyChan,
+	}
+	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim
 }
 
@@ -354,6 +369,11 @@ func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time,
 	elapsed := now.Sub(last)
 	delta := lim.limit.tokensFromDuration(elapsed)
 	tokens := lim.tokens + delta
+	if lim.burst != 0 {
+		if burst := float64(lim.burst); tokens > burst {
+			tokens = burst
+		}
+	}
 	return now, last, tokens
 }
 
