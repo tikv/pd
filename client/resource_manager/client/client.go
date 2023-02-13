@@ -60,8 +60,6 @@ type ResourceGroupsController struct {
 	groupsController sync.Map
 	config           *Config
 
-	createGroupsControllerLock sync.Mutex
-
 	loopCtx    context.Context
 	loopCancel func()
 
@@ -137,8 +135,6 @@ func (c *ResourceGroupsController) Stop() error {
 
 func (c *ResourceGroupsController) putResourceGroup(ctx context.Context, name string) (*groupCostController, error) {
 	// ref https://github.com/tikv/pd/issues/5955
-	c.createGroupsControllerLock.Lock()
-	defer c.createGroupsControllerLock.Unlock()
 	if tmp, ok := c.groupsController.Load(name); ok {
 		gc := tmp.(*groupCostController)
 		return gc, nil
@@ -147,14 +143,21 @@ func (c *ResourceGroupsController) putResourceGroup(ctx context.Context, name st
 	if err != nil {
 		return nil, err
 	}
+	if tmp, ok := c.groupsController.Load(name); ok {
+		gc := tmp.(*groupCostController)
+		return gc, nil
+	}
 	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.groupNotificationCh)
 	if err != nil {
 		return nil, err
 	}
 	// A future case: If user change mode from RU to RAW mode. How to re-init?
 	gc.initRunState()
-	c.groupsController.Store(group.GetName(), gc)
-	log.Info("create resource group cost controller", zap.String("name", group.GetName()))
+	tmp, loaded := c.groupsController.LoadOrStore(group.GetName(), gc)
+	if !loaded {
+		log.Info("create resource group cost controller", zap.String("name", group.GetName()))
+	}
+	gc = tmp.(*groupCostController)
 	return gc, nil
 }
 
