@@ -36,6 +36,9 @@ import (
 )
 
 const (
+	// defaultEtcdClientTimeout is the default timeout for etcd client.
+	defaultEtcdClientTimeout = 3 * time.Second
+
 	// DefaultDialTimeout is the maximum amount of time a dial will wait for a
 	// connection to setup. 30s is long enough for most of the network conditions.
 	DefaultDialTimeout = 30 * time.Second
@@ -201,4 +204,29 @@ func NewTestSingleConfig(t *testing.T) *embed.Config {
 	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
+}
+
+// CreateClients creates etcd v3 client and http client.
+func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
+	endpoints := []string{acUrls[0].String()}
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   endpoints,
+		DialTimeout: defaultEtcdClientTimeout,
+		TLS:         tlsConfig,
+		LogConfig:   &lgc,
+	})
+	if err != nil {
+		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   tlsConfig,
+		},
+	}
+	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
+	return client, httpClient, nil
 }
