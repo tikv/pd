@@ -40,11 +40,13 @@ const (
 	// If we want a factor of 0.5 per second, this should be:
 	//
 	//	0.5^(1 second / mainLoopUpdateInterval)
-	movingAvgFactor                 = 0.5
-	notifyFraction                  = 0.1
-	consumptionsReportingThreshold  = 100
-	extendedReportingPeriodFactor   = 4
-	defaultGroupCleanupInterval     = 1 * time.Minute
+	movingAvgFactor                = 0.5
+	notifyFraction                 = 0.1
+	consumptionsReportingThreshold = 100
+	extendedReportingPeriodFactor  = 4
+	// defaultGroupCleanupInterval is the interval to clean up the deleted resource groups in memory.
+	defaultGroupCleanupInterval = 10 * time.Minute
+	// defaultGroupStateUpdateInterval is the interval to update the state of the resource groups.
 	defaultGroupStateUpdateInterval = 1 * time.Second
 	// targetPeriod indicate how long it is expected to cost token when acquiring token.
 	defaultTargetPeriod = 10 * time.Second

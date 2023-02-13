@@ -166,7 +166,7 @@ func (c *ResourceGroupsController) Stop() error {
 }
 
 // tryGetResourceGroup will try to get the resource group controller from local cache first,
-// if the local cache misses, it will then call gRPC to fetch the resource group info.
+// if the local cache misses, it will then call gRPC to fetch the resource group info from server.
 func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name string) (*groupCostController, error) {
 	// Get from the local cache first.
 	if tmp, ok := c.groupsController.Load(name); ok {
@@ -182,12 +182,14 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 		gc := tmp.(*groupCostController)
 		return gc, nil
 	}
+	// Initialize the resource group controller.
 	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 	if err != nil {
 		return nil, err
 	}
 	// TODO: re-init the state if user change mode from RU to RAW mode.
 	gc.initRunState()
+	// Check again to prevent initializing the same resource group concurrently.
 	tmp, loaded := c.groupsController.LoadOrStore(group.GetName(), gc)
 	if !loaded {
 		log.Info("[resource group controller] create resource group cost controller", zap.String("name", group.GetName()))
