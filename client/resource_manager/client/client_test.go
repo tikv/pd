@@ -41,7 +41,8 @@ func TestGroupControlBurstable(t *testing.T) {
 	}
 	ch1 := make(chan struct{})
 	ch2 := make(chan *groupCostController)
-	gc := newGroupCostController(group, DefaultConfig(), ch1, ch2)
+	gc, err := newGroupCostController(group, DefaultConfig(), ch1, ch2)
+	re.NoError(err)
 	gc.initRunState()
 	args := tokenBucketReconfigureArgs{
 		NewRate:  1000,
