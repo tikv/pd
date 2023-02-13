@@ -33,11 +33,11 @@ const (
 	maxNotificationChanLen = 200
 )
 
-// ResourceGroupKVInterceptor is used as quato limit controller for resource group using kv store.
+// ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
 	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) error
-	// OnResponse is used to consume tokens atfer receiving response
+	// OnResponse is used to consume tokens after receiving response
 	OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error
 }
 
