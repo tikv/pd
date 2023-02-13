@@ -41,7 +41,7 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 }
 
 func BenchmarkCandidateStores(b *testing.B) {
-	cancel, _, tc, _ := newTestCluster()
+	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
 
 	for id := uint64(1); id < uint64(10000); id++ {

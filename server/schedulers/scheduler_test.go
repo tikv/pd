@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"context"
 	"testing"
 
 	"github.com/docker/go-units"
@@ -27,14 +28,30 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 )
 
+func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, *config.PersistOptions, *mockcluster.Cluster, *schedule.OperatorController) {
+	Register()
+	ctx, cancel := context.WithCancel(context.Background())
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	var stream *hbstream.HeartbeatStreams
+	if len(needToRunStream) == 0 {
+		stream = nil
+	} else {
+		stream = hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, needToRunStream[0])
+	}
+	oc := schedule.NewOperatorController(ctx, tc, stream)
+	return cancel, opt, tc, oc
+}
+
 func TestShuffleLeader(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
 	sl, err := schedule.CreateScheduler(ShuffleLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleLeaderType, []string{"", ""}))
@@ -62,7 +79,7 @@ func TestShuffleLeader(t *testing.T) {
 
 func TestRejectLeader(t *testing.T) {
 	re := require.New(t)
-	cancel, opt, tc, oc := newTestCluster()
+	cancel, opt, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	opt.SetLabelPropertyConfig(config.LabelPropertyConfig{
 		config.RejectLeader: {{Key: "noleader", Value: "true"}},
@@ -118,7 +135,7 @@ func TestRejectLeader(t *testing.T) {
 
 func TestRemoveRejectLeader(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 1)
@@ -131,7 +148,7 @@ func TestRemoveRejectLeader(t *testing.T) {
 
 func TestShuffleHotRegionScheduleBalance(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
@@ -187,7 +204,7 @@ func checkBalance(re *require.Assertions, tc *mockcluster.Cluster, hb schedule.S
 
 func TestHotRegionScheduleAbnormalReplica(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetHotRegionScheduleLimit(0)
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
@@ -212,7 +229,7 @@ func TestHotRegionScheduleAbnormalReplica(t *testing.T) {
 
 func TestShuffleRegion(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
 	sl, err := schedule.CreateScheduler(ShuffleRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
@@ -241,7 +258,7 @@ func TestShuffleRegion(t *testing.T) {
 
 func TestShuffleRegionRole(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
@@ -295,7 +312,7 @@ func TestShuffleRegionRole(t *testing.T) {
 
 func TestSpecialUseHotRegion(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
 	storage := storage.NewStorageWithMemoryBackend()
@@ -347,7 +364,7 @@ func TestSpecialUseHotRegion(t *testing.T) {
 
 func TestSpecialUseReserved(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
 	storage := storage.NewStorageWithMemoryBackend()
@@ -383,7 +400,7 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 	// Leaders:    1    0    0
 	// Region1:    L    F    F
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetEnablePlacementRules(true)
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))

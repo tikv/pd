@@ -42,7 +42,7 @@ var (
 // the tolerate define storeCount that store can elect candidate but not should balance
 // so the case  bench the worst scene
 func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (context.CancelFunc, *mockcluster.Cluster, *schedule.OperatorController) {
-	cancel, opt, tc, oc := newTestCluster()
+	cancel, opt, tc, oc := prepareSchedulersTest()
 	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(ruleEnable)
 
@@ -87,7 +87,7 @@ func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (contex
 }
 
 func newBenchBigCluster(storeNumInOneRack, regionNum int) (context.CancelFunc, *mockcluster.Cluster, *schedule.OperatorController) {
-	cancel, opt, tc, oc := newTestCluster()
+	cancel, opt, tc, oc := prepareSchedulersTest()
 	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(true)
 

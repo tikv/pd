@@ -27,7 +27,7 @@ import (
 
 func TestSplitBucket(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.AddRegionStore(10, 10)
 	hotBuckets := make(map[uint64][]*buckets.BucketStat, 10)
