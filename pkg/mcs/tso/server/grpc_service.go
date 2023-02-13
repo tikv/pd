@@ -1,0 +1,463 @@
+// Copyright 2023 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package server
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
+	"github.com/pingcap/log"
+	"github.com/pkg/errors"
+	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+const (
+	// tso
+	maxMergeTSORequests    = 10000
+	defaultTSOProxyTimeout = 3 * time.Second
+)
+
+// gRPC errors
+var (
+	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
+	// TODO: work as proxy.
+	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
+)
+
+var _ tsopb.TSOServer = (*Service)(nil)
+
+// SetUpRestHandler is a hook to sets up the REST service.
+var SetUpRestHandler = func(srv *Service) (http.Handler, apiutil.APIServiceGroup) {
+	return dummyRestService{}, apiutil.APIServiceGroup{}
+}
+
+type dummyRestService struct{}
+
+func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+	w.Write([]byte("not implemented"))
+}
+
+// Service is the TSO grpc service.
+type Service struct {
+	ctx context.Context
+	*Server
+}
+
+// NewService creates a new TSO service.
+func NewService(svr bs.Server) registry.RegistrableService {
+	server, ok := svr.(*Server)
+	if !ok {
+		log.Fatal("create tso server failed")
+	}
+	return &Service{
+		ctx:    svr.Context(),
+		Server: server,
+	}
+}
+
+// RegisterGRPCService registers the service to gRPC server.
+func (s *Service) RegisterGRPCService(g *grpc.Server) {
+	tsopb.RegisterTSOServer(g, s)
+}
+
+// RegisterRESTHandler registers the service to REST server.
+func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+	handler, group := SetUpRestHandler(s)
+	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+}
+
+// Tso returns a stream of timestamps
+func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
+	var (
+		doneCh chan struct{}
+		errCh  chan error
+	)
+	ctx, cancel := context.WithCancel(stream.Context())
+	defer cancel()
+	for {
+		// Prevent unnecessary performance overhead of the channel.
+		if errCh != nil {
+			select {
+			case err := <-errCh:
+				return errors.WithStack(err)
+			default:
+			}
+		}
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		streamCtx := stream.Context()
+		forwardedHost := grpcutil.GetForwardedHost(streamCtx)
+		if !s.IsLocalRequest(forwardedHost) {
+			if errCh == nil {
+				doneCh = make(chan struct{})
+				defer close(doneCh)
+				errCh = make(chan error)
+			}
+			s.dispatchTSORequest(ctx, &tsoRequest{
+				forwardedHost,
+				request,
+				stream,
+			}, forwardedHost, doneCh, errCh)
+			continue
+		}
+
+		start := time.Now()
+		// TSO uses leader lease to determine validity. No need to check leader here.
+		if s.IsClosed() {
+			return status.Errorf(codes.Unknown, "server not started")
+		}
+		if request.GetHeader().GetClusterId() != s.clusterID {
+			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
+		}
+		count := request.GetCount()
+		ts, err := s.tsoAllocatorManager.HandleTSORequest(request.GetDcLocation(), count)
+		if err != nil {
+			return status.Errorf(codes.Unknown, err.Error())
+		}
+		tsoHandleDuration.Observe(time.Since(start).Seconds())
+		response := &tsopb.TsoResponse{
+			Header:    s.header(),
+			Timestamp: &ts,
+			Count:     count,
+		}
+		if err := stream.Send(response); err != nil {
+			return errors.WithStack(err)
+		}
+	}
+}
+
+// GetDCLocationInfo gets the dc-location info of the given dc-location from the primary
+// keyspace group replica's TSO allocator manager.
+func (s *Service) GetDCLocationInfo(ctx context.Context,
+	request *tsopb.GetDCLocationInfoRequest) (*tsopb.GetDCLocationInfoResponse, error) {
+	// TODO: Check if the keyspace replica is the primary
+	var err error
+	if err = s.ValidateInternalRequest(request.GetHeader(), false); err != nil {
+		return nil, err
+	}
+	if !s.member.IsLeader() {
+		return nil, ErrNotLeader
+	}
+	am := s.tsoAllocatorManager
+	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
+	if !ok {
+		am.ClusterDCLocationChecker()
+		return &tsopb.GetDCLocationInfoResponse{
+			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN,
+				fmt.Sprintf("dc-location %s is not found", request.GetDcLocation())),
+		}, nil
+	}
+	resp := &tsopb.GetDCLocationInfoResponse{
+		Header: s.header(),
+		Suffix: info.Suffix,
+	}
+	// Because the number of suffix bits is changing dynamically according to the dc-location number,
+	// there is a corner case may cause the Local TSO is not unique while member changing.
+	// Example:
+	//     t1: xxxxxxxxxxxxxxx1 | 11
+	//     t2: xxxxxxxxxxxxxxx | 111
+	// So we will force the newly added Local TSO Allocator to have a Global TSO synchronization
+	// when it becomes the Local TSO Allocator leader.
+	// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
+	if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
+		return &tsopb.GetDCLocationInfoResponse{
+			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+	return resp, nil
+}
+
+// SetExternalTimestamp sets a given external timestamp to perform stale read.
+func (s *Service) SetExternalTimestamp(ctx context.Context, request *tsopb.SetExternalTimestampRequest) (*tsopb.SetExternalTimestampResponse, error) {
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
+	if !s.IsLocalRequest(forwardedHost) {
+		client, err := s.GetDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return tsopb.NewTSOClient(client).SetExternalTimestamp(ctx, request)
+	}
+
+	if err := s.ValidateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	timestamp := request.GetTimestamp()
+	if err := s.SetExternalTS(timestamp); err != nil {
+		return &tsopb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
+	}
+	log.Debug("set external timestamp",
+		zap.Uint64("timestamp", timestamp))
+	return &tsopb.SetExternalTimestampResponse{
+		Header: s.header(),
+	}, nil
+}
+
+// GetExternalTimestamp gets the saved external timstamp.
+func (s *Service) GetExternalTimestamp(ctx context.Context, request *tsopb.GetExternalTimestampRequest) (*tsopb.GetExternalTimestampResponse, error) {
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
+	if !s.IsLocalRequest(forwardedHost) {
+		client, err := s.GetDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			return nil, err
+		}
+		ctx = grpcutil.ResetForwardContext(ctx)
+		return tsopb.NewTSOClient(client).GetExternalTimestamp(ctx, request)
+	}
+
+	if err := s.ValidateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	timestamp := s.GetExternalTS()
+	return &tsopb.GetExternalTimestampResponse{
+		Header:    s.header(),
+		Timestamp: timestamp,
+	}, nil
+}
+
+func (s *Service) header() *tsopb.ResponseHeader {
+	if s.clusterID == 0 {
+		return s.wrapErrorToHeader(tsopb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+	}
+	return &tsopb.ResponseHeader{ClusterId: s.clusterID}
+}
+
+func (s *Service) wrapErrorToHeader(errorType tsopb.ErrorType, message string) *tsopb.ResponseHeader {
+	return s.errorHeader(&tsopb.Error{
+		Type:    errorType,
+		Message: message,
+	})
+}
+
+func (s *Service) errorHeader(err *tsopb.Error) *tsopb.ResponseHeader {
+	return &tsopb.ResponseHeader{
+		ClusterId: s.clusterID,
+		Error:     err,
+	}
+}
+
+func (s *Service) invalidValue(msg string) *tsopb.ResponseHeader {
+	return s.errorHeader(
+		&tsopb.Error{
+			Type:    tsopb.ErrorType_INVALID_VALUE,
+			Message: msg,
+		})
+}
+
+func (s *Service) notBootstrappedHeader() *tsopb.ResponseHeader {
+	return s.errorHeader(&tsopb.Error{
+		Type:    tsopb.ErrorType_NOT_BOOTSTRAPPED,
+		Message: "cluster is not bootstrapped",
+	})
+}
+
+type tsoRequest struct {
+	forwardedHost string
+	request       *tsopb.TsoRequest
+	stream        tsopb.TSO_TsoServer
+}
+
+func (s *Service) dispatchTSORequest(ctx context.Context, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error) {
+	tsoRequestChInterface, loaded := s.tsoDispatcher.LoadOrStore(forwardedHost, make(chan *tsoRequest, maxMergeTSORequests))
+	if !loaded {
+		tsDeadlineCh := make(chan deadline, 1)
+		go s.handleDispatcher(ctx, forwardedHost, tsoRequestChInterface.(chan *tsoRequest), tsDeadlineCh, doneCh, errCh)
+		go watchTSDeadline(ctx, tsDeadlineCh)
+	}
+	tsoRequestChInterface.(chan *tsoRequest) <- request
+}
+
+func (s *Service) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error) {
+	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
+	defer ctxCancel()
+	defer s.tsoDispatcher.Delete(forwardedHost)
+
+	var (
+		forwardStream tsopb.TSO_TsoClient
+		cancel        context.CancelFunc
+	)
+	client, err := s.GetDelegateClient(ctx, forwardedHost)
+	if err != nil {
+		goto errHandling
+	}
+	log.Info("create tso forward stream", zap.String("forwarded-host", forwardedHost))
+	forwardStream, cancel, err = s.CreateTsoForwardStream(client)
+errHandling:
+	if err != nil || forwardStream == nil {
+		log.Error("create tso forwarding stream error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCCreateStream, err))
+		select {
+		case <-dispatcherCtx.Done():
+			return
+		case _, ok := <-doneCh:
+			if !ok {
+				return
+			}
+		case errCh <- err:
+			close(errCh)
+			return
+		}
+	}
+	defer cancel()
+
+	requests := make([]*tsoRequest, maxMergeTSORequests+1)
+	for {
+		select {
+		case first := <-tsoRequestCh:
+			pendingTSOReqCount := len(tsoRequestCh) + 1
+			requests[0] = first
+			for i := 1; i < pendingTSOReqCount; i++ {
+				requests[i] = <-tsoRequestCh
+			}
+			done := make(chan struct{})
+			dl := deadline{
+				timer:  time.After(defaultTSOProxyTimeout),
+				done:   done,
+				cancel: cancel,
+			}
+			select {
+			case tsDeadlineCh <- dl:
+			case <-dispatcherCtx.Done():
+				return
+			}
+			err = s.processTSORequests(forwardStream, requests[:pendingTSOReqCount])
+			close(done)
+			if err != nil {
+				log.Error("proxy forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
+				select {
+				case <-dispatcherCtx.Done():
+					return
+				case _, ok := <-doneCh:
+					if !ok {
+						return
+					}
+				case errCh <- err:
+					close(errCh)
+					return
+				}
+			}
+		case <-dispatcherCtx.Done():
+			return
+		}
+	}
+}
+
+func (s *Service) processTSORequests(forwardStream tsopb.TSO_TsoClient, requests []*tsoRequest) error {
+	start := time.Now()
+	// Merge the requests
+	count := uint32(0)
+	for _, request := range requests {
+		count += request.request.GetCount()
+	}
+	req := &tsopb.TsoRequest{
+		Header: requests[0].request.GetHeader(),
+		Count:  count,
+		// TODO: support Local TSO proxy forwarding.
+		DcLocation: requests[0].request.GetDcLocation(),
+	}
+	// Send to the leader stream.
+	if err := forwardStream.Send(req); err != nil {
+		return err
+	}
+	resp, err := forwardStream.Recv()
+	if err != nil {
+		return err
+	}
+	tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
+	tsoProxyBatchSize.Observe(float64(count))
+	// Split the response
+	physical, logical, suffixBits := resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
+	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
+	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
+	// count is 5, then the splitting results should be 5 and 10.
+	firstLogical := addLogical(logical, -int64(count), suffixBits)
+	return s.finishTSORequest(requests, physical, firstLogical, suffixBits)
+}
+
+// Because of the suffix, we need to shift the count before we add it to the logical part.
+func addLogical(logical, count int64, suffixBits uint32) int64 {
+	return logical + count<<suffixBits
+}
+
+func (s *Service) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32) error {
+	countSum := int64(0)
+	for i := 0; i < len(requests); i++ {
+		count := requests[i].request.GetCount()
+		countSum += int64(count)
+		response := &tsopb.TsoResponse{
+			Header: s.header(),
+			Count:  count,
+			Timestamp: &pdpb.Timestamp{
+				Physical:   physical,
+				Logical:    addLogical(firstLogical, countSum, suffixBits),
+				SuffixBits: suffixBits,
+			},
+		}
+		// Send back to the client.
+		if err := requests[i].stream.Send(response); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type deadline struct {
+	timer  <-chan time.Time
+	done   chan struct{}
+	cancel context.CancelFunc
+}
+
+func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	for {
+		select {
+		case d := <-tsDeadlineCh:
+			select {
+			case <-d.timer:
+				log.Error("tso proxy request processing is canceled due to timeout", errs.ZapError(errs.ErrProxyTSOTimeout))
+				d.cancel()
+			case <-d.done:
+				continue
+			case <-ctx.Done():
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
