@@ -1812,6 +1812,7 @@ type testCluster struct {
 }
 
 func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
+	schedulers.Register()
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
 	if err := cfg.Adjust(nil, false); err != nil {

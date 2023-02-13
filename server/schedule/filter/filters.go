@@ -40,7 +40,7 @@ func SelectSourceStores(stores []*core.StoreInfo, filters []Filter, opt *config.
 					counter.inc(source, filters[i].Type(), s.GetID(), 0)
 				} else {
 					sourceID := strconv.FormatUint(s.GetID(), 10)
-					// todo: pre-allocate gauge metrics
+					// TODO: pre-allocate gauge metrics
 					filterCounter.WithLabelValues(source.String(), filters[i].Scope(), filters[i].Type().String(), sourceID, "").Inc()
 				}
 				if collector != nil {
@@ -389,6 +389,15 @@ func (f *StoreStateFilter) slowStoreEvicted(opt *config.PersistOptions, store *c
 	return statusOK
 }
 
+func (f *StoreStateFilter) slowTrendEvicted(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+	if store.IsEvictedAsSlowTrend() {
+		f.Reason = storeStateSlowTrend
+		return statusStoreRejectLeader
+	}
+	f.Reason = storeStateOK
+	return statusOK
+}
+
 func (f *StoreStateFilter) isDisconnected(_ *config.PersistOptions, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && store.IsDisconnected() {
 		f.Reason = storeStateDisconnected
@@ -490,7 +499,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, opt *config.PersistOptions
 		funcs = []conditionFunc{f.isBusy}
 	case leaderTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.pauseLeaderTransfer,
-			f.slowStoreEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
+			f.slowStoreEvicted, f.slowTrendEvicted, f.isDisconnected, f.isBusy, f.hasRejectLeaderProperty}
 	case regionTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy,
 			f.exceedAddLimit, f.tooManySnapshots, f.tooManyPendingPeers}

@@ -21,7 +21,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const replicaBaseScore = 100
@@ -30,28 +29,10 @@ const replicaBaseScore = 100
 // All peers are divided into corresponding rules according to the matching
 // rules, and the remaining Peers are placed in the OrphanPeers list.
 type RegionFit struct {
-	mu struct {
-		syncutil.RWMutex
-		cached bool
-	}
 	RuleFits     []*RuleFit     `json:"rule-fits"`
 	OrphanPeers  []*metapb.Peer `json:"orphan-peers"`
 	regionStores []*core.StoreInfo
 	rules        []*Rule
-}
-
-// SetCached indicates this RegionFit is fetch form cache
-func (f *RegionFit) SetCached(cached bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.mu.cached = cached
-}
-
-// IsCached indicates whether this result is fetched from caches
-func (f *RegionFit) IsCached() bool {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.mu.cached
 }
 
 // Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.

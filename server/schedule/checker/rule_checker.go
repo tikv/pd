@@ -20,7 +20,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -128,17 +127,6 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		log.Debug("fail to check region", zap.Uint64("region-id", region.GetID()), zap.Error(errRegionNoLeader))
 		return
 	}
-	// If the fit is fetched from cache, it seems that the region doesn't need cache
-	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() && fit.IsCached() {
-		failpoint.Inject("assertShouldNotCache", func() {
-			panic("cached shouldn't be used")
-		})
-		ruleCheckerGetCacheCounter.Inc()
-		return nil
-	}
-	failpoint.Inject("assertShouldCache", func() {
-		panic("cached should be used")
-	})
 
 	// If the fit is calculated by FitRegion, which means we get a new fit result, thus we should
 	// invalid the cache if it exists
@@ -388,7 +376,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 }
 
 func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
-	if core.IsLearner(peer) {
+	if core.IsLearner(peer) || core.IsWitness(peer) {
 		return false
 	}
 	s := c.cluster.GetStore(peer.GetStoreId())

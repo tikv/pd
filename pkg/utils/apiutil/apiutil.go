@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 var (
@@ -321,4 +323,47 @@ func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.Read
 	}
 	ErrorResp(rd, w, errCode)
 	return err
+}
+
+const (
+	// CorePath the core group, is at REST path `/pd/api/v1`.
+	CorePath = "/pd/api/v1"
+	// ExtensionsPath the named groups are REST at `/pd/apis/{GROUP_NAME}/{Version}`.
+	ExtensionsPath = "/pd/apis"
+)
+
+// APIServiceGroup used to register the HTTP REST API.
+type APIServiceGroup struct {
+	Name       string
+	Version    string
+	IsCore     bool
+	PathPrefix string
+}
+
+// Path returns the path of the service.
+func (sg *APIServiceGroup) Path() string {
+	if len(sg.PathPrefix) > 0 {
+		return sg.PathPrefix
+	}
+	if sg.IsCore {
+		return CorePath
+	}
+	if len(sg.Name) > 0 && len(sg.Version) > 0 {
+		return path.Join(ExtensionsPath, sg.Name, sg.Version)
+	}
+	return ""
+}
+
+// RegisterUserDefinedHandlers register the user defined handlers.
+func RegisterUserDefinedHandlers(registerMap map[string]http.Handler, group *APIServiceGroup, handler http.Handler) error {
+	pathPrefix := group.Path()
+	if _, ok := registerMap[pathPrefix]; ok {
+		return errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
+	}
+	if len(pathPrefix) == 0 {
+		return errs.ErrAPIInformationInvalid.FastGenByArgs(group.Name, group.Version)
+	}
+	registerMap[pathPrefix] = handler
+	log.Info("register REST path", zap.String("path", pathPrefix))
+	return nil
 }

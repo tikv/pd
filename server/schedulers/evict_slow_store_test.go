@@ -61,6 +61,7 @@ func (suite *evictSlowStoreTestSuite) SetupTest() {
 
 	suite.oc = schedule.NewOperatorController(suite.ctx, nil, nil)
 	storage := storage.NewStorageWithMemoryBackend()
+	Register()
 	var err error
 	suite.es, err = schedule.CreateScheduler(EvictSlowStoreType, suite.oc, storage, schedule.ConfigSliceDecoder(EvictSlowStoreType, []string{}))
 	suite.NoError(err)

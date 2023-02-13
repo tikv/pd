@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/autoscaling"
-	basicsvr "github.com/tikv/pd/pkg/basic_server"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/swaggerserver"
@@ -36,13 +36,8 @@ import (
 	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-	"go.uber.org/zap"
-
 	"github.com/tikv/pd/server/schedulers"
-
-	// Register Service
-	_ "github.com/tikv/pd/pkg/mcs/registry"
-	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/install"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -77,7 +72,7 @@ func main() {
 	}
 }
 
-func createServerWrapper(args []string) (context.Context, context.CancelFunc, basicsvr.Server) {
+func createServerWrapper(args []string) (context.Context, context.CancelFunc, bs.Server) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	err := cfg.Parse(args)

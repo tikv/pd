@@ -18,13 +18,14 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
 
 const swaggerPrefix = "/swagger/"
 
 var (
-	swaggerServiceGroup = server.APIServiceGroup{
+	swaggerServiceGroup = apiutil.APIServiceGroup{
 		Name:       "swagger",
 		Version:    "v1",
 		IsCore:     false,
@@ -33,7 +34,7 @@ var (
 )
 
 // NewHandler creates a HTTP handler for Swagger.
-func NewHandler(context.Context, *server.Server) (http.Handler, server.APIServiceGroup, error) {
+func NewHandler(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 	swaggerHandler := http.NewServeMux()
 	swaggerHandler.Handle(swaggerPrefix, handler())
 	return swaggerHandler, swaggerServiceGroup, nil

@@ -252,6 +252,7 @@ func (suite *balanceLeaderSchedulerTestSuite) SetupTest() {
 	suite.opt = config.NewTestOptions()
 	suite.tc = mockcluster.NewCluster(suite.ctx, suite.opt)
 	suite.oc = schedule.NewOperatorController(suite.ctx, suite.tc, nil)
+	Register()
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	suite.NoError(err)
 	suite.lb = lb
@@ -1221,7 +1222,7 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 	operators, _ := sb.Schedule(tc, false)
 	re.NotEmpty(operators)
 
-	for i := uint64(10); i < 60; i++ {
+	for i := uint64(10); i < 111; i++ {
 		tc.PutRegionStores(i, 1, 3, 4)
 	}
 	operators, _ = sb.Schedule(tc, false)

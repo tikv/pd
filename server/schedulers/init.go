@@ -165,7 +165,6 @@ func schedulersRegister() {
 		return newEvictSlowStoreScheduler(opController, conf), nil
 	})
 
-	// todo: evict slow trend store
 	// grant hot region
 	schedule.RegisterSliceDecoderBuilder(GrantHotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
@@ -455,5 +454,20 @@ func schedulersRegister() {
 
 	schedule.RegisterScheduler(TransferWitnessLeaderType, func(opController *schedule.OperatorController, _ endpoint.ConfigStorage, _ schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		return newTransferWitnessLeaderScheduler(opController), nil
+	})
+
+	// evict slow store by trend
+	schedule.RegisterSliceDecoderBuilder(EvictSlowTrendType, func(args []string) schedule.ConfigDecoder {
+		return func(v interface{}) error {
+			return nil
+		}
+	})
+
+	schedule.RegisterScheduler(EvictSlowTrendType, func(opController *schedule.OperatorController, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+		conf := &evictSlowTrendSchedulerConfig{storage: storage, EvictedStores: make([]uint64, 0), evictCandidate: 0}
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		return newEvictSlowTrendScheduler(opController, conf), nil
 	})
 }

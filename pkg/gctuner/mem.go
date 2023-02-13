@@ -12,29 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package basicsvr
+package gctuner
 
 import (
-	"context"
-	"net/http"
-
-	"go.etcd.io/etcd/clientv3"
+	"github.com/tikv/pd/pkg/memory"
 )
 
-// Server defines the common basic behaviors of a server
-type Server interface {
-	// Name returns the unique Name for this server in the cluster.
-	Name() string
-	// Context returns the context of server.
-	Context() context.Context
-
-	// Run runs the server.
-	Run() error
-	// Close closes the server.
-	Close()
-
-	// GetClient returns builtin etcd client.
-	GetClient() *clientv3.Client
-	// GetHTTPClient returns builtin etcd client.
-	GetHTTPClient() *http.Client
+func readMemoryInuse() uint64 {
+	memStats := memory.ForceReadMemStats()
+	return memStats.HeapInuse
 }

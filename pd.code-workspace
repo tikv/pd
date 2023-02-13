@@ -1,15 +1,23 @@
 {
 	"folders": [
 		{
+			"name": "pd-server",
 			"path": "."
 		},
 		{
+			"name": "pd-client",
 			"path": "client"
 		},
 		{
+			"name": "pd-client-tests",
 			"path": "tests/client"
 		},
 		{
+			"name": "mcs-tests",
+			"path": "tests/mcs"
+		},
+		{
+			"name": "pd-tso-bench",
 			"path": "tools/pd-tso-bench"
 		}
 	],

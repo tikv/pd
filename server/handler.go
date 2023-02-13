@@ -319,6 +319,11 @@ func (h *Handler) AddBalanceHotRegionScheduler() error {
 	return h.AddScheduler(schedulers.HotRegionType)
 }
 
+// AddEvictSlowTrendScheduler adds a evict-slow-trend-scheduler.
+func (h *Handler) AddEvictSlowTrendScheduler() error {
+	return h.AddScheduler(schedulers.EvictSlowTrendType)
+}
+
 // AddLabelScheduler adds a label-scheduler.
 func (h *Handler) AddLabelScheduler() error {
 	return h.AddScheduler(schedulers.LabelType)
@@ -1042,7 +1047,7 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			}
 			stat := storage.HistoryHotRegion{
 				// store in ms.
-				// todo: distinguish store heartbeat interval and region heartbeat interval
+				// TODO: distinguish store heartbeat interval and region heartbeat interval
 				// read statistic from store heartbeat, write statistic from region heartbeat
 				UpdateTime:     int64(region.GetInterval().GetEndTimestamp() * 1000),
 				RegionID:       hotPeerStat.RegionID,

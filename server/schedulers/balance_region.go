@@ -285,7 +285,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
-			// todo: pre-allocate gauge metrics
+			// TODO: pre-allocate gauge metrics
 			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
 			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
 		)
