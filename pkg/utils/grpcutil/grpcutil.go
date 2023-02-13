@@ -148,3 +148,15 @@ func ResetForwardContext(ctx context.Context) context.Context {
 	md.Set(ForwardMetadataKey, "")
 	return metadata.NewOutgoingContext(ctx, md)
 }
+
+// GetForwardedHost returns the forwarded host in metadata.
+func GetForwardedHost(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		log.Debug("failed to get forwarding metadata")
+	}
+	if t, ok := md[ForwardMetadataKey]; ok {
+		return t[0]
+	}
+	return ""
+}

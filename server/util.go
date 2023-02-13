@@ -17,10 +17,8 @@ package server
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
@@ -28,17 +26,10 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/urfave/negroni"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
-)
-
-const (
-	requestTimeout = etcdutil.DefaultRequestTimeout
 )
 
 // LogPDInfo prints the PD version information.
@@ -86,45 +77,6 @@ func CheckPDVersion(opt *config.PersistOptions) {
 			zap.String("PD-version", pdVersion.String()),
 			zap.String("cluster-version", clusterVersion.String()))
 	}
-}
-
-func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
-	ctx, cancel := context.WithTimeout(c.Ctx(), requestTimeout)
-	defer cancel()
-
-	// Generate a random cluster ID.
-	ts := uint64(time.Now().Unix())
-	clusterID := (ts << 32) + uint64(rand.Uint32())
-	value := typeutil.Uint64ToBytes(clusterID)
-
-	// Multiple PDs may try to init the cluster ID at the same time.
-	// Only one PD can commit this transaction, then other PDs can get
-	// the committed cluster ID.
-	resp, err := c.Txn(ctx).
-		If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
-		Then(clientv3.OpPut(key, string(value))).
-		Else(clientv3.OpGet(key)).
-		Commit()
-	if err != nil {
-		return 0, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-
-	// Txn commits ok, return the generated cluster ID.
-	if resp.Succeeded {
-		return clusterID, nil
-	}
-
-	// Otherwise, parse the committed cluster ID.
-	if len(resp.Responses) == 0 {
-		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-
-	response := resp.Responses[0].GetResponseRange()
-	if response == nil || len(response.Kvs) != 1 {
-		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-
-	return typeutil.BytesToUint64(response.Kvs[0].Value)
 }
 
 func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {

@@ -42,7 +42,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -74,7 +73,7 @@ func (s *GrpcServer) unaryMiddleware(ctx context.Context, header *pdpb.RequestHe
 	failpoint.Inject("customTimeout", func() {
 		time.Sleep(5 * time.Second)
 	})
-	forwardedHost := getForwardedHost(ctx)
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
@@ -167,7 +166,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		streamCtx := stream.Context()
-		forwardedHost := getForwardedHost(streamCtx)
+		forwardedHost := grpcutil.GetForwardedHost(streamCtx)
 		if !s.isLocalRequest(forwardedHost) {
 			if errCh == nil {
 				doneCh = make(chan struct{})
@@ -766,7 +765,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		forwardedHost := getForwardedHost(stream.Context())
+		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		failpoint.Inject("grpcClientClosed", func() {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
 		})
@@ -861,7 +860,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			return errors.WithStack(err)
 		}
 
-		forwardedHost := getForwardedHost(stream.Context())
+		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -1786,17 +1785,6 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 	return client.(*grpc.ClientConn), nil
 }
 
-func getForwardedHost(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		log.Debug("failed to get forwarding metadata")
-	}
-	if t, ok := md[grpcutil.ForwardMetadataKey]; ok {
-		return t[0]
-	}
-	return ""
-}
-
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
 	failpoint.Inject("useForwardRequest", func() {
 		failpoint.Return(false)
@@ -2044,7 +2032,7 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 
 // ReportMinResolvedTS implements gRPC PDServer.
 func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.ReportMinResolvedTsRequest) (*pdpb.ReportMinResolvedTsResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
@@ -2078,7 +2066,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 
 // SetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
@@ -2105,7 +2093,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 
 // GetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {

@@ -330,7 +330,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 
 func (s *Server) startServer(ctx context.Context) error {
 	var err error
-	if err = s.initClusterID(); err != nil {
+	if s.clusterID, err = etcdutil.InitClusterID(s.client, pdClusterIDPath); err != nil {
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
@@ -406,22 +406,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
-}
-
-func (s *Server) initClusterID() error {
-	// Get any cluster key to parse the cluster ID.
-	resp, err := etcdutil.EtcdKVGet(s.client, pdClusterIDPath)
-	if err != nil {
-		return err
-	}
-
-	// If no key exist, generate a random cluster ID.
-	if len(resp.Kvs) == 0 {
-		s.clusterID, err = initOrGetClusterID(s.client, pdClusterIDPath)
-		return err
-	}
-	s.clusterID, err = typeutil.BytesToUint64(resp.Kvs[0].Value)
-	return err
 }
 
 // AddCloseCallback adds a callback in the Close phase.
