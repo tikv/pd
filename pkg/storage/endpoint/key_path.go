@@ -48,10 +48,8 @@ const (
 
 	// tso storage endpoint has prefix `tso`
 
-	// MicroserviceKey is the key to indicate the microservice.
-	MicroserviceKey = "ms"
-	// TSOServiceKey is the key to indicate the TSO service.
-	TSOServiceKey = "tso"
+	// TSOMicroserviceKey is the key to indicate the TSO microservice.
+	TSOMicroserviceKey = "ms/tso"
 	// LocalTSOKey is the key to indicate the local TSO.
 	LocalTSOKey = "lts"
 	// LocalTSOAllocatorKey is the key to indicate the local TSO allocator.
@@ -234,16 +232,16 @@ func encodeKeyspaceID(spaceID uint32) string {
 // TimestampPath returns the path to the timestamp of the given keyspace group.
 func TimestampPath(keyspaceGroupName string, dcLocationKey ...string) string {
 	if len(dcLocationKey) != 0 && dcLocationKey[0] != "global" {
-		return buildPath(false, []string{MicroserviceKey, TSOServiceKey, keyspaceGroupName, LocalTSOKey, dcLocationKey[0], timestampKey}...)
+		return buildPath(false, []string{TSOMicroserviceKey, keyspaceGroupName, LocalTSOKey, dcLocationKey[0], timestampKey}...)
 	}
-	return buildPath(false, []string{MicroserviceKey, TSOServiceKey, keyspaceGroupName, GlobalTSOKey, timestampKey}...)
+	return buildPath(false, []string{TSOMicroserviceKey, keyspaceGroupName, GlobalTSOKey, timestampKey}...)
 }
 
 func timestampPrefix(keyspaceGroupName string, dcLocationKey ...string) string {
 	if len(dcLocationKey) != 0 && dcLocationKey[0] != "global" {
-		return buildPath(true, []string{MicroserviceKey, TSOServiceKey, keyspaceGroupName, LocalTSOKey, dcLocationKey[0]}...)
+		return buildPath(true, []string{TSOMicroserviceKey, keyspaceGroupName, LocalTSOKey, dcLocationKey[0]}...)
 	}
-	return buildPath(true, []string{MicroserviceKey, TSOServiceKey, keyspaceGroupName}...)
+	return buildPath(true, []string{TSOMicroserviceKey, keyspaceGroupName}...)
 }
 
 func buildPath(withSuffix bool, str ...string) string {

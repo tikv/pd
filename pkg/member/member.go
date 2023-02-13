@@ -303,7 +303,7 @@ func (m *Member) getMemberLeaderPriorityPath(id uint64) string {
 
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 func (m *Member) GetDCLocationPathPrefix() string {
-	return path.Join(m.rootPath, endpoint.MicroserviceKey, endpoint.TSOServiceKey, "default", dcLocationConfigEtcdPrefix)
+	return path.Join(m.rootPath, endpoint.TSOMicroserviceKey, "default", dcLocationConfigEtcdPrefix)
 }
 
 // GetDCLocationPath returns the dc-location path of a member with the given member ID.

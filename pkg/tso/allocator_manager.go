@@ -360,13 +360,13 @@ func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
 // Add a prefix to the root path to prevent being conflicted
 // with other system key paths such as leader, member, alloc_id, raft, etc.
 func (am *AllocatorManager) getGlobalTSOAllocatorPath() string {
-	return path.Join(am.rootPath, endpoint.MicroserviceKey, endpoint.TSOServiceKey, defaultKeyspaceGroup, endpoint.GlobalTSOKey)
+	return path.Join(am.rootPath, endpoint.TSOMicroserviceKey, defaultKeyspaceGroup, endpoint.GlobalTSOKey)
 }
 
 // Add a prefix to the root path to prevent being conflicted
 // with other system key paths such as leader, member, alloc_id, raft, etc.
 func (am *AllocatorManager) getLocalTSOAllocatorPath() string {
-	return path.Join(am.rootPath, endpoint.MicroserviceKey, endpoint.TSOServiceKey, defaultKeyspaceGroup, endpoint.LocalTSOKey)
+	return path.Join(am.rootPath, endpoint.TSOMicroserviceKey, defaultKeyspaceGroup, endpoint.LocalTSOKey)
 }
 
 // similar logic with leaderLoop in server/server.go
@@ -812,7 +812,7 @@ func (am *AllocatorManager) getMaxLocalTSOSuffix() (int32, error) {
 
 // GetLocalTSOSuffixPathPrefix returns the etcd key prefix of the Local TSO suffix for the given dc-location.
 func (am *AllocatorManager) GetLocalTSOSuffixPathPrefix() string {
-	return path.Join(am.rootPath, endpoint.MicroserviceKey, endpoint.TSOServiceKey, defaultKeyspaceGroup, endpoint.LocalTSOAllocatorKey)
+	return path.Join(am.rootPath, endpoint.TSOMicroserviceKey, defaultKeyspaceGroup, endpoint.LocalTSOAllocatorKey)
 }
 
 // GetLocalTSOSuffixPath returns the etcd key of the Local TSO suffix for the given dc-location.
