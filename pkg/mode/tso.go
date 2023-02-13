@@ -16,9 +16,12 @@ package server
 
 import (
 	"context"
+	"math/rand"
+	"net/http"
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/sysutil"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
@@ -30,7 +33,12 @@ import (
 
 // TSOStart starts the TSO server.
 func TSOStart(ctx context.Context, cfg *config.Config) bs.Server {
-	// start client
+	log.Info("TSO Config", zap.Reflect("config", cfg))
+	rand.Seed(time.Now().UnixNano())
+
+	// TODO: Create Autdit Backend
+
+	// Start etcd client
 	etcdTimeout := time.Second * 3
 	tlsConfig, err := cfg.Security.ToTLSConfig()
 	if err != nil {
@@ -56,10 +64,19 @@ func TSOStart(ctx context.Context, cfg *config.Config) bs.Server {
 		return nil
 	}
 
-	// start server
-	svr := tsosvr.NewServer(ctx, client)
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   tlsConfig,
+		},
+	}
+
+	// Create the TSO server
+	// TODO: handle RESTful API ResetTS() and TransferLocalTSOAllocator()
+	// TODO: register Diagnostics service
+	s := tsosvr.NewServer(ctx, client, httpClient, sysutil.NewDiagnosticsServer(cfg.Log.File.Filename))
 	gs := grpc.NewServer()
 	registry.ServerServiceRegistry.RegisterService("TSO", tsosvr.NewService)
-	registry.ServerServiceRegistry.InstallAllGRPCServices(svr, gs)
-	return svr
+	registry.ServerServiceRegistry.InstallAllGRPCServices(s, gs) 
+	return s
 }

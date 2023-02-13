@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"testing"
@@ -28,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/etcdserver"
@@ -182,6 +184,58 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 		return nil, err
 	}
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
+}
+
+func InitClusterID(c *clientv3.Client, key string) (clusterID uint64, err error) {
+	// Get any cluster key to parse the cluster ID.
+	resp, err := EtcdKVGet(c, key)
+	if err != nil {
+		return 0, err
+	}
+	// If no key exist, generate a random cluster ID.
+	if len(resp.Kvs) == 0 {
+		return InitOrGetClusterID(c, key)
+	}
+	return typeutil.BytesToUint64(resp.Kvs[0].Value)
+}
+
+func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
+	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
+	defer cancel()
+
+	// Generate a random cluster ID.
+	ts := uint64(time.Now().Unix())
+	clusterID := (ts << 32) + uint64(rand.Uint32())
+	value := typeutil.Uint64ToBytes(clusterID)
+
+	// Multiple PDs may try to init the cluster ID at the same time.
+	// Only one PD can commit this transaction, then other PDs can get
+	// the committed cluster ID.
+	resp, err := c.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
+		Then(clientv3.OpPut(key, string(value))).
+		Else(clientv3.OpGet(key)).
+		Commit()
+	if err != nil {
+		return 0, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+	}
+
+	// Txn commits ok, return the generated cluster ID.
+	if resp.Succeeded {
+		return clusterID, nil
+	}
+
+	// Otherwise, parse the committed cluster ID.
+	if len(resp.Responses) == 0 {
+		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+
+	response := resp.Responses[0].GetResponseRange()
+	if response == nil || len(response.Kvs) != 1 {
+		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+
+	return typeutil.BytesToUint64(response.Kvs[0].Value)
 }
 
 // NewTestSingleConfig is used to create a etcd config for the unit test purpose.

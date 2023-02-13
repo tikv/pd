@@ -16,23 +16,41 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"path"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
+	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+const (
+	serverMetricsInterval = time.Minute
+	// tsoRootPath for all tso servers.
+	tsoRootPath      = "/tso"
+	tsoAPIPrefix     = "/tso/"
+	tsoClusterIDPath = "/tso/cluster_id"
 )
 
 // If server doesn't implement all methods of bs.Server, this line will result in a clear
@@ -42,10 +60,19 @@ var _ tso.GrpcServer = (*Server)(nil)
 
 // Server is the TSO server, and it implements bs.Server and tso.GrpcServer.
 type Server struct {
-	ctx                 context.Context
-	name                string
-	clusterID           uint64
-	client              *clientv3.Client
+	diagnosticspb.DiagnosticsServer
+
+	// Server start timestamp
+	startTimestamp int64
+
+	ctx       context.Context
+	name      string
+	clusterID uint64
+	rootPath  string
+	// etcd client
+	client *clientv3.Client
+	// http client
+	httpClient          *http.Client
 	member              *member.Member
 	tsoAllocatorManager *tso.AllocatorManager
 	// Store as map[string]*grpc.ClientConn
@@ -60,11 +87,16 @@ type Server struct {
 }
 
 // NewServer creates a new TSO server.
-func NewServer(ctx context.Context, client *clientv3.Client) *Server {
+func NewServer(ctx context.Context, client *clientv3.Client, httpClient *http.Client,
+	dxs diagnosticspb.DiagnosticsServer) *Server {
 	return &Server{
-		ctx:    ctx,
-		name:   "TSO",
-		client: client,
+		DiagnosticsServer: dxs,
+		startTimestamp:    time.Now().Unix(),
+		ctx:               ctx,
+		name:              "TSO",
+		client:            client,
+		httpClient:        httpClient,
+		member:            &member.Member{},
 	}
 }
 
@@ -80,8 +112,21 @@ func (s *Server) Context() context.Context {
 	return s.ctx
 }
 
-// Run runs the pd server.
+// Run runs the TSO server.
 func (s *Server) Run() error {
+	go systimemon.StartMonitor(s.ctx, time.Now, func() {
+		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
+		timeJumpBackCounter.Inc()
+	})
+
+	// TODO: Start gPRC server
+
+	if err := s.startServer(s.ctx); err != nil {
+		return err
+	}
+
+	s.startServerLoop(s.ctx)
+
 	return nil
 }
 
@@ -96,7 +141,7 @@ func (s *Server) GetClient() *clientv3.Client {
 
 // GetHTTPClient returns builtin http client.
 func (s *Server) GetHTTPClient() *http.Client {
-	return nil
+	return s.httpClient
 }
 
 // AddStartCallback adds a callback in the startServer phase.
@@ -250,4 +295,70 @@ func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 	}
 	members, err := cluster.GetMembers(s.GetClient())
 	return members, err
+}
+
+func (s *Server) startServer(ctx context.Context) error {
+	var err error
+	if s.clusterID, err = etcdutil.InitClusterID(s.client, tsoClusterIDPath); err != nil {
+		return err
+	}
+	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
+	// It may lose accuracy if use float64 to store uint64. So we store the
+	// cluster id in label.
+	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
+	// The independent TSO service still reuses PD version info since PD and TSO are just
+	// different service modes provided by the same pd-server binary
+	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+
+	s.rootPath = path.Join(tsoRootPath, strconv.FormatUint(s.clusterID, 10))
+
+	/*
+	s.member.MemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
+	s.member.SetMemberDeployPath(s.member.ID())
+	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
+	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
+
+	s.tsoAllocatorManager = tso.NewAllocatorManager(
+		s.member, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
+	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
+	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
+	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
+	if !s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
+			return err
+		}
+	}
+	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
+			return err
+		}
+	}
+	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
+	if err != nil {
+		return err
+	}
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
+	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
+	s.basicCluster = core.NewBasicCluster()
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
+		Client:    s.client,
+		RootPath:  s.rootPath,
+		AllocPath: endpoint.KeyspaceIDAlloc(),
+		Label:     keyspace.AllocLabel,
+		Member:    s.member.MemberValue(),
+		Step:      keyspace.AllocStep,
+	})
+	// Run callbacks
+	log.Info("triggering the start callback functions")
+	for _, cb := range s.startCallbacks {
+		cb()
+	}
+
+	// Server has started.
+	atomic.StoreInt64(&s.isServing, 1)
+	*/
+	return nil
 }
