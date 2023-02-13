@@ -168,11 +168,12 @@ func (c *ResourceGroupsController) updateAllResourceGroups(ctx context.Context) 
 	}
 	latestGroups := make(map[string]struct{})
 	for _, group := range groups {
-		log.Info("create resource group cost controller", zap.String("name", group.GetName()))
 		gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.groupNotificationCh)
 		if err != nil {
+			log.Warn("failed to create resource group cost controller", zap.Error(errors.Errorf("[resource group controller] %s is not existed or miss necessary configuration.", group.GetName())))
 			continue
 		}
+		log.Info("create resource group cost controller", zap.String("name", group.GetName()))
 		c.groupsController.Store(group.GetName(), gc)
 		latestGroups[group.GetName()] = struct{}{}
 	}
