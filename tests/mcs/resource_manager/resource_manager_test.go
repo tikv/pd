@@ -234,6 +234,7 @@ func (ti *testRequestInfo) WriteBytes() uint64 {
 type testResponseInfo struct {
 	cpuMs     uint64
 	readBytes uint64
+	succeed   bool
 }
 
 func (tri *testResponseInfo) ReadBytes() uint64 {
@@ -242,6 +243,10 @@ func (tri *testResponseInfo) ReadBytes() uint64 {
 
 func (tri *testResponseInfo) KVCPUMs() uint64 {
 	return tri.cpuMs
+}
+
+func (tri *testResponseInfo) Succeed() bool {
+	return tri.succeed
 }
 
 type tokenConsumptionPerSecond struct {
@@ -276,6 +281,7 @@ func (t tokenConsumptionPerSecond) makeWriteResponse() *testResponseInfo {
 	return &testResponseInfo{
 		readBytes: 0,
 		cpuMs:     0,
+		succeed:   true,
 	}
 }
 

@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -64,8 +65,6 @@ type ResourceGroupsController struct {
 
 	calculators []ResourceCalculator
 
-	// When a signal is received, the controller will try to update the resource group states.
-	groupUpdateChan chan struct{}
 	// When a signal is received, it means the number of available token is low.
 	lowTokenNotifyChan chan struct{}
 	// When a token bucket response received from server, it will be sent to the channel.
@@ -87,10 +86,6 @@ type ResourceGroupsController struct {
 		//
 		// Note: requestNeedsRetry and requestInProgress are never true at the same time.
 		requestNeedsRetry bool
-
-		// targetPeriod indicate how long it is expected to cost token when acquiring token.
-		// last update.
-		targetPeriod time.Duration
 	}
 }
 
@@ -106,7 +101,6 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
 		config:                config,
-		groupUpdateChan:       make(chan struct{}, 1),
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
@@ -148,12 +142,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					c.run.requestNeedsRetry = false
 					c.collectTokenBucketRequests(c.loopCtx, "report", false /* select all */)
 				}
-			case <-c.groupUpdateChan:
-				c.updateRunState(c.loopCtx)
-				c.updateAvgRequestResourcePerSec()
-				if !c.run.requestInProgress {
-					c.collectTokenBucketRequests(c.loopCtx, "update", false /* select all */)
-				}
 			case <-c.lowTokenNotifyChan:
 				c.updateRunState(c.loopCtx)
 				c.updateAvgRequestResourcePerSec()
@@ -189,13 +177,22 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	if err != nil {
 		return nil, err
 	}
-	log.Info("[resource group controller] create resource group controller", zap.String("name", group.GetName()))
-	gc := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
-	// A future case: If user change mode from RU to RAW mode. How to re-init?
+	// Check again to prevent initializing the same resource group concurrently.
+	if tmp, ok := c.groupsController.Load(name); ok {
+		gc := tmp.(*groupCostController)
+		return gc, nil
+	}
+	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: re-init the state if user change mode from RU to RAW mode.
 	gc.initRunState()
-	c.groupsController.Store(group.GetName(), gc)
-	c.groupUpdateChan <- struct{}{}
-	return gc, nil
+	tmp, loaded := c.groupsController.LoadOrStore(group.GetName(), gc)
+	if !loaded {
+		log.Info("[resource group controller] create resource group cost controller", zap.String("name", group.GetName()))
+	}
+	return tmp.(*groupCostController), nil
 }
 
 func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) error {
@@ -207,7 +204,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 	for _, group := range groups {
 		latestGroups[group.GetName()] = struct{}{}
 	}
-	// TODO: maybe we can also clean up those resource groups that have not been used for a long time.
+	// TODO: maybe we should also clean up those resource groups that have not been used for a long time.
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		if _, ok := latestGroups[resourceGroupName]; !ok {
@@ -222,7 +219,6 @@ func (c *ResourceGroupsController) initRunState() {
 	now := time.Now()
 	c.run.now = now
 	c.run.lastRequestTime = now
-	c.run.targetPeriod = defaultTargetPeriod
 }
 
 func (c *ResourceGroupsController) updateRunState(ctx context.Context) {
@@ -239,8 +235,8 @@ func (c *ResourceGroupsController) shouldReportConsumption() bool {
 		return false
 	}
 	timeSinceLastRequest := c.run.now.Sub(c.run.lastRequestTime)
-	if timeSinceLastRequest >= c.run.targetPeriod {
-		if timeSinceLastRequest >= extendedReportingPeriodFactor*c.run.targetPeriod {
+	if timeSinceLastRequest >= defaultTargetPeriod {
+		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
 		}
 		ret := false
@@ -405,9 +401,18 @@ type tokenCounter struct {
 func newGroupCostController(
 	group *rmpb.ResourceGroup,
 	mainCfg *Config,
-	lowRUNotifyChan chan<- struct{},
-	tokenBucketUpdateChan chan<- *groupCostController,
-) *groupCostController {
+	lowRUNotifyChan chan struct{},
+	tokenBucketUpdateChan chan *groupCostController,
+) (*groupCostController, error) {
+	switch group.Mode {
+	case rmpb.GroupMode_RUMode:
+		if group.RUSettings.RU == nil || group.RUSettings.RU.Settings == nil {
+			return nil, errors.Errorf("the resource group is not configured")
+		}
+	default:
+		return nil, errors.New("not supports the resource type")
+	}
+
 	gc := &groupCostController{
 		ResourceGroup: group,
 		mainCfg:       mainCfg,
@@ -429,7 +434,7 @@ func newGroupCostController(
 	}
 
 	gc.mu.consumption = &rmpb.Consumption{}
-	return gc
+	return gc, nil
 }
 
 func (gc *groupCostController) initRunState() {
@@ -438,13 +443,30 @@ func (gc *groupCostController) initRunState() {
 	gc.run.targetPeriod = defaultTargetPeriod
 	gc.run.consumption = &rmpb.Consumption{}
 	gc.run.lastRequestConsumption = &rmpb.Consumption{}
+
+	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
+		cfg := tokenBucketReconfigureArgs{
+			NewTokens: initialRequestUnits,
+			NewBurst:  tb.Settings.BurstLimit,
+			// This is to trigger token requests as soon as resource group start consuming tokens.
+			NotifyThreshold: math.Max(initialRequestUnits-float64(tb.Settings.FillRate)*0.2, 1),
+		}
+		if cfg.NewBurst >= 0 {
+			cfg.NewBurst = 0
+		}
+		return cfg
+	}
+
 	switch gc.mode {
 	case rmpb.GroupMode_RUMode:
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitLimitTypeList {
+			tb := getRUTokenBucketSetting(gc.ResourceGroup, typ)
+			cfg := cfgFunc(tb)
+			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
 			counter := &tokenCounter{
-				limiter:     NewLimiter(now, 0, 0, initialRequestUnits, gc.lowRUNotifyChan),
-				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
+				limiter:     limiter,
+				avgRUPerSec: 0,
 				avgLastTime: now,
 			}
 			gc.run.requestUnitTokens[typ] = counter
@@ -452,9 +474,12 @@ func (gc *groupCostController) initRunState() {
 	case rmpb.GroupMode_RawMode:
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceLimitTypeList {
+			tb := getRawResourceTokenBucketSetting(gc.ResourceGroup, typ)
+			cfg := cfgFunc(tb)
+			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
 			counter := &tokenCounter{
-				limiter:     NewLimiter(now, 0, 0, initialRequestUnits, gc.lowRUNotifyChan),
-				avgRUPerSec: initialRequestUnits / gc.run.targetPeriod.Seconds() * 2,
+				limiter:     limiter,
+				avgRUPerSec: 0,
 				avgLastTime: now,
 			}
 			gc.run.resourceTokens[typ] = counter
@@ -674,6 +699,10 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		cfg.NewRate = float64(bucket.GetSettings().FillRate)
 		cfg.NotifyThreshold = notifyThreshold
 		counter.lastDeadline = time.Time{}
+		// In the non-trickle case, clients can be allowed to accumulate more tokens.
+		if cfg.NewBurst >= 0 {
+			cfg.NewBurst = 0
+		}
 	} else {
 		// Otherwise the granted token is delivered to the client by fill rate.
 		cfg.NewTokens = 0

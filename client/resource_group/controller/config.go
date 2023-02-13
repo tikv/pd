@@ -46,7 +46,8 @@ const (
 	extendedReportingPeriodFactor   = 4
 	defaultGroupCleanupInterval     = 1 * time.Minute
 	defaultGroupStateUpdateInterval = 1 * time.Second
-	defaultTargetPeriod             = 10 * time.Second
+	// targetPeriod indicate how long it is expected to cost token when acquiring token.
+	defaultTargetPeriod = 10 * time.Second
 )
 
 const (

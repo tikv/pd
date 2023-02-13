@@ -37,6 +37,9 @@ type RequestInfo interface {
 type ResponseInfo interface {
 	ReadBytes() uint64
 	KVCPUMs() uint64
+	// Succeed is used to tell whether the request is successfully returned.
+	// If not, we need to pay back the WRU cost of the request.
+	Succeed() bool
 }
 
 // ResourceCalculator is used to calculate the resource consumption of a request.
@@ -72,9 +75,7 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 	if req.IsWrite() {
 		consumption.KvWriteRpcCount += 1
 		// Write bytes are knowable in advance, so we can calculate the WRU cost here.
-		writeBytes := float64(req.WriteBytes())
-		consumption.WriteBytes += writeBytes
-		consumption.WRU += float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
+		kc.calculateWriteCost(consumption, req)
 	} else {
 		consumption.KvReadRpcCount += 1
 		// Read bytes could not be known before the request is executed,
@@ -83,18 +84,42 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 	}
 }
 
+func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
+	writeBytes := float64(req.WriteBytes())
+	consumption.WriteBytes += writeBytes
+	consumption.WRU += float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
+}
+
 // AfterKVRequest ...
 func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
-	// For now, we can only collect the KV CPU cost for a read request.
 	if !req.IsWrite() {
-		kvCPUMs := float64(res.KVCPUMs())
-		consumption.TotalCpuTimeMs += kvCPUMs
-		consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
+		// For now, we can only collect the KV CPU cost for a read request.
+		kc.calculateCPUCost(consumption, res)
+	} else if !res.Succeed() {
+		// If the write request is not successfully returned, we need to pay back the WRU cost.
+		kc.payBackWriteCost(consumption, req)
 	}
 	// A write request may also read data, which should be counted into the RRU cost.
+	// This part should be counted even if the request does not succeed.
+	kc.calculateReadCost(consumption, res)
+}
+
+func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res ResponseInfo) {
 	readBytes := float64(res.ReadBytes())
 	consumption.ReadBytes += readBytes
 	consumption.RRU += float64(kc.ReadBytesCost) * readBytes
+}
+
+func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res ResponseInfo) {
+	kvCPUMs := float64(res.KVCPUMs())
+	consumption.TotalCpuTimeMs += kvCPUMs
+	consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
+}
+
+func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
+	writeBytes := float64(req.WriteBytes())
+	consumption.WriteBytes -= writeBytes
+	consumption.WRU -= float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
 }
 
 // SQLCalculator is used to calculate the SQL-side consumption.
@@ -128,6 +153,13 @@ func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitTyp
 	return 0
 }
 
+func getRUTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RequestUnitType) *rmpb.TokenBucket {
+	if typ == 0 {
+		return group.RUSettings.RU
+	}
+	return nil
+}
+
 func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
 	switch typ {
 	case 0:
@@ -138,6 +170,18 @@ func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawRe
 		return custom.WriteBytes
 	}
 	return 0
+}
+
+func getRawResourceTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RawResourceType) *rmpb.TokenBucket {
+	switch typ {
+	case 0:
+		return group.RawResourceSettings.Cpu
+	case 1:
+		return group.RawResourceSettings.IoRead
+	case 2:
+		return group.RawResourceSettings.IoWrite
+	}
+	return nil
 }
 
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
