@@ -267,7 +267,7 @@ const (
 )
 
 var (
-	defaultEnableTelemetry = true
+	defaultEnableTelemetry = false
 	defaultRuntimeServices = []string{}
 	defaultLocationLabels  = []string{}
 	// DefaultStoreLimit is the default store limit of add peer and remove peer.
@@ -406,10 +406,6 @@ func (c *Config) Parse(arguments []string) error {
 		}
 		if meta.IsDefined("schedule", "disable-raft-learner") {
 			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", c.configFile)
-			c.WarningMsgs = append(c.WarningMsgs, msg)
-		}
-		if meta.IsDefined("dashboard", "disable-telemetry") {
-			msg := fmt.Sprintf("disable-telemetry in %s is deprecated, use enable-telemetry instead", c.configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
@@ -1329,8 +1325,6 @@ type DashboardConfig struct {
 	InternalProxy      bool   `toml:"internal-proxy" json:"internal-proxy"`
 	EnableTelemetry    bool   `toml:"enable-telemetry" json:"enable-telemetry"`
 	EnableExperimental bool   `toml:"enable-experimental" json:"enable-experimental"`
-	// WARN: DisableTelemetry is deprecated.
-	DisableTelemetry bool `toml:"disable-telemetry" json:"disable-telemetry,omitempty"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
@@ -1354,7 +1348,6 @@ func (c *DashboardConfig) adjust(meta *configMetaData) {
 	if !meta.IsDefined("enable-telemetry") {
 		c.EnableTelemetry = defaultEnableTelemetry
 	}
-	c.EnableTelemetry = c.EnableTelemetry && !c.DisableTelemetry
 }
 
 // ReplicationModeConfig is the configuration for the replication policy.
