@@ -40,6 +40,9 @@ type Config struct {
 
 	configFile string
 
+	BackendEndpoints string `toml:"backend-endpoint" json:"backend-endpoint"`
+	ListenAddr       string `toml:"listen-addr" json:"listen-addr"`
+
 	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
 	// which allows the PD server to generate Local TSO for certain DC-level transactions.
 	// To make this feature meaningful, user has to set the "zone" label for the PD server
@@ -73,10 +76,12 @@ type Config struct {
 // NewConfig creates a new config.
 func NewConfig() *Config {
 	cfg := &Config{}
-	cfg.flagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
+	cfg.flagSet = flag.NewFlagSet("tso", flag.ContinueOnError)
 	fs := cfg.flagSet
 
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
+	fs.StringVar(&cfg.BackendEndpoints, "backend-points", "", "backend endpoints")
+	fs.StringVar(&cfg.ListenAddr, "listen-addr", "", "listen address")
 
 	return cfg
 }
