@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -46,7 +45,6 @@ import (
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // Config is the pd server configuration.
@@ -160,8 +158,8 @@ type Config struct {
 	HeartbeatStreamBindInterval typeutil.Duration
 	LeaderPriorityCheckInterval typeutil.Duration
 
-	logger   *zap.Logger
-	logProps *log.ZapProperties
+	Logger   *zap.Logger        `json:"-"`
+	LogProps *log.ZapProperties `json:"-"`
 
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
@@ -1301,28 +1299,6 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
-// SetupLogger setup the logger.
-func (c *Config) SetupLogger() error {
-	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
-	if err != nil {
-		return errs.ErrInitLogger.Wrap(err).FastGenWithCause()
-	}
-	c.logger = lg
-	c.logProps = p
-	logutil.SetRedactLog(c.Security.RedactInfoLog)
-	return nil
-}
-
-// GetZapLogger gets the created zap logger.
-func (c *Config) GetZapLogger() *zap.Logger {
-	return c.logger
-}
-
-// GetZapLogProperties gets properties of the zap logger.
-func (c *Config) GetZapLogProperties() *log.ZapProperties {
-	return c.logProps
-}
-
 // GetConfigFile gets the config file.
 func (c *Config) GetConfigFile() string {
 	return c.configFile
@@ -1382,7 +1358,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
 	cfg.PeerTLSInfo.AllowedCN = allowedCN
 	cfg.ForceNewCluster = c.ForceNewCluster
-	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
+	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.Logger, c.Logger.Core(), c.LogProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
 	cfg.EnableV2 = true
 	cfg.Logger = "zap"

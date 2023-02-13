@@ -28,6 +28,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
+	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -40,8 +41,27 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	serviceMode    = "service"
+	tsoServiceMode = "tso-service"
+)
+
 func main() {
-	ctx, cancel, svr := createServerWrapper(os.Args[1:])
+	var (
+		ctx    context.Context
+		cancel context.CancelFunc
+		svr    bs.Server
+	)
+	if len(os.Args) >= 3 && os.Args[1] == serviceMode {
+		switch os.Args[2] {
+		case tsoServiceMode:
+			ctx, cancel, svr = tso.CreateServerWrapper(os.Args[3:])
+		default:
+			log.Fatal("service are not implemented")
+		}
+	} else {
+		ctx, cancel, svr = createServerWrapper(os.Args[1:])
+	}
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
@@ -98,9 +118,9 @@ func createServerWrapper(args []string) (context.Context, context.CancelFunc, bs
 	}
 
 	// New zap logger
-	err = cfg.SetupLogger()
+	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
-		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
 		log.Fatal("initialize logger error", errs.ZapError(err))
 	}

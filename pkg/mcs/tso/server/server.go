@@ -71,10 +71,11 @@ func (s *Server) GetHTTPClient() *http.Client {
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, bs.Server) {
 	cfg := tso.NewConfig()
-	err := cfg.Parse(os.Args[1:])
+	err := cfg.Parse(args)
 
 	if cfg.Version {
-		printVersionInfo()
+		// TODO: support printing TSO server info
+		// server.PrintTSOInfo()
 		exit(0)
 	}
 
@@ -88,12 +89,18 @@ func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, bs
 		log.Fatal("parse cmd flags error", errs.ZapError(err))
 	}
 
-	if cfg.ConfigCheck {
-		printConfigCheckMsg(cfg)
-		exit(0)
+	// New zap logger
+	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	if err == nil {
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+	} else {
+		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
+	// Flushing any buffered log entries
+	defer log.Sync()
 
-	// TODO: Initialize logger
+	// TODO: support printing TSO server info
+	// LogTSOInfo()
 
 	// TODO: Make it configurable if it has big impact on performance.
 	grpcprometheus.EnableHandlingTimeHistogram()
@@ -101,16 +108,7 @@ func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, bs
 	metricutil.Push(&cfg.Metric)
 
 	// TODO: Create the server
-
 	return nil, nil, nil
-}
-
-// TODO: implement it
-func printVersionInfo() {
-}
-
-// TODO: implement it
-func printConfigCheckMsg(cfg *tso.Config) {
 }
 
 func exit(code int) {

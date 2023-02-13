@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -84,10 +85,10 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
-			err := cfg.SetupLogger()
+			err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 			re.NoError(err)
 			zapLogOnce.Do(func() {
-				log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+				log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 			})
 			for _, opt := range opts {
 				opt(cfg)

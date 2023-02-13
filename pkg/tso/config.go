@@ -19,8 +19,12 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/encryption"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"go.uber.org/zap"
 )
 
 const (
@@ -34,8 +38,7 @@ type Config struct {
 
 	Version bool `json:"-"`
 
-	ConfigCheck bool `json:"-"`
-	configFile  string
+	configFile string
 
 	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
 	// which allows the PD server to generate Local TSO for certain DC-level transactions.
@@ -57,6 +60,14 @@ type Config struct {
 	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
+
+	// Log related config.
+	Log log.Config `toml:"log" json:"log"`
+
+	Logger   *zap.Logger
+	LogProps *log.ZapProperties
+
+	Security SecurityConfig `toml:"security" json:"security"`
 }
 
 // NewConfig creates a new config.
@@ -81,4 +92,12 @@ func (c *Config) Parse(arguments []string) error {
 	// TODO: Implement the main function body
 
 	return nil
+}
+
+// SecurityConfig indicates the security configuration for pd server
+type SecurityConfig struct {
+	grpcutil.TLSConfig
+	// RedactInfoLog indicates that whether enabling redact log
+	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
+	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
 }
