@@ -134,7 +134,8 @@ func (c *ResourceGroupsController) Stop() error {
 }
 
 func (c *ResourceGroupsController) putResourceGroup(ctx context.Context, name string) (*groupCostController, error) {
-	// ref https://github.com/tikv/pd/issues/5955
+	// ref https://github.com/tikv/pd/issues/5955, if we don't introduce a lock, we need check the groupsController as much as possible to avoid
+	// getting or creating resource group. We check it in L139, L147 and L157.
 	if tmp, ok := c.groupsController.Load(name); ok {
 		gc := tmp.(*groupCostController)
 		return gc, nil
