@@ -207,6 +207,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 	for _, group := range groups {
 		latestGroups[group.GetName()] = struct{}{}
 	}
+	// TODO: maybe we can also clean up those resource groups that have not been used for a long time.
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		if _, ok := latestGroups[resourceGroupName]; !ok {
