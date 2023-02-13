@@ -45,7 +45,7 @@ type testBalanceSpeedCase struct {
 }
 
 func TestInfluenceAmp(t *testing.T) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	re := require.New(t)
 
@@ -135,7 +135,7 @@ func TestShouldBalance(t *testing.T) {
 		{80, 70, 5 * R, true, core.ByCount},
 	}
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetTolerantSizeRatio(2.5)
 	tc.SetRegionScoreFormulaVersion("v1")
@@ -174,7 +174,7 @@ func TestShouldBalance(t *testing.T) {
 
 func TestTolerantRatio(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, _ := newTestCluster()
+	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
 	// create a region to control average region size.
 	re.NotNil(tc.AddLeaderRegion(1, 1, 2))
@@ -237,7 +237,7 @@ func TestBalanceLeaderSchedulerTestSuite(t *testing.T) {
 }
 
 func (suite *balanceLeaderSchedulerTestSuite) SetupTest() {
-	suite.cancel, suite.opt, suite.tc, suite.oc = newTestCluster()
+	suite.cancel, suite.opt, suite.tc, suite.oc = prepareSchedulersTest()
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	suite.NoError(err)
 	suite.lb = lb
@@ -552,7 +552,7 @@ func TestBalanceLeaderRangeSchedulerTestSuite(t *testing.T) {
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) SetupTest() {
-	suite.cancel, _, suite.tc, suite.oc = newTestCluster()
+	suite.cancel, _, suite.tc, suite.oc = prepareSchedulersTest()
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TearDownTest() {
@@ -742,7 +742,7 @@ func TestBalanceRegionSchedule1(t *testing.T) {
 }
 
 func checkBalanceRegionSchedule1(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -796,7 +796,7 @@ func TestBalanceRegionReplicas3(t *testing.T) {
 }
 
 func checkReplica3(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -870,7 +870,7 @@ func TestBalanceRegionReplicas5(t *testing.T) {
 }
 
 func checkReplica5(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -938,7 +938,7 @@ func TestBalanceRegionSchedule2(t *testing.T) {
 }
 
 func checkBalanceRegionSchedule2(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1028,7 +1028,7 @@ func TestBalanceRegionStoreWeight(t *testing.T) {
 }
 
 func checkBalanceRegionStoreWeight(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1063,7 +1063,7 @@ func TestBalanceRegionOpInfluence(t *testing.T) {
 }
 
 func checkBalanceRegionOpInfluence(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster(false /* no need to run stream*/)
+	cancel, _, tc, oc := prepareSchedulersTest(false /* no need to run stream*/)
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1099,7 +1099,7 @@ func TestBalanceRegionReplacePendingRegion(t *testing.T) {
 }
 
 func checkReplacePendingRegion(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1131,7 +1131,7 @@ func checkReplacePendingRegion(re *require.Assertions, enablePlacementRules bool
 
 func TestBalanceRegionShouldNotBalance(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -1144,7 +1144,7 @@ func TestBalanceRegionShouldNotBalance(t *testing.T) {
 
 func TestBalanceRegionEmptyRegion(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	sb, err := schedule.CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
@@ -1186,7 +1186,7 @@ func TestRandomMergeSchedule(t *testing.T) {
 }
 
 func checkRandomMergeSchedule(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster(true /* need to run stream*/)
+	cancel, _, tc, oc := prepareSchedulersTest(true /* need to run stream*/)
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1223,7 +1223,7 @@ func TestScatterRangeBalance(t *testing.T) {
 }
 
 func checkScatterRangeBalance(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1294,7 +1294,7 @@ func TestBalanceLeaderLimit(t *testing.T) {
 }
 
 func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1371,7 +1371,7 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 
 func TestConcurrencyUpdateConfig(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(ScatterRangeType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
 	sche := hb.(*scatterRangeScheduler)
@@ -1397,7 +1397,7 @@ func TestConcurrencyUpdateConfig(t *testing.T) {
 
 func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	// Add stores 1,2,3.
 	tc.AddRegionStore(1, 0)

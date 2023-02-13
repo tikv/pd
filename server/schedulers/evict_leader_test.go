@@ -30,7 +30,7 @@ import (
 
 func TestEvictLeader(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
 	// Add stores 1, 2, 3
@@ -53,7 +53,7 @@ func TestEvictLeader(t *testing.T) {
 
 func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sl, err := schedule.CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
 	re.NoError(err)

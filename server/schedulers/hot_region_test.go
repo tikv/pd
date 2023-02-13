@@ -67,7 +67,7 @@ func clearPendingInfluence(h *hotScheduler) {
 
 func TestUpgrade(t *testing.T) {
 	re := require.New(t)
-	cancel, _, _, oc := newTestCluster()
+	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
 	// new
 	sche, err := schedule.CreateScheduler(HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(HotRegionType, nil))
@@ -112,7 +112,7 @@ func TestGCPendingOpInfos(t *testing.T) {
 }
 
 func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -201,7 +201,7 @@ func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 }
 
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
-	cancel, opt, tc, oc := newTestCluster()
+	cancel, opt, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -383,7 +383,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	statisticsInterval = 0
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -592,7 +592,7 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 	defer func() {
 		schedulePeerPr = originValue
 	}()
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	statistics.Denoising = false
 	statisticsInterval = 0
@@ -631,7 +631,7 @@ func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -690,7 +690,7 @@ func TestHotWriteRegionScheduleUnhealthyStore(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -738,7 +738,7 @@ func TestHotWriteRegionScheduleCheckHot(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -773,7 +773,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{statistics.KeyPriority, statistics.BytePriority}
@@ -839,7 +839,7 @@ func TestHotWriteRegionScheduleWithPendingInfluence(t *testing.T) {
 }
 
 func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim int) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -926,7 +926,7 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	statisticsInterval = 0
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetEnablePlacementRules(true)
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
@@ -1008,7 +1008,7 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 
 func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	scheduler, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
@@ -1131,7 +1131,7 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1166,7 +1166,7 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1228,7 +1228,7 @@ func TestHotReadRegionScheduleWithPendingInfluence(t *testing.T) {
 }
 
 func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim int) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1346,7 +1346,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1384,7 +1384,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 
 func TestHotCacheUpdateCache(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, _ := newTestCluster()
+	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
 	tc.SetHotRegionCacheHitsThreshold(0)
 
@@ -1452,7 +1452,7 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 		statistics.ThresholdsUpdateInterval = 8 * time.Second
 	}()
 	{ // only a few regions
-		cancel, _, tc, _ := newTestCluster()
+		cancel, _, tc, _ := prepareSchedulersTest()
 		defer cancel()
 		tc.SetHotRegionCacheHitsThreshold(0)
 		addRegionInfo(tc, statistics.Read, []testRegionInfo{
@@ -1471,7 +1471,7 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 		re.Len(stats[6], 1)
 	}
 	{ // many regions
-		cancel, _, tc, _ := newTestCluster()
+		cancel, _, tc, _ := prepareSchedulersTest()
 		defer cancel()
 		regions := []testRegionInfo{}
 		for i := 1; i <= 1000; i += 2 {
@@ -1524,7 +1524,7 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 
 func TestHotCacheByteAndKey(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, _ := newTestCluster()
+	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
 	tc.SetHotRegionCacheHitsThreshold(0)
 	statistics.ThresholdsUpdateInterval = 0
@@ -1651,7 +1651,7 @@ func TestHotCacheCheckRegionFlow(t *testing.T) {
 }
 
 func checkHotCacheCheckRegionFlow(re *require.Assertions, testCase testHotCacheCheckRegionFlowCase, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1726,7 +1726,7 @@ func TestHotCacheCheckRegionFlowWithDifferentThreshold(t *testing.T) {
 }
 
 func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, _ := newTestCluster()
+	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1762,7 +1762,7 @@ func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, 
 
 func TestHotCacheSortHotPeer(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := schedule.CreateScheduler(HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
@@ -1820,7 +1820,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -1913,7 +1913,7 @@ func TestHotReadPeerSchedule(t *testing.T) {
 }
 
 func checkHotReadPeerSchedule(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
@@ -1943,7 +1943,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2049,7 +2049,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2109,7 +2109,7 @@ func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2152,7 +2152,7 @@ func TestCompatibility(t *testing.T) {
 	statistics.Denoising = false
 	statisticsInterval = 0
 
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -2218,7 +2218,7 @@ func TestCompatibility(t *testing.T) {
 
 func TestCompatibilityConfig(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
 	// From new or 3.x cluster, it will use new config
@@ -2379,7 +2379,7 @@ type maxZombieDurTestCase struct {
 
 func TestMaxZombieDuration(t *testing.T) {
 	re := require.New(t)
-	cancel, _, _, oc := newTestCluster()
+	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("hot-region", nil))
 	re.NoError(err)
@@ -2432,7 +2432,7 @@ func TestMaxZombieDuration(t *testing.T) {
 
 func TestExpect(t *testing.T) {
 	re := require.New(t)
-	cancel, _, _, oc := newTestCluster()
+	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := schedule.CreateScheduler(HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("hot-region", nil))
 	re.NoError(err)
@@ -2678,7 +2678,7 @@ func TestExpect(t *testing.T) {
 // ref https://github.com/tikv/pd/issues/5701
 func TestEncodeConfig(t *testing.T) {
 	re := require.New(t)
-	cancel, _, _, oc := newTestCluster()
+	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := schedule.CreateScheduler(HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)

@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"context"
 	"net/url"
 	"strconv"
 	"time"
@@ -23,10 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
@@ -380,17 +376,3 @@ func (q *retryQuota) GC(keepStores []*core.StoreInfo) {
 	}
 }
 
-func newTestCluster(needToRunStream ...bool) (context.CancelFunc, *config.PersistOptions, *mockcluster.Cluster, *schedule.OperatorController) {
-	Register()
-	ctx, cancel := context.WithCancel(context.Background())
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	var stream *hbstream.HeartbeatStreams
-	if len(needToRunStream) == 0 {
-		stream = nil
-	} else {
-		stream = hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, needToRunStream[0])
-	}
-	oc := schedule.NewOperatorController(ctx, tc, stream)
-	return cancel, opt, tc, oc
-}

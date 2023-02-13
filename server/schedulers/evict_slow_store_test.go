@@ -44,7 +44,7 @@ func TestEvictSlowStoreTestSuite(t *testing.T) {
 }
 
 func (suite *evictSlowStoreTestSuite) SetupTest() {
-	suite.cancel, _, suite.tc, suite.oc = newTestCluster()
+	suite.cancel, _, suite.tc, suite.oc = prepareSchedulersTest()
 
 	// Add stores 1, 2
 	suite.tc.AddLeaderStore(1, 0)

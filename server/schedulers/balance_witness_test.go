@@ -41,7 +41,7 @@ type balanceWitnessSchedulerTestSuite struct {
 }
 
 func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
-	suite.cancel, suite.opt, suite.tc, suite.oc = newTestCluster()
+	suite.cancel, suite.opt, suite.tc, suite.oc = prepareSchedulersTest()
 	suite.tc.RuleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "pd",

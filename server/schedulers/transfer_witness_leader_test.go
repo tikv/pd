@@ -29,7 +29,7 @@ import (
 
 func TestTransferWitnessLeader(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
 	// Add stores 1, 2, 3
@@ -51,7 +51,7 @@ func TestTransferWitnessLeader(t *testing.T) {
 
 func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
-	cancel, _, tc, oc := newTestCluster()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)

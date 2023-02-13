@@ -44,7 +44,7 @@ func TestEvictSlowTrendTestSuite(t *testing.T) {
 }
 
 func (suite *evictSlowTrendTestSuite) SetupTest() {
-	suite.cancel, _, suite.tc, suite.oc = newTestCluster()
+	suite.cancel, _, suite.tc, suite.oc = prepareSchedulersTest()
 
 	suite.tc.AddLeaderStore(1, 10)
 	suite.tc.AddLeaderStore(2, 99)
