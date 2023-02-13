@@ -32,7 +32,7 @@ import (
 
 func TestSendAndGetComponent(t *testing.T) {
 	re := require.New(t)
-	handler := func(ctx context.Context, s *server.Server) (http.Handler, server.APIServiceGroup, error) {
+	handler := func(ctx context.Context, s *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 			component := apiutil.GetComponentNameOnHTTP(r)
@@ -43,7 +43,7 @@ func TestSendAndGetComponent(t *testing.T) {
 			re.Equal("pdctl", component)
 			fmt.Fprint(w, component)
 		})
-		info := server.APIServiceGroup{
+		info := apiutil.APIServiceGroup{
 			IsCore: true,
 		}
 		return mux, info, nil

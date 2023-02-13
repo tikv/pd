@@ -18,6 +18,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -27,7 +28,7 @@ import (
 const autoScalingPrefix = "/autoscaling"
 
 var (
-	autoscalingServiceGroup = server.APIServiceGroup{
+	autoscalingServiceGroup = apiutil.APIServiceGroup{
 		Name:       "autoscaling",
 		Version:    "v1alpha",
 		IsCore:     false,
@@ -36,7 +37,7 @@ var (
 )
 
 // NewHandler creates a HTTP handler for auto scaling.
-func NewHandler(_ context.Context, svr *server.Server) (http.Handler, server.APIServiceGroup, error) {
+func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 	autoScalingHandler := http.NewServeMux()
 	rd := render.New(render.Options{
 		IndentJSON: true,

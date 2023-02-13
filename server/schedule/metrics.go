@@ -17,7 +17,7 @@ package schedule
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	// todo: pre-allocate gauge metrics
+	// TODO: pre-allocate gauge metrics
 	operatorCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",

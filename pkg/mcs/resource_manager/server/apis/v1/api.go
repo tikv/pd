@@ -23,14 +23,14 @@ import (
 	"github.com/gin-gonic/gin"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	rmserver "github.com/tikv/pd/pkg/mcs/resource_manager/server"
-	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
 // APIPathPrefix is the prefix of the API path.
 const APIPathPrefix = "/resource-manager/api/v1/"
 
 var (
-	apiServiceGroup = server.APIServiceGroup{
+	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "resource-manager",
 		Version:    "v1",
 		IsCore:     false,
@@ -39,7 +39,7 @@ var (
 )
 
 func init() {
-	rmserver.SetUpRestHandler = func(srv *rmserver.Service) (http.Handler, server.APIServiceGroup) {
+	rmserver.SetUpRestHandler = func(srv *rmserver.Service) (http.Handler, apiutil.APIServiceGroup) {
 		s := NewService(srv)
 		return s.handler(), apiServiceGroup
 	}

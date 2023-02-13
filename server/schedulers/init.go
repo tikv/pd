@@ -165,7 +165,6 @@ func schedulersRegister() {
 		return newEvictSlowStoreScheduler(opController, conf), nil
 	})
 
-	// todo: evict slow trend store
 	// grant hot region
 	schedule.RegisterSliceDecoderBuilder(GrantHotRegionType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {

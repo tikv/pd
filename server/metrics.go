@@ -118,7 +118,7 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
 		}, []string{"address", "store"})
 
-	// todo: pre-allocate gauge metrics
+	// TODO: pre-allocate gauge metrics
 	storeHeartbeatHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",

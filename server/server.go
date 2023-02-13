@@ -40,11 +40,13 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
-	basicsvr "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mcs/registry"
+	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage"
@@ -100,11 +102,7 @@ var (
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
 )
 
-// if server doesn't implement all methods of basicsvr.Server, this line will result in
-// clear error message "*Server does not implement basicsvr.Server (missing Method method)"
-var _ basicsvr.Server = (*Server)(nil)
-
-// Server is the pd server. It implements basicsvr.Server
+// Server is the pd server. It implements bs.Server
 // nolint
 type Server struct {
 	diagnosticspb.DiagnosticsServer
@@ -185,17 +183,12 @@ type Server struct {
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
 	auditBackends []audit.Backend
+
+	registry *registry.ServiceRegistry
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, APIServiceGroup, error)
-
-const (
-	// CorePath the core group, is at REST path `/pd/api/v1`.
-	CorePath = "/pd/api/v1"
-	// ExtensionsPath the named groups are REST at `/pd/apis/{GROUP_NAME}/{Version}`.
-	ExtensionsPath = "/pd/apis"
-)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APIServiceGroup, error)
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
@@ -238,10 +231,13 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		etcdCfg.UserHandlers = userHandlers
 	}
 	// New way to register services.
-	registry := NewServiceRegistry()
-
+	s.registry = registry.NewServerServiceRegistry()
+	failpoint.Inject("useGlobalRegistry", func() {
+		s.registry = registry.ServerServiceRegistry
+	})
+	s.registry.RegisterService("ResourceManager", rm_server.NewService)
 	// Register the micro services REST path.
-	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
+	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
@@ -249,7 +245,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 		// Register the micro services GRPC service.
-		registry.InstallAllGRPCServices(s, gs)
+		s.registry.InstallAllGRPCServices(s, gs)
 	}
 
 	s.etcdCfg = etcdCfg
