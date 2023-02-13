@@ -78,7 +78,6 @@ import (
 )
 
 const (
-	etcdTimeout           = time.Second * 3
 	serverMetricsInterval = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
@@ -321,29 +320,7 @@ func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-
-	endpoints := []string{etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", cfg.Security))
-
-	lgc := zap.NewProductionConfig()
-	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: etcdTimeout,
-		TLS:         tlsConfig,
-		LogConfig:   &lgc,
-	})
-	if err != nil {
-		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
-	}
-
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   tlsConfig,
-		},
-	}
-	return client, httpClient, nil
+	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls)
 }
 
 // AddStartCallback adds a callback in the startServer phase.
