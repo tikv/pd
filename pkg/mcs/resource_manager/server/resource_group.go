@@ -173,14 +173,14 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 func (rg *ResourceGroup) RequestRU(
 	now time.Time,
 	neededTokens float64,
-	targetPeriodMs uint64,
+	targetPeriodMs, clientUniqueID uint64,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
-	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs)
+	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs, clientUniqueID)
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
@@ -257,6 +257,8 @@ func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 	case rmpb.GroupMode_RUMode:
 		if state := states.RU; state != nil {
 			rg.RUSettings.RU.GroupTokenBucketState = *state
+			rg.RUSettings.RU.GroupTokenBucketState.slots = make([]uint64, 0)
+			rg.RUSettings.RU.GroupTokenBucketState.tokenSlots = make(map[uint64]float64)
 		}
 	case rmpb.GroupMode_RawMode:
 		if state := states.CPU; state != nil {

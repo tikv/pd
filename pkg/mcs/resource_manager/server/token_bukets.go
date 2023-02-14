@@ -16,6 +16,7 @@ package server
 
 import (
 	"math"
+	"math/rand"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -23,11 +24,8 @@ import (
 )
 
 const (
-	defaultRefillRate    = 10000
-	defaultInitialTokens = 10 * 10000
-)
-
-const (
+	defaultRefillRate      = 10000
+	defaultInitialTokens   = 10 * 10000
 	defaultReserveRatio    = 0.05
 	defaultLoanCoefficient = 2
 )
@@ -47,32 +45,158 @@ type GroupTokenBucket struct {
 
 // GroupTokenBucketState is the running state of TokenBucket.
 type GroupTokenBucketState struct {
+	slots []uint64
+	// ClientUniqueID -> Tokens
+	tokenSlots map[uint64]float64
+	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
+	settingChanged bool
+	// The total tokens in the bucket should be equal to the sum of all tokens in the slots.
 	Tokens      float64    `json:"tokens,omitempty"`
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
-	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
-	settingChanged bool
+}
+
+// newGroupTokenBucketState returns a new GroupTokenBucketState.
+func newGroupTokenBucketState(tokens float64) GroupTokenBucketState {
+	return GroupTokenBucketState{
+		slots:      make([]uint64, 0),
+		tokenSlots: make(map[uint64]float64),
+		Tokens:     tokens,
+	}
 }
 
 // Clone returns the copy of GroupTokenBucketState
 func (s *GroupTokenBucketState) Clone() *GroupTokenBucketState {
+	slots := make([]uint64, len(s.slots))
+	copy(slots, s.slots)
+	tokenSlots := make(map[uint64]float64)
+	for id, tokens := range s.tokenSlots {
+		tokenSlots[id] = tokens
+	}
+	var lastUpdate *time.Time
+	if s.LastUpdate != nil {
+		newLastUpdate := *s.LastUpdate
+		lastUpdate = &newLastUpdate
+	}
 	return &GroupTokenBucketState{
+		slots:       slots,
+		tokenSlots:  tokenSlots,
 		Tokens:      s.Tokens,
-		LastUpdate:  s.LastUpdate,
+		LastUpdate:  lastUpdate,
 		Initialized: s.Initialized,
 	}
+}
+
+// NOTICE: all the slot-related operations SHOULD NOT change the total tokens in the bucket
+// and it SHOULD make sure that the total tokens in the bucket is always equal to the sum of
+// all tokens in the slots.
+func (s *GroupTokenBucketState) balanceSlotTokens() {
+	slots := len(s.tokenSlots)
+	if slots == 0 {
+		return
+	}
+	subTokens := s.Tokens / float64(slots)
+	for id := range s.tokenSlots {
+		s.tokenSlots[id] = subTokens
+	}
+}
+
+func (s *GroupTokenBucketState) insertSlot(clientUniqueID uint64) {
+	if _, ok := s.tokenSlots[clientUniqueID]; ok {
+		return
+	}
+	s.slots = append(s.slots, clientUniqueID)
+	if len(s.tokenSlots) == 0 {
+		s.tokenSlots[clientUniqueID] = s.Tokens
+		return
+	}
+	s.tokenSlots[clientUniqueID] = 0
+	// Re-balance the tokens in the slots.
+	s.balanceSlotTokens()
+}
+
+func (s *GroupTokenBucketState) removeSlot(clientUniqueIDs uint64) {
+	if _, ok := s.tokenSlots[clientUniqueIDs]; !ok {
+		return
+	}
+	for i, id := range s.slots {
+		if id == clientUniqueIDs {
+			s.slots = append(s.slots[:i], s.slots[i+1:]...)
+			break
+		}
+	}
+	delete(s.tokenSlots, clientUniqueIDs)
+	// Re-balance the tokens in the slots.
+	s.balanceSlotTokens()
+}
+
+// Ingest the tokens into the bucket and update the slot tokens as well.
+// TODO: if the token given is negative, will it be a problem?
+func (s *GroupTokenBucketState) ingestTokens(tokens float64) {
+	s.Tokens += tokens
+	slots := len(s.tokenSlots)
+	if slots == 0 {
+		return
+	}
+	subTokens := tokens / float64(slots)
+	for id := range s.tokenSlots {
+		s.tokenSlots[id] += subTokens
+	}
+}
+
+func (s *GroupTokenBucketState) setTokens(tokens float64) {
+	s.Tokens = tokens
+	s.balanceSlotTokens()
+}
+
+// consumeTokens will first consume the tokens in its own slot, if the slot could not
+// meet the demand, it will consume the tokens in other slots randomly. Please make
+// sure the total tokens in the bucket is enough before calling this function.
+func (s *GroupTokenBucketState) consumeTokens(clientUniqueID uint64, tokens float64) {
+	s.insertSlot(clientUniqueID)
+	s.Tokens -= tokens
+	subTokens := s.getTokens(clientUniqueID)
+	if subTokens >= tokens {
+		s.tokenSlots[clientUniqueID] -= tokens
+		return
+	}
+	// All tokens in the slot are consumed.
+	s.tokenSlots[clientUniqueID] = 0
+	// We still need the remaining tokens.
+	neededTokens := tokens - subTokens
+	// Randomly consume the tokens in other slots.
+	slotsLen := len(s.slots)
+	for neededTokens > 0 {
+		id := s.slots[rand.Intn(slotsLen)]
+		if id == clientUniqueID {
+			continue
+		}
+		grantedTokens := math.Min(s.tokenSlots[id], neededTokens)
+		neededTokens -= grantedTokens
+		s.tokenSlots[id] -= grantedTokens
+	}
+}
+
+func (s *GroupTokenBucketState) getTokens(clientUniqueIDs ...uint64) (tokens float64) {
+	if len(clientUniqueIDs) == 0 {
+		return s.Tokens
+	}
+	for _, id := range clientUniqueIDs {
+		tokens += s.tokenSlots[id]
+	}
+	return tokens
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
 func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
 	if tokenBucket == nil || tokenBucket.Settings == nil {
-		return GroupTokenBucket{}
+		return GroupTokenBucket{
+			GroupTokenBucketState: newGroupTokenBucketState(0),
+		}
 	}
 	return GroupTokenBucket{
-		Settings: tokenBucket.Settings,
-		GroupTokenBucketState: GroupTokenBucketState{
-			Tokens: tokenBucket.Tokens,
-		},
+		Settings:              tokenBucket.Settings,
+		GroupTokenBucketState: newGroupTokenBucketState(tokenBucket.Tokens),
 	}
 }
 
@@ -96,9 +220,8 @@ func (t *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 		t.Settings = setting
 		t.settingChanged = true
 	}
-
 	// the settings in token is delta of the last update and now.
-	t.Tokens += tb.GetTokens()
+	t.ingestTokens(tb.GetTokens())
 }
 
 // init initializes the group token bucket.
@@ -106,32 +229,36 @@ func (t *GroupTokenBucket) init(now time.Time) {
 	if t.Settings.FillRate == 0 {
 		t.Settings.FillRate = defaultRefillRate
 	}
-	if t.Tokens < defaultInitialTokens {
-		t.Tokens = defaultInitialTokens
+	if t.getTokens() < defaultInitialTokens {
+		t.setTokens(defaultInitialTokens)
 	}
 	t.LastUpdate = &now
 	t.Initialized = true
 }
 
 // request requests tokens from the group token bucket.
-func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPeriodMs uint64) (*rmpb.TokenBucket, int64) {
+func (t *GroupTokenBucket) request(
+	now time.Time,
+	neededTokens float64,
+	targetPeriodMs, clientUniqueID uint64,
+) (*rmpb.TokenBucket, int64) {
 	if !t.Initialized {
 		t.init(now)
 	} else {
 		delta := now.Sub(*t.LastUpdate)
 		if delta > 0 {
-			t.Tokens += float64(t.Settings.FillRate) * delta.Seconds()
+			t.ingestTokens(float64(t.Settings.FillRate) * delta.Seconds())
 			t.LastUpdate = &now
 		}
 	}
 	// reloan when setting changed
-	if t.settingChanged && t.Tokens <= 0 {
-		t.Tokens = 0
+	if t.settingChanged && t.getTokens() <= 0 {
+		t.setTokens(0)
 	}
 	t.settingChanged = false
 	if t.Settings.BurstLimit != 0 {
-		if burst := float64(t.Settings.BurstLimit); t.Tokens > burst {
-			t.Tokens = burst
+		if burst := float64(t.Settings.BurstLimit); t.getTokens() > burst {
+			t.setTokens(burst)
 		}
 	}
 
@@ -142,25 +269,24 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 		res.Tokens = neededTokens
 		return &res, 0
 	}
-	// FillRate is used for the token server unavailable in abnormal situation.
+	// If the needed token number is less than 0, just return.
 	if neededTokens <= 0 {
 		return &res, 0
 	}
-	// If the current tokens can directly meet the requirement, returns the need token
-	if t.Tokens >= neededTokens {
-		t.Tokens -= neededTokens
-		// granted the total request tokens
+	// Check whether the total tokens in the bucket could meet the requirement.
+	totalTokens := t.getTokens()
+	if totalTokens >= neededTokens {
+		t.consumeTokens(clientUniqueID, neededTokens)
 		res.Tokens = neededTokens
 		return &res, 0
 	}
-
-	// Firstly allocate the remaining tokens
+	// Grant the remaining tokens and start to calculate the loan.
 	var grantedTokens float64
 	hasRemaining := false
-	if t.Tokens > 0 {
-		grantedTokens = t.Tokens
+	if totalTokens > 0 {
+		grantedTokens = totalTokens
 		neededTokens -= grantedTokens
-		t.Tokens = 0
+		t.setTokens(0)
 		hasRemaining = true
 	}
 
@@ -193,14 +319,14 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 		p[i] = float64(LoanCoefficient-i)*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() + p[i-1]
 	}
 	for i := 0; i < LoanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTime.Seconds(); i++ {
-		loan := -t.Tokens
+		loan := -t.getTokens()
 		if loan > p[i] {
 			continue
 		}
 		roundReserveTokens := p[i] - loan
 		fillRate := float64(LoanCoefficient-i) * float64(t.Settings.FillRate)
 		if roundReserveTokens > neededTokens {
-			t.Tokens -= neededTokens
+			t.ingestTokens(-neededTokens)
 			grantedTokens += neededTokens
 			trickleTime += grantedTokens / fillRate
 			neededTokens = 0
@@ -209,19 +335,19 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 			if roundReserveTime+trickleTime >= targetPeriodTime.Seconds() {
 				roundTokens := (targetPeriodTime.Seconds() - trickleTime) * fillRate
 				neededTokens -= roundTokens
-				t.Tokens -= roundTokens
+				t.ingestTokens(-roundTokens)
 				grantedTokens += roundTokens
 				trickleTime = targetPeriodTime.Seconds()
 			} else {
 				grantedTokens += roundReserveTokens
 				neededTokens -= roundReserveTokens
-				t.Tokens -= roundReserveTokens
+				t.ingestTokens(-roundReserveTokens)
 				trickleTime += roundReserveTime
 			}
 		}
 	}
 	if grantedTokens < defaultReserveRatio*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() {
-		t.Tokens -= defaultReserveRatio*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() - grantedTokens
+		t.ingestTokens(-(defaultReserveRatio*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() - grantedTokens))
 		grantedTokens = defaultReserveRatio * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
 	}
 	res.Tokens = grantedTokens
