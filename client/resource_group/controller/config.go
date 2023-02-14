@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package controller
 
 import (
 	"time"
@@ -44,8 +44,12 @@ const (
 	notifyFraction                 = 0.1
 	consumptionsReportingThreshold = 100
 	extendedReportingPeriodFactor  = 4
-	defaultGroupLoopUpdateInterval = 1 * time.Second
-	defaultTargetPeriod            = 10 * time.Second
+	// defaultGroupCleanupInterval is the interval to clean up the deleted resource groups in memory.
+	defaultGroupCleanupInterval = 10 * time.Minute
+	// defaultGroupStateUpdateInterval is the interval to update the state of the resource groups.
+	defaultGroupStateUpdateInterval = 1 * time.Second
+	// targetPeriod indicate how long it is expected to cost token when acquiring token.
+	defaultTargetPeriod = 10 * time.Second
 )
 
 const (
@@ -92,9 +96,7 @@ func DefaultRequestUnitConfig() *RequestUnitConfig {
 // units or request resource cost standards. It should be calculated by a given `RequestUnitConfig`
 // or `RequestResourceConfig`.
 type Config struct {
-	groupLoopUpdateInterval time.Duration
-	targetPeriod            time.Duration
-
+	// RU model config
 	ReadBaseCost   RequestUnit
 	ReadBytesCost  RequestUnit
 	WriteBaseCost  RequestUnit
@@ -118,7 +120,5 @@ func generateConfig(ruConfig *RequestUnitConfig) *Config {
 		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
 		CPUMsCost:      RequestUnit(ruConfig.CPUMsCost),
 	}
-	cfg.groupLoopUpdateInterval = defaultGroupLoopUpdateInterval
-	cfg.targetPeriod = defaultTargetPeriod
 	return cfg
 }

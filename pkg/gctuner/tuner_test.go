@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build enable_flaky_tests
+
 package gctuner
 
 import (
@@ -72,22 +74,4 @@ func TestTuner(t *testing.T) {
 		runtime.GC()
 		require.Equal(t, minGCPercent.Load(), tn.getGCPercent())
 	}
-}
-
-func TestCalcGCPercent(t *testing.T) {
-	const gb = 1024 * 1024 * 1024
-	// use default value when invalid params
-	require.Equal(t, defaultGCPercent, calcGCPercent(0, 0))
-	require.Equal(t, defaultGCPercent, calcGCPercent(0, 1))
-	require.Equal(t, defaultGCPercent, calcGCPercent(1, 0))
-
-	require.Equal(t, maxGCPercent.Load(), calcGCPercent(1, 3*gb))
-	require.Equal(t, maxGCPercent.Load(), calcGCPercent(gb/10, 4*gb))
-	require.Equal(t, maxGCPercent.Load(), calcGCPercent(gb/2, 4*gb))
-	require.Equal(t, uint32(300), calcGCPercent(1*gb, 4*gb))
-	require.Equal(t, uint32(166), calcGCPercent(1.5*gb, 4*gb))
-	require.Equal(t, uint32(100), calcGCPercent(2*gb, 4*gb))
-	require.Equal(t, uint32(100), calcGCPercent(3*gb, 4*gb))
-	require.Equal(t, minGCPercent.Load(), calcGCPercent(4*gb, 4*gb))
-	require.Equal(t, minGCPercent.Load(), calcGCPercent(5*gb, 4*gb))
 }

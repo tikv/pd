@@ -6,7 +6,8 @@ RUN apk add --no-cache \
     bash \
     curl \
     gcc \
-    g++
+    g++ \
+    binutils-gold
 
 # Install jq for pd-ctl
 RUN cd / && \
@@ -26,7 +27,7 @@ COPY . .
 
 RUN make
 
-FROM alpine:3.5
+FROM alpine:3.17
 
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-server /pd-server
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-ctl /pd-ctl

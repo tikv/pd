@@ -199,3 +199,36 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	re.NoError(err)
 	re.Equal(int64(0), resp.Count)
 }
+
+func TestInitClusterID(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	cfg := NewTestSingleConfig(t)
+	etcd, err := embed.StartEtcd(cfg)
+	defer func() {
+		etcd.Close()
+	}()
+	re.NoError(err)
+
+	ep := cfg.LCUrls[0].String()
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: []string{ep},
+	})
+	re.NoError(err)
+
+	<-etcd.Server.ReadyNotify()
+
+	pdClusterIDPath := "test/TestInitClusterID/pd/cluster_id"
+	// Get any cluster key to parse the cluster ID.
+	resp, err := EtcdKVGet(client, pdClusterIDPath)
+	re.NoError(err)
+	re.Equal(0, len(resp.Kvs))
+
+	clusterID, err := InitClusterID(client, pdClusterIDPath)
+	re.NoError(err)
+	re.NotEqual(0, clusterID)
+
+	clusterID1, err := InitClusterID(client, pdClusterIDPath)
+	re.NoError(err)
+	re.Equal(clusterID, clusterID1)
+}

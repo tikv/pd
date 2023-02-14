@@ -25,11 +25,12 @@ import (
 
 	"github.com/pingcap/tidb-dashboard/pkg/config"
 
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
 
 var (
-	serviceGroup = server.APIServiceGroup{
+	serviceGroup = apiutil.APIServiceGroup{
 		Name:       "dashboard",
 		Version:    "v1",
 		IsCore:     false,
@@ -43,7 +44,7 @@ func SetCheckInterval(time.Duration) {}
 // GetServiceBuilders returns a empty Dashboard Builder
 func GetServiceBuilders() []server.HandlerBuilder {
 	return []server.HandlerBuilder{
-		func(context.Context, *server.Server) (http.Handler, server.APIServiceGroup, error) {
+		func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.WriteString(w, "Dashboard is not built.\n")
 			})
