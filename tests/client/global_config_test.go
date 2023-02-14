@@ -63,7 +63,7 @@ func (suite *globalConfigTestSuite) SetupSuite() {
 	var gsi *server.Server
 	checker := assertutil.NewChecker()
 	checker.FailNow = func() {}
-	gsi, suite.cleanup, err = server.NewTestServer(checker)
+	gsi, suite.cleanup, err = server.NewTestServer(suite.Require(), checker)
 	suite.server = &server.GrpcServer{Server: gsi}
 	suite.NoError(err)
 	addr := suite.server.GetAddr()

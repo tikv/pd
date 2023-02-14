@@ -187,7 +187,7 @@ func (b *BucketTreeItem) inherit(origins []*BucketTreeItem) {
 
 func (b *BucketTreeItem) calculateHotDegree() {
 	for _, stat := range b.stats {
-		// todo: qps should be considered, tikv will report this in next sprint
+		// TODO: qps should be considered, tikv will report this in next sprint
 		// the order: read [bytes keys qps] and write[bytes keys qps]
 		readLoads := stat.Loads[:2]
 		readHot := slice.AllOf(readLoads, func(i int) bool {

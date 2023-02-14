@@ -16,7 +16,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package controller
 
 import (
 	"context"
@@ -62,9 +62,9 @@ func Every(interval time.Duration) Limit {
 // or its associated context.Context is canceled.
 //
 // Some changes about burst(b):
-//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst within a capacity).
+//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within an unlimited capacity).
 //   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within a unlimited capacity).
-//   - If b > 0, that means the limiter is limited capacity. (current not used).
+//   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
 	mu     sync.Mutex
 	limit  Limit
@@ -73,7 +73,7 @@ type Limiter struct {
 	// last is the last time the limiter's tokens field was updated
 	last                time.Time
 	notifyThreshold     float64
-	lowTokensNotifyChan chan struct{}
+	lowTokensNotifyChan chan<- struct{}
 	// To prevent too many chan sent, the notifyThreshold is set to 0 after notify.
 	// So the notifyThreshold cannot show whether the limiter is in the low token state,
 	// isLowProcess is used to check it.
@@ -89,7 +89,7 @@ func (lim *Limiter) Limit() Limit {
 
 // NewLimiter returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan struct{}) *Limiter {
+func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan<- struct{}) *Limiter {
 	lim := &Limiter{
 		limit:               r,
 		last:                now,
@@ -97,7 +97,22 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 		burst:               b,
 		lowTokensNotifyChan: lowTokensNotifyChan,
 	}
-	log.Info("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
+	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
+	return lim
+}
+
+// NewLimiterWithCfg returns a new Limiter that allows events up to rate r and permits
+// bursts of at most b tokens.
+func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- struct{}) *Limiter {
+	lim := &Limiter{
+		limit:               Limit(cfg.NewRate),
+		last:                now,
+		tokens:              cfg.NewTokens,
+		burst:               cfg.NewBurst,
+		notifyThreshold:     cfg.NotifyThreshold,
+		lowTokensNotifyChan: lowTokensNotifyChan,
+	}
+	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim
 }
 
@@ -167,7 +182,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 
 // Reserve returns a Reservation that indicates how long the caller must wait before n events happen.
 // The Limiter takes this Reservation into account when allowing future events.
-// The returned Reservation’s OK() method returns false if waitting duration exceeds deadline.
+// The returned Reservation’s OK() method returns false if wait duration exceeds deadline.
 // Usage example:
 //
 //	r := lim.Reserve(time.Now(), 1)
@@ -259,12 +274,9 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 }
 
 type tokenBucketReconfigureArgs struct {
-	NewTokens float64
-
-	NewRate float64
-
-	NewBurst int64
-
+	NewTokens       float64
+	NewRate         float64
+	NewBurst        int64
 	NotifyThreshold float64
 }
 
@@ -272,7 +284,7 @@ type tokenBucketReconfigureArgs struct {
 func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	log.Debug("[resource group controllor] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
+	log.Debug("[resource group controller] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 	now, _, tokens := lim.advance(now)
 	lim.last = now
 	lim.tokens = tokens + args.NewTokens
@@ -281,7 +293,7 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	lim.notifyThreshold = args.NotifyThreshold
 	lim.isLowProcess = false
 	lim.maybeNotify()
-	log.Debug("[resource group controllor] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
+	log.Debug("[resource group controller] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -354,6 +366,11 @@ func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time,
 	elapsed := now.Sub(last)
 	delta := lim.limit.tokensFromDuration(elapsed)
 	tokens := lim.tokens + delta
+	if lim.burst != 0 {
+		if burst := float64(lim.burst); tokens > burst {
+			tokens = burst
+		}
+	}
 	return now, last, tokens
 }
 

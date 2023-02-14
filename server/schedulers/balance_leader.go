@@ -545,7 +545,7 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
 		balanceDirectionCounter.WithLabelValues(l.GetName(), solver.SourceMetricLabel(), solver.TargetMetricLabel()),
-		// todo: pre-allocate gauge metrics
+		// TODO: pre-allocate gauge metrics
 		l.counter.WithLabelValues("move-leader", solver.SourceMetricLabel()+"-out"),
 		l.counter.WithLabelValues("move-leader", solver.TargetMetricLabel()+"-in"),
 	)

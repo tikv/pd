@@ -575,7 +575,7 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
 	for _, s := range stores {
-		// todo: pre-allocate gauge metrics
+		// TODO: pre-allocate gauge metrics
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)

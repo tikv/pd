@@ -326,7 +326,7 @@ type KeyspaceMeta struct {
 // 1. Keyspace State are marshaled to their corresponding name for better readability.
 func (meta *KeyspaceMeta) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		ID             uint32            `json:"id,omitempty"`
+		ID             uint32            `json:"id"`
 		Name           string            `json:"name,omitempty"`
 		State          string            `json:"state,omitempty"`
 		CreatedAt      int64             `json:"created_at,omitempty"`
@@ -345,7 +345,7 @@ func (meta *KeyspaceMeta) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON reverse KeyspaceMeta's the Custom JSON marshal.
 func (meta *KeyspaceMeta) UnmarshalJSON(data []byte) error {
 	aux := &struct {
-		ID             uint32            `json:"id,omitempty"`
+		ID             uint32            `json:"id"`
 		Name           string            `json:"name,omitempty"`
 		State          string            `json:"state,omitempty"`
 		CreatedAt      int64             `json:"created_at,omitempty"`

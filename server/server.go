@@ -40,11 +40,13 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
-	basicsvr "github.com/tikv/pd/pkg/basic_server"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mcs/registry"
+	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage"
@@ -76,7 +78,6 @@ import (
 )
 
 const (
-	etcdTimeout           = time.Second * 3
 	serverMetricsInterval = time.Minute
 	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
@@ -100,11 +101,7 @@ var (
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
 )
 
-// if server doesn't implement all methods of basicsvr.Server, this line will result in
-// clear error message "*Server does not implement basicsvr.Server (missing Method method)"
-var _ basicsvr.Server = (*Server)(nil)
-
-// Server is the pd server. It implements basicsvr.Server
+// Server is the pd server. It implements bs.Server
 // nolint
 type Server struct {
 	diagnosticspb.DiagnosticsServer
@@ -185,17 +182,12 @@ type Server struct {
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
 	auditBackends []audit.Backend
+
+	registry *registry.ServiceRegistry
 }
 
 // HandlerBuilder builds a server HTTP handler.
-type HandlerBuilder func(context.Context, *Server) (http.Handler, APIServiceGroup, error)
-
-const (
-	// CorePath the core group, is at REST path `/pd/api/v1`.
-	CorePath = "/pd/api/v1"
-	// ExtensionsPath the named groups are REST at `/pd/apis/{GROUP_NAME}/{Version}`.
-	ExtensionsPath = "/pd/apis"
-)
+type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APIServiceGroup, error)
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
@@ -238,10 +230,13 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		etcdCfg.UserHandlers = userHandlers
 	}
 	// New way to register services.
-	registry := NewServiceRegistry()
-
+	s.registry = registry.NewServerServiceRegistry()
+	failpoint.Inject("useGlobalRegistry", func() {
+		s.registry = registry.ServerServiceRegistry
+	})
+	s.registry.RegisterService("ResourceManager", rm_server.NewService)
 	// Register the micro services REST path.
-	registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
+	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
 		grpcServer := &GrpcServer{Server: s}
@@ -249,7 +244,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 		// Register the micro services GRPC service.
-		registry.InstallAllGRPCServices(s, gs)
+		s.registry.InstallAllGRPCServices(s, gs)
 	}
 
 	s.etcdCfg = etcdCfg
@@ -325,29 +320,7 @@ func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-
-	endpoints := []string{etcdCfg.ACUrls[0].String()}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", cfg.Security))
-
-	lgc := zap.NewProductionConfig()
-	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: etcdTimeout,
-		TLS:         tlsConfig,
-		LogConfig:   &lgc,
-	})
-	if err != nil {
-		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
-	}
-
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   tlsConfig,
-		},
-	}
-	return client, httpClient, nil
+	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls)
 }
 
 // AddStartCallback adds a callback in the startServer phase.
@@ -357,7 +330,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 
 func (s *Server) startServer(ctx context.Context) error {
 	var err error
-	if err = s.initClusterID(); err != nil {
+	if s.clusterID, err = etcdutil.InitClusterID(s.client, pdClusterIDPath); err != nil {
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
@@ -433,22 +406,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
-}
-
-func (s *Server) initClusterID() error {
-	// Get any cluster key to parse the cluster ID.
-	resp, err := etcdutil.EtcdKVGet(s.client, pdClusterIDPath)
-	if err != nil {
-		return err
-	}
-
-	// If no key exist, generate a random cluster ID.
-	if len(resp.Kvs) == 0 {
-		s.clusterID, err = initOrGetClusterID(s.client, pdClusterIDPath)
-		return err
-	}
-	s.clusterID, err = typeutil.BytesToUint64(resp.Kvs[0].Value)
-	return err
 }
 
 // AddCloseCallback adds a callback in the Close phase.
