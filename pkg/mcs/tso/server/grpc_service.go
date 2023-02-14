@@ -65,7 +65,6 @@ func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Service is the TSO grpc service.
 type Service struct {
-	ctx context.Context
 	*Server
 }
 
@@ -76,7 +75,6 @@ func NewService(svr bs.Server) registry.RegistrableService {
 		log.Fatal("create tso server failed")
 	}
 	return &Service{
-		ctx:    svr.Context(),
 		Server: server,
 	}
 }
