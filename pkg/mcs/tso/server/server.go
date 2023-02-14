@@ -59,7 +59,6 @@ type Server struct {
 	ctx       context.Context
 	name      string
 	clusterID uint64
-	rootPath  string
 	// etcd client
 	client *clientv3.Client
 	// http client
@@ -162,13 +161,10 @@ func (s *Server) GetTSODispatcher() *sync.Map {
 
 // IsLocalRequest checks if the forwarded host is the current host
 func (s *Server) IsLocalRequest(forwardedHost string) bool {
-	if forwardedHost == "" {
-		return true
-	}
 	// TODO: Check if the forwarded host is the current host
 	// and we can't use ClientUrls because that's for the remote
-	// etcd cluster. The TSO microservice doesn't use embeded etcd.
-	return false
+	// etcd cluster. The TSO microservice doesn't use embedded etcd.
+	return forwardedHost == ""
 }
 
 // CreateTsoForwardStream creats the forward stream

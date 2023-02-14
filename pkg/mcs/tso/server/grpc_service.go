@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -159,97 +158,6 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 	}
 }
 
-// GetDCLocationInfo gets the dc-location info of the given dc-location from the primary
-// keyspace group replica's TSO allocator manager.
-func (s *Service) GetDCLocationInfo(ctx context.Context,
-	request *tsopb.GetDCLocationInfoRequest) (*tsopb.GetDCLocationInfoResponse, error) {
-	// TODO: Check if the keyspace replica is the primary
-	var err error
-	if err = s.ValidateInternalRequest(request.GetHeader(), false); err != nil {
-		return nil, err
-	}
-	if !s.member.IsLeader() {
-		return nil, ErrNotLeader
-	}
-	am := s.tsoAllocatorManager
-	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
-	if !ok {
-		am.ClusterDCLocationChecker()
-		return &tsopb.GetDCLocationInfoResponse{
-			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN,
-				fmt.Sprintf("dc-location %s is not found", request.GetDcLocation())),
-		}, nil
-	}
-	resp := &tsopb.GetDCLocationInfoResponse{
-		Header: s.header(),
-		Suffix: info.Suffix,
-	}
-	// Because the number of suffix bits is changing dynamically according to the dc-location number,
-	// there is a corner case may cause the Local TSO is not unique while member changing.
-	// Example:
-	//     t1: xxxxxxxxxxxxxxx1 | 11
-	//     t2: xxxxxxxxxxxxxxx | 111
-	// So we will force the newly added Local TSO Allocator to have a Global TSO synchronization
-	// when it becomes the Local TSO Allocator leader.
-	// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
-	if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
-		return &tsopb.GetDCLocationInfoResponse{
-			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-	return resp, nil
-}
-
-// SetExternalTimestamp sets a given external timestamp to perform stale read.
-func (s *Service) SetExternalTimestamp(ctx context.Context, request *tsopb.SetExternalTimestampRequest) (*tsopb.SetExternalTimestampResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.IsLocalRequest(forwardedHost) {
-		client, err := s.GetDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
-		return tsopb.NewTSOClient(client).SetExternalTimestamp(ctx, request)
-	}
-
-	if err := s.ValidateRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-
-	timestamp := request.GetTimestamp()
-	if err := s.SetExternalTS(timestamp); err != nil {
-		return &tsopb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
-	}
-	log.Debug("set external timestamp",
-		zap.Uint64("timestamp", timestamp))
-	return &tsopb.SetExternalTimestampResponse{
-		Header: s.header(),
-	}, nil
-}
-
-// GetExternalTimestamp gets the saved external timstamp.
-func (s *Service) GetExternalTimestamp(ctx context.Context, request *tsopb.GetExternalTimestampRequest) (*tsopb.GetExternalTimestampResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.IsLocalRequest(forwardedHost) {
-		client, err := s.GetDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
-		return tsopb.NewTSOClient(client).GetExternalTimestamp(ctx, request)
-	}
-
-	if err := s.ValidateRequest(request.GetHeader()); err != nil {
-		return nil, err
-	}
-
-	timestamp := s.GetExternalTS()
-	return &tsopb.GetExternalTimestampResponse{
-		Header:    s.header(),
-		Timestamp: timestamp,
-	}, nil
-}
-
 func (s *Service) header() *tsopb.ResponseHeader {
 	if s.clusterID == 0 {
 		return s.wrapErrorToHeader(tsopb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
@@ -269,21 +177,6 @@ func (s *Service) errorHeader(err *tsopb.Error) *tsopb.ResponseHeader {
 		ClusterId: s.clusterID,
 		Error:     err,
 	}
-}
-
-func (s *Service) invalidValue(msg string) *tsopb.ResponseHeader {
-	return s.errorHeader(
-		&tsopb.Error{
-			Type:    tsopb.ErrorType_INVALID_VALUE,
-			Message: msg,
-		})
-}
-
-func (s *Service) notBootstrappedHeader() *tsopb.ResponseHeader {
-	return s.errorHeader(&tsopb.Error{
-		Type:    tsopb.ErrorType_NOT_BOOTSTRAPPED,
-		Message: "cluster is not bootstrapped",
-	})
 }
 
 type tsoRequest struct {

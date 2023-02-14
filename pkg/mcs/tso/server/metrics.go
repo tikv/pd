@@ -18,8 +18,6 @@ import "github.com/prometheus/client_golang/prometheus"
 
 const (
 	namespace = "tso"
-	dcLabel   = "dc"
-	typeLabel = "type"
 )
 
 var (
@@ -50,7 +48,7 @@ var (
 
 	tsoProxyHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
-			Namespace: "pd",
+			Namespace: namespace,
 			Subsystem: "server",
 			Name:      "handle_tso_proxy_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled tso proxy requests.",
@@ -59,7 +57,7 @@ var (
 
 	tsoProxyBatchSize = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
-			Namespace: "pd",
+			Namespace: namespace,
 			Subsystem: "server",
 			Name:      "handle_tso_proxy_batch_size",
 			Help:      "Bucketed histogram of the batch size of handled tso proxy requests.",
@@ -68,7 +66,7 @@ var (
 
 	tsoHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
-			Namespace: "pd",
+			Namespace: namespace,
 			Subsystem: "server",
 			Name:      "handle_tso_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
