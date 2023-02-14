@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/keyspace"
+	"github.com/tikv/pd/server/schedulers"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -428,6 +429,7 @@ type ConfigOption func(conf *config.Config, serverName string)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
+	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
 	for _, conf := range config.InitialServers {

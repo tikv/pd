@@ -22,12 +22,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/tests"
-
-	"github.com/tikv/pd/server/schedulers"
 )
 
 func TestCancelDuringStarting(t *testing.T) {
-	schedulers.Register()
 	prepareTestConfig()
 	defer resetTestConfig()
 	ctx, cancel := context.WithCancel(context.Background())

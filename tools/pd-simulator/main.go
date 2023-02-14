@@ -38,8 +38,6 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
-
-	_ "github.com/tikv/pd/pkg/utils/testutil"
 )
 
 var (
@@ -56,7 +54,6 @@ var (
 )
 
 func main() {
-	schedulers.Register()
 	// wait PD start. Otherwise it will happen error when getting cluster ID.
 	time.Sleep(3 * time.Second)
 	// ignore some undefined flag
@@ -70,6 +67,7 @@ func main() {
 		analysis.GetTransferCounter().Init(simutil.CaseConfigure.StoreNum, simutil.CaseConfigure.RegionNum)
 	}
 
+	schedulers.Register() // register schedulers, which is needed by simConfig.Adjust
 	simConfig := simulator.NewSimConfig(*serverLogLevel)
 	var meta toml.MetaData
 	var err error

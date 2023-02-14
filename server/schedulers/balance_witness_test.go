@@ -33,7 +33,6 @@ func TestBalanceWitnessSchedulerTestSuite(t *testing.T) {
 
 type balanceWitnessSchedulerTestSuite struct {
 	suite.Suite
-	ctx    context.Context
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
 	lb     schedule.Scheduler
@@ -42,9 +41,7 @@ type balanceWitnessSchedulerTestSuite struct {
 }
 
 func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
-	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.opt = config.NewTestOptions()
-	suite.tc = mockcluster.NewCluster(suite.ctx, suite.opt)
+	suite.cancel, suite.opt, suite.tc, suite.oc = prepareSchedulersTest()
 	suite.tc.RuleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "pd",
@@ -53,7 +50,6 @@ func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
 			Count:   4,
 		},
 	})
-	suite.oc = schedule.NewOperatorController(suite.ctx, suite.tc, nil)
 	lb, err := schedule.CreateScheduler(BalanceWitnessType, suite.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceWitnessType, []string{"", ""}))
 	suite.NoError(err)
 	suite.lb = lb

@@ -15,27 +15,20 @@
 package schedulers
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/statistics/buckets"
 )
 
 func TestSplitBucket(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(10, 10)
 	hotBuckets := make(map[uint64][]*buckets.BucketStat, 10)
 	// init cluster: there are 8 regions and their size is 600MB,
@@ -67,7 +60,6 @@ func TestSplitBucket(t *testing.T) {
 	}
 
 	conf := &splitBucketSchedulerConfig{Degree: 10}
-	oc := schedule.NewOperatorController(ctx, nil, nil)
 	scheduler := newSplitBucketScheduler(oc, nil)
 
 	// case1: the key range of the hot bucket stat is [1 2] and the region is [1 10],

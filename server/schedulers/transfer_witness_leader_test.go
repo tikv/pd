@@ -15,28 +15,22 @@
 package schedulers
 
 import (
-	"context"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
 func TestTransferWitnessLeader(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
 
 	// Add stores 1, 2, 3
 	tc.AddLeaderStore(1, 0)
@@ -45,7 +39,7 @@ func TestTransferWitnessLeader(t *testing.T) {
 	// Add regions 1 with leader in stores 1
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
-	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	re.True(sl.IsScheduleAllowed(tc))
@@ -57,12 +51,9 @@ func TestTransferWitnessLeader(t *testing.T) {
 
 func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-
-	opt := config.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 
 	// Add stores 1, 2, 3
