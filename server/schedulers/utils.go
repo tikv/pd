@@ -375,4 +375,3 @@ func (q *retryQuota) GC(keepStores []*core.StoreInfo) {
 		}
 	}
 }
-
