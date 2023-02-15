@@ -48,10 +48,9 @@ func (c *client) GetTSWithinKeyspace(ctx context.Context, keyspaceID uint32) (ph
 	defer cancel()
 
 	start := time.Now()
-	count := uint32(1)
 	req := &tsopb.TsoRequest{
 		Header:     c.getTSORequestHeader(keyspaceID),
-		Count:      count,
+		Count:      1,
 		DcLocation: globalDCLocation,
 	}
 
@@ -65,9 +64,9 @@ func (c *client) GetTSWithinKeyspace(ctx context.Context, keyspaceID uint32) (ph
 		return 0, 0, err
 	}
 	requestDurationTSO.Observe(time.Since(start).Seconds())
-	tsoBatchSize.Observe(float64(count))
+	tsoBatchSize.Observe(1.00)
 
-	if resp.GetCount() != count {
+	if resp.GetCount() != 1 {
 		err = errors.WithStack(errTSOLength)
 		return 0, 0, err
 	}

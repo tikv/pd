@@ -63,7 +63,6 @@ type Server struct {
 	client *clientv3.Client
 	// http client
 	httpClient          *http.Client
-	member              *member.Member
 	tsoAllocatorManager *tso.AllocatorManager
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
@@ -72,8 +71,6 @@ type Server struct {
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
-	// leaderCallbacks will be called after the server becomes leader.
-	leaderCallbacks []func(context.Context)
 }
 
 // NewServer creates a new TSO server.
@@ -86,7 +83,6 @@ func NewServer(ctx context.Context, client *clientv3.Client, httpClient *http.Cl
 		name:              "TSO",
 		client:            client,
 		httpClient:        httpClient,
-		member:            &member.Member{},
 	}
 }
 
@@ -128,12 +124,14 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 
 // GetMember returns the member.
 func (s *Server) GetMember() *member.Member {
-	return s.member
+	return nil
 }
 
-// AddLeaderCallback adds the callback function when the server becomes leader.
+// AddLeaderCallback adds the callback function when the server becomes
+// the global TSO allocator after the flag 'enable-local-tso' is set to true.
 func (s *Server) AddLeaderCallback(callbacks ...func(context.Context)) {
-	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
+	// Leave it empty
+	// TODO: implment it when integerating with the Local/Global TSO Allocator.
 }
 
 // Implement the other methods
