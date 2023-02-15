@@ -107,10 +107,17 @@ func TestUpgrade(t *testing.T) {
 
 func TestGCPendingOpInfos(t *testing.T) {
 	re := require.New(t)
+	checkGCPendingOpInfos(re, false /* disable placement rules */)
+	checkGCPendingOpInfos(re, true /* enable placement rules */)
+}
+
+func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	tc.SetMaxReplicas(3)
-	tc.SetLocationLabels([]string{"zone", "host"})
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	labels := []string{"zone", "host"}
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
 	for id := uint64(1); id <= 10; id++ {
 		tc.PutStoreWithLabels(id)
 	}
@@ -189,25 +196,21 @@ func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	statisticsInterval = 0
-	checkByteRateOnly(re, false)
-	// TODO: enable placement rules
-	// checkByteRateOnly(re, true)
+	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
+	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
 }
 
-func checkByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
+func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
 	cancel, opt, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	opt.SetPlacementRuleEnabled(enablePlacementRules)
-	tc.SetMaxReplicas(3)
-	tc.SetLocationLabels([]string{"zone", "host"})
-	if !enablePlacementRules {
-		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	}
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	labels := []string{"zone", "host"}
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
 	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	tc.SetHotRegionCacheHitsThreshold(0)
 
-	tc.SetEnablePlacementRules(enablePlacementRules)
 	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z2", "host": "h2"})
@@ -584,7 +587,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 
 func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 	re := require.New(t)
-	// todo: add schedulePeerPr,Denoising,statisticsInterval to prepare function
+	// TODO: add schedulePeerPr,Denoising,statisticsInterval to prepare function
 	originValue := schedulePeerPr
 	defer func() {
 		schedulePeerPr = originValue
@@ -1615,13 +1618,15 @@ func addRegionLeaderReadInfo(tc *mockcluster.Cluster, regions []testRegionInfo) 
 	}
 }
 
+type testHotCacheCheckRegionFlowCase struct {
+	kind                      statistics.RWType
+	onlyLeader                bool
+	DegreeAfterTransferLeader int
+}
+
 func TestHotCacheCheckRegionFlow(t *testing.T) {
 	re := require.New(t)
-	testCases := []struct {
-		kind                      statistics.RWType
-		onlyLeader                bool
-		DegreeAfterTransferLeader int
-	}{
+	testCases := []testHotCacheCheckRegionFlowCase{
 		{
 			kind:                      statistics.Write,
 			onlyLeader:                false,
@@ -1640,82 +1645,93 @@ func TestHotCacheCheckRegionFlow(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		cancel, _, tc, oc := prepareSchedulersTest()
-		defer cancel()
-		tc.SetMaxReplicas(3)
-		tc.SetLocationLabels([]string{"zone", "host"})
-		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-		sche, err := schedule.CreateScheduler(HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
-		re.NoError(err)
-		hb := sche.(*hotScheduler)
-		heartbeat := tc.AddLeaderRegionWithWriteInfo
-		if testCase.kind == statistics.Read {
-			if testCase.onlyLeader {
-				heartbeat = tc.AddRegionLeaderWithReadInfo
-			} else {
-				heartbeat = tc.AddRegionWithReadInfo
-			}
-		}
-		tc.AddRegionStore(2, 20)
-		tc.UpdateStorageReadStats(2, 9.5*units.MiB*statistics.StoreHeartBeatReportInterval, 9.5*units.MiB*statistics.StoreHeartBeatReportInterval)
-		reportInterval := uint64(statistics.WriteReportInterval)
-		if testCase.kind == statistics.Read {
-			reportInterval = uint64(statistics.ReadReportInterval)
-		}
-		// hot degree increase
-		heartbeat(1, 1, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)
-		heartbeat(1, 1, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)
-		items := heartbeat(1, 1, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)
-		re.NotEmpty(items)
-		for _, item := range items {
-			re.Equal(3, item.HotDegree)
-		}
-		// transfer leader
-		items = heartbeat(1, 2, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{1, 3}, 1)
-		for _, item := range items {
-			if item.StoreID == 2 {
-				re.Equal(testCase.DegreeAfterTransferLeader, item.HotDegree)
-			}
-		}
+		checkHotCacheCheckRegionFlow(re, testCase, false /* disable placement rules */)
+		checkHotCacheCheckRegionFlow(re, testCase, true /* enable placement rules */)
+	}
+}
 
-		if testCase.DegreeAfterTransferLeader >= 3 {
-			// try schedule
-			hb.prepareForBalance(testCase.kind, tc)
-			leaderSolver := newBalanceSolver(hb, tc, testCase.kind, transferLeader)
-			leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testCase.kind, transferLeader)][2]}
-			re.Empty(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore)) // skip schedule
-			threshold := tc.GetHotRegionCacheHitsThreshold()
-			leaderSolver.minHotDegree = 0
-			re.Len(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), 1)
-			leaderSolver.minHotDegree = threshold
+func checkHotCacheCheckRegionFlow(re *require.Assertions, testCase testHotCacheCheckRegionFlowCase, enablePlacementRules bool) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	labels := []string{"zone", "host"}
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
+	sche, err := schedule.CreateScheduler(HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	heartbeat := tc.AddLeaderRegionWithWriteInfo
+	if testCase.kind == statistics.Read {
+		if testCase.onlyLeader {
+			heartbeat = tc.AddRegionLeaderWithReadInfo
+		} else {
+			heartbeat = tc.AddRegionWithReadInfo
 		}
+	}
+	tc.AddRegionStore(2, 20)
+	tc.UpdateStorageReadStats(2, 9.5*units.MiB*statistics.StoreHeartBeatReportInterval, 9.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+	reportInterval := uint64(statistics.WriteReportInterval)
+	if testCase.kind == statistics.Read {
+		reportInterval = uint64(statistics.ReadReportInterval)
+	}
+	// hot degree increase
+	heartbeat(1, 1, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)
+	heartbeat(1, 1, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)
+	items := heartbeat(1, 1, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)
+	re.NotEmpty(items)
+	for _, item := range items {
+		re.Equal(3, item.HotDegree)
+	}
+	// transfer leader
+	items = heartbeat(1, 2, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{1, 3}, 1)
+	for _, item := range items {
+		if item.StoreID == 2 {
+			re.Equal(testCase.DegreeAfterTransferLeader, item.HotDegree)
+		}
+	}
 
-		// move peer: add peer and remove peer
-		items = heartbeat(1, 2, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{1, 3, 4}, 1)
-		re.NotEmpty(items)
-		for _, item := range items {
-			re.Equal(testCase.DegreeAfterTransferLeader+1, item.HotDegree)
+	if testCase.DegreeAfterTransferLeader >= 3 {
+		// try schedule
+		hb.prepareForBalance(testCase.kind, tc)
+		leaderSolver := newBalanceSolver(hb, tc, testCase.kind, transferLeader)
+		leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testCase.kind, transferLeader)][2]}
+		re.Empty(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore)) // skip schedule
+		threshold := tc.GetHotRegionCacheHitsThreshold()
+		leaderSolver.minHotDegree = 0
+		re.Len(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore), 1)
+		leaderSolver.minHotDegree = threshold
+	}
+
+	// move peer: add peer and remove peer
+	items = heartbeat(1, 2, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{1, 3, 4}, 1)
+	re.NotEmpty(items)
+	for _, item := range items {
+		re.Equal(testCase.DegreeAfterTransferLeader+1, item.HotDegree)
+	}
+	items = heartbeat(1, 2, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{1, 4}, 1)
+	re.NotEmpty(items)
+	for _, item := range items {
+		if item.StoreID == 3 {
+			re.Equal(statistics.Remove, item.GetActionType())
+			continue
 		}
-		items = heartbeat(1, 2, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{1, 4}, 1)
-		re.NotEmpty(items)
-		for _, item := range items {
-			if item.StoreID == 3 {
-				re.Equal(statistics.Remove, item.GetActionType())
-				continue
-			}
-			re.Equal(testCase.DegreeAfterTransferLeader+2, item.HotDegree)
-		}
-		cancel()
+		re.Equal(testCase.DegreeAfterTransferLeader+2, item.HotDegree)
 	}
 }
 
 func TestHotCacheCheckRegionFlowWithDifferentThreshold(t *testing.T) {
 	re := require.New(t)
+	checkHotCacheCheckRegionFlowWithDifferentThreshold(re, false /* disable placement rules */)
+	checkHotCacheCheckRegionFlowWithDifferentThreshold(re, true /* enable placement rules */)
+}
+
+func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, enablePlacementRules bool) {
 	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
-	tc.SetMaxReplicas(3)
-	tc.SetLocationLabels([]string{"zone", "host"})
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	labels := []string{"zone", "host"}
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
 	statistics.ThresholdsUpdateInterval = 0
 	defer func() {
 		statistics.ThresholdsUpdateInterval = statistics.StoreHeartBeatReportInterval
@@ -1748,7 +1764,6 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	tc.SetMaxReplicas(3)
 	sche, err := schedule.CreateScheduler(HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
@@ -1893,11 +1908,17 @@ func loadsEqual(loads1, loads2 []float64) bool {
 
 func TestHotReadPeerSchedule(t *testing.T) {
 	re := require.New(t)
+	checkHotReadPeerSchedule(re, false /* disable placement rules */)
+	checkHotReadPeerSchedule(re, true /* enable placement rules */)
+}
+
+func checkHotReadPeerSchedule(re *require.Assertions, enablePlacementRules bool) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetMaxReplicas(3)
-	tc.SetLocationLabels([]string{"zone", "host"})
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	labels := []string{"zone", "host"}
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
 	for id := uint64(1); id <= 6; id++ {
 		tc.PutStoreWithLabels(id)
 	}
