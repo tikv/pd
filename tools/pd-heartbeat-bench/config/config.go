@@ -6,7 +6,6 @@ import (
 	"github.com/pingcap/log"
 	flag "github.com/spf13/pflag"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -32,8 +31,8 @@ type Config struct {
 	StatusAddr string
 
 	Log      log.Config `toml:"log" json:"log"`
-	logger   *zap.Logger
-	logProps *log.ZapProperties
+	Logger   *zap.Logger
+	LogProps *log.ZapProperties
 
 	StoreCount        int     `toml:"store-count" json:"store-count"`
 	RegionCount       int     `toml:"region-count" json:"region-count"`
@@ -136,27 +135,6 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
 	meta, err := toml.DecodeFile(path, c)
 	return &meta, err
-}
-
-// SetupLogger setup the logger.
-func (c *Config) SetupLogger() error {
-	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
-	if err != nil {
-		return err
-	}
-	c.logger = lg
-	c.logProps = p
-	return nil
-}
-
-// GetZapLogger gets the created zap logger.
-func (c *Config) GetZapLogger() *zap.Logger {
-	return c.logger
-}
-
-// GetZapLogProperties gets properties of the zap logger.
-func (c *Config) GetZapLogProperties() *log.ZapProperties {
-	return c.logProps
 }
 
 func adjustFloat64(v *float64, defValue float64) {

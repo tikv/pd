@@ -17,7 +17,6 @@ package config
 import (
 	"crypto/tls"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"math"
 	"net/url"
@@ -27,12 +26,12 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -46,18 +45,11 @@ import (
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // Config is the pd server configuration.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Config struct {
-	flagSet *flag.FlagSet
-
-	Version bool `json:"-"`
-
-	ConfigCheck bool `json:"-"`
-
 	ClientUrls          string `toml:"client-urls" json:"client-urls"`
 	PeerUrls            string `toml:"peer-urls" json:"peer-urls"`
 	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
@@ -150,8 +142,6 @@ type Config struct {
 
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
-	configFile string
-
 	// For all warnings during parsing.
 	WarningMsgs []string
 
@@ -160,8 +150,8 @@ type Config struct {
 	HeartbeatStreamBindInterval typeutil.Duration
 	LeaderPriorityCheckInterval typeutil.Duration
 
-	logger   *zap.Logger
-	logProps *log.ZapProperties
+	Logger   *zap.Logger        `json:"-"`
+	LogProps *log.ZapProperties `json:"-"`
 
 	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
 
@@ -172,36 +162,7 @@ type Config struct {
 
 // NewConfig creates a new config.
 func NewConfig() *Config {
-	cfg := &Config{}
-	cfg.flagSet = flag.NewFlagSet("pd", flag.ContinueOnError)
-	fs := cfg.flagSet
-
-	fs.BoolVar(&cfg.Version, "V", false, "print version information and exit")
-	fs.BoolVar(&cfg.Version, "version", false, "print version information and exit")
-	fs.StringVar(&cfg.configFile, "config", "", "config file")
-	fs.BoolVar(&cfg.ConfigCheck, "config-check", false, "check config file validity and exit")
-
-	fs.StringVar(&cfg.Name, "name", "", "human-readable name for this pd member")
-
-	fs.StringVar(&cfg.DataDir, "data-dir", "", "path to the data directory (default 'default.${name}')")
-	fs.StringVar(&cfg.ClientUrls, "client-urls", defaultClientUrls, "url for client traffic")
-	fs.StringVar(&cfg.AdvertiseClientUrls, "advertise-client-urls", "", "advertise url for client traffic (default '${client-urls}')")
-	fs.StringVar(&cfg.PeerUrls, "peer-urls", defaultPeerUrls, "url for peer traffic")
-	fs.StringVar(&cfg.AdvertisePeerUrls, "advertise-peer-urls", "", "advertise url for peer traffic (default '${peer-urls}')")
-	fs.StringVar(&cfg.InitialCluster, "initial-cluster", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
-	fs.StringVar(&cfg.Join, "join", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
-
-	fs.StringVar(&cfg.Metric.PushAddress, "metrics-addr", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
-
-	fs.StringVar(&cfg.Log.Level, "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
-	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
-
-	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "path of file that contains list of trusted TLS CAs")
-	fs.StringVar(&cfg.Security.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
-	fs.StringVar(&cfg.Security.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
-	fs.BoolVar(&cfg.ForceNewCluster, "force-new-cluster", false, "force to create a new one-member cluster")
-
-	return cfg
+	return &Config{}
 }
 
 const (
@@ -391,54 +352,66 @@ func adjustPath(p *string) {
 }
 
 // Parse parses flag definitions from the argument list.
-func (c *Config) Parse(arguments []string) error {
-	// Parse first to get config file.
-	err := c.flagSet.Parse(arguments)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-
+func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	// Load config file if specified.
 	var meta *toml.MetaData
-	if c.configFile != "" {
-		meta, err = c.configFromFile(c.configFile)
+	if configFile, _ := flagSet.GetString("config"); configFile != "" {
+		meta, err := c.configFromFile(configFile)
 		if err != nil {
 			return err
 		}
 
 		// Backward compatibility for toml config
 		if c.LogFileDeprecated != "" {
-			msg := fmt.Sprintf("log-file in %s is deprecated, use [log.file] instead", c.configFile)
+			msg := fmt.Sprintf("log-file in %s is deprecated, use [log.file] instead", configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 			if c.Log.File.Filename == "" {
 				c.Log.File.Filename = c.LogFileDeprecated
 			}
 		}
 		if c.LogLevelDeprecated != "" {
-			msg := fmt.Sprintf("log-level in %s is deprecated, use [log] instead", c.configFile)
+			msg := fmt.Sprintf("log-level in %s is deprecated, use [log] instead", configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 			if c.Log.Level == "" {
 				c.Log.Level = c.LogLevelDeprecated
 			}
 		}
 		if meta.IsDefined("schedule", "disable-raft-learner") {
-			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", c.configFile)
+			msg := fmt.Sprintf("disable-raft-learner in %s is deprecated", configFile)
 			c.WarningMsgs = append(c.WarningMsgs, msg)
 		}
 	}
 
-	// Parse again to replace with command line options.
-	err = c.flagSet.Parse(arguments)
-	if err != nil {
-		return errors.WithStack(err)
-	}
+	// ignore the error check here
+	adjustCommandlineString(flagSet, &c.Log.Level, "log-level")
+	adjustCommandlineString(flagSet, &c.Log.File.Filename, "log-file")
+	adjustCommandlineString(flagSet, &c.Name, "name")
+	adjustCommandlineString(flagSet, &c.DataDir, "data-dir")
+	adjustCommandlineString(flagSet, &c.ClientUrls, "client-urls")
+	adjustCommandlineString(flagSet, &c.AdvertiseClientUrls, "advertise-client-urls")
+	adjustCommandlineString(flagSet, &c.PeerUrls, "peer-urls")
+	adjustCommandlineString(flagSet, &c.AdvertisePeerUrls, "advertise-peer-urls")
+	adjustCommandlineString(flagSet, &c.InitialCluster, "initial-cluster")
+	adjustCommandlineString(flagSet, &c.Join, "join")
+	adjustCommandlineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
+	adjustCommandlineString(flagSet, &c.Security.CAPath, "cacert")
+	adjustCommandlineString(flagSet, &c.Security.CertPath, "cert")
+	adjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
+	adjustCommandlineBool(flagSet, &c.ForceNewCluster, "force-new-cluster")
 
-	if len(c.flagSet.Args()) != 0 {
-		return errors.Errorf("'%s' is an invalid flag", c.flagSet.Arg(0))
-	}
+	return c.Adjust(meta, false)
+}
 
-	err = c.Adjust(meta, false)
-	return err
+func adjustCommandlineString(flagSet *pflag.FlagSet, v *string, name string) {
+	if value, _ := flagSet.GetString(name); value != "" {
+		*v = value
+	}
+}
+
+func adjustCommandlineBool(flagSet *pflag.FlagSet, v *bool, name string) {
+	if value, _ := flagSet.GetBool(name); value {
+		*v = value
+	}
 }
 
 // Validate is used to validate if some configurations are right.
@@ -1301,33 +1274,6 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
-// SetupLogger setup the logger.
-func (c *Config) SetupLogger() error {
-	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
-	if err != nil {
-		return errs.ErrInitLogger.Wrap(err).FastGenWithCause()
-	}
-	c.logger = lg
-	c.logProps = p
-	logutil.SetRedactLog(c.Security.RedactInfoLog)
-	return nil
-}
-
-// GetZapLogger gets the created zap logger.
-func (c *Config) GetZapLogger() *zap.Logger {
-	return c.logger
-}
-
-// GetZapLogProperties gets properties of the zap logger.
-func (c *Config) GetZapLogProperties() *log.ZapProperties {
-	return c.logProps
-}
-
-// GetConfigFile gets the config file.
-func (c *Config) GetConfigFile() string {
-	return c.configFile
-}
-
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO
@@ -1382,7 +1328,7 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
 	cfg.PeerTLSInfo.AllowedCN = allowedCN
 	cfg.ForceNewCluster = c.ForceNewCluster
-	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.logger, c.logger.Core(), c.logProps.Syncer)
+	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.Logger, c.Logger.Core(), c.LogProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
 	cfg.EnableV2 = true
 	cfg.Logger = "zap"

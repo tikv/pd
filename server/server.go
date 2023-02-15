@@ -248,8 +248,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 	}
 
 	s.etcdCfg = etcdCfg
-	s.lg = cfg.GetZapLogger()
-	s.logProps = cfg.GetZapLogProperties()
+	s.lg = cfg.Logger
+	s.logProps = cfg.LogProps
 	return s, nil
 }
 
