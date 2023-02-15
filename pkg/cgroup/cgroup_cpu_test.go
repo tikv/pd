@@ -89,7 +89,7 @@ func TestGetCgroupCPU(t *testing.T) {
 		if checkKernelVersionNewerThan(t, 4, 7) {
 			require.NoError(t, err, "linux version > v4.7 and err still happens")
 		} else {
-			log.Info("the 'no cpu controller detected' error is ignored because the kernel is too old")
+			log.Warn("the 'no cpu controller detected' error is ignored because the kernel is too old")
 		}
 	} else {
 		require.NoError(t, err)
