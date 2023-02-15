@@ -140,6 +140,8 @@ type Client interface {
 	KeyspaceClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
+	// TSOClient is the client of TSO service
+	TSOClient
 	// Close closes the client.
 	Close()
 }
