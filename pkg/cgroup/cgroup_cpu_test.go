@@ -21,7 +21,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestGetCgroupCPU(t *testing.T) {
@@ -42,9 +44,12 @@ func TestGetCgroupCPU(t *testing.T) {
 		}()
 	}
 	cpu, err := GetCgroupCPU()
+	log.Info("InContainer()", zap.Bool("InContainer", InContainer()))
 	if err == errNoCPUControllerDetected {
+		log.Info("errNoCPUControllerDetected", zap.Bool("errNoCPUControllerDetected", true))
 		require.False(t, InContainer(), "Please check linux version > v4.7.x. This is related to cgroup compatibility.")
 	} else {
+		log.Info("errNoCPUControllerDetected", zap.Bool("errNoCPUControllerDetected", false))
 		require.NoError(t, err)
 		require.NotZero(t, cpu.Period)
 		require.Less(t, int64(1), cpu.Period)
