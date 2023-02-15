@@ -15,11 +15,12 @@
 package tso
 
 import (
-	"flag"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -34,13 +35,7 @@ const (
 
 // Config is the configuration for the TSO.
 type Config struct {
-	flagSet *flag.FlagSet
-
-	Version bool `json:"-"`
-
-	configFile string
-
-	BackendEndpoints string `toml:"backend-endpoint" json:"backend-endpoint"`
+	BackendEndpoints string `toml:"backend-endpoints" json:"backend-endpoints"`
 	ListenAddr       string `toml:"listen-addr" json:"listen-addr"`
 
 	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
@@ -75,28 +70,37 @@ type Config struct {
 
 // NewConfig creates a new config.
 func NewConfig() *Config {
-	cfg := &Config{}
-	cfg.flagSet = flag.NewFlagSet("tso", flag.ContinueOnError)
-	fs := cfg.flagSet
-
-	fs.StringVar(&cfg.configFile, "config", "", "config file")
-	fs.StringVar(&cfg.BackendEndpoints, "backend-points", "", "backend endpoints")
-	fs.StringVar(&cfg.ListenAddr, "listen-addr", "", "listen address")
-
-	return cfg
+	return &Config{}
 }
 
 // Parse parses flag definitions from the argument list.
-func (c *Config) Parse(arguments []string) error {
-	// Parse first to get config file.
-	err := c.flagSet.Parse(arguments)
-	if err != nil {
-		return errors.WithStack(err)
+func (c *Config) Parse(flagSet *pflag.FlagSet) error {
+	// Load config file if specified.
+	if configFile, _ := flagSet.GetString("config"); configFile != "" {
+		_, err := c.configFromFile(configFile)
+		if err != nil {
+			return err
+		}
 	}
 
-	// TODO: Implement the main function body
+	// ignore the error check here
+	adjustCommandlineString(flagSet, &c.Log.Level, "log-level")
+	adjustCommandlineString(flagSet, &c.Log.File.Filename, "log-file")
+	adjustCommandlineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
+	adjustCommandlineString(flagSet, &c.Security.CAPath, "cacert")
+	adjustCommandlineString(flagSet, &c.Security.CertPath, "cert")
+	adjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
+	adjustCommandlineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
+	adjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
 
+	// TODO: Implement the main function body
 	return nil
+}
+
+// configFromFile loads config from file.
+func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
+	meta, err := toml.DecodeFile(path, c)
+	return &meta, errors.WithStack(err)
 }
 
 // SecurityConfig indicates the security configuration for pd server
@@ -105,4 +109,10 @@ type SecurityConfig struct {
 	// RedactInfoLog indicates that whether enabling redact log
 	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
 	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
+}
+
+func adjustCommandlineString(flagSet *pflag.FlagSet, v *string, name string) {
+	if value, _ := flagSet.GetString(name); value != "" {
+		*v = value
+	}
 }
