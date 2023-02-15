@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -63,6 +64,20 @@ func StringToZapLogLevel(level string) zapcore.Level {
 		return zapcore.InfoLevel
 	}
 	return zapcore.InfoLevel
+}
+
+// SetupLogger setup the logger.
+func SetupLogger(logConfig log.Config, logger **zap.Logger, logProps **log.ZapProperties, enabled ...bool) error {
+	lg, p, err := log.InitLogger(&logConfig, zap.AddStacktrace(zapcore.FatalLevel))
+	if err != nil {
+		return errs.ErrInitLogger.Wrap(err).FastGenWithCause()
+	}
+	*logger = lg
+	*logProps = p
+	if len(enabled) > 0 {
+		SetRedactLog(enabled[0])
+	}
+	return nil
 }
 
 // LogPanic logs the panic reason and stack, then exit the process.

@@ -19,16 +19,19 @@ import (
 	"flag"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 // Server is the TSO server, and it implements bs.Server.
@@ -69,12 +72,24 @@ func (s *Server) GetHTTPClient() *http.Client {
 }
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
-func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, bs.Server) {
+func CreateServerWrapper(cmd *cobra.Command, args []string) {
+	cmd.Flags().Parse(args)
 	cfg := tso.NewConfig()
-	err := cfg.Parse(os.Args[1:])
+	flagSet := cmd.Flags()
+	err := cfg.Parse(flagSet)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
 
-	if cfg.Version {
-		printVersionInfo()
+	printVersion, err := flagSet.GetBool("version")
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	if printVersion {
+		// TODO: support printing TSO server info
+		// server.PrintTSOInfo()
 		exit(0)
 	}
 
@@ -88,12 +103,18 @@ func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, bs
 		log.Fatal("parse cmd flags error", errs.ZapError(err))
 	}
 
-	if cfg.ConfigCheck {
-		printConfigCheckMsg(cfg)
-		exit(0)
+	// New zap logger
+	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	if err == nil {
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+	} else {
+		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
+	// Flushing any buffered log entries
+	defer log.Sync()
 
-	// TODO: Initialize logger
+	// TODO: support printing TSO server info
+	// LogTSOInfo()
 
 	// TODO: Make it configurable if it has big impact on performance.
 	grpcprometheus.EnableHandlingTimeHistogram()
@@ -101,16 +122,36 @@ func CreateServerWrapper(args []string) (context.Context, context.CancelFunc, bs
 	metricutil.Push(&cfg.Metric)
 
 	// TODO: Create the server
+	ctx, cancel := context.WithCancel(context.Background())
+	svr := &Server{}
 
-	return nil, nil, nil
-}
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
 
-// TODO: implement it
-func printVersionInfo() {
-}
+	var sig os.Signal
+	go func() {
+		sig = <-sc
+		cancel()
+	}()
 
-// TODO: implement it
-func printConfigCheckMsg(cfg *tso.Config) {
+	if err := svr.Run(); err != nil {
+		log.Fatal("run server failed", errs.ZapError(err))
+	}
+
+	<-ctx.Done()
+	log.Info("Got signal to exit", zap.String("signal", sig.String()))
+
+	svr.Close()
+	switch sig {
+	case syscall.SIGTERM:
+		exit(0)
+	default:
+		exit(1)
+	}
 }
 
 func exit(code int) {

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -177,7 +178,13 @@ max-merge-region-size = 0
 enable-one-way-merge = true
 leader-schedule-limit = 0
 `
+
+	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	flagSet.Parse(nil)
 	cfg := NewConfig()
+	err := cfg.Parse(flagSet)
+	re.NoError(err)
 	meta, err := toml.Decode(cfgData, &cfg)
 	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
