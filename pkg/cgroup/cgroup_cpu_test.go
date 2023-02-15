@@ -25,9 +25,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 func checkKernelVersionNewerThan(t *testing.T, major, minor int) bool {
@@ -42,14 +40,15 @@ func checkKernelVersionNewerThan(t *testing.T, major, minor int) bool {
 		releaseBs = append(releaseBs, byte(v))
 	}
 	releaseStr := string(releaseBs)
-	log.Info("kernel release string", zap.String("release-str", releaseStr))
+	t.Log("kernel release string:", releaseStr)
 	versionInfoRE := regexp.MustCompile(`[0-9]+\.[0-9]+\.[0-9]+`)
 	kernelVerion := versionInfoRE.FindAllString(releaseStr, 1)
 	require.Equal(t, 1, len(kernelVerion), fmt.Sprintf("release str is %s", releaseStr))
 	kernelVersionPartRE := regexp.MustCompile(`[0-9]+`)
 	kernelVersionParts := kernelVersionPartRE.FindAllString(kernelVerion[0], -1)
 	require.Equal(t, 3, len(kernelVersionParts), fmt.Sprintf("kernel verion str is %s", kernelVerion[0]))
-	log.Info("parsed kernel version parts", zap.String("major", kernelVersionParts[0]), zap.String("minor", kernelVersionParts[1]), zap.String("patch", kernelVersionParts[2]))
+	t.Logf("parsed kernel version parts: major %s, minor %s, patch %s",
+		kernelVersionParts[0], kernelVersionParts[1], kernelVersionParts[2])
 	mustConvInt := func(s string) int {
 		i, err := strconv.Atoi(s)
 		require.NoError(t, err, s)
@@ -89,7 +88,7 @@ func TestGetCgroupCPU(t *testing.T) {
 		if checkKernelVersionNewerThan(t, 4, 7) {
 			require.NoError(t, err, "linux version > v4.7 and err still happens")
 		} else {
-			log.Warn("the 'no cpu controller detected' error is ignored because the kernel is too old")
+			t.Log("the 'no cpu controller detected' error is ignored because the kernel is too old")
 		}
 	} else {
 		require.NoError(t, err)
