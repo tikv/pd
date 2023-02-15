@@ -62,7 +62,7 @@ func TestMigrateGlobalTSO(t *testing.T) {
 
 	resp, err = client.Get(context.Background(), oldGlobalPath)
 	re.NoError(err)
-	re.Empty(resp.Kvs)
+	re.NotEmpty(resp.Kvs)
 
 	newLocalPath := path.Join(rootPath, "ms", "tso", "default", "lts", "dc1", "timestamp")
 	resp, err = client.Get(context.Background(), newLocalPath)
@@ -73,7 +73,7 @@ func TestMigrateGlobalTSO(t *testing.T) {
 
 	resp, err = client.Get(context.Background(), oldLocalPath)
 	re.NoError(err)
-	re.Empty(resp.Kvs)
+	re.NotEmpty(resp.Kvs)
 }
 
 func TestMigrateLocalTSO(t *testing.T) {
@@ -123,7 +123,7 @@ func TestMigrateLocalTSO(t *testing.T) {
 
 	resp, err = client.Get(context.Background(), oldGlobalPath)
 	re.NoError(err)
-	re.Empty(resp.Kvs)
+	re.NotEmpty(resp.Kvs)
 
 	newLocalPath := path.Join(rootPath, "ms", "tso", "default", "lts", "dc1", "timestamp")
 	resp, err = client.Get(context.Background(), newLocalPath)
@@ -134,5 +134,5 @@ func TestMigrateLocalTSO(t *testing.T) {
 
 	resp, err = client.Get(context.Background(), oldLocalPath)
 	re.NoError(err)
-	re.Empty(resp.Kvs)
+	re.NotEmpty(resp.Kvs)
 }

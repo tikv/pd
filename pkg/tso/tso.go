@@ -181,25 +181,27 @@ func (t *timestampOracle) SyncTimestamp() error {
 	failpoint.Inject("delaySyncTimestamp", func() {
 		time.Sleep(time.Second)
 	})
-	// It is for compatibility with the old version and will try to load timestamp from the old path at the first time.
-	// Then, switch to the new path.
-	last, kvs, err := t.loadTimestamp()
+
+	last, err := t.storage.LoadTimestamp(defaultKeyspaceGroup, t.dcLocation)
 	if err != nil {
 		return err
 	}
-	// If old path exists, we should switch to the new path.
-	if len(kvs) != 0 {
-		for _, kv := range kvs {
-			if strings.HasPrefix(string(kv.Key), t.rootPath) {
-				t.switchToNewPath(kv)
+	if last == typeutil.ZeroTime {
+		var kvs []*mvccpb.KeyValue
+		// It is for compatibility with the old version and will try to load timestamp from the old path at the first time.
+		// Then, switch to the new path.
+		last, kvs, err = t.loadTimestamp()
+		if err != nil {
+			return err
+		}
+		// If old path exists, we should switch to the new path.
+		if len(kvs) != 0 {
+			for _, kv := range kvs {
+				if strings.HasPrefix(string(kv.Key), t.rootPath) {
+					t.switchToNewPath(kv)
+				}
 			}
 		}
-	} else {
-		// Use new path to load timestamp.
-		last, err = t.storage.LoadTimestamp(defaultKeyspaceGroup, t.dcLocation)
-	}
-	if err != nil {
-		return err
 	}
 
 	next := time.Now()
@@ -244,7 +246,7 @@ func (t *timestampOracle) switchToNewPath(keyValue *mvccpb.KeyValue) error {
 	if len(keySlice) == oldLocalTSOKeyLen+1 {
 		newPath = path.Join("/", keySlice[1], keySlice[2], endpoint.TimestampPath(defaultKeyspaceGroup, keySlice[4]))
 	}
-	resp, err := kv.NewSlowLogTxn(t.client).Then(clientv3.OpPut(newPath, string(keyValue.Value)), clientv3.OpDelete(oldPath)).Commit()
+	resp, err := kv.NewSlowLogTxn(t.client).Then(clientv3.OpPut(newPath, string(keyValue.Value))).Commit()
 	if err != nil {
 		return errs.ErrEtcdKVTxn.Wrap(err).GenWithStackByCause()
 	}
