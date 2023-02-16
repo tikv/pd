@@ -187,14 +187,16 @@ type Server struct {
 	auditBackends []audit.Backend
 
 	registry *registry.ServiceRegistry
+	// apiMode indicates whether the server is running in API mode.
+	apiMode bool
 }
 
 // HandlerBuilder builds a server HTTP handler.
 type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APIServiceGroup, error)
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
-	log.Info("PD Config", zap.Reflect("config", cfg))
+func CreateServer(ctx context.Context, cfg *config.Config, apiMode bool, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
+	log.Info("server config", zap.Reflect("config", cfg))
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
@@ -207,6 +209,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		ctx:                             ctx,
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		apiMode:                         apiMode,
 	}
 	s.handler = newHandler(s)
 
@@ -356,20 +359,22 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 	})
 
-	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.member, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
-		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
-	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
-	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
-	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
-	if !s.cfg.EnableLocalTSO {
-		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
-			return err
+	if !s.apiMode {
+		s.tsoAllocatorManager = tso.NewAllocatorManager(
+			s.member, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
+			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
+		// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
+		s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
+		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
+		if !s.cfg.EnableLocalTSO {
+			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
+				return err
+			}
 		}
-	}
-	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
-		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
-			return err
+		if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
+			if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
+				return err
+			}
 		}
 	}
 	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
@@ -508,12 +513,15 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(5)
+	s.serverLoopWg.Add(4)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
-	go s.tsoAllocatorLoop()
 	go s.encryptionKeyManagerLoop()
+	if !s.apiMode {
+		s.serverLoopWg.Add(1)
+		go s.tsoAllocatorLoop()
+	}
 }
 
 func (s *Server) stopServerLoop() {
@@ -664,6 +672,11 @@ func (s *Server) createRaftCluster() error {
 func (s *Server) stopRaftCluster() {
 	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
+}
+
+// IsAPIMode returns if the server is in API mode.
+func (s *Server) IsAPIMode() bool {
+	return s.apiMode
 }
 
 // GetAddr returns the server urls for clients.
@@ -1392,14 +1405,14 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign pd leader", zap.String("campaign-pd-leader-name", s.Name()))
+	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info("campaign pd leader meets error due to txn conflict, another PD server may campaign successfully",
-				zap.String("campaign-pd-leader-name", s.Name()))
+			log.Info("campaign leader meets error due to txn conflict, another PD/API server may campaign successfully",
+				zap.String("campaign-leader-name", s.Name()))
 		} else {
-			log.Error("campaign pd leader meets error due to etcd error",
-				zap.String("campaign-pd-leader-name", s.Name()),
+			log.Error("campaign leader meets error due to etcd error",
+				zap.String("campaign-leader-name", s.Name()),
 				errs.ZapError(err))
 		}
 		return
@@ -1418,26 +1431,28 @@ func (s *Server) campaignLeader() {
 
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
-	log.Info("campaign pd leader ok", zap.String("campaign-pd-leader-name", s.Name()))
+	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
 
-	allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
-		return
+	if !s.apiMode {
+		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+		if err != nil {
+			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
+			return
+		}
+		log.Info("initializing the global TSO allocator")
+		if err := allocator.Initialize(0); err != nil {
+			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+			return
+		}
+		defer func() {
+			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+			failpoint.Inject("updateAfterResetTSO", func() {
+				if err = allocator.UpdateTSO(); err != nil {
+					panic(err)
+				}
+			})
+		}()
 	}
-	log.Info("initializing the global TSO allocator")
-	if err := allocator.Initialize(0); err != nil {
-		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-		return
-	}
-	defer func() {
-		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-		failpoint.Inject("updateAfterResetTSO", func() {
-			if err = allocator.UpdateTSO(); err != nil {
-				panic(err)
-			}
-		})
-	}()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
@@ -1471,8 +1486,10 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	// Check the cluster dc-location after the PD leader is elected.
-	go s.tsoAllocatorManager.ClusterDCLocationChecker()
+	if !s.apiMode {
+		// Check the cluster dc-location after the PD leader is elected.
+		go s.tsoAllocatorManager.ClusterDCLocationChecker()
+	}
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
@@ -1481,7 +1498,7 @@ func (s *Server) campaignLeader() {
 	})
 
 	CheckPDVersion(s.persistOptions)
-	log.Info("PD cluster leader is ready to serve", zap.String("pd-leader-name", s.Name()))
+	log.Info("leader is ready to serve", zap.String("leader-name", s.Name()))
 
 	leaderTicker := time.NewTicker(leaderTickInterval)
 	defer leaderTicker.Stop()
