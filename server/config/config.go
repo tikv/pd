@@ -176,9 +176,11 @@ const (
 	// then 150MB can fit for store reports that have about 300k regions which is something of a huge amount of region on one TiKV.
 	defaultMaxRequestBytes = uint(150 * units.MiB) // 150MB
 
-	defaultName                = "pd"
-	defaultClientUrls          = "http://127.0.0.1:2379"
-	defaultPeerUrls            = "http://127.0.0.1:2380"
+	defaultName = "pd"
+	// DefaultClientUrls is the default value for client-urls
+	DefaultClientUrls = "http://127.0.0.1:2379"
+	// DefaultPeerUrls si the default value for peer-urls
+	DefaultPeerUrls            = "http://127.0.0.1:2380"
 	defaultInitialClusterState = embed.ClusterStateFlagNew
 	defaultInitialClusterToken = "pd-cluster"
 
@@ -459,9 +461,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		return err
 	}
 
-	adjustString(&c.ClientUrls, defaultClientUrls)
+	adjustString(&c.ClientUrls, DefaultClientUrls)
 	adjustString(&c.AdvertiseClientUrls, c.ClientUrls)
-	adjustString(&c.PeerUrls, defaultPeerUrls)
+	adjustString(&c.PeerUrls, DefaultPeerUrls)
 	adjustString(&c.AdvertisePeerUrls, c.PeerUrls)
 	adjustDuration(&c.Metric.PushInterval, defaultMetricsPushInterval)
 
