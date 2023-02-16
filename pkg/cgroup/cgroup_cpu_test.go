@@ -57,10 +57,8 @@ func checkKernelVersionNewerThan(t *testing.T, major, minor int) bool {
 	versionNewerThanFlag := false
 	if mustConvInt(kernelVersionParts[0]) > major {
 		versionNewerThanFlag = true
-	} else {
-		if mustConvInt(kernelVersionParts[0]) == major && mustConvInt(kernelVersionParts[1]) > minor {
-			versionNewerThanFlag = true
-		}
+	} else if mustConvInt(kernelVersionParts[0]) == major && mustConvInt(kernelVersionParts[1]) > minor {
+		versionNewerThanFlag = true
 	}
 	return versionNewerThanFlag
 }
