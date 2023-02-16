@@ -1,8 +1,11 @@
 <!--
+
 Thank you for working on PD! Please read PD's [CONTRIBUTING](https://github.com/tikv/pd/blob/master/CONTRIBUTING.md) document **BEFORE** filing this PR.
+
 PR Title Format:
 1. pkg [, pkg2, pkg3]: what's changed
 2. *: what's changed
+
 -->
 
 ### What problem does this PR solve?
@@ -44,7 +47,7 @@ Tests
 
 Code changes
 
-- Has configuration change
+- Has the configuration change
 - Has HTTP API interfaces changed (Don't forget to [add the declarative for the new API](https://github.com/tikv/pd/blob/master/docs/development.md#updating-api-documentation))
 - Has persistent data change
 
@@ -62,12 +65,14 @@ Related changes
 
 ### Release note
 
-<!-- A bugfix or a new feature needs a release note. If there is no need release note, just uncomment the below line. -->
+<!--
 
-```release-note
-Please add a release note.
+A bugfix or a new feature needs a release note. If there is no need to give a release note, just leave it with the `None`.
 
 Please refer to [Release Notes Language Style Guide](https://pingcap.github.io/tidb-dev-guide/contribute-to-tidb/release-notes-style-guide.html) to write a quality release note.
 
-If you don't think this PR needs a release note then fill it with None.
+-->
+
+```release-note
+None.
 ```
