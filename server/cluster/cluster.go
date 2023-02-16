@@ -1494,6 +1494,7 @@ func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bool, slowStoreIDs []uint64) {
 	store := c.GetStore(storeID)
 
+	// If there did no exist slow stores, following checking can be skipped.
 	if !c.hotStat.ExistsSlowStores() {
 		return false, nil
 	}
