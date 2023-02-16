@@ -19,6 +19,7 @@ import (
 
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // SetMaxMergeRegionSize updates the MaxMergeRegionSize configuration.
@@ -144,4 +145,27 @@ func (mc *Cluster) updateReplicationConfig(f func(*config.ReplicationConfig)) {
 	r := mc.GetReplicationConfig().Clone()
 	f(r)
 	mc.SetReplicationConfig(r)
+}
+
+// SetMaxReplicasWithLabel sets the max replicas for the cluster in two ways.
+func (mc *Cluster) SetMaxReplicasWithLabel(enablePlacementRules bool, num int, labels ...string) {
+	if len(labels) == 0 {
+		labels = []string{"zone", "rack", "host"}
+	}
+	if enablePlacementRules {
+		rule := &placement.Rule{
+			GroupID:        "pd",
+			ID:             "default",
+			Index:          1,
+			StartKey:       []byte(""),
+			EndKey:         []byte(""),
+			Role:           placement.Voter,
+			Count:          num,
+			LocationLabels: labels,
+		}
+		mc.SetRule(rule)
+	} else {
+		mc.SetMaxReplicas(num)
+		mc.SetLocationLabels(labels)
+	}
 }

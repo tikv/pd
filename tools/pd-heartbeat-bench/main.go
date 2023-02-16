@@ -408,9 +408,9 @@ func main() {
 	}
 
 	// New zap logger
-	err = cfg.SetupLogger()
+	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps)
 	if err == nil {
-		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
