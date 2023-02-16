@@ -210,7 +210,7 @@ func (s *Server) startServer() error {
 }
 
 // NewServer creates a new resource manager server.
-func NewServer(name string, ctx context.Context, cfg *Config) *Server {
+func NewServer(ctx context.Context, cfg *Config, name string) *Server {
 	return &Server{
 		name: name,
 		ctx:  ctx,
@@ -268,7 +268,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	metricutil.Push(&cfg.Metric)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	svr := NewServer("ResourceManager", ctx, cfg)
+	svr := NewServer(ctx, cfg, "ResourceManager")
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
