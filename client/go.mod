@@ -3,6 +3,7 @@ module github.com/tikv/pd/client
 go 1.19
 
 require (
+	github.com/elastic/gosigar v0.14.2
 	github.com/gogo/protobuf v1.3.2
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
@@ -23,6 +24,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.26.0 // indirect

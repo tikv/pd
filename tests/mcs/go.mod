@@ -35,6 +35,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4 // indirect
+	github.com/elastic/gosigar v0.14.2 // indirect
 	github.com/elliotchance/pie/v2 v2.1.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/gin-contrib/cors v1.4.0 // indirect

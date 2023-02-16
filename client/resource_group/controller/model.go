@@ -16,6 +16,11 @@ package controller
 
 import (
 	"context"
+	"os"
+
+	"github.com/elastic/gosigar"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
@@ -26,14 +31,14 @@ import (
 type RequestUnit float64
 
 // RequestInfo is the interface of the request information provider. A request should be
-// able tell whether it's a write request and if so, the written bytes would also be provided.
+// able to tell whether it's a write request and if so, the written bytes would also be provided.
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
-// able tell how many bytes it read and KV CPU cost in milliseconds.
+// able to tell how many bytes it read and KV CPU cost in milliseconds.
 type ResponseInfo interface {
 	ReadBytes() uint64
 	KVCPUMs() uint64
@@ -133,9 +138,11 @@ func newSQLCalculator(cfg *Config) *SQLCalculator {
 	return &SQLCalculator{Config: cfg}
 }
 
-// Trickle ...
-// TODO: calculate the SQL CPU cost and related resource consumption.
+// Trickle Update Sql Layer CPU consumption.
 func (dsc *SQLCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumption) {
+	delta := getCPUTime() - consumption.SqlLayerCpuTimeMs
+	consumption.SqlLayerCpuTimeMs = delta
+	consumption.TotalCpuTimeMs = delta
 }
 
 // BeforeKVRequest ...
@@ -204,4 +211,15 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.SqlLayerCpuTimeMs -= custom2.SqlLayerCpuTimeMs
 	custom1.KvReadRpcCount -= custom2.KvReadRpcCount
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
+}
+
+// getCPUTime returns the cumulative user+system time (in ms) since the process start.
+func getCPUTime() float64 {
+	pid := os.Getpid()
+	cpuTime := gosigar.ProcTime{}
+	if err := cpuTime.Get(pid); err != nil {
+		log.Error("getCPUTime get pid failed", zap.Error(err))
+	}
+
+	return float64(cpuTime.User+cpuTime.Sys) * 1e-3
 }
