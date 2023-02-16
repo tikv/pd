@@ -27,7 +27,6 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"go.uber.org/zap"
@@ -38,7 +37,7 @@ const defaultConsumptionChanSize = 1024
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	member  *member.Member
+	srv     bs.Server
 	groups  map[string]*ResourceGroup
 	storage endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
@@ -52,7 +51,6 @@ type Manager struct {
 // NewManager returns a new Manager.
 func NewManager(srv bs.Server) *Manager {
 	m := &Manager{
-		member: &member.Member{},
 		groups: make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
@@ -66,10 +64,10 @@ func NewManager(srv bs.Server) *Manager {
 			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
 			nil,
 		)
-		m.member = srv.GetMember()
+		m.srv = srv
 	})
-	// The second initialization after the leader is elected.
-	srv.AddLeaderCallback(m.Init)
+	// The second initialization after becoming primary.
+	srv.AddPrimaryCallback(m.Init)
 	return m
 }
 

@@ -1318,8 +1318,13 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	return nil
 }
 
-// AddLeaderCallback adds a callback in the leader campaign phase.
-func (s *Server) AddLeaderCallback(callbacks ...func(context.Context)) {
+// IsPrimary returns whether the server is primary, if there is etcd server in the server, it will return whether it is leader.
+func (s *Server) IsPrimary() bool {
+	return s.member.IsLeader()
+}
+
+// AddPrimaryCallback adds a callback when the server becomes primary, if there is etcd server in the server, it means the server becomes leader.
+func (s *Server) AddPrimaryCallback(callbacks ...func(context.Context)) {
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
 

@@ -32,7 +32,6 @@ import (
 	"github.com/spf13/cobra"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -122,14 +121,15 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
-// GetMember returns the member.
-func (s *Server) GetMember() *member.Member {
-	return nil
+// IsPrimary returns whether the server is primary, if there is etcd server in the server, it will return whether it is leader.
+func (s *Server) IsPrimary() bool {
+	// TODO: implement this
+	return true
 }
 
-// AddLeaderCallback adds the callback function when the server becomes
+// AddPrimaryCallback adds a callback when the server becomes primary, if there is etcd server in the server, it means the server becomes leader.
 // the global TSO allocator after the flag 'enable-local-tso' is set to true.
-func (s *Server) AddLeaderCallback(callbacks ...func(context.Context)) {
+func (s *Server) AddPrimaryCallback(callbacks ...func(context.Context)) {
 	// Leave it empty
 	// TODO: implment it when integerating with the Local/Global TSO Allocator.
 }
@@ -309,7 +309,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// TODO: Create the server
 	ctx, cancel := context.WithCancel(context.Background())
 	svr := &Server{}
-
+	// TODO: tso server needs timeJumpBackCounter.
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
