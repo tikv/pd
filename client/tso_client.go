@@ -40,7 +40,6 @@ func (c *client) GetTSWithinKeyspace(ctx context.Context, keyspaceID uint32) (ph
 }
 
 // GetLocalTSWithinKeyspace gets a local timestamp within the given keyspace from the TSO service
-// nolint
 func (c *client) GetLocalTSWithinKeyspace(ctx context.Context, dcLocation string, keyspaceID uint32) (physical int64, logical int64, err error) {
 	resp := c.GetLocalTSWithinKeyspaceAsync(ctx, dcLocation, keyspaceID)
 	return resp.Wait()
