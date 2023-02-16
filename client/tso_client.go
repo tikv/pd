@@ -14,18 +14,20 @@
 
 package pd
 
-import (
-	"context"
-	"time"
-
-	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/tsopb"
-)
+import "context"
 
 // TSOClient manages resource group info and token request.
 type TSOClient interface {
 	// GetTSWithinKeyspace gets a timestamp within the given keyspace from the TSO service
 	GetTSWithinKeyspace(ctx context.Context, keyspaceID uint32) (int64, int64, error)
+	// GetTSWithinKeyspaceAsync gets a timestamp within the given keyspace from the TSO service,
+	// without block the caller.
+	GetTSWithinKeyspaceAsync(ctx context.Context, keyspaceID uint32) TSFuture
+	// GetLocalTSWithinKeyspace gets a local timestamp within the given keyspace from the TSO service
+	GetLocalTSWithinKeyspace(ctx context.Context, dcLocation string, keyspaceID uint32) (int64, int64, error)
+	// GetLocalTSWithinKeyspaceAsync gets a local timestamp within the given keyspace from the TSO service,
+	// without block the caller.
+	GetLocalTSWithinKeyspaceAsync(ctx context.Context, dcLocation string, keyspaceID uint32) TSFuture
 }
 
 // GetTSWithinKeyspace gets a timestamp within the given keyspace from the TSO service
@@ -33,70 +35,26 @@ type TSOClient interface {
 // here is in a basic manner and only for testing and integration purpose -- no batching,
 // no async, no pooling, no forwarding, no retry and no deliberate error handling.
 func (c *client) GetTSWithinKeyspace(ctx context.Context, keyspaceID uint32) (physical int64, logical int64, err error) {
-	tsoClient, err := c.getTSOClient(keyspaceID)
-	if err != nil {
-		return 0, 0, err
-	}
-	done := make(chan struct{})
-	cctx, cancel := context.WithCancel(ctx)
-	go checkStream(cctx, cancel, done)
-	stream, err := tsoClient.Tso(cctx)
-	done <- struct{}{}
-	if err != nil {
-		return 0, 0, err
-	}
-	defer cancel()
-
-	start := time.Now()
-	req := &tsopb.TsoRequest{
-		Header:     c.getTSORequestHeader(keyspaceID),
-		Count:      1,
-		DcLocation: globalDCLocation,
-	}
-
-	if err := stream.Send(req); err != nil {
-		err = errors.WithStack(err)
-		return 0, 0, err
-	}
-	resp, err := stream.Recv()
-	if err != nil {
-		err = errors.WithStack(err)
-		return 0, 0, err
-	}
-	requestDurationTSO.Observe(time.Since(start).Seconds())
-	tsoBatchSize.Observe(1.00)
-
-	if resp.GetCount() != 1 {
-		err = errors.WithStack(errTSOLength)
-		return 0, 0, err
-	}
-
-	// No need to adjust logical part, because the batch size is 1.
-	physical, logical, _ = resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
-	return physical, logical, nil
+	resp := c.GetTSAsync(ctx)
+	return resp.Wait()
 }
 
-func (c *client) getTSORequestHeader(keyspaceID uint32) *tsopb.RequestHeader {
-	return &tsopb.RequestHeader{
-		ClusterId:  c.clusterID,
-		KeyspaceId: keyspaceID,
-	}
+// GetLocalTSWithinKeyspace gets a local timestamp within the given keyspace from the TSO service
+// nolint
+func (c *client) GetLocalTSWithinKeyspace(ctx context.Context, dcLocation string, keyspaceID uint32) (physical int64, logical int64, err error) {
+	resp := c.GetLocalTSWithinKeyspaceAsync(ctx, dcLocation, keyspaceID)
+	return resp.Wait()
 }
 
-// getTSOClient gets the TSO client of the TSO instance who is in charge of
-// the primary replica of the keyspace (group).
-// TODO: implement TSO service discovery client side logic
-func (c *client) getTSOClient(keyspaceID uint32) (tsopb.TSOClient, error) {
-	return nil, nil
+// GetTSWithinKeyspaceAsync gets a timestamp within the given keyspace from the TSO service,
+// without block the caller.
+func (c *client) GetTSWithinKeyspaceAsync(ctx context.Context, keyspaceID uint32) TSFuture {
+	return c.GetLocalTSWithinKeyspaceAsync(ctx, globalDCLocation, keyspaceID)
 }
 
-func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
-	select {
-	case <-done:
-		return
-	case <-time.After(3 * time.Second):
-		cancel()
-	case <-streamCtx.Done():
-	}
-	<-done
+// GetLocalTSWithinKeyspaceAsync gets a local timestamp within the given keyspace from the TSO service,
+// without block the caller.
+// TODO: implement the following API
+func (c *client) GetLocalTSWithinKeyspaceAsync(ctx context.Context, dcLocation string, keyspaceID uint32) TSFuture {
+	return nil
 }
