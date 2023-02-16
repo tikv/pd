@@ -19,19 +19,17 @@ import (
 	"flag"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 )
 
 // Server is the TSO server, and it implements bs.Server.
@@ -72,20 +70,20 @@ func (s *Server) GetHTTPClient() *http.Client {
 }
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
-func CreateServerWrapper(cmd *cobra.Command, args []string) {
+func CreateServerWrapper(cmd *cobra.Command, args []string) error {
 	cmd.Flags().Parse(args)
 	cfg := tso.NewConfig()
 	flagSet := cmd.Flags()
 	err := cfg.Parse(flagSet)
 	if err != nil {
 		cmd.Println(err)
-		return
+		return err
 	}
 
 	printVersion, err := flagSet.GetBool("version")
 	if err != nil {
 		cmd.Println(err)
-		return
+		return err
 	}
 	if printVersion {
 		// TODO: support printing TSO server info
@@ -122,36 +120,11 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	metricutil.Push(&cfg.Metric)
 
 	// TODO: Create the server
-	ctx, cancel := context.WithCancel(context.Background())
-	svr := &Server{}
+	result := &bs.CreateServerResult{}
+	result.Ctx, result.Cancel = context.WithCancel(context.Background())
+	result.Server = nil
 
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-
-	var sig os.Signal
-	go func() {
-		sig = <-sc
-		cancel()
-	}()
-
-	if err := svr.Run(); err != nil {
-		log.Fatal("run server failed", errs.ZapError(err))
-	}
-
-	<-ctx.Done()
-	log.Info("Got signal to exit", zap.String("signal", sig.String()))
-
-	svr.Close()
-	switch sig {
-	case syscall.SIGTERM:
-		exit(0)
-	default:
-		exit(1)
-	}
+	return result
 }
 
 func exit(code int) {

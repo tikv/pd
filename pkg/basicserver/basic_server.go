@@ -44,3 +44,19 @@ type Server interface {
 	// AddLeaderCallback adds a callback in the leader campaign phase.
 	AddLeaderCallback(callbacks ...func(context.Context))
 }
+
+// CreateServerResult defines the result of CreateServer
+type CreateServerResult struct {
+	Err    error
+	Ctx    context.Context
+	Cancel context.CancelFunc
+	Server
+}
+
+// Error implement the Error() method in error
+func (r *CreateServerResult) Error() string {
+	if r.Err != nil {
+		return r.Error()
+	}
+	return ""
+}

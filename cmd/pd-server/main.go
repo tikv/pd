@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/autoscaling"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
@@ -45,7 +46,7 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "pd-server",
 		Short: "Placement Driver server",
-		Run:   createServerWrapper,
+		RunE:  createServerWrapper,
 	}
 
 	rootCmd.Flags().BoolP("version", "V", false, "print version information and exit")
@@ -69,9 +70,53 @@ func main() {
 	rootCmd.AddCommand(NewServiceCommand())
 
 	rootCmd.SetOutput(os.Stdout)
-	if err := rootCmd.Execute(); err != nil {
+	cmd, flags, err := rootCmd.Traverse(os.Args[1:])
+	if err != nil {
 		rootCmd.Println(err)
 		os.Exit(1)
+	}
+
+	cmdRes := cmd.RunE(cmd, flags)
+	if cmdRes == nil {
+		log.Fatal("Failed to start server start. Shouldn't reach here.")
+	}
+
+	res, ok := cmdRes.(*bs.CreateServerResult)
+	if !ok {
+		rootCmd.Println(err)
+		os.Exit(1)
+	}
+	if res.Err != nil {
+		rootCmd.Println(res.Err)
+		os.Exit(1)
+	}
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	var sig os.Signal
+	go func() {
+		sig = <-sc
+		res.Cancel()
+	}()
+
+	if err := res.Server.Run(); err != nil {
+		log.Fatal("run server failed", errs.ZapError(err))
+	}
+
+	<-res.Ctx.Done()
+	log.Info("Got signal to exit", zap.String("signal", sig.String()))
+
+	res.Server.Close()
+	switch sig {
+	case syscall.SIGTERM:
+		exit(0)
+	default:
+		exit(1)
 	}
 }
 
@@ -90,7 +135,7 @@ func NewTSOServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tso",
 		Short: "Run the tso service",
-		Run:   tso.CreateServerWrapper,
+		RunE:  tso.CreateServerWrapper,
 	}
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
@@ -102,21 +147,22 @@ func NewTSOServiceCommand() *cobra.Command {
 	return cmd
 }
 
-func createServerWrapper(cmd *cobra.Command, args []string) {
+func createServerWrapper(cmd *cobra.Command, args []string) error {
 	schedulers.Register()
+
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
 	flagSet.Parse(args)
 	err := cfg.Parse(flagSet)
 	if err != nil {
 		cmd.Println(err)
-		return
+		return err
 	}
 
 	printVersion, err := flagSet.GetBool("version")
 	if err != nil {
 		cmd.Println(err)
-		return
+		return err
 	}
 	if printVersion {
 		server.PrintPDInfo()
@@ -136,7 +182,7 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	configCheck, err := flagSet.GetBool("config-check")
 	if err != nil {
 		cmd.Println(err)
-		return
+		return &bs.CreateServerResult{Err: err}
 	}
 
 	if configCheck {
@@ -171,41 +217,16 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	// Creates server.
-	ctx, cancel := context.WithCancel(context.Background())
+	result := &bs.CreateServerResult{}
+	result.Ctx, result.Cancel = context.WithCancel(context.Background())
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
+	result.Server, result.Err = server.CreateServer(result.Ctx, cfg, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}
 
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-
-	var sig os.Signal
-	go func() {
-		sig = <-sc
-		cancel()
-	}()
-
-	if err := svr.Run(); err != nil {
-		log.Fatal("run server failed", errs.ZapError(err))
-	}
-
-	<-ctx.Done()
-	log.Info("Got signal to exit", zap.String("signal", sig.String()))
-
-	svr.Close()
-	switch sig {
-	case syscall.SIGTERM:
-		exit(0)
-	default:
-		exit(1)
-	}
+	return result
 }
 
 func exit(code int) {
