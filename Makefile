@@ -143,7 +143,7 @@ install-tools:
 
 #### Static checks ####
 
-check: install-tools static tidy generate-errdoc check-plugin check-test
+check: install-tools tidy static generate-errdoc check-plugin check-test
 
 static: install-tools
 	@ echo "gofmt ..."
