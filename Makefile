@@ -54,7 +54,7 @@ ifneq ($(DASHBOARD), 0)
 endif
 
 ROOT_PATH := $(shell pwd)
-BUILD_BIN_PATH := $$ROOT_PATH/bin
+BUILD_BIN_PATH := $(ROOT_PATH)/bin
 
 build: pd-server pd-ctl pd-recover
 
