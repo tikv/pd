@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/transport"
 )
@@ -76,7 +76,7 @@ func main() {
 		exitErr(err)
 	}
 	if v {
-		server.PrintPDInfo()
+		versioninfo.Print()
 		return
 	}
 

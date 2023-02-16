@@ -59,6 +59,9 @@ type Config struct {
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
+	// WarningMsgs contains all warnings during parsing.
+	WarningMsgs []string
+
 	// Log related config.
 	Log log.Config `toml:"log" json:"log"`
 

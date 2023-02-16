@@ -24,7 +24,7 @@ import (
 	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
-	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
@@ -105,7 +105,7 @@ func MainStart(args []string) {
 
 	rootCmd.Run = func(cmd *cobra.Command, args []string) {
 		if v, err := cmd.Flags().GetBool("version"); err == nil && v {
-			server.PrintPDInfo()
+			versioninfo.Print()
 			return
 		}
 		if v, err := cmd.Flags().GetBool("interact"); err == nil && v {
