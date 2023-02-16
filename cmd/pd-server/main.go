@@ -55,7 +55,7 @@ func main() {
 	rootCmd.Flags().StringP("data-dir", "", "", "path to the data directory (default 'default.${name}')")
 	rootCmd.Flags().StringP("client-urls", "", "http://127.0.0.1:2379", "url for client traffic")
 	rootCmd.Flags().StringP("advertise-client-urls", "", "", "advertise url for client traffic (default '${client-urls}')")
-	rootCmd.Flags().StringP("peer-urls", "", "http://127.0.0.1:2379", "url for peer traffic")
+	rootCmd.Flags().StringP("peer-urls", "", "http://127.0.0.1:2380", "url for peer traffic")
 	rootCmd.Flags().StringP("advertise-peer-urls", "", "", "advertise url for peer traffic (default '${peer-urls}')")
 	rootCmd.Flags().StringP("initial-cluster", "", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	rootCmd.Flags().StringP("join", "", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
