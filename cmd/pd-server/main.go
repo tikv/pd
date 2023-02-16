@@ -82,25 +82,8 @@ func NewServiceCommand() *cobra.Command {
 		Use:   "service <mode>",
 		Short: "Run a service, for example, tso, resource_manager",
 	}
-	cmd.AddCommand(NewTSOServiceCommand())
+	cmd.AddCommand(tso.NewTSOServiceCommand())
 	cmd.AddCommand(NewResourceManagerServiceCommand())
-	return cmd
-}
-
-// NewTSOServiceCommand returns the tso service command.
-func NewTSOServiceCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "tso",
-		Short: "Run the tso service",
-		Run:   tso.CreateServerWrapper,
-	}
-	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
-	cmd.Flags().StringP("config", "", "", "config file")
-	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
-	cmd.Flags().StringP("listen-addr", "", "", "listen address for tso service")
-	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
-	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
-	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
 	return cmd
 }
 
@@ -114,7 +97,7 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
-	cmd.Flags().StringP("listen-addr", "", "", "listen address for tso service")
+	cmd.Flags().StringP("listen-addr", "", "", "listen address for resource management service")
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")

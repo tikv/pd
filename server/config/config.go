@@ -454,6 +454,10 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	} else if c.TSOUpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
 	}
+	if c.TSOUpdatePhysicalInterval.Duration != defaultTSOUpdatePhysicalInterval {
+		log.Warn("tso update physical interval is non-default",
+			zap.Duration("update-physical-interval", c.TSOUpdatePhysicalInterval.Duration))
+	}
 
 	if c.Labels == nil {
 		c.Labels = make(map[string]string)

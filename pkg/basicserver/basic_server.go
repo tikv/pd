@@ -47,6 +47,6 @@ type Server interface {
 	AddStartCallback(callbacks ...func())
 	// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 	IsServing() bool
-	// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+	// AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 	AddServiceReadyCallback(callbacks ...func(context.Context))
 }
