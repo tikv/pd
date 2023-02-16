@@ -11,8 +11,6 @@ linters:
     - makezero
     - gosec
     - bodyclose
-    - unconvert
-    - ineffassign
   disable:
     - errcheck
 linters-settings:
