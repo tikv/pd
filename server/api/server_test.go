@@ -16,10 +16,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -30,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/goleak"
@@ -211,4 +215,29 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodGet))
 	suite.Equal("QueryMetric", serviceLabel)
+}
+
+func TestAPIService(t *testing.T) {
+	re := require.New(t)
+
+	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svr, err := server.CreateServer(ctx, cfg, true, NewHandler)
+	re.NoError(err)
+	defer svr.Close()
+	err = svr.Run()
+	re.NoError(err)
+	server.MustWaitLeader(re, []*server.Server{svr})
+
+	args := make(map[string]interface{})
+	t1 := makeTS(time.Hour)
+	url := fmt.Sprintf("%s/admin/reset-ts", cfg.ClientUrls+apiPrefix+"/api/v1")
+	args["tso"] = fmt.Sprintf("%d", t1)
+	values, err := json.Marshal(args)
+	re.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, url, values, tu.Status(re, http.StatusNotFound))
+	re.NoError(err)
+
+	testutil.CleanServer(cfg.DataDir)
 }
