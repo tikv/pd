@@ -53,7 +53,8 @@ ifneq ($(DASHBOARD), 0)
 	LDFLAGS += -X "github.com/pingcap/tidb-dashboard/pkg/utils/version.BuildGitHash=$(shell scripts/describe-dashboard.sh git-hash)"
 endif
 
-BUILD_BIN_PATH := $(shell pwd)/bin
+ROOT_PATH := $(shell pwd)
+BUILD_BIN_PATH := $$ROOT_PATH/bin
 
 build: pd-server pd-ctl pd-recover
 
@@ -129,7 +130,7 @@ dashboard-replace-distro-info:
 PD_PKG := github.com/tikv/pd
 PACKAGES := $(shell go list ./...)
 
-GO_TOOLS_BIN_PATH := $(shell pwd)/.tools/bin
+GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
@@ -152,14 +153,14 @@ static: install-tools
 	@ echo "revive ..."
 	@ revive -formatter friendly -config revive.toml $(PACKAGES)
 
-	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd - > /dev/null; done
+	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
 
 tidy:
 	@ go mod tidy
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
-	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd - > /dev/null; done
+	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) tidy && cd $(ROOT_PATH) > /dev/null; done
 
 generate-errdoc: install-tools
 	@echo "generating errors.toml..."
@@ -219,7 +220,7 @@ ci-test-job: install-tools dashboard-ui
 
 ci-test-job-submod: install-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
-	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) ci-test-job && cd - > /dev/null && cat $$mod/covprofile >> covprofile; done
+	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) ci-test-job && cd $(ROOT_PATH) > /dev/null && cat $$mod/covprofile >> covprofile; done
 	@$(FAILPOINT_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
