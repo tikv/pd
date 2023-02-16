@@ -184,8 +184,9 @@ func (s *Server) startServer() error {
 
 	handler, _ := SetUpRestHandler(s.service)
 	s.httpServer = &http.Server{
-		Handler:     handler,
-		ReadTimeout: 5 * time.Minute,
+		Handler:           handler,
+		ReadTimeout:       5 * time.Minute,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	go func() {
