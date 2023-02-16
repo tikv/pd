@@ -50,7 +50,7 @@ func TestResourceManagerServer(t *testing.T) {
 	cfg.BackendEndpoints = leader.GetAddr()
 	cfg.ListenAddr = "127.0.0.1:8086"
 
-	svr := rm.NewServer("ResourceManager", ctx, cfg)
+	svr := rm.NewServer(ctx, cfg, "ResourceManager")
 	go svr.Run()
 	time.Sleep(2 * time.Second) // wait for server start
 	defer svr.Close()
