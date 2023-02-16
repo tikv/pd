@@ -1790,12 +1790,13 @@ func TestAwakenStore(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	n := uint64(3)
-	stores := newTestStores(n, "6.0.0")
+	stores := newTestStores(n, "6.5.0")
 	re.True(stores[0].NeedAwakenStore())
 	for _, store := range stores {
 		re.NoError(cluster.PutStore(store.GetMeta()))
 	}
 	for i := uint64(1); i <= n; i++ {
+		re.False(cluster.hotStat.ExistsSlowStores())
 		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(i)
 		re.False(needAwaken)
 	}
@@ -1805,6 +1806,33 @@ func TestAwakenStore(t *testing.T) {
 	re.NoError(cluster.putStoreLocked(store4))
 	store1 := cluster.GetStore(1)
 	re.True(store1.NeedAwakenStore())
+
+	// Test slowStore heartbeat by marking Store-1 already slow.
+	slowStoreReq := &pdpb.StoreHeartbeatRequest{}
+	slowStoreResp := &pdpb.StoreHeartbeatResponse{}
+	slowStoreReq.Stats = &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{},
+		SlowScore: 80,
+	}
+	re.NoError(cluster.HandleStoreHeartbeat(slowStoreReq, slowStoreResp))
+	time.Sleep(20 * time.Millisecond)
+	re.True(cluster.hotStat.ExistsSlowStores())
+	{
+		// Store 1 cannot be awaken.
+		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(1)
+		re.False(needAwaken)
+	}
+	{
+		// Other stores can be awaken.
+		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(2)
+		re.True(needAwaken)
+	}
 }
 
 type testCluster struct {

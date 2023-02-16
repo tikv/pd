@@ -824,6 +824,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	c.core.PutStore(newStore)
 	c.hotStat.Observe(storeID, newStore.GetStoreStats())
+	c.hotStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -1450,6 +1451,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		c.RemoveStoreLimit(storeID)
 		c.resetProgress(storeID, store.GetAddress())
 		c.hotStat.RemoveRollingStoreStats(storeID)
+		c.hotStat.RemoveSlowStoreStatus(storeID)
 	}
 	return err
 }
@@ -1491,6 +1493,10 @@ func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
 // NeedAwakenAllRegionsInStore checks whether we should do AwakenRegions operation.
 func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bool, slowStoreIDs []uint64) {
 	store := c.GetStore(storeID)
+
+	if !c.hotStat.ExistsSlowStores() {
+		return false, nil
+	}
 	// We just return AwakenRegions messages to those Serving stores which need to be awaken.
 	if store.IsSlow() || !store.NeedAwakenStore() {
 		return false, nil
