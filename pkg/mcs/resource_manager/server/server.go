@@ -22,12 +22,14 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
@@ -49,9 +51,10 @@ type Server struct {
 	cfg *Config
 	mux cmux.CMux
 	// Server state. 0 is not serving, 1 is serving.
-	isServing int64
-	ctx       context.Context
-	name      string
+	isServing   int64
+	ctx         context.Context
+	name        string
+	backendUrls []*url.URL
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -144,11 +147,19 @@ func (s *Server) initClient() error {
 	if err != nil {
 		return err
 	}
-	endpoint, err := url.Parse(s.cfg.BackendEndpoints)
-	if err != nil {
-		return err
+	endpoints := strings.Split(s.cfg.BackendEndpoints, ",")
+	for _, endpoint := range endpoints {
+		e, err := url.Parse(endpoint)
+		if err != nil {
+			return err
+		}
+		s.backendUrls = append(s.backendUrls, e)
 	}
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL{*endpoint})
+	if len(s.backendUrls) == 0 {
+		return errs.ErrURLParse.Wrap(errors.New("no backend url found"))
+	}
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL{*s.backendUrls[0]})
+	// TODO: support multi-endpoints.
 	return err
 }
 
