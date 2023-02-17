@@ -127,14 +127,14 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
-// IsPrimary returns whether the server is primary, if there is etcd server in the server, it will return whether it is leader.
-func (s *Server) IsPrimary() bool {
+// IsPrimaryOrLeader returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) IsPrimaryOrLeader() bool {
 	// TODO: implement this
 	return true
 }
 
-// AddPrimaryCallback adds a callback when the server becomes primary, if there is etcd server in the server, it means the server becomes leader.
-func (s *Server) AddPrimaryCallback(callbacks ...func(context.Context)) {
+// AddPrimaryOrLeaderCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) AddPrimaryOrLeaderCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 

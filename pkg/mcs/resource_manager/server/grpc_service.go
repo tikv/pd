@@ -85,7 +85,7 @@ func (s *Service) GetManager() *Manager {
 }
 
 func (s *Service) checkPrimary() error {
-	if !s.manager.srv.IsPrimary() {
+	if !s.manager.srv.IsPrimaryOrLeader() {
 		return errNotPrimary
 	}
 	return nil

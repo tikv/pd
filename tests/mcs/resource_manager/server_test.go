@@ -74,7 +74,6 @@ func TestResourceManagerServer(t *testing.T) {
 		respString, err := io.ReadAll(resp.Body)
 		re.NoError(err)
 		re.Equal("[]", string(respString))
-
 	}
 	{
 		group := &rmpb.ResourceGroup{
