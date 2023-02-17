@@ -121,15 +121,15 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
-// IsPrimaryOrLeader returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
-func (s *Server) IsPrimaryOrLeader() bool {
+// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) IsServing() bool {
 	// TODO: implement this
 	return true
 }
 
-// AddPrimaryOrLeaderCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceReadyCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 // the global TSO allocator after the flag 'enable-local-tso' is set to true.
-func (s *Server) AddPrimaryOrLeaderCallback(callbacks ...func(context.Context)) {
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	// Leave it empty
 	// TODO: implment it when integerating with the Local/Global TSO Allocator.
 }

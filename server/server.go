@@ -1318,13 +1318,13 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	return nil
 }
 
-// IsPrimaryOrLeader returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
-func (s *Server) IsPrimaryOrLeader() bool {
+// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) IsServing() bool {
 	return s.member.IsLeader()
 }
 
-// AddPrimaryOrLeaderCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
-func (s *Server) AddPrimaryOrLeaderCallback(callbacks ...func(context.Context)) {
+// AddServiceReadyCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
 

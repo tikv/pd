@@ -127,14 +127,14 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
-// IsPrimaryOrLeader returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
-func (s *Server) IsPrimaryOrLeader() bool {
+// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) IsServing() bool {
 	// TODO: implement this
 	return true
 }
 
-// AddPrimaryOrLeaderCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
-func (s *Server) AddPrimaryOrLeaderCallback(callbacks ...func(context.Context)) {
+// AddServiceReadyCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 
@@ -189,6 +189,7 @@ func (s *Server) startServer() error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	s.serverLoopWg.Add(2)
 	go func() {
 		defer s.serverLoopWg.Done()
 		s.grpcServer.Serve(grpcL)
@@ -197,7 +198,6 @@ func (s *Server) startServer() error {
 		defer s.serverLoopWg.Done()
 		s.httpServer.Serve(httpL)
 	}()
-	s.serverLoopWg.Add(2)
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")

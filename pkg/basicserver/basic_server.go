@@ -37,8 +37,8 @@ type Server interface {
 	GetHTTPClient() *http.Client
 	// AddStartCallback adds a callback in the startServer phase.
 	AddStartCallback(callbacks ...func())
-	// IsPrimaryOrLeader returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
-	IsPrimaryOrLeader() bool
-	// AddPrimaryOrLeaderCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
-	AddPrimaryOrLeaderCallback(callbacks ...func(context.Context))
+	// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+	IsServing() bool
+	// AddServiceReadyCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+	AddServiceReadyCallback(callbacks ...func(context.Context))
 }

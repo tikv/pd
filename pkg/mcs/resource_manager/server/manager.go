@@ -67,7 +67,7 @@ func NewManager(srv bs.Server) *Manager {
 		m.srv = srv
 	})
 	// The second initialization after becoming primary.
-	srv.AddPrimaryOrLeaderCallback(m.Init)
+	srv.AddServiceReadyCallback(m.Init)
 	return m
 }
 
