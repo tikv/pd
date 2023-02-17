@@ -17,12 +17,9 @@ package tso
 import (
 	"time"
 
-	"github.com/BurntSushi/toml"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/encryption"
-	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
@@ -65,7 +62,7 @@ type Config struct {
 	Logger   *zap.Logger
 	LogProps *log.ZapProperties
 
-	Security SecurityConfig `toml:"security" json:"security"`
+	Security configutil.SecurityConfig `toml:"security" json:"security"`
 }
 
 // NewConfig creates a new config.
@@ -77,42 +74,22 @@ func NewConfig() *Config {
 func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	// Load config file if specified.
 	if configFile, _ := flagSet.GetString("config"); configFile != "" {
-		_, err := c.configFromFile(configFile)
+		_, err := configutil.ConfigFromFile(c, configFile)
 		if err != nil {
 			return err
 		}
 	}
 
 	// ignore the error check here
-	adjustCommandlineString(flagSet, &c.Log.Level, "log-level")
-	adjustCommandlineString(flagSet, &c.Log.File.Filename, "log-file")
-	adjustCommandlineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
-	adjustCommandlineString(flagSet, &c.Security.CAPath, "cacert")
-	adjustCommandlineString(flagSet, &c.Security.CertPath, "cert")
-	adjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
-	adjustCommandlineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
-	adjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
+	configutil.AdjustCommandlineString(flagSet, &c.Log.Level, "log-level")
+	configutil.AdjustCommandlineString(flagSet, &c.Log.File.Filename, "log-file")
+	configutil.AdjustCommandlineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
+	configutil.AdjustCommandlineString(flagSet, &c.Security.CAPath, "cacert")
+	configutil.AdjustCommandlineString(flagSet, &c.Security.CertPath, "cert")
+	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
+	configutil.AdjustCommandlineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
+	configutil.AdjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
 
 	// TODO: Implement the main function body
 	return nil
-}
-
-// configFromFile loads config from file.
-func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
-	meta, err := toml.DecodeFile(path, c)
-	return &meta, errors.WithStack(err)
-}
-
-// SecurityConfig indicates the security configuration for pd server
-type SecurityConfig struct {
-	grpcutil.TLSConfig
-	// RedactInfoLog indicates that whether enabling redact log
-	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
-	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
-}
-
-func adjustCommandlineString(flagSet *pflag.FlagSet, v *string, name string) {
-	if value, _ := flagSet.GetString(name); value != "" {
-		*v = value
-	}
 }
