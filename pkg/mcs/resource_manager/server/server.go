@@ -29,7 +29,6 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
@@ -39,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -53,7 +53,7 @@ type Server struct {
 	isServing   int64
 	ctx         context.Context
 	name        string
-	backendUrls []*url.URL
+	backendUrls []url.URL
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -144,18 +144,12 @@ func (s *Server) initClient() error {
 	if err != nil {
 		return err
 	}
-	endpoints := strings.Split(s.cfg.BackendEndpoints, ",")
-	for _, endpoint := range endpoints {
-		e, err := url.Parse(endpoint)
-		if err != nil {
-			return err
-		}
-		s.backendUrls = append(s.backendUrls, e)
+	u, err := types.NewURLs(strings.Split(s.cfg.BackendEndpoints, ","))
+	if err != nil {
+		return err
 	}
-	if len(s.backendUrls) == 0 {
-		return errs.ErrURLParse.Wrap(errors.New("no backend url found"))
-	}
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL{*s.backendUrls[0]})
+	s.backendUrls = []url.URL(u)
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendUrls)
 	return err
 }
 
