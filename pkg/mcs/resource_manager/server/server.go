@@ -17,7 +17,6 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"flag"
 	"net"
 	"net/http"
 	"net/url"
@@ -29,7 +28,6 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
@@ -37,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -224,30 +223,19 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	cfg := NewConfig()
 	flagSet := cmd.Flags()
 	err := cfg.Parse(flagSet)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-
-	printVersion, err := flagSet.GetBool("version")
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	if printVersion {
-		// TODO: support printing resource manager server info
-		// server.PrintPDInfo()
-		exit(0)
-	}
-
 	defer logutil.LogPanic()
 
-	switch errors.Cause(err) {
-	case nil:
-	case flag.ErrHelp:
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	if printVersion, err := flagSet.GetBool("version"); err != nil {
+		cmd.Println(err)
+		return
+	} else if printVersion {
+		versioninfo.Print()
 		exit(0)
-	default:
-		log.Fatal("parse cmd flags error", errs.ZapError(err))
 	}
 
 	// New zap logger
@@ -260,8 +248,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	// TODO: support printing resource manager server info
-	// server.LogPDInfo()
+	versioninfo.Log("TSO")
+	log.Info("TSO Config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 
