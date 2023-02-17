@@ -140,7 +140,7 @@ func newSQLCalculator(cfg *Config) *SQLCalculator {
 
 // Trickle Update Sql Layer CPU consumption.
 func (dsc *SQLCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumption) {
-	delta := getCPUTime() - consumption.SqlLayerCpuTimeMs
+	delta := getSQLProcessCPUTime() - consumption.SqlLayerCpuTimeMs
 	consumption.SqlLayerCpuTimeMs = delta
 	consumption.TotalCpuTimeMs = delta
 }
@@ -213,8 +213,8 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
 }
 
-// getCPUTime returns the cumulative user+system time (in ms) since the process start.
-func getCPUTime() float64 {
+// getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.
+func getSQLProcessCPUTime() float64 {
 	pid := os.Getpid()
 	cpuTime := gosigar.ProcTime{}
 	if err := cpuTime.Get(pid); err != nil {

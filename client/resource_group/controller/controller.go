@@ -35,7 +35,7 @@ const (
 
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
-	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
+	// OnRequestWait is used to check whether the resource group has enough tokens. It maybe needs to wait sometime.
 	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) error
 	// OnResponse is used to consume tokens after receiving response
 	OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error
@@ -311,7 +311,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 	}()
 }
 
-// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
+// OnRequestWait is used to check whether the resource group has enough tokens. It maybe needs to wait sometime.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
 ) (err error) {
