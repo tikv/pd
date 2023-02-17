@@ -85,10 +85,7 @@ func (s *Server) Run() error {
 	if err := s.initClient(); err != nil {
 		return err
 	}
-	if err := s.startServer(); err != nil {
-		return err
-	}
-	return nil
+	return s.startServer()
 }
 
 // Close closes the server.
@@ -142,6 +139,7 @@ func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 }
 
 func (s *Server) initClient() error {
+	// TODO: We need to keep all backend endpoints and keep updating them to the latest. Once one of them failed, need to try another one.
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
@@ -158,7 +156,6 @@ func (s *Server) initClient() error {
 		return errs.ErrURLParse.Wrap(errors.New("no backend url found"))
 	}
 	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL{*s.backendUrls[0]})
-	// TODO: support multi-endpoints.
 	return err
 }
 
