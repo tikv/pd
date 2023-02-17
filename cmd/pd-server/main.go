@@ -16,13 +16,11 @@ package main
 
 import (
 	"context"
-	"flag"
 	"os"
 	"os/signal"
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/autoscaling"
@@ -30,8 +28,10 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/swaggerserver"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -53,14 +53,14 @@ func main() {
 	rootCmd.Flags().BoolP("config-check", "", false, "check config file validity and exit")
 	rootCmd.Flags().StringP("name", "", "", "human-readable name for this pd member")
 	rootCmd.Flags().StringP("data-dir", "", "", "path to the data directory (default 'default.${name}')")
-	rootCmd.Flags().StringP("client-urls", "", "http://127.0.0.1:2379", "url for client traffic")
+	rootCmd.Flags().StringP("client-urls", "", "", "url for client traffic")
 	rootCmd.Flags().StringP("advertise-client-urls", "", "", "advertise url for client traffic (default '${client-urls}')")
-	rootCmd.Flags().StringP("peer-urls", "", "http://127.0.0.1:2380", "url for peer traffic")
+	rootCmd.Flags().StringP("peer-urls", "", "", "url for peer traffic")
 	rootCmd.Flags().StringP("advertise-peer-urls", "", "", "advertise url for peer traffic (default '${peer-urls}')")
 	rootCmd.Flags().StringP("initial-cluster", "", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	rootCmd.Flags().StringP("join", "", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 	rootCmd.Flags().StringP("metrics-addr", "", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
-	rootCmd.Flags().StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	rootCmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	rootCmd.Flags().StringP("log-file", "", "", "log file path")
 	rootCmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	rootCmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
@@ -94,7 +94,7 @@ func NewTSOServiceCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
-	cmd.Flags().StringP("backend-endpoints", "", "http://127.0.0.1:2379", "url for etcd client")
+	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
 	cmd.Flags().StringP("listen-addr", "", "", "listen address for tso service")
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
@@ -108,39 +108,26 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	flagSet := cmd.Flags()
 	flagSet.Parse(args)
 	err := cfg.Parse(flagSet)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-
-	printVersion, err := flagSet.GetBool("version")
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	if printVersion {
-		server.PrintPDInfo()
-		exit(0)
-	}
-
 	defer logutil.LogPanic()
 
-	switch errors.Cause(err) {
-	case nil:
-	case flag.ErrHelp:
-		exit(0)
-	default:
-		log.Fatal("parse cmd flags error", errs.ZapError(err))
-	}
-
-	configCheck, err := flagSet.GetBool("config-check")
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
 
-	if configCheck {
-		server.PrintConfigCheckMsg(cfg)
+	if printVersion, err := flagSet.GetBool("version"); err != nil {
+		cmd.Println(err)
+		return
+	} else if printVersion {
+		versioninfo.Print()
+		exit(0)
+	}
+
+	if configCheck, err := flagSet.GetBool("config-check"); err != nil {
+		cmd.Println(err)
+		return
+	} else if configCheck {
+		configutil.PrintConfigCheckMsg(os.Stdout, cfg.WarningMsgs)
 		exit(0)
 	}
 
@@ -154,7 +141,7 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	server.LogPDInfo()
+	versioninfo.Log("PD")
 
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
