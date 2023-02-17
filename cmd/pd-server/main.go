@@ -128,7 +128,7 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	} else if configCheck {
-		configutil.PrintConfigCheckMsg(cfg.WarningMsgs)
+		configutil.PrintConfigCheckMsg(os.Stdout, cfg.WarningMsgs)
 		exit(0)
 	}
 
