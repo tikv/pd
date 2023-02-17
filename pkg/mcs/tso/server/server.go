@@ -17,18 +17,28 @@ package server
 import (
 	"context"
 	"net/http"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
+	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
+	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -247,5 +257,76 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
-	// TODO: implement this function
+	cmd.Flags().Parse(args)
+	cfg := tso.NewConfig()
+	flagSet := cmd.Flags()
+	err := cfg.Parse(flagSet)
+	defer logutil.LogPanic()
+
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+
+	if printVersion, err := flagSet.GetBool("version"); err != nil {
+		cmd.Println(err)
+		return
+	} else if printVersion {
+		versioninfo.Print()
+		exit(0)
+	}
+
+	// New zap logger
+	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	if err == nil {
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+	} else {
+		log.Fatal("initialize logger error", errs.ZapError(err))
+	}
+	// Flushing any buffered log entries
+	defer log.Sync()
+
+	versioninfo.Log("TSO")
+	log.Info("TSO Config", zap.Reflect("config", cfg))
+
+	grpcprometheus.EnableHandlingTimeHistogram()
+
+	metricutil.Push(&cfg.Metric)
+
+	// TODO: Create the server
+	ctx, cancel := context.WithCancel(context.Background())
+	svr := &Server{}
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
+	var sig os.Signal
+	go func() {
+		sig = <-sc
+		cancel()
+	}()
+
+	if err := svr.Run(); err != nil {
+		log.Fatal("run server failed", errs.ZapError(err))
+	}
+
+	<-ctx.Done()
+	log.Info("Got signal to exit", zap.String("signal", sig.String()))
+
+	svr.Close()
+	switch sig {
+	case syscall.SIGTERM:
+		exit(0)
+	default:
+		exit(1)
+	}
+}
+
+func exit(code int) {
+	log.Sync()
+	os.Exit(code)
 }

@@ -94,7 +94,6 @@ func NewTSOServiceCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
-	cmd.Flags().BoolP("config-check", "", false, "check config file validity and exit")
 	cmd.Flags().StringP("backend-endpoints", "", "http://127.0.0.1:2379", "url for etcd client")
 	cmd.Flags().StringP("listen-addr", "", "", "listen address for tso service")
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
