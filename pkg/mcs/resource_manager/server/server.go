@@ -41,6 +41,8 @@ import (
 	"google.golang.org/grpc"
 )
 
+const tcp = "tcp"
+
 // Server is the resource manager server, and it implements bs.Server.
 // nolint
 type Server struct {
@@ -128,8 +130,8 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	// TODO: implement this
-	return true
+	// TODO: implement this function with primary.
+	return s.isServing == 1
 }
 
 // AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
@@ -156,13 +158,13 @@ func (s *Server) startServer() error {
 		return err
 	}
 	if tlsConfig != nil {
-		l, err := tls.Listen("tcp", s.cfg.ListenAddr, tlsConfig)
+		l, err := tls.Listen(tcp, s.cfg.ListenAddr, tlsConfig)
 		if err != nil {
 			return err
 		}
 		s.mux = cmux.New(l)
 	} else {
-		l, err := net.Listen("tcp", s.cfg.ListenAddr)
+		l, err := net.Listen(tcp, s.cfg.ListenAddr)
 		if err != nil {
 			return err
 		}

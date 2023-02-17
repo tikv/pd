@@ -21,11 +21,11 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
 	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/grpc_testing"
@@ -52,7 +52,9 @@ func TestResourceManagerServer(t *testing.T) {
 
 	svr := rm.NewServer(ctx, cfg, "ResourceManager")
 	go svr.Run()
-	time.Sleep(2 * time.Second) // wait for server start
+	testutil.Eventually(re, func() bool {
+		return svr.IsServing()
+	})
 	defer svr.Close()
 
 	// Test registered GRPC Service
