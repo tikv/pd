@@ -134,7 +134,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
 	// TODO: implement this function with primary.
-	return s.isServing == 1
+	return atomic.LoadInt64(&s.isServing) == 1
 }
 
 // AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.

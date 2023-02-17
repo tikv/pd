@@ -55,7 +55,7 @@ func TestResourceManagerServer(t *testing.T) {
 	go svr.Run()
 	testutil.Eventually(re, func() bool {
 		return svr.IsServing()
-	}, testutil.WithWaitFor(5*time.Second))
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 	defer svr.Close()
 
 	// Test registered GRPC Service
