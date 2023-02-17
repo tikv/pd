@@ -16,13 +16,11 @@ package main
 
 import (
 	"context"
-	"flag"
 	"os"
 	"os/signal"
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/autoscaling"
@@ -30,8 +28,10 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/swaggerserver"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -108,39 +108,26 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	flagSet := cmd.Flags()
 	flagSet.Parse(args)
 	err := cfg.Parse(flagSet)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-
-	printVersion, err := flagSet.GetBool("version")
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	if printVersion {
-		server.PrintPDInfo()
-		exit(0)
-	}
-
 	defer logutil.LogPanic()
 
-	switch errors.Cause(err) {
-	case nil:
-	case flag.ErrHelp:
-		exit(0)
-	default:
-		log.Fatal("parse cmd flags error", errs.ZapError(err))
-	}
-
-	configCheck, err := flagSet.GetBool("config-check")
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
 
-	if configCheck {
-		server.PrintConfigCheckMsg(cfg)
+	if printVersion, err := flagSet.GetBool("version"); err != nil {
+		cmd.Println(err)
+		return
+	} else if printVersion {
+		versioninfo.Print()
+		exit(0)
+	}
+
+	if configCheck, err := flagSet.GetBool("config-check"); err != nil {
+		cmd.Println(err)
+		return
+	} else if configCheck {
+		configutil.PrintConfigCheckMsg(os.Stdout, cfg.WarningMsgs)
 		exit(0)
 	}
 
@@ -154,7 +141,7 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	server.LogPDInfo()
+	versioninfo.Log("PD")
 
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)

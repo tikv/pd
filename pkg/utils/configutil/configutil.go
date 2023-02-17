@@ -16,6 +16,8 @@ package configutil
 
 import (
 	"errors"
+	"fmt"
+	"io"
 
 	"github.com/BurntSushi/toml"
 )
@@ -65,4 +67,16 @@ func (m *ConfigMetaData) CheckUndecoded() error {
 		errInfo += key.String() + ", "
 	}
 	return errors.New(errInfo[:len(errInfo)-2])
+}
+
+// PrintConfigCheckMsg prints the message about configuration checks.
+func PrintConfigCheckMsg(w io.Writer, warningMsgs []string) {
+	if len(warningMsgs) == 0 {
+		fmt.Fprintln(w, "config check successful")
+		return
+	}
+
+	for _, msg := range warningMsgs {
+		fmt.Fprintln(w, msg)
+	}
 }
