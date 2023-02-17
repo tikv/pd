@@ -15,6 +15,7 @@
 package pd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/rand"
@@ -1491,6 +1492,8 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 	return handleRegionResponse(resp), nil
 }
 
+const maxRegionLimit = 10000
+
 func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
@@ -1499,26 +1502,47 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 	start := time.Now()
 	defer cmdDurationScanRegions.Observe(time.Since(start).Seconds())
 
-	var cancel context.CancelFunc
-	scanCtx := ctx
-	if _, ok := ctx.Deadline(); !ok {
-		scanCtx, cancel = context.WithTimeout(ctx, c.option.timeout)
-		defer cancel()
-	}
-	req := &pdpb.ScanRegionsRequest{
-		Header:   c.requestHeader(),
-		StartKey: key,
-		EndKey:   endKey,
-		Limit:    int32(limit),
-	}
-	scanCtx = grpcutil.BuildForwardContext(scanCtx, c.GetLeaderAddr())
-	resp, err := c.getClient().ScanRegions(scanCtx, req)
+	totalRegions := make([]*Region, 0, limit)
+	for {
+		if limit <= 0 {
+			break
+		}
+		var cancel context.CancelFunc
+		scanCtx := ctx
+		if _, ok := ctx.Deadline(); !ok {
+			scanCtx, cancel = context.WithTimeout(ctx, c.option.timeout)
+			defer cancel()
+		}
+		currentLimit := limit
+		if currentLimit > maxRegionLimit {
+			currentLimit = maxRegionLimit
+		}
+		req := &pdpb.ScanRegionsRequest{
+			Header:   c.requestHeader(),
+			StartKey: key,
+			EndKey:   endKey,
+			Limit:    int32(currentLimit),
+		}
+		scanCtx = grpcutil.BuildForwardContext(scanCtx, c.GetLeaderAddr())
+		resp, err := c.getClient().ScanRegions(scanCtx, req)
 
-	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
-		return nil, err
+		if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
+			return nil, err
+		}
+
+		limit -= currentLimit
+		totalRegions = append(totalRegions, handleRegionsResponse(resp)...)
+		lastRegion := totalRegions[len(totalRegions)-1]
+		if lastRegion.Meta.EndKey == nil {
+			break
+		}
+		if endKey != nil && bytes.Compare(lastRegion.Meta.EndKey, endKey) >= 0 {
+			break
+		}
+		key = lastRegion.Meta.EndKey
 	}
 
-	return handleRegionsResponse(resp), nil
+	return totalRegions, nil
 }
 
 func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*Region {
