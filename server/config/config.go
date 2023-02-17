@@ -317,9 +317,12 @@ func adjustPath(p *string) {
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	// Load config file if specified.
-	var meta *toml.MetaData
+	var (
+		meta *toml.MetaData
+		err  error
+	)
 	if configFile, _ := flagSet.GetString("config"); configFile != "" {
-		meta, err := configutil.ConfigFromFile(c, configFile)
+		meta, err = configutil.ConfigFromFile(c, configFile)
 		if err != nil {
 			return err
 		}
