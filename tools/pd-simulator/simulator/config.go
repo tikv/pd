@@ -21,6 +21,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/docker/go-units"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -92,53 +93,23 @@ func NewSimConfig(serverLogLevel string) *SimConfig {
 	return &SimConfig{ServerConfig: cfg}
 }
 
-func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
-	if v.Duration == 0 {
-		v.Duration = defValue
-	}
-}
-
-func adjustString(v *string, defValue string) {
-	if len(*v) == 0 {
-		*v = defValue
-	}
-}
-
-func adjustUint64(v *uint64, defValue uint64) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
-func adjustInt64(v *int64, defValue int64) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
-func adjustByteSize(v *typeutil.ByteSize, defValue typeutil.ByteSize) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
 // Adjust is used to adjust configurations
 func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
-	adjustDuration(&sc.SimTickInterval, defaultSimTickInterval)
-	adjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
-	adjustString(&sc.StoreVersion, versioninfo.PDReleaseVersion)
-	adjustDuration(&sc.RaftStore.RegionHeartBeatInterval, defaultRegionHeartbeat)
-	adjustDuration(&sc.RaftStore.StoreHeartBeatInterval, defaultStoreHeartbeat)
-	adjustByteSize(&sc.RaftStore.Capacity, defaultCapacity)
-	adjustByteSize(&sc.RaftStore.ExtraUsedSpace, defaultExtraUsedSpace)
-	adjustUint64(&sc.Coprocessor.RegionSplitKey, defaultRegionSplitKeys)
-	adjustByteSize(&sc.Coprocessor.RegionSplitSize, defaultRegionSplitSize)
+	configutil.AdjustDuration(&sc.SimTickInterval, defaultSimTickInterval)
+	configutil.AdjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
+	configutil.AdjustString(&sc.StoreVersion, versioninfo.PDReleaseVersion)
+	configutil.AdjustDuration(&sc.RaftStore.RegionHeartBeatInterval, defaultRegionHeartbeat)
+	configutil.AdjustDuration(&sc.RaftStore.StoreHeartBeatInterval, defaultStoreHeartbeat)
+	configutil.AdjustByteSize(&sc.RaftStore.Capacity, defaultCapacity)
+	configutil.AdjustByteSize(&sc.RaftStore.ExtraUsedSpace, defaultExtraUsedSpace)
+	configutil.AdjustUint64(&sc.Coprocessor.RegionSplitKey, defaultRegionSplitKeys)
+	configutil.AdjustByteSize(&sc.Coprocessor.RegionSplitSize, defaultRegionSplitSize)
 
-	adjustInt64(&sc.ServerConfig.LeaderLease, defaultLeaderLease)
-	adjustDuration(&sc.ServerConfig.TSOSaveInterval, defaultTSOSaveInterval)
-	adjustDuration(&sc.ServerConfig.TickInterval, defaultTickInterval)
-	adjustDuration(&sc.ServerConfig.ElectionInterval, defaultElectionInterval)
-	adjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
+	configutil.AdjustInt64(&sc.ServerConfig.LeaderLease, defaultLeaderLease)
+	configutil.AdjustDuration(&sc.ServerConfig.TSOSaveInterval, defaultTSOSaveInterval)
+	configutil.AdjustDuration(&sc.ServerConfig.TickInterval, defaultTickInterval)
+	configutil.AdjustDuration(&sc.ServerConfig.ElectionInterval, defaultElectionInterval)
+	configutil.AdjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
 	return sc.ServerConfig.Adjust(meta, false)
 }
