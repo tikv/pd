@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/goleak"
@@ -236,7 +235,7 @@ func TestAPIService(t *testing.T) {
 	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, values, tu.Status(re, http.StatusNotFound))
+	err = testutil.CheckPostJSON(testDialClient, url, values, testutil.Status(re, http.StatusNotFound))
 	re.NoError(err)
 
 	testutil.CleanServer(cfg.DataDir)

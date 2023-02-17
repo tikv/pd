@@ -184,7 +184,11 @@ func start(cmd *cobra.Command, args []string, apiMode bool) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	versioninfo.Log("PD")
+	if apiMode {
+		versioninfo.Log("API Server")
+	} else {
+		versioninfo.Log("PD")
+	}
 
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
