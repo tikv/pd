@@ -1323,7 +1323,7 @@ func (s *Server) IsServing() bool {
 	return s.member.IsLeader()
 }
 
-// AddServiceReadyCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }

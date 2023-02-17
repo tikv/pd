@@ -127,7 +127,7 @@ func (s *Server) IsServing() bool {
 	return true
 }
 
-// AddServiceReadyCallback adds a callback when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 // the global TSO allocator after the flag 'enable-local-tso' is set to true.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	// Leave it empty
