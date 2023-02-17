@@ -33,8 +33,8 @@ import (
 )
 
 var (
-	// errNotServing is returned when current server is not serving.
-	errNotServing = status.Errorf(codes.Unavailable, "server is not serving")
+	// errNotLeader is returned when current server is not the leader.
+	errNotLeader = status.Errorf(codes.Unavailable, "not leader")
 )
 
 var _ rmpb.ResourceManagerServer = (*Service)(nil)
@@ -86,7 +86,7 @@ func (s *Service) GetManager() *Manager {
 
 func (s *Service) checkServing() error {
 	if !s.manager.srv.IsServing() {
-		return errNotServing
+		return errNotLeader
 	}
 	return nil
 }

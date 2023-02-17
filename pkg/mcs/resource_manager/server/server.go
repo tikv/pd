@@ -49,7 +49,6 @@ const tcp = "tcp"
 // nolint
 type Server struct {
 	cfg *Config
-	mux cmux.CMux
 	// Server state. 0 is not serving, 1 is serving.
 	isServing   int64
 	ctx         context.Context
@@ -89,7 +88,7 @@ func (s *Server) Run() error {
 	if err := s.startServer(); err != nil {
 		return err
 	}
-	return s.mux.Serve()
+	return nil
 }
 
 // Close closes the server.
@@ -164,6 +163,7 @@ func (s *Server) initClient() error {
 }
 
 func (s *Server) startServer() error {
+	var mux cmux.CMux
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
@@ -173,17 +173,17 @@ func (s *Server) startServer() error {
 		if err != nil {
 			return err
 		}
-		s.mux = cmux.New(l)
+		mux = cmux.New(l)
 	} else {
 		l, err := net.Listen(tcp, s.cfg.ListenAddr)
 		if err != nil {
 			return err
 		}
-		s.mux = cmux.New(l)
+		mux = cmux.New(l)
 	}
 
-	grpcL := s.mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
-	httpL := s.mux.Match(cmux.Any())
+	grpcL := mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	httpL := mux.Match(cmux.Any())
 
 	manager := NewManager(s)
 	s.service = &Service{
@@ -218,7 +218,7 @@ func (s *Server) startServer() error {
 	}
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	return nil
+	return mux.Serve()
 }
 
 // NewServer creates a new resource manager server.
