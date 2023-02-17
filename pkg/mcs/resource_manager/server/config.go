@@ -25,7 +25,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Config is the configuration for the TSO.
+// Config is the configuration for the resource manager.
 type Config struct {
 	BackendEndpoints string `toml:"backend-endpoints" json:"backend-endpoints"`
 	ListenAddr       string `toml:"listen-addr" json:"listen-addr"`
