@@ -41,7 +41,8 @@ func TestRegister(t *testing.T) {
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()
-	sr := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", 10)
+	sr, err := NewServiceRegister(context.Background(), []string{ep}, "test_service", "127.0.0.1:1", "127.0.0.1:1", 10)
+	re.NoError(err)
 	err = sr.Register()
 	re.NoError(err)
 	resp, err := client.Get(context.Background(), sr.key)
@@ -54,7 +55,8 @@ func TestRegister(t *testing.T) {
 	re.NoError(err)
 	re.Empty(resp.Kvs)
 
-	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr, err = NewServiceRegister(context.Background(), []string{ep}, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	re.NoError(err)
 	err = sr.Register()
 	re.NoError(err)
 	sr.cancel()

@@ -21,7 +21,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 )
 
@@ -35,20 +34,19 @@ func TestDiscover(t *testing.T) {
 	re.NoError(err)
 
 	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
+	sr1, err := NewServiceRegister(context.Background(), []string{ep}, "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
+	re.NoError(err)
 	err = sr1.Register()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr2, err := NewServiceRegister(context.Background(), []string{ep}, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	re.NoError(err)
 	err = sr2.Register()
 	re.NoError(err)
 
-	endpoints, err := Discover(client, "test_service")
+	endpoints, err := Discover([]string{ep}, "test_service")
 	re.NoError(err)
 	re.Len(endpoints, 2)
 	re.Equal("127.0.0.1:1", endpoints[0])
@@ -57,7 +55,45 @@ func TestDiscover(t *testing.T) {
 	sr1.cancel()
 	sr2.cancel()
 	time.Sleep(3 * time.Second)
-	endpoints, err = Discover(client, "test_service")
+	endpoints, err = Discover([]string{ep}, "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)
+}
+
+func TestWatch(t *testing.T) {
+	re := require.New(t)
+	cfg := etcdutil.NewTestSingleConfig(t)
+	etcd, err := embed.StartEtcd(cfg)
+	defer func() {
+		etcd.Close()
+	}()
+	re.NoError(err)
+
+	ep := cfg.LCUrls[0].String()
+	re.NoError(err)
+	r1 := make(chan string, 1)
+	r2 := make(chan string, 1)
+	<-etcd.Server.ReadyNotify()
+	go Watch(context.Background(), []string{ep}, registryPath("test_service", "127.0.0.1:1"),
+		func() { r1 <- "put" }, func() { r1 <- "delete" },
+	)
+	go Watch(context.Background(), []string{ep}, discoveryPath("test_service1"),
+		func() { r2 <- "put" }, func() { r2 <- "delete" },
+	)
+	sr1, err := NewServiceRegister(context.Background(), []string{ep}, "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
+	re.NoError(err)
+	err = sr1.Register()
+	re.NoError(err)
+	re.Equal("put", <-r1)
+	sr2, err := NewServiceRegister(context.Background(), []string{ep}, "test_service1", "127.0.0.1:2", "127.0.0.1:2", 1)
+	re.NoError(err)
+	err = sr2.Register()
+	re.NoError(err)
+	re.Equal("put", <-r2)
+
+	sr1.cancel()
+	sr2.cancel()
+	time.Sleep(3 * time.Second)
+	re.Equal("delete", <-r1)
+	re.Equal("delete", <-r2)
 }
