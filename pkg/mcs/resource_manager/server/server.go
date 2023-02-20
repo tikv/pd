@@ -43,26 +43,35 @@ import (
 	"google.golang.org/grpc"
 )
 
-const tcp = "tcp"
+const (
+	tcp = "tcp"
+	// defaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
+	defaultGRPCGracefulStopTimeout = 5 * time.Second
+	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
+	defaultHTTPGracefulShutdownTimeout = 300 * time.Second
+)
 
 // Server is the resource manager server, and it implements bs.Server.
 // nolint
 type Server struct {
-	cfg *Config
 	// Server state. 0 is not serving, 1 is serving.
-	isServing   int64
-	ctx         context.Context
+	isServing int64
+
+	ctx              context.Context
+	serverLoopCtx    context.Context
+	serverLoopCancel func()
+	serverLoopWg     sync.WaitGroup
+
+	cfg         *Config
 	name        string
 	backendUrls []url.URL
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	grpcServer *grpc.Server
-	httpServer *http.Server
-	service    *Service
+	muxListener net.Listener
+	service     *Service
 
-	serverLoopWg sync.WaitGroup
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
@@ -85,6 +94,7 @@ func (s *Server) Run() error {
 	if err := s.initClient(); err != nil {
 		return err
 	}
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	return s.startServer()
 }
 
@@ -95,10 +105,10 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.Info("closing server")
-
-	s.grpcServer.Stop()
-	s.httpServer.Shutdown(s.ctx)
+	log.Info("closing resource manager server ...")
+	// TODO: double check when muxListener is closed, grpc.Server.serve() and http.Server.serve()
+	// will also close with error cmux.ErrListenerClosed.
+	s.muxListener.Close()
 	s.serverLoopWg.Wait()
 
 	if s.etcdClient != nil {
@@ -110,6 +120,8 @@ func (s *Server) Close() {
 	if s.httpClient != nil {
 		s.httpClient.CloseIdleConnections()
 	}
+
+	log.Info("resource manager server is closed")
 }
 
 // GetClient returns builtin etcd client.
@@ -133,6 +145,11 @@ func (s *Server) IsServing() bool {
 	return atomic.LoadInt64(&s.isServing) == 1
 }
 
+// IsClosed checks if the server loop is closed
+func (s *Server) IsClosed() bool {
+	return atomic.LoadInt64(&s.isServing) == 0
+}
+
 // AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
@@ -153,63 +170,104 @@ func (s *Server) initClient() error {
 	return err
 }
 
-func (s *Server) startServer() error {
-	var mux cmux.CMux
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
-	if err != nil {
-		return err
-	}
-	if tlsConfig != nil {
-		l, err := tls.Listen(tcp, s.cfg.ListenAddr, tlsConfig)
-		if err != nil {
-			return err
-		}
-		mux = cmux.New(l)
-	} else {
-		l, err := net.Listen(tcp, s.cfg.ListenAddr)
-		if err != nil {
-			return err
-		}
-		mux = cmux.New(l)
-	}
+func (s *Server) startGRPCServer(l net.Listener) {
+	defer s.serverLoopWg.Done()
 
+	gs := grpc.NewServer()
+	s.service.RegisterGRPCService(gs)
+	err := gs.Serve(l)
+	if err != cmux.ErrListenerClosed {
+		log.Fatal("grpc server stops serving unexpectedly.", errs.ZapError(err))
+	}
+	log.Info("gRPC server stop serving.", errs.ZapError(err))
+
+	// Attempt graceful stop (waits for pending RPCs), but force a stop if
+	// it doesn't happen in a reasonable amount of time.
+	done := make(chan struct{})
+	go func() {
+		gs.GracefulStop()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(defaultGRPCGracefulStopTimeout):
+		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now.", zap.Duration("default", defaultGRPCGracefulStopTimeout))
+		gs.Stop()
+	}
+}
+
+func (s *Server) startHTTPServer(l net.Listener) {
+	defer s.serverLoopWg.Done()
+
+	handler, _ := SetUpRestHandler(s.service)
+	hs := &http.Server{
+		Handler:           handler,
+		ReadTimeout:       5 * time.Minute,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	err := hs.Serve(l)
+	if err != cmux.ErrListenerClosed {
+		log.Fatal("http server stops serving unexpectedly.", errs.ZapError(err))
+	}
+	log.Info("http server stop serving", errs.ZapError(err))
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPGracefulShutdownTimeout)
+	defer cancel()
+	err = hs.Shutdown(ctx)
+	log.Info("all http(s) requests finished.")
+	if err != nil {
+		log.Error("http server shutdown encountered problem.", errs.ZapError(err))
+	}
+}
+
+func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
+	defer s.serverLoopWg.Done()
+
+	mux := cmux.New(l)
 	grpcL := mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
 	httpL := mux.Match(cmux.Any())
 
+	s.serverLoopWg.Add(2)
+	go s.startGRPCServer(grpcL)
+	go s.startHTTPServer(httpL)
+
+	if err := mux.Serve(); !strings.Contains(err.Error(), "use of closed network connection") {
+		log.Fatal("mux stop serving unexpectedly.", errs.ZapError(err))
+	}
+}
+
+func (s *Server) startServer() error {
 	manager := NewManager(s)
 	s.service = &Service{
 		ctx:     s.ctx,
 		manager: manager,
 	}
 
-	s.grpcServer = grpc.NewServer()
-	s.service.RegisterGRPCService(s.grpcServer)
-
-	handler, _ := SetUpRestHandler(s.service)
-	s.httpServer = &http.Server{
-		Handler:           handler,
-		ReadTimeout:       5 * time.Minute,
-		ReadHeaderTimeout: 5 * time.Second,
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	if err != nil {
+		return err
+	}
+	if tlsConfig != nil {
+		s.muxListener, err = tls.Listen(tcp, s.cfg.ListenAddr, tlsConfig)
+	} else {
+		s.muxListener, err = net.Listen(tcp, s.cfg.ListenAddr)
+	}
+	if err != nil {
+		return err
 	}
 
-	s.serverLoopWg.Add(2)
-	go func() {
-		defer s.serverLoopWg.Done()
-		s.grpcServer.Serve(grpcL)
-	}()
-	go func() {
-		defer s.serverLoopWg.Done()
-		s.httpServer.Serve(httpL)
-	}()
+	s.serverLoopWg.Add(1)
+	go s.startGRPCAndHTTPServers(s.muxListener)
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
 	for _, cb := range s.startCallbacks {
 		cb()
 	}
+
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	return mux.Serve()
+	return nil
 }
 
 // NewServer creates a new resource manager server.
