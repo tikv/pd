@@ -33,7 +33,7 @@ import (
 const (
 	defaultName              = "Resource Manager"
 	defaultBackendEndpoints  = "127.0.0.1:2379"
-	defaultListenAddr        = "127.0.0.1:2382"
+	defaultListenAddr        = "127.0.0.1:3380"
 	defaultEnableGRPCGateway = true
 
 	defaultLogFormat           = "text"

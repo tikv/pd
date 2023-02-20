@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/test/grpc_testing"
 )
 
 func TestResourceManagerServer(t *testing.T) {
@@ -51,7 +50,7 @@ func TestResourceManagerServer(t *testing.T) {
 	cfg.BackendEndpoints = leader.GetAddr()
 	cfg.ListenAddr = "127.0.0.1:8086"
 
-	svr := rm.NewServer(ctx, cfg, "ResourceManager")
+	svr := rm.NewServer(ctx, cfg)
 	go svr.Run()
 	testutil.Eventually(re, func() bool {
 		return svr.IsServing()
@@ -62,10 +61,11 @@ func TestResourceManagerServer(t *testing.T) {
 	cc, err := grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithInsecure())
 	re.NoError(err)
 	defer cc.Close()
-	grpcClient := grpc_testing.NewTestServiceClient(cc)
-	resp, err := grpcClient.EmptyCall(context.Background(), &grpc_testing.Empty{})
-	re.ErrorContains(err, "Unimplemented")
-	re.Nil(resp)
+	c := rmpb.NewResourceManagerClient(cc)
+	_, err = c.GetResourceGroup(context.Background(), &rmpb.GetResourceGroupRequest{
+		ResourceGroupName: "pingcap",
+	})
+	re.ErrorContains(err, "resource group not found")
 
 	// Test registered REST HTTP Handler
 	url := "http://" + cfg.ListenAddr + "/resource-manager/api/v1/config"
