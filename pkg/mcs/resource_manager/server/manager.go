@@ -38,6 +38,7 @@ const defaultConsumptionChanSize = 1024
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
+	ctx     context.Context
 	member  *member.Member
 	groups  map[string]*ResourceGroup
 	storage endpoint.ResourceGroupStorage
@@ -75,6 +76,7 @@ func NewManager(srv bs.Server) *Manager {
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
+	m.ctx = ctx
 	// Reset the resource groups first.
 	m.groups = make(map[string]*ResourceGroup)
 	handler := func(k, v string) {
@@ -83,7 +85,7 @@ func (m *Manager) Init(ctx context.Context) {
 			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
-		m.groups[group.Name] = FromProtoResourceGroup(group)
+		m.groups[group.Name] = fromProtoResourceGroup(ctx, group)
 	}
 	m.storage.LoadResourceGroupSettings(handler)
 	tokenHandler := func(k, v string) {
@@ -104,17 +106,18 @@ func (m *Manager) Init(ctx context.Context) {
 }
 
 // AddResourceGroup puts a resource group.
-func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
+func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	m.RLock()
-	_, ok := m.groups[group.Name]
+	_, ok := m.groups[grouppb.Name]
 	m.RUnlock()
 	if ok {
 		return errors.New("this group already exists")
 	}
-	err := group.CheckAndInit()
-	if err != nil {
-		return err
+	// Check the name.
+	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
+		return errors.New("invalid resource group name, the length should be in [1,32]")
 	}
+	group := fromProtoResourceGroup(m.ctx, grouppb)
 	m.Lock()
 	defer m.Unlock()
 	if err := group.persistSettings(m.storage); err != nil {

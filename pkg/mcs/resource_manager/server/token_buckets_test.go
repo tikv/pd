@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -25,6 +26,8 @@ import (
 
 func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	tbSetting := &rmpb.TokenBucket{
 		Tokens: 200000,
 		Settings: &rmpb.TokenLimitSettings{
@@ -33,9 +36,9 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 		},
 	}
 
-	tb := NewGroupTokenBucket(tbSetting)
+	tb := NewGroupTokenBucket(ctx, tbSetting)
 	time1 := time.Now()
-	tb.request(time1, 0, 0)
+	tb.request(time1, 0, 0, 0)
 	re.LessOrEqual(math.Abs(tbSetting.Tokens-tb.Tokens), 1e-7)
 	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
 
@@ -49,13 +52,15 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	tb.patch(tbSetting)
 
 	time2 := time.Now()
-	tb.request(time2, 0, 0)
+	tb.request(time2, 0, 0, 0)
 	re.LessOrEqual(math.Abs(100000-tb.Tokens), time2.Sub(time1).Seconds()*float64(tbSetting.Settings.FillRate)+1e7)
 	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
 }
 
 func TestGroupTokenBucketRequest(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	tbSetting := &rmpb.TokenBucket{
 		Tokens: 200000,
 		Settings: &rmpb.TokenLimitSettings{
@@ -64,29 +69,29 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 		},
 	}
 
-	gtb := NewGroupTokenBucket(tbSetting)
+	gtb := NewGroupTokenBucket(ctx, tbSetting)
 	time1 := time.Now()
-	tb, trickle := gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond))
+	tb, trickle := gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond), 0)
 	re.LessOrEqual(math.Abs(tb.Tokens-190000), 1e-7)
 	re.Equal(trickle, int64(0))
 	// need to lend token
-	tb, trickle = gtb.request(time1, 11000, uint64(time.Second)*10/uint64(time.Millisecond))
+	tb, trickle = gtb.request(time1, 11000, uint64(time.Second)*10/uint64(time.Millisecond), 0)
 	re.LessOrEqual(math.Abs(tb.Tokens-11000), 1e-7)
 	re.Equal(trickle, int64(time.Second)*11000./4000./int64(time.Millisecond))
-	tb, trickle = gtb.request(time1, 35000, uint64(time.Second)*10/uint64(time.Millisecond))
+	tb, trickle = gtb.request(time1, 35000, uint64(time.Second)*10/uint64(time.Millisecond), 0)
 	re.LessOrEqual(math.Abs(tb.Tokens-35000), 1e-7)
 	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
-	tb, trickle = gtb.request(time1, 60000, uint64(time.Second)*10/uint64(time.Millisecond))
+	tb, trickle = gtb.request(time1, 60000, uint64(time.Second)*10/uint64(time.Millisecond), 0)
 	re.LessOrEqual(math.Abs(tb.Tokens-22000), 1e-7)
 	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
-	tb, trickle = gtb.request(time1, 3000, uint64(time.Second)*10/uint64(time.Millisecond))
+	tb, trickle = gtb.request(time1, 3000, uint64(time.Second)*10/uint64(time.Millisecond), 0)
 	re.LessOrEqual(math.Abs(tb.Tokens-2000), 1e-7)
 	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
-	tb, trickle = gtb.request(time1, 3000, uint64(time.Second)*10/uint64(time.Millisecond))
+	tb, trickle = gtb.request(time1, 3000, uint64(time.Second)*10/uint64(time.Millisecond), 0)
 	re.LessOrEqual(math.Abs(tb.Tokens-1000), 1e-7)
 	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
 	time2 := time1.Add(10 * time.Second)
-	tb, trickle = gtb.request(time2, 20000, uint64(time.Second)*10/uint64(time.Millisecond))
+	tb, trickle = gtb.request(time2, 20000, uint64(time.Second)*10/uint64(time.Millisecond), 0)
 	re.LessOrEqual(math.Abs(tb.Tokens-19000), 1e-7)
 	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
 }
