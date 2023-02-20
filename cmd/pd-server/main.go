@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
+	resource_manager "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -78,19 +79,37 @@ func main() {
 // NewServiceCommand returns the service command.
 func NewServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "service <tso>",
-		Short: "Run a service",
+		Use:   "service <mode>",
+		Short: "Run a service, for example, tso, resource_manager",
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
+	cmd.AddCommand(NewResourceManagerServiceCommand())
 	return cmd
 }
 
-// NewTSOServiceCommand returns the unsafe remove failed stores command.
+// NewTSOServiceCommand returns the tso service command.
 func NewTSOServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tso",
 		Short: "Run the tso service",
 		Run:   tso.CreateServerWrapper,
+	}
+	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
+	cmd.Flags().StringP("config", "", "", "config file")
+	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
+	cmd.Flags().StringP("listen-addr", "", "", "listen address for tso service")
+	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
+	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
+	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	return cmd
+}
+
+// NewResourceManagerServiceCommand returns the resource manager service command.
+func NewResourceManagerServiceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "resource_manager",
+		Short: "Run the resource manager service",
+		Run:   resource_manager.CreateServerWrapper,
 	}
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")

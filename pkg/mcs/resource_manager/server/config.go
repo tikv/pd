@@ -32,8 +32,8 @@ import (
 
 const (
 	defaultName              = "Resource Manager"
-	defaultBackendEndpoints  = "http://127.0.0.1:2379"
-	defaultListenAddr        = "http://127.0.0.1:2382"
+	defaultBackendEndpoints  = "127.0.0.1:2379"
+	defaultListenAddr        = "127.0.0.1:2382"
 	defaultEnableGRPCGateway = true
 
 	defaultLogFormat           = "text"
