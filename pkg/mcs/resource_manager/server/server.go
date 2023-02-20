@@ -177,9 +177,9 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	s.service.RegisterGRPCService(gs)
 	err := gs.Serve(l)
 	if err != cmux.ErrListenerClosed {
-		log.Fatal("grpc server stops serving unexpectedly.", errs.ZapError(err))
+		log.Fatal("grpc server stops serving unexpectedly", errs.ZapError(err))
 	}
-	log.Info("gRPC server stop serving.", errs.ZapError(err))
+	log.Info("gRPC server stop serving", errs.ZapError(err))
 
 	// Attempt graceful stop (waits for pending RPCs), but force a stop if
 	// it doesn't happen in a reasonable amount of time.
@@ -191,7 +191,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	select {
 	case <-done:
 	case <-time.After(defaultGRPCGracefulStopTimeout):
-		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now.", zap.Duration("default", defaultGRPCGracefulStopTimeout))
+		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", defaultGRPCGracefulStopTimeout))
 		gs.Stop()
 	}
 }
@@ -207,16 +207,16 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	}
 	err := hs.Serve(l)
 	if err != cmux.ErrListenerClosed {
-		log.Fatal("http server stops serving unexpectedly.", errs.ZapError(err))
+		log.Fatal("http server stops serving unexpectedly", errs.ZapError(err))
 	}
 	log.Info("http server stop serving", errs.ZapError(err))
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPGracefulShutdownTimeout)
 	defer cancel()
 	err = hs.Shutdown(ctx)
-	log.Info("all http(s) requests finished.")
+	log.Info("all http(s) requests finished")
 	if err != nil {
-		log.Error("http server shutdown encountered problem.", errs.ZapError(err))
+		log.Error("http server shutdown encountered problem", errs.ZapError(err))
 	}
 }
 
@@ -232,7 +232,7 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 	go s.startHTTPServer(httpL)
 
 	if err := mux.Serve(); !strings.Contains(err.Error(), "use of closed network connection") {
-		log.Fatal("mux stop serving unexpectedly.", errs.ZapError(err))
+		log.Fatal("mux stop serving unexpectedly", errs.ZapError(err))
 	}
 }
 

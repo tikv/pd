@@ -50,9 +50,6 @@ type Config struct {
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
-	// WarningMsgs contains all warnings during parsing.
-	WarningMsgs []string
-
 	// Log related config.
 	Log log.Config `toml:"log" json:"log"`
 
@@ -96,9 +93,11 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 // Adjust is used to adjust the PD configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configMetaData := configutil.NewConfigMetadata(meta)
+	warningMsgs := make([]string, 0)
 	if err := configMetaData.CheckUndecoded(); err != nil {
-		c.WarningMsgs = append(c.WarningMsgs, err.Error())
+		warningMsgs = append(warningMsgs, err.Error())
 	}
+	configutil.PrintConfigCheckMsg(os.Stdout, warningMsgs)
 
 	if c.Name == "" {
 		hostname, err := os.Hostname()
