@@ -35,6 +35,11 @@ import (
 
 const defaultConsumptionChanSize = 1024
 
+const (
+	metricsCleanupInterval = time.Minute
+	metricsCleanupTimeout  = 20 * time.Minute
+)
+
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
@@ -47,6 +52,8 @@ type Manager struct {
 		resourceGroupName string
 		*rmpb.Consumption
 	}
+	// record update time of each resource group
+	comsumptionRecord map[string]time.Time
 }
 
 // NewManager returns a new Manager.
@@ -58,6 +65,7 @@ func NewManager(srv bs.Server) *Manager {
 			resourceGroupName string
 			*rmpb.Consumption
 		}, defaultConsumptionChanSize),
+		comsumptionRecord: make(map[string]time.Time),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -227,6 +235,8 @@ func (m *Manager) persistResourceGroupRunningState() {
 
 // Receive the consumption and flush it to the metrics.
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+	ticker := time.NewTicker(metricsCleanupInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -274,6 +284,24 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			if consumption.KvWriteRpcCount != 0 {
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
+			}
+
+			m.comsumptionRecord[name] = time.Now()
+
+		case <-ticker.C:
+			// Clean up the metrics that have not been updated for a long time.
+			for name, lastTime := range m.comsumptionRecord {
+				if time.Since(lastTime) > metricsCleanupTimeout {
+					readRequestUnitCost.DeleteLabelValues(name)
+					writeRequestUnitCost.DeleteLabelValues(name)
+					readByteCost.DeleteLabelValues(name)
+					writeByteCost.DeleteLabelValues(name)
+					kvCPUCost.DeleteLabelValues(name)
+					sqlCPUCost.DeleteLabelValues(name)
+					requestCount.DeleteLabelValues(name, readTypeLabel)
+					requestCount.DeleteLabelValues(name, writeTypeLabel)
+					delete(m.comsumptionRecord, name)
+				}
 			}
 		}
 	}
