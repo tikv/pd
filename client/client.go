@@ -137,6 +137,9 @@ type Client interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
+	// Watch watches on a key or prefix.
+	Watch(ctx context.Context, key []byte, opts ...WatchOption) (chan []*pdpb.Event, error)
+
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
@@ -145,6 +148,25 @@ type Client interface {
 	TSOClient
 	// Close closes the client.
 	Close()
+}
+
+// WatchOp represents available options when using watch.
+type WatchOp struct {
+	rangeEnd      []byte
+	startRevision int64
+}
+
+// WatchOption configures Watch.
+type WatchOption func(*WatchOp)
+
+// WithRangeEnd specifies the range end of watch.
+func WithRangeEnd(rangeEnd []byte) WatchOption {
+	return func(op *WatchOp) { op.rangeEnd = rangeEnd }
+}
+
+// WithStartRevision specifies the start revision of watch.
+func WithStartRevision(startRevision int64) WatchOption {
+	return func(op *WatchOp) { op.startRevision = startRevision }
 }
 
 // GetStoreOp represents available options when getting stores.
@@ -1124,6 +1146,44 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 		}
 	}()
 	return globalConfigWatcherCh, err
+}
+
+func (c *client) Watch(ctx context.Context, key []byte, opts ...WatchOption) (chan []*pdpb.Event, error) {
+	eventCh := make(chan []*pdpb.Event, 100)
+	options := &WatchOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	res, err := c.getClient().Watch(ctx, &pdpb.WatchRequest{
+		Key:           key,
+		RangeEnd:      options.rangeEnd,
+		StartRevision: options.startRevision,
+	})
+	if err != nil {
+		close(eventCh)
+		return nil, err
+	}
+	go func() {
+		defer func() {
+			close(eventCh)
+			if r := recover(); r != nil {
+				log.Error("[pd] panic in client `Watch`", zap.Any("error", r))
+				return
+			}
+		}()
+		for {
+			resp, err := res.Recv()
+			if err != nil {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case eventCh <- resp.GetEvents():
+			}
+		}
+	}()
+	return eventCh, err
 }
 
 func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {

@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
 
@@ -1421,4 +1422,45 @@ func (suite *clientTestSuite) TestScatterRegion() {
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
 	}, testutil.WithTickInterval(time.Second))
+}
+
+func TestWatch(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+	client := setupCli(re, ctx, endpoints)
+	defer client.Close()
+
+	key := "test"
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ch, err := client.Watch(ctx, []byte(key))
+		re.NoError(err)
+		var events []*pdpb.Event
+		for e := range ch {
+			events = append(events, e...)
+			if len(events) >= 3 {
+				break
+			}
+		}
+		re.Equal(pdpb.Event_PUT, events[0].GetType())
+		re.Equal("1", string(events[0].GetKv().GetValue()))
+		re.Equal(pdpb.Event_PUT, events[1].GetType())
+		re.Equal("2", string(events[1].GetKv().GetValue()))
+		re.Equal(pdpb.Event_DELETE, events[2].GetType())
+	}()
+
+	cli, err := clientv3.NewFromURLs(endpoints)
+	re.NoError(err)
+	defer cli.Close()
+	cli.Put(context.Background(), key, "1")
+	cli.Put(context.Background(), key, "2")
+	cli.Delete(context.Background(), key)
+	wg.Wait()
 }

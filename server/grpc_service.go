@@ -2007,6 +2007,52 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	}
 }
 
+// Watch watches the key with a given prefix and revision.
+func (s *GrpcServer) Watch(req *pdpb.WatchRequest, server pdpb.PD_WatchServer) error {
+	ctx, cancel := context.WithCancel(s.Context())
+	defer cancel()
+	key := req.GetKey()
+	startRevision := req.GetStartRevision()
+	watchChan := s.client.Watch(ctx, string(key), clientv3.WithPrefix(), clientv3.WithRev(startRevision), clientv3.WithPrevKV())
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case res := <-watchChan:
+			if res.Err() != nil {
+				var resp pdpb.WatchResponse
+				if startRevision < res.CompactRevision {
+					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", startRevision, res.CompactRevision))
+					resp.CompactRevision = res.CompactRevision
+				} else {
+					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
+				}
+				if err := server.Send(&resp); err != nil {
+					return err
+				}
+				// Err() indicates that this WatchResponse holds a channel-closing error.
+				return res.Err()
+			}
+
+			events := make([]*pdpb.Event, 0, len(res.Events))
+			for _, e := range res.Events {
+				event := &pdpb.Event{Kv: &pdpb.KeyValue{Key: e.Kv.Key, Value: e.Kv.Value}, Type: pdpb.Event_EventType(e.Type)}
+				if e.PrevKv != nil {
+					event.PrevKv = &pdpb.KeyValue{Key: e.PrevKv.Key, Value: e.PrevKv.Value}
+				}
+				events = append(events, event)
+			}
+			if len(events) > 0 {
+				if err := server.Send(&pdpb.WatchResponse{Events: events, CompactRevision: res.Header.GetRevision()}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+}
+
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
 // and requires user to manually remove the `evict-leader-scheduler` with pd-ctl
 func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
