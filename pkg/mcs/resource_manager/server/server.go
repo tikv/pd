@@ -103,8 +103,6 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing resource manager server ...")
-	// TODO: double check when muxListener is closed, grpc.Server.serve() and http.Server.serve()
-	// will also close with error cmux.ErrListenerClosed.
 	s.muxListener.Close()
 	s.serverLoopWg.Wait()
 
