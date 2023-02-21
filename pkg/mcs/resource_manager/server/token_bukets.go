@@ -22,6 +22,8 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 const (
@@ -54,10 +56,7 @@ type TokenRequest struct {
 	grantedTokens float64
 	typ           requestTyp
 	// respChan is used to send the response back to the gRPC stream.
-	respChan chan<- struct {
-		resp          *rmpb.TokenBucket
-		trickleTimeMs int64
-	}
+	respChan chan<- *rmpb.GrantedRUTokenBucket
 }
 
 // NewTokenRequest creates a new token request.
@@ -65,10 +64,7 @@ func NewTokenRequest(
 	now time.Time,
 	neededTokens float64,
 	targetPeriodMs, clientUniqueID uint64,
-	respChan chan<- struct {
-		resp          *rmpb.TokenBucket
-		trickleTimeMs int64
-	},
+	respChan chan<- *rmpb.GrantedRUTokenBucket,
 ) *TokenRequest {
 	return &TokenRequest{
 		now:            now,
@@ -85,12 +81,9 @@ func (tr *TokenRequest) finish(resp *rmpb.TokenBucket, trickleTimeMs int64) {
 	if resp == nil || tr.respChan == nil {
 		return
 	}
-	tr.respChan <- struct {
-		resp          *rmpb.TokenBucket
-		trickleTimeMs int64
-	}{
-		resp,
-		trickleTimeMs,
+	tr.respChan <- &rmpb.GrantedRUTokenBucket{
+		GrantedTokens: resp,
+		TrickleTimeMs: trickleTimeMs,
 	}
 }
 
@@ -268,6 +261,10 @@ type GroupTokenBucketState struct {
 	requestChan chan *TokenRequest
 	// patchChan is used to receive the token bucket settings patch.
 	patchChan chan *rmpb.TokenBucket
+	// cloneChan is used to receive the clone request.
+	cloneChan chan chan<- *GroupTokenBucket
+	// stateChan is used to receive the state set request.
+	stateChan chan *GroupTokenBucketState
 
 	/* Visible States */
 	Tokens      float64    `json:"tokens,omitempty"`
@@ -280,13 +277,15 @@ func newGroupTokenBucketState(tokens float64) *GroupTokenBucketState {
 		tokenSlots:  sync.Map{},
 		requestChan: make(chan *TokenRequest, defaultRequestChanSize),
 		patchChan:   make(chan *rmpb.TokenBucket, 1),
+		cloneChan:   make(chan chan<- *GroupTokenBucket, 1),
+		stateChan:   make(chan *GroupTokenBucketState, 1),
 		Tokens:      tokens,
 	}
 }
 
 func (gts *GroupTokenBucketState) clone() *GroupTokenBucketState {
 	return &GroupTokenBucketState{
-		Tokens:      gts.Tokens,
+		Tokens:      gts.getTokens(),
 		LastUpdate:  gts.LastUpdate,
 		Initialized: gts.Initialized,
 	}
@@ -353,6 +352,9 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(settings *rmpb.TokenLimitSet
 }
 
 func (gts *GroupTokenBucketState) getTokens() (sum float64) {
+	if len(gts.slots) == 0 {
+		return gts.Tokens
+	}
 	gts.tokenSlots.Range(func(key, value interface{}) bool {
 		sum += value.(*TokenSlot).tokens
 		return true
@@ -392,8 +394,8 @@ type GroupTokenBucket struct {
 	*GroupTokenBucketState `json:"state,omitempty"`
 }
 
-// NewGroupTokenBucket returns a new GroupTokenBucket and runs the main loop.
-func NewGroupTokenBucket(ctx context.Context, tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
+// newGroupTokenBucket returns a new GroupTokenBucket and runs the main loop.
+func newGroupTokenBucket(ctx context.Context, tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
 	gtb := &GroupTokenBucket{
 		Settings:              tokenBucket.GetSettings(),
 		GroupTokenBucketState: newGroupTokenBucketState(tokenBucket.GetTokens()),
@@ -402,15 +404,8 @@ func NewGroupTokenBucket(ctx context.Context, tokenBucket *rmpb.TokenBucket) *Gr
 	return gtb
 }
 
-// GetTokenBucket returns the grpc protoc struct of GroupTokenBucket.
-func (gtb *GroupTokenBucket) GetTokenBucket() *rmpb.TokenBucket {
-	if gtb.Settings == nil {
-		return nil
-	}
-	return &rmpb.TokenBucket{
-		Settings: gtb.Settings,
-		Tokens:   gtb.getTokens(),
-	}
+func (gtb *GroupTokenBucket) setState(states *GroupTokenBucketState) {
+	gtb.stateChan <- states
 }
 
 // mainLoop will start a goroutine to receive token requests from gRPC stream
@@ -426,9 +421,17 @@ func (gtb *GroupTokenBucket) mainLoop(ctx context.Context) {
 		case <-tokenCtx.Done():
 			return
 		case req := <-gtb.requestChan:
+			if gtb.Settings == nil || gtb.Settings.FillRate == 0 {
+				req.finish(nil, 0)
+				continue
+			}
 			burstLimit := gtb.Settings.GetBurstLimit()
 			gtb.updateTokens(req.now, burstLimit)
-			res := &rmpb.TokenBucket{}
+			res := &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					BurstLimit: burstLimit,
+				},
+			}
 			// The fill rate will be used when the token server is in abnormal situation.
 			if req.neededTokens <= 0 {
 				req.finish(res, 0)
@@ -457,7 +460,7 @@ func (gtb *GroupTokenBucket) mainLoop(ctx context.Context) {
 				).requestSlotChan <- req
 			}
 		case tokenBucket := <-gtb.patchChan:
-			settings := proto.Clone(tokenBucket.GetSettings()).(*rmpb.TokenLimitSettings)
+			settings := tokenBucket.GetSettings()
 			if settings == nil {
 				continue
 			}
@@ -481,6 +484,13 @@ func (gtb *GroupTokenBucket) mainLoop(ctx context.Context) {
 				}
 				return true
 			})
+		case cloneChan := <-gtb.cloneChan:
+			cloneChan <- gtb.clone()
+		case state := <-gtb.stateChan:
+			gtb.setTokens(state.Tokens)
+			gtb.LastUpdate = state.LastUpdate
+			gtb.Initialized = state.Initialized
+			log.Info("update group token bucket state", zap.Any("state", state))
 		}
 	}
 }
@@ -497,6 +507,7 @@ func (gtb *GroupTokenBucket) init(now time.Time) {
 	gtb.Initialized = true
 }
 
+// updateTokens updates the tokens and settings.
 func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64) {
 	if !gtb.Initialized {
 		gtb.init(now)
@@ -510,24 +521,35 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64) {
 	}
 }
 
-// patch patches the token bucket settings.
+// patch patches the token bucket settings and wait for it's applied.
 func (gtb *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 	if gtb == nil {
 		return
 	}
-	gtb.patchChan <- tb
+	gtb.patchChan <- proto.Clone(tb).(*rmpb.TokenBucket)
 }
 
+func (gtb *GroupTokenBucket) clone() *GroupTokenBucket {
+	return &GroupTokenBucket{
+		Settings:              proto.Clone(gtb.Settings).(*rmpb.TokenLimitSettings),
+		GroupTokenBucketState: gtb.GroupTokenBucketState.clone(),
+	}
+}
+
+// request requests tokens from the group token bucket.
 func (gtb *GroupTokenBucket) request(
 	now time.Time,
 	neededTokens float64,
 	targetPeriodMs, clientUniqueID uint64,
-) (*rmpb.TokenBucket, int64) {
-	respChan := make(chan struct {
-		resp          *rmpb.TokenBucket
-		trickleTimeMs int64
-	}, 1)
+) *rmpb.GrantedRUTokenBucket {
+	respChan := make(chan *rmpb.GrantedRUTokenBucket, 1)
 	gtb.requestChan <- NewTokenRequest(now, neededTokens, targetPeriodMs, clientUniqueID, respChan)
-	resp := <-respChan
-	return resp.resp, resp.trickleTimeMs
+	return <-respChan
+}
+
+// Copy is used to safely copy the group token bucket without any data race.
+func (gtb *GroupTokenBucket) Copy() *GroupTokenBucket {
+	cloneRespChan := make(chan *GroupTokenBucket, 1)
+	gtb.cloneChan <- cloneRespChan
+	return <-cloneRespChan
 }

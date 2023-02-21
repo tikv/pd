@@ -17,8 +17,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -30,7 +28,6 @@ import (
 
 // ResourceGroup is the definition of a resource group, for REST API.
 type ResourceGroup struct {
-	sync.RWMutex
 	Name string         `json:"name"`
 	Mode rmpb.GroupMode `json:"mode"`
 	// RU settings
@@ -45,55 +42,39 @@ type RequestUnitSettings struct {
 // NewRequestUnitSettings creates a new RequestUnitSettings with the given token bucket.
 func NewRequestUnitSettings(ctx context.Context, tokenBucket *rmpb.TokenBucket) *RequestUnitSettings {
 	return &RequestUnitSettings{
-		RU: NewGroupTokenBucket(ctx, tokenBucket),
+		RU: newGroupTokenBucket(ctx, tokenBucket),
 	}
-}
-
-func (rg *ResourceGroup) String() string {
-	res, err := json.Marshal(rg)
-	if err != nil {
-		log.Error("marshal resource group failed", zap.Error(err))
-		return ""
-	}
-	return string(res)
 }
 
 // Copy copies the resource group.
 func (rg *ResourceGroup) Copy() *ResourceGroup {
-	// TODO: use a better way to copy
-	rg.RLock()
-	defer rg.RUnlock()
-	res, err := json.Marshal(rg)
-	if err != nil {
-		panic(err)
+	return &ResourceGroup{
+		Name: rg.Name,
+		Mode: rg.Mode,
+		RUSettings: &RequestUnitSettings{
+			RU: rg.RUSettings.RU.Copy(),
+		},
 	}
-	var newRG ResourceGroup
-	err = json.Unmarshal(res, &newRG)
-	if err != nil {
-		panic(err)
-	}
-	return &newRG
 }
 
-// PatchSettings patches the resource group settings.
+// patchSettings patches the resource group settings.
 // Only used to patch the resource group when updating.
 // Note: the tokens is the delta value to patch.
-func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
-	rg.RLock()
-	defer rg.RUnlock()
+func (rg *ResourceGroup) patchSettings(metaGroup *rmpb.ResourceGroup) error {
 	if metaGroup.GetMode() != rg.Mode {
 		return errors.New("only support reconfigure in same mode, maybe you should delete and create a new one")
 	}
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
-		if metaGroup.GetRUSettings() == nil {
+		settings := metaGroup.GetRUSettings().GetRU()
+		if settings == nil {
 			return errors.New("invalid resource group settings, RU mode should set RU settings")
 		}
-		rg.RUSettings.RU.patch(metaGroup.GetRUSettings().GetRU())
+		rg.RUSettings.RU.patch(settings)
+		log.Info("patch resource group ru settings", zap.String("name", rg.Name), zap.Any("settings", settings))
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
 	}
-	log.Info("patch resource group settings", zap.String("name", rg.Name), zap.String("settings", rg.String()))
 	return nil
 }
 
@@ -105,9 +86,7 @@ func fromProtoResourceGroup(ctx context.Context, group *rmpb.ResourceGroup) *Res
 	}
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
-		if settings := group.GetRUSettings(); settings != nil {
-			rg.RUSettings = NewRequestUnitSettings(ctx, settings.GetRU())
-		}
+		rg.RUSettings = NewRequestUnitSettings(ctx, group.GetRUSettings().GetRU())
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
 	}
@@ -120,26 +99,23 @@ func (rg *ResourceGroup) RequestRU(
 	neededTokens float64,
 	targetPeriodMs, clientUniqueID uint64,
 ) *rmpb.GrantedRUTokenBucket {
-	rg.Lock()
-	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
-		return nil
-	}
-	rg.Unlock()
-	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs, clientUniqueID)
-	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
+	return rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs, clientUniqueID)
 }
 
-// IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
-func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
-	rg.RLock()
-	defer rg.RUnlock()
+// intoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
+func (rg *ResourceGroup) intoProtoResourceGroup() *rmpb.ResourceGroup {
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
+		tokenBucket := &rmpb.TokenBucket{}
+		if rg.RUSettings != nil && rg.RUSettings.RU != nil {
+			tokenBucket.Settings = rg.RUSettings.RU.Settings
+			tokenBucket.Tokens = rg.RUSettings.RU.Tokens
+		}
 		group := &rmpb.ResourceGroup{
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RUMode,
 			RUSettings: &rmpb.GroupRequestUnitSettings{
-				RU: rg.RUSettings.RU.GetTokenBucket(),
+				RU: tokenBucket,
 			},
 		}
 		return group
@@ -152,7 +128,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
 func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) error {
-	metaGroup := rg.IntoProtoResourceGroup()
+	metaGroup := rg.intoProtoResourceGroup()
 	return storage.SaveResourceGroupSetting(rg.Name, metaGroup)
 }
 
@@ -160,20 +136,14 @@ func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) 
 type GroupStates struct {
 	// RU tokens
 	RU *GroupTokenBucketState `json:"r_u,omitempty"`
-	// raw resource tokens
-	CPU     *GroupTokenBucketState `json:"cpu,omitempty"`
-	IORead  *GroupTokenBucketState `json:"io_read,omitempty"`
-	IOWrite *GroupTokenBucketState `json:"io_write,omitempty"`
 }
 
 // GetGroupStates get the token set of ResourceGroup.
 func (rg *ResourceGroup) GetGroupStates() *GroupStates {
-	rg.RLock()
-	defer rg.RUnlock()
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
 		tokens := &GroupStates{
-			RU: rg.RUSettings.RU.GroupTokenBucketState.clone(),
+			RU: rg.RUSettings.RU.Copy().GroupTokenBucketState,
 		}
 		return tokens
 	case rmpb.GroupMode_RawMode: // Raw mode
@@ -187,7 +157,7 @@ func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
 		if state := states.RU; state != nil {
-			rg.RUSettings.RU.GroupTokenBucketState = state
+			rg.RUSettings.RU.setState(states.RU)
 		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")

@@ -142,11 +142,11 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 		return errors.New("not exists the group")
 	}
 
-	err := curGroup.PatchSettings(group)
+	err := curGroup.patchSettings(group)
 	if err != nil {
 		return err
 	}
-	return curGroup.persistSettings(m.storage)
+	return curGroup.Copy().persistSettings(m.storage)
 }
 
 // DeleteResourceGroup deletes a resource group.

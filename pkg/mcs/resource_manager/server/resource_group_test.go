@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
@@ -26,14 +25,12 @@ func TestPatchResourceGroup(t *testing.T) {
 	}
 
 	for _, ca := range testCaseRU {
-		// rg := rg1.Copy()
 		patch := &rmpb.ResourceGroup{}
 		err := json.Unmarshal([]byte(ca.patchJSONString), patch)
 		re.NoError(err)
-		err = rg.PatchSettings(patch)
+		err = rg.patchSettings(patch)
 		re.NoError(err)
-		time.Sleep(100 * time.Millisecond)
-		res, err := json.Marshal(rg)
+		res, err := json.Marshal(rg.Copy())
 		re.NoError(err)
 		re.Equal(ca.expectJSONString, string(res))
 	}
