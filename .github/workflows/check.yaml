@@ -20,7 +20,7 @@ jobs:
             ~/go/pkg/mod
             ~/.cache/go-build
             **/.dashboard_download_cache
-          key: ${{ runner.os }}-golang-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-golang-1.20-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-golang
       - name: Make Check
