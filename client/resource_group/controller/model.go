@@ -221,5 +221,5 @@ func getSQLProcessCPUTime() float64 {
 		log.Error("getCPUTime get pid failed", zap.Error(err))
 	}
 
-	return float64(cpuTime.User+cpuTime.Sys) * 1e-3
+	return float64(cpuTime.User + cpuTime.Sys)
 }
