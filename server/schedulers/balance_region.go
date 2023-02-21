@@ -256,7 +256,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		regionID := solver.region.GetID()
 		sourceID := solver.source.GetID()
 		targetID := solver.target.GetID()
-		log.Debug("", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
+		log.Debug("candidate store", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 		if !solver.shouldBalance(s.GetName()) {
 			balanceRegionSkipCounter.Inc()
