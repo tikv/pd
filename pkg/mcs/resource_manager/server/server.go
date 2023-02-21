@@ -190,7 +190,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 		gs.Stop()
 	}
 	if s.IsClosed() {
-		log.Info("grpc server stopped.")
+		log.Info("grpc server stopped")
 	} else {
 		log.Fatal("grpc server stopped unexpectedly", errs.ZapError(err))
 	}
@@ -216,7 +216,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 		log.Info("all http(s) requests finished")
 	}
 	if s.IsClosed() {
-		log.Info("http server stopped.")
+		log.Info("http server stopped")
 	} else {
 		log.Fatal("http server stopped unexpectedly", errs.ZapError(err))
 	}
