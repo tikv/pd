@@ -203,7 +203,7 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	<-ctx.Done()
-	log.Info("Got signal to exit", zap.String("signal", sig.String()))
+	log.Info("got signal to exit", zap.String("signal", sig.String()))
 
 	svr.Close()
 	switch sig {

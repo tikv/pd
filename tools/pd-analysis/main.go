@@ -48,7 +48,7 @@ func main() {
 	InitLogger(*logLevel)
 	analysis.GetTransferCounter().Init(0, 0)
 	if *input == "" {
-		Logger.Fatal("Need to specify one input pd log.")
+		Logger.Fatal("need to specify one input pd log")
 	}
 	if *output != "" {
 		f, err := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_SYNC|os.O_APPEND, 0600)
@@ -63,7 +63,7 @@ func main() {
 	case "transfer-counter":
 		{
 			if *operator == "" {
-				Logger.Fatal("Need to specify one operator.")
+				Logger.Fatal("need to specify one operator")
 			}
 			r, err := analysis.GetTransferCounter().CompileRegex(*operator)
 			if err != nil {
@@ -77,6 +77,6 @@ func main() {
 			break
 		}
 	default:
-		Logger.Fatal("Style is not exist.")
+		Logger.Fatal("style is not exist")
 	}
 }

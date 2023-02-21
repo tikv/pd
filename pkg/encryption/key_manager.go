@@ -120,11 +120,11 @@ func saveKeys(
 		Then(clientv3.OpPut(EncryptionKeysPath, string(value))).
 		Commit()
 	if err != nil {
-		log.Warn("fail to save encryption keys.", errs.ZapError(err))
+		log.Warn("fail to save encryption keys", errs.ZapError(err))
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStack("fail to save encryption keys")
 	}
 	if !resp.Succeeded {
-		log.Warn("fail to save encryption keys. leader expired.")
+		log.Warn("fail to save encryption keys and leader expired")
 		return errs.ErrEncryptionSaveDataKeys.GenWithStack("leader expired")
 	}
 	// Leave for the watcher to load the updated keys.

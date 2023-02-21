@@ -160,7 +160,7 @@ func (c *ttlCache) doGC() {
 				}
 			}
 			c.Unlock()
-			log.Debug("TTL GC items", zap.Int("count", count))
+			log.Debug("ttl gc items", zap.Int("count", count))
 		case <-c.ctx.Done():
 			return
 		}

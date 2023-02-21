@@ -286,8 +286,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	versioninfo.Log("TSO")
-	log.Info("TSO Config", zap.Reflect("config", cfg))
+	versioninfo.Log("tso")
+	log.Info("tso config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 
@@ -314,7 +314,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	<-ctx.Done()
-	log.Info("Got signal to exit", zap.String("signal", sig.String()))
+	log.Info("got signal to exit", zap.String("signal", sig.String()))
 
 	svr.Close()
 	switch sig {
