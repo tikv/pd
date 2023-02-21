@@ -48,7 +48,7 @@ const (
 	// defaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
 	defaultGRPCGracefulStopTimeout = 5 * time.Second
 	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
-	defaultHTTPGracefulShutdownTimeout = 300 * time.Second
+	defaultHTTPGracefulShutdownTimeout = 5 * time.Second
 )
 
 // Server is the resource manager server, and it implements bs.Server.
@@ -57,10 +57,8 @@ type Server struct {
 	// Server state. 0 is not serving, 1 is serving.
 	isServing int64
 
-	ctx              context.Context
-	serverLoopCtx    context.Context
-	serverLoopCancel func()
-	serverLoopWg     sync.WaitGroup
+	ctx          context.Context
+	serverLoopWg sync.WaitGroup
 
 	cfg         *Config
 	name        string
@@ -94,7 +92,6 @@ func (s *Server) Run() error {
 	if err := s.initClient(); err != nil {
 		return err
 	}
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	return s.startServer()
 }
 
@@ -176,15 +173,13 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	gs := grpc.NewServer()
 	s.service.RegisterGRPCService(gs)
 	err := gs.Serve(l)
-	if err != cmux.ErrListenerClosed {
-		log.Fatal("grpc server stops serving unexpectedly", errs.ZapError(err))
-	}
-	log.Info("gRPC server stop serving", errs.ZapError(err))
+	log.Info("gRPC server stop serving")
 
 	// Attempt graceful stop (waits for pending RPCs), but force a stop if
 	// it doesn't happen in a reasonable amount of time.
 	done := make(chan struct{})
 	go func() {
+		log.Info("try to gracefully stop the server now")
 		gs.GracefulStop()
 		close(done)
 	}()
@@ -193,6 +188,11 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	case <-time.After(defaultGRPCGracefulStopTimeout):
 		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", defaultGRPCGracefulStopTimeout))
 		gs.Stop()
+	}
+	if s.IsClosed() {
+		log.Info("grpc server stopped.")
+	} else {
+		log.Fatal("grpc server stopped unexpectedly", errs.ZapError(err))
 	}
 }
 
@@ -206,17 +206,19 @@ func (s *Server) startHTTPServer(l net.Listener) {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	err := hs.Serve(l)
-	if err != cmux.ErrListenerClosed {
-		log.Fatal("http server stops serving unexpectedly", errs.ZapError(err))
-	}
-	log.Info("http server stop serving", errs.ZapError(err))
+	log.Info("http server stop serving")
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPGracefulShutdownTimeout)
 	defer cancel()
-	err = hs.Shutdown(ctx)
-	log.Info("all http(s) requests finished")
-	if err != nil {
+	if err := hs.Shutdown(ctx); err != nil {
 		log.Error("http server shutdown encountered problem", errs.ZapError(err))
+	} else {
+		log.Info("all http(s) requests finished")
+	}
+	if s.IsClosed() {
+		log.Info("http server stopped.")
+	} else {
+		log.Fatal("http server stopped unexpectedly", errs.ZapError(err))
 	}
 }
 
@@ -231,8 +233,12 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 	go s.startGRPCServer(grpcL)
 	go s.startHTTPServer(httpL)
 
-	if err := mux.Serve(); !strings.Contains(err.Error(), "use of closed network connection") {
-		log.Fatal("mux stop serving unexpectedly", errs.ZapError(err))
+	if err := mux.Serve(); err != nil {
+		if s.IsClosed() {
+			log.Info("mux stop serving", errs.ZapError(err))
+		} else {
+			log.Fatal("mux stop serving unexpectedly", errs.ZapError(err))
+		}
 	}
 }
 
@@ -263,6 +269,10 @@ func (s *Server) startServer() error {
 	log.Info("triggering the start callback functions")
 	for _, cb := range s.startCallbacks {
 		cb()
+	}
+	// TODO: resolve callback for the primary
+	for _, cb := range s.primaryCallbacks {
+		cb(s.ctx)
 	}
 
 	// Server has started.

@@ -45,8 +45,8 @@ type Config struct {
 	BackendEndpoints  string `toml:"backend-endpoints" json:"backend-endpoints"`
 	ListenAddr        string `toml:"listen-addr" json:"listen-addr"`
 	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"`
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
+	DataDir           string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
+	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`      // TODO: use it
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
