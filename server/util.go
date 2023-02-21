@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -31,37 +30,6 @@ import (
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
 )
-
-// LogPDInfo prints the PD version information.
-func LogPDInfo() {
-	log.Info("Welcome to Placement Driver (PD)")
-	log.Info("PD", zap.String("release-version", versioninfo.PDReleaseVersion))
-	log.Info("PD", zap.String("edition", versioninfo.PDEdition))
-	log.Info("PD", zap.String("git-hash", versioninfo.PDGitHash))
-	log.Info("PD", zap.String("git-branch", versioninfo.PDGitBranch))
-	log.Info("PD", zap.String("utc-build-time", versioninfo.PDBuildTS))
-}
-
-// PrintPDInfo prints the PD version information without log info.
-func PrintPDInfo() {
-	fmt.Println("Release Version:", versioninfo.PDReleaseVersion)
-	fmt.Println("Edition:", versioninfo.PDEdition)
-	fmt.Println("Git Commit Hash:", versioninfo.PDGitHash)
-	fmt.Println("Git Branch:", versioninfo.PDGitBranch)
-	fmt.Println("UTC Build Time: ", versioninfo.PDBuildTS)
-}
-
-// PrintConfigCheckMsg prints the message about configuration checks.
-func PrintConfigCheckMsg(cfg *config.Config) {
-	if len(cfg.WarningMsgs) == 0 {
-		fmt.Println("config check successful")
-		return
-	}
-
-	for _, msg := range cfg.WarningMsgs {
-		fmt.Println(msg)
-	}
-}
 
 // CheckPDVersion checks if PD needs to be upgraded.
 func CheckPDVersion(opt *config.PersistOptions) {

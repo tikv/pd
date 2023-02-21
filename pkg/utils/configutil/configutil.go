@@ -15,9 +15,16 @@
 package configutil
 
 import (
-	"errors"
+	"fmt"
+	"io"
+	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/pkg/errors"
+	"github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/encryption"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 // ConfigMetaData is an utility to test if a configuration is defined.
@@ -65,4 +72,93 @@ func (m *ConfigMetaData) CheckUndecoded() error {
 		errInfo += key.String() + ", "
 	}
 	return errors.New(errInfo[:len(errInfo)-2])
+}
+
+// SecurityConfig indicates the security configuration
+type SecurityConfig struct {
+	grpcutil.TLSConfig
+	// RedactInfoLog indicates that whether enabling redact log
+	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
+	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
+}
+
+// PrintConfigCheckMsg prints the message about configuration checks.
+func PrintConfigCheckMsg(w io.Writer, warningMsgs []string) {
+	if len(warningMsgs) == 0 {
+		fmt.Fprintln(w, "config check successful")
+		return
+	}
+
+	for _, msg := range warningMsgs {
+		fmt.Fprintln(w, msg)
+	}
+}
+
+// ConfigFromFile loads config from file.
+func ConfigFromFile(c interface{}, path string) (*toml.MetaData, error) {
+	meta, err := toml.DecodeFile(path, c)
+	return &meta, errors.WithStack(err)
+}
+
+// AdjustCommandlineString adjusts the value of a string variable from command line flags.
+func AdjustCommandlineString(flagSet *pflag.FlagSet, v *string, name string) {
+	if value, _ := flagSet.GetString(name); value != "" {
+		*v = value
+	}
+}
+
+// AdjustCommandlineBool adjusts the value of a bool variable from command line flags.
+func AdjustCommandlineBool(flagSet *pflag.FlagSet, v *bool, name string) {
+	if value, _ := flagSet.GetBool(name); value {
+		*v = value
+	}
+}
+
+// AdjustString adjusts the value of a string variable.
+func AdjustString(v *string, defValue string) {
+	if len(*v) == 0 {
+		*v = defValue
+	}
+}
+
+// AdjustUint64 adjusts the value of a uint64 variable.
+func AdjustUint64(v *uint64, defValue uint64) {
+	if *v == 0 {
+		*v = defValue
+	}
+}
+
+// AdjustInt64 adjusts the value of a int64 variable.
+func AdjustInt64(v *int64, defValue int64) {
+	if *v == 0 {
+		*v = defValue
+	}
+}
+
+// AdjustInt adjusts the value of a int variable.
+func AdjustInt(v *int, defValue int) {
+	if *v == 0 {
+		*v = defValue
+	}
+}
+
+// AdjustFloat64 adjusts the value of a float64 variable.
+func AdjustFloat64(v *float64, defValue float64) {
+	if *v == 0 {
+		*v = defValue
+	}
+}
+
+// AdjustDuration adjusts the value of a Duration variable.
+func AdjustDuration(v *typeutil.Duration, defValue time.Duration) {
+	if v.Duration <= 0 {
+		v.Duration = defValue
+	}
+}
+
+// AdjustByteSize adjusts the value of a ByteSize variable.
+func AdjustByteSize(v *typeutil.ByteSize, defValue typeutil.ByteSize) {
+	if *v == 0 {
+		*v = defValue
+	}
 }
