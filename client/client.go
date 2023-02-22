@@ -138,7 +138,11 @@ type Client interface {
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
 	// Watch watches on a key or prefix.
-	Watch(ctx context.Context, key []byte, opts ...WatchOption) (chan []*pdpb.Event, error)
+	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*pdpb.Event, error)
+	// Get gets the value for a key.
+	Get(ctx context.Context, key []byte, opts ...OpOption) (*pdpb.GetResponse, error)
+	// Put puts a key-value pair into etcd.
+	Put(ctx context.Context, key []byte, value []byte, opts ...OpOption) (*pdpb.PutResponse, error)
 
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
@@ -150,23 +154,35 @@ type Client interface {
 	Close()
 }
 
-// WatchOp represents available options when using watch.
-type WatchOp struct {
-	rangeEnd      []byte
-	startRevision int64
+// Op represents available options when using etcd client.
+type Op struct {
+	rangeEnd []byte
+	revision int64
+	prevKv   bool
+	lease    int64
 }
 
-// WatchOption configures Watch.
-type WatchOption func(*WatchOp)
+// OpOption configures etcd Op.
+type OpOption func(*Op)
 
-// WithRangeEnd specifies the range end of watch.
-func WithRangeEnd(rangeEnd []byte) WatchOption {
-	return func(op *WatchOp) { op.rangeEnd = rangeEnd }
+// WithRangeEnd specifies the range end of the key.
+func WithRangeEnd(rangeEnd []byte) OpOption {
+	return func(op *Op) { op.rangeEnd = rangeEnd }
 }
 
-// WithStartRevision specifies the start revision of watch.
-func WithStartRevision(startRevision int64) WatchOption {
-	return func(op *WatchOp) { op.startRevision = startRevision }
+// WithRev specifies the start revision of the key.
+func WithRev(revision int64) OpOption {
+	return func(op *Op) { op.revision = revision }
+}
+
+// WithPrevKV specifies the previous key-value pair of the key.
+func WithPrevKV(prevKv bool) OpOption {
+	return func(op *Op) { op.prevKv = prevKv }
+}
+
+// WithLease specifies the lease of the key.
+func WithLease(lease int64) OpOption {
+	return func(op *Op) { op.lease = lease }
 }
 
 // GetStoreOp represents available options when getting stores.
@@ -1148,16 +1164,76 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 	return globalConfigWatcherCh, err
 }
 
+func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*pdpb.PutResponse, error) {
+	options := &OpOption{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.Put", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationPut.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &pdpb.PutRequest{
+		Key:    key,
+		Value:  value,
+		Lease:  options.lease,
+		PrevKv: options.prevKV,
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.getClient().Put(ctx, req)
+	cancel()
+
+	if err = c.respForErr(cmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*pdpb.GetResponse, error) {
+	options := &OpOption{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.Get", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationGet.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &pdpb.GetRequest{
+		Key:      key,
+		RangeEnd: options.rangeEnd,
+		Limit:    options.limit,
+		Revision: options.revision,
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.getClient().Get(ctx, req)
+	cancel()
+
+	if err = c.respForErr(cmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 func (c *client) Watch(ctx context.Context, key []byte, opts ...WatchOption) (chan []*pdpb.Event, error) {
 	eventCh := make(chan []*pdpb.Event, 100)
-	options := &WatchOp{}
+	options := &OpOption{}
 	for _, opt := range opts {
 		opt(options)
 	}
 	res, err := c.getClient().Watch(ctx, &pdpb.WatchRequest{
 		Key:           key,
 		RangeEnd:      options.rangeEnd,
-		StartRevision: options.startRevision,
+		StartRevision: options.revision,
 	})
 	if err != nil {
 		close(eventCh)

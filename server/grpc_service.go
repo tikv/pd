@@ -2011,9 +2011,10 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 func (s *GrpcServer) Watch(req *pdpb.WatchRequest, server pdpb.PD_WatchServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
-	key := req.GetKey()
+	key := string(req.GetKey())
+	endKey := string(req.GetRangeEnd())
 	startRevision := req.GetStartRevision()
-	watchChan := s.client.Watch(ctx, string(key), clientv3.WithPrefix(), clientv3.WithRev(startRevision), clientv3.WithPrevKV())
+	watchChan := s.client.Watch(ctx, key, clientv3.WithPrefix(), clientv3.WithRange(endKey), clientv3.WithRev(startRevision), clientv3.WithPrevKV())
 	for {
 		select {
 		case <-ctx.Done():
@@ -2051,6 +2052,64 @@ func (s *GrpcServer) Watch(req *pdpb.WatchRequest, server pdpb.PD_WatchServer) e
 			}
 		}
 	}
+}
+
+// Get gets the key-value pair with a given key.
+func (s *GrpcServer) Get(ctx context.Context, req *pdpb.GetRequest) (*pdpb.GetResponse, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	options := []clientv3.OpOption{}
+	key := string(req.GetKey())
+	if endKey := req.GetRangeEnd(); endKey != nil {
+		options = append(options, clientv3.WithRange(string(endKey)))
+	}
+	if rev := req.GetRevision(); rev != 0 {
+		options = append(options, clientv3.WithRev(rev))
+	}
+	if limit := req.GetLimit(); limit != 0 {
+		options = append(options, clientv3.WithLimit(limit))
+	}
+	res, err := s.client.Get(ctx, key, options...)
+	if err != nil {
+		return &pdpb.GetResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())}, nil
+	}
+	resp := &pdpb.GetResponse{
+		Header: s.header(),
+		Count:  res.Count,
+		More:   res.More,
+	}
+	for _, kv := range res.Kvs {
+		resp.Kvs = append(resp.Kvs, &pdpb.KeyValue{Key: kv.Key, Value: kv.Value})
+	}
+
+	return resp, nil
+}
+
+// Put puts the key-value pair into etcd.
+func (s *GrpcServer) Put(ctx context.Context, req *pdpb.PutRequest) (*pdpb.PutResponse, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	options := []clientv3.OpOption{}
+	key := string(req.GetKey())
+	value := string(req.GetValue())
+	if lease := clientv3.LeaseID(req.GetLease()); lease != 0 {
+		options = append(options, clientv3.WithLease(lease))
+	}
+	if prevKv := req.GetPrevKv(); prevKv {
+		options = append(options, clientv3.WithPrevKV())
+	}
+
+	res, err := s.client.Put(ctx, key, value, options...)
+	if err != nil {
+		return &pdpb.PutResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())}, nil
+	}
+	resp := &pdpb.PutResponse{
+		Header: s.header(),
+	}
+	if res.PrevKv != nil {
+		resp.PrevKv = &pdpb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
+	}
+	return resp, nil
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
