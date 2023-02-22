@@ -35,7 +35,8 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
-	"go.etcd.io/etcd/pkg/report"
+	"go.etcd.io/etcd/pkg/v3/report"
+
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )

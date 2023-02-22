@@ -44,7 +44,7 @@ import (
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/schedulers"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // TestServer states.

@@ -16,7 +16,7 @@ package discovery
 
 import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Discover is used to get all the service instances of the specified service name.
