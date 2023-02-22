@@ -31,6 +31,7 @@ import (
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/grpc_testing"
 )
 
@@ -80,7 +81,8 @@ func TestRegistryService(t *testing.T) {
 	leader := cluster.GetServer(leaderName)
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(leader.GetAddr(), "http://"), grpc.WithInsecure())
+	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(leader.GetAddr(), "http://"),
+		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	defer cc.Close()
 	grpcClient := grpc_testing.NewTestServiceClient(cc)

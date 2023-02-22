@@ -39,6 +39,7 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -60,7 +61,7 @@ func trimHTTPPrefix(str string) string {
 
 func newClient(cfg *config.Config) pdpb.PDClient {
 	addr := trimHTTPPrefix(cfg.PDAddr)
-	cc, err := grpc.Dial(addr, grpc.WithInsecure())
+	cc, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		log.Fatal("failed to create gRPC connection", zap.Error(err))
 	}

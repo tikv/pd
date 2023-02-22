@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func TestResourceManagerServer(t *testing.T) {
@@ -58,7 +59,7 @@ func TestResourceManagerServer(t *testing.T) {
 	defer svr.Close()
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithInsecure())
+	cc, err := grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	defer cc.Close()
 	c := rmpb.NewResourceManagerClient(cc)
