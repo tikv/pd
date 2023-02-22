@@ -286,8 +286,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	versioninfo.Log("tso")
-	log.Info("tso config", zap.Reflect("config", cfg))
+	versioninfo.Log("TSO")
+	log.Info("TSO config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 

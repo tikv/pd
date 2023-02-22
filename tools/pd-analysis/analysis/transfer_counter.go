@@ -97,7 +97,7 @@ func (c *TransferCounter) AddSource(regionID, sourceStoreID uint64) {
 		}
 		delete(c.regionMap, regionID)
 	} else {
-		log.Fatal("error when add sourceStore in transfer region map", zap.Uint64("source store", sourceStoreID), zap.Uint64("region", regionID))
+		log.Fatal("error when add sourceStore in transfer region map", zap.Uint64("source-store", sourceStoreID), zap.Uint64("region", regionID))
 	}
 }
 
