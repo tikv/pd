@@ -205,13 +205,6 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			ruleCheckerReplaceOfflineCounter.Inc()
 			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
 		}
-
-		if c.isWitnessEnabled() && c.isPendingVoter(region, peer) {
-			if witness, ok := c.hasAvailableWitness(region, peer); ok {
-				ruleCheckerPromoteWitnessCounter.Inc()
-				return operator.CreateNonWitnessPeerOperator("promote-witness-for-pending", c.cluster, region, witness)
-			}
-		}
 	}
 	// fix loose matched peers.
 	for _, peer := range rf.PeersWithDifferentRole {
