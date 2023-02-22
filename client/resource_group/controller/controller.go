@@ -410,10 +410,10 @@ func newGroupCostController(
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
 		if group.RUSettings.RU == nil || group.RUSettings.RU.Settings == nil {
-			return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs(group.Name, "not configured")
+			return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not configured")
 		}
 	default:
-		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs(group.Name, "not supports the resource type")
+		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
 
 	gc := &groupCostController{
