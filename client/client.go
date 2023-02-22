@@ -160,10 +160,16 @@ type Op struct {
 	revision int64
 	prevKv   bool
 	lease    int64
+	limit    int64
 }
 
 // OpOption configures etcd Op.
 type OpOption func(*Op)
+
+// WithLimit specifies the limit of the key.
+func WithLimit(limit int64) OpOption {
+	return func(op *Op) { op.limit = limit }
+}
 
 // WithRangeEnd specifies the range end of the key.
 func WithRangeEnd(rangeEnd []byte) OpOption {
@@ -176,8 +182,8 @@ func WithRev(revision int64) OpOption {
 }
 
 // WithPrevKV specifies the previous key-value pair of the key.
-func WithPrevKV(prevKv bool) OpOption {
-	return func(op *Op) { op.prevKv = prevKv }
+func WithPrevKV() OpOption {
+	return func(op *Op) { op.prevKv = true }
 }
 
 // WithLease specifies the lease of the key.
@@ -1165,7 +1171,7 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 }
 
 func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*pdpb.PutResponse, error) {
-	options := &OpOption{}
+	options := &Op{}
 	for _, opt := range opts {
 		opt(options)
 	}
@@ -1182,7 +1188,7 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 		Key:    key,
 		Value:  value,
 		Lease:  options.lease,
-		PrevKv: options.prevKV,
+		PrevKv: options.prevKv,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().Put(ctx, req)
@@ -1195,7 +1201,7 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 }
 
 func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*pdpb.GetResponse, error) {
-	options := &OpOption{}
+	options := &Op{}
 	for _, opt := range opts {
 		opt(options)
 	}
@@ -1224,9 +1230,9 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*pdpb.G
 	return resp, nil
 }
 
-func (c *client) Watch(ctx context.Context, key []byte, opts ...WatchOption) (chan []*pdpb.Event, error) {
+func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*pdpb.Event, error) {
 	eventCh := make(chan []*pdpb.Event, 100)
-	options := &OpOption{}
+	options := &Op{}
 	for _, opt := range opts {
 		opt(options)
 	}

@@ -1464,3 +1464,29 @@ func TestWatch(t *testing.T) {
 	cli.Delete(context.Background(), key)
 	wg.Wait()
 }
+
+func TestPutGet(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+	client := setupCli(re, ctx, endpoints)
+	defer client.Close()
+
+	key := []byte("test")
+	putResp, err := client.Put(context.Background(), key, []byte("1"))
+	re.NoError(err)
+	re.Empty(putResp.GetPrevKv())
+	getResp, err := client.Get(context.Background(), key)
+	re.NoError(err)
+	re.Equal([]byte("1"), getResp.GetKvs()[0].Value)
+	putResp, err = client.Put(context.Background(), key, []byte("2"), pd.WithPrevKV())
+	re.NoError(err)
+	re.Equal([]byte("1"), putResp.GetPrevKv().Value)
+	getResp, err = client.Get(context.Background(), key)
+	re.NoError(err)
+	re.Equal([]byte("2"), getResp.GetKvs()[0].Value)
+}
