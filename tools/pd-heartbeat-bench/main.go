@@ -479,7 +479,7 @@ func main() {
 			regions.update(cfg.Replica)
 			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
 		case <-ctx.Done():
-			log.Info("Got signal to exit")
+			log.Info("got signal to exit")
 			switch sig {
 			case syscall.SIGTERM:
 				exit(0)

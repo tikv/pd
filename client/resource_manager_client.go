@@ -34,8 +34,8 @@ const (
 	add                     actionType = 0
 	modify                  actionType = 1
 	groupSettingsPathPrefix            = "resource_group/settings"
-	// errNotLeaderMsg is returned when the requested server is not the leader.
-	errNotLeaderMsg = "not leader"
+	// errNotPrimary is returned when the requested server is not primary.
+	errNotPrimary = "not primary"
 )
 
 // ResourceManagerClient manages resource group info and token request.
@@ -59,7 +59,7 @@ func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
 
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *client) gRPCErrorHandler(err error) {
-	if strings.Contains(err.Error(), errNotLeaderMsg) {
+	if strings.Contains(err.Error(), errNotPrimary) {
 		c.ScheduleCheckLeader()
 	}
 }
