@@ -560,7 +560,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
-				re.EqualError(err, "rpc error: code = Unknown desc = resource group not found")
+				re.EqualError(err, "[PD:client:ErrClientGetResourceGroup]get resource group failed, rpc error: code = Unknown desc = resource group not found")
 			}
 
 			// to test the deletion of persistence

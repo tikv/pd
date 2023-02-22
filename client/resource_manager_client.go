@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
 
@@ -69,11 +70,11 @@ func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 	resp, err := c.resourceManagerClient().ListResourceGroups(ctx, req)
 	if err != nil {
 		c.gRPCErrorHandler(err)
-		return nil, err
+		return nil, errs.ErrClientListResourceGroup.FastGenByArgs(err.Error())
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return nil, errors.Errorf("[resource_manager] %s", resErr.Message)
+		return nil, errs.ErrClientListResourceGroup.FastGenByArgs(resErr.Message)
 	}
 	return resp.GetGroups(), nil
 }
@@ -85,11 +86,11 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string)
 	resp, err := c.resourceManagerClient().GetResourceGroup(ctx, req)
 	if err != nil {
 		c.gRPCErrorHandler(err)
-		return nil, err
+		return nil, errs.ErrClientGetResourceGroup.FastGenByArgs(err.Error())
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return nil, errors.Errorf("[resource_manager] %s", resErr.Message)
+		return nil, errs.ErrClientGetResourceGroup.FastGenByArgs(resErr.Message)
 	}
 	return resp.GetGroup(), nil
 }

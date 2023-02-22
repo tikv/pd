@@ -14,7 +14,9 @@
 
 package errs
 
-import "github.com/pingcap/errors"
+import (
+	"github.com/pingcap/errors"
+)
 
 const (
 	// NotLeaderErr indicates the the non-leader member received the requests which should be received by leader.
@@ -60,4 +62,12 @@ var (
 var (
 	ErrCryptoX509KeyPair        = errors.Normalize("x509 keypair error", errors.RFCCodeText("PD:crypto:ErrCryptoX509KeyPair"))
 	ErrCryptoAppendCertsFromPEM = errors.Normalize("cert pool append certs error", errors.RFCCodeText("PD:crypto:ErrCryptoAppendCertsFromPEM"))
+)
+
+// resource group errors
+var (
+	ErrClientGetResourceGroup               = errors.Normalize("get resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientGetResourceGroup"))
+	ErrClientListResourceGroup              = errors.Normalize("get all resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientListResourceGroup"))
+	ErrClientResourceGroupConfigUnavailable = errors.Normalize("resource group config is unavailable, %v", errors.RFCCodeText("PD:client:ErrClientResourceGroupConfigUnavailable"))
+	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
 )
