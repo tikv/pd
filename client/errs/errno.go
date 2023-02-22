@@ -69,5 +69,5 @@ var (
 	ErrClientGetResourceGroup               = errors.Normalize("get resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientGetResourceGroup"))
 	ErrClientListResourceGroup              = errors.Normalize("get all resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientListResourceGroup"))
 	ErrClientResourceGroupConfigUnavailable = errors.Normalize("resource group config is unavailable, %v", errors.RFCCodeText("PD:client:ErrClientResourceGroupConfigUnavailable"))
-	ErrClientResourceGroupThrottled         = errors.Normalize("exceed resource group quota limitation", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
+	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
 )
