@@ -468,7 +468,7 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	b, _ := os.ReadFile(tempStdoutFile.Name())
-	suite.Contains(string(b), "Audit Log")
+	suite.Contains(string(b), "audit log")
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
 

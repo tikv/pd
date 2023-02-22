@@ -961,7 +961,7 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 			errs.ZapError(err))
 		return err
 	}
-	log.Info("Audit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("audit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1010,7 +1010,7 @@ func (s *Server) SetRateLimitConfig(cfg config.RateLimitConfig) error {
 			errs.ZapError(err))
 		return err
 	}
-	log.Info("Rate Limit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("rate limit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 

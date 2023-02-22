@@ -123,6 +123,6 @@ func (l *LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	log.Info("Audit Log", zap.String("service-info", requestInfo.String()))
+	log.Info("audit log", zap.String("service-info", requestInfo.String()))
 	return true
 }

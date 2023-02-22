@@ -287,7 +287,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	defer log.Sync()
 
 	versioninfo.Log("TSO")
-	log.Info("TSO Config", zap.Reflect("config", cfg))
+	log.Info("TSO config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 
@@ -314,7 +314,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	<-ctx.Done()
-	log.Info("Got signal to exit", zap.String("signal", sig.String()))
+	log.Info("got signal to exit", zap.String("signal", sig.String()))
 
 	svr.Close()
 	switch sig {
