@@ -15,9 +15,9 @@
 package core
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math"
-	"math/rand"
 	"strconv"
 	"testing"
 

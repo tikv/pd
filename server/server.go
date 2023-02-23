@@ -192,7 +192,7 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("PD Config", zap.Reflect("config", cfg))
-	rand.Seed(time.Now().UnixNano())
+	rand.New(rand.NewSource(time.Now().UnixNano()))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{

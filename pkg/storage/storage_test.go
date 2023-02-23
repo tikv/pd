@@ -338,7 +338,7 @@ func generateKeys(size int) []string {
 }
 
 func randomMerge(regions []*metapb.Region, n int, ratio int) {
-	rand.Seed(6)
+	rand.New(rand.NewSource(6))
 	note := make(map[int]bool)
 	for i := 0; i < n*ratio/100; i++ {
 		pos := rand.Intn(n - 1)

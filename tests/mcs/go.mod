@@ -1,6 +1,6 @@
 module github.com/tikv/pd/tests/mcs
 
-go 1.19
+go 1.20
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
