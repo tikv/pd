@@ -1483,6 +1483,7 @@ func TestPutGet(t *testing.T) {
 	getResp, err := client.Get(context.Background(), key)
 	re.NoError(err)
 	re.Equal([]byte("1"), getResp.GetKvs()[0].Value)
+	re.NotEqual(0, getResp.GetRevision())
 	putResp, err = client.Put(context.Background(), key, []byte("2"), pd.WithPrevKV())
 	re.NoError(err)
 	re.Equal([]byte("1"), putResp.GetPrevKv().Value)

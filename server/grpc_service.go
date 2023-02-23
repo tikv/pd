@@ -2078,6 +2078,9 @@ func (s *GrpcServer) Get(ctx context.Context, req *pdpb.GetRequest) (*pdpb.GetRe
 		Count:  res.Count,
 		More:   res.More,
 	}
+	if res.Header != nil {
+		resp.Revision = res.Header.GetRevision()
+	}
 	for _, kv := range res.Kvs {
 		resp.Kvs = append(resp.Kvs, &pdpb.KeyValue{Key: kv.Key, Value: kv.Value})
 	}
@@ -2103,8 +2106,12 @@ func (s *GrpcServer) Put(ctx context.Context, req *pdpb.PutRequest) (*pdpb.PutRe
 	if err != nil {
 		return &pdpb.PutResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
+
 	resp := &pdpb.PutResponse{
 		Header: s.header(),
+	}
+	if res.Header != nil {
+		resp.Revision = res.Header.GetRevision()
 	}
 	if res.PrevKv != nil {
 		resp.PrevKv = &pdpb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
