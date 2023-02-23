@@ -1398,6 +1398,6 @@ type KeyspaceConfig struct {
 }
 
 // GetRequestUnitConfig returns the request unit config.
-func (c *Config) GetRequestUnitConfig() rm.RequestUnitConfig {
-	return c.RequestUnit
+func (c *Config) GetRequestUnitConfig() *rm.RequestUnitConfig {
+	return &c.RequestUnit
 }
