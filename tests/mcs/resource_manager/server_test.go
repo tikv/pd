@@ -25,6 +25,7 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -99,4 +100,40 @@ func TestResourceManagerServer(t *testing.T) {
 		re.NoError(err)
 		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"ru\":{\"state\":{\"initialized\":false}}}}", string(respString))
 	}
+}
+
+func TestResourceManagerRegister(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	leader := cluster.GetServer(leaderName)
+
+	cfg := rm.NewConfig()
+	cfg.BackendEndpoints = leader.GetAddr()
+	cfg.ListenAddr = "127.0.0.1:8087"
+
+	svr := rm.NewServer(ctx, cfg)
+	go svr.Run()
+	testutil.Eventually(re, func() bool {
+		return svr.IsServing()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	client := leader.GetEtcdClient()
+	endpoints, err := discovery.Discover(client, "resource_manager")
+	re.NoError(err)
+	re.Equal(cfg.ListenAddr, endpoints[0])
+
+	svr.Close()
+	endpoints, err = discovery.Discover(client, "resource_manager")
+	re.NoError(err)
+	re.Empty(endpoints)
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -76,6 +77,8 @@ type Server struct {
 	startCallbacks []func()
 	// primaryCallbacks will be called after the server becomes leader.
 	primaryCallbacks []func(context.Context)
+
+	serviceRegister *discovery.ServiceRegister
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -104,6 +107,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing resource manager server ...")
+	s.serviceRegister.Deregister()
 	s.muxListener.Close()
 	s.serverLoopWg.Wait()
 
@@ -279,6 +283,9 @@ func (s *Server) startServer() error {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
+	// register to etcd
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, 3)
+	s.serviceRegister.Register()
 	return nil
 }
 
