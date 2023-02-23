@@ -116,7 +116,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
-	if !s.apiMode {
+	if s.IsServiceEnabled(tsoServiceName) {
 		tsoAllocatorManager := s.GetTSOAllocatorManager()
 		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
 	}
@@ -145,7 +145,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
-	if s.apiMode {
+	if !s.IsServiceEnabled(tsoServiceName) {
 		return status.Errorf(codes.Unknown, "API server don't support TSO service")
 	}
 	var (
@@ -1556,7 +1556,7 @@ var mockLocalAllocatorLeaderChangeFlag = false
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
 // and write it into all Local TSO Allocators then if it's indeed the biggest one.
 func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	if s.apiMode {
+	if !s.IsServiceEnabled(tsoServiceName) {
 		return nil, status.Errorf(codes.Unknown, "API server don't support TSO service")
 	}
 	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
@@ -1725,7 +1725,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
 func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
-	if s.apiMode {
+	if !s.IsServiceEnabled(tsoServiceName) {
 		return nil, status.Errorf(codes.Unknown, "API server don't support TSO service")
 	}
 	var err error
@@ -2078,7 +2078,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 
 // SetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
-	if s.apiMode {
+	if !s.IsServiceEnabled(tsoServiceName) {
 		return nil, status.Errorf(codes.Unknown, "API server don't support TSO service")
 	}
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
@@ -2108,7 +2108,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 
 // GetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
-	if s.apiMode {
+	if !s.IsServiceEnabled(tsoServiceName) {
 		return nil, status.Errorf(codes.Unknown, "API server don't support TSO service")
 	}
 	forwardedHost := grpcutil.GetForwardedHost(ctx)

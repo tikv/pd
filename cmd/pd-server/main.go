@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -62,8 +63,8 @@ func main() {
 // NewServiceCommand returns the service command.
 func NewServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "service <mode>",
-		Short: "Run a service, for example, tso, resource_manager",
+		Use:   "services <mode>",
+		Short: "Run services, for example, tso, resource_manager",
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
 	cmd.AddCommand(NewResourceManagerServiceCommand())
@@ -75,7 +76,7 @@ func NewServiceCommand() *cobra.Command {
 func NewTSOServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tso",
-		Short: "Run the tso service",
+		Short: "Run the TSO service",
 		Run:   tso.CreateServerWrapper,
 	}
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
@@ -91,7 +92,7 @@ func NewTSOServiceCommand() *cobra.Command {
 // NewResourceManagerServiceCommand returns the resource manager service command.
 func NewResourceManagerServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "resource_manager",
+		Use:   "resource-manager",
 		Short: "Run the resource manager service",
 		Run:   resource_manager.CreateServerWrapper,
 	}
@@ -108,10 +109,14 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 // NewAPIServiceCommand returns the API service command.
 func NewAPIServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "api",
-		Short: "Run the api service",
-		Run:   createAPIServerWrapper,
+		// TODO: Here we use a hack way to support sub-commands with multiple services.
+		// We should use a better way to support it.
+		Use:     "api[,tso|resource-manager]",
+		Aliases: []string{"api,tso", "api,resource-manager"},
+		Short:   "Run the API service",
+		Run:     createAPIServerWrapper,
 	}
+	cmd.SetUsageTemplate(usageTemplate())
 	addFlags(cmd)
 	return cmd
 }
@@ -138,14 +143,14 @@ func addFlags(cmd *cobra.Command) {
 }
 
 func createAPIServerWrapper(cmd *cobra.Command, args []string) {
-	start(cmd, args, true)
+	start(cmd, args, cmd.CalledAs())
 }
 
 func createServerWrapper(cmd *cobra.Command, args []string) {
-	start(cmd, args, false)
+	start(cmd, args)
 }
 
-func start(cmd *cobra.Command, args []string, apiMode bool) {
+func start(cmd *cobra.Command, args []string, services ...string) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
@@ -184,7 +189,8 @@ func start(cmd *cobra.Command, args []string, apiMode bool) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	if apiMode {
+	if len(services) != 0 {
+		services = strings.Split(services[0], ",")
 		versioninfo.Log("API Server")
 	} else {
 		versioninfo.Log("PD")
@@ -208,7 +214,7 @@ func start(cmd *cobra.Command, args []string, apiMode bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, apiMode, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}
@@ -245,4 +251,30 @@ func start(cmd *cobra.Command, args []string, apiMode bool) {
 func exit(code int) {
 	log.Sync()
 	os.Exit(code)
+}
+
+// usageTemplate returns usage template for the command.
+// This is a copy of cobra.Command's usageTemplate, with the removal of the aliases section.
+func usageTemplate() string {
+	return `Usage:{{if .Runnable}}
+  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
+  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
+
+Examples:
+{{.Example}}{{end}}{{if .HasAvailableSubCommands}}
+
+Available Commands:{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
+
+Flags:
+{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
+
+Global Flags:
+{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
+
+Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
+
+Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
+`
 }

@@ -91,7 +91,9 @@ const (
 	idAllocPath  = "alloc_id"
 	idAllocLabel = "idalloc"
 
-	recoveringMarkPath = "cluster/markers/snapshot-recovering"
+	recoveringMarkPath         = "cluster/markers/snapshot-recovering"
+	tsoServiceName             = "tso"
+	resourceManagerServiceName = "resource-manager"
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -187,15 +189,15 @@ type Server struct {
 	auditBackends []audit.Backend
 
 	registry *registry.ServiceRegistry
-	// apiMode indicates whether the server is running in API mode.
-	apiMode bool
+	// services indicates whether the server is running in microservice mode and start part of services.
+	services []string
 }
 
 // HandlerBuilder builds a server HTTP handler.
 type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APIServiceGroup, error)
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, cfg *config.Config, apiMode bool, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
+func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	log.Info("server config", zap.Reflect("config", cfg))
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
@@ -209,7 +211,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiMode bool, legacyS
 		ctx:                             ctx,
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		apiMode:                         apiMode,
+		services:                        services,
 	}
 	s.handler = newHandler(s)
 
@@ -240,8 +242,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, apiMode bool, legacyS
 	failpoint.Inject("useGlobalRegistry", func() {
 		s.registry = registry.ServerServiceRegistry
 	})
-	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
+	if s.IsServiceEnabled(resourceManagerServiceName) {
+		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	}
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
@@ -359,7 +363,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 	})
 
-	if !s.apiMode {
+	if s.IsServiceEnabled(tsoServiceName) {
 		s.tsoAllocatorManager = tso.NewAllocatorManager(
 			s.member, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
 			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
@@ -518,7 +522,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if !s.apiMode {
+	if s.IsServiceEnabled(tsoServiceName) {
 		s.serverLoopWg.Add(1)
 		go s.tsoAllocatorLoop()
 	}
@@ -674,9 +678,17 @@ func (s *Server) stopRaftCluster() {
 	s.cluster.Stop()
 }
 
-// IsAPIMode returns if the server is in API mode.
-func (s *Server) IsAPIMode() bool {
-	return s.apiMode
+// IsServiceEnabled returns whether the service is enabled.
+func (s *Server) IsServiceEnabled(serviceName string) bool {
+	if len(s.services) == 0 {
+		return true
+	}
+	for _, service := range s.services {
+		if strings.ToLower(service) == serviceName {
+			return true
+		}
+	}
+	return false
 }
 
 // GetAddr returns the server urls for clients.
@@ -1433,7 +1445,7 @@ func (s *Server) campaignLeader() {
 	s.member.KeepLeader(ctx)
 	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
 
-	if !s.apiMode {
+	if s.IsServiceEnabled(tsoServiceName) {
 		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 		if err != nil {
 			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
@@ -1486,7 +1498,7 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	if !s.apiMode {
+	if s.IsServiceEnabled(tsoServiceName) {
 		// Check the cluster dc-location after the PD leader is elected.
 		go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	}

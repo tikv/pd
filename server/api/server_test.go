@@ -96,7 +96,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 			for _, opt := range opts {
 				opt(cfg)
 			}
-			s, err := server.CreateServer(ctx, cfg, false, NewHandler)
+			s, err := server.CreateServer(ctx, cfg, nil, NewHandler)
 			re.NoError(err)
 			err = s.Run()
 			re.NoError(err)
@@ -222,7 +222,7 @@ func TestAPIService(t *testing.T) {
 	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	svr, err := server.CreateServer(ctx, cfg, true, NewHandler)
+	svr, err := server.CreateServer(ctx, cfg, []string{"api"}, NewHandler)
 	re.NoError(err)
 	defer svr.Close()
 	err = svr.Run()
