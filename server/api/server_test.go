@@ -261,7 +261,7 @@ func TestMultipleServices(t *testing.T) {
 	defer testutil.CleanServer(cfg.DataDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	svr, err := server.CreateServer(ctx, cfg, []string{"api", "resource-manager"}, NewHandler)
+	svr, err := server.CreateServer(ctx, cfg, []string{"resource-manager", "api"}, NewHandler)
 	re.NoError(err)
 	defer svr.Close()
 	err = svr.Run()

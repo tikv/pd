@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	resource_manager "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -111,8 +112,8 @@ func NewAPIServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		// TODO: Here we use a hack way to support sub-commands with multiple services.
 		// We should use a better way to support it.
-		Use:     "api[,tso|resource-manager]",
-		Aliases: []string{"api,tso", "api,resource-manager"},
+		Use:     "api[,tso][,resource-manager]",
+		Aliases: generateAlias(),
 		Short:   "Run the API service",
 		Run:     createAPIServerWrapper,
 	}
@@ -277,4 +278,45 @@ Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
 
 Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
 `
+}
+
+func generateAlias() []string {
+	var servicesList = []string{"api", "tso", "resource-manager"}
+	length := uint(len(servicesList))
+
+	var subsets [][]string
+	for subsetBits := 1; subsetBits < (1 << length); subsetBits++ {
+		var subset []string
+
+		for object := uint(0); object < length; object++ {
+			if (subsetBits>>object)&1 == 1 {
+				subset = append(subset, servicesList[object])
+			}
+		}
+		subsets = append(subsets, subset)
+	}
+
+	var alias []string
+	for _, s := range subsets {
+		if !slice.Contains(s, "api") {
+			continue
+		}
+		perm(s, func(a []string) {
+			alias = append(alias, strings.Join(a, ","))
+		}, 0)
+	}
+	return alias
+}
+
+func perm(a []string, f func([]string), i int) {
+	if i > len(a) {
+		f(a)
+		return
+	}
+	perm(a, f, i+1)
+	for j := i + 1; j < len(a); j++ {
+		a[i], a[j] = a[j], a[i]
+		perm(a, f, i+1)
+		a[i], a[j] = a[j], a[i]
+	}
 }
