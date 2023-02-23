@@ -411,7 +411,7 @@ func (u *unsafeRecoveryController) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRe
 
 	if expire, dispatched := u.storePlanExpires[storeID]; !dispatched || expire.Before(now) {
 		if dispatched {
-			log.Info("Unsafe recovery store recovery plan execution timeout, retry", zap.Uint64("store-id", storeID))
+			log.Info("unsafe recovery store recovery plan execution timeout, retry", zap.Uint64("store-id", storeID))
 		}
 		// Dispatch the recovery plan to the store, and the plan may be empty.
 		resp.RecoveryPlan = u.getRecoveryPlan(storeID)
@@ -433,7 +433,7 @@ func (u *unsafeRecoveryController) collectReport(heartbeat *pdpb.StoreHeartbeatR
 	}
 
 	if heartbeat.StoreReport.GetStep() != u.step {
-		log.Info("Unsafe recovery receives invalid store report",
+		log.Info("unsafe recovery receives invalid store report",
 			zap.Uint64("store-id", storeID), zap.Uint64("expected-step", u.step), zap.Uint64("obtained-step", heartbeat.StoreReport.GetStep()))
 		// invalid store report, ignore
 		return false
@@ -527,7 +527,7 @@ func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
 	u.output = append(u.output, output)
 	data, err := json.Marshal(output)
 	if err != nil {
-		log.Error("Unsafe recovery fail to marshal json object", zap.Error(err))
+		log.Error("unsafe recovery fail to marshal json object", zap.Error(err))
 	} else {
 		log.Info(string(data))
 	}

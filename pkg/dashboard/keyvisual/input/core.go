@@ -108,6 +108,6 @@ func clusterScan(rc *core.BasicCluster) RegionsInfo {
 		}
 	}
 
-	log.Debug("Update key visual regions", zap.Int("total-length", len(regions)))
+	log.Debug("update key visual regions", zap.Int("total-length", len(regions)))
 	return regions
 }

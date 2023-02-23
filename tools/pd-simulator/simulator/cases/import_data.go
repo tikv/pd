@@ -184,6 +184,6 @@ func renderPlot(name string, data [][3]int, len, minCount, maxCount int) {
 	f, _ := os.Create(name)
 	err := bar3d.Render(f)
 	if err != nil {
-		log.Error("Render error", zap.Error(err))
+		log.Error("render error", zap.Error(err))
 	}
 }

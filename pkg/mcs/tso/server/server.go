@@ -30,7 +30,6 @@ import (
 	"github.com/spf13/cobra"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -121,14 +120,15 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
-// GetMember returns the member.
-func (s *Server) GetMember() *member.Member {
-	return nil
+// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) IsServing() bool {
+	// TODO: implement this
+	return true
 }
 
-// AddLeaderCallback adds the callback function when the server becomes
+// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 // the global TSO allocator after the flag 'enable-local-tso' is set to true.
-func (s *Server) AddLeaderCallback(callbacks ...func(context.Context)) {
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	// Leave it empty
 	// TODO: implment it when integerating with the Local/Global TSO Allocator.
 }
@@ -287,7 +287,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	defer log.Sync()
 
 	versioninfo.Log("TSO")
-	log.Info("TSO Config", zap.Reflect("config", cfg))
+	log.Info("TSO config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 
@@ -296,7 +296,6 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// TODO: Create the server
 	ctx, cancel := context.WithCancel(context.Background())
 	svr := &Server{}
-
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
@@ -315,7 +314,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	<-ctx.Done()
-	log.Info("Got signal to exit", zap.String("signal", sig.String()))
+	log.Info("got signal to exit", zap.String("signal", sig.String()))
 
 	svr.Close()
 	switch sig {

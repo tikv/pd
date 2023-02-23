@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
 
@@ -200,7 +201,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) error {
 	groups, err := c.provider.ListResourceGroups(ctx)
 	if err != nil {
-		return err
+		return errs.ErrClientListResourceGroup.FastGenByArgs(err.Error())
 	}
 	latestGroups := make(map[string]struct{})
 	for _, group := range groups {
@@ -317,7 +318,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 ) (err error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
-		return errors.Errorf("failed to get the resource group %s", resourceGroupName)
+		return err
 	}
 	return gc.onRequestWait(ctx, info)
 }
@@ -409,10 +410,10 @@ func newGroupCostController(
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
 		if group.RUSettings.RU == nil || group.RUSettings.RU.Settings == nil {
-			return nil, errors.Errorf("the resource group is not configured")
+			return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not configured")
 		}
 	default:
-		return nil, errors.New("not supports the resource type")
+		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
 
 	gc := &groupCostController{
