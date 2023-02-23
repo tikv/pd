@@ -151,7 +151,6 @@ func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 }
 
 func (s *Server) initClient() error {
-	// TODO: We need to keep all backend endpoints and keep updating them to the latest. Once one of them failed, need to try another one.
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
