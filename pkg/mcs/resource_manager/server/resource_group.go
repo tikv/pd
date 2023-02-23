@@ -75,17 +75,16 @@ func (rg *ResourceGroup) String() string {
 
 // Copy copies the resource group.
 func (rg *ResourceGroup) Copy() *ResourceGroup {
-	// TODO: use a better way to copy
-	res, err := json.Marshal(rg)
-	if err != nil {
-		panic(err)
+	return &ResourceGroup{
+		Name: rg.Name,
+		Mode: rg.Mode,
+		RUSettings: &RequestUnitSettings{
+			RU: GroupTokenBucket{
+				Settings:              rg.RUSettings.RU.Settings,
+				GroupTokenBucketState: *rg.RUSettings.RU.Clone(),
+			},
+		},
 	}
-	var newRG ResourceGroup
-	err = json.Unmarshal(res, &newRG)
-	if err != nil {
-		panic(err)
-	}
-	return &newRG
 }
 
 // CheckAndInit checks the validity of the resource group and initializes the default values if not setting.
@@ -229,12 +228,7 @@ func (rg *ResourceGroup) GetGroupStates() *GroupStates {
 		}
 		return tokens
 	case rmpb.GroupMode_RawMode: // Raw mode
-		tokens := &GroupStates{
-			CPU:     rg.RawResourceSettings.CPU.GroupTokenBucketState.Clone(),
-			IORead:  rg.RawResourceSettings.IOReadBandwidth.GroupTokenBucketState.Clone(),
-			IOWrite: rg.RawResourceSettings.IOWriteBandwidth.GroupTokenBucketState.Clone(),
-		}
-		return tokens
+		panic("no implementation")
 	}
 	return nil
 }
@@ -244,18 +238,10 @@ func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
 		if state := states.RU; state != nil {
-			rg.RUSettings.RU.GroupTokenBucketState = *state
+			rg.RUSettings.RU.setState(states.RU)
 		}
 	case rmpb.GroupMode_RawMode:
-		if state := states.CPU; state != nil {
-			rg.RawResourceSettings.CPU.GroupTokenBucketState = *state
-		}
-		if state := states.IORead; state != nil {
-			rg.RawResourceSettings.IOReadBandwidth.GroupTokenBucketState = *state
-		}
-		if state := states.IOWrite; state != nil {
-			rg.RawResourceSettings.IOWriteBandwidth.GroupTokenBucketState = *state
-		}
+		panic("no implementation")
 	}
 }
 

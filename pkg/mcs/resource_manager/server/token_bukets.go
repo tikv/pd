@@ -15,13 +15,15 @@
 package server
 
 import (
-	"fmt"
 	"math"
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/gogo/protobuf/proto"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 )
 
 const (
@@ -45,6 +47,16 @@ type GroupTokenBucket struct {
 	// MaxTokens limits the number of tokens that can be accumulated
 	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
 	GroupTokenBucketState `json:"state,omitempty"`
+}
+
+func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
+	gtb.mu.Lock()
+	defer gtb.mu.Unlock()
+
+	gtb.Tokens = state.Tokens
+	gtb.LastUpdate = state.LastUpdate
+	gtb.Initialized = state.Initialized
+	log.Info("update group token bucket state", zap.Any("state", state))
 }
 
 // TokenSlot is used to split a token bucket into multiple slots to
@@ -85,29 +97,12 @@ func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 	}
 }
 
-func (gts *GroupTokenBucketState) getTokens() (sum float64) {
-	gts.tokenSlots.Range(func(key, value interface{}) bool {
-		sum += value.(*TokenSlot).assignTokens
-		return true
-	})
-	return
-}
-
 func (gts *GroupTokenBucketState) balanceSlotTokens(
 	neededTokens float64,
 	clientUniqueID uint64,
 	settings *rmpb.TokenLimitSettings) {
 	gts.mu.Lock()
 	defer gts.mu.Unlock()
-
-	// Firstly need to sub from each slot consume.
-	var delta float64
-	gts.tokenSlots.Range(func(key, value interface{}) bool {
-		slot := value.(*TokenSlot)
-		delta += slot.lastTokens - slot.assignTokens
-		return true
-	})
-	gts.Tokens -= delta
 
 	slot, ok := gts.tokenSlots.LoadOrStore(clientUniqueID, &TokenSlot{assignTokens: 0, neededTokens: neededTokens})
 	prevNeed := slot.(*TokenSlot).neededTokens
@@ -121,7 +116,6 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 	gts.tokenSlots.Range(func(key, value interface{}) bool {
 		slot := value.(*TokenSlot)
 		ratio := slot.neededTokens / gts.mu.needTokenSum
-		fmt.Printf("balanceSlotTokens need: %+v, ratio: %+v, sum: +%v\n", slot.neededTokens, ratio, gts.mu.needTokenSum)
 		var (
 			fillRate    = settings.GetFillRate() * uint64(ratio)
 			burstLimit  = settings.GetBurstLimit() * int64(ratio)
@@ -211,7 +205,21 @@ func (gtb *GroupTokenBucket) request(now time.Time, neededTokens float64, target
 	gtb.updateTokens(now, gtb.Settings.GetBurstLimit(), neededTokens, clientUniqueID)
 	// serve by each client
 	slot, _ := gtb.tokenSlots.Load(clientUniqueID)
-	return slot.(*TokenSlot).serve(neededTokens, targetPeriodMs)
+
+	res, trickleDuration := slot.(*TokenSlot).serve(neededTokens, targetPeriodMs)
+
+	gtb.mu.Lock()
+	defer gtb.mu.Unlock()
+	// Tokens need to be subbed from each slot consume.
+	var delta float64
+	gtb.tokenSlots.Range(func(key, value interface{}) bool {
+		slot := value.(*TokenSlot)
+		delta += slot.lastTokens - slot.assignTokens
+		return true
+	})
+	gtb.Tokens -= delta
+
+	return res, trickleDuration
 }
 
 func (ts *TokenSlot) serve(neededTokens float64, targetPeriodMs uint64) (*rmpb.TokenBucket, int64) {
