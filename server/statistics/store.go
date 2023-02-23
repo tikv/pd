@@ -38,14 +38,12 @@ const (
 type StoresStats struct {
 	syncutil.RWMutex
 	rollingStoresStats map[uint64]*RollingStoreStats
-	slowStoresStats    map[uint64]*SlowStoreStats
 }
 
 // NewStoresStats creates a new hot spot cache.
 func NewStoresStats() *StoresStats {
 	return &StoresStats{
 		rollingStoresStats: make(map[uint64]*RollingStoreStats),
-		slowStoresStats:    make(map[uint64]*SlowStoreStats),
 	}
 }
 
@@ -87,36 +85,6 @@ func (s *StoresStats) ObserveRegionsStats(storeIDs []uint64, writeBytesRates, wr
 		rollingStoreStat := s.GetOrCreateRollingStoreStats(storeID)
 		rollingStoreStat.ObserveRegionsStats(writeBytesRates[i], writeKeysRates[i])
 	}
-}
-
-// RemoveSlowStoreStatus removes SlowStoreStats with a given store ID.
-func (s *StoresStats) RemoveSlowStoreStatus(storeID uint64) {
-	s.Lock()
-	defer s.Unlock()
-	delete(s.slowStoresStats, storeID)
-}
-
-// ObserveSlowStoreStatus updates SlowStoreStats with a given store ID.
-func (s *StoresStats) ObserveSlowStoreStatus(storeID uint64, isSlow bool) {
-	s.Lock()
-	defer s.Unlock()
-	// If the given store was slow, this store should be recorded. Otherwise,
-	// this store should be removed from the recording list.
-	if isSlow {
-		_, ok := s.slowStoresStats[storeID]
-		if !ok {
-			s.slowStoresStats[storeID] = &SlowStoreStats{}
-		}
-	} else {
-		delete(s.slowStoresStats, storeID)
-	}
-}
-
-// ExistsSlowStores returns whether there exists slow stores in this cluster.
-func (s *StoresStats) ExistsSlowStores() bool {
-	s.Lock()
-	defer s.Unlock()
-	return len(s.slowStoresStats) > 0
 }
 
 // Set sets the store statistics (for test).
@@ -298,5 +266,45 @@ func (r *RollingStoreStats) GetInstantLoad(k StoreStatKind) float64 {
 	return 0
 }
 
-// SlowStoreStats is a cached statistics for the slow store.
-type SlowStoreStats struct{}
+// SlowStoreStatInfo is a cached statistics for the slow store.
+type SlowStoreStatInfo struct{}
+
+// SlowStoresStats is a cache hold slow storeIDs.
+type SlowStoresStats struct {
+	syncutil.RWMutex
+	slowStores map[uint64]*SlowStoreStatInfo
+}
+
+// NewSlowStoresStats creates a new slowStoresStats cache.
+func NewSlowStoresStats() *SlowStoresStats {
+	return &SlowStoresStats{
+		slowStores: make(map[uint64]*SlowStoreStatInfo),
+	}
+}
+
+// RemoveSlowStoreStatus removes SlowStoreStats with a given store ID.
+func (s *SlowStoresStats) RemoveSlowStoreStatus(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	delete(s.slowStores, storeID)
+}
+
+// ObserveSlowStoreStatus updates SlowStoreStats with a given store ID.
+func (s *SlowStoresStats) ObserveSlowStoreStatus(storeID uint64, isSlow bool) {
+	s.Lock()
+	defer s.Unlock()
+	// If the given store was slow, this store should be recorded. Otherwise,
+	// this store should be removed from the recording list.
+	if _, ok := s.slowStores[storeID]; !ok && isSlow {
+		s.slowStores[storeID] = &SlowStoreStatInfo{}
+	} else {
+		delete(s.slowStores, storeID)
+	}
+}
+
+// ExistsSlowStores returns whether there exists slow stores in this cluster.
+func (s *SlowStoresStats) ExistsSlowStores() bool {
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.slowStores) > 0
+}
