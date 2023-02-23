@@ -266,19 +266,16 @@ func (r *RollingStoreStats) GetInstantLoad(k StoreStatKind) float64 {
 	return 0
 }
 
-// SlowStoreStatInfo is a cached statistics for the slow store.
-type SlowStoreStatInfo struct{}
-
-// SlowStoresStats is a cache hold slow storeIDs.
+// SlowStoresStats is a cached statistics for the slow store.
 type SlowStoresStats struct {
 	syncutil.RWMutex
-	slowStores map[uint64]*SlowStoreStatInfo
+	slowStores map[uint64]struct{}
 }
 
 // NewSlowStoresStats creates a new slowStoresStats cache.
 func NewSlowStoresStats() *SlowStoresStats {
 	return &SlowStoresStats{
-		slowStores: make(map[uint64]*SlowStoreStatInfo),
+		slowStores: make(map[uint64]struct{}),
 	}
 }
 
@@ -296,7 +293,7 @@ func (s *SlowStoresStats) ObserveSlowStoreStatus(storeID uint64, isSlow bool) {
 	// If the given store was slow, this store should be recorded. Otherwise,
 	// this store should be removed from the recording list.
 	if _, ok := s.slowStores[storeID]; !ok && isSlow {
-		s.slowStores[storeID] = &SlowStoreStatInfo{}
+		s.slowStores[storeID] = struct{}{}
 	} else {
 		delete(s.slowStores, storeID)
 	}

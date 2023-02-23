@@ -147,6 +147,7 @@ type RaftCluster struct {
 	regionStats              *statistics.RegionStatistics
 	hotStat                  *statistics.HotStat
 	hotBuckets               *buckets.HotBucketCache
+	slowStat                 *statistics.SlowStat
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
@@ -237,6 +238,7 @@ func (c *RaftCluster) InitCluster(
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
 	c.hotBuckets = buckets.NewBucketsCache(c.ctx)
+	c.slowStat = statistics.NewSlowStat(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
@@ -456,6 +458,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	for _, store := range c.GetStores() {
 		storeID := store.GetID()
 		c.hotStat.GetOrCreateRollingStoreStats(storeID)
+		c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
 	}
 	return c, nil
 }
@@ -824,8 +827,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	c.core.PutStore(newStore)
 	c.hotStat.Observe(storeID, newStore.GetStoreStats())
-	c.hotStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
 	c.hotStat.FilterUnhealthyStore(c)
+	c.slowStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
@@ -1451,7 +1454,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		c.RemoveStoreLimit(storeID)
 		c.resetProgress(storeID, store.GetAddress())
 		c.hotStat.RemoveRollingStoreStats(storeID)
-		c.hotStat.RemoveSlowStoreStatus(storeID)
+		c.slowStat.RemoveSlowStoreStatus(storeID)
 	}
 	return err
 }
@@ -1495,7 +1498,7 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bo
 	store := c.GetStore(storeID)
 
 	// If there did no exist slow stores, following checking can be skipped.
-	if !c.hotStat.ExistsSlowStores() {
+	if !c.slowStat.ExistsSlowStores() {
 		return false, nil
 	}
 	// We just return AwakenRegions messages to those Serving stores which need to be awaken.
@@ -1626,6 +1629,7 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 	}
 	c.core.PutStore(store)
 	c.hotStat.GetOrCreateRollingStoreStats(store.GetID())
+	c.slowStat.ObserveSlowStoreStatus(store.GetID(), store.IsSlow())
 	return nil
 }
 

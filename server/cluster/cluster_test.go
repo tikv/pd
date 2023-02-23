@@ -1822,7 +1822,7 @@ func TestAwakenStore(t *testing.T) {
 	}
 	re.NoError(cluster.HandleStoreHeartbeat(slowStoreReq, slowStoreResp))
 	time.Sleep(20 * time.Millisecond)
-	re.True(cluster.hotStat.ExistsSlowStores())
+	re.True(cluster.slowStat.ExistsSlowStores())
 	{
 		// Store 1 cannot be awaken.
 		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(1)
