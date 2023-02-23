@@ -15,7 +15,6 @@
 package controller
 
 import (
-	"context"
 	"os"
 
 	"github.com/elastic/gosigar"
@@ -51,7 +50,7 @@ type ResponseInfo interface {
 type ResourceCalculator interface {
 	// Trickle is used to calculate the resource consumption periodically rather than on the request path.
 	// It's mainly used to calculate like the SQL CPU cost.
-	Trickle(context.Context, *rmpb.Consumption)
+	Trickle(*rmpb.Consumption)
 	// BeforeKVRequest is used to calculate the resource consumption before the KV request.
 	// It's mainly used to calculate the base and write request cost.
 	BeforeKVRequest(*rmpb.Consumption, RequestInfo)
@@ -72,7 +71,7 @@ func newKVCalculator(cfg *Config) *KVCalculator {
 }
 
 // Trickle ...
-func (kc *KVCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumption) {
+func (kc *KVCalculator) Trickle(*rmpb.Consumption) {
 }
 
 // BeforeKVRequest ...
@@ -139,10 +138,11 @@ func newSQLCalculator(cfg *Config) *SQLCalculator {
 }
 
 // Trickle Update Sql Layer CPU consumption.
-func (dsc *SQLCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumption) {
-	delta := getSQLProcessCPUTime() - consumption.SqlLayerCpuTimeMs
-	consumption.SqlLayerCpuTimeMs = delta
-	consumption.TotalCpuTimeMs = delta
+func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption) {
+	sqlCpuTimeMs := getSQLProcessCPUTime()
+	delta := sqlCpuTimeMs - consumption.SqlLayerCpuTimeMs
+	consumption.TotalCpuTimeMs += delta
+	consumption.SqlLayerCpuTimeMs = sqlCpuTimeMs
 }
 
 // BeforeKVRequest ...

@@ -125,7 +125,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case resp := <-c.tokenResponseChan:
 				c.run.requestInProgress = false
 				if resp != nil {
-					c.updateRunState(c.loopCtx)
+					c.updateRunState()
 					c.handleTokenBucketResponse(resp)
 				} else {
 					// A nil response indicates a failure (which would have been logged).
@@ -136,14 +136,14 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					log.Error("[resource group controller] clean up resource groups failed", zap.Error(err))
 				}
 			case <-stateUpdateTicker.C:
-				c.updateRunState(c.loopCtx)
+				c.updateRunState()
 				c.updateAvgRequestResourcePerSec()
 				if c.run.requestNeedsRetry || c.shouldReportConsumption() {
 					c.run.requestNeedsRetry = false
 					c.collectTokenBucketRequests(c.loopCtx, "report", false /* select all */)
 				}
 			case <-c.lowTokenNotifyChan:
-				c.updateRunState(c.loopCtx)
+				c.updateRunState()
 				c.updateAvgRequestResourcePerSec()
 				if !c.run.requestInProgress {
 					c.collectTokenBucketRequests(c.loopCtx, "low_ru", true /* only select low tokens resource group */)
@@ -223,11 +223,11 @@ func (c *ResourceGroupsController) initRunState() {
 	c.run.lastRequestTime = now
 }
 
-func (c *ResourceGroupsController) updateRunState(ctx context.Context) {
+func (c *ResourceGroupsController) updateRunState() {
 	c.run.now = time.Now()
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
-		gc.updateRunState(ctx)
+		gc.updateRunState()
 		return true
 	})
 }
@@ -489,31 +489,14 @@ func (gc *groupCostController) initRunState() {
 	}
 }
 
-func (gc *groupCostController) updateRunState(ctx context.Context) {
+func (gc *groupCostController) updateRunState() {
 	newTime := time.Now()
 	gc.mu.Lock()
-	deltaConsumption := &rmpb.Consumption{SqlLayerCpuTimeMs: gc.mu.consumption.SqlLayerCpuTimeMs}
 	for _, calc := range gc.calculators {
-		calc.Trickle(ctx, deltaConsumption)
+		calc.Trickle(gc.mu.consumption)
 	}
-	add(gc.mu.consumption, deltaConsumption)
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
-	// remove tokens
-	switch gc.mode {
-	case rmpb.GroupMode_RUMode:
-		for typ, counter := range gc.run.requestUnitTokens {
-			if v := getRUValueFromConsumption(deltaConsumption, typ); v > 0 {
-				counter.limiter.RemoveTokens(newTime, v)
-			}
-		}
-	case rmpb.GroupMode_RawMode:
-		for typ, counter := range gc.run.resourceTokens {
-			if v := getRawResourceValueFromConsumption(deltaConsumption, typ); v > 0 {
-				counter.limiter.RemoveTokens(newTime, v)
-			}
-		}
-	}
 	log.Debug("[resource group controller] update run state", zap.Any("request unit consumption", gc.run.consumption))
 	gc.run.now = newTime
 }
