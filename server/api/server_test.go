@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"sync"
@@ -220,6 +221,7 @@ func TestAPIService(t *testing.T) {
 	re := require.New(t)
 
 	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	defer testutil.CleanServer(cfg.DataDir)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	svr, err := server.CreateServer(ctx, cfg, []string{"api"}, NewHandler)
@@ -231,12 +233,66 @@ func TestAPIService(t *testing.T) {
 
 	args := make(map[string]interface{})
 	t1 := makeTS(time.Hour)
-	url := fmt.Sprintf("%s/admin/reset-ts", cfg.ClientUrls+apiPrefix+"/api/v1")
+	url := cfg.ClientUrls + "/pd/api/v1/admin/reset-ts"
 	args["tso"] = fmt.Sprintf("%d", t1)
 	values, err := json.Marshal(args)
 	re.NoError(err)
 	err = testutil.CheckPostJSON(testDialClient, url, values, testutil.Status(re, http.StatusNotFound))
 	re.NoError(err)
 
-	testutil.CleanServer(cfg.DataDir)
+	leader := svr.GetLeader()
+	url = cfg.ClientUrls + "/pd/api/v1/leader"
+	resp, err := testDialClient.Get(url)
+	re.NoError(err)
+	defer resp.Body.Close()
+	buf, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+
+	var got pdpb.Member
+	re.NoError(json.Unmarshal(buf, &got))
+	re.Equal(leader.GetClientUrls(), got.GetClientUrls())
+	re.Equal(leader.GetMemberId(), got.GetMemberId())
+}
+
+func TestMultipleServices(t *testing.T) {
+	re := require.New(t)
+
+	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	defer testutil.CleanServer(cfg.DataDir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svr, err := server.CreateServer(ctx, cfg, []string{"api", "resource-manager"}, NewHandler)
+	re.NoError(err)
+	defer svr.Close()
+	err = svr.Run()
+	re.NoError(err)
+	server.MustWaitLeader(re, []*server.Server{svr})
+
+	args := make(map[string]interface{})
+	t1 := makeTS(time.Hour)
+	url := cfg.ClientUrls + "/pd/api/v1/admin/reset-ts"
+	args["tso"] = fmt.Sprintf("%d", t1)
+	values, err := json.Marshal(args)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(testDialClient, url, values, testutil.Status(re, http.StatusNotFound))
+	re.NoError(err)
+
+	url = cfg.ClientUrls + "/resource-manager/api/v1/config/groups"
+	resp, err := testDialClient.Get(url)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+
+	leader := svr.GetLeader()
+	url = cfg.ClientUrls + "/pd/api/v1/leader"
+	resp, err = testDialClient.Get(url)
+	re.NoError(err)
+	defer resp.Body.Close()
+	buf, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+
+	var got pdpb.Member
+	re.NoError(json.Unmarshal(buf, &got))
+	re.Equal(leader.GetClientUrls(), got.GetClientUrls())
+	re.Equal(leader.GetMemberId(), got.GetMemberId())
 }
