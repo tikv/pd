@@ -17,7 +17,6 @@ package server
 
 import (
 	"encoding/json"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -29,7 +28,6 @@ import (
 
 // ResourceGroup is the definition of a resource group, for REST API.
 type ResourceGroup struct {
-	sync.RWMutex
 	Name string         `json:"name"`
 	Mode rmpb.GroupMode `json:"mode"`
 	// RU settings
@@ -78,8 +76,6 @@ func (rg *ResourceGroup) String() string {
 // Copy copies the resource group.
 func (rg *ResourceGroup) Copy() *ResourceGroup {
 	// TODO: use a better way to copy
-	rg.RLock()
-	defer rg.RUnlock()
 	res, err := json.Marshal(rg)
 	if err != nil {
 		panic(err)
@@ -123,8 +119,6 @@ func (rg *ResourceGroup) CheckAndInit() error {
 // Only used to patch the resource group when updating.
 // Note: the tokens is the delta value to patch.
 func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
-	rg.Lock()
-	defer rg.Unlock()
 	if metaGroup.GetMode() != rg.Mode {
 		return errors.New("only support reconfigure in same mode, maybe you should delete and create a new one")
 	}
@@ -173,21 +167,17 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 func (rg *ResourceGroup) RequestRU(
 	now time.Time,
 	neededTokens float64,
-	targetPeriodMs uint64,
+	targetPeriodMs, clientUniqueID uint64,
 ) *rmpb.GrantedRUTokenBucket {
-	rg.Lock()
-	defer rg.Unlock()
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
-	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs)
+	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs, clientUniqueID)
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
 func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
-	rg.RLock()
-	defer rg.RUnlock()
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
 		group := &rmpb.ResourceGroup{
@@ -232,8 +222,6 @@ type GroupStates struct {
 
 // GetGroupStates get the token set of ResourceGroup.
 func (rg *ResourceGroup) GetGroupStates() *GroupStates {
-	rg.RLock()
-	defer rg.RUnlock()
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
 		tokens := &GroupStates{

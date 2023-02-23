@@ -78,7 +78,7 @@ type ResourceGroupsController struct {
 		lastRequestTime time.Time
 
 		// requestInProgress is true if we are in the process of sending a request.
-		// It gets set to false when we receives the response in the main loop,
+		// It gets set to false when we receive the response in the main loop,
 		// even in error cases.
 		requestInProgress bool
 
@@ -695,7 +695,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 
 	var cfg tokenBucketReconfigureArgs
 	cfg.NewBurst = bucket.GetSettings().GetBurstLimit()
-	// when trickleTimeMs equals zero, server has enough tokens and does not need to
+	// When trickleTimeMs equals zero, server has enough tokens and does not need to
 	// limit client consume token. So all token is granted to client right now.
 	if trickleTimeMs == 0 {
 		cfg.NewTokens = granted

@@ -15,7 +15,9 @@
 package server
 
 import (
+	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -45,9 +47,29 @@ type GroupTokenBucket struct {
 	GroupTokenBucketState `json:"state,omitempty"`
 }
 
+// TokenSlot is used to split a token bucket into multiple slots to
+// server different clients within the same resource group.
+type TokenSlot struct {
+	// settings is the token limit settings for the slot.
+	settings *rmpb.TokenLimitSettings
+	// tokens is the number of tokens in the slot.
+	assignTokens float64
+	neededTokens float64
+
+	lastTokens float64
+}
+
 // GroupTokenBucketState is the running state of TokenBucket.
 type GroupTokenBucketState struct {
-	Tokens      float64    `json:"tokens,omitempty"`
+	Tokens float64 `json:"tokens,omitempty"`
+	// ClientUniqueID -> TokenSlot
+	tokenSlots sync.Map
+
+	mu struct {
+		sync.Mutex
+		needTokenSum float64
+	}
+
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
 	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
@@ -55,12 +77,66 @@ type GroupTokenBucketState struct {
 }
 
 // Clone returns the copy of GroupTokenBucketState
-func (s *GroupTokenBucketState) Clone() *GroupTokenBucketState {
+func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 	return &GroupTokenBucketState{
-		Tokens:      s.Tokens,
-		LastUpdate:  s.LastUpdate,
-		Initialized: s.Initialized,
+		Tokens:      gts.Tokens,
+		LastUpdate:  gts.LastUpdate,
+		Initialized: gts.Initialized,
 	}
+}
+
+func (gts *GroupTokenBucketState) getTokens() (sum float64) {
+	gts.tokenSlots.Range(func(key, value interface{}) bool {
+		sum += value.(*TokenSlot).assignTokens
+		return true
+	})
+	return
+}
+
+func (gts *GroupTokenBucketState) balanceSlotTokens(
+	neededTokens float64,
+	clientUniqueID uint64,
+	settings *rmpb.TokenLimitSettings) {
+	gts.mu.Lock()
+	defer gts.mu.Unlock()
+
+	// Firstly need to sub from each slot consume.
+	var delta float64
+	gts.tokenSlots.Range(func(key, value interface{}) bool {
+		slot := value.(*TokenSlot)
+		delta += slot.lastTokens - slot.assignTokens
+		return true
+	})
+	gts.Tokens -= delta
+
+	slot, ok := gts.tokenSlots.LoadOrStore(clientUniqueID, &TokenSlot{assignTokens: 0, neededTokens: neededTokens})
+	prevNeed := slot.(*TokenSlot).neededTokens
+	if !ok {
+		gts.mu.needTokenSum += neededTokens
+	} else {
+		gts.mu.needTokenSum = gts.mu.needTokenSum - prevNeed + neededTokens
+		slot.(*TokenSlot).neededTokens = neededTokens
+	}
+
+	gts.tokenSlots.Range(func(key, value interface{}) bool {
+		slot := value.(*TokenSlot)
+		ratio := slot.neededTokens / gts.mu.needTokenSum
+		fmt.Printf("balanceSlotTokens need: %+v, ratio: %+v, sum: +%v\n", slot.neededTokens, ratio, gts.mu.needTokenSum)
+		var (
+			fillRate    = settings.GetFillRate() * uint64(ratio)
+			burstLimit  = settings.GetBurstLimit() * int64(ratio)
+			assignToken = gts.Tokens * ratio
+		)
+
+		slot.assignTokens = assignToken
+		slot.lastTokens = assignToken
+		slot.settings = &rmpb.TokenLimitSettings{
+			FillRate:   fillRate,
+			BurstLimit: burstLimit,
+		}
+
+		return true
+	})
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
@@ -69,76 +145,81 @@ func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
 		return GroupTokenBucket{}
 	}
 	return GroupTokenBucket{
-		Settings: tokenBucket.Settings,
+		Settings: tokenBucket.GetSettings(),
 		GroupTokenBucketState: GroupTokenBucketState{
-			Tokens: tokenBucket.Tokens,
+			Tokens:     tokenBucket.GetTokens(),
+			tokenSlots: sync.Map{},
 		},
 	}
 }
 
 // GetTokenBucket returns the grpc protoc struct of GroupTokenBucket.
-func (t *GroupTokenBucket) GetTokenBucket() *rmpb.TokenBucket {
-	if t.Settings == nil {
+func (gtb *GroupTokenBucket) GetTokenBucket() *rmpb.TokenBucket {
+	if gtb.Settings == nil {
 		return nil
 	}
 	return &rmpb.TokenBucket{
-		Settings: t.Settings,
-		Tokens:   t.Tokens,
+		Settings: gtb.Settings,
+		Tokens:   gtb.Tokens,
 	}
 }
 
 // patch patches the token bucket settings.
-func (t *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
+func (gtb *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 	if tb == nil {
 		return
 	}
 	if setting := proto.Clone(tb.GetSettings()).(*rmpb.TokenLimitSettings); setting != nil {
-		t.Settings = setting
-		t.settingChanged = true
+		gtb.Settings = setting
+		gtb.settingChanged = true
 	}
 
 	// the settings in token is delta of the last update and now.
-	t.Tokens += tb.GetTokens()
+	gtb.Tokens += tb.GetTokens()
 }
 
 // init initializes the group token bucket.
-func (t *GroupTokenBucket) init(now time.Time) {
-	if t.Settings.FillRate == 0 {
-		t.Settings.FillRate = defaultRefillRate
+func (gtb *GroupTokenBucket) init(now time.Time) {
+	if gtb.Settings.FillRate == 0 {
+		gtb.Settings.FillRate = defaultRefillRate
 	}
-	if t.Tokens < defaultInitialTokens {
-		t.Tokens = defaultInitialTokens
+	if gtb.Tokens < defaultInitialTokens {
+		gtb.Tokens = defaultInitialTokens
 	}
-	t.LastUpdate = &now
-	t.Initialized = true
+	gtb.LastUpdate = &now
+	gtb.Initialized = true
+}
+
+// updateTokens updates the tokens and settings.
+func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, neededTokens float64, clientUniqueID uint64) {
+	if !gtb.Initialized {
+		gtb.init(now)
+	} else if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
+		gtb.Tokens += float64(gtb.Settings.GetFillRate()) * delta.Seconds()
+		gtb.LastUpdate = &now
+	}
+	if burst := float64(burstLimit); burst != 0 && gtb.Tokens > burst {
+		gtb.Tokens = burst
+	}
+	// Balance resource group bucket and each slots.
+	gtb.balanceSlotTokens(neededTokens, clientUniqueID, gtb.Settings)
 }
 
 // request requests tokens from the group token bucket.
-func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPeriodMs uint64) (*rmpb.TokenBucket, int64) {
-	if !t.Initialized {
-		t.init(now)
-	} else {
-		delta := now.Sub(*t.LastUpdate)
-		if delta > 0 {
-			t.Tokens += float64(t.Settings.FillRate) * delta.Seconds()
-			t.LastUpdate = &now
-		}
-	}
-	// reloan when setting changed
-	if t.settingChanged && t.Tokens <= 0 {
-		t.Tokens = 0
-	}
-	t.settingChanged = false
-	if t.Settings.BurstLimit != 0 {
-		if burst := float64(t.Settings.BurstLimit); t.Tokens > burst {
-			t.Tokens = burst
-		}
-	}
+func (gtb *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPeriodMs, clientUniqueID uint64) (*rmpb.TokenBucket, int64) {
+	// Update tokens
+	gtb.updateTokens(now, gtb.Settings.GetBurstLimit(), neededTokens, clientUniqueID)
+	// serve by each client
+	slot, _ := gtb.tokenSlots.Load(clientUniqueID)
+	return slot.(*TokenSlot).serve(neededTokens, targetPeriodMs)
+}
 
+func (ts *TokenSlot) serve(neededTokens float64, targetPeriodMs uint64) (*rmpb.TokenBucket, int64) {
 	var res rmpb.TokenBucket
-	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: t.Settings.GetBurstLimit()}
+	burstLimit := ts.settings.GetBurstLimit()
+	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: burstLimit}
 	// If BurstLimit is -1, just return.
-	if res.Settings.BurstLimit < 0 {
+	if burstLimit < 0 {
 		res.Tokens = neededTokens
 		return &res, 0
 	}
@@ -147,8 +228,8 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 		return &res, 0
 	}
 	// If the current tokens can directly meet the requirement, returns the need token
-	if t.Tokens >= neededTokens {
-		t.Tokens -= neededTokens
+	if ts.assignTokens >= neededTokens {
+		ts.assignTokens -= neededTokens
 		// granted the total request tokens
 		res.Tokens = neededTokens
 		return &res, 0
@@ -157,21 +238,25 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	// Firstly allocate the remaining tokens
 	var grantedTokens float64
 	hasRemaining := false
-	if t.Tokens > 0 {
-		grantedTokens = t.Tokens
+	if ts.assignTokens > 0 {
+		grantedTokens = ts.assignTokens
 		neededTokens -= grantedTokens
-		t.Tokens = 0
+		ts.assignTokens = 0
 		hasRemaining = true
 	}
 
-	var targetPeriodTime = time.Duration(targetPeriodMs) * time.Millisecond
-	var trickleTime = 0.
+	var (
+		targetPeriodTime    = time.Duration(targetPeriodMs) * time.Millisecond
+		targetPeriodTimeSec = targetPeriodTime.Seconds()
+		trickleTime         = 0.
+		fillRate            = ts.settings.GetFillRate()
+	)
 
-	LoanCoefficient := defaultLoanCoefficient
-	// when BurstLimit less or equal FillRate, the server does not accumulate a significant number of tokens.
+	loanCoefficient := defaultLoanCoefficient
+	// When BurstLimit less or equal FillRate, the server does not accumulate a significant number of tokens.
 	// So we don't need to smooth the token allocation speed.
-	if t.Settings.BurstLimit > 0 && t.Settings.BurstLimit <= int64(t.Settings.FillRate) {
-		LoanCoefficient = 1
+	if burstLimit > 0 && burstLimit <= int64(fillRate) {
+		loanCoefficient = 1
 	}
 	// When there are loan, the allotment will match the fill rate.
 	// We will have k threshold, beyond which the token allocation will be a minimum.
@@ -187,49 +272,50 @@ func (t *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPe
 	//               |
 	// grant_rate 0  ------------------------------------------------------------------------------------
 	//         loan      ***    k*period_token    (k+k-1)*period_token    ***      (k+k+1...+1)*period_token
-	p := make([]float64, LoanCoefficient)
-	p[0] = float64(LoanCoefficient) * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
-	for i := 1; i < LoanCoefficient; i++ {
-		p[i] = float64(LoanCoefficient-i)*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() + p[i-1]
+	p := make([]float64, loanCoefficient)
+	p[0] = float64(loanCoefficient) * float64(fillRate) * targetPeriodTimeSec
+	for i := 1; i < loanCoefficient; i++ {
+		p[i] = float64(loanCoefficient-i)*float64(fillRate)*targetPeriodTimeSec + p[i-1]
 	}
-	for i := 0; i < LoanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTime.Seconds(); i++ {
-		loan := -t.Tokens
+	for i := 0; i < loanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTimeSec; i++ {
+		loan := -ts.assignTokens
 		if loan > p[i] {
 			continue
 		}
 		roundReserveTokens := p[i] - loan
-		fillRate := float64(LoanCoefficient-i) * float64(t.Settings.FillRate)
+		fillRate := float64(loanCoefficient-i) * float64(fillRate)
 		if roundReserveTokens > neededTokens {
-			t.Tokens -= neededTokens
+			ts.assignTokens -= neededTokens
 			grantedTokens += neededTokens
 			trickleTime += grantedTokens / fillRate
 			neededTokens = 0
 		} else {
 			roundReserveTime := roundReserveTokens / fillRate
-			if roundReserveTime+trickleTime >= targetPeriodTime.Seconds() {
-				roundTokens := (targetPeriodTime.Seconds() - trickleTime) * fillRate
+			if roundReserveTime+trickleTime >= targetPeriodTimeSec {
+				roundTokens := (targetPeriodTimeSec - trickleTime) * fillRate
 				neededTokens -= roundTokens
-				t.Tokens -= roundTokens
+				ts.assignTokens -= roundTokens
 				grantedTokens += roundTokens
-				trickleTime = targetPeriodTime.Seconds()
+				trickleTime = targetPeriodTimeSec
 			} else {
 				grantedTokens += roundReserveTokens
 				neededTokens -= roundReserveTokens
-				t.Tokens -= roundReserveTokens
+				ts.assignTokens -= roundReserveTokens
 				trickleTime += roundReserveTime
 			}
 		}
 	}
-	if grantedTokens < defaultReserveRatio*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() {
-		t.Tokens -= defaultReserveRatio*float64(t.Settings.FillRate)*targetPeriodTime.Seconds() - grantedTokens
-		grantedTokens = defaultReserveRatio * float64(t.Settings.FillRate) * targetPeriodTime.Seconds()
+	if grantedTokens < defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec {
+		ts.assignTokens -= defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec - grantedTokens
+		grantedTokens = defaultReserveRatio * float64(fillRate) * targetPeriodTimeSec
 	}
 	res.Tokens = grantedTokens
+
 	var trickleDuration time.Duration
-	// can't directly treat targetPeriodTime as trickleTime when there is a token remaining.
-	// If treat, client consumption will be slowed down (actually cloud be increased).
+	// Can't directly treat targetPeriodTime as trickleTime when there is a token remaining.
+	// If treated, client consumption will be slowed down (actually could be increased).
 	if hasRemaining {
-		trickleDuration = time.Duration(math.Min(trickleTime, targetPeriodTime.Seconds()) * float64(time.Second))
+		trickleDuration = time.Duration(math.Min(trickleTime, targetPeriodTimeSec) * float64(time.Second))
 	} else {
 		trickleDuration = targetPeriodTime
 	}
