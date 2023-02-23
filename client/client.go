@@ -419,7 +419,7 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 		cancel:                  clientCancel,
 		option:                  newOption(),
 	}
-	c.bc = newBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
+	c.bc = newPDBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
 
 	// Inject the client options.
 	for _, opt := range opts {
@@ -444,6 +444,51 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 	go c.leaderCheckLoop()
 
 	return c, nil
+}
+
+// NewTSOClientWithContext creates a TSO client with context.
+func NewTSOClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", svrAddrs))
+	clientCtx, clientCancel := context.WithCancel(ctx)
+	c := &client{
+		checkTSDeadlineCh:       make(chan struct{}),
+		checkTSODispatcherCh:    make(chan struct{}, 1),
+		updateTokenConnectionCh: make(chan struct{}, 1),
+		updateConnectionCtxsCh:  make(chan struct{}, 1),
+		ctx:                     clientCtx,
+		cancel:                  clientCancel,
+		option:                  newOption(),
+	}
+	c.bc = newTSOBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
+	if err := c.newClientWithContext(opts...); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (c *client) newClientWithContext(opts ...ClientOption) error {
+	// Inject the client options.
+	for _, opt := range opts {
+		opt(c)
+	}
+	// Init the client base.
+	if err := c.bc.Init(); err != nil {
+		return err
+	}
+
+	c.bc.AddServiceEndpointSwitchedCallback(c.scheduleCheckTSODispatcher)
+	c.bc.AddServiceEndpointSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.bc.AddServiceEndpointsChangedCallback(c.scheduleUpdateConnectionCtxs)
+
+	// Start the daemons.
+	c.updateTSODispatcher()
+	c.createTokenDispatcher()
+	c.wg.Add(3)
+	go c.tsLoop()
+	go c.tsCancelLoop()
+	go c.leaderCheckLoop()
+
+	return nil
 }
 
 func (c *client) scheduleCheckTSODispatcher() {
@@ -1028,7 +1073,7 @@ func (c *client) tryConnectToTSO(
 		backupClientConn, addr := c.backupClientConn()
 		if backupClientConn != nil {
 			log.Info("[pd] fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("addr", addr))
-			forwardedHost, ok := c.bc.GetTSOAllocatorLeaderAddrByDCLocation(dc)
+			forwardedHost, ok := c.bc.GetTSOAllocatorServingAddrByDCLocation(dc)
 			if !ok {
 				return errors.Errorf("cannot find the allocator leader in %s", dc)
 			}

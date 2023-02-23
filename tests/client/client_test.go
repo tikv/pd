@@ -290,7 +290,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 
 	// Check allocator leaders URL map.
 	cli.Close()
-	for dcLocation, url := range innerCli.GetBaseClient().GetTSOAllocatorLeaderURLs() {
+	for dcLocation, url := range innerCli.GetBaseClient().GetTSOAllocatorServingEndpointURLs() {
 		if dcLocation == tso.GlobalDCLocation {
 			urls := innerCli.GetBaseClient().GetURLs()
 			sort.Strings(urls)

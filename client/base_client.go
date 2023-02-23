@@ -62,8 +62,8 @@ type BaseClient interface {
 	GetClusterID(context.Context) uint64
 	// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 	GetTSOAllocators() *sync.Map
-	// GetTSOAllocatorLeaderAddrByDCLocation returns the tso allocator of the given dcLocation
-	GetTSOAllocatorLeaderAddrByDCLocation(dcLocation string) (string, bool)
+	// GetTSOAllocatorServingAddrByDCLocation returns the tso allocator of the given dcLocation
+	GetTSOAllocatorServingAddrByDCLocation(dcLocation string) (string, bool)
 	// GetTSOAllocatorClientConnByDCLocation returns the tso allocator grpc client connection
 	// of the given dcLocation
 	GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string)
@@ -92,7 +92,7 @@ type BaseClient interface {
 	// is switched.
 	AddServiceEndpointSwitchedCallback(callbacks ...func())
 	// AddServiceEndpointsChangedCallback adds callbacks which will be called when any leader/follower
-	// in a quorum-based cluster or the primary in a primary/secondary configured cluster is changed.
+	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster is changed.
 	AddServiceEndpointsChangedCallback(callbacks ...func())
 	// CreateTsoStream creates a TSO stream to send/recv timestamps
 	CreateTsoStream(ctx context.Context, cancel context.CancelFunc, cc *grpc.ClientConn) (interface{}, error)
@@ -106,9 +106,9 @@ type BaseClient interface {
 	// GetURLs returns the URLs of the servers.
 	// For testing use. It should only be called when the client is closed.
 	GetURLs() []string
-	// GetTSOAllocatorLeaderURLs returns the urls of the tso allocator leaders
+	// GetTSOAllocatorServingEndpointURLs returns the urls of the tso allocator leaders
 	// For testing use.
-	GetTSOAllocatorLeaderURLs() map[string]string
+	GetTSOAllocatorServingEndpointURLs() map[string]string
 }
 
 var _ BaseClient = (*pdBaseClient)(nil)
@@ -129,7 +129,7 @@ type pdBaseClient struct {
 
 	// leaderSwitchedCallbacks will be called after the leader swichted
 	leaderSwitchedCallbacks []func()
-	// leaderSwitchedCallbacks will be called after there is any membership
+	// membersChangedCallbacks will be called after there is any membership
 	// change in the leader and followers
 	membersChangedCallbacks []func()
 
@@ -156,8 +156,8 @@ type SecurityOption struct {
 	SSLKEYBytes  []byte
 }
 
-// newBaseClient returns a new baseClient.
-func newBaseClient(ctx context.Context, cancel context.CancelFunc,
+// newPDBaseClient returns a new baseClient.
+func newPDBaseClient(ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup, urls []string, security SecurityOption, option *option) BaseClient {
 	bc := &pdBaseClient{
 		checkMembershipCh: make(chan struct{}, 1),
@@ -292,7 +292,7 @@ func (c *pdBaseClient) AddServiceEndpointsChangedCallback(callbacks ...func()) {
 	c.membersChangedCallbacks = append(c.membersChangedCallbacks, callbacks...)
 }
 
-// GetLeaderAddr returns the leader address.
+// getLeaderAddr returns the leader address.
 func (c *pdBaseClient) getLeaderAddr() string {
 	leaderAddr := c.leader.Load()
 	if leaderAddr == nil {
@@ -301,7 +301,7 @@ func (c *pdBaseClient) getLeaderAddr() string {
 	return leaderAddr.(string)
 }
 
-// GetFollowerAddrs returns the follower address.
+// getFollowerAddrs returns the follower address.
 func (c *pdBaseClient) getFollowerAddrs() []string {
 	followerAddrs := c.followers.Load()
 	if followerAddrs == nil {
@@ -316,9 +316,9 @@ func (c *pdBaseClient) GetURLs() []string {
 	return c.urls.Load().([]string)
 }
 
-// GetTSOAllocatorLeaderURLs returns the urls of the tso allocator leaders
+// GetTSOAllocatorServingEndpointURLs returns the urls of the tso allocator leaders
 // For testing use.
-func (c *pdBaseClient) GetTSOAllocatorLeaderURLs() map[string]string {
+func (c *pdBaseClient) GetTSOAllocatorServingEndpointURLs() map[string]string {
 	allocatorLeaders := make(map[string]string)
 	c.tsoAllocators.Range(func(dcLocation, url interface{}) bool {
 		allocatorLeaders[dcLocation.(string)] = url.(string)
@@ -327,8 +327,8 @@ func (c *pdBaseClient) GetTSOAllocatorLeaderURLs() map[string]string {
 	return allocatorLeaders
 }
 
-// GetTSOAllocatorLeaderAddrByDCLocation returns the tso allocator of the given dcLocation
-func (c *pdBaseClient) GetTSOAllocatorLeaderAddrByDCLocation(dcLocation string) (string, bool) {
+// GetTSOAllocatorServingAddrByDCLocation returns the tso allocator of the given dcLocation
+func (c *pdBaseClient) GetTSOAllocatorServingAddrByDCLocation(dcLocation string) (string, bool) {
 	url, exist := c.tsoAllocators.Load(dcLocation)
 	if !exist {
 		return "", false
@@ -530,7 +530,7 @@ func (c *pdBaseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Me
 			continue
 		}
 		addr := member.GetClientUrls()[0]
-		oldAddr, exist := c.GetTSOAllocatorLeaderAddrByDCLocation(dcLocation)
+		oldAddr, exist := c.GetTSOAllocatorServingAddrByDCLocation(dcLocation)
 		if exist && addr == oldAddr {
 			continue
 		}
@@ -650,7 +650,7 @@ func (c *pdBaseClient) TryConnectToTSOWithProxy(
 ) error {
 	clients := c.getAllClients()
 	leaderAddr := c.getLeaderAddr()
-	forwardedHost, ok := c.GetTSOAllocatorLeaderAddrByDCLocation(dc)
+	forwardedHost, ok := c.GetTSOAllocatorServingAddrByDCLocation(dc)
 	if !ok {
 		return errors.Errorf("cannot find the allocator leader in %s", dc)
 	}
