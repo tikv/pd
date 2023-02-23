@@ -115,6 +115,9 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 
 	gts.tokenSlots.Range(func(key, value interface{}) bool {
 		slot := value.(*TokenSlot)
+		if gts.mu.needTokenSum == 0 {
+			return false
+		}
 		ratio := slot.neededTokens / gts.mu.needTokenSum
 		var (
 			fillRate    = settings.GetFillRate() * uint64(ratio)
@@ -134,11 +137,11 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
-func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) GroupTokenBucket {
+func NewGroupTokenBucket(tokenBucket *rmpb.TokenBucket) *GroupTokenBucket {
 	if tokenBucket == nil || tokenBucket.Settings == nil {
-		return GroupTokenBucket{}
+		return &GroupTokenBucket{}
 	}
-	return GroupTokenBucket{
+	return &GroupTokenBucket{
 		Settings: tokenBucket.GetSettings(),
 		GroupTokenBucketState: GroupTokenBucketState{
 			Tokens:     tokenBucket.GetTokens(),
@@ -168,7 +171,7 @@ func (gtb *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 		gtb.settingChanged = true
 	}
 
-	// the settings in token is delta of the last update and now.
+	// The settings in token is delta of the last update and now.
 	gtb.Tokens += tb.GetTokens()
 }
 
@@ -203,26 +206,15 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, neede
 func (gtb *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPeriodMs, clientUniqueID uint64) (*rmpb.TokenBucket, int64) {
 	// Update tokens
 	gtb.updateTokens(now, gtb.Settings.GetBurstLimit(), neededTokens, clientUniqueID)
-	// serve by each client
+	// Serve by each client
 	slot, _ := gtb.tokenSlots.Load(clientUniqueID)
-
-	res, trickleDuration := slot.(*TokenSlot).serve(neededTokens, targetPeriodMs)
-
-	gtb.mu.Lock()
-	defer gtb.mu.Unlock()
-	// Tokens need to be subbed from each slot consume.
-	var delta float64
-	gtb.tokenSlots.Range(func(key, value interface{}) bool {
-		slot := value.(*TokenSlot)
-		delta += slot.lastTokens - slot.assignTokens
-		return true
-	})
-	gtb.Tokens -= delta
+	res, trickleDuration := slot.(*TokenSlot).slotRequest(neededTokens, targetPeriodMs)
+	gtb.subClientTokens(slot.(*TokenSlot))
 
 	return res, trickleDuration
 }
 
-func (ts *TokenSlot) serve(neededTokens float64, targetPeriodMs uint64) (*rmpb.TokenBucket, int64) {
+func (ts *TokenSlot) slotRequest(neededTokens float64, targetPeriodMs uint64) (*rmpb.TokenBucket, int64) {
 	var res rmpb.TokenBucket
 	burstLimit := ts.settings.GetBurstLimit()
 	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: burstLimit}
@@ -328,4 +320,11 @@ func (ts *TokenSlot) serve(neededTokens float64, targetPeriodMs uint64) (*rmpb.T
 		trickleDuration = targetPeriodTime
 	}
 	return &res, trickleDuration.Milliseconds()
+}
+
+// subTokens sub tokens from each slot.
+func (gtb *GroupTokenBucket) subClientTokens(slot *TokenSlot) {
+	gtb.mu.Lock()
+	defer gtb.mu.Unlock()
+	gtb.Tokens -= slot.lastTokens - slot.assignTokens
 }

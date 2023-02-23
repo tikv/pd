@@ -110,17 +110,18 @@ func (m *Manager) Init(ctx context.Context) {
 }
 
 // AddResourceGroup puts a resource group.
-func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
+func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	m.RLock()
-	_, ok := m.groups[group.Name]
+	_, ok := m.groups[grouppb.Name]
 	m.RUnlock()
 	if ok {
 		return errors.New("this group already exists")
 	}
-	err := group.CheckAndInit()
-	if err != nil {
-		return err
+	// Check the name.
+	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
+		return errors.New("invalid resource group name, the length should be in [1,32]")
 	}
+	group := FromProtoResourceGroup(grouppb)
 	m.Lock()
 	defer m.Unlock()
 	if err := group.persistSettings(m.storage); err != nil {

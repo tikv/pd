@@ -125,8 +125,7 @@ func (s *Service) AddResourceGroup(ctx context.Context, req *rmpb.PutResourceGro
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := FromProtoResourceGroup(req.GetGroup())
-	err := s.manager.AddResourceGroup(rg)
+	err := s.manager.AddResourceGroup(req.GetGroup())
 	if err != nil {
 		return nil, err
 	}
