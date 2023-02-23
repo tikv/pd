@@ -126,7 +126,7 @@ func isUniform(count, meanCount int, threshold float64) bool {
 func getStoreNum() int {
 	storeNum := simutil.CaseConfigure.StoreNum
 	if storeNum < 3 {
-		simutil.Logger.Fatal("Store num should be larger than or equal to 3.")
+		simutil.Logger.Fatal("store num should be larger than or equal to 3")
 	}
 	return storeNum
 }
@@ -134,7 +134,7 @@ func getStoreNum() int {
 func getRegionNum() int {
 	regionNum := simutil.CaseConfigure.RegionNum
 	if regionNum <= 0 {
-		simutil.Logger.Fatal("Region num should be larger than 0.")
+		simutil.Logger.Fatal("region num should be larger than 0")
 	}
 	return regionNum
 }

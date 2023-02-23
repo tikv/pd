@@ -961,7 +961,7 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 			errs.ZapError(err))
 		return err
 	}
-	log.Info("Audit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("audit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1010,7 +1010,7 @@ func (s *Server) SetRateLimitConfig(cfg config.RateLimitConfig) error {
 			errs.ZapError(err))
 		return err
 	}
-	log.Info("Rate Limit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("rate limit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1318,8 +1318,13 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	return nil
 }
 
-// AddLeaderCallback adds a callback in the leader campaign phase.
-func (s *Server) AddLeaderCallback(callbacks ...func(context.Context)) {
+// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) IsServing() bool {
+	return s.member.IsLeader()
+}
+
+// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
 

@@ -126,7 +126,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		err := storage.TryLoadRegionsOnce(ctx, regionStorage, bc.CheckAndPutRegion)
 		log.Info("region syncer finished load region", zap.Duration("time-cost", time.Since(start)))
 		if err != nil {
-			log.Warn("failed to load regions.", errs.ZapError(err))
+			log.Warn("failed to load regions", errs.ZapError(err))
 		}
 		// establish client.
 		var conn *grpc.ClientConn

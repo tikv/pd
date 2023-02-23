@@ -18,7 +18,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tikv/pd/pkg/member"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -38,9 +37,8 @@ type Server interface {
 	GetHTTPClient() *http.Client
 	// AddStartCallback adds a callback in the startServer phase.
 	AddStartCallback(callbacks ...func())
-	// TODO: replace these two methods with `primary` function without etcd server dependency.
-	// GetMember returns the member information.
-	GetMember() *member.Member
-	// AddLeaderCallback adds a callback in the leader campaign phase.
-	AddLeaderCallback(callbacks ...func(context.Context))
+	// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+	IsServing() bool
+	// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+	AddServiceReadyCallback(callbacks ...func(context.Context))
 }
