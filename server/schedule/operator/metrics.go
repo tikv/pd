@@ -34,9 +34,18 @@ var (
 			Name:      "operator_limit",
 			Help:      "Counter of operator meeting limit",
 		}, []string{"type", "name"})
+
+	OperatorExceedStoreLimitCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "operator_exceed_store_limit",
+			Help:      "Counter of operator meeting store limit",
+		}, []string{"desc"})
 )
 
 func init() {
 	prometheus.MustRegister(operatorStepDuration)
 	prometheus.MustRegister(OperatorLimitCounter)
+	prometheus.MustRegister(OperatorExceedStoreLimitCounter)
 }
