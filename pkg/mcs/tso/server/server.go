@@ -102,7 +102,11 @@ func (s *Server) Run() error {
 }
 
 // Close closes the server.
-func (s *Server) Close() {
+func (s *Server) Close() {}
+
+// GetConfigAny returns the config with any type.
+func (s *Server) GetConfigAny() any {
+	return nil
 }
 
 // GetClient returns builtin etcd client.

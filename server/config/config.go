@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
+	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -157,6 +158,8 @@ type Config struct {
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
+
+	RequestUnit rm.RequestUnitConfig `toml:"request-unit" json:"request-unit"`
 }
 
 // NewConfig creates a new config.
@@ -501,6 +504,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	if len(c.Log.Format) == 0 {
 		c.Log.Format = defaultLogFormat
 	}
+
+	c.RequestUnit.Adjust()
 
 	return nil
 }
@@ -1390,4 +1395,9 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
+}
+
+// GetRequestUnitConfig returns the request unit config.
+func (c *Config) GetRequestUnitConfig() rm.RequestUnitConfig {
+	return c.RequestUnit
 }

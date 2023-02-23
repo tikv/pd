@@ -799,6 +799,11 @@ func (s *Server) SetEnableLocalTSO(enableLocalTSO bool) {
 	s.cfg.EnableLocalTSO = enableLocalTSO
 }
 
+// GetConfigAny returns the config with any type.
+func (s *Server) GetConfigAny() any {
+	return s.GetConfig()
+}
+
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()

@@ -81,8 +81,8 @@ type RequestUnitConfig struct {
 	CPUMsCost float64 `toml:"read-cpu-ms-cost" json:"read-cpu-ms-cost"`
 }
 
-// DefaultRequestUnitConfig returns the default request unit configuration.
-func DefaultRequestUnitConfig() *RequestUnitConfig {
+// defaultRequestUnitConfig returns the default request unit configuration.
+func defaultRequestUnitConfig() *RequestUnitConfig {
 	return &RequestUnitConfig{
 		ReadBaseCost:     defaultReadBaseCost,
 		ReadCostPerByte:  defaultReadCostPerByte,
@@ -107,7 +107,7 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	cfg := generateConfig(
-		DefaultRequestUnitConfig(),
+		defaultRequestUnitConfig(),
 	)
 	return cfg
 }
