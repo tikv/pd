@@ -26,6 +26,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
 	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc"
@@ -48,8 +49,7 @@ func TestResourceManagerServer(t *testing.T) {
 
 	cfg := rm.NewConfig()
 	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = "127.0.0.1:8086"
-
+	cfg.ListenAddr = tempurl.Alloc()
 	svr := rm.NewServer(ctx, cfg)
 	go svr.Run()
 	testutil.Eventually(re, func() bool {
@@ -58,7 +58,7 @@ func TestResourceManagerServer(t *testing.T) {
 	defer svr.Close()
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithInsecure())
+	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(cfg.ListenAddr, "http://"), grpc.WithInsecure())
 	re.NoError(err)
 	defer cc.Close()
 	c := rmpb.NewResourceManagerClient(cc)
@@ -68,7 +68,7 @@ func TestResourceManagerServer(t *testing.T) {
 	re.ErrorContains(err, "resource group not found")
 
 	// Test registered REST HTTP Handler
-	url := "http://" + cfg.ListenAddr + "/resource-manager/api/v1/config"
+	url := cfg.ListenAddr + "/resource-manager/api/v1/config"
 	{
 		resp, err := http.Get(url + "/groups")
 		re.NoError(err)

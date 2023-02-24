@@ -63,6 +63,7 @@ type Server struct {
 	cfg         *Config
 	name        string
 	backendUrls []url.URL
+	listenUrl   *url.URL
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -250,10 +251,14 @@ func (s *Server) startServer() error {
 	if err != nil {
 		return err
 	}
+	s.listenUrl, err = url.Parse(s.cfg.ListenAddr)
+	if err != nil {
+		return err
+	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(tcp, s.cfg.ListenAddr, tlsConfig)
+		s.muxListener, err = tls.Listen(tcp, s.listenUrl.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(tcp, s.cfg.ListenAddr)
+		s.muxListener, err = net.Listen(tcp, s.listenUrl.Host)
 	}
 	if err != nil {
 		return err
