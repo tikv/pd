@@ -70,7 +70,7 @@ func (c *client) GetTSWithinKeyspaceAsync(ctx context.Context, keyspaceID uint32
 // TODO: implement the following API
 func (c *client) GetLocalTSWithinKeyspaceAsync(ctx context.Context, dcLocation string, keyspaceID uint32) TSFuture {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("GetLocalTSAsync", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("GetLocalTSWithinKeyspaceAsync", opentracing.ChildOf(span.Context()))
 		ctx = opentracing.ContextWithSpan(ctx, span)
 	}
 	req := tsoReqPool.Get().(*tsoRequest)
@@ -261,17 +261,17 @@ func (c *tsoBaseClient) getSecondaryAddrs() []string {
 func (c *tsoBaseClient) createTsoStreamInternal(ctx context.Context, cancel context.CancelFunc, client tsopb.TSOClient) (interface{}, error) {
 	done := make(chan struct{})
 	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
-	go c.checkStreamTimeout(ctx, cancel, done)
+	go c.checkStreamTimeout(ctx, cancel, done, c.option.timeout)
 	stream, err := client.Tso(ctx)
 	done <- struct{}{}
 	return stream, err
 }
 
-func (c *tsoBaseClient) checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
+func (c *tsoBaseClient) checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done chan struct{}, timeout time.Duration) {
 	select {
 	case <-done:
 		return
-	case <-time.After(c.option.timeout):
+	case <-time.After(timeout):
 		cancel()
 	case <-ctx.Done():
 	}

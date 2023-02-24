@@ -448,7 +448,7 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 
 // NewTSOClientWithContext creates a TSO client with context.
 func NewTSOClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", svrAddrs))
+	log.Info("[pd] create pd(tso) client with endpoints", zap.Strings("pd-address", svrAddrs))
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
 		checkTSDeadlineCh:       make(chan struct{}),

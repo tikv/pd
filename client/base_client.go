@@ -589,17 +589,17 @@ func (c *pdBaseClient) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error
 func (c *pdBaseClient) createTsoStreamInternal(ctx context.Context, cancel context.CancelFunc, client pdpb.PDClient) (interface{}, error) {
 	done := make(chan struct{})
 	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
-	go c.checkStreamTimeout(ctx, cancel, done)
+	go c.checkStreamTimeout(ctx, cancel, done, c.option.timeout)
 	stream, err := client.Tso(ctx)
 	done <- struct{}{}
 	return stream, err
 }
 
-func (c *pdBaseClient) checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
+func (c *pdBaseClient) checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done chan struct{}, timeout time.Duration) {
 	select {
 	case <-done:
 		return
-	case <-time.After(c.option.timeout):
+	case <-time.After(timeout):
 		cancel()
 	case <-ctx.Done():
 	}
