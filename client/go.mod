@@ -1,6 +1,6 @@
 module github.com/tikv/pd/client
 
-go 1.19
+go 1.20
 
 require (
 	github.com/gogo/protobuf v1.3.2

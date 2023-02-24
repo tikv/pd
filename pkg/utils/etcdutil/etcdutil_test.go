@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -78,7 +79,6 @@ func TestMemberHelpers(t *testing.T) {
 	re.NoError(err)
 
 	<-etcd2.Server.ReadyNotify()
-	re.NoError(err)
 
 	listResp2, err := ListEtcdMembers(client2)
 	re.NoError(err)
@@ -231,4 +231,66 @@ func TestInitClusterID(t *testing.T) {
 	clusterID1, err := InitClusterID(client, pdClusterIDPath)
 	re.NoError(err)
 	re.Equal(clusterID, clusterID1)
+}
+
+func TestEtcdClientSync(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval", "return(true)"))
+
+	// Start a etcd server.
+	cfg1 := NewTestSingleConfig(t)
+	etcd1, err := embed.StartEtcd(cfg1)
+	re.NoError(err)
+
+	// Create a etcd client with etcd1 as endpoint.
+	ep1 := cfg1.LCUrls[0].String()
+	urls, err := types.NewURLs([]string{ep1})
+	re.NoError(err)
+	client1, err := createEtcdClient(nil, urls)
+	re.NoError(err)
+	<-etcd1.Server.ReadyNotify()
+
+	// Add a new member.
+	cfg2 := NewTestSingleConfig(t)
+	cfg2.Name = "etcd2"
+	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
+	cfg2.ClusterState = embed.ClusterStateFlagExisting
+	peerURL := cfg2.LPUrls[0].String()
+	addResp, err := AddEtcdMember(client1, []string{peerURL})
+	re.NoError(err)
+	etcd2, err := embed.StartEtcd(cfg2)
+	defer func() {
+		etcd2.Close()
+	}()
+	re.NoError(err)
+	re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
+	<-etcd2.Server.ReadyNotify()
+
+	// Check the client can get the new member.
+	listResp2, err := ListEtcdMembers(client1)
+	re.NoError(err)
+	re.Len(listResp2.Members, 2)
+	for _, m := range listResp2.Members {
+		switch m.ID {
+		case uint64(etcd1.Server.ID()):
+		case uint64(etcd2.Server.ID()):
+		default:
+			t.Fatalf("unknown member: %v", m)
+		}
+	}
+
+	// Remove the first member and close the etcd1.
+	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	re.NoError(err)
+	time.Sleep(20 * time.Millisecond) // wait for etcd client sync endpoints and client will be connected to etcd2
+	etcd1.Close()
+
+	// Check the client can get the new member with the new endpoints.
+	listResp3, err := ListEtcdMembers(client1)
+	re.NoError(err)
+	re.Len(listResp3.Members, 1)
+	re.Equal(uint64(etcd2.Server.ID()), listResp3.Members[0].ID)
+
+	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval"))
 }
