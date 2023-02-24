@@ -119,7 +119,7 @@ func TestResourceManagerRegister(t *testing.T) {
 
 	cfg := rm.NewConfig()
 	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = "127.0.0.1:8087"
+	cfg.ListenAddr = tempurl.Alloc()
 
 	svr := rm.NewServer(ctx, cfg)
 	go svr.Run()

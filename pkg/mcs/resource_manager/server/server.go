@@ -50,6 +50,7 @@ const (
 	defaultGRPCGracefulStopTimeout = 5 * time.Second
 	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
 	defaultHTTPGracefulShutdownTimeout = 5 * time.Second
+	defaultLeaseInSeconds              = 3
 )
 
 // Server is the resource manager server, and it implements bs.Server.
@@ -283,8 +284,7 @@ func (s *Server) startServer() error {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	// register to etcd
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, 3)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, defaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }
