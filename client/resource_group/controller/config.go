@@ -54,7 +54,7 @@ const (
 
 const (
 	defaultReadBaseCost  = 0.25
-	defaultWriteBaseCost = 1.5
+	defaultWriteBaseCost = 1
 	// 1 RU = 64 KiB read bytes
 	defaultReadCostPerByte = 1. / (64 * 1024)
 	// 1 RU = 1 KiB written bytes
