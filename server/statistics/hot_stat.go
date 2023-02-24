@@ -22,14 +22,12 @@ import (
 type HotStat struct {
 	*HotCache
 	*StoresStats
-	*SlowStoresStats
 }
 
 // NewHotStat creates the container to hold cluster's hotspot statistics.
 func NewHotStat(ctx context.Context) *HotStat {
 	return &HotStat{
-		HotCache:        NewHotCache(ctx),
-		StoresStats:     NewStoresStats(),
-		SlowStoresStats: NewSlowStoresStats(),
+		HotCache:    NewHotCache(ctx),
+		StoresStats: NewStoresStats(),
 	}
 }

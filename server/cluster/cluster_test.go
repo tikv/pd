@@ -1796,7 +1796,7 @@ func TestAwakenStore(t *testing.T) {
 		re.NoError(cluster.PutStore(store.GetMeta()))
 	}
 	for i := uint64(1); i <= n; i++ {
-		re.False(cluster.hotStat.ExistsSlowStores())
+		re.False(cluster.slowStat.ExistsSlowStores())
 		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(i)
 		re.False(needAwaken)
 	}
