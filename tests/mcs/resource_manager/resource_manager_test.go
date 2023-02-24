@@ -17,6 +17,7 @@ package resourcemanager_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -560,7 +561,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
-				re.EqualError(err, "[PD:client:ErrClientGetResourceGroup]get resource group failed, rpc error: code = Unknown desc = resource group not found")
+				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", g.Name))
 			}
 
 			// to test the deletion of persistence
