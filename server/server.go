@@ -235,7 +235,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 	failpoint.Inject("useGlobalRegistry", func() {
 		s.registry = registry.ServerServiceRegistry
 	})
-	s.registry.RegisterService("ResourceManager", rm_server.NewService)
+	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
@@ -799,11 +799,6 @@ func (s *Server) SetEnableLocalTSO(enableLocalTSO bool) {
 	s.cfg.EnableLocalTSO = enableLocalTSO
 }
 
-// GetConfigAny returns the config with any type.
-func (s *Server) GetConfigAny() any {
-	return s.GetConfig()
-}
-
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
@@ -1145,6 +1140,11 @@ func (s *Server) GetClusterVersion() semver.Version {
 // GetTLSConfig get the security config.
 func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
+}
+
+// GetRequestUnitConfig gets the RU config.
+func (s *Server) GetRequestUnitConfig() *rm_server.RequestUnitConfig {
+	return &s.cfg.RequestUnit
 }
 
 // GetRaftCluster gets Raft cluster.

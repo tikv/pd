@@ -31,9 +31,6 @@ type Server interface {
 	Run() error
 	// Close closes the server.
 	Close()
-	// GetConfigAny returns the config with any type.
-	// TODO: maybe using the generic type instead of any.
-	GetConfigAny() any
 	// GetClient returns builtin etcd client.
 	GetClient() *clientv3.Client
 	// GetHTTPClient returns builtin http client.

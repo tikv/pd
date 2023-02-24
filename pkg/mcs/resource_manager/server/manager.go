@@ -41,9 +41,10 @@ const (
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	srv     bs.Server
-	groups  map[string]*ResourceGroup
-	storage endpoint.ResourceGroupStorage
+	srv      bs.Server
+	ruConfig *RequestUnitConfig
+	groups   map[string]*ResourceGroup
+	storage  endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
@@ -54,10 +55,18 @@ type Manager struct {
 	consumptionRecord map[string]time.Time
 }
 
-// NewManager returns a new Manager.
-func NewManager(srv bs.Server) *Manager {
+// RUConfigProvider is used to get RU config from the given
+// `bs.server` without modifying its interface.
+type RUConfigProvider interface {
+	GetRequestUnitConfig() *RequestUnitConfig
+}
+
+// NewManager returns a new manager base on the given server,
+// which should implement the `RUConfigProvider` interface.
+func NewManager[T RUConfigProvider](srv bs.Server) *Manager {
 	m := &Manager{
-		groups: make(map[string]*ResourceGroup),
+		ruConfig: srv.(T).GetRequestUnitConfig(),
+		groups:   make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
@@ -80,6 +89,8 @@ func NewManager(srv bs.Server) *Manager {
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
+	// Store the RU model config into the storage.
+	m.storage.SaveRequestUnitConfig(m.ruConfig)
 	// Load resource group meta info from storage.
 	m.groups = make(map[string]*ResourceGroup)
 	handler := func(k, v string) {
@@ -103,10 +114,6 @@ func (m *Manager) Init(ctx context.Context) {
 		}
 	}
 	m.storage.LoadResourceGroupStates(tokenHandler)
-	// Store the RU model config into the storage.
-	m.storage.SaveRequestUnitConfig(m.srv.GetConfigAny().(interface {
-		GetRequestUnitConfig() *RequestUnitConfig
-	}).GetRequestUnitConfig())
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
 	go m.persistLoop(ctx)

@@ -120,9 +120,9 @@ func (s *Server) Close() {
 	log.Info("resource manager server is closed")
 }
 
-// GetConfigAny returns the config with any type.
-func (s *Server) GetConfigAny() any {
-	return s.cfg
+// GetRequestUnitConfig returns the RU config.
+func (s *Server) GetRequestUnitConfig() *RequestUnitConfig {
+	return &s.cfg.RequestUnit
 }
 
 // GetClient returns builtin etcd client.
@@ -246,7 +246,7 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 }
 
 func (s *Server) startServer() error {
-	manager := NewManager(s)
+	manager := NewManager[*Server](s)
 	s.service = &Service{
 		ctx:     s.ctx,
 		manager: manager,

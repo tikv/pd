@@ -68,7 +68,7 @@ type Config struct {
 
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
-	RequestUnit *RequestUnitConfig
+	RequestUnit RequestUnitConfig
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
@@ -201,11 +201,6 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 // GetTLSConfig returns the TLS config.
 func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
-}
-
-// GetRequestUnitConfig returns the request unit config.
-func (c *Config) GetRequestUnitConfig() *RequestUnitConfig {
-	return c.RequestUnit
 }
 
 // Validate is used to validate if some configurations are right.

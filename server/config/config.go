@@ -1396,8 +1396,3 @@ type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
 }
-
-// GetRequestUnitConfig returns the request unit config.
-func (c *Config) GetRequestUnitConfig() *rm.RequestUnitConfig {
-	return &c.RequestUnit
-}
