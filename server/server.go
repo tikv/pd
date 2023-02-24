@@ -23,6 +23,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -405,6 +406,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
+	serverMaxProcs.Set(float64(runtime.GOMAXPROCS(0)))
 	return nil
 }
 
