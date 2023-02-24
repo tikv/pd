@@ -24,7 +24,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	rmserver "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/apiutil/multiserviceapi"
+	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 )
 
 // APIPathPrefix is the prefix of the API path.
@@ -66,7 +66,7 @@ func NewService(srv *rmserver.Service) *Service {
 		c.Set("service", manager.GetBasicServer())
 		c.Next()
 	})
-	apiHandlerEngine.Use(multiserviceapi.ServiceRedirector())
+	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
 		manager:          manager,

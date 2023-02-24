@@ -404,6 +404,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
+		defer resp.Body.Close()
 		var reader io.ReadCloser
 		switch resp.Header.Get("Content-Encoding") {
 		case "gzip":
@@ -416,20 +417,14 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		default:
 			reader = resp.Body
 		}
-		b, err := io.ReadAll(reader)
-		resp.Body.Close()
-		if err != nil {
-			log.Error("read failed", errs.ZapError(errs.ErrIORead, err))
-			continue
-		}
 
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
-		if _, err := w.Write(b); err != nil {
+
+		if _, err := io.Copy(w, reader); err != nil {
 			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err))
 			continue
 		}
-
 		return
 	}
 	http.Error(w, ErrRedirectFailed, http.StatusInternalServerError)
