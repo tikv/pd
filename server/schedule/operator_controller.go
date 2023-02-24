@@ -851,7 +851,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 				return false
 			}
 			if !limiter.Available(stepCost, v) {
-				operator.OperatorExceedStoreLimitCounter.WithLabelValues(desc).Inc()
+				operator.OperatorExceededStoreLimitCounter.WithLabelValues(desc).Inc()
 				return true
 			}
 		}
