@@ -420,29 +420,9 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 		option:                  newOption(),
 	}
 	c.bc = newPDBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
-
-	// Inject the client options.
-	for _, opt := range opts {
-		opt(c)
-	}
-
-	// Init the client base.
-	if err := c.bc.Init(); err != nil {
+	if err := c.newClientWithContext(false, opts...); err != nil {
 		return nil, err
 	}
-
-	c.bc.AddServiceEndpointSwitchedCallback(c.scheduleCheckTSODispatcher)
-	c.bc.AddServiceEndpointSwitchedCallback(c.scheduleUpdateTokenConnection)
-	c.bc.AddServiceEndpointsChangedCallback(c.scheduleUpdateConnectionCtxs)
-
-	// Start the daemons.
-	c.updateTSODispatcher()
-	c.createTokenDispatcher()
-	c.wg.Add(3)
-	go c.tsLoop()
-	go c.tsCancelLoop()
-	go c.leaderCheckLoop()
-
 	return c, nil
 }
 
@@ -460,13 +440,13 @@ func NewTSOClientWithContext(ctx context.Context, svrAddrs []string, security Se
 		option:                  newOption(),
 	}
 	c.bc = newTSOBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
-	if err := c.newClientWithContext(opts...); err != nil {
+	if err := c.newClientWithContext(true, opts...); err != nil {
 		return nil, err
 	}
 	return c, nil
 }
 
-func (c *client) newClientWithContext(opts ...ClientOption) error {
+func (c *client) newClientWithContext(tsoMode bool, opts ...ClientOption) error {
 	// Inject the client options.
 	for _, opt := range opts {
 		opt(c)
@@ -476,13 +456,15 @@ func (c *client) newClientWithContext(opts ...ClientOption) error {
 		return err
 	}
 
+	// Register callbacks and start the daemons.
 	c.bc.AddServiceEndpointSwitchedCallback(c.scheduleCheckTSODispatcher)
-	c.bc.AddServiceEndpointSwitchedCallback(c.scheduleUpdateTokenConnection)
 	c.bc.AddServiceEndpointsChangedCallback(c.scheduleUpdateConnectionCtxs)
-
-	// Start the daemons.
 	c.updateTSODispatcher()
-	c.createTokenDispatcher()
+	if !tsoMode {
+		c.bc.AddServiceEndpointSwitchedCallback(c.scheduleUpdateTokenConnection)
+		c.createTokenDispatcher()
+	}
+
 	c.wg.Add(3)
 	go c.tsLoop()
 	go c.tsCancelLoop()

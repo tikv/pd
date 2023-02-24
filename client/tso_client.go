@@ -26,6 +26,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -137,6 +139,12 @@ func newTSOBaseClient(ctx context.Context, cancel context.CancelFunc,
 	bc.urls.Store(urls)
 	// TODO: fill the missing part for service discovery
 	bc.switchPrimary(urls)
+
+	_, err := bc.GetOrCreateGRPCConn(bc.getPrimaryAddr())
+	if err != nil {
+		return nil
+	}
+
 	return bc
 }
 
@@ -212,7 +220,35 @@ func (c *tsoBaseClient) GetBackupEndpointsAddrs() []string {
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
 func (c *tsoBaseClient) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
-	return nil, nil
+	conn, ok := c.clientConns.Load(addr)
+	if ok {
+		return conn.(*grpc.ClientConn), nil
+	}
+	tlsCfg, err := tlsutil.TLSConfig{
+		CAPath:   c.security.CAPath,
+		CertPath: c.security.CertPath,
+		KeyPath:  c.security.KeyPath,
+
+		SSLCABytes:   c.security.SSLCABytes,
+		SSLCertBytes: c.security.SSLCertBytes,
+		SSLKEYBytes:  c.security.SSLKEYBytes,
+	}.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	dCtx, cancel := context.WithTimeout(c.ctx, dialTimeout)
+	defer cancel()
+	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.option.gRPCDialOptions...)
+	if err != nil {
+		return nil, err
+	}
+	if old, ok := c.clientConns.Load(addr); ok {
+		cc.Close()
+		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
+		return old.(*grpc.ClientConn), nil
+	}
+	c.clientConns.Store(addr, cc)
+	return cc, nil
 }
 
 // ScheduleCheckIfMembershipChanged is used to trigger a check to see if there is any
