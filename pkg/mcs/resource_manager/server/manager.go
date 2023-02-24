@@ -79,6 +79,11 @@ func NewManager(srv bs.Server) *Manager {
 	return m
 }
 
+// GetBasicServer returns the basic server.
+func (m *Manager) GetBasicServer() bs.Server {
+	return m.srv
+}
+
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
 	// Reset the resource groups first.

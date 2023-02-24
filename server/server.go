@@ -41,6 +41,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -703,6 +704,12 @@ func (s *Server) GetHTTPClient() *http.Client {
 
 // GetLeader returns the leader of PD cluster(i.e the PD leader).
 func (s *Server) GetLeader() *pdpb.Member {
+	return s.member.GetLeader()
+}
+
+// GetPrimary returns the primary member provider of the api server.
+// api service's leader is equal to the primary member.
+func (s *Server) GetPrimary() bs.MemberProvider {
 	return s.member.GetLeader()
 }
 

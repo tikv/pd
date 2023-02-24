@@ -16,6 +16,7 @@ package apiutil
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -42,6 +44,13 @@ var (
 	componentSignatureKey = "component"
 	// componentAnonymousValue identifies anonymous request source
 	componentAnonymousValue = "anonymous"
+)
+
+const (
+	// ErrRedirectFailed is the error message for redirect failed.
+	ErrRedirectFailed = "redirect failed"
+	// ErrRedirectToNotLeader is the error message for redirect to not leader.
+	ErrRedirectToNotLeader = "redirect to not leader"
 )
 
 // DeferClose captures the error returned from closing (if an error occurs).
@@ -366,4 +375,73 @@ func RegisterUserDefinedHandlers(registerMap map[string]http.Handler, group *API
 	registerMap[pathPrefix] = handler
 	log.Info("register REST path", zap.String("path", pathPrefix))
 	return nil
+}
+
+type customReverseProxies struct {
+	urls   []url.URL
+	client *http.Client
+}
+
+// NewCustomReverseProxies returns the custom reverse proxies.
+func NewCustomReverseProxies(dialClient *http.Client, urls []url.URL) http.Handler {
+	p := &customReverseProxies{
+		client: dialClient,
+	}
+
+	p.urls = append(p.urls, urls...)
+
+	return p
+}
+
+func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	for _, url := range p.urls {
+		r.RequestURI = ""
+		r.URL.Host = url.Host
+		r.URL.Scheme = url.Scheme
+
+		resp, err := p.client.Do(r)
+		if err != nil {
+			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
+			continue
+		}
+		var reader io.ReadCloser
+		switch resp.Header.Get("Content-Encoding") {
+		case "gzip":
+			reader, err = gzip.NewReader(resp.Body)
+			if err != nil {
+				log.Error("failed to parser response with gzip compress", zap.Error(err))
+				continue
+			}
+			defer reader.Close()
+		default:
+			reader = resp.Body
+		}
+		b, err := io.ReadAll(reader)
+		resp.Body.Close()
+		if err != nil {
+			log.Error("read failed", errs.ZapError(errs.ErrIORead, err))
+			continue
+		}
+
+		copyHeader(w.Header(), resp.Header)
+		w.WriteHeader(resp.StatusCode)
+		if _, err := w.Write(b); err != nil {
+			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err))
+			continue
+		}
+
+		return
+	}
+	http.Error(w, ErrRedirectFailed, http.StatusInternalServerError)
+}
+
+func copyHeader(dst, src http.Header) {
+	for k, vv := range src {
+		values := dst[k]
+		for _, v := range vv {
+			if !slice.Contains(values, v) {
+				dst.Add(k, v)
+			}
+		}
+	}
 }

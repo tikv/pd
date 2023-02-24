@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -238,6 +239,12 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 			log.Fatal("mux stop serving unexpectedly", errs.ZapError(err))
 		}
 	}
+}
+
+// GetPrimary returns the primary member.
+func (s *Server) GetPrimary() bs.MemberProvider {
+	// TODO: implement this function with primary.
+	return nil
 }
 
 func (s *Server) startServer() error {

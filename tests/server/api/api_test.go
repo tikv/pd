@@ -613,10 +613,10 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	addr := follower.GetAddr() + "/pd/api/v1/version"
 	request, err := http.NewRequest(http.MethodGet, addr, nil)
 	suite.NoError(err)
-	request.Header.Add(serverapi.AllowFollowerHandle, "true")
+	request.Header.Add(serverapi.PDAllowFollowerHandle, "true")
 	resp, err := dialClient.Do(request)
 	suite.NoError(err)
-	suite.Equal("", resp.Header.Get(serverapi.RedirectorHeader))
+	suite.Equal("", resp.Header.Get(serverapi.PDRedirectorHeader))
 	defer resp.Body.Close()
 	suite.Equal(http.StatusOK, resp.StatusCode)
 	_, err = io.ReadAll(resp.Body)
@@ -647,7 +647,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 
 	// Request to follower with redirectorHeader will fail.
 	request.RequestURI = ""
-	request.Header.Set(serverapi.RedirectorHeader, "pd")
+	request.Header.Set(serverapi.PDRedirectorHeader, "pd")
 	resp1, err := dialClient.Do(request)
 	suite.NoError(err)
 	defer resp1.Body.Close()
