@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/etcdpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -1442,18 +1443,18 @@ func TestWatch(t *testing.T) {
 		defer wg.Done()
 		ch, err := client.Watch(ctx, []byte(key))
 		re.NoError(err)
-		var events []*pdpb.Event
+		var events []*etcdpb.Event
 		for e := range ch {
 			events = append(events, e...)
 			if len(events) >= 3 {
 				break
 			}
 		}
-		re.Equal(pdpb.Event_PUT, events[0].GetType())
+		re.Equal(etcdpb.Event_PUT, events[0].GetType())
 		re.Equal("1", string(events[0].GetKv().GetValue()))
-		re.Equal(pdpb.Event_PUT, events[1].GetType())
+		re.Equal(etcdpb.Event_PUT, events[1].GetType())
 		re.Equal("2", string(events[1].GetKv().GetValue()))
-		re.Equal(pdpb.Event_DELETE, events[2].GetType())
+		re.Equal(etcdpb.Event_DELETE, events[2].GetType())
 	}()
 
 	cli, err := clientv3.NewFromURLs(endpoints)
@@ -1483,7 +1484,7 @@ func TestPutGet(t *testing.T) {
 	getResp, err := client.Get(context.Background(), key)
 	re.NoError(err)
 	re.Equal([]byte("1"), getResp.GetKvs()[0].Value)
-	re.NotEqual(0, getResp.GetRevision())
+	re.NotEqual(0, getResp.GetHeader().GetRevision())
 	putResp, err = client.Put(context.Background(), key, []byte("2"), pd.WithPrevKV())
 	re.NoError(err)
 	re.Equal([]byte("1"), putResp.GetPrevKv().Value)

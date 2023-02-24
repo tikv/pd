@@ -137,13 +137,8 @@ type Client interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// Watch watches on a key or prefix.
-	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*pdpb.Event, error)
-	// Get gets the value for a key.
-	Get(ctx context.Context, key []byte, opts ...OpOption) (*pdpb.GetResponse, error)
-	// Put puts a key-value pair into etcd.
-	Put(ctx context.Context, key []byte, value []byte, opts ...OpOption) (*pdpb.PutResponse, error)
-
+	// EtcdClient returns the etcd client.
+	EtcdClient
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
@@ -152,43 +147,6 @@ type Client interface {
 	TSOClient
 	// Close closes the client.
 	Close()
-}
-
-// Op represents available options when using etcd client.
-type Op struct {
-	rangeEnd []byte
-	revision int64
-	prevKv   bool
-	lease    int64
-	limit    int64
-}
-
-// OpOption configures etcd Op.
-type OpOption func(*Op)
-
-// WithLimit specifies the limit of the key.
-func WithLimit(limit int64) OpOption {
-	return func(op *Op) { op.limit = limit }
-}
-
-// WithRangeEnd specifies the range end of the key.
-func WithRangeEnd(rangeEnd []byte) OpOption {
-	return func(op *Op) { op.rangeEnd = rangeEnd }
-}
-
-// WithRev specifies the start revision of the key.
-func WithRev(revision int64) OpOption {
-	return func(op *Op) { op.revision = revision }
-}
-
-// WithPrevKV specifies the previous key-value pair of the key.
-func WithPrevKV() OpOption {
-	return func(op *Op) { op.prevKv = true }
-}
-
-// WithLease specifies the lease of the key.
-func WithLease(lease int64) OpOption {
-	return func(op *Op) { op.lease = lease }
 }
 
 // GetStoreOp represents available options when getting stores.
@@ -1168,104 +1126,6 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 		}
 	}()
 	return globalConfigWatcherCh, err
-}
-
-func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*pdpb.PutResponse, error) {
-	options := &Op{}
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.Put", opentracing.ChildOf(span.Context()))
-		defer span.Finish()
-	}
-	start := time.Now()
-	defer func() { cmdDurationPut.Observe(time.Since(start).Seconds()) }()
-
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	req := &pdpb.PutRequest{
-		Key:    key,
-		Value:  value,
-		Lease:  options.lease,
-		PrevKv: options.prevKv,
-	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().Put(ctx, req)
-	cancel()
-
-	if err = c.respForErr(cmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*pdpb.GetResponse, error) {
-	options := &Op{}
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.Get", opentracing.ChildOf(span.Context()))
-		defer span.Finish()
-	}
-	start := time.Now()
-	defer func() { cmdDurationGet.Observe(time.Since(start).Seconds()) }()
-
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	req := &pdpb.GetRequest{
-		Key:      key,
-		RangeEnd: options.rangeEnd,
-		Limit:    options.limit,
-		Revision: options.revision,
-	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().Get(ctx, req)
-	cancel()
-
-	if err = c.respForErr(cmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*pdpb.Event, error) {
-	eventCh := make(chan []*pdpb.Event, 100)
-	options := &Op{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	res, err := c.getClient().Watch(ctx, &pdpb.WatchRequest{
-		Key:           key,
-		RangeEnd:      options.rangeEnd,
-		StartRevision: options.revision,
-	})
-	if err != nil {
-		close(eventCh)
-		return nil, err
-	}
-	go func() {
-		defer func() {
-			close(eventCh)
-			if r := recover(); r != nil {
-				log.Error("[pd] panic in client `Watch`", zap.Any("error", r))
-				return
-			}
-		}()
-		for {
-			resp, err := res.Recv()
-			if err != nil {
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case eventCh <- resp.GetEvents():
-			}
-		}
-	}()
-	return eventCh, err
 }
 
 func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {

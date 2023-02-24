@@ -1,0 +1,193 @@
+// Copyright 2023 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package pd
+
+import (
+	"context"
+	"time"
+
+	"github.com/opentracing/opentracing-go"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/etcdpb"
+	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/grpcutil"
+	"go.uber.org/zap"
+)
+
+// EtcdClient is the interface for etcd client.
+type EtcdClient interface {
+	// Watch watches on a key or prefix.
+	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*etcdpb.Event, error)
+	// Get gets the value for a key.
+	Get(ctx context.Context, key []byte, opts ...OpOption) (*etcdpb.GetResponse, error)
+	// Put puts a key-value pair into etcd.
+	Put(ctx context.Context, key []byte, value []byte, opts ...OpOption) (*etcdpb.PutResponse, error)
+}
+
+// etcdClient gets the etcd client from current PD leader.
+func (c *client) etcdClient() etcdpb.EtcdClient {
+	if cc, err := c.getOrCreateGRPCConn(c.GetLeaderAddr()); err == nil {
+		return etcdpb.NewEtcdClient(cc)
+	}
+	return nil
+}
+
+// Op represents available options when using etcd client.
+type Op struct {
+	rangeEnd []byte
+	revision int64
+	prevKv   bool
+	lease    int64
+	limit    int64
+}
+
+// OpOption configures etcd Op.
+type OpOption func(*Op)
+
+// WithLimit specifies the limit of the key.
+func WithLimit(limit int64) OpOption {
+	return func(op *Op) { op.limit = limit }
+}
+
+// WithRangeEnd specifies the range end of the key.
+func WithRangeEnd(rangeEnd []byte) OpOption {
+	return func(op *Op) { op.rangeEnd = rangeEnd }
+}
+
+// WithRev specifies the start revision of the key.
+func WithRev(revision int64) OpOption {
+	return func(op *Op) { op.revision = revision }
+}
+
+// WithPrevKV specifies the previous key-value pair of the key.
+func WithPrevKV() OpOption {
+	return func(op *Op) { op.prevKv = true }
+}
+
+// WithLease specifies the lease of the key.
+func WithLease(lease int64) OpOption {
+	return func(op *Op) { op.lease = lease }
+}
+
+func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*etcdpb.PutResponse, error) {
+	options := &Op{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.Put", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationPut.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &etcdpb.PutRequest{
+		Key:    key,
+		Value:  value,
+		Lease:  options.lease,
+		PrevKv: options.prevKv,
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.etcdClient().Put(ctx, req)
+	cancel()
+
+	if err = c.respForEtcdErr(cmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*etcdpb.GetResponse, error) {
+	options := &Op{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.Get", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationGet.Observe(time.Since(start).Seconds()) }()
+
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &etcdpb.GetRequest{
+		Key:      key,
+		RangeEnd: options.rangeEnd,
+		Limit:    options.limit,
+		Revision: options.revision,
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.etcdClient().Get(ctx, req)
+	cancel()
+
+	if err = c.respForEtcdErr(cmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*etcdpb.Event, error) {
+	eventCh := make(chan []*etcdpb.Event, 100)
+	options := &Op{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	res, err := c.etcdClient().Watch(ctx, &etcdpb.WatchRequest{
+		Key:           key,
+		RangeEnd:      options.rangeEnd,
+		StartRevision: options.revision,
+	})
+	if err != nil {
+		close(eventCh)
+		return nil, err
+	}
+	go func() {
+		defer func() {
+			close(eventCh)
+			if r := recover(); r != nil {
+				log.Error("[pd] panic in client `Watch`", zap.Any("error", r))
+				return
+			}
+		}()
+		for {
+			resp, err := res.Recv()
+			if err != nil {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case eventCh <- resp.GetEvents():
+			}
+		}
+	}()
+	return eventCh, err
+}
+
+func (c *client) respForEtcdErr(observer prometheus.Observer, start time.Time, err error, header *etcdpb.ResponseHeader) error {
+	if err != nil || header.GetError() != nil {
+		observer.Observe(time.Since(start).Seconds())
+		if err != nil {
+			c.ScheduleCheckLeader()
+			return errors.WithStack(err)
+		}
+		return errors.WithStack(errors.New(header.GetError().String()))
+	}
+	return nil
+}
