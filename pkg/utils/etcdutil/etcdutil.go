@@ -202,6 +202,9 @@ func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *
 }
 
 func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, error) {
+	if len(acUrls) == 0 {
+		return nil, errs.ErrNewEtcdClient.FastGenByArgs("no available etcd address")
+	}
 	endpoints := make([]string, 0, len(acUrls))
 	for _, u := range acUrls {
 		endpoints = append(endpoints, u.String())
