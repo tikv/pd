@@ -143,7 +143,7 @@ func (c *baseClient) memberLoop() {
 			failpoint.Continue()
 		})
 		if err := c.updateMember(); err != nil {
-			log.Error("[pd] failed updateMember", errs.ZapError(err))
+			log.Error("[pd] failed to update member", errs.ZapError(err))
 		}
 	}
 }
@@ -303,7 +303,7 @@ func (c *baseClient) updateMember() error {
 			errTSO = c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders())
 		}
 
-		// Failed to get PD leader
+		// Failed to get members
 		if err != nil {
 			log.Info("[pd] cannot update member from this address",
 				zap.String("address", u),
@@ -327,7 +327,7 @@ func (c *baseClient) updateMember() error {
 		// the error of `switchTSOAllocatorLeader` will be returned.
 		return errTSO
 	}
-	return errs.ErrClientGetLeader.FastGenByArgs(c.GetURLs())
+	return errs.ErrClientGetMember.FastGenByArgs(c.GetURLs())
 }
 
 func (c *baseClient) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
