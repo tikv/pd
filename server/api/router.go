@@ -352,7 +352,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/show",
 		unsafeOperationHandler.GetFailedStoresRemovalStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
-	if svr.IsServiceEnabled("tso") {
+	if !svr.IsAPIServiceMode() || (svr.IsAPIServiceMode() && svr.IsServiceEnabled(server.TSOServiceName)) {
 		// tso API
 		tsoHandler := newTSOHandler(svr, rd)
 		registerFunc(apiRouter, "/tso/allocator/transfer/{name}", tsoHandler.TransferLocalTSOAllocator, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))

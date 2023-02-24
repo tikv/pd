@@ -91,10 +91,21 @@ const (
 	idAllocPath  = "alloc_id"
 	idAllocLabel = "idalloc"
 
-	recoveringMarkPath         = "cluster/markers/snapshot-recovering"
-	tsoServiceName             = "tso"
-	resourceManagerServiceName = "resource-manager"
+	recoveringMarkPath = "cluster/markers/snapshot-recovering"
+	// TSOServiceName is the name of TSO service.
+	TSOServiceName = "tso"
+	// ResourceManagerServiceName is the name of resource manager service.
+	ResourceManagerServiceName = "resource-manager"
+	// APIServiceName is the name of API service.
+	APIServiceName = "api"
+	// PDMode represents that server is in PD mode.
+	PDMode = "PD"
+	// APIServiceMode represents that server is in API service mode.
+	APIServiceMode = "API service"
 )
+
+// SupportServicesList is the list of supported services.
+var SupportServicesList = []string{APIServiceName, TSOServiceName, ResourceManagerServiceName}
 
 // EtcdStartTimeout the timeout of the startup etcd.
 var EtcdStartTimeout = time.Minute * 5
@@ -191,6 +202,7 @@ type Server struct {
 	registry *registry.ServiceRegistry
 	// services indicates whether the server is running in microservice mode and start part of services.
 	services []string
+	mode     string
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -198,7 +210,13 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
-	log.Info("server config", zap.Reflect("config", cfg))
+	var mode string
+	if len(services) == 0 {
+		mode = PDMode
+	} else {
+		mode = APIServiceMode
+	}
+	log.Info(fmt.Sprintf("%s config", mode), zap.Reflect("config", cfg))
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
@@ -212,6 +230,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		services:                        services,
+		mode:                            mode,
 	}
 	s.handler = newHandler(s)
 
@@ -243,7 +262,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		s.registry = registry.ServerServiceRegistry
 	})
 	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
-	if s.IsServiceEnabled(resourceManagerServiceName) {
+	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(ResourceManagerServiceName)) {
 		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	}
 	// Register the micro services REST path.
@@ -363,7 +382,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 	})
 
-	if s.IsServiceEnabled(tsoServiceName) {
+	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName)) {
 		s.tsoAllocatorManager = tso.NewAllocatorManager(
 			s.member, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
 			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
@@ -522,7 +541,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsServiceEnabled(tsoServiceName) {
+	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName)) {
 		s.serverLoopWg.Add(1)
 		go s.tsoAllocatorLoop()
 	}
@@ -680,15 +699,17 @@ func (s *Server) stopRaftCluster() {
 
 // IsServiceEnabled returns whether the service is enabled.
 func (s *Server) IsServiceEnabled(serviceName string) bool {
-	if len(s.services) == 0 {
-		return true
-	}
 	for _, service := range s.services {
 		if strings.ToLower(service) == serviceName {
 			return true
 		}
 	}
 	return false
+}
+
+// IsAPIServiceMode return whether the server is in API service mode.
+func (s *Server) IsAPIServiceMode() bool {
+	return s.mode == APIServiceMode
 }
 
 // GetAddr returns the server urls for clients.
@@ -1417,13 +1438,13 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign leader", zap.String("campaign-leader-name", s.Name()))
+	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info("campaign leader meets error due to txn conflict, another PD/API server may campaign successfully",
+			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
 				zap.String("campaign-leader-name", s.Name()))
 		} else {
-			log.Error("campaign leader meets error due to etcd error",
+			log.Error(fmt.Sprintf("campaign %s leader meets error due to etcd error", s.mode),
 				zap.String("campaign-leader-name", s.Name()),
 				errs.ZapError(err))
 		}
@@ -1443,9 +1464,9 @@ func (s *Server) campaignLeader() {
 
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
-	log.Info("campaign leader ok", zap.String("campaign-leader-name", s.Name()))
+	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
 
-	if s.IsServiceEnabled(tsoServiceName) {
+	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName)) {
 		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 		if err != nil {
 			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
@@ -1498,7 +1519,7 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	if s.IsServiceEnabled(tsoServiceName) {
+	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName)) {
 		// Check the cluster dc-location after the PD leader is elected.
 		go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	}
@@ -1510,7 +1531,7 @@ func (s *Server) campaignLeader() {
 	})
 
 	CheckPDVersion(s.persistOptions)
-	log.Info("leader is ready to serve", zap.String("leader-name", s.Name()))
+	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
 
 	leaderTicker := time.NewTicker(leaderTickInterval)
 	defer leaderTicker.Stop()

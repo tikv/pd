@@ -113,7 +113,7 @@ func NewAPIServiceCommand() *cobra.Command {
 		// TODO: Here we use a hack way to support sub-commands with multiple services.
 		// We should use a better way to support it.
 		Use:     "api[,tso][,resource-manager]",
-		Aliases: generateAlias(),
+		Aliases: generateAlias(server.SupportServicesList),
 		Short:   "Run the API service",
 		Run:     createAPIServerWrapper,
 	}
@@ -192,9 +192,9 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 
 	if len(services) != 0 {
 		services = strings.Split(services[0], ",")
-		versioninfo.Log("API Server")
+		versioninfo.Log(server.APIServiceMode)
 	} else {
-		versioninfo.Log("PD")
+		versioninfo.Log(server.PDMode)
 	}
 
 	for _, msg := range cfg.WarningMsgs {
@@ -280,8 +280,7 @@ Use "{{.CommandPath}} [command] --help" for more information about a command.{{e
 `
 }
 
-func generateAlias() []string {
-	var servicesList = []string{"api", "tso", "resource-manager"}
+func generateAlias(servicesList []string) []string {
 	length := uint(len(servicesList))
 
 	var subsets [][]string
@@ -298,7 +297,7 @@ func generateAlias() []string {
 
 	var alias []string
 	for _, s := range subsets {
-		if !slice.Contains(s, "api") {
+		if !slice.Contains(s, server.APIServiceName) {
 			continue
 		}
 		perm(s, func(a []string) {
