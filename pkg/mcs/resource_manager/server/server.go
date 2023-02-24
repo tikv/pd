@@ -62,8 +62,8 @@ type Server struct {
 
 	cfg         *Config
 	name        string
-	backendUrls []url.URL
-	listenUrl   *url.URL
+	backendURLs []url.URL
+	listenURL   *url.URL
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -160,8 +160,8 @@ func (s *Server) initClient() error {
 	if err != nil {
 		return err
 	}
-	s.backendUrls = []url.URL(u)
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendUrls)
+	s.backendURLs = []url.URL(u)
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendURLs)
 	return err
 }
 
@@ -251,14 +251,14 @@ func (s *Server) startServer() error {
 	if err != nil {
 		return err
 	}
-	s.listenUrl, err = url.Parse(s.cfg.ListenAddr)
+	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
 	if err != nil {
 		return err
 	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(tcp, s.listenUrl.Host, tlsConfig)
+		s.muxListener, err = tls.Listen(tcp, s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(tcp, s.listenUrl.Host)
+		s.muxListener, err = net.Listen(tcp, s.listenURL.Host)
 	}
 	if err != nil {
 		return err
