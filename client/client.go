@@ -388,12 +388,12 @@ type client struct {
 	tokenDispatcher *tokenDispatcher
 
 	// For internal usage.
-	checkTSDeadlineCh       chan struct{}
-	checkTSODispatcherCh    chan struct{}
-	updateTokenConnectionCh chan struct{}
-	updateConnectionCtxsCh  chan struct{}
-	leaderNetworkFailure    int32
-	wg                      sync.WaitGroup
+	checkTSDeadlineCh         chan struct{}
+	checkTSODispatcherCh      chan struct{}
+	updateTSOConnectionCtxsCh chan struct{}
+	updateTokenConnectionCh   chan struct{}
+	leaderNetworkFailure      int32
+	wg                        sync.WaitGroup
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -409,18 +409,9 @@ func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption)
 // NewClientWithContext creates a PD client with context.
 func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", svrAddrs))
-	clientCtx, clientCancel := context.WithCancel(ctx)
-	c := &client{
-		checkTSDeadlineCh:       make(chan struct{}),
-		checkTSODispatcherCh:    make(chan struct{}, 1),
-		updateTokenConnectionCh: make(chan struct{}, 1),
-		updateConnectionCtxsCh:  make(chan struct{}, 1),
-		ctx:                     clientCtx,
-		cancel:                  clientCancel,
-		option:                  newOption(),
-	}
+	c, clientCtx, clientCancel := newClientWithContext(ctx)
 	c.bc = newPDBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
-	if err := c.newClientWithContext(false, opts...); err != nil {
+	if err := c.setup(true, true, opts...); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -428,25 +419,30 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 
 // NewTSOClientWithContext creates a TSO client with context.
 func NewTSOClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd] create pd(tso) client with endpoints", zap.Strings("pd-address", svrAddrs))
-	clientCtx, clientCancel := context.WithCancel(ctx)
-	c := &client{
-		checkTSDeadlineCh:       make(chan struct{}),
-		checkTSODispatcherCh:    make(chan struct{}, 1),
-		updateTokenConnectionCh: make(chan struct{}, 1),
-		updateConnectionCtxsCh:  make(chan struct{}, 1),
-		ctx:                     clientCtx,
-		cancel:                  clientCancel,
-		option:                  newOption(),
-	}
+	log.Info("[pd(tso)] create pd(tso) client with endpoints", zap.Strings("tso-address", svrAddrs))
+	c, clientCtx, clientCancel := newClientWithContext(ctx)
 	c.bc = newTSOBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
-	if err := c.newClientWithContext(true, opts...); err != nil {
+	if err := c.setup(true, false, opts...); err != nil {
 		return nil, err
 	}
 	return c, nil
 }
 
-func (c *client) newClientWithContext(tsoMode bool, opts ...ClientOption) error {
+func newClientWithContext(ctx context.Context) (*client, context.Context, context.CancelFunc) {
+	clientCtx, clientCancel := context.WithCancel(ctx)
+	c := &client{
+		checkTSDeadlineCh:         make(chan struct{}),
+		checkTSODispatcherCh:      make(chan struct{}, 1),
+		updateTSOConnectionCtxsCh: make(chan struct{}, 1),
+		updateTokenConnectionCh:   make(chan struct{}, 1),
+		ctx:                       clientCtx,
+		cancel:                    clientCancel,
+		option:                    newOption(),
+	}
+	return c, clientCtx, clientCancel
+}
+
+func (c *client) setup(enableTSO, enableAdmissionCtl bool, opts ...ClientOption) error {
 	// Inject the client options.
 	for _, opt := range opts {
 		opt(c)
@@ -457,19 +453,20 @@ func (c *client) newClientWithContext(tsoMode bool, opts ...ClientOption) error 
 	}
 
 	// Register callbacks and start the daemons.
-	c.bc.AddServiceEndpointSwitchedCallback(c.scheduleCheckTSODispatcher)
-	c.bc.AddServiceEndpointsChangedCallback(c.scheduleUpdateConnectionCtxs)
-	c.updateTSODispatcher()
-	if !tsoMode {
+	if enableTSO {
+		c.bc.AddServiceEndpointSwitchedCallback(c.scheduleCheckTSODispatcher)
+		c.bc.AddServiceEndpointsChangedCallback(c.scheduleUpdateTSOConnectionCtxs)
+		c.updateTSODispatcher()
+		c.wg.Add(2)
+		go c.tsLoop()
+		go c.tsCancelLoop()
+	}
+	if enableAdmissionCtl {
 		c.bc.AddServiceEndpointSwitchedCallback(c.scheduleUpdateTokenConnection)
 		c.createTokenDispatcher()
 	}
-
-	c.wg.Add(3)
-	go c.tsLoop()
-	go c.tsCancelLoop()
+	c.wg.Add(1)
 	go c.leaderCheckLoop()
-
 	return nil
 }
 
@@ -487,9 +484,9 @@ func (c *client) scheduleUpdateTokenConnection() {
 	}
 }
 
-func (c *client) scheduleUpdateConnectionCtxs() {
+func (c *client) scheduleUpdateTSOConnectionCtxs() {
 	select {
-	case c.updateConnectionCtxsCh <- struct{}{}:
+	case c.updateTSOConnectionCtxsCh <- struct{}{}:
 	default:
 	}
 }
@@ -786,7 +783,7 @@ func (c *client) handleDispatcher(
 	}()
 	// Call updateTSOConnectionCtxs once to init the connectionCtxs first.
 	c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-	// Only the Global TSO needs to watch the updateConnectionCtxsCh to sense the
+	// Only the Global TSO needs to watch the updateTSOConnectionCtxsCh to sense the
 	// change of the cluster when TSO Follower Proxy is enabled.
 	// TODO: support TSO Follower Proxy for the Local TSO.
 	if dc == globalDCLocation {
@@ -820,7 +817,7 @@ func (c *client) handleDispatcher(
 						continue
 					}
 				case <-updateTicker.C:
-				case <-c.updateConnectionCtxsCh:
+				case <-c.updateTSOConnectionCtxsCh:
 				}
 				c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
 			}
@@ -1170,9 +1167,11 @@ func (c *client) Close() {
 
 	c.bc.CloseClientConns()
 
-	tokenErr := errors.WithStack(errClosing)
-	c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
-	c.tokenDispatcher.dispatcherCancel()
+	if c.tokenDispatcher != nil {
+		tokenErr := errors.WithStack(errClosing)
+		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
+		c.tokenDispatcher.dispatcherCancel()
+	}
 }
 
 // leaderClient gets the client of current PD leader.
