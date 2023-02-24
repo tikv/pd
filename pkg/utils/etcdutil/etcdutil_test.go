@@ -233,7 +233,7 @@ func TestInitClusterID(t *testing.T) {
 	re.Equal(clusterID, clusterID1)
 }
 
-func TestEtcdClient(t *testing.T) {
+func TestEtcdClientSync(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval", "return(true)"))
