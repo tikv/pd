@@ -409,7 +409,7 @@ func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption)
 // NewClientWithContext creates a PD client with context.
 func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", svrAddrs))
-	c, clientCtx, clientCancel := newClientWithContext(ctx)
+	c, clientCtx, clientCancel := createClient(ctx)
 	c.bc = newPDBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
 	if err := c.setup(true, true, opts...); err != nil {
 		return nil, err
@@ -419,8 +419,8 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 
 // NewTSOClientWithContext creates a TSO client with context.
 func NewTSOClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd(tso)] create pd(tso) client with endpoints", zap.Strings("tso-address", svrAddrs))
-	c, clientCtx, clientCancel := newClientWithContext(ctx)
+	log.Info("[pd(tso)] create tso client with endpoints", zap.Strings("tso-address", svrAddrs))
+	c, clientCtx, clientCancel := createClient(ctx)
 	c.bc = newTSOBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
 	if err := c.setup(true, false, opts...); err != nil {
 		return nil, err
@@ -428,7 +428,7 @@ func NewTSOClientWithContext(ctx context.Context, svrAddrs []string, security Se
 	return c, nil
 }
 
-func newClientWithContext(ctx context.Context) (*client, context.Context, context.CancelFunc) {
+func createClient(ctx context.Context) (*client, context.Context, context.CancelFunc) {
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
 		checkTSDeadlineCh:         make(chan struct{}),
@@ -454,7 +454,7 @@ func (c *client) setup(enableTSO, enableAdmissionCtl bool, opts ...ClientOption)
 
 	// Register callbacks and start the daemons.
 	if enableTSO {
-		c.bc.AddServiceEndpointSwitchedCallback(c.scheduleCheckTSODispatcher)
+		c.bc.AddTSOAllocatorServiceEndpointSwitchedCallback(c.scheduleCheckTSODispatcher)
 		c.bc.AddServiceEndpointsChangedCallback(c.scheduleUpdateTSOConnectionCtxs)
 		c.updateTSODispatcher()
 		c.wg.Add(2)

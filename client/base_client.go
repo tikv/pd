@@ -94,6 +94,9 @@ type BaseClient interface {
 	// AddServiceEndpointsChangedCallback adds callbacks which will be called when any leader/follower
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster is changed.
 	AddServiceEndpointsChangedCallback(callbacks ...func())
+	// AddTSOAllocatorServiceEndpointSwitchedCallback adds callbacks which will be called
+	// when any global/local tso allocator service endpoint is switched.
+	AddTSOAllocatorServiceEndpointSwitchedCallback(callbacks ...func())
 	// CreateTsoStream creates a TSO stream to send/recv timestamps
 	CreateTsoStream(ctx context.Context, cancel context.CancelFunc, cc *grpc.ClientConn) (interface{}, error)
 	// TryConnectToTSOWithProxy will create multiple streams to all the service endpoints to work as
@@ -132,6 +135,9 @@ type pdBaseClient struct {
 	// membersChangedCallbacks will be called after there is any membership
 	// change in the leader and followers
 	membersChangedCallbacks []func()
+	// tsoAllocatorLeaderSwitchedCallback will be called when any global/local
+	// tso allocator leader is switched.
+	tsoAllocatorLeaderSwitchedCallback []func()
 
 	checkMembershipCh chan struct{}
 
@@ -292,6 +298,12 @@ func (c *pdBaseClient) AddServiceEndpointsChangedCallback(callbacks ...func()) {
 	c.membersChangedCallbacks = append(c.membersChangedCallbacks, callbacks...)
 }
 
+// AddTSOAllocatorServiceEndpointSwitchedCallback adds callbacks which will be called
+// when any global/local tso allocator leader is switched.
+func (c *pdBaseClient) AddTSOAllocatorServiceEndpointSwitchedCallback(callbacks ...func()) {
+	c.tsoAllocatorLeaderSwitchedCallback = append(c.tsoAllocatorLeaderSwitchedCallback, callbacks...)
+}
+
 // getLeaderAddr returns the leader address.
 func (c *pdBaseClient) getLeaderAddr() string {
 	leaderAddr := c.leader.Load()
@@ -434,6 +446,10 @@ func (c *pdBaseClient) updateMember() error {
 		c.updateFollowers(members.GetMembers(), members.GetLeader())
 		if err := c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
 			return err
+		}
+		// Run callbacks to refelect any change in the local/global tso allocator.
+		for _, cb := range c.tsoAllocatorLeaderSwitchedCallback {
+			cb()
 		}
 
 		// If `switchLeader` succeeds but `switchTSOAllocatorLeader` has an error,

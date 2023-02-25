@@ -112,6 +112,9 @@ type tsoBaseClient struct {
 	// membersChangedCallbacks will be called after there is any membership
 	// change in the primary and followers
 	membersChangedCallbacks []func()
+	// tsoAllocatorLeaderSwitchedCallback will be called when any keyspace group tso
+	// allocator primary is switched.
+	tsoAllocatorLeaderSwitchedCallback []func()
 
 	checkMembershipCh chan struct{}
 
@@ -273,6 +276,12 @@ func (c *tsoBaseClient) AddServiceEndpointSwitchedCallback(callbacks ...func()) 
 // in a primary/secondary configured cluster is changed.
 func (c *tsoBaseClient) AddServiceEndpointsChangedCallback(callbacks ...func()) {
 	c.membersChangedCallbacks = append(c.membersChangedCallbacks, callbacks...)
+}
+
+// AddTSOAllocatorServiceEndpointSwitchedCallback adds callbacks which will be called
+// when any keyspace group tso allocator primary is switched.
+func (c *tsoBaseClient) AddTSOAllocatorServiceEndpointSwitchedCallback(callbacks ...func()) {
+	c.tsoAllocatorLeaderSwitchedCallback = append(c.tsoAllocatorLeaderSwitchedCallback, callbacks...)
 }
 
 // getPrimaryAddr returns the primary address.
