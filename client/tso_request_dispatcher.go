@@ -244,7 +244,7 @@ func (c *client) checkAllocator(
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 			// create a stream of the original allocator
 			cctx, cancel := context.WithCancel(dispatcherCtx)
-			stream, err := c.bc.CreateTsoStream(cctx, cancel, cc)
+			stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
 			if err == nil && stream != nil {
 				log.Info("[pd] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
 				updateAndClear(url, &tsoConnectionContext{url, stream, cctx, cancel})
@@ -294,7 +294,7 @@ func (c *client) handleDispatcher(
 	var (
 		err        error
 		streamAddr string
-		stream     interface{}
+		stream     tsoStream
 		streamCtx  context.Context
 		cancel     context.CancelFunc
 		// addr -> connectionContext
@@ -492,7 +492,7 @@ type tsoConnectionContext struct {
 	streamAddr string
 	// Current stream to send gRPC requests, pdpb.PD_TsoClient for a leader/follower in the PD cluser,
 	// or tsopb.TSO_TsoClient for a primary/secondary in the TSO clusrer
-	stream interface{}
+	stream tsoStream
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -501,7 +501,7 @@ func (c *client) updateTSOConnectionCtxs(updaterCtx context.Context, dc string, 
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnectToTSO
 	if c.allowTSOFollowerProxy(dc) {
-		createTSOConnection = c.bc.TryConnectToTSOWithProxy
+		createTSOConnection = c.TryConnectToTSOWithProxy
 	}
 	if err := createTSOConnection(updaterCtx, dc, connectionCtxs); err != nil {
 		log.Error("[pd] update connection contexts failed", zap.String("dc", dc), errs.ZapError(err))
@@ -522,7 +522,7 @@ func (c *client) tryConnectToTSO(
 	var (
 		networkErrNum uint64
 		err           error
-		stream        interface{}
+		stream        tsoStream
 		url           string
 		cc            *grpc.ClientConn
 	)
@@ -546,7 +546,7 @@ func (c *client) tryConnectToTSO(
 		c.bc.ScheduleCheckIfMembershipChanged()
 		cc, url = c.bc.GetTSOAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
-		stream, err = c.bc.CreateTsoStream(cctx, cancel, cc)
+		stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
 		failpoint.Inject("unreachableNetwork", func() {
 			stream = nil
 			err = status.New(codes.Unavailable, "unavailable").Err()
@@ -588,7 +588,7 @@ func (c *client) tryConnectToTSO(
 			// create the follower stream
 			cctx, cancel := context.WithCancel(dispatcherCtx)
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
-			stream, err = c.bc.CreateTsoStream(cctx, cancel, backupClientConn)
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.timeout)
 			if err == nil {
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
 				addrTrim := trimHTTPPrefix(addr)
@@ -604,6 +604,77 @@ func (c *client) tryConnectToTSO(
 	return err
 }
 
+// getAllTSOStreamBuilders returns a TSO stream builder for every service endpoint of TSO leader/followers
+// or of keyspace group primary/secondaries.
+func (c *client) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
+	var (
+		addrs          = c.bc.GetURLs()
+		streamBuilders = make(map[string]tsoStreamBuilder, len(addrs))
+		cc             *grpc.ClientConn
+		err            error
+	)
+	for _, addr := range addrs {
+		if len(addrs) == 0 {
+			continue
+		}
+		if cc, err = c.bc.GetOrCreateGRPCConn(addr); err != nil {
+			continue
+		}
+		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
+		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
+		healthCancel()
+		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
+			streamBuilders[addr] = c.tsoStreamBuilderFactory.makeBuilder(cc)
+		}
+	}
+	return streamBuilders
+}
+
+// TryConnectToTSOWithProxy will create multiple streams to all the service endpoints to work as
+// a TSO proxy to reduce the pressure of the main serving service endpoint.
+func (c *client) TryConnectToTSOWithProxy(dispatcherCtx context.Context, dc string, connectionCtxs *sync.Map) error {
+	tsoStreamBuilders := c.getAllTSOStreamBuilders()
+	leaderAddr := c.GetLeaderAddr()
+	forwardedHost, ok := c.bc.GetTSOAllocatorServingAddrByDCLocation(dc)
+	if !ok {
+		return errors.Errorf("cannot find the allocator leader in %s", dc)
+	}
+	// GC the stale one.
+	connectionCtxs.Range(func(addr, cc interface{}) bool {
+		if _, ok := tsoStreamBuilders[addr.(string)]; !ok {
+			cc.(*tsoConnectionContext).cancel()
+			connectionCtxs.Delete(addr)
+		}
+		return true
+	})
+	// Update the missing one.
+	for addr, tsoStreamBuilder := range tsoStreamBuilders {
+		if _, ok = connectionCtxs.Load(addr); ok {
+			continue
+		}
+		cctx, cancel := context.WithCancel(dispatcherCtx)
+		// Do not proxy the leader client.
+		if addr != leaderAddr {
+			log.Info("[pd] use follower to forward tso stream to do the proxy", zap.String("dc", dc), zap.String("addr", addr))
+			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
+		}
+		// Create the TSO stream.
+		stream, err := tsoStreamBuilder.build(cctx, cancel, c.option.timeout)
+		if err == nil {
+			if addr != leaderAddr {
+				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
+				addrTrim := trimHTTPPrefix(addr)
+				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
+			}
+			connectionCtxs.Store(addr, &tsoConnectionContext{addr, stream, cctx, cancel})
+			continue
+		}
+		log.Error("[pd] create the tso stream failed", zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
+		cancel()
+	}
+	return nil
+}
+
 func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
 	for _, req := range tbc.getCollectedRequests() {
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil {
@@ -613,7 +684,7 @@ func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanO
 	return opts
 }
 
-func (c *client) processTSORequests(stream interface{}, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption) error {
+func (c *client) processTSORequests(stream tsoStream, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption) error {
 	if len(opts) > 0 {
 		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
 		defer span.Finish()
@@ -621,7 +692,7 @@ func (c *client) processTSORequests(stream interface{}, dcLocation string, tbc *
 
 	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
-	physical, logical, suffixBits, err := c.bc.ProcessTSORequests(stream, dcLocation, requests, tbc.batchStartTime)
+	physical, logical, suffixBits, err := stream.processRequests(c.GetClusterID(c.ctx), dcLocation, requests, tbc.batchStartTime)
 	if err != nil {
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err

@@ -22,8 +22,6 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
@@ -101,7 +99,6 @@ type tsoBaseClient struct {
 	// TSO Secondary URLs
 	secondaries atomic.Value // Store as []string
 
-	clusterID uint64
 	// addr -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 	// dc-location -> TSO allocator primary URL
@@ -122,7 +119,7 @@ type tsoBaseClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	security SecurityOption
+	tlsCfg *tlsutil.TLSConfig
 
 	// Client option.
 	option *option
@@ -130,13 +127,13 @@ type tsoBaseClient struct {
 
 // newTSOBaseClient returns a new baseClient.
 func newTSOBaseClient(ctx context.Context, cancel context.CancelFunc,
-	wg *sync.WaitGroup, urls []string, security SecurityOption, option *option) BaseClient {
+	wg *sync.WaitGroup, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) BaseClient {
 	bc := &tsoBaseClient{
 		checkMembershipCh: make(chan struct{}, 1),
 		ctx:               ctx,
 		cancel:            cancel,
 		wg:                wg,
-		security:          security,
+		tlsCfg:            tlsCfg,
 		option:            option,
 	}
 	bc.urls.Store(urls)
@@ -169,6 +166,12 @@ func (c *tsoBaseClient) CloseClientConns() {
 // GetClusterID returns the ID of the cluster
 func (c *tsoBaseClient) GetClusterID(context.Context) uint64 {
 	return 0
+}
+
+// GetURLs returns the URLs of the servers.
+// For testing use. It should only be called when the client is closed.
+func (c *tsoBaseClient) GetURLs() []string {
+	return c.urls.Load().([]string)
 }
 
 // GetTSOAllocators returns {dc-location -> TSO allocator primary URL} connection map
@@ -223,35 +226,7 @@ func (c *tsoBaseClient) GetBackupEndpointsAddrs() []string {
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
 func (c *tsoBaseClient) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
-	conn, ok := c.clientConns.Load(addr)
-	if ok {
-		return conn.(*grpc.ClientConn), nil
-	}
-	tlsCfg, err := tlsutil.TLSConfig{
-		CAPath:   c.security.CAPath,
-		CertPath: c.security.CertPath,
-		KeyPath:  c.security.KeyPath,
-
-		SSLCABytes:   c.security.SSLCABytes,
-		SSLCertBytes: c.security.SSLCertBytes,
-		SSLKEYBytes:  c.security.SSLKEYBytes,
-	}.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	dCtx, cancel := context.WithTimeout(c.ctx, dialTimeout)
-	defer cancel()
-	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.option.gRPCDialOptions...)
-	if err != nil {
-		return nil, err
-	}
-	if old, ok := c.clientConns.Load(addr); ok {
-		cc.Close()
-		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
-		return old.(*grpc.ClientConn), nil
-	}
-	c.clientConns.Store(addr, cc)
-	return cc, nil
+	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
 // ScheduleCheckIfMembershipChanged is used to trigger a check to see if there is any
@@ -302,27 +277,6 @@ func (c *tsoBaseClient) getSecondaryAddrs() []string {
 	return secondaryAddrs.([]string)
 }
 
-// CreateTsoStream creates a TSO stream to send/recv timestamps
-func (c *tsoBaseClient) createTsoStreamInternal(ctx context.Context, cancel context.CancelFunc, client tsopb.TSOClient) (interface{}, error) {
-	done := make(chan struct{})
-	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
-	go c.checkStreamTimeout(ctx, cancel, done, c.option.timeout)
-	stream, err := client.Tso(ctx)
-	done <- struct{}{}
-	return stream, err
-}
-
-func (c *tsoBaseClient) checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done chan struct{}, timeout time.Duration) {
-	select {
-	case <-done:
-		return
-	case <-time.After(timeout):
-		cancel()
-	case <-ctx.Done():
-	}
-	<-done
-}
-
 func (c *tsoBaseClient) switchPrimary(addrs []string) error {
 	// FIXME: How to safely compare primary urls? For now, only allows one client url.
 	addr := addrs[0]
@@ -344,73 +298,4 @@ func (c *tsoBaseClient) switchPrimary(addrs []string) error {
 	}
 	log.Info("[tso] switch primary", zap.String("new-primary", addr), zap.String("old-primary", oldPrimary))
 	return nil
-}
-
-func (c *tsoBaseClient) requestHeader() *tsopb.RequestHeader {
-	return &tsopb.RequestHeader{
-		ClusterId: c.clusterID,
-	}
-}
-
-// CreateTsoStream creates a TSO stream to send/recv timestamps
-func (c *tsoBaseClient) CreateTsoStream(ctx context.Context, cancel context.CancelFunc, cc *grpc.ClientConn) (interface{}, error) {
-	return c.createTsoStreamInternal(ctx, cancel, tsopb.NewTSOClient(cc))
-}
-
-// TryConnectToTSOWithProxy will create multiple streams to all the service endpoints to work as
-// a TSO proxy to reduce the pressure of the main serving service endpoint.
-func (c *tsoBaseClient) TryConnectToTSOWithProxy(dispatcherCtx context.Context, dc string, connectionCtxs *sync.Map) error {
-	return nil
-}
-
-// ProcessTSORequests processes TSO requests in streaming mode to get timestamps
-func (c *tsoBaseClient) ProcessTSORequests(stream interface{}, dcLocation string, requests []*tsoRequest,
-	batchStartTime time.Time) (physical, logical int64, suffixBits uint32, err error) {
-	tsoStream := stream.(tsopb.TSO_TsoClient)
-
-	start := time.Now()
-	count := int64(len(requests))
-	req := &tsopb.TsoRequest{
-		Header:     c.requestHeader(),
-		Count:      uint32(count),
-		DcLocation: dcLocation,
-	}
-
-	if err = tsoStream.Send(req); err != nil {
-		err = errors.WithStack(err)
-		return
-	}
-	tsoBatchSendLatency.Observe(float64(time.Since(batchStartTime)))
-	resp, err := tsoStream.Recv()
-	if err != nil {
-		err = errors.WithStack(err)
-		return
-	}
-	requestDurationTSO.Observe(time.Since(start).Seconds())
-	tsoBatchSize.Observe(float64(count))
-
-	if resp.GetCount() != uint32(count) {
-		err = errors.WithStack(errTSOLength)
-		return
-	}
-
-	physical, logical, suffixBits = resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
-	return
-}
-
-// GetURLs returns the URLs of the servers.
-// For testing use. It should only be called when the client is closed.
-func (c *tsoBaseClient) GetURLs() []string {
-	return c.urls.Load().([]string)
-}
-
-// GetTSOAllocatorServingEndpointURLs returns the urls of the tso allocator primarys
-// For testing use.
-func (c *tsoBaseClient) GetTSOAllocatorServingEndpointURLs() map[string]string {
-	allocatorLeaders := make(map[string]string)
-	c.tsoAllocators.Range(func(dcLocation, url interface{}) bool {
-		allocatorLeaders[dcLocation.(string)] = url.(string)
-		return true
-	})
-	return allocatorLeaders
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -240,6 +241,7 @@ var _ Client = (*client)(nil)
 
 type client struct {
 	bc BaseClient
+	tsoStreamBuilderFactory
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding dc-location TSO channel.
 	tsoDispatcher sync.Map // Same as map[string]chan *tsoRequest
@@ -264,6 +266,17 @@ type client struct {
 	option *option
 }
 
+// SecurityOption records options about tls
+type SecurityOption struct {
+	CAPath   string
+	CertPath string
+	KeyPath  string
+
+	SSLCABytes   []byte
+	SSLCertBytes []byte
+	SSLKEYBytes  []byte
+}
+
 // NewClient creates a PD client.
 func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	return NewClientWithContext(context.Background(), svrAddrs, security, opts...)
@@ -272,8 +285,9 @@ func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption)
 // NewClientWithContext creates a PD client with context.
 func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", svrAddrs))
-	c, clientCtx, clientCancel := createClient(ctx)
-	c.bc = newPDBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
+	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, &security)
+	c.tsoStreamBuilderFactory = &pdTSOStreamBuilderFactory{}
+	c.bc = newPDBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
 	if err := c.setup(true, true, opts...); err != nil {
 		return nil, err
 	}
@@ -283,15 +297,26 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 // NewTSOClientWithContext creates a TSO client with context.
 func NewTSOClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd(tso)] create tso client with endpoints", zap.Strings("tso-address", svrAddrs))
-	c, clientCtx, clientCancel := createClient(ctx)
-	c.bc = newTSOBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), security, c.option)
+	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, &security)
+	c.tsoStreamBuilderFactory = &tsoTSOStreamBuilderFactory{}
+	c.bc = newTSOBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
 	if err := c.setup(true, false, opts...); err != nil {
 		return nil, err
 	}
 	return c, nil
 }
 
-func createClient(ctx context.Context) (*client, context.Context, context.CancelFunc) {
+func createClient(ctx context.Context, security *SecurityOption) (*client, context.Context, context.CancelFunc, *tlsutil.TLSConfig) {
+	tlsCfg := &tlsutil.TLSConfig{
+		CAPath:   security.CAPath,
+		CertPath: security.CertPath,
+		KeyPath:  security.KeyPath,
+
+		SSLCABytes:   security.SSLCABytes,
+		SSLCertBytes: security.SSLCertBytes,
+		SSLKEYBytes:  security.SSLKEYBytes,
+	}
+
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
 		checkTSDeadlineCh:         make(chan struct{}),
@@ -302,7 +327,8 @@ func createClient(ctx context.Context) (*client, context.Context, context.Cancel
 		cancel:                    clientCancel,
 		option:                    newOption(),
 	}
-	return c, clientCtx, clientCancel
+
+	return c, clientCtx, clientCancel, tlsCfg
 }
 
 func (c *client) setup(enableTSO, enableAdmissionCtl bool, opts ...ClientOption) error {
