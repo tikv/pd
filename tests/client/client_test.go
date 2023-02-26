@@ -290,7 +290,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 
 	// Check allocator leaders URL map.
 	cli.Close()
-	for dcLocation, url := range innerCli.GetBaseClient().GetTSOAllocatorServingEndpointURLs() {
+	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(innerCli.GetBaseClient()) {
 		if dcLocation == tso.GlobalDCLocation {
 			urls := innerCli.GetBaseClient().GetURLs()
 			sort.Strings(urls)
@@ -507,6 +507,15 @@ func requestGlobalAndLocalTSO(
 		}
 	}
 	wg.Wait()
+}
+
+func getTSOAllocatorServingEndpointURLs(c pd.BaseClient) map[string]string {
+	allocatorLeaders := make(map[string]string)
+	c.GetTSOAllocators().Range(func(dcLocation, url interface{}) bool {
+		allocatorLeaders[dcLocation.(string)] = url.(string)
+		return true
+	})
+	return allocatorLeaders
 }
 
 func TestCustomTimeout(t *testing.T) {
