@@ -51,6 +51,8 @@ const (
 	ErrRedirectFailed = "redirect failed"
 	// ErrRedirectToNotLeader is the error message for redirect to not leader.
 	ErrRedirectToNotLeader = "redirect to not leader"
+
+	chunkSize = 4096
 )
 
 // DeferClose captures the error returned from closing (if an error occurs).
@@ -420,9 +422,17 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
-
-		if _, err := io.Copy(w, reader); err != nil {
-			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err))
+		for {
+			if _, err = io.CopyN(w, reader, chunkSize); err != nil {
+				if err == io.EOF {
+					err = nil
+				}
+				break
+			}
+		}
+		if err != nil {
+			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
+			// try next url.
 			continue
 		}
 		return
