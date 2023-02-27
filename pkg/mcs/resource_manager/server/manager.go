@@ -87,6 +87,11 @@ func NewManager[T RUConfigProvider](srv bs.Server) *Manager {
 	return m
 }
 
+// GetBasicServer returns the basic server.
+func (m *Manager) GetBasicServer() bs.Server {
+	return m.srv
+}
+
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
 	// Store the RU model config into the storage.

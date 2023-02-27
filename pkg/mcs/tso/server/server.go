@@ -130,6 +130,12 @@ func (s *Server) IsServing() bool {
 	return true
 }
 
+// GetPrimary returns the primary provider of this tso server.
+func (s *Server) GetPrimary() bs.MemberProvider {
+	// TODO: implement this
+	return nil
+}
+
 // AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 // the global TSO allocator after the flag 'enable-local-tso' is set to true.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
