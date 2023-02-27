@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
+	"google.golang.org/grpc"
 )
 
 func TestTSOServerStartAndStopNormally(t *testing.T) {
@@ -57,5 +58,10 @@ func TestTSOServerStartAndStopNormally(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return s.IsServing()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// Test registered GRPC Service
+	_, err = grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithInsecure())
+	re.NoError(err)
+
 	cleanup()
 }

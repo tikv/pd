@@ -166,16 +166,16 @@ func (m *Participant) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// CheckLeaderPrecheck does some pre-check before checking whether or not it's the leader.
+// PrecheckLeader does some pre-check before checking whether or not it's the leader.
 // It returns true if it passes the pre-check, false otherwise.
-func (m *Participant) CheckLeaderPrecheck() error {
+func (m *Participant) PrecheckLeader() error {
 	// No specific thing to check. Returns no error.
 	return nil
 }
 
 // CheckLeader checks returns true if it is needed to check later.
 func (m *Participant) CheckLeader() (*pdpb.Member, int64, bool) {
-	if err := m.CheckLeaderPrecheck(); err != nil {
+	if err := m.PrecheckLeader(); err != nil {
 		log.Error("failed to pass pre-check, check the leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true

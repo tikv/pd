@@ -103,8 +103,6 @@ var (
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
 )
 
-var _ tso.Member = (*member.EmbeddedEtcdMember)(nil)
-
 // Server is the pd server. It implements bs.Server
 // nolint
 type Server struct {

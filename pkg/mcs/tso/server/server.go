@@ -131,11 +131,6 @@ func (s *Server) Context() context.Context {
 	return s.ctx
 }
 
-// GetNetListener returns cmux listerner of grpc and http server
-func (s *Server) GetNetListener() net.Listener {
-	return s.muxListener
-}
-
 // Run runs the TSO server.
 func (s *Server) Run() error {
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
@@ -327,8 +322,7 @@ func (s *Server) IsServing() bool {
 
 // GetPrimary returns the primary provider of this tso server.
 func (s *Server) GetPrimary() bs.MemberProvider {
-	// TODO: implement this
-	return nil
+	return s.participant.GetLeader()
 }
 
 // AddServiceReadyCallback implments basicserver. It adds callbacks when the server becomes the primary.

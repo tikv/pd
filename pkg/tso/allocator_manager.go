@@ -138,8 +138,8 @@ type Member interface {
 	GetDCLocationPathPrefix() string
 	// GetDCLocationPath returns the dc-location path of a member with the given member ID.
 	GetDCLocationPath(id uint64) string
-	// CheckLeaderPrecheck does some pre-check before checking whether it's the leader.
-	CheckLeaderPrecheck() error
+	// PrecheckLeader does some pre-check before checking whether it's the leader.
+	PrecheckLeader() error
 }
 
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
