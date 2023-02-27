@@ -49,7 +49,7 @@ func newTestServer(ctx context.Context, cancel context.CancelFunc, re *require.A
 	return s, cleanup, nil
 }
 
-// NewTestSingleConfig is only for test to create one pd.
+// newTestDefaultConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
 func newTestDefaultConfig() (*Config, error) {
 	cmd := NewTSOServiceCommand()

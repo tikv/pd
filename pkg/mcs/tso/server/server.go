@@ -559,7 +559,7 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.ListenAddr
 	hash := sha256.Sum256([]byte(uniqueName))
 	uniqueID := binary.LittleEndian.Uint64(hash[:8])
-	log.Info(fmt.Sprintf("Participant name=%s, id=%d", uniqueName, uniqueID))
+	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
 	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
 	s.participant.InitInfo(uniqueName, tsoKeyspaceGroupPrimaryElectionPrefix+fmt.Sprintf("%05d", 0), "primary", "keyspace group primary election")
