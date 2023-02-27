@@ -755,8 +755,8 @@ func TestBalanceRegion(t *testing.T) {
 		re.False(isPeerCountChanged(op))
 	}
 	for i := uint64(2); i <= 7; i++ {
-		re.Equal(150, scatterer.ordinaryEngine.selectedPeer.Get(i, group))
-		re.Equal(50, scatterer.ordinaryEngine.selectedLeader.Get(i, group))
+		re.Equal(uint64(150), scatterer.ordinaryEngine.selectedPeer.Get(i, group))
+		re.Equal(uint64(50), scatterer.ordinaryEngine.selectedLeader.Get(i, group))
 	}
 }
 
