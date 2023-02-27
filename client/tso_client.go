@@ -202,7 +202,7 @@ func (c *tsoBaseClient) GetTSOAllocatorClientConnByDCLocation(dcLocation string)
 	return cc.(*grpc.ClientConn), url.(string)
 }
 
-// GetServingEndpointAddr returns the grpc client connection of the serving endpoint
+// GetServingAddr returns the grpc client connection of the serving endpoint
 // which is the primary in a primary/secondy configured cluster.
 func (c *tsoBaseClient) GetServingEndpointClientConn() *grpc.ClientConn {
 	if cc, ok := c.clientConns.Load(c.getPrimaryAddr()); ok {
@@ -211,16 +211,16 @@ func (c *tsoBaseClient) GetServingEndpointClientConn() *grpc.ClientConn {
 	return nil
 }
 
-// GetServingEndpointAddr returns the serving endpoint which is the primary in a
+// GetServingAddr returns the serving endpoint which is the primary in a
 // primary/secondy configured cluster.
-func (c *tsoBaseClient) GetServingEndpointAddr() string {
+func (c *tsoBaseClient) GetServingAddr() string {
 	return c.getPrimaryAddr()
 }
 
-// GetBackupEndpointsAddrs gets the addresses of the current reachable and healthy
+// GetBackupAddrs gets the addresses of the current reachable and healthy
 // backup service endpoints randomly. Backup service endpoints are secondaries in
 // a primary/secondary configured cluster.
-func (c *tsoBaseClient) GetBackupEndpointsAddrs() []string {
+func (c *tsoBaseClient) GetBackupAddrs() []string {
 	return c.getSecondaryAddrs()
 }
 
@@ -229,33 +229,33 @@ func (c *tsoBaseClient) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, erro
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
-// ScheduleCheckIfMembershipChanged is used to trigger a check to see if there is any
+// ScheduleCheckMemberChanged is used to trigger a check to see if there is any
 // membership change among the primary/secondaries in a primary/secondy configured cluster.
-func (c *tsoBaseClient) ScheduleCheckIfMembershipChanged() {
+func (c *tsoBaseClient) ScheduleCheckMemberChanged() {
 
 }
 
 // Immediately checkif there is any membership change among the primary/secondaries in
 // a primary/secondy configured cluster.
-func (c *tsoBaseClient) CheckIfMembershipChanged() error {
+func (c *tsoBaseClient) CheckMemberChanged() error {
 	return nil
 }
 
-// AddServiceEndpointSwitchedCallback adds callbacks which will be called when the primary in
+// AddServingAddrSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
-func (c *tsoBaseClient) AddServiceEndpointSwitchedCallback(callbacks ...func()) {
+func (c *tsoBaseClient) AddServingAddrSwitchedCallback(callbacks ...func()) {
 	c.primarySwitchedCallbacks = append(c.primarySwitchedCallbacks, callbacks...)
 }
 
-// AddServiceEndpointsChangedCallback adds callbacks which will be called when any primary/secondary
+// AddServiceAddrsSwitchedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.
-func (c *tsoBaseClient) AddServiceEndpointsChangedCallback(callbacks ...func()) {
+func (c *tsoBaseClient) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
 	c.membersChangedCallbacks = append(c.membersChangedCallbacks, callbacks...)
 }
 
-// AddTSOAllocatorServiceEndpointSwitchedCallback adds callbacks which will be called
+// AddTSOAllocatorServingAddrSwitchedCallback adds callbacks which will be called
 // when any keyspace group tso allocator primary is switched.
-func (c *tsoBaseClient) AddTSOAllocatorServiceEndpointSwitchedCallback(callbacks ...func()) {
+func (c *tsoBaseClient) AddTSOAllocatorServingAddrSwitchedCallback(callbacks ...func()) {
 	c.tsoAllocatorLeaderSwitchedCallback = append(c.tsoAllocatorLeaderSwitchedCallback, callbacks...)
 }
 

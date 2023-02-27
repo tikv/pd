@@ -68,36 +68,37 @@ type BaseClient interface {
 	// GetTSOAllocatorClientConnByDCLocation returns the tso allocator grpc client connection
 	// of the given dcLocation
 	GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string)
-	// GetServingEndpointAddr returns the grpc client connection of the serving endpoint
+	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
 	// which is the leader in a quorum-based cluster or the primary in a primary/secondy
 	// configured cluster.
 	GetServingEndpointClientConn() *grpc.ClientConn
-	// GetServingEndpointAddr returns the serving endpoint which is the leader
-	// in a quorum-based cluster or the primary in a primary/secondy configured cluster.
-	GetServingEndpointAddr() string
-	// GetBackupEndpointsAddrs gets the addresses of the current reachable and healthy
-	// backup service endpoints randomly. Backup service endpoints are followers in a
-	// quorum-based cluster or secondaries in a primary/secondary configured cluster.
-	GetBackupEndpointsAddrs() []string
+	// GetServingAddr returns the serving endpoint which is the leader in a quorum-based cluster
+	// or the primary in a primary/secondy configured cluster.
+	GetServingAddr() string
+	// GetBackupAddrs gets the addresses of the current reachable and healthy backup service
+	// endpoints randomly. Backup service endpoints are followers in a quorum-based cluster or
+	// secondaries in a primary/secondary configured cluster.
+	GetBackupAddrs() []string
 	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
 	GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error)
-	// ScheduleCheckIfMembershipChanged is used to trigger a check to see if there is any
-	// membership change among the leader/followers in a quorum-based cluster or among
-	// the primary/secondaries in a primary/secondy configured cluster.
-	ScheduleCheckIfMembershipChanged()
-	// Immediately checkif there is any membership change among the leader/followers in a
-	// quorum-based cluster or among the primary/secondaries in a primary/secondy configured cluster.
-	CheckIfMembershipChanged() error
-	// AddServiceEndpointSwitchedCallback adds callbacks which will be called when the leader
+	// ScheduleCheckMemberChanged is used to trigger a check to see if there is any membership change
+	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
+	// primary/secondy configured cluster.
+	ScheduleCheckMemberChanged()
+	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
+	// in a quorum-based cluster or among the primary/secondaries in a primary/secondy configured cluster.
+	CheckMemberChanged() error
+	// AddServingAddrSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
 	// is switched.
-	AddServiceEndpointSwitchedCallback(callbacks ...func())
-	// AddServiceEndpointsChangedCallback adds callbacks which will be called when any leader/follower
-	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster is changed.
-	AddServiceEndpointsChangedCallback(callbacks ...func())
-	// AddTSOAllocatorServiceEndpointSwitchedCallback adds callbacks which will be called
+	AddServingAddrSwitchedCallback(callbacks ...func())
+	// AddServiceAddrsSwitchedCallback adds callbacks which will be called when any leader/follower
+	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
+	// is changed.
+	AddServiceAddrsSwitchedCallback(callbacks ...func())
+	// AddTSOAllocatorServingAddrSwitchedCallback adds callbacks which will be called
 	// when any global/local tso allocator service endpoint is switched.
-	AddTSOAllocatorServiceEndpointSwitchedCallback(callbacks ...func())
+	AddTSOAllocatorServingAddrSwitchedCallback(callbacks ...func())
 }
 
 var _ BaseClient = (*pdBaseClient)(nil)
@@ -230,7 +231,7 @@ func (c *pdBaseClient) GetTSOAllocators() *sync.Map {
 	return &c.tsoAllocators
 }
 
-// GetServingEndpointAddr returns the grpc client connection of the serving endpoint
+// GetServingAddr returns the grpc client connection of the serving endpoint
 // which is the leader in a quorum-based cluster or the primary in a primary/secondy
 // configured cluster.
 func (c *pdBaseClient) GetServingEndpointClientConn() *grpc.ClientConn {
@@ -240,20 +241,20 @@ func (c *pdBaseClient) GetServingEndpointClientConn() *grpc.ClientConn {
 	return nil
 }
 
-// GetServingEndpointAddr returns the leader address
-func (c *pdBaseClient) GetServingEndpointAddr() string {
+// GetServingAddr returns the leader address
+func (c *pdBaseClient) GetServingAddr() string {
 	return c.getLeaderAddr()
 }
 
-// GetBackupEndpointsAddrs gets the addresses of the current reachable and healthy followers
+// GetBackupAddrs gets the addresses of the current reachable and healthy followers
 // in a quorum-based cluster.
-func (c *pdBaseClient) GetBackupEndpointsAddrs() []string {
+func (c *pdBaseClient) GetBackupAddrs() []string {
 	return c.getFollowerAddrs()
 }
 
-// ScheduleCheckIfMembershipChanged is used to check if there is any membership
+// ScheduleCheckMemberChanged is used to check if there is any membership
 // change among the leader and the followers.
-func (c *pdBaseClient) ScheduleCheckIfMembershipChanged() {
+func (c *pdBaseClient) ScheduleCheckMemberChanged() {
 	select {
 	case c.checkMembershipCh <- struct{}{}:
 	default:
@@ -262,25 +263,25 @@ func (c *pdBaseClient) ScheduleCheckIfMembershipChanged() {
 
 // Immediately check if there is any membership change among the leader/followers in a
 // quorum-based cluster or among the primary/secondaries in a primary/secondy configured cluster.
-func (c *pdBaseClient) CheckIfMembershipChanged() error {
+func (c *pdBaseClient) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
-// AddServiceEndpointSwitchedCallback adds callbacks which will be called
+// AddServingAddrSwitchedCallback adds callbacks which will be called
 // when the leader is switched.
-func (c *pdBaseClient) AddServiceEndpointSwitchedCallback(callbacks ...func()) {
+func (c *pdBaseClient) AddServingAddrSwitchedCallback(callbacks ...func()) {
 	c.leaderSwitchedCallbacks = append(c.leaderSwitchedCallbacks, callbacks...)
 }
 
-// AddServiceEndpointsChangedCallback adds callbacks which will be called when
+// AddServiceAddrsSwitchedCallback adds callbacks which will be called when
 // any leader/follower is changed.
-func (c *pdBaseClient) AddServiceEndpointsChangedCallback(callbacks ...func()) {
+func (c *pdBaseClient) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
 	c.membersChangedCallbacks = append(c.membersChangedCallbacks, callbacks...)
 }
 
-// AddTSOAllocatorServiceEndpointSwitchedCallback adds callbacks which will be called
+// AddTSOAllocatorServingAddrSwitchedCallback adds callbacks which will be called
 // when any global/local tso allocator leader is switched.
-func (c *pdBaseClient) AddTSOAllocatorServiceEndpointSwitchedCallback(callbacks ...func()) {
+func (c *pdBaseClient) AddTSOAllocatorServingAddrSwitchedCallback(callbacks ...func()) {
 	c.tsoAllocatorLeaderSwitchedCallback = append(c.tsoAllocatorLeaderSwitchedCallback, callbacks...)
 }
 

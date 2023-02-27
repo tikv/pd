@@ -343,15 +343,15 @@ func (c *client) setup(enableTSO, enableAdmissionCtl bool, opts ...ClientOption)
 
 	// Register callbacks and start the daemons.
 	if enableTSO {
-		c.bc.AddTSOAllocatorServiceEndpointSwitchedCallback(c.scheduleCheckTSODispatcher)
-		c.bc.AddServiceEndpointsChangedCallback(c.scheduleUpdateTSOConnectionCtxs)
+		c.bc.AddTSOAllocatorServingAddrSwitchedCallback(c.scheduleCheckTSODispatcher)
+		c.bc.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
 		c.updateTSODispatcher()
 		c.wg.Add(2)
 		go c.tsLoop()
 		go c.tsCancelLoop()
 	}
 	if enableAdmissionCtl {
-		c.bc.AddServiceEndpointSwitchedCallback(c.scheduleUpdateTokenConnection)
+		c.bc.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
 		c.createTokenDispatcher()
 	}
 	c.wg.Add(1)
@@ -373,7 +373,7 @@ func (c *client) GetClusterID(ctx context.Context) uint64 {
 
 // GetLeaderAddr returns the leader address.
 func (c *client) GetLeaderAddr() string {
-	return c.bc.GetServingEndpointAddr()
+	return c.bc.GetServingAddr()
 }
 
 // GetBaseClient returns BaseClient which contains service discovery client logic
@@ -492,7 +492,7 @@ func (c *client) leaderClient() pdpb.PDClient {
 // backup service endpoints randomly. Backup service endpoints are followers in a
 // quorum-based cluster or secondaries in a primary/secondary configured cluster.
 func (c *client) backupClientConn() (*grpc.ClientConn, string) {
-	addrs := c.bc.GetBackupEndpointsAddrs()
+	addrs := c.bc.GetBackupAddrs()
 	if len(addrs) < 1 {
 		return nil, ""
 	}
@@ -650,7 +650,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 	if resp == nil {
 		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
-		c.bc.ScheduleCheckIfMembershipChanged()
+		c.bc.ScheduleCheckMemberChanged()
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
@@ -1160,7 +1160,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.bc.ScheduleCheckIfMembershipChanged()
+			c.bc.ScheduleCheckMemberChanged()
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))

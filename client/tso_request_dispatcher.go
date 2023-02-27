@@ -72,7 +72,7 @@ func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) error {
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
 		log.Error("[pd] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
-		c.bc.ScheduleCheckIfMembershipChanged()
+		c.bc.ScheduleCheckMemberChanged()
 		return err
 	}
 	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
@@ -396,7 +396,7 @@ tsoBatchLoop:
 				case <-streamLoopTimer.C:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[pd] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-					c.bc.ScheduleCheckIfMembershipChanged()
+					c.bc.ScheduleCheckMemberChanged()
 					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					continue tsoBatchLoop
 				case <-time.After(retryInterval):
@@ -442,15 +442,15 @@ tsoBatchLoop:
 				return
 			default:
 			}
-			c.bc.ScheduleCheckIfMembershipChanged()
+			c.bc.ScheduleCheckMemberChanged()
 			log.Error("[pd] getTS error", zap.String("dc-location", dc), zap.String("stream-addr", streamAddr), errs.ZapError(errs.ErrClientGetTSO, err))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
 			cancel()
 			stream = nil
-			// Because ScheduleCheckIfMembershipChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
+			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
-				if err := c.bc.CheckIfMembershipChanged(); err != nil {
+				if err := c.bc.CheckMemberChanged(); err != nil {
 					select {
 					case <-dispatcherCtx.Done():
 						return
@@ -543,7 +543,7 @@ func (c *client) tryConnectToTSO(
 	// retry several times before falling back to the follower when the network problem happens
 
 	for i := 0; i < maxRetryTimes; i++ {
-		c.bc.ScheduleCheckIfMembershipChanged()
+		c.bc.ScheduleCheckMemberChanged()
 		cc, url = c.bc.GetTSOAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)

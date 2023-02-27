@@ -75,7 +75,7 @@ func BuildForwardContext(ctx context.Context, addr string) context.Context {
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.
 // Returns the old one if's already  existed in the clientConns; otherwise creates a new one and returns it.
-func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string, tlsCfg *tlsutil.TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
+func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string, tlsCfg *tlsutil.TLSConfig, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
 	conn, ok := clientConns.Load(addr)
 	if ok {
 		return conn.(*grpc.ClientConn), nil
@@ -86,7 +86,7 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string
 	}
 	dCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	cc, err := GetClientConn(dCtx, addr, tc, do...)
+	cc, err := GetClientConn(dCtx, addr, tc, opt...)
 	if err != nil {
 		return nil, err
 	}
