@@ -179,6 +179,7 @@ func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 	case rmpb.GroupMode_RUMode:
 		if state := states.RU; state != nil {
 			rg.RUSettings.RU.setState(states.RU)
+			rg.RUSettings.RU.GroupTokenBucketState.tokenSlots = make(map[uint64]*TokenSlot)
 		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
