@@ -80,13 +80,13 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string
 	if ok {
 		return conn.(*grpc.ClientConn), nil
 	}
-	tc, err := tlsCfg.ToTLSConfig()
+	tlsConfig, err := tlsCfg.ToTLSConfig()
 	if err != nil {
 		return nil, err
 	}
 	dCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	cc, err := GetClientConn(dCtx, addr, tc, opt...)
+	cc, err := GetClientConn(dCtx, addr, tlsConfig, opt...)
 	if err != nil {
 		return nil, err
 	}
