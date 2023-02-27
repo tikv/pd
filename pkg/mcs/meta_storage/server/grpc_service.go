@@ -17,24 +17,82 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
+	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.etcd.io/etcd/clientv3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// MetaStorageServer wraps GrpcServer to provide meta storage service.
-type MetaStorageServer struct {
-	*GrpcServer
+var (
+	// errNotLeader is returned when current server is not the leader.
+	errNotLeader = status.Errorf(codes.Unavailable, "not leader")
+)
+
+var _ meta_storagepb.MetaStorageServer = (*Service)(nil)
+
+// SetUpRestHandler is a hook to sets up the REST service.
+var SetUpRestHandler = func(srv *Service) (http.Handler, apiutil.APIServiceGroup) {
+	return dummyRestService{}, apiutil.APIServiceGroup{}
+}
+
+type dummyRestService struct{}
+
+func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+	w.Write([]byte("not implemented"))
+}
+
+// Service is the gRPC service for meta storage.
+type Service struct {
+	ctx     context.Context
+	manager *Manager
+	// settings
+}
+
+// NewService creates a new meta storage service.
+func NewService[T ClusterIDProvider](svr bs.Server) registry.RegistrableService {
+	return &Service{
+		ctx:     svr.Context(),
+		manager: NewManager[T](svr),
+	}
+}
+
+// RegisterGRPCService registers the service to gRPC server.
+func (s *Service) RegisterGRPCService(g *grpc.Server) {
+	meta_storagepb.RegisterMetaStorageServer(g, s)
+}
+
+// RegisterRESTHandler registers the service to REST server.
+func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+	handler, group := SetUpRestHandler(s)
+	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+}
+
+func (s *Service) checkServing() error {
+	if !s.manager.srv.IsServing() {
+		return errNotLeader
+	}
+	return nil
 }
 
 // Watch watches the key with a given prefix and revision.
-func (s *MetaStorageServer) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.MetaStorage_WatchServer) error {
-	ctx, cancel := context.WithCancel(s.Context())
+func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.MetaStorage_WatchServer) error {
+	if err := s.checkServing(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 	key := string(req.GetKey())
 	endKey := string(req.GetRangeEnd())
 	startRevision := req.GetStartRevision()
-	watchChan := s.client.Watch(ctx, key, clientv3.WithPrefix(), clientv3.WithRange(endKey), clientv3.WithRev(startRevision), clientv3.WithPrevKV())
+	cli := s.manager.GetClient()
+	watchChan := cli.Watch(ctx, key, clientv3.WithPrefix(), clientv3.WithRange(endKey), clientv3.WithRev(startRevision), clientv3.WithPrevKV())
 	for {
 		select {
 		case <-ctx.Done():
@@ -67,7 +125,7 @@ func (s *MetaStorageServer) Watch(req *meta_storagepb.WatchRequest, server meta_
 			}
 			if len(events) > 0 {
 				if err := server.Send(&meta_storagepb.WatchResponse{
-					Header: &meta_storagepb.ResponseHeader{Revision: res.Header.GetRevision(), ClusterId: s.clusterID},
+					Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: res.Header.GetRevision()},
 					Events: events, CompactRevision: res.CompactRevision}); err != nil {
 					return err
 				}
@@ -77,7 +135,10 @@ func (s *MetaStorageServer) Watch(req *meta_storagepb.WatchRequest, server meta_
 }
 
 // Get gets the key-value pair with a given key.
-func (s *MetaStorageServer) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*meta_storagepb.GetResponse, error) {
+func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*meta_storagepb.GetResponse, error) {
+	if err := s.checkServing(); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	options := []clientv3.OpOption{}
@@ -91,12 +152,13 @@ func (s *MetaStorageServer) Get(ctx context.Context, req *meta_storagepb.GetRequ
 	if limit := req.GetLimit(); limit != 0 {
 		options = append(options, clientv3.WithLimit(limit))
 	}
-	res, err := s.client.Get(ctx, key, options...)
+	cli := s.manager.GetClient()
+	res, err := cli.Get(ctx, key, options...)
 	if err != nil {
 		return &meta_storagepb.GetResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 	resp := &meta_storagepb.GetResponse{
-		Header: &meta_storagepb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
+		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: res.Header.GetRevision()},
 		Count:  res.Count,
 		More:   res.More,
 	}
@@ -108,7 +170,10 @@ func (s *MetaStorageServer) Get(ctx context.Context, req *meta_storagepb.GetRequ
 }
 
 // Put puts the key-value pair into meta storage.
-func (s *MetaStorageServer) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*meta_storagepb.PutResponse, error) {
+func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*meta_storagepb.PutResponse, error) {
+	if err := s.checkServing(); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	options := []clientv3.OpOption{}
@@ -121,13 +186,14 @@ func (s *MetaStorageServer) Put(ctx context.Context, req *meta_storagepb.PutRequ
 		options = append(options, clientv3.WithPrevKV())
 	}
 
-	res, err := s.client.Put(ctx, key, value, options...)
+	cli := s.manager.GetClient()
+	res, err := cli.Put(ctx, key, value, options...)
 	if err != nil {
 		return &meta_storagepb.PutResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 
 	resp := &meta_storagepb.PutResponse{
-		Header: &meta_storagepb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
+		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: res.Header.GetRevision()},
 	}
 	if res.PrevKv != nil {
 		resp.PrevKv = &meta_storagepb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
@@ -135,16 +201,16 @@ func (s *MetaStorageServer) Put(ctx context.Context, req *meta_storagepb.PutRequ
 	return resp, nil
 }
 
-func (s *MetaStorageServer) wrapErrorAndRevision(revision int64, errorType meta_storagepb.ErrorType, message string) *meta_storagepb.ResponseHeader {
+func (s *Service) wrapErrorAndRevision(revision int64, errorType meta_storagepb.ErrorType, message string) *meta_storagepb.ResponseHeader {
 	return s.errorHeader(revision, &meta_storagepb.Error{
 		Type:    errorType,
 		Message: message,
 	})
 }
 
-func (s *MetaStorageServer) errorHeader(revision int64, err *meta_storagepb.Error) *meta_storagepb.ResponseHeader {
+func (s *Service) errorHeader(revision int64, err *meta_storagepb.Error) *meta_storagepb.ResponseHeader {
 	return &meta_storagepb.ResponseHeader{
-		ClusterId: s.clusterID,
+		ClusterId: s.manager.ClusterID(),
 		Revision:  revision,
 		Error:     err,
 	}

@@ -36,7 +36,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
-	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -47,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
@@ -238,6 +238,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		s.registry = registry.ServerServiceRegistry
 	})
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
@@ -246,7 +247,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		meta_storagepb.RegisterMetaStorageServer(gs, &MetaStorageServer{GrpcServer: grpcServer})
 		// Register the micro services GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)
 	}
