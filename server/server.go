@@ -35,10 +35,10 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
-	"github.com/pingcap/kvproto/pkg/etcdpb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/storagepb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
@@ -246,7 +246,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		etcdpb.RegisterEtcdServer(gs, &EtcdServer{GrpcServer: grpcServer})
+		storagepb.RegisterStorageServer(gs, &StorageServer{GrpcServer: grpcServer})
 		// Register the micro services GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)
 	}

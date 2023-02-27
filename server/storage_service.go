@@ -18,17 +18,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pingcap/kvproto/pkg/etcdpb"
+	"github.com/pingcap/kvproto/pkg/storagepb"
 	"go.etcd.io/etcd/clientv3"
 )
 
-// EtcdServer wraps GrpcServer to provide etcd service.
-type EtcdServer struct {
+// StorageServer wraps GrpcServer to provide etcd service.
+type StorageServer struct {
 	*GrpcServer
 }
 
 // Watch watches the key with a given prefix and revision.
-func (s *EtcdServer) Watch(req *etcdpb.WatchRequest, server etcdpb.Etcd_WatchServer) error {
+func (s *StorageServer) Watch(req *storagepb.WatchRequest, server storagepb.Storage_WatchServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
 	key := string(req.GetKey())
@@ -41,13 +41,13 @@ func (s *EtcdServer) Watch(req *etcdpb.WatchRequest, server etcdpb.Etcd_WatchSer
 			return nil
 		case res := <-watchChan:
 			if res.Err() != nil {
-				var resp etcdpb.WatchResponse
+				var resp storagepb.WatchResponse
 				if startRevision < res.CompactRevision {
-					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), etcdpb.ErrorType_DATA_COMPACTED,
+					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), storagepb.ErrorType_DATA_COMPACTED,
 						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", startRevision, res.CompactRevision))
 					resp.CompactRevision = res.CompactRevision
 				} else {
-					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), etcdpb.ErrorType_UNKNOWN,
+					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), storagepb.ErrorType_UNKNOWN,
 						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
 				}
 				if err := server.Send(&resp); err != nil {
@@ -57,17 +57,17 @@ func (s *EtcdServer) Watch(req *etcdpb.WatchRequest, server etcdpb.Etcd_WatchSer
 				return res.Err()
 			}
 
-			events := make([]*etcdpb.Event, 0, len(res.Events))
+			events := make([]*storagepb.Event, 0, len(res.Events))
 			for _, e := range res.Events {
-				event := &etcdpb.Event{Kv: &etcdpb.KeyValue{Key: e.Kv.Key, Value: e.Kv.Value}, Type: etcdpb.Event_EventType(e.Type)}
+				event := &storagepb.Event{Kv: &storagepb.KeyValue{Key: e.Kv.Key, Value: e.Kv.Value}, Type: storagepb.Event_EventType(e.Type)}
 				if e.PrevKv != nil {
-					event.PrevKv = &etcdpb.KeyValue{Key: e.PrevKv.Key, Value: e.PrevKv.Value}
+					event.PrevKv = &storagepb.KeyValue{Key: e.PrevKv.Key, Value: e.PrevKv.Value}
 				}
 				events = append(events, event)
 			}
 			if len(events) > 0 {
-				if err := server.Send(&etcdpb.WatchResponse{
-					Header: &etcdpb.ResponseHeader{Revision: res.Header.GetRevision(), ClusterId: s.clusterID},
+				if err := server.Send(&storagepb.WatchResponse{
+					Header: &storagepb.ResponseHeader{Revision: res.Header.GetRevision(), ClusterId: s.clusterID},
 					Events: events, CompactRevision: res.CompactRevision}); err != nil {
 					return err
 				}
@@ -77,7 +77,7 @@ func (s *EtcdServer) Watch(req *etcdpb.WatchRequest, server etcdpb.Etcd_WatchSer
 }
 
 // Get gets the key-value pair with a given key.
-func (s *EtcdServer) Get(ctx context.Context, req *etcdpb.GetRequest) (*etcdpb.GetResponse, error) {
+func (s *StorageServer) Get(ctx context.Context, req *storagepb.GetRequest) (*storagepb.GetResponse, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	options := []clientv3.OpOption{}
@@ -93,22 +93,22 @@ func (s *EtcdServer) Get(ctx context.Context, req *etcdpb.GetRequest) (*etcdpb.G
 	}
 	res, err := s.client.Get(ctx, key, options...)
 	if err != nil {
-		return &etcdpb.GetResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), etcdpb.ErrorType_UNKNOWN, err.Error())}, nil
+		return &storagepb.GetResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
-	resp := &etcdpb.GetResponse{
-		Header: &etcdpb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
+	resp := &storagepb.GetResponse{
+		Header: &storagepb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
 		Count:  res.Count,
 		More:   res.More,
 	}
 	for _, kv := range res.Kvs {
-		resp.Kvs = append(resp.Kvs, &etcdpb.KeyValue{Key: kv.Key, Value: kv.Value})
+		resp.Kvs = append(resp.Kvs, &storagepb.KeyValue{Key: kv.Key, Value: kv.Value})
 	}
 
 	return resp, nil
 }
 
 // Put puts the key-value pair into etcd.
-func (s *EtcdServer) Put(ctx context.Context, req *etcdpb.PutRequest) (*etcdpb.PutResponse, error) {
+func (s *StorageServer) Put(ctx context.Context, req *storagepb.PutRequest) (*storagepb.PutResponse, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	options := []clientv3.OpOption{}
@@ -123,27 +123,27 @@ func (s *EtcdServer) Put(ctx context.Context, req *etcdpb.PutRequest) (*etcdpb.P
 
 	res, err := s.client.Put(ctx, key, value, options...)
 	if err != nil {
-		return &etcdpb.PutResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), etcdpb.ErrorType_UNKNOWN, err.Error())}, nil
+		return &storagepb.PutResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 
-	resp := &etcdpb.PutResponse{
-		Header: &etcdpb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
+	resp := &storagepb.PutResponse{
+		Header: &storagepb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
 	}
 	if res.PrevKv != nil {
-		resp.PrevKv = &etcdpb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
+		resp.PrevKv = &storagepb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
 	}
 	return resp, nil
 }
 
-func (s *EtcdServer) wrapErrorAndRevision(revision int64, errorType etcdpb.ErrorType, message string) *etcdpb.ResponseHeader {
-	return s.etcdErrorHeader(revision, &etcdpb.Error{
+func (s *StorageServer) wrapErrorAndRevision(revision int64, errorType storagepb.ErrorType, message string) *storagepb.ResponseHeader {
+	return s.etcdErrorHeader(revision, &storagepb.Error{
 		Type:    errorType,
 		Message: message,
 	})
 }
 
-func (s *EtcdServer) etcdErrorHeader(revision int64, err *etcdpb.Error) *etcdpb.ResponseHeader {
-	return &etcdpb.ResponseHeader{
+func (s *StorageServer) etcdErrorHeader(revision int64, err *storagepb.Error) *storagepb.ResponseHeader {
+	return &storagepb.ResponseHeader{
 		ClusterId: s.clusterID,
 		Revision:  revision,
 		Error:     err,
