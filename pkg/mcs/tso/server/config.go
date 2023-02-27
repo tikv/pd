@@ -24,7 +24,6 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -50,23 +49,6 @@ const (
 	defaultLogFormat           = "text"
 	defaultDisableErrorVerbose = true
 )
-
-// NewTSOServiceCommand returns the tso service command.
-func NewTSOServiceCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "tso",
-		Short: "Run the tso service",
-		Run:   CreateServerWrapper,
-	}
-	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
-	cmd.Flags().StringP("config", "", "", "config file")
-	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
-	cmd.Flags().StringP("listen-addr", "", "", "listen address for tso service")
-	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
-	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
-	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
-	return cmd
-}
 
 // Config is the configuration for the TSO.
 type Config struct {

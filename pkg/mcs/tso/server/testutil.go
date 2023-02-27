@@ -19,6 +19,7 @@ import (
 	"os"
 
 	"github.com/pingcap/log"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -52,7 +53,10 @@ func newTestServer(ctx context.Context, cancel context.CancelFunc, re *require.A
 // newTestDefaultConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
 func newTestDefaultConfig() (*Config, error) {
-	cmd := NewTSOServiceCommand()
+	cmd := &cobra.Command{
+		Use:   "tso",
+		Short: "Run the tso service",
+	}
 	cfg := NewConfig()
 	flagSet := cmd.Flags()
 	return cfg, cfg.Parse(flagSet)
