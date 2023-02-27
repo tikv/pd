@@ -294,11 +294,6 @@ func (s *Server) Close() {
 	log.Info("tso server is closed")
 }
 
-// GetConfigAny returns the config with any type.
-func (s *Server) GetConfigAny() any {
-	return nil
-}
-
 // GetClient returns builtin etcd client.
 func (s *Server) GetClient() *clientv3.Client {
 	return s.etcdClient
