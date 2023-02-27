@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -726,6 +727,36 @@ func TestSelectedStoresTooManyPeers(t *testing.T) {
 		region := tc.AddLeaderRegion(i+200, i%3+1, (i+1)%3+1, (i+2)%3+1)
 		op := scatterer.scatterRegion(region, group)
 		re.False(isPeerCountChanged(op))
+	}
+}
+
+// TestBalanceRegion tests whether region peers and leaders are balanced after scatter.
+// ref https://github.com/tikv/pd/issues/6017
+func TestBalanceRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := config.NewTestOptions()
+	opt.SetLocationLabels([]string{"host"})
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 6 stores in 3 hosts.
+	for i := uint64(2); i <= 7; i++ {
+		tc.AddLabelsStore(i, 0, map[string]string{"host": strconv.FormatUint(i/2, 10)})
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+	group := "group"
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	for i := uint64(1001); i <= 1300; i++ {
+		region := tc.AddLeaderRegion(i, 2, 4, 6)
+		op := scatterer.scatterRegion(region, group)
+		re.False(isPeerCountChanged(op))
+	}
+	for i := uint64(2); i <= 7; i++ {
+		re.Equal(150, scatterer.ordinaryEngine.selectedPeer.Get(i, group))
+		re.Equal(50, scatterer.ordinaryEngine.selectedLeader.Get(i, group))
 	}
 }
 
