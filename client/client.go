@@ -288,7 +288,7 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, &security)
 	c.tsoStreamBuilderFactory = &pdTSOStreamBuilderFactory{}
 	c.bc = newPDBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	if err := c.setup(true, true, opts...); err != nil {
+	if err := c.setup(opts...); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -300,7 +300,7 @@ func NewTSOClientWithContext(ctx context.Context, svrAddrs []string, security Se
 	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, &security)
 	c.tsoStreamBuilderFactory = &tsoTSOStreamBuilderFactory{}
 	c.bc = newTSOBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	if err := c.setup(true, false, opts...); err != nil {
+	if err := c.setup(opts...); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -331,7 +331,7 @@ func createClient(ctx context.Context, security *SecurityOption) (*client, conte
 	return c, clientCtx, clientCancel, tlsCfg
 }
 
-func (c *client) setup(enableTSO, enableAdmissionCtl bool, opts ...ClientOption) error {
+func (c *client) setup(opts ...ClientOption) error {
 	// Inject the client options.
 	for _, opt := range opts {
 		opt(c)
@@ -341,20 +341,19 @@ func (c *client) setup(enableTSO, enableAdmissionCtl bool, opts ...ClientOption)
 		return err
 	}
 
-	// Register callbacks and start the daemons.
-	if enableTSO {
-		c.bc.AddTSOAllocatorServingAddrSwitchedCallback(c.scheduleCheckTSODispatcher)
-		c.bc.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
-		c.updateTSODispatcher()
-		c.wg.Add(2)
-		go c.tsLoop()
-		go c.tsCancelLoop()
-	}
-	if enableAdmissionCtl {
-		c.bc.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
-		c.createTokenDispatcher()
-	}
-	c.wg.Add(1)
+	// Register callbacks
+	c.bc.AddTSOAllocatorServingAddrSwitchedCallback(c.scheduleCheckTSODispatcher)
+	c.bc.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
+	c.bc.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
+
+	// Create dispatchers
+	c.updateTSODispatcher()
+	c.createTokenDispatcher()
+
+	// Start the daemons.
+	c.wg.Add(3)
+	go c.tsLoop()
+	go c.tsCancelLoop()
 	go c.leaderCheckLoop()
 	return nil
 }
