@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -94,6 +93,55 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 	return copiedInfo
 }
 
+// Member defines the interface for the election related logic.
+type Member interface {
+	// ID returns the unique ID for this participant in the group. For example, it can be
+	// unique server id of a cluster or the unique keyspace group replica id of the election
+	// group comprised of the replicas of a keyspace group.
+	ID() uint64
+	// MemberValue returns the member value.
+	MemberValue() string
+	// Member returns the member.
+	Member() *pdpb.Member
+	// Client returns the etcd client.
+	Client() *clientv3.Client
+	// IsLeader returns whether the participant is the leader or not by checking its
+	// leadership's lease and leader info.
+	IsLeader() bool
+	// GetLeaderID returns current leader's member ID.
+	GetLeaderID() uint64
+	// GetLeader returns current leader of the election group.
+	GetLeader() *pdpb.Member
+	// EnableLeader declares the member itself to be the leader.
+	EnableLeader()
+	// GetLeaderPath returns the path of the leader.
+	GetLeaderPath() string
+	// GetLeadership returns the leadership of the PD member.
+	GetLeadership() *election.Leadership
+	// CampaignLeader is used to campaign a PD member's leadership
+	// and make it become a PD leader.
+	CampaignLeader(leaseTimeout int64) error
+	// KeepLeader is used to keep the PD leader's leadership.
+	KeepLeader(ctx context.Context)
+	// CheckLeader checks returns true if it is needed to check later.
+	CheckLeader() (*pdpb.Member, int64, bool)
+	// WatchLeader is used to watch the changes of the leader.
+	WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64)
+	// ResetLeader is used to reset the PD member's current leadership.
+	// Basically it will reset the leader lease and unset leader info.
+	ResetLeader()
+	// IsSameLeader checks whether a server is the leader itself.
+	IsSameLeader(leader *pdpb.Member) bool
+	// CheckPriority checks whether there is another participant has higher priority and resign it as the leader if so.
+	CheckPriority(ctx context.Context)
+	// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
+	GetDCLocationPathPrefix() string
+	// GetDCLocationPath returns the dc-location path of a member with the given member ID.
+	GetDCLocationPath(id uint64) string
+	// PrecheckLeader does some pre-check before checking whether it's the leader.
+	PrecheckLeader() error
+}
+
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
@@ -114,7 +162,7 @@ type AllocatorManager struct {
 	}
 	wg sync.WaitGroup
 	// for election use
-	member *member.Member
+	member Member
 	// TSO config
 	rootPath               string
 	saveInterval           time.Duration
@@ -130,7 +178,7 @@ type AllocatorManager struct {
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
 func NewAllocatorManager(
-	m *member.Member,
+	m Member,
 	rootPath string,
 	enableLocalTSO bool,
 	saveInterval time.Duration,
@@ -314,10 +362,6 @@ func CalSuffixBits(maxSuffix int32) int {
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	if am.updatePhysicalInterval != defaultTSOUpdatePhysicalInterval {
-		log.Warn("tso update physical interval is non-default",
-			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
-	}
 	if _, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		return
 	}
