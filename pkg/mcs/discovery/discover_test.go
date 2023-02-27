@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 )
 
@@ -36,17 +37,20 @@ func TestDiscover(t *testing.T) {
 	ep := cfg.LCUrls[0].String()
 	re.NoError(err)
 
+	client, err := clientv3.NewFromURL(ep)
+	re.NoError(err)
+
 	<-etcd.Server.ReadyNotify()
-	sr1, err := NewServiceRegister(context.Background(), []string{ep}, "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
+	sr1, err := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
 	re.NoError(err)
 	err = sr1.Register()
 	re.NoError(err)
-	sr2, err := NewServiceRegister(context.Background(), []string{ep}, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr2, err := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	re.NoError(err)
 	err = sr2.Register()
 	re.NoError(err)
 
-	endpoints, err := Discover([]string{ep}, "test_service")
+	endpoints, err := Discover(client, "test_service")
 	re.NoError(err)
 	re.Len(endpoints, 2)
 	re.Equal("127.0.0.1:1", endpoints[0])
@@ -55,7 +59,7 @@ func TestDiscover(t *testing.T) {
 	sr1.cancel()
 	sr2.cancel()
 	time.Sleep(3 * time.Second)
-	endpoints, err = Discover([]string{ep}, "test_service")
+	endpoints, err = Discover(client, "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)
 }

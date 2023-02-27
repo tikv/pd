@@ -20,12 +20,7 @@ import (
 )
 
 // Discover is used to get all the service instances of the specified service name.
-func Discover(urls []string, serviceName string) ([]string, error) {
-	cli, err := clientv3.NewFromURLs(urls)
-	if err != nil {
-		return nil, err
-	}
-	defer cli.Close()
+func Discover(cli *clientv3.Client, serviceName string) ([]string, error) {
 	key := discoveryPath(serviceName) + "/"
 	endKey := clientv3.GetPrefixRangeEnd(key) + "/"
 

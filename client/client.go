@@ -137,8 +137,8 @@ type Client interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// EtcdClient returns the etcd client.
-	EtcdClient
+	// MetaStorageClient returns the meta storage client.
+	MetaStorageClient
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// ResourceManagerClient manages resource group metadata and token assignment.

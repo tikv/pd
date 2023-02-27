@@ -35,13 +35,11 @@ func TestRegister(t *testing.T) {
 	re.NoError(err)
 
 	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
+	client, err := clientv3.NewFromURL(ep)
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()
-	sr, err := NewServiceRegister(context.Background(), []string{ep}, "test_service", "127.0.0.1:1", "127.0.0.1:1", 10)
+	sr, err := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", 10)
 	re.NoError(err)
 	err = sr.Register()
 	re.NoError(err)
@@ -55,7 +53,7 @@ func TestRegister(t *testing.T) {
 	re.NoError(err)
 	re.Empty(resp.Kvs)
 
-	sr, err = NewServiceRegister(context.Background(), []string{ep}, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr, err = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	re.NoError(err)
 	err = sr.Register()
 	re.NoError(err)

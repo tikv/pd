@@ -38,11 +38,7 @@ type ServiceRegister struct {
 }
 
 // NewServiceRegister creates a new ServiceRegister.
-func NewServiceRegister(ctx context.Context, urls []string, serviceName, serviceAddr, serializedValue string, ttl int64) (*ServiceRegister, error) {
-	cli, err := clientv3.NewFromURLs(urls)
-	if err != nil {
-		return nil, err
-	}
+func NewServiceRegister(ctx context.Context, cli *clientv3.Client, serviceName, serviceAddr, serializedValue string, ttl int64) (*ServiceRegister, error) {
 	cctx, cancel := context.WithCancel(ctx)
 	serviceKey := registryPath(serviceName, serviceAddr)
 	return &ServiceRegister{
