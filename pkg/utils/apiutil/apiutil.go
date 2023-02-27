@@ -412,7 +412,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		case "gzip":
 			reader, err = gzip.NewReader(resp.Body)
 			if err != nil {
-				log.Error("failed to parser response with gzip compress", zap.Error(err))
+				log.Error("failed to parse response with gzip compress", zap.Error(err))
 				continue
 			}
 			defer reader.Close()
