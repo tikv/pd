@@ -28,9 +28,9 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/storagepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
@@ -1443,18 +1443,18 @@ func TestWatch(t *testing.T) {
 		defer wg.Done()
 		ch, err := client.Watch(ctx, []byte(key))
 		re.NoError(err)
-		var events []*storagepb.Event
+		var events []*meta_storagepb.Event
 		for e := range ch {
 			events = append(events, e...)
 			if len(events) >= 3 {
 				break
 			}
 		}
-		re.Equal(storagepb.Event_PUT, events[0].GetType())
+		re.Equal(meta_storagepb.Event_PUT, events[0].GetType())
 		re.Equal("1", string(events[0].GetKv().GetValue()))
-		re.Equal(storagepb.Event_PUT, events[1].GetType())
+		re.Equal(meta_storagepb.Event_PUT, events[1].GetType())
 		re.Equal("2", string(events[1].GetKv().GetValue()))
-		re.Equal(storagepb.Event_DELETE, events[2].GetType())
+		re.Equal(meta_storagepb.Event_DELETE, events[2].GetType())
 	}()
 
 	cli, err := clientv3.NewFromURLs(endpoints)

@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230220070831-5cc42e4327e4
+	github.com/pingcap/kvproto v0.0.0-20230227061928-2d7db5bc021e
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/stretchr/testify v1.8.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
@@ -171,5 +171,3 @@ replace (
 
 // reset grpc and protobuf deps in order to import client and server at the same time
 replace google.golang.org/grpc v1.51.0 => google.golang.org/grpc v1.26.0
-
-replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20230227022012-3ad5a6139696

@@ -18,17 +18,17 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pingcap/kvproto/pkg/storagepb"
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"go.etcd.io/etcd/clientv3"
 )
 
-// StorageServer wraps GrpcServer to provide etcd service.
-type StorageServer struct {
+// MetaStorageServer wraps GrpcServer to provide meta storage service.
+type MetaStorageServer struct {
 	*GrpcServer
 }
 
 // Watch watches the key with a given prefix and revision.
-func (s *StorageServer) Watch(req *storagepb.WatchRequest, server storagepb.Storage_WatchServer) error {
+func (s *MetaStorageServer) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.MetaStorage_WatchServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
 	key := string(req.GetKey())
@@ -41,13 +41,13 @@ func (s *StorageServer) Watch(req *storagepb.WatchRequest, server storagepb.Stor
 			return nil
 		case res := <-watchChan:
 			if res.Err() != nil {
-				var resp storagepb.WatchResponse
+				var resp meta_storagepb.WatchResponse
 				if startRevision < res.CompactRevision {
-					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), storagepb.ErrorType_DATA_COMPACTED,
+					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_DATA_COMPACTED,
 						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", startRevision, res.CompactRevision))
 					resp.CompactRevision = res.CompactRevision
 				} else {
-					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), storagepb.ErrorType_UNKNOWN,
+					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN,
 						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
 				}
 				if err := server.Send(&resp); err != nil {
@@ -57,17 +57,17 @@ func (s *StorageServer) Watch(req *storagepb.WatchRequest, server storagepb.Stor
 				return res.Err()
 			}
 
-			events := make([]*storagepb.Event, 0, len(res.Events))
+			events := make([]*meta_storagepb.Event, 0, len(res.Events))
 			for _, e := range res.Events {
-				event := &storagepb.Event{Kv: &storagepb.KeyValue{Key: e.Kv.Key, Value: e.Kv.Value}, Type: storagepb.Event_EventType(e.Type)}
+				event := &meta_storagepb.Event{Kv: &meta_storagepb.KeyValue{Key: e.Kv.Key, Value: e.Kv.Value}, Type: meta_storagepb.Event_EventType(e.Type)}
 				if e.PrevKv != nil {
-					event.PrevKv = &storagepb.KeyValue{Key: e.PrevKv.Key, Value: e.PrevKv.Value}
+					event.PrevKv = &meta_storagepb.KeyValue{Key: e.PrevKv.Key, Value: e.PrevKv.Value}
 				}
 				events = append(events, event)
 			}
 			if len(events) > 0 {
-				if err := server.Send(&storagepb.WatchResponse{
-					Header: &storagepb.ResponseHeader{Revision: res.Header.GetRevision(), ClusterId: s.clusterID},
+				if err := server.Send(&meta_storagepb.WatchResponse{
+					Header: &meta_storagepb.ResponseHeader{Revision: res.Header.GetRevision(), ClusterId: s.clusterID},
 					Events: events, CompactRevision: res.CompactRevision}); err != nil {
 					return err
 				}
@@ -77,7 +77,7 @@ func (s *StorageServer) Watch(req *storagepb.WatchRequest, server storagepb.Stor
 }
 
 // Get gets the key-value pair with a given key.
-func (s *StorageServer) Get(ctx context.Context, req *storagepb.GetRequest) (*storagepb.GetResponse, error) {
+func (s *MetaStorageServer) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*meta_storagepb.GetResponse, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	options := []clientv3.OpOption{}
@@ -93,22 +93,22 @@ func (s *StorageServer) Get(ctx context.Context, req *storagepb.GetRequest) (*st
 	}
 	res, err := s.client.Get(ctx, key, options...)
 	if err != nil {
-		return &storagepb.GetResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), storagepb.ErrorType_UNKNOWN, err.Error())}, nil
+		return &meta_storagepb.GetResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
-	resp := &storagepb.GetResponse{
-		Header: &storagepb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
+	resp := &meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
 		Count:  res.Count,
 		More:   res.More,
 	}
 	for _, kv := range res.Kvs {
-		resp.Kvs = append(resp.Kvs, &storagepb.KeyValue{Key: kv.Key, Value: kv.Value})
+		resp.Kvs = append(resp.Kvs, &meta_storagepb.KeyValue{Key: kv.Key, Value: kv.Value})
 	}
 
 	return resp, nil
 }
 
-// Put puts the key-value pair into etcd.
-func (s *StorageServer) Put(ctx context.Context, req *storagepb.PutRequest) (*storagepb.PutResponse, error) {
+// Put puts the key-value pair into meta storage.
+func (s *MetaStorageServer) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*meta_storagepb.PutResponse, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	options := []clientv3.OpOption{}
@@ -123,27 +123,27 @@ func (s *StorageServer) Put(ctx context.Context, req *storagepb.PutRequest) (*st
 
 	res, err := s.client.Put(ctx, key, value, options...)
 	if err != nil {
-		return &storagepb.PutResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), storagepb.ErrorType_UNKNOWN, err.Error())}, nil
+		return &meta_storagepb.PutResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 
-	resp := &storagepb.PutResponse{
-		Header: &storagepb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
+	resp := &meta_storagepb.PutResponse{
+		Header: &meta_storagepb.ResponseHeader{ClusterId: s.clusterID, Revision: res.Header.GetRevision()},
 	}
 	if res.PrevKv != nil {
-		resp.PrevKv = &storagepb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
+		resp.PrevKv = &meta_storagepb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
 	}
 	return resp, nil
 }
 
-func (s *StorageServer) wrapErrorAndRevision(revision int64, errorType storagepb.ErrorType, message string) *storagepb.ResponseHeader {
-	return s.etcdErrorHeader(revision, &storagepb.Error{
+func (s *MetaStorageServer) wrapErrorAndRevision(revision int64, errorType meta_storagepb.ErrorType, message string) *meta_storagepb.ResponseHeader {
+	return s.errorHeader(revision, &meta_storagepb.Error{
 		Type:    errorType,
 		Message: message,
 	})
 }
 
-func (s *StorageServer) etcdErrorHeader(revision int64, err *storagepb.Error) *storagepb.ResponseHeader {
-	return &storagepb.ResponseHeader{
+func (s *MetaStorageServer) errorHeader(revision int64, err *meta_storagepb.Error) *meta_storagepb.ResponseHeader {
+	return &meta_storagepb.ResponseHeader{
 		ClusterId: s.clusterID,
 		Revision:  revision,
 		Error:     err,

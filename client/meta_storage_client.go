@@ -20,32 +20,32 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/etcdpb"
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
 )
 
-// EtcdClient is the interface for etcd client.
-type EtcdClient interface {
+// MetaStorageClient is the interface for meta storage client.
+type MetaStorageClient interface {
 	// Watch watches on a key or prefix.
-	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*etcdpb.Event, error)
+	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error)
 	// Get gets the value for a key.
-	Get(ctx context.Context, key []byte, opts ...OpOption) (*etcdpb.GetResponse, error)
-	// Put puts a key-value pair into etcd.
-	Put(ctx context.Context, key []byte, value []byte, opts ...OpOption) (*etcdpb.PutResponse, error)
+	Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error)
+	// Put puts a key-value pair into meta storage.
+	Put(ctx context.Context, key []byte, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error)
 }
 
-// etcdClient gets the etcd client from current PD leader.
-func (c *client) etcdClient() etcdpb.EtcdClient {
+// metaStorageClient gets the meta storage client from current PD leader.
+func (c *client) metaStorageClient() meta_storagepb.MetaStorageClient {
 	if cc, err := c.getOrCreateGRPCConn(c.GetLeaderAddr()); err == nil {
-		return etcdpb.NewEtcdClient(cc)
+		return meta_storagepb.NewMetaStorageClient(cc)
 	}
 	return nil
 }
 
-// Op represents available options when using etcd client.
+// Op represents available options when using meta storage client.
 type Op struct {
 	rangeEnd []byte
 	revision int64
@@ -82,7 +82,7 @@ func WithLease(lease int64) OpOption {
 	return func(op *Op) { op.lease = lease }
 }
 
-func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*etcdpb.PutResponse, error) {
+func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error) {
 	options := &Op{}
 	for _, opt := range opts {
 		opt(options)
@@ -96,23 +96,23 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 	defer func() { cmdDurationPut.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	req := &etcdpb.PutRequest{
+	req := &meta_storagepb.PutRequest{
 		Key:    key,
 		Value:  value,
 		Lease:  options.lease,
 		PrevKv: options.prevKv,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.etcdClient().Put(ctx, req)
+	resp, err := c.metaStorageClient().Put(ctx, req)
 	cancel()
 
-	if err = c.respForEtcdErr(cmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForMetaStorageErr(cmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*etcdpb.GetResponse, error) {
+func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error) {
 	options := &Op{}
 	for _, opt := range opts {
 		opt(options)
@@ -126,29 +126,29 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*etcdpb
 	defer func() { cmdDurationGet.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	req := &etcdpb.GetRequest{
+	req := &meta_storagepb.GetRequest{
 		Key:      key,
 		RangeEnd: options.rangeEnd,
 		Limit:    options.limit,
 		Revision: options.revision,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.etcdClient().Get(ctx, req)
+	resp, err := c.metaStorageClient().Get(ctx, req)
 	cancel()
 
-	if err = c.respForEtcdErr(cmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForMetaStorageErr(cmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*etcdpb.Event, error) {
-	eventCh := make(chan []*etcdpb.Event, 100)
+func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error) {
+	eventCh := make(chan []*meta_storagepb.Event, 100)
 	options := &Op{}
 	for _, opt := range opts {
 		opt(options)
 	}
-	res, err := c.etcdClient().Watch(ctx, &etcdpb.WatchRequest{
+	res, err := c.metaStorageClient().Watch(ctx, &meta_storagepb.WatchRequest{
 		Key:           key,
 		RangeEnd:      options.rangeEnd,
 		StartRevision: options.revision,
@@ -180,7 +180,7 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 	return eventCh, err
 }
 
-func (c *client) respForEtcdErr(observer prometheus.Observer, start time.Time, err error, header *etcdpb.ResponseHeader) error {
+func (c *client) respForMetaStorageErr(observer prometheus.Observer, start time.Time, err error, header *meta_storagepb.ResponseHeader) error {
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
