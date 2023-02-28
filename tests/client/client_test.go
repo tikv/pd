@@ -1513,31 +1513,31 @@ func TestClientWatchWithRevision(t *testing.T) {
 	client := setupCli(re, ctx, endpoints)
 	defer client.Close()
 	s := cluster.GetServer(cluster.GetLeader())
-
+	watchPrefix := "watch_test"
 	defer func() {
-		_, err := s.GetEtcdClient().Delete(context.Background(), "test")
+		_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+"test")
 		re.NoError(err)
 
 		for i := 3; i < 9; i++ {
-			_, err := s.GetEtcdClient().Delete(context.Background(), "check"+strconv.Itoa(i))
+			_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+strconv.Itoa(i))
 			re.NoError(err)
 		}
 	}()
 	// Mock get revision by loading
-	r, err := s.GetEtcdClient().Put(context.Background(), "test", "test")
+	r, err := s.GetEtcdClient().Put(context.Background(), watchPrefix+"test", "test")
 	re.NoError(err)
-	res, err := client.Get(context.Background(), []byte("test"))
+	res, err := client.Get(context.Background(), []byte(watchPrefix), pd.WithPrefix())
 	re.NoError(err)
 	re.Len(res.Kvs, 1)
 	re.LessOrEqual(r.Header.GetRevision(), res.GetHeader().GetRevision())
 	// Mock when start watcher there are existed some keys, will load firstly
-	watchPrefix := "watch_test"
+
 	for i := 0; i < 6; i++ {
 		_, err = s.GetEtcdClient().Put(context.Background(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
 		re.NoError(err)
 	}
 	// Start watcher at next revision
-	ch, err := client.Watch(context.Background(), []byte(watchPrefix), pd.WithRev(res.GetHeader().GetRevision()))
+	ch, err := client.Watch(context.Background(), []byte(watchPrefix), pd.WithRev(res.GetHeader().GetRevision()), pd.WithPrefix(), pd.WithPrevKV())
 	re.NoError(err)
 	// Mock delete
 	for i := 0; i < 3; i++ {
@@ -1549,13 +1549,20 @@ func TestClientWatchWithRevision(t *testing.T) {
 		_, err = s.GetEtcdClient().Put(context.Background(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
 		re.NoError(err)
 	}
+	var watchCount int
 	for {
 		select {
-		case <-time.After(time.Second):
+		case <-time.After(1 * time.Second):
+			re.Equal(13, watchCount)
 			return
 		case res := <-ch:
 			for _, r := range res {
-				re.Equal(watchPrefix+string(r.Kv.Value), string(r.Kv.Key))
+				watchCount++
+				if r.GetType() == meta_storagepb.Event_DELETE {
+					re.Equal(watchPrefix+string(r.PrevKv.Value), string(r.Kv.Key))
+				} else {
+					re.Equal(watchPrefix+string(r.Kv.Value), string(r.Kv.Key))
+				}
 			}
 		}
 	}
