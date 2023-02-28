@@ -47,11 +47,12 @@ func (c *client) metaStorageClient() meta_storagepb.MetaStorageClient {
 
 // Op represents available options when using meta storage client.
 type Op struct {
-	rangeEnd []byte
-	revision int64
-	prevKv   bool
-	lease    int64
-	limit    int64
+	rangeEnd         []byte
+	revision         int64
+	prevKv           bool
+	lease            int64
+	limit            int64
+	isOptsWithPrefix bool
 }
 
 // OpOption configures etcd Op.
@@ -80,6 +81,26 @@ func WithPrevKV() OpOption {
 // WithLease specifies the lease of the key.
 func WithLease(lease int64) OpOption {
 	return func(op *Op) { op.lease = lease }
+}
+
+// WithPrefix specifies the prefix of the key.
+func WithPrefix() OpOption {
+	return func(op *Op) {
+		op.isOptsWithPrefix = true
+	}
+}
+
+func getPrefix(key []byte) []byte {
+	end := make([]byte, len(key))
+	copy(end, key)
+	for i := len(end) - 1; i >= 0; i-- {
+		if end[i] < 0xff {
+			end[i]++
+			end = end[:i+1]
+			return end
+		}
+	}
+	return []byte{0}
 }
 
 func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error) {
@@ -117,6 +138,9 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 	for _, opt := range opts {
 		opt(options)
 	}
+	if options.isOptsWithPrefix {
+		options.rangeEnd = getPrefix(key)
+	}
 
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.Get", opentracing.ChildOf(span.Context()))
@@ -148,6 +172,10 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 	for _, opt := range opts {
 		opt(options)
 	}
+	if options.isOptsWithPrefix {
+		options.rangeEnd = getPrefix(key)
+	}
+
 	res, err := c.metaStorageClient().Watch(ctx, &meta_storagepb.WatchRequest{
 		Key:           key,
 		RangeEnd:      options.rangeEnd,
