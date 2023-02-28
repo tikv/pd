@@ -39,8 +39,8 @@ type MetaStorageClient interface {
 
 // metaStorageClient gets the meta storage client from current PD leader.
 func (c *client) metaStorageClient() meta_storagepb.MetaStorageClient {
-	if cc, err := c.getOrCreateGRPCConn(c.GetLeaderAddr()); err == nil {
-		return meta_storagepb.NewMetaStorageClient(cc)
+	if client := c.bc.GetServingEndpointClientConn(); client != nil {
+		return meta_storagepb.NewMetaStorageClient(client)
 	}
 	return nil
 }
@@ -152,6 +152,7 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 		Key:           key,
 		RangeEnd:      options.rangeEnd,
 		StartRevision: options.revision,
+		PrevKv:        options.prevKv,
 	})
 	if err != nil {
 		close(eventCh)
@@ -184,7 +185,7 @@ func (c *client) respForMetaStorageErr(observer prometheus.Observer, start time.
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.ScheduleCheckLeader()
+			c.bc.ScheduleCheckMemberChanged()
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))

@@ -88,11 +88,20 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 	}
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
+	options := []clientv3.OpOption{}
 	key := string(req.GetKey())
-	endKey := string(req.GetRangeEnd())
-	startRevision := req.GetStartRevision()
+	var startRevision int64
+	if endKey := req.GetRangeEnd(); endKey != nil {
+		options = append(options, clientv3.WithRange(string(endKey)))
+	}
+	if startRevision = req.GetStartRevision(); startRevision != 0 {
+		options = append(options, clientv3.WithRev(startRevision))
+	}
+	if prevKv := req.GetPrevKv(); prevKv {
+		options = append(options, clientv3.WithPrevKV())
+	}
 	cli := s.manager.GetClient()
-	watchChan := cli.Watch(ctx, key, clientv3.WithPrefix(), clientv3.WithRange(endKey), clientv3.WithRev(startRevision), clientv3.WithPrevKV())
+	watchChan := cli.Watch(ctx, key, options...)
 	for {
 		select {
 		case <-ctx.Done():
