@@ -293,7 +293,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		re.Contains(resp, "Success!")
 	}
 
-	controller, _ := controller.NewResourceGroupController(1, cli, controller.DefaultServerlessRUConfig())
+	controller, _ := controller.NewResourceGroupController(1, cli, controller.SetSingleGroupByKeyspaceMode())
 	controller.Start(suite.ctx)
 
 	testCases := []struct {

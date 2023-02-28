@@ -83,8 +83,8 @@ type RequestUnitConfig struct {
 	IsServerless bool `toml:"serverless" json:"serverless"`
 }
 
-// defaultRequestUnitConfig returns the default request unit configuration.
-func defaultRequestUnitConfig() *RequestUnitConfig {
+// DefaultRequestUnitConfig returns the default request unit configuration.
+func DefaultRequestUnitConfig() *RequestUnitConfig {
 	return &RequestUnitConfig{
 		ReadBaseCost:     defaultReadBaseCost,
 		ReadCostPerByte:  defaultReadCostPerByte,
@@ -95,9 +95,9 @@ func defaultRequestUnitConfig() *RequestUnitConfig {
 	}
 }
 
-// DefaultServerlessRUConfig returns the default configuration of Serverless.
-func DefaultServerlessRUConfig() *RequestUnitConfig {
-	cfg := defaultRequestUnitConfig()
+// SetSingleGroupByKeyspaceMode returns the default configuration of Serverless.
+func SetSingleGroupByKeyspaceMode() *RequestUnitConfig {
+	cfg := DefaultRequestUnitConfig()
 	cfg.IsServerless = true
 	return cfg
 }
@@ -120,7 +120,7 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	cfg := generateConfig(
-		defaultRequestUnitConfig(),
+		DefaultRequestUnitConfig(),
 	)
 	return cfg
 }
