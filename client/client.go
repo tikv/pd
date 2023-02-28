@@ -242,7 +242,8 @@ func WithMaxErrorRetry(count int) ClientOption {
 var _ Client = (*client)(nil)
 
 type client struct {
-	bc BaseClient
+	bc    BaseClient
+	tsobc BaseClient
 	tsoStreamBuilderFactory
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding dc-location TSO channel.
@@ -290,6 +291,7 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, &security)
 	c.tsoStreamBuilderFactory = &pdTSOStreamBuilderFactory{}
 	c.bc = newPDBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
+	c.tsobc = c.bc
 	if err := c.setup(opts...); err != nil {
 		return nil, err
 	}
@@ -297,14 +299,22 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 }
 
 // NewTSOClientWithContext creates a TSO client with context.
-func NewTSOClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd(tso)] create tso client with endpoints", zap.Strings("tso-address", svrAddrs))
+// TODO:
+// relace NewClientWithContext with this API after we enable auto service discovery.
+// Before that, internal tools call this function to use mcs service.
+func NewTSOClientWithContext(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+	log.Info("[pd(tso)] create tso client with endpoints", zap.Strings("pd(api)-address", svrAddrs))
 	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, &security)
 	c.tsoStreamBuilderFactory = &tsoTSOStreamBuilderFactory{}
-	c.bc = newTSOBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
+	c.bc = newPDBaseClient(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
+	c.tsobc = newTSOMcsClient(clientCtx, clientCancel, &c.wg, MetaStorageClient(c), keyspaceID, addrsToUrls(svrAddrs), tlsCfg, c.option)
 	if err := c.setup(opts...); err != nil {
 		return nil, err
 	}
+	if err := c.tsobc.Init(); err != nil {
+		return nil, err
+	}
+	c.updateTSODispatcher()
 	return c, nil
 }
 
@@ -344,8 +354,8 @@ func (c *client) setup(opts ...ClientOption) error {
 	}
 
 	// Register callbacks
-	c.bc.AddTSOAllocatorServingAddrSwitchedCallback(c.scheduleCheckTSODispatcher)
-	c.bc.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
+	c.tsobc.AddTSOAllocatorServingAddrSwitchedCallback(c.scheduleCheckTSODispatcher)
+	c.tsobc.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
 	c.bc.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
 
 	// Create dispatchers
@@ -472,7 +482,8 @@ func (c *client) Close() {
 		return true
 	})
 
-	c.bc.CloseClientConns()
+	c.bc.Close()
+	c.tsobc.Close()
 
 	if c.tokenDispatcher != nil {
 		tokenErr := errors.WithStack(errClosing)
@@ -525,6 +536,17 @@ func (c *client) getClient() pdpb.PDClient {
 		}
 	}
 	return c.leaderClient()
+}
+
+type tsoRequest struct {
+	start      time.Time
+	clientCtx  context.Context
+	requestCtx context.Context
+	done       chan error
+	physical   int64
+	logical    int64
+	dcLocation string
+	keyspaceID uint32
 }
 
 var tsoReqPool = sync.Pool{

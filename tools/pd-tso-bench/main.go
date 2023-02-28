@@ -37,7 +37,6 @@ import (
 
 var (
 	pdAddrs                = flag.String("pd", "127.0.0.1:2379", "pd address")
-	tsoAddrs               = flag.String("tso", "127.0.0.1:3379", "tso address")
 	microservice           = flag.Bool("m", false, "talks to the tso microservice")
 	clientNumber           = flag.Int("client", 1, "the number of pd clients involved in each benchmark")
 	concurrency            = flag.Int("c", 1000, "concurrency")
@@ -98,7 +97,7 @@ func bench(mainCtx context.Context) {
 		)
 
 		if *microservice {
-			pdCli, err = pd.NewTSOClientWithContext(mainCtx, []string{*tsoAddrs}, pd.SecurityOption{
+			pdCli, err = pd.NewTSOClientWithContext(mainCtx, 0, []string{*pdAddrs}, pd.SecurityOption{
 				CAPath:   *caPath,
 				CertPath: *certPath,
 				KeyPath:  *keyPath,
@@ -356,15 +355,28 @@ func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {
 
 	for {
 		start := time.Now()
-		_, _, err := pdCli.GetLocalTS(reqCtx, *dcLocation)
-		if errors.Cause(err) == context.Canceled {
-			return
-		}
 
+		var (
+			i                      int32
+			err                    error
+			maxRetryTime           int32         = 50
+			sleepIntervalOnFailure time.Duration = 100 * time.Millisecond
+		)
+		for ; i < maxRetryTime; i++ {
+			_, _, err = pdCli.GetLocalTS(reqCtx, *dcLocation)
+			if errors.Cause(err) == context.Canceled {
+				return
+			}
+			if err == nil {
+				break
+			}
+			log.Error(fmt.Sprintf("%v", err))
+			time.Sleep(sleepIntervalOnFailure)
+		}
 		if err != nil {
 			log.Fatal(fmt.Sprintf("%v", err))
 		}
-		dur := time.Since(start)
+		dur := time.Since(start) - time.Duration(i)*sleepIntervalOnFailure
 
 		select {
 		case <-reqCtx.Done():

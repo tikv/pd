@@ -39,24 +39,13 @@ const (
 	memberUpdateInterval = time.Minute
 )
 
-type tsoRequest struct {
-	start      time.Time
-	clientCtx  context.Context
-	requestCtx context.Context
-	done       chan error
-	physical   int64
-	logical    int64
-	dcLocation string
-	keyspaceID uint32
-}
-
 // BaseClient defines the general interface for service discovery on a quorum-based cluster
 // or a primary/secondy configured cluster.
 type BaseClient interface {
 	// Init initialize the concrete client underlying
 	Init() error
-	// Close all grpc client connnections
-	CloseClientConns()
+	// Close releases all resources
+	Close()
 	// GetClusterID returns the ID of the cluster
 	GetClusterID(context.Context) uint64
 	// GetURLs returns the URLs of the servers.
@@ -205,12 +194,13 @@ func (c *pdBaseClient) memberLoop() {
 	}
 }
 
-// Close all grpc client connnections
-func (c *pdBaseClient) CloseClientConns() {
-	c.clientConns.Range(func(_, cc interface{}) bool {
+// Close releases all resources
+func (c *pdBaseClient) Close() {
+	c.clientConns.Range(func(key, cc interface{}) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
 			log.Error("[pd] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
+		c.clientConns.Delete(key)
 		return true
 	})
 }
