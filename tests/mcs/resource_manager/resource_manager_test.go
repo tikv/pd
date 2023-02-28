@@ -665,15 +665,14 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 	cli := suite.client
 
 	group := &rmpb.ResourceGroup{
-		Name: "modetest",
+		Name: "test3",
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &rmpb.GroupRequestUnitSettings{
 			RU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   10,
-					BurstLimit: 10,
+					FillRate: 10000,
 				},
-				Tokens: 10,
+				Tokens: 100000,
 			},
 		},
 	}
@@ -731,16 +730,24 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 		CPUMsCost:        1,
 	}
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU", "return(true)"))
 	controller, _ := controller.NewResourceGroupController(1, cli, cfg)
 	controller.Start(suite.ctx)
 	tc := tokenConsumptionPerSecond{
 		rruTokensAtATime: 0,
-		wruTokensAtATime: 100,
+		wruTokensAtATime: 10000,
 	}
 	controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
 	time.Sleep(time.Second * 2)
+	beginTime := time.Now()
+	for i := 0; i < 100; i++ {
+		controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
+	}
+	endTime := time.Now()
+	// we can not check `inDegradedMode` because of data race.
+	re.True(endTime.Before(beginTime.Add(time.Second)))
 	controller.Stop()
-	re.True(controller.IsInDegradedMode())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU"))
 	suite.cleanupResourceGroups()
 }

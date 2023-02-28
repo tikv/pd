@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
@@ -173,12 +174,6 @@ func (c *ResourceGroupsController) Stop() error {
 	}
 	c.loopCancel()
 	return nil
-}
-
-// IsInDegradedMode return whether controller is in degraded mode.
-// only used in test.
-func (c *ResourceGroupsController) IsInDegradedMode() bool {
-	return c.run.inDegradedMode
 }
 
 // tryGetResourceGroup will try to get the resource group controller from local cache first,
@@ -723,6 +718,9 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		fillRate := getRUTokenBucketSetting(gc.ResourceGroup, typ)
 		cfg.NewBurst = int64(fillRate.Settings.FillRate)
 		cfg.NewRate = float64(fillRate.Settings.FillRate)
+		failpoint.Inject("degradedModeRU", func() {
+			cfg.NewRate = 99999999
+		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 	}
 
