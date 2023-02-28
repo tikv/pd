@@ -92,6 +92,7 @@ type ResourceGroupsController struct {
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
 func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupProvider, requestUnitConfig *RequestUnitConfig) (*ResourceGroupsController, error) {
+	// TODO: initialize `requestUnitConfig`` from the remote manager server.
 	var config *Config
 	if requestUnitConfig != nil {
 		config = generateConfig(requestUnitConfig)
