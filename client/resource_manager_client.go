@@ -86,11 +86,11 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string)
 	resp, err := c.resourceManagerClient().GetResourceGroup(ctx, req)
 	if err != nil {
 		c.gRPCErrorHandler(err)
-		return nil, errs.ErrClientGetResourceGroup.FastGenByArgs(err.Error())
+		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return nil, errs.ErrClientGetResourceGroup.FastGenByArgs(resErr.Message)
+		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: resErr.Message}
 	}
 	return resp.GetGroup(), nil
 }
