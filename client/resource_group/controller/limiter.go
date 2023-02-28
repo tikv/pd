@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
 
@@ -408,7 +409,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
-			return fmt.Errorf("[resource group controller] limiter has no enough token or needs wait too long")
+			return errs.ErrClientResourceGroupThrottled
 		}
 		delay := res.DelayFrom(now)
 		if delay > longestDelayDuration {

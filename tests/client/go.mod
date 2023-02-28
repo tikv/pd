@@ -1,10 +1,10 @@
 module github.com/tikv/pd/tests/client
 
-go 1.19
+go 1.20
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230216063518-fe71e5de4643
+	github.com/pingcap/kvproto v0.0.0-20230220070831-5cc42e4327e4
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/stretchr/testify v1.8.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
@@ -72,6 +72,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
 	github.com/gtank/cryptopasta v0.0.0-20170601214702-1f550f6f2f69 // indirect
 	github.com/ianlancetaylor/demangle v0.0.0-20210905161508-09a460cdf81d // indirect
+	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
@@ -117,6 +118,7 @@ require (
 	github.com/sirupsen/logrus v1.6.0 // indirect
 	github.com/smallnest/chanx v0.0.0-20221229104322-eb4c998d2072 // indirect
 	github.com/soheilhy/cmux v0.1.4 // indirect
+	github.com/spf13/cobra v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/objx v0.5.0 // indirect
 	github.com/swaggo/files v0.0.0-20190704085106-630677cd5c14 // indirect

@@ -1,6 +1,6 @@
 module github.com/tikv/pd
 
-go 1.19
+go 1.20
 
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
@@ -146,7 +146,7 @@ require (
 	github.com/shurcooL/httpgzip v0.0.0-20190720172056-320755c1c1b0 // indirect
 	github.com/shurcooL/sanitized_anchor_name v1.0.0 // indirect
 	github.com/sirupsen/logrus v1.6.0 // indirect
-	github.com/soheilhy/cmux v0.1.4 // indirect
+	github.com/soheilhy/cmux v0.1.4
 	github.com/stretchr/objx v0.5.0 // indirect
 	github.com/swaggo/files v0.0.0-20190704085106-630677cd5c14 // indirect
 	github.com/tidwall/gjson v1.9.3 // indirect

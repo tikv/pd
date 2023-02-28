@@ -54,7 +54,7 @@ const (
 
 const (
 	defaultReadBaseCost  = 0.25
-	defaultWriteBaseCost = 1.5
+	defaultWriteBaseCost = 1
 	// 1 RU = 64 KiB read bytes
 	defaultReadCostPerByte = 1. / (64 * 1024)
 	// 1 RU = 1 KiB written bytes
@@ -83,8 +83,8 @@ type RequestUnitConfig struct {
 	IsServerless bool `toml:"serverless" json:"serverless"`
 }
 
-// DefaultRequestUnitConfig returns the default request unit configuration.
-func DefaultRequestUnitConfig() *RequestUnitConfig {
+// defaultRequestUnitConfig returns the default request unit configuration.
+func defaultRequestUnitConfig() *RequestUnitConfig {
 	return &RequestUnitConfig{
 		ReadBaseCost:     defaultReadBaseCost,
 		ReadCostPerByte:  defaultReadCostPerByte,
@@ -120,7 +120,7 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	cfg := generateConfig(
-		DefaultRequestUnitConfig(),
+		defaultRequestUnitConfig(),
 	)
 	return cfg
 }

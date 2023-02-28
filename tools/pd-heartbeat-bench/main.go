@@ -232,7 +232,7 @@ func (rs *Regions) init(cfg *config.Config) {
 		slice[i] = i
 	}
 
-	rand.Seed(0) // Ensure consistent behavior multiple times
+	rand.New(rand.NewSource(0)) // Ensure consistent behavior multiple times
 	pick := func(ratio float64) []int {
 		rand.Shuffle(cfg.RegionCount, func(i, j int) {
 			slice[i], slice[j] = slice[j], slice[i]
@@ -479,7 +479,7 @@ func main() {
 			regions.update(cfg.Replica)
 			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
 		case <-ctx.Done():
-			log.Info("Got signal to exit")
+			log.Info("got signal to exit")
 			switch sig {
 			case syscall.SIGTERM:
 				exit(0)

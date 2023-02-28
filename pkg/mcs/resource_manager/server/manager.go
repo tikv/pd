@@ -27,37 +27,51 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"go.uber.org/zap"
 )
 
-const defaultConsumptionChanSize = 1024
+const (
+	defaultConsumptionChanSize = 1024
+	metricsCleanupInterval     = time.Minute
+	metricsCleanupTimeout      = 20 * time.Minute
+)
 
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	member  *member.Member
-	groups  map[string]*ResourceGroup
-	storage endpoint.ResourceGroupStorage
+	srv      bs.Server
+	ruConfig *RequestUnitConfig
+	groups   map[string]*ResourceGroup
+	storage  endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
 		resourceGroupName string
 		*rmpb.Consumption
 	}
+	// record update time of each resource group
+	consumptionRecord map[string]time.Time
 }
 
-// NewManager returns a new Manager.
-func NewManager(srv bs.Server) *Manager {
+// RUConfigProvider is used to get RU config from the given
+// `bs.server` without modifying its interface.
+type RUConfigProvider interface {
+	GetRequestUnitConfig() *RequestUnitConfig
+}
+
+// NewManager returns a new manager base on the given server,
+// which should implement the `RUConfigProvider` interface.
+func NewManager[T RUConfigProvider](srv bs.Server) *Manager {
 	m := &Manager{
-		member: &member.Member{},
-		groups: make(map[string]*ResourceGroup),
+		ruConfig: srv.(T).GetRequestUnitConfig(),
+		groups:   make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
 		}, defaultConsumptionChanSize),
+		consumptionRecord: make(map[string]time.Time),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -66,16 +80,23 @@ func NewManager(srv bs.Server) *Manager {
 			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
 			nil,
 		)
-		m.member = srv.GetMember()
+		m.srv = srv
 	})
-	// The second initialization after the leader is elected.
-	srv.AddLeaderCallback(m.Init)
+	// The second initialization after becoming serving.
+	srv.AddServiceReadyCallback(m.Init)
 	return m
+}
+
+// GetBasicServer returns the basic server.
+func (m *Manager) GetBasicServer() bs.Server {
+	return m.srv
 }
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
-	// Reset the resource groups first.
+	// Store the RU model config into the storage.
+	m.storage.SaveRequestUnitConfig(m.ruConfig)
+	// Load resource group meta info from storage.
 	m.groups = make(map[string]*ResourceGroup)
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
@@ -86,6 +107,7 @@ func (m *Manager) Init(ctx context.Context) {
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
 	m.storage.LoadResourceGroupSettings(handler)
+	// Load resource group states from storage.
 	tokenHandler := func(k, v string) {
 		tokens := &GroupStates{}
 		if err := json.Unmarshal([]byte(v), tokens); err != nil {
@@ -227,6 +249,8 @@ func (m *Manager) persistResourceGroupRunningState() {
 
 // Receive the consumption and flush it to the metrics.
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+	ticker := time.NewTicker(metricsCleanupInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -274,6 +298,24 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			if consumption.KvWriteRpcCount != 0 {
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
+			}
+
+			m.consumptionRecord[name] = time.Now()
+
+		case <-ticker.C:
+			// Clean up the metrics that have not been updated for a long time.
+			for name, lastTime := range m.consumptionRecord {
+				if time.Since(lastTime) > metricsCleanupTimeout {
+					readRequestUnitCost.DeleteLabelValues(name)
+					writeRequestUnitCost.DeleteLabelValues(name)
+					readByteCost.DeleteLabelValues(name)
+					writeByteCost.DeleteLabelValues(name)
+					kvCPUCost.DeleteLabelValues(name)
+					sqlCPUCost.DeleteLabelValues(name)
+					requestCount.DeleteLabelValues(name, readTypeLabel)
+					requestCount.DeleteLabelValues(name, writeTypeLabel)
+					delete(m.consumptionRecord, name)
+				}
 			}
 		}
 	}

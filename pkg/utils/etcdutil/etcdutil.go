@@ -17,21 +17,18 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"math/rand"
 	"net/http"
 	"net/url"
-	"testing"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
@@ -40,6 +37,9 @@ import (
 const (
 	// defaultEtcdClientTimeout is the default timeout for etcd client.
 	defaultEtcdClientTimeout = 3 * time.Second
+
+	// defaultAutoSyncInterval is the interval to sync etcd cluster.
+	defaultAutoSyncInterval = 60 * time.Second
 
 	// DefaultDialTimeout is the maximum amount of time a dial will wait for a
 	// connection to setup. 30s is long enough for most of the network conditions.
@@ -186,51 +186,46 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
 }
 
-// NewTestSingleConfig is used to create a etcd config for the unit test purpose.
-func NewTestSingleConfig(t *testing.T) *embed.Config {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd"
-	cfg.Dir = t.TempDir()
-	cfg.WalDir = ""
-	cfg.Logger = "zap"
-	cfg.LogOutputs = []string{"stdout"}
-
-	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-
-	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	return cfg
-}
-
 // CreateClients creates etcd v3 client and http client.
 func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
-	endpoints := []string{acUrls[0].String()}
-	lgc := zap.NewProductionConfig()
-	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: defaultEtcdClientTimeout,
-		TLS:         tlsConfig,
-		LogConfig:   &lgc,
-	})
+	client, err := createEtcdClient(tlsConfig, acUrls)
 	if err != nil {
 		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
-
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 			TLSClientConfig:   tlsConfig,
 		},
 	}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
 	return client, httpClient, nil
+}
+
+func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, error) {
+	if len(acUrls) == 0 {
+		return nil, errs.ErrNewEtcdClient.FastGenByArgs("no available etcd address")
+	}
+	endpoints := make([]string, 0, len(acUrls))
+	for _, u := range acUrls {
+		endpoints = append(endpoints, u.String())
+	}
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
+	autoSyncInterval := defaultAutoSyncInterval
+	failpoint.Inject("autoSyncInterval", func() {
+		autoSyncInterval = 10 * time.Millisecond
+	})
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:        endpoints,
+		DialTimeout:      defaultEtcdClientTimeout,
+		AutoSyncInterval: autoSyncInterval,
+		TLS:              tlsConfig,
+		LogConfig:        &lgc,
+	})
+	if err != nil {
+		log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
+	}
+	return client, err
 }
 
 // InitClusterID creates a cluster ID for the given key if it hasn't existed.

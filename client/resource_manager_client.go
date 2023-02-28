@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
 
@@ -33,8 +34,8 @@ const (
 	add                     actionType = 0
 	modify                  actionType = 1
 	groupSettingsPathPrefix            = "resource_group/settings"
-	// errNotLeaderMsg is returned when the requested server is not the leader.
-	errNotLeaderMsg = "not leader"
+	// errNotPrimary is returned when the requested server is not primary.
+	errNotPrimary = "not primary"
 )
 
 // ResourceManagerClient manages resource group info and token request.
@@ -50,7 +51,7 @@ type ResourceManagerClient interface {
 
 // resourceManagerClient gets the ResourceManager client of current PD leader.
 func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
-	if cc, err := c.getOrCreateGRPCConn(c.GetLeaderAddr()); err == nil {
+	if cc, err := c.bc.GetOrCreateGRPCConn(c.GetLeaderAddr()); err == nil {
 		return rmpb.NewResourceManagerClient(cc)
 	}
 	return nil
@@ -58,8 +59,8 @@ func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
 
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *client) gRPCErrorHandler(err error) {
-	if strings.Contains(err.Error(), errNotLeaderMsg) {
-		c.ScheduleCheckLeader()
+	if strings.Contains(err.Error(), errNotPrimary) {
+		c.bc.ScheduleCheckMemberChanged()
 	}
 }
 
@@ -69,11 +70,11 @@ func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 	resp, err := c.resourceManagerClient().ListResourceGroups(ctx, req)
 	if err != nil {
 		c.gRPCErrorHandler(err)
-		return nil, err
+		return nil, errs.ErrClientListResourceGroup.FastGenByArgs(err.Error())
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return nil, errors.Errorf("[resource_manager] %s", resErr.Message)
+		return nil, errs.ErrClientListResourceGroup.FastGenByArgs(resErr.Message)
 	}
 	return resp.GetGroups(), nil
 }
@@ -85,11 +86,11 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string)
 	resp, err := c.resourceManagerClient().GetResourceGroup(ctx, req)
 	if err != nil {
 		c.gRPCErrorHandler(err)
-		return nil, err
+		return nil, errs.ErrClientGetResourceGroup.FastGenByArgs(err.Error())
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return nil, errors.Errorf("[resource_manager] %s", resErr.Message)
+		return nil, errs.ErrClientGetResourceGroup.FastGenByArgs(resErr.Message)
 	}
 	return resp.GetGroup(), nil
 }
@@ -302,7 +303,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		// If the stream is still nil, return an error.
 		if stream == nil {
 			firstRequest.done <- errors.Errorf("failed to get the stream connection")
-			c.ScheduleCheckLeader()
+			c.bc.ScheduleCheckMemberChanged()
 			connection.reset()
 			continue
 		}
@@ -314,7 +315,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		default:
 		}
 		if err = c.processTokenRequests(stream, firstRequest); err != nil {
-			c.ScheduleCheckLeader()
+			c.bc.ScheduleCheckMemberChanged()
 			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
 		}

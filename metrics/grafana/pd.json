@@ -1748,6 +1748,14 @@
               "legendFormat": "{{job}}-{{instance}}",
               "refId": "A",
               "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "{{job}}-{{instance}}-limit",
+              "refId": "B"
             }
           ],
           "thresholds": [],
@@ -3252,6 +3260,14 @@
               "intervalFactor": 2,
               "legendFormat": "{{type}}-{{name}}",
               "refId": "A"
+            },
+            {
+              "exemplar": true,
+              "expr": "sum(delta(pd_schedule_operator_exceeded_store_limit{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[1m])) by (desc)",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "{{desc}}-exceed-store-limit",
+              "refId": "B"
             }
           ],
           "thresholds": [],
