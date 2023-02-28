@@ -93,12 +93,15 @@ func (s *Service) handler() http.Handler {
 	})
 }
 
-// @Summary Add a resource group
-// @Param  groupInfo body object true "json params, rmpb.ResourceGroup"
-// @Success 200 {string} string "Success"
-// @Failure 400 {string} error
-// @Failure 500 {string} error
-// @Router /config/group [POST]
+// postResourceGroup
+//
+//	@Tags		ResourceManager
+//	@Summary	Add a resource group
+//	@Param		groupInfo	body		object	true	"json params, rmpb.ResourceGroup"
+//	@Success	200			{string}	string	"Success"
+//	@Failure	400			{string}	error
+//	@Failure	500			{string}	error
+//	@Router		/config/group [POST]
 func (s *Service) postResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
 	if err := c.ShouldBindJSON(&group); err != nil {
@@ -113,12 +116,15 @@ func (s *Service) postResourceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, "Success!")
 }
 
-// @Summary updates an exists resource group
-// @Param  groupInfo body object true "json params, rmpb.ResourceGroup"
-// @Success 200 "Success"
-// @Failure 400 {string} error
-// @Failure 500 {string} error
-// @Router /config/group/ [PUT]
+// putResourceGroup
+//
+//	@Tags		ResourceManager
+//	@Summary	updates an exists resource group
+//	@Param		groupInfo	body	object	true	"json params, rmpb.ResourceGroup"
+//	@Success	200			"Success"
+//	@Failure	400			{string}	error
+//	@Failure	500			{string}	error
+//	@Router		/config/group [PUT]
 func (s *Service) putResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
 	if err := c.ShouldBindJSON(&group); err != nil {
@@ -132,11 +138,14 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, "Success!")
 }
 
-// @Summary Get resource group by name.
-// @Success 200 {string} json format of rmpb.ResourceGroup
-// @Failure 404 {string} error
-// @Param name path string true "groupName"
-// @Router /config/group/{name} [GET]
+// getResourceGroup
+//
+//	@Tags		ResourceManager
+//	@Summary	Get resource group by name.
+//	@Success	200		{string}	json	format	of	rmpb.ResourceGroup
+//	@Failure	404		{string}	error
+//	@Param		name	path		string	true	"groupName"
+//	@Router		/config/group/{name} [GET]
 func (s *Service) getResourceGroup(c *gin.Context) {
 	group := s.manager.GetResourceGroup(c.Param("name"))
 	if group == nil {
@@ -145,20 +154,26 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, group)
 }
 
-// @Summary get all resource group with a list.
-// @Success 200 {string} json format of []rmpb.ResourceGroup
-// @Failure 404 {string} error
-// @Router /config/groups [GET]
+// getResourceGroupList
+//
+//	@Tags		ResourceManager
+//	@Summary	get all resource group with a list.
+//	@Success	200	{string}	json	format	of	[]rmpb.ResourceGroup
+//	@Failure	404	{string}	error
+//	@Router		/config/groups [GET]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	groups := s.manager.GetResourceGroupList()
 	c.JSON(http.StatusOK, groups)
 }
 
-// @Summary delete resource group by name.
-// @Param name path string true "Name of the resource group to be deleted"
-// @Success 200 {string} string "Success!"
-// @Failure 404 {string} error
-// @Router /config/group/{name} [DELETE]
+// deleteResourceGroup
+//
+//	@Tags		ResourceManager
+//	@Summary	delete resource group by name.
+//	@Param		name	path		string	true	"Name of the resource group to be deleted"
+//	@Success	200		{string}	string	"Success!"
+//	@Failure	404		{string}	error
+//	@Router		/config/group/{name} [DELETE]
 func (s *Service) deleteResourceGroup(c *gin.Context) {
 	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
