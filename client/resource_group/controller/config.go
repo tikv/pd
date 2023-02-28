@@ -97,7 +97,7 @@ func defaultRequestUnitConfig() *RequestUnitConfig {
 
 // DefaultServerlessRUConfig returns the default configuration of Serverless.
 func DefaultServerlessRUConfig() *RequestUnitConfig {
-	cfg := DefaultRequestUnitConfig()
+	cfg := defaultRequestUnitConfig()
 	cfg.IsServerless = true
 	return cfg
 }

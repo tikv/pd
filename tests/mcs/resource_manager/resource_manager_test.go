@@ -292,15 +292,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		re.Contains(resp, "Success!")
 	}
 
-	cfg := &controller.RequestUnitConfig{
-		ReadBaseCost:     1,
-		ReadCostPerByte:  1,
-		WriteBaseCost:    1,
-		WriteCostPerByte: 1,
-		CPUMsCost:        1,
-	}
-
-	controller, _ := controller.NewResourceGroupController(1, cli, cfg)
+	controller, _ := controller.NewResourceGroupController(1, cli, controller.DefaultServerlessRUConfig())
 	controller.Start(suite.ctx)
 
 	testCases := []struct {
