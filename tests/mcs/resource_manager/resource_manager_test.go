@@ -293,7 +293,15 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		re.Contains(resp, "Success!")
 	}
 
-	controller, _ := controller.NewResourceGroupController(1, cli, controller.SetSingleGroupByKeyspaceMode())
+	cfg := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+		CPUMsCost:        1,
+	}
+
+	controller, _ := controller.NewResourceGroupController(1, cli, cfg, controller.EnableSingleGroupByKeyspace())
 	controller.Start(suite.ctx)
 
 	testCases := []struct {

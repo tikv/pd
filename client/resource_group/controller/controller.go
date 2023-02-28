@@ -52,6 +52,16 @@ type ResourceGroupProvider interface {
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 }
 
+// ResourceControlCreateOption create a ResourceGroupsController with the optional settings.
+type ResourceControlCreateOption func(controller *ResourceGroupsController)
+
+// EnableSingleGroupByKeyspace is the option to enable IsSingleGroupByKeyspace feature.
+func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.config.IsSingleGroupByKeyspace = true
+	}
+}
+
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController impls ResourceGroupKVInterceptor.
@@ -78,7 +88,7 @@ type ResourceGroupsController struct {
 		lastRequestTime time.Time
 
 		// requestInProgress is true if we are in the process of sending a request.
-		// It gets set to false when we receives the response in the main loop,
+		// It gets set to false when we receive the response in the main loop,
 		// even in error cases.
 		requestInProgress bool
 
@@ -91,15 +101,16 @@ type ResourceGroupsController struct {
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
-func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupProvider, requestUnitConfig *RequestUnitConfig) (*ResourceGroupsController, error) {
-	// TODO: initialize `requestUnitConfig`` from the remote manager server.
+func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupProvider, requestUnitConfig *RequestUnitConfig, opts ...ResourceControlCreateOption) (*ResourceGroupsController, error) {
+	// TODO: initialize `requestUnitConfig` from the remote manager server.
 	var config *Config
 	if requestUnitConfig != nil {
 		config = generateConfig(requestUnitConfig)
 	} else {
 		config = DefaultConfig()
 	}
-	return &ResourceGroupsController{
+
+	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
 		config:                config,
@@ -107,7 +118,11 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
 		calculators:           []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(controller)
+	}
+	return controller, nil
 }
 
 // Start starts ResourceGroupController service.
@@ -495,7 +510,7 @@ func (gc *groupCostController) updateRunState() {
 	newTime := time.Now()
 	gc.mu.Lock()
 	for _, calc := range gc.calculators {
-		calc.Trickle(gc.mu.consumption, gc.mainCfg.IsServerless)
+		calc.Trickle(gc.mu.consumption, gc.mainCfg.IsSingleGroupByKeyspace)
 	}
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()

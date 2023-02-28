@@ -46,6 +46,14 @@ var (
 			Help:      "Bucketed histogram of the write request unit cost for all resource groups.",
 			Buckets:   prometheus.ExponentialBuckets(3, 10, 5), // 3 ~ 300000
 		}, []string{resourceGroupNameLabel})
+	sqlLayerRequestUnitCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "sql_layer_request_unit",
+			Help:      "Bucketed histogram of the sql layer request unit cost for all resource groups.",
+			Buckets:   prometheus.ExponentialBuckets(4, 10, 5), // 1 ~ 400000
+		}, []string{resourceGroupNameLabel})
 
 	// Resource cost metrics.
 	readByteCost = prometheus.NewHistogramVec(

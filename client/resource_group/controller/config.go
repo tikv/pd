@@ -79,8 +79,6 @@ type RequestUnitConfig struct {
 	// CPUMsCost is the cost for each millisecond of CPU time taken.
 	// It's 1 RU = 3 millisecond by default.
 	CPUMsCost float64 `toml:"read-cpu-ms-cost" json:"read-cpu-ms-cost"`
-	// Declaring Serverless Environments.
-	IsServerless bool `toml:"serverless" json:"serverless"`
 }
 
 // DefaultRequestUnitConfig returns the default request unit configuration.
@@ -91,15 +89,7 @@ func DefaultRequestUnitConfig() *RequestUnitConfig {
 		WriteBaseCost:    defaultWriteBaseCost,
 		WriteCostPerByte: defaultWriteCostPerByte,
 		CPUMsCost:        defaultCPUMsCost,
-		IsServerless:     false,
 	}
-}
-
-// SetSingleGroupByKeyspaceMode returns the default configuration of Serverless.
-func SetSingleGroupByKeyspaceMode() *RequestUnitConfig {
-	cfg := DefaultRequestUnitConfig()
-	cfg.IsServerless = true
-	return cfg
 }
 
 // Config is the configuration of the resource units, which gives the read/write request
@@ -114,7 +104,7 @@ type Config struct {
 	CPUMsCost      RequestUnit
 	// The CPU statistics need to distinguish between different environments.
 	// Will remove After https://github.com/golang/go/issues/41554 merged.
-	IsServerless bool
+	IsSingleGroupByKeyspace bool
 }
 
 // DefaultConfig returns the default configuration.
@@ -132,7 +122,6 @@ func generateConfig(ruConfig *RequestUnitConfig) *Config {
 		WriteBaseCost:  RequestUnit(ruConfig.WriteBaseCost),
 		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
 		CPUMsCost:      RequestUnit(ruConfig.CPUMsCost),
-		IsServerless:   ruConfig.IsServerless,
 	}
 	return cfg
 }
