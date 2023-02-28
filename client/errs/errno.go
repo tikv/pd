@@ -15,6 +15,8 @@
 package errs
 
 import (
+	"fmt"
+
 	"github.com/pingcap/errors"
 )
 
@@ -66,8 +68,16 @@ var (
 
 // resource group errors
 var (
-	ErrClientGetResourceGroup               = errors.Normalize("get resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientGetResourceGroup"))
 	ErrClientListResourceGroup              = errors.Normalize("get all resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientListResourceGroup"))
 	ErrClientResourceGroupConfigUnavailable = errors.Normalize("resource group config is unavailable, %v", errors.RFCCodeText("PD:client:ErrClientResourceGroupConfigUnavailable"))
 	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
 )
+
+type ErrClientGetResourceGroup struct {
+	ResourceGroupName string
+	Cause             string
+}
+
+func (e *ErrClientGetResourceGroup) Error() string {
+	return fmt.Sprintf("get resource group %v failed, %v", e.ResourceGroupName, e.Cause)
+}
