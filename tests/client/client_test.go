@@ -1501,51 +1501,52 @@ func TestPutGet(t *testing.T) {
 	re.Empty(getResp.GetKvs())
 }
 
+// TestClientWatchWithRevision is the same as TestClientWatchWithRevision in global config.
 func TestClientWatchWithRevision(t *testing.T) {
 	re := require.New(t)
-	checker := assertutil.NewChecker()
-	checker.FailNow = func() {}
-	svr, cleanup, err := server.NewTestServer(re, checker)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
-	defer cleanup()
-	s := &server.GrpcServer{Server: svr}
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+	client := setupCli(re, ctx, endpoints)
+	defer client.Close()
+	s := cluster.GetServer(cluster.GetLeader())
 
-	addr := s.GetAddr()
-	client, err := pd.NewClientWithContext(s.Context(), []string{addr}, pd.SecurityOption{})
-	re.NoError(err)
 	defer func() {
-		_, err := s.GetClient().Delete(s.Context(), "test")
+		_, err := s.GetEtcdClient().Delete(context.Background(), "test")
 		re.NoError(err)
 
 		for i := 3; i < 9; i++ {
-			_, err := s.GetClient().Delete(s.Context(), "check"+strconv.Itoa(i))
+			_, err := s.GetEtcdClient().Delete(context.Background(), "check"+strconv.Itoa(i))
 			re.NoError(err)
 		}
 	}()
 	// Mock get revision by loading
-	r, err := s.GetClient().Put(s.Context(), "test", "test")
+	r, err := s.GetEtcdClient().Put(context.Background(), "test", "test")
 	re.NoError(err)
-	res, err := client.Get(s.Context(), []byte("test"))
+	res, err := client.Get(context.Background(), []byte("test"))
 	re.NoError(err)
 	re.Len(res.Kvs, 1)
 	re.LessOrEqual(r.Header.GetRevision(), res.GetHeader().GetRevision())
 	// Mock when start watcher there are existed some keys, will load firstly
 	watchPrefix := "watch_test"
 	for i := 0; i < 6; i++ {
-		_, err = s.GetClient().Put(s.Context(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
+		_, err = s.GetEtcdClient().Put(context.Background(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
 		re.NoError(err)
 	}
 	// Start watcher at next revision
-	ch, err := client.Watch(s.Context(), []byte(watchPrefix), pd.WithRev(res.GetHeader().GetRevision()))
+	ch, err := client.Watch(context.Background(), []byte(watchPrefix), pd.WithRev(res.GetHeader().GetRevision()))
 	re.NoError(err)
 	// Mock delete
 	for i := 0; i < 3; i++ {
-		_, err = s.GetClient().Delete(s.Context(), watchPrefix+strconv.Itoa(i))
+		_, err = s.GetEtcdClient().Delete(context.Background(), watchPrefix+strconv.Itoa(i))
 		re.NoError(err)
 	}
 	// Mock put
 	for i := 6; i < 9; i++ {
-		_, err = s.GetClient().Put(s.Context(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
+		_, err = s.GetEtcdClient().Put(context.Background(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
 		re.NoError(err)
 	}
 	for {
