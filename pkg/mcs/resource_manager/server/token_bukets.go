@@ -156,7 +156,7 @@ retryLoop:
 		gts.assignTokensSum += assignToken
 		if gts.assignTokensSum >= maxAssignTokens {
 			gts.cleanupAssignTokenSum()
-			break retryLoop
+			continue retryLoop
 		}
 	}
 }
