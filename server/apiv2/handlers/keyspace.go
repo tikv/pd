@@ -101,13 +101,13 @@ func LoadKeyspace(c *gin.Context) {
 }
 
 // LoadKeyspaceByID returns target keyspace.
-// @Tags keyspaces
-// @Summary Get keyspace info.
-// @Param id path string true "Keyspace id"
-// @Produce json
-// @Success 200 {object} KeyspaceMeta
-// @Failure 500 {string} string "PD server failed to proceed the request."
-// @Router /keyspaces/id/{id} [get]
+// @Tags     keyspaces
+// @Summary  Get keyspace info.
+// @Param    id  path  string  true  "Keyspace id"
+// @Produce  json
+// @Success  200  {object}  KeyspaceMeta
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /keyspaces/id/{id} [get]
 func LoadKeyspaceByID(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || id == 0 {
