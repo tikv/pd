@@ -50,7 +50,8 @@ type ResponseInfo interface {
 type ResourceCalculator interface {
 	// Trickle is used to calculate the resource consumption periodically rather than on the request path.
 	// It's mainly used to calculate like the SQL CPU cost.
-	Trickle(*rmpb.Consumption)
+	// Need to check if it is a serverless environment
+	Trickle(*rmpb.Consumption, bool)
 	// BeforeKVRequest is used to calculate the resource consumption before the KV request.
 	// It's mainly used to calculate the base and write request cost.
 	BeforeKVRequest(*rmpb.Consumption, RequestInfo)
@@ -71,7 +72,7 @@ func newKVCalculator(cfg *Config) *KVCalculator {
 }
 
 // Trickle ...
-func (kc *KVCalculator) Trickle(*rmpb.Consumption) {
+func (kc *KVCalculator) Trickle(*rmpb.Consumption, bool) {
 }
 
 // BeforeKVRequest ...
@@ -137,12 +138,11 @@ func newSQLCalculator(cfg *Config) *SQLCalculator {
 	return &SQLCalculator{Config: cfg}
 }
 
-// Trickle Update Sql Layer CPU consumption.
-func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption) {
-	sqlCpuTimeMs := getSQLProcessCPUTime()
-	delta := sqlCpuTimeMs - consumption.SqlLayerCpuTimeMs
+// Trickle update sql layer CPU consumption.
+func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption, isServerless bool) {
+	delta := getSQLProcessCPUTime(isServerless) - consumption.SqlLayerCpuTimeMs
 	consumption.TotalCpuTimeMs += delta
-	consumption.SqlLayerCpuTimeMs = sqlCpuTimeMs
+	consumption.SqlLayerCpuTimeMs += delta
 }
 
 // BeforeKVRequest ...
@@ -214,7 +214,14 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 }
 
 // getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.
-func getSQLProcessCPUTime() float64 {
+func getSQLProcessCPUTime(isServerless bool) float64 {
+	if isServerless {
+		return getSysProcessCPUTime()
+	}
+	return getGroupProcessCPUTime()
+}
+
+func getSysProcessCPUTime() float64 {
 	pid := os.Getpid()
 	cpuTime := gosigar.ProcTime{}
 	if err := cpuTime.Get(pid); err != nil {
@@ -222,4 +229,9 @@ func getSQLProcessCPUTime() float64 {
 	}
 
 	return float64(cpuTime.User + cpuTime.Sys)
+}
+
+// TODO: will be implemented by Goroutine after https://github.com/golang/go/issues/41554 merged
+func getGroupProcessCPUTime() float64 {
+	return 0
 }
