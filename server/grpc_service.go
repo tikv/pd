@@ -116,7 +116,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
-	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName)) {
+	if s.IsTSOEnabled() {
 		tsoAllocatorManager := s.GetTSOAllocatorManager()
 		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
 	}

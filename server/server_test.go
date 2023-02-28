@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -286,4 +287,42 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	suite.NoError(err)
 	bodyString := string(bodyBytes)
 	suite.Equal("Hello World\n", bodyString)
+}
+
+func TestAPIService(t *testing.T) {
+	re := require.New(t)
+
+	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	defer testutil.CleanServer(cfg.DataDir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockHandler := CreateMockHandler(re, "127.0.0.1")
+	svr, err := CreateServer(ctx, cfg, []string{"api"}, mockHandler)
+	re.NoError(err)
+	defer svr.Close()
+	err = svr.Run()
+	re.NoError(err)
+	MustWaitLeader(re, []*Server{svr})
+	re.True(svr.IsAPIServiceMode())
+	re.False(svr.IsServiceEnabled(TSOServiceName))
+	re.False(svr.IsServiceEnabled(ResourceManagerServiceName))
+}
+
+func TestMultipleServices(t *testing.T) {
+	re := require.New(t)
+
+	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	defer testutil.CleanServer(cfg.DataDir)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockHandler := CreateMockHandler(re, "127.0.0.1")
+	svr, err := CreateServer(ctx, cfg, []string{"resource-manager", "api"}, mockHandler)
+	re.NoError(err)
+	defer svr.Close()
+	err = svr.Run()
+	re.NoError(err)
+	MustWaitLeader(re, []*Server{svr})
+	re.True(svr.IsAPIServiceMode())
+	re.False(svr.IsServiceEnabled(TSOServiceName))
+	re.True(svr.IsServiceEnabled(ResourceManagerServiceName))
 }

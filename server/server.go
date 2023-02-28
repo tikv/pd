@@ -382,7 +382,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 	})
 
-	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName)) {
+	if s.IsTSOEnabled() {
 		s.tsoAllocatorManager = tso.NewAllocatorManager(
 			s.member, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
 			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
@@ -541,7 +541,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName)) {
+	if s.IsTSOEnabled() {
 		s.serverLoopWg.Add(1)
 		go s.tsoAllocatorLoop()
 	}
@@ -1380,6 +1380,11 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	return nil
 }
 
+// IsTSOEnabled returns whether the TSO service is enabled.
+func (s *Server) IsTSOEnabled() bool {
+	return !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName))
+}
+
 // IsServing returns whether the server is the leader if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
 	return s.member.IsLeader()
@@ -1410,8 +1415,10 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
-			// Check the cluster dc-location after the PD leader is elected
-			go s.tsoAllocatorManager.ClusterDCLocationChecker()
+			if s.IsTSOEnabled() {
+				// Check the cluster dc-location after the PD leader is elected
+				go s.tsoAllocatorManager.ClusterDCLocationChecker()
+			}
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
@@ -1466,7 +1473,7 @@ func (s *Server) campaignLeader() {
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
 
-	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName)) {
+	if s.IsTSOEnabled() {
 		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 		if err != nil {
 			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
@@ -1519,7 +1526,7 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	if !s.IsAPIServiceMode() || (s.IsAPIServiceMode() && s.IsServiceEnabled(TSOServiceName)) {
+	if s.IsTSOEnabled() {
 		// Check the cluster dc-location after the PD leader is elected.
 		go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	}
