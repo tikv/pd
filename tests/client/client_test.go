@@ -1492,6 +1492,13 @@ func TestPutGet(t *testing.T) {
 	getResp, err = client.Get(context.Background(), key)
 	re.NoError(err)
 	re.Equal([]byte("2"), getResp.GetKvs()[0].Value)
+	s := cluster.GetServer(cluster.GetLeader())
+	// use etcd client delete the key
+	_, err = s.GetEtcdClient().Delete(context.Background(), string(key))
+	re.NoError(err)
+	getResp, err = client.Get(context.Background(), key)
+	re.NoError(err)
+	re.Empty(getResp.GetKvs())
 }
 
 func TestClientWatchWithRevision(t *testing.T) {
