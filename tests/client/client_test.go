@@ -23,6 +23,7 @@ import (
 	"path"
 	"reflect"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -1491,4 +1492,63 @@ func TestPutGet(t *testing.T) {
 	getResp, err = client.Get(context.Background(), key)
 	re.NoError(err)
 	re.Equal([]byte("2"), getResp.GetKvs()[0].Value)
+}
+
+func TestClientWatchWithRevision(t *testing.T) {
+	re := require.New(t)
+	checker := assertutil.NewChecker()
+	checker.FailNow = func() {}
+	svr, cleanup, err := server.NewTestServer(re, checker)
+	re.NoError(err)
+	defer cleanup()
+	s := &server.GrpcServer{Server: svr}
+
+	addr := s.GetAddr()
+	client, err := pd.NewClientWithContext(s.Context(), []string{addr}, pd.SecurityOption{})
+	re.NoError(err)
+	defer func() {
+		_, err := s.GetClient().Delete(s.Context(), "test")
+		re.NoError(err)
+
+		for i := 3; i < 9; i++ {
+			_, err := s.GetClient().Delete(s.Context(), "check"+strconv.Itoa(i))
+			re.NoError(err)
+		}
+	}()
+	// Mock get revision by loading
+	r, err := s.GetClient().Put(s.Context(), "test", "test")
+	re.NoError(err)
+	res, err := client.Get(s.Context(), []byte("test"))
+	re.NoError(err)
+	re.Len(res.Kvs, 1)
+	re.LessOrEqual(r.Header.GetRevision(), res.GetHeader().GetRevision())
+	// Mock when start watcher there are existed some keys, will load firstly
+	watchPrefix := "watch_test"
+	for i := 0; i < 6; i++ {
+		_, err = s.GetClient().Put(s.Context(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
+		re.NoError(err)
+	}
+	// Start watcher at next revision
+	ch, err := client.Watch(s.Context(), []byte(watchPrefix), pd.WithRev(res.GetHeader().GetRevision()))
+	re.NoError(err)
+	// Mock delete
+	for i := 0; i < 3; i++ {
+		_, err = s.GetClient().Delete(s.Context(), watchPrefix+strconv.Itoa(i))
+		re.NoError(err)
+	}
+	// Mock put
+	for i := 6; i < 9; i++ {
+		_, err = s.GetClient().Put(s.Context(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
+		re.NoError(err)
+	}
+	for {
+		select {
+		case <-time.After(time.Second):
+			return
+		case res := <-ch:
+			for _, r := range res {
+				re.Equal(watchPrefix+string(r.Kv.Value), string(r.Kv.Key))
+			}
+		}
+	}
 }
