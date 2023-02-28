@@ -665,14 +665,15 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 	cli := suite.client
 
 	group := &rmpb.ResourceGroup{
-		Name: "test3",
+		Name: "modetest",
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &rmpb.GroupRequestUnitSettings{
 			RU: &rmpb.TokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
-					FillRate: 10000,
+					FillRate:   10,
+					BurstLimit: 10,
 				},
-				Tokens: 100000,
+				Tokens: 10,
 			},
 		},
 	}
@@ -698,5 +699,48 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 	}
 
 	// Cleanup the resource group.
+	suite.cleanupResourceGroups()
+}
+
+func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMode() {
+	re := suite.Require()
+	cli := suite.client
+
+	group := &rmpb.ResourceGroup{
+		Name: "modetest",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   10,
+					BurstLimit: 10,
+				},
+				Tokens: 10,
+			},
+		},
+	}
+	addResp, err := cli.AddResourceGroup(suite.ctx, group)
+	re.NoError(err)
+	re.Contains(addResp, "Success!")
+
+	cfg := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+		CPUMsCost:        1,
+	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed", `return(true)`))
+	controller, _ := controller.NewResourceGroupController(1, cli, cfg)
+	controller.Start(suite.ctx)
+	tc := tokenConsumptionPerSecond{
+		rruTokensAtATime: 0,
+		wruTokensAtATime: 100,
+	}
+	controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
+	time.Sleep(time.Second * 2)
+	controller.Stop()
+	re.True(controller.IsInDegradedMode())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed"))
 	suite.cleanupResourceGroups()
 }

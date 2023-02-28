@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -169,6 +170,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		if err == io.EOF {
 			return nil
 		}
+		failpoint.Inject("acquireFailed", func() {
+			err = errors.New("error")
+		})
 		if err != nil {
 			return errors.WithStack(err)
 		}
