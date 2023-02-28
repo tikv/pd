@@ -90,6 +90,7 @@ func WithPrefix() OpOption {
 	}
 }
 
+// See https://github.com/etcd-io/etcd/blob/da4bf0f76fb708e0b57763edb46ba523447b9510/client/v3/op.go#L372-L385
 func getPrefix(key []byte) []byte {
 	end := make([]byte, len(key))
 	copy(end, key)
