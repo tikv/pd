@@ -52,6 +52,13 @@ func TestSlidingWindow(t *testing.T) {
 		}
 		re.EqualValues(v.capacity, cap)
 	}
+	// case 0: test low level
+	re.True(s.Available(capacity, AddPeer, Low))
+	re.True(s.Take(capacity, AddPeer, Low))
+	re.False(s.Available(capacity, AddPeer, Low))
+	s.Ack(capacity)
+	re.True(s.Available(capacity, AddPeer, Low))
+
 	// case 1: it will occupy the normal window size not the high window.
 	re.True(s.Take(capacity, AddPeer, High))
 	re.EqualValues(capacity, s.GetUsed())
@@ -62,10 +69,10 @@ func TestSlidingWindow(t *testing.T) {
 	// case 2: it will occupy the high window size if the normal window is full.
 	capacity = 1000
 	s.Reset(float64(capacity), AddPeer)
-	re.True(s.Take(capacity, AddPeer, Medium))
-	re.False(s.Take(capacity, AddPeer, Medium))
-	re.True(s.Take(capacity-100, AddPeer, High))
-	re.False(s.Take(capacity-100, AddPeer, High))
+	re.True(s.Take(capacity, AddPeer, Low))
+	re.False(s.Take(capacity, AddPeer, Low))
+	re.True(s.Take(capacity-100, AddPeer, Medium))
+	re.False(s.Take(capacity-100, AddPeer, Medium))
 	re.EqualValues(s.GetUsed(), capacity+capacity-100)
 	s.Ack(capacity)
 	re.Equal(s.GetUsed(), capacity-100)

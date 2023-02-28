@@ -70,7 +70,7 @@ func (s *SlidingWindows) GetUsed() int64 {
 func (s *SlidingWindows) Available(_ int64, _ Type, level PriorityLevel) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for i := 0; i < int(level); i++ {
+	for i := 0; i <= int(level); i++ {
 		if s.windows[i].available() {
 			return true
 		}
@@ -83,7 +83,7 @@ func (s *SlidingWindows) Available(_ int64, _ Type, level PriorityLevel) bool {
 func (s *SlidingWindows) Take(token int64, _ Type, level PriorityLevel) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := 0; i < int(level); i++ {
+	for i := 0; i <= int(level); i++ {
 		if s.windows[i].take(token) {
 			return true
 		}

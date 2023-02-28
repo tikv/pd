@@ -30,9 +30,13 @@ const (
 type PriorityLevel int
 
 const (
+	// Low represent the lowest level.
 	Low PriorityLevel = iota
+	// Medium represent the medium level.
 	Medium
+	// High represent the high level.
 	High
+	// Urgent represent the urgent level.
 	Urgent
 
 	priorityLevelLen
