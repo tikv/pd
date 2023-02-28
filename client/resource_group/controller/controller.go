@@ -723,7 +723,6 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 	}
-
 }
 
 func (gc *groupCostController) applyBasicConfigForRawResourceTokenCounter() {
