@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package middlewares
+package multiservicesapi
 
 import (
 	"net/http"
@@ -20,39 +20,44 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/log"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
-	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 )
 
-// Redirector is a middleware to redirect the request to the right place.
-func Redirector() gin.HandlerFunc {
+// HTTP headers.
+const (
+	ServiceAllowDirectHandle = "service-allow-direct-handle"
+	ServiceRedirectorHeader  = "service-redirector"
+)
+
+// ServiceRedirector is a middleware to redirect the request to the right place.
+func ServiceRedirector() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		svr := c.MustGet("server").(*server.Server)
-		allowFollowerHandle := len(c.Request.Header.Get(serverapi.PDAllowFollowerHandle)) > 0
-		isLeader := svr.GetMember().IsLeader()
-		if !svr.IsClosed() && (allowFollowerHandle || isLeader) {
+		svr := c.MustGet("service").(bs.Server)
+		allowDirectHandle := len(c.Request.Header.Get(ServiceAllowDirectHandle)) > 0
+		isServing := svr.IsServing()
+		if allowDirectHandle || isServing {
 			c.Next()
 			return
 		}
 
 		// Prevent more than one redirection.
-		if name := c.Request.Header.Get(serverapi.PDRedirectorHeader); len(name) != 0 {
-			log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirect))
+		if name := c.Request.Header.Get(ServiceRedirectorHeader); len(name) != 0 {
+			log.Error("redirect but server is not primary", zap.String("from", name), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirect))
 			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrRedirect.FastGenByArgs().Error())
 			return
 		}
 
-		c.Request.Header.Set(serverapi.PDRedirectorHeader, svr.Name())
+		c.Request.Header.Set(ServiceRedirectorHeader, svr.Name())
 
-		leader := svr.GetMember().GetLeader()
-		if leader == nil {
+		primary := svr.GetPrimary()
+		if primary == nil {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 			return
 		}
-		clientUrls := leader.GetClientUrls()
+		clientUrls := primary.GetClientUrls()
 		urls := make([]url.URL, 0, len(clientUrls))
 		for _, item := range clientUrls {
 			u, err := url.Parse(item)

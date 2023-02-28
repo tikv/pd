@@ -56,13 +56,6 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-type client interface {
-	GetLeaderAddr() string
-	ScheduleCheckLeader()
-	GetURLs() []string
-	GetAllocatorLeaderURLs() map[string]string
-}
-
 func TestClientClusterIDCheck(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -106,6 +99,8 @@ func TestClientLeaderChange(t *testing.T) {
 
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints)
+	innerCli, ok := cli.(interface{ GetBaseClient() pd.BaseClient })
+	re.True(ok)
 
 	var ts1, ts2 uint64
 	testutil.Eventually(re, func() bool {
@@ -120,13 +115,14 @@ func TestClientLeaderChange(t *testing.T) {
 	re.True(cluster.CheckTSOUnique(ts1))
 
 	leader := cluster.GetLeader()
-	waitLeader(re, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetBaseClient(), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	err = cluster.GetServer(leader).Stop()
 	re.NoError(err)
 	leader = cluster.WaitLeader()
 	re.NotEmpty(leader)
-	waitLeader(re, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
+
+	waitLeader(re, innerCli.GetBaseClient(), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	// Check TS won't fall back after leader changed.
 	testutil.Eventually(re, func() bool {
@@ -143,7 +139,7 @@ func TestClientLeaderChange(t *testing.T) {
 
 	// Check URL list.
 	cli.Close()
-	urls := cli.(client).GetURLs()
+	urls := innerCli.GetBaseClient().GetURLs()
 	sort.Strings(urls)
 	sort.Strings(endpoints)
 	re.Equal(endpoints, urls)
@@ -289,12 +285,14 @@ func TestTSOAllocatorLeader(t *testing.T) {
 		allocatorLeaderMap[dcLocation] = pdName
 	}
 	cli := setupCli(re, ctx, endpoints)
+	innerCli, ok := cli.(interface{ GetBaseClient() pd.BaseClient })
+	re.True(ok)
 
 	// Check allocator leaders URL map.
 	cli.Close()
-	for dcLocation, url := range cli.(client).GetAllocatorLeaderURLs() {
+	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(innerCli.GetBaseClient()) {
 		if dcLocation == tso.GlobalDCLocation {
-			urls := cli.(client).GetURLs()
+			urls := innerCli.GetBaseClient().GetURLs()
 			sort.Strings(urls)
 			sort.Strings(endpoints)
 			re.Equal(endpoints, urls)
@@ -511,6 +509,15 @@ func requestGlobalAndLocalTSO(
 	wg.Wait()
 }
 
+func getTSOAllocatorServingEndpointURLs(c pd.BaseClient) map[string]string {
+	allocatorLeaders := make(map[string]string)
+	c.GetTSOAllocators().Range(func(dcLocation, url interface{}) bool {
+		allocatorLeaders[dcLocation.(string)] = url.(string)
+		return true
+	})
+	return allocatorLeaders
+}
+
 func TestCustomTimeout(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -656,10 +663,10 @@ func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, o
 	return cli
 }
 
-func waitLeader(re *require.Assertions, cli client, leader string) {
+func waitLeader(re *require.Assertions, cli pd.BaseClient, leader string) {
 	testutil.Eventually(re, func() bool {
-		cli.ScheduleCheckLeader()
-		return cli.GetLeaderAddr() == leader
+		cli.ScheduleCheckMemberChanged()
+		return cli.GetServingAddr() == leader
 	})
 }
 

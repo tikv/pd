@@ -32,7 +32,9 @@ import (
 	"github.com/pingcap/log"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -49,6 +51,7 @@ const (
 	defaultGRPCGracefulStopTimeout = 5 * time.Second
 	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
 	defaultHTTPGracefulShutdownTimeout = 5 * time.Second
+	defaultLeaseInSeconds              = 3
 )
 
 // Server is the resource manager server, and it implements bs.Server.
@@ -62,7 +65,8 @@ type Server struct {
 
 	cfg         *Config
 	name        string
-	backendUrls []url.URL
+	backendURLs []url.URL
+	listenURL   *url.URL
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -75,6 +79,8 @@ type Server struct {
 	startCallbacks []func()
 	// primaryCallbacks will be called after the server becomes leader.
 	primaryCallbacks []func(context.Context)
+
+	serviceRegister *discovery.ServiceRegister
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.
@@ -103,6 +109,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing resource manager server ...")
+	s.serviceRegister.Deregister()
 	s.muxListener.Close()
 	s.serverLoopWg.Wait()
 
@@ -117,6 +124,11 @@ func (s *Server) Close() {
 	}
 
 	log.Info("resource manager server is closed")
+}
+
+// GetRequestUnitConfig returns the RU config.
+func (s *Server) GetRequestUnitConfig() *RequestUnitConfig {
+	return &s.cfg.RequestUnit
 }
 
 // GetClient returns builtin etcd client.
@@ -145,7 +157,7 @@ func (s *Server) IsClosed() bool {
 	return atomic.LoadInt64(&s.isServing) == 0
 }
 
-// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
@@ -159,8 +171,8 @@ func (s *Server) initClient() error {
 	if err != nil {
 		return err
 	}
-	s.backendUrls = []url.URL(u)
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendUrls)
+	s.backendURLs = []url.URL(u)
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendURLs)
 	return err
 }
 
@@ -239,8 +251,14 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 	}
 }
 
+// GetPrimary returns the primary member.
+func (s *Server) GetPrimary() bs.MemberProvider {
+	// TODO: implement this function with primary.
+	return nil
+}
+
 func (s *Server) startServer() error {
-	manager := NewManager(s)
+	manager := NewManager[*Server](s)
 	s.service = &Service{
 		ctx:     s.ctx,
 		manager: manager,
@@ -250,10 +268,14 @@ func (s *Server) startServer() error {
 	if err != nil {
 		return err
 	}
+	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
+	if err != nil {
+		return err
+	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(tcp, s.cfg.ListenAddr, tlsConfig)
+		s.muxListener, err = tls.Listen(tcp, s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(tcp, s.cfg.ListenAddr)
+		s.muxListener, err = net.Listen(tcp, s.listenURL.Host)
 	}
 	if err != nil {
 		return err
@@ -274,6 +296,8 @@ func (s *Server) startServer() error {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, defaultLeaseInSeconds)
+	s.serviceRegister.Register()
 	return nil
 }
 
