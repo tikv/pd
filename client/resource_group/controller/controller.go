@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -24,11 +25,13 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
 
 const (
+	requestUnitConfigPath  = "resource_group/ru_config"
 	defaultMaxWaitDuration = time.Second
 	maxRetry               = 3
 	maxNotificationChanLen = 200
@@ -50,6 +53,7 @@ type ResourceGroupProvider interface {
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
+	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]pd.GlobalConfigItem, int64, error)
 }
 
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
@@ -91,14 +95,20 @@ type ResourceGroupsController struct {
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
-func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupProvider, requestUnitConfig *RequestUnitConfig) (*ResourceGroupsController, error) {
-	// TODO: initialize `requestUnitConfig`` from the remote manager server.
-	var config *Config
-	if requestUnitConfig != nil {
-		config = generateConfig(requestUnitConfig)
-	} else {
-		config = DefaultConfig()
+func NewResourceGroupController(
+	ctx context.Context,
+	clientUniqueID uint64,
+	provider ResourceGroupProvider,
+	requestUnitConfig *RequestUnitConfig,
+) (*ResourceGroupsController, error) {
+	if requestUnitConfig == nil {
+		var err error
+		requestUnitConfig, err = loadRequestUnitConfig(ctx, provider)
+		if err != nil {
+			return nil, err
+		}
 	}
+	config := GenerateConfig(requestUnitConfig)
 	return &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
@@ -108,6 +118,27 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
 		calculators:           []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
 	}, nil
+}
+
+func loadRequestUnitConfig(ctx context.Context, provider ResourceGroupProvider) (*RequestUnitConfig, error) {
+	items, _, err := provider.LoadGlobalConfig(ctx, nil, requestUnitConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, errors.Errorf("failed to load the ru config from remote server")
+	}
+	ruConfig := &RequestUnitConfig{}
+	err = json.Unmarshal(items[0].PayLoad, ruConfig)
+	if err != nil {
+		return nil, err
+	}
+	return ruConfig, nil
+}
+
+// GetConfig returns the config of controller. It's only used for test.
+func (c *ResourceGroupsController) GetConfig() *Config {
+	return c.config
 }
 
 // Start starts ResourceGroupController service.

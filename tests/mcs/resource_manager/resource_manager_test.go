@@ -301,7 +301,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		CPUMsCost:        1,
 	}
 
-	controller, _ := controller.NewResourceGroupController(1, cli, cfg)
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
 	controller.Start(suite.ctx)
 
 	testCases := []struct {
@@ -699,4 +699,38 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 
 	// Cleanup the resource group.
 	suite.cleanupResourceGroups()
+}
+
+func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
+	re := suite.Require()
+	cli := suite.client
+	// Test load from resource manager.
+	ctr, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	re.NoError(err)
+	config := ctr.GetConfig()
+	re.NotNil(config)
+	expectedConfig := controller.DefaultConfig()
+	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
+	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
+	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
+	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
+	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
+	// Test init from given config.
+	ruConfig := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  2,
+		WriteBaseCost:    3,
+		WriteCostPerByte: 4,
+		CPUMsCost:        5,
+	}
+	ctr, err = controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig)
+	re.NoError(err)
+	config = ctr.GetConfig()
+	re.NotNil(config)
+	expectedConfig = controller.GenerateConfig(ruConfig)
+	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
+	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
+	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
+	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
+	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
 }
