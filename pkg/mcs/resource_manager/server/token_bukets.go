@@ -35,6 +35,8 @@ const (
 	defaultReserveRatio    = 0.05
 	defaultLoanCoefficient = 2
 	maxAssignTokens        = math.MaxFloat64 / 1024 // assume max client connect is 1024
+	// slotStalePeriod indicate how long that a slot is considered stale if it is not acquire token request.
+	defaultSlotStalePeriod = 1 * time.Minute
 )
 
 // GroupTokenBucket is a token bucket for a resource group.
@@ -69,6 +71,7 @@ type TokenSlot struct {
 	assignTokens     float64
 	lastAssignTokens float64
 	assignTokensSum  float64
+	lastUpdate       *time.Time
 }
 
 // GroupTokenBucketState is the running state of TokenBucket.
@@ -115,9 +118,12 @@ func (gts *GroupTokenBucketState) cleanupAssignTokenSum() {
 func (gts *GroupTokenBucketState) balanceSlotTokens(
 	clientUniqueID uint64,
 	settings *rmpb.TokenLimitSettings) {
-	if _, ok := gts.tokenSlots[clientUniqueID]; !ok {
+	now := time.Now()
+	if slot, ok := gts.tokenSlots[clientUniqueID]; !ok {
 		gts.cleanupAssignTokenSum()
-		gts.tokenSlots[clientUniqueID] = &TokenSlot{}
+		gts.tokenSlots[clientUniqueID] = &TokenSlot{lastUpdate: &now}
+	} else {
+		slot.lastUpdate = &now
 	}
 
 	if settings.GetBurstLimit() < 0 {
@@ -132,7 +138,15 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 
 	evenRatio := 1 / float64(len(gts.tokenSlots))
 retryLoop:
-	for _, slot := range gts.tokenSlots {
+	for clientID, slot := range gts.tokenSlots {
+		// Clean up those slot that have not been used for a long time.
+		if clientID != clientUniqueID && now.Sub(*slot.lastUpdate) >= defaultSlotStalePeriod {
+			delete(gts.tokenSlots, clientID)
+			evenRatio = 1 / float64(len(gts.tokenSlots))
+			gts.cleanupAssignTokenSum()
+			continue retryLoop
+		}
+
 		var ratio float64
 		if gts.assignTokensSum == 0 || len(gts.tokenSlots) == 1 {
 			ratio = evenRatio
@@ -234,8 +248,11 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 func (gtb *GroupTokenBucket) request(now time.Time, neededTokens float64, targetPeriodMs, clientUniqueID uint64) (*rmpb.TokenBucket, int64) {
 	// Update tokens
 	gtb.updateTokens(now, gtb.Settings.GetBurstLimit(), clientUniqueID)
-	// Serve by each client
-	slot := gtb.tokenSlots[clientUniqueID]
+	// Serve by specific client
+	slot, ok := gtb.tokenSlots[clientUniqueID]
+	if !ok {
+		return nil, 0
+	}
 	res, trickleDuration := slot.assignSlotTokens(neededTokens, targetPeriodMs)
 
 	gtb.mu.Lock()
