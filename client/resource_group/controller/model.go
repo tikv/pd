@@ -141,8 +141,8 @@ func newSQLCalculator(cfg *Config) *SQLCalculator {
 // Trickle update sql layer CPU consumption.
 func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption, isSingleGroupByKeyspace bool) {
 	delta := getSQLProcessCPUTime(isSingleGroupByKeyspace) - consumption.SqlLayerCpuTimeMs
-	consumption.TotalCpuTimeMs += delta
-	consumption.SqlLayerCpuTimeMs += delta
+	consumption.TotalCpuTimeMs = delta
+	consumption.SqlLayerCpuTimeMs = delta
 }
 
 // BeforeKVRequest ...

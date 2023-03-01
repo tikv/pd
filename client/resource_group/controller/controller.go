@@ -55,10 +55,10 @@ type ResourceGroupProvider interface {
 // ResourceControlCreateOption create a ResourceGroupsController with the optional settings.
 type ResourceControlCreateOption func(controller *ResourceGroupsController)
 
-// EnableSingleGroupByKeyspace is the option to enable IsSingleGroupByKeyspace feature.
+// EnableSingleGroupByKeyspace is the option to enable single group by keyspace feature.
 func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
-		controller.config.IsSingleGroupByKeyspace = true
+		controller.config.isSingleGroupByKeyspace = true
 	}
 }
 
@@ -508,10 +508,12 @@ func (gc *groupCostController) initRunState() {
 
 func (gc *groupCostController) updateRunState() {
 	newTime := time.Now()
-	gc.mu.Lock()
+	deltaConsumption := &rmpb.Consumption{SqlLayerCpuTimeMs: gc.mu.consumption.SqlLayerCpuTimeMs}
 	for _, calc := range gc.calculators {
-		calc.Trickle(gc.mu.consumption, gc.mainCfg.IsSingleGroupByKeyspace)
+		calc.Trickle(deltaConsumption, gc.mainCfg.isSingleGroupByKeyspace)
 	}
+	gc.mu.Lock()
+	add(gc.mu.consumption, deltaConsumption)
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
 	log.Debug("[resource group controller] update run state", zap.Any("request unit consumption", gc.run.consumption))
