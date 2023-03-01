@@ -103,7 +103,6 @@ type Config struct {
 	WriteBytesCost RequestUnit
 	CPUMsCost      RequestUnit
 	// The CPU statistics need to distinguish between different environments.
-	// Will remove After https://github.com/golang/go/issues/41554 merged.
 	IsSingleGroupByKeyspace bool
 }
 

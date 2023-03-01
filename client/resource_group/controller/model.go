@@ -139,8 +139,8 @@ func newSQLCalculator(cfg *Config) *SQLCalculator {
 }
 
 // Trickle update sql layer CPU consumption.
-func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption, isServerless bool) {
-	delta := getSQLProcessCPUTime(isServerless) - consumption.SqlLayerCpuTimeMs
+func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption, isSingleGroupByKeyspace bool) {
+	delta := getSQLProcessCPUTime(isSingleGroupByKeyspace) - consumption.SqlLayerCpuTimeMs
 	consumption.TotalCpuTimeMs += delta
 	consumption.SqlLayerCpuTimeMs += delta
 }
@@ -214,8 +214,8 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 }
 
 // getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.
-func getSQLProcessCPUTime(isServerless bool) float64 {
-	if isServerless {
+func getSQLProcessCPUTime(isSingleGroupByKeyspace bool) float64 {
+	if isSingleGroupByKeyspace {
 		return getSysProcessCPUTime()
 	}
 	return getGroupProcessCPUTime()
@@ -231,7 +231,7 @@ func getSysProcessCPUTime() float64 {
 	return float64(cpuTime.User + cpuTime.Sys)
 }
 
-// TODO: will be implemented by Goroutine after https://github.com/golang/go/issues/41554 merged
+// TODO: Need a way to calculate in the case of multiple groups.
 func getGroupProcessCPUTime() float64 {
 	return 0
 }
