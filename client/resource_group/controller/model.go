@@ -51,7 +51,7 @@ type ResourceCalculator interface {
 	// Trickle is used to calculate the resource consumption periodically rather than on the request path.
 	// It's mainly used to calculate like the SQL CPU cost.
 	// Need to check if it is a serverless environment
-	Trickle(*rmpb.Consumption, bool)
+	Trickle(*rmpb.Consumption)
 	// BeforeKVRequest is used to calculate the resource consumption before the KV request.
 	// It's mainly used to calculate the base and write request cost.
 	BeforeKVRequest(*rmpb.Consumption, RequestInfo)
@@ -78,7 +78,7 @@ func (kc *KVCalculator) SetConfig(config *Config) {
 }
 
 // Trickle ...
-func (kc *KVCalculator) Trickle(*rmpb.Consumption, bool) {
+func (kc *KVCalculator) Trickle(*rmpb.Consumption) {
 }
 
 // BeforeKVRequest ...
@@ -149,8 +149,8 @@ func (dsc *SQLCalculator) SetConfig(config *Config) {
 }
 
 // Trickle update sql layer CPU consumption.
-func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption, isSingleGroupByKeyspace bool) {
-	delta := getSQLProcessCPUTime(isSingleGroupByKeyspace) - consumption.SqlLayerCpuTimeMs
+func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption) {
+	delta := getSQLProcessCPUTime(dsc.isSingleGroupByKeyspace) - consumption.SqlLayerCpuTimeMs
 	consumption.TotalCpuTimeMs += delta
 	consumption.SqlLayerCpuTimeMs += delta
 }

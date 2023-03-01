@@ -544,7 +544,7 @@ func (gc *groupCostController) updateRunState() {
 	newTime := time.Now()
 	gc.mu.Lock()
 	for _, calc := range gc.calculators {
-		calc.Trickle(gc.mu.consumption, gc.mainCfg.isSingleGroupByKeyspace)
+		calc.Trickle(gc.mu.consumption)
 	}
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
