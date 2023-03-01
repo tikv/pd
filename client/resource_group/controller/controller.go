@@ -508,12 +508,10 @@ func (gc *groupCostController) initRunState() {
 
 func (gc *groupCostController) updateRunState() {
 	newTime := time.Now()
-	deltaConsumption := &rmpb.Consumption{SqlLayerCpuTimeMs: gc.mu.consumption.SqlLayerCpuTimeMs}
-	for _, calc := range gc.calculators {
-		calc.Trickle(deltaConsumption, gc.mainCfg.isSingleGroupByKeyspace)
-	}
 	gc.mu.Lock()
-	add(gc.mu.consumption, deltaConsumption)
+	for _, calc := range gc.calculators {
+		calc.Trickle(gc.mu.consumption, gc.mainCfg.isSingleGroupByKeyspace)
+	}
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
 	log.Debug("[resource group controller] update run state", zap.Any("request unit consumption", gc.run.consumption))
