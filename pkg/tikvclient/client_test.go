@@ -17,16 +17,16 @@ func TestGetConn(t *testing.T) {
 	re.NoError(err)
 	conn2, err := client.getClientConn(ctx, "http://127.0.0.1:5678")
 	re.NoError(err)
-	re.NotEqual(conn1.Get(), conn2.Get())
+	re.False(conn1.Get() == conn2.Get())
 
 	conn3, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
 	re.NoError(err)
 	conn4, err := client.getClientConn(ctx, "http://127.0.0.1:5678")
 	re.NoError(err)
-	re.NotEqual(conn3.Get(), conn4.Get())
+	re.False(conn3.Get() == conn4.Get())
 
-	re.Equal(conn1.Get(), conn3.Get())
-	re.Equal(conn2.Get(), conn4.Get())
+	re.True(conn1.Get() == conn3.Get())
+	re.True(conn2.Get() == conn4.Get())
 }
 
 func TestGetConnAfterClose(t *testing.T) {
@@ -36,15 +36,15 @@ func TestGetConnAfterClose(t *testing.T) {
 	client := NewRPCClient()
 
 	conn1, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
-	re.NoError(err)
+	re.Nil(err)
 	err = conn1.Get().Close()
-	re.NoError(err)
+	re.Nil(err)
 
 	conn2, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
-	re.NoError(err)
-	re.NotEqual(conn1.Get(), conn2.Get())
+	re.Nil(err)
+	re.False(conn1.Get() == conn2.Get())
 
 	conn3, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
-	re.NoError(err)
-	re.Equal(conn2.Get(), conn3.Get())
+	re.Nil(err)
+	re.True(conn2.Get() == conn3.Get())
 }
