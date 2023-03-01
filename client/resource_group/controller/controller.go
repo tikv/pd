@@ -63,9 +63,6 @@ type ResourceControlCreateOption func(controller *ResourceGroupsController)
 func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
 		controller.config.isSingleGroupByKeyspace = true
-		for _, c := range controller.calculators {
-			c.SetConfig(controller.config)
-		}
 	}
 }
 
@@ -95,7 +92,7 @@ type ResourceGroupsController struct {
 		lastRequestTime time.Time
 
 		// requestInProgress is true if we are in the process of sending a request.
-		// It gets set to false when we receives the response in the main loop,
+		// It gets set to false when we receive the response in the main loop,
 		// even in error cases.
 		requestInProgress bool
 
@@ -130,11 +127,11 @@ func NewResourceGroupController(
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
-		calculators:           []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
 	}
 	for _, opt := range opts {
 		opt(controller)
 	}
+	controller.calculators = []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)}
 	return controller, nil
 }
 
@@ -486,7 +483,7 @@ func newGroupCostController(
 		gc.handleRespFunc = gc.handleRawResourceTokenResponse
 	}
 
-	gc.mu.consumption = &rmpb.Consumption{}
+	gc.mu.consumption = &rmpb.Consumption{SqlLayerCpuTimeMs: getSQLProcessCPUTime(mainCfg.isSingleGroupByKeyspace)}
 	return gc, nil
 }
 
