@@ -107,7 +107,6 @@ func NewResourceGroupController(
 			return nil, err
 		}
 	}
-	// TODO: do we need to reload the config from remote server periodically?
 	config := GenerateConfig(requestUnitConfig)
 	return &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
