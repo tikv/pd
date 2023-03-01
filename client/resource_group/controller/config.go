@@ -108,13 +108,13 @@ type Config struct {
 
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
-	cfg := generateConfig(
+	return GenerateConfig(
 		DefaultRequestUnitConfig(),
 	)
-	return cfg
 }
 
-func generateConfig(ruConfig *RequestUnitConfig) *Config {
+// GenerateConfig generates the configuration by the given request unit configuration.
+func GenerateConfig(ruConfig *RequestUnitConfig) *Config {
 	cfg := &Config{
 		ReadBaseCost:   RequestUnit(ruConfig.ReadBaseCost),
 		ReadBytesCost:  RequestUnit(ruConfig.ReadCostPerByte),

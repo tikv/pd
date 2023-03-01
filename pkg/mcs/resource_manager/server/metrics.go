@@ -100,6 +100,7 @@ var (
 func init() {
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
+	prometheus.MustRegister(sqlLayerRequestUnitCost)
 	prometheus.MustRegister(readByteCost)
 	prometheus.MustRegister(writeByteCost)
 	prometheus.MustRegister(kvCPUCost)

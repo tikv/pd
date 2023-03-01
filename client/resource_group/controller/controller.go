@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -24,11 +25,13 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
 
 const (
+	requestUnitConfigPath  = "resource_group/ru_config"
 	defaultMaxWaitDuration = time.Second
 	maxRetry               = 3
 	maxNotificationChanLen = 200
@@ -36,7 +39,7 @@ const (
 
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
-	// OnRequestWait is used to check whether the resource group has enough tokens. It maybe needs to wait for a while.
+	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
 	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) error
 	// OnResponse is used to consume tokens after receiving response
 	OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error
@@ -50,6 +53,7 @@ type ResourceGroupProvider interface {
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
+	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]pd.GlobalConfigItem, int64, error)
 }
 
 // ResourceControlCreateOption create a ResourceGroupsController with the optional settings.
@@ -59,6 +63,9 @@ type ResourceControlCreateOption func(controller *ResourceGroupsController)
 func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
 		controller.config.isSingleGroupByKeyspace = true
+		for _, c := range controller.calculators {
+			c.SetConfig(controller.config)
+		}
 	}
 }
 
@@ -88,7 +95,7 @@ type ResourceGroupsController struct {
 		lastRequestTime time.Time
 
 		// requestInProgress is true if we are in the process of sending a request.
-		// It gets set to false when we receive the response in the main loop,
+		// It gets set to false when we receives the response in the main loop,
 		// even in error cases.
 		requestInProgress bool
 
@@ -101,15 +108,21 @@ type ResourceGroupsController struct {
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
-func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupProvider, requestUnitConfig *RequestUnitConfig, opts ...ResourceControlCreateOption) (*ResourceGroupsController, error) {
-	// TODO: initialize `requestUnitConfig` from the remote manager server.
-	var config *Config
-	if requestUnitConfig != nil {
-		config = generateConfig(requestUnitConfig)
-	} else {
-		config = DefaultConfig()
+func NewResourceGroupController(
+	ctx context.Context,
+	clientUniqueID uint64,
+	provider ResourceGroupProvider,
+	requestUnitConfig *RequestUnitConfig,
+	opts ...ResourceControlCreateOption,
+) (*ResourceGroupsController, error) {
+	if requestUnitConfig == nil {
+		var err error
+		requestUnitConfig, err = loadRequestUnitConfig(ctx, provider)
+		if err != nil {
+			return nil, err
+		}
 	}
-
+	config := GenerateConfig(requestUnitConfig)
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
@@ -123,6 +136,27 @@ func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupPro
 		opt(controller)
 	}
 	return controller, nil
+}
+
+func loadRequestUnitConfig(ctx context.Context, provider ResourceGroupProvider) (*RequestUnitConfig, error) {
+	items, _, err := provider.LoadGlobalConfig(ctx, nil, requestUnitConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, errors.Errorf("failed to load the ru config from remote server")
+	}
+	ruConfig := &RequestUnitConfig{}
+	err = json.Unmarshal(items[0].PayLoad, ruConfig)
+	if err != nil {
+		return nil, err
+	}
+	return ruConfig, nil
+}
+
+// GetConfig returns the config of controller. It's only used for test.
+func (c *ResourceGroupsController) GetConfig() *Config {
+	return c.config
 }
 
 // Start starts ResourceGroupController service.
@@ -328,7 +362,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 	}()
 }
 
-// OnRequestWait is used to check whether the resource group has enough tokens. It maybe needs to wait for a while.
+// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
 ) (err error) {

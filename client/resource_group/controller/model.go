@@ -58,6 +58,8 @@ type ResourceCalculator interface {
 	// AfterKVRequest is used to calculate the resource consumption after the KV request.
 	// It's mainly used to calculate the read request cost and KV CPU cost.
 	AfterKVRequest(*rmpb.Consumption, RequestInfo, ResponseInfo)
+	// SetConfig is sync with controller config.
+	SetConfig(*Config)
 }
 
 // KVCalculator is used to calculate the KV-side consumption.
@@ -69,6 +71,10 @@ var _ ResourceCalculator = (*KVCalculator)(nil)
 
 func newKVCalculator(cfg *Config) *KVCalculator {
 	return &KVCalculator{Config: cfg}
+}
+
+func (kc *KVCalculator) SetConfig(config *Config) {
+	kc.Config = config
 }
 
 // Trickle ...
@@ -136,6 +142,10 @@ var _ ResourceCalculator = (*SQLCalculator)(nil)
 
 func newSQLCalculator(cfg *Config) *SQLCalculator {
 	return &SQLCalculator{Config: cfg}
+}
+
+func (dsc *SQLCalculator) SetConfig(config *Config) {
+	dsc.Config = config
 }
 
 // Trickle update sql layer CPU consumption.
