@@ -18,7 +18,6 @@ import (
 	"context"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -29,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	resource_manager "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -110,14 +108,10 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 // NewAPIServiceCommand returns the API service command.
 func NewAPIServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		// TODO: Here we use a hack way to support sub-commands with multiple services.
-		// We should use a better way to support it.
-		Use:     "api[,tso][,resource-manager]",
-		Aliases: generateAlias(server.SupportServicesList),
-		Short:   "Run the API service",
-		Run:     createAPIServerWrapper,
+		Use:   "api",
+		Short: "Run the API service",
+		Run:   createAPIServerWrapper,
 	}
-	cmd.SetUsageTemplate(usageTemplate())
 	addFlags(cmd)
 	return cmd
 }
@@ -191,7 +185,6 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	defer log.Sync()
 
 	if len(services) != 0 {
-		services = strings.Split(services[0], ",")
 		versioninfo.Log(server.APIServiceMode)
 	} else {
 		versioninfo.Log(server.PDMode)
@@ -252,70 +245,4 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 func exit(code int) {
 	log.Sync()
 	os.Exit(code)
-}
-
-// usageTemplate returns usage template for the command.
-// This is a copy of cobra.Command's usageTemplate, with the removal of the aliases section.
-func usageTemplate() string {
-	return `Usage:{{if .Runnable}}
-  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
-  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
-
-Examples:
-{{.Example}}{{end}}{{if .HasAvailableSubCommands}}
-
-Available Commands:{{range .Commands}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
-
-Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}
-
-Global Flags:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
-
-Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
-
-Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
-`
-}
-
-func generateAlias(servicesList []string) []string {
-	length := uint(len(servicesList))
-
-	var subsets [][]string
-	for subsetBits := 1; subsetBits < (1 << length); subsetBits++ {
-		var subset []string
-
-		for object := uint(0); object < length; object++ {
-			if (subsetBits>>object)&1 == 1 {
-				subset = append(subset, servicesList[object])
-			}
-		}
-		subsets = append(subsets, subset)
-	}
-
-	var alias []string
-	for _, s := range subsets {
-		if !slice.Contains(s, server.APIServiceName) {
-			continue
-		}
-		perm(s, func(a []string) {
-			alias = append(alias, strings.Join(a, ","))
-		}, 0)
-	}
-	return alias
-}
-
-func perm(a []string, f func([]string), i int) {
-	if i > len(a) {
-		f(a)
-		return
-	}
-	perm(a, f, i+1)
-	for j := i + 1; j < len(a); j++ {
-		a[i], a[j] = a[j], a[i]
-		perm(a, f, i+1)
-		a[i], a[j] = a[j], a[i]
-	}
 }
