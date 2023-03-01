@@ -28,7 +28,7 @@ import (
 type CleanupFunc func()
 
 // NewTestServer creates a tso server for testing.
-func newTestServer(ctx context.Context, cancel context.CancelFunc, re *require.Assertions, cfg *Config) (*Server, CleanupFunc, error) {
+func newTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, CleanupFunc, error) {
 	// New zap logger
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
@@ -38,12 +38,10 @@ func newTestServer(ctx context.Context, cancel context.CancelFunc, re *require.A
 
 	s := CreateServer(ctx, cfg)
 	if err = s.Run(); err != nil {
-		cancel()
 		return nil, nil, err
 	}
 
 	cleanup := func() {
-		cancel()
 		s.Close()
 		os.RemoveAll(cfg.DataDir)
 	}
