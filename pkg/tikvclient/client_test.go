@@ -36,15 +36,15 @@ func TestGetConnAfterClose(t *testing.T) {
 	client := NewRPCClient()
 
 	conn1, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
-	re.Nil(err)
+	re.NoError(err)
 	err = conn1.Get().Close()
-	re.Nil(err)
+	re.NoError(err)
 
 	conn2, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
-	re.Nil(err)
+	re.NoError(err)
 	re.False(conn1.Get() == conn2.Get())
 
 	conn3, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
-	re.Nil(err)
+	re.NoError(err)
 	re.True(conn2.Get() == conn3.Get())
 }
