@@ -101,9 +101,10 @@ func NewResourceGroupController(
 	provider ResourceGroupProvider,
 	requestUnitConfig *RequestUnitConfig,
 ) (*ResourceGroupsController, error) {
-	var err error
 	if requestUnitConfig == nil {
-		if requestUnitConfig, err = loadRequestUnitConfig(ctx, provider); err != nil {
+		var err error
+		requestUnitConfig, err = loadRequestUnitConfig(ctx, provider)
+		if err != nil {
 			return nil, err
 		}
 	}
