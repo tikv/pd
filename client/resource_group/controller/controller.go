@@ -483,7 +483,7 @@ func newGroupCostController(
 		gc.handleRespFunc = gc.handleRawResourceTokenResponse
 	}
 
-	gc.mu.consumption = &rmpb.Consumption{SqlLayerCpuTimeMs: getSQLProcessCPUTime(mainCfg.isSingleGroupByKeyspace)}
+	gc.mu.consumption = &rmpb.Consumption{}
 	return gc, nil
 }
 
@@ -492,7 +492,7 @@ func (gc *groupCostController) initRunState() {
 	gc.run.now = now
 	gc.run.targetPeriod = defaultTargetPeriod
 	gc.run.consumption = &rmpb.Consumption{}
-	gc.run.lastRequestConsumption = &rmpb.Consumption{}
+	gc.run.lastRequestConsumption = &rmpb.Consumption{SqlLayerCpuTimeMs: getSQLProcessCPUTime(gc.mainCfg.isSingleGroupByKeyspace)}
 
 	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
 		cfg := tokenBucketReconfigureArgs{
