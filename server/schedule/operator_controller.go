@@ -490,7 +490,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			if stepCost == 0 {
 				continue
 			}
-			limit.Take(stepCost, v)
+			limit.Take(stepCost, v, storelimit.Low)
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
@@ -832,8 +832,12 @@ func (oc *OperatorController) ExceedStoreLimit(ops ...*operator.Operator) bool {
 // exceedStoreLimitLocked returns true if the store exceeds the cost limit after adding the operator. Otherwise, returns false.
 func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) bool {
 	// The operator with Urgent priority, like admin operators, should ignore the store limit check.
-	if len(ops) != 0 && ops[0].GetPriorityLevel() == core.Urgent {
-		return false
+	var desc string
+	if len(ops) != 0 {
+		desc = ops[0].Desc()
+		if ops[0].GetPriorityLevel() == core.Urgent {
+			return false
+		}
 	}
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
@@ -846,7 +850,8 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if !limiter.Available(stepCost, v) {
+			if !limiter.Available(stepCost, v, storelimit.Low) {
+				operator.OperatorExceededStoreLimitCounter.WithLabelValues(desc).Inc()
 				return true
 			}
 		}

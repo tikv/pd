@@ -54,7 +54,7 @@ const (
 
 const (
 	defaultReadBaseCost  = 0.25
-	defaultWriteBaseCost = 1.5
+	defaultWriteBaseCost = 1
 	// 1 RU = 64 KiB read bytes
 	defaultReadCostPerByte = 1. / (64 * 1024)
 	// 1 RU = 1 KiB written bytes
@@ -102,17 +102,19 @@ type Config struct {
 	WriteBaseCost  RequestUnit
 	WriteBytesCost RequestUnit
 	CPUMsCost      RequestUnit
+	// The CPU statistics need to distinguish between different environments.
+	isSingleGroupByKeyspace bool
 }
 
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
-	cfg := generateConfig(
+	return GenerateConfig(
 		DefaultRequestUnitConfig(),
 	)
-	return cfg
 }
 
-func generateConfig(ruConfig *RequestUnitConfig) *Config {
+// GenerateConfig generates the configuration by the given request unit configuration.
+func GenerateConfig(ruConfig *RequestUnitConfig) *Config {
 	cfg := &Config{
 		ReadBaseCost:   RequestUnit(ruConfig.ReadBaseCost),
 		ReadBytesCost:  RequestUnit(ruConfig.ReadCostPerByte),

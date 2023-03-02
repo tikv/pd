@@ -23,6 +23,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,10 +41,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
@@ -126,7 +129,7 @@ type Server struct {
 	serverLoopWg     sync.WaitGroup
 
 	// for PD leader election.
-	member *member.Member
+	member *member.EmbeddedEtcdMember
 	// etcd client
 	client *clientv3.Client
 	// http client
@@ -200,7 +203,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		persistOptions:                  config.NewPersistOptions(cfg),
 		serviceMiddlewareCfg:            serviceMiddlewareCfg,
 		serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(serviceMiddlewareCfg),
-		member:                          &member.Member{},
+		member:                          &member.EmbeddedEtcdMember{},
 		ctx:                             ctx,
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
@@ -234,7 +237,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 	failpoint.Inject("useGlobalRegistry", func() {
 		s.registry = registry.ServerServiceRegistry
 	})
-	s.registry.RegisterService("ResourceManager", rm_server.NewService)
+	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
@@ -331,16 +335,16 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 func (s *Server) startServer(ctx context.Context) error {
 	var err error
 	if s.clusterID, err = etcdutil.InitClusterID(s.client, pdClusterIDPath); err != nil {
+		log.Error("failed to init cluster id", errs.ZapError(err))
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
-	// It may lose accuracy if use float64 to store uint64. So we store the
-	// cluster id in label.
+	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
 	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
-	s.member.MemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
+	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
 	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
@@ -405,6 +409,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
+	serverMaxProcs.Set(float64(runtime.GOMAXPROCS(0)))
 	return nil
 }
 
@@ -704,8 +709,14 @@ func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
 }
 
+// GetPrimary returns the primary member provider of the api server.
+// api service's leader is equal to the primary member.
+func (s *Server) GetPrimary() bs.MemberProvider {
+	return s.member.GetLeader()
+}
+
 // GetMember returns the member of server.
-func (s *Server) GetMember() *member.Member {
+func (s *Server) GetMember() *member.EmbeddedEtcdMember {
 	return s.member
 }
 
@@ -1140,6 +1151,11 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
+// GetRequestUnitConfig gets the RU config.
+func (s *Server) GetRequestUnitConfig() *rm_server.RequestUnitConfig {
+	return &s.cfg.RequestUnit
+}
+
 // GetRaftCluster gets Raft cluster.
 // If cluster has not been bootstrapped, return nil.
 func (s *Server) GetRaftCluster() *cluster.RaftCluster {
@@ -1318,12 +1334,12 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	return nil
 }
 
-// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+// IsServing returns whether the server is the leader if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
 	return s.member.IsLeader()
 }
 
-// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceReadyCallback adds callbacks when the server becomes the leader if there is embedded etcd, or the primary otherwise.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
