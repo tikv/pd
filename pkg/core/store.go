@@ -139,7 +139,7 @@ func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
 func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType)
+	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType, storelimit.Low)
 }
 
 // IsTiFlash returns true if the store is tiflash.
