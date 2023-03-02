@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"golang.org/x/net/context"
 )
 
@@ -13,15 +14,18 @@ func TestGetConn(t *testing.T) {
 	ctx := context.Background()
 	client := NewRPCClient()
 
-	conn1, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
+	url1 := tempurl.Alloc()
+	url2 := tempurl.Alloc()
+
+	conn1, err := client.getClientConn(ctx, url1)
 	re.NoError(err)
-	conn2, err := client.getClientConn(ctx, "http://127.0.0.1:5678")
+	conn2, err := client.getClientConn(ctx, url2)
 	re.NoError(err)
 	re.False(conn1.Get() == conn2.Get())
 
-	conn3, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
+	conn3, err := client.getClientConn(ctx, url1)
 	re.NoError(err)
-	conn4, err := client.getClientConn(ctx, "http://127.0.0.1:5678")
+	conn4, err := client.getClientConn(ctx, url2)
 	re.NoError(err)
 	re.False(conn3.Get() == conn4.Get())
 
@@ -35,16 +39,18 @@ func TestGetConnAfterClose(t *testing.T) {
 	ctx := context.Background()
 	client := NewRPCClient()
 
-	conn1, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
+	url := tempurl.Alloc()
+
+	conn1, err := client.getClientConn(ctx, url)
 	re.NoError(err)
 	err = conn1.Get().Close()
 	re.NoError(err)
 
-	conn2, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
+	conn2, err := client.getClientConn(ctx, url)
 	re.NoError(err)
 	re.False(conn1.Get() == conn2.Get())
 
-	conn3, err := client.getClientConn(ctx, "http://127.0.0.1:1234")
+	conn3, err := client.getClientConn(ctx, url)
 	re.NoError(err)
 	re.True(conn2.Get() == conn3.Get())
 }
