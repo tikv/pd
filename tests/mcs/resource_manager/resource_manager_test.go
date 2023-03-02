@@ -731,7 +731,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 	}
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU", "return(true)"))
-	controller, _ := controller.NewResourceGroupController(1, cli, cfg)
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
 	controller.Start(suite.ctx)
 	tc := tokenConsumptionPerSecond{
 		rruTokensAtATime: 0,
