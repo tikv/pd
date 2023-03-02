@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keyutil"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/labeler"
@@ -92,7 +91,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return []*operator.Operator{op}
 	}
 
-	if c.cluster.GetOpts().IsPlacementRulesEnabled() {
+	if c.conf.IsPlacementRulesEnabled() {
 		skipRuleCheck := c.cluster.GetOpts().IsPlacementRulesCacheEnabled() &&
 			c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
 		if skipRuleCheck {
@@ -107,7 +106,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			})
 			fit := c.priorityInspector.Inspect(region)
 			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
-				if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 					return []*operator.Operator{op}
 				}
 				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()

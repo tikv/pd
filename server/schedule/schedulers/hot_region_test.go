@@ -279,7 +279,7 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	tc.SetHotRegionScheduleLimit(0)
 	re.False(hb.IsScheduleAllowed(tc))
 	clearPendingInfluence(hb.(*hotScheduler))
-	tc.SetHotRegionScheduleLimit(int(opt.GetScheduleConfig().HotRegionScheduleLimit))
+	tc.SetHotRegionScheduleLimit(int(opt.GetHotRegionScheduleLimit()))
 
 	for i := 0; i < 20; i++ {
 		ops, _ := hb.Schedule(tc, false)

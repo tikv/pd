@@ -6,8 +6,8 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 )
 
 // RejectLeader is the label property type that suggests a store should not
@@ -34,6 +34,7 @@ type Config interface {
 	GetMergeScheduleLimit() uint64
 	GetLeaderScheduleLimit() uint64
 	GetHotRegionScheduleLimit() uint64
+	GetWitnessScheduleLimit() uint64
 
 	GetHotRegionCacheHitsThreshold() int
 	GetMaxMovableHotPeerSize() int64
@@ -74,6 +75,7 @@ type Config interface {
 	GetSchedulerMaxWaitingOperator() uint64
 	GetStoreLimitByType(uint64, storelimit.Type) float64
 	SetAllStoresLimit(storelimit.Type, float64)
+	GetSlowStoreEvictingAffectedStoreRatioThreshold() float64
 	IsUseJointConsensus() bool
 	CheckLabelProperty(string, []*metapb.StoreLabel) bool
 	IsDebugMetricsEnabled() bool
@@ -82,6 +84,7 @@ type Config interface {
 	SetPlacementRuleEnabled(bool)
 	SetSplitMergeInterval(time.Duration)
 	SetMaxReplicas(int)
+	SetPlacementRulesCacheEnabled(bool)
 }
 
 // StoreConfig is the interface that wraps the StoreConfig related methods.

@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
@@ -390,7 +389,7 @@ func (f *StoreStateFilter) slowStoreEvicted(conf config.Config, store *core.Stor
 	return statusOK
 }
 
-func (f *StoreStateFilter) slowTrendEvicted(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+func (f *StoreStateFilter) slowTrendEvicted(_ config.Config, store *core.StoreInfo) *plan.Status {
 	if store.IsEvictedAsSlowTrend() {
 		f.Reason = storeStateSlowTrend
 		return statusStoreRejectLeader
@@ -544,7 +543,7 @@ func (f *StoreStateFilter) Target(conf config.Config, store *core.StoreInfo) (st
 		}
 	}
 	if f.MoveRegion && f.AllowFastFailover {
-		return f.anyConditionMatch(fastFailoverTarget, opts, store)
+		return f.anyConditionMatch(fastFailoverTarget, conf, store)
 	}
 	if f.MoveRegion && f.ScatterRegion {
 		if status = f.anyConditionMatch(scatterRegionTarget, conf, store); !status.IsOK() {
@@ -740,11 +739,11 @@ func (f *ruleWitnessFitFilter) Type() filterType {
 	return ruleFit
 }
 
-func (f *ruleWitnessFitFilter) Source(_ *config.PersistOptions, _ *core.StoreInfo) *plan.Status {
+func (f *ruleWitnessFitFilter) Source(_ config.Config, _ *core.StoreInfo) *plan.Status {
 	return statusOK
 }
 
-func (f *ruleWitnessFitFilter) Target(options *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+func (f *ruleWitnessFitFilter) Target(_ config.Config, store *core.StoreInfo) *plan.Status {
 	targetStoreID := store.GetID()
 	targetPeer := f.region.GetStorePeer(targetStoreID)
 	if targetPeer == nil {
@@ -783,9 +782,9 @@ func NewPlacementLeaderSafeguard(scope string, conf config.Config, cluster *core
 // NewPlacementWitnessSafeguard creates a filter that ensures after transfer a witness with
 // existed peer, the placement restriction will not become worse.
 // Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
-func NewPlacementWitnessSafeguard(scope string, opt *config.PersistOptions, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+func NewPlacementWitnessSafeguard(scope string, conf config.Config, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
 	region *core.RegionInfo, sourceStore *core.StoreInfo, oldFit *placement.RegionFit) Filter {
-	if opt.IsPlacementRulesEnabled() {
+	if conf.IsPlacementRulesEnabled() {
 		return newRuleWitnessFitFilter(scope, cluster, ruleManager, region, oldFit, sourceStore.GetID())
 	}
 	return nil

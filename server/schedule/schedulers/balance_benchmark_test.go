@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -42,7 +43,11 @@ var (
 // the tolerate define storeCount that store can elect candidate but not should balance
 // so the case  bench the worst scene
 func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (context.CancelFunc, *mockcluster.Cluster, *schedule.OperatorController) {
-	cancel, opt, tc, oc := prepareSchedulersTest()
+	Register()
+	ctx, cancel := context.WithCancel(context.Background())
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	oc := schedule.NewOperatorController(ctx, tc, nil)
 	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(ruleEnable)
 
@@ -87,7 +92,11 @@ func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (contex
 }
 
 func newBenchBigCluster(storeNumInOneRack, regionNum int) (context.CancelFunc, *mockcluster.Cluster, *schedule.OperatorController) {
-	cancel, opt, tc, oc := prepareSchedulersTest()
+	Register()
+	ctx, cancel := context.WithCancel(context.Background())
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	oc := schedule.NewOperatorController(ctx, tc, nil)
 	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(true)
 

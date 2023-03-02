@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 )
@@ -228,6 +229,7 @@ type balanceLeaderSchedulerTestSuite struct {
 	tc     *mockcluster.Cluster
 	lb     schedule.Scheduler
 	oc     *schedule.OperatorController
+	conf   config.Config
 }
 
 func TestBalanceLeaderSchedulerTestSuite(t *testing.T) {

@@ -35,7 +35,7 @@ import (
 	"github.com/tikv/pd/server/statistics"
 )
 
-func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, *config.PersistOptions, *mockcluster.Cluster, *schedule.OperatorController) {
+func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.Config, *mockcluster.Cluster, *schedule.OperatorController) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
 	opt := mockconfig.NewTestOptions()
@@ -80,12 +80,9 @@ func TestShuffleLeader(t *testing.T) {
 
 func TestRejectLeader(t *testing.T) {
 	re := require.New(t)
-	cancel, opt, tc, oc := prepareSchedulersTest()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	opt.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		config.RejectLeader: {{Key: "noleader", Value: "true"}},
-	})
-
+	tc.SetLabelProperty(config.RejectLeader, "noleader", "true")
 	// Add 3 stores 1,2,3.
 	tc.AddLabelsStore(1, 1, map[string]string{"noleader": "true"})
 	tc.UpdateLeaderCount(1, 1)

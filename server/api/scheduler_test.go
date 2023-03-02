@@ -28,10 +28,6 @@ import (
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-<<<<<<< HEAD
-=======
-	_ "github.com/tikv/pd/server/schedule/schedulers"
->>>>>>> 2cb5b0e3e (decouple the logic between config and schedule)
 )
 
 type scheduleTestSuite struct {

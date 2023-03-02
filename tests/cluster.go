@@ -43,7 +43,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/keyspace"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"go.etcd.io/etcd/clientv3"
 )
 
