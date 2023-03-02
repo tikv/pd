@@ -1439,11 +1439,11 @@ func TestWatch(t *testing.T) {
 
 	key := "test"
 	wg := sync.WaitGroup{}
+	ch, err := client.Watch(ctx, []byte(key))
+	re.NoError(err)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ch, err := client.Watch(ctx, []byte(key))
-		re.NoError(err)
 		var events []*meta_storagepb.Event
 		for e := range ch {
 			events = append(events, e...)
