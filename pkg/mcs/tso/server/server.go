@@ -93,6 +93,8 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
+	handler *Handler
+
 	cfg         *Config
 	clusterID   uint64
 	rootPath    string
@@ -131,6 +133,11 @@ func (s *Server) Name() string {
 // Context returns the context of server.
 func (s *Server) Context() context.Context {
 	return s.ctx
+}
+
+// GetHandler returns the handler.
+func (s *Server) GetHandler() *Handler {
+	return s.handler
 }
 
 // Run runs the TSO server.
@@ -610,6 +617,7 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 		cfg:               cfg,
 		ctx:               ctx,
 	}
+	svr.handler = newHandler(svr)
 	return svr
 }
 
