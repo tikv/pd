@@ -301,7 +301,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		CPUMsCost:        1,
 	}
 
-	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
 	controller.Start(suite.ctx)
 
 	testCases := []struct {
