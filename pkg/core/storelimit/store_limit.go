@@ -78,13 +78,15 @@ func NewStoreRateLimit(ratePerSec float64) StoreLimit {
 	}
 }
 
-// Available returns the number of available tokens
-func (l *StoreRateLimit) Available(cost int64, typ Type) bool {
+// Available returns the number of available tokens.
+// notice that the priority level is not used.
+func (l *StoreRateLimit) Available(cost int64, typ Type, _ PriorityLevel) bool {
 	return l.limits[typ].Available(cost)
 }
 
 // Take takes count tokens from the bucket without blocking.
-func (l *StoreRateLimit) Take(cost int64, typ Type) bool {
+// notice that the priority level is not used.
+func (l *StoreRateLimit) Take(cost int64, typ Type, _ PriorityLevel) bool {
 	return l.limits[typ].Take(cost)
 }
 

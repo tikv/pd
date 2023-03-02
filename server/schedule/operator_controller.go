@@ -490,7 +490,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			if stepCost == 0 {
 				continue
 			}
-			limit.Take(stepCost, v)
+			limit.Take(stepCost, v, storelimit.Low)
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
@@ -850,7 +850,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if !limiter.Available(stepCost, v) {
+			if !limiter.Available(stepCost, v, storelimit.Low) {
 				operator.OperatorExceededStoreLimitCounter.WithLabelValues(desc).Inc()
 				return true
 			}
