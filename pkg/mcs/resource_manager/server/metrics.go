@@ -52,7 +52,7 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "sql_layer_request_unit",
 			Help:      "Bucketed histogram of the sql layer request unit cost for all resource groups.",
-			Buckets:   prometheus.ExponentialBuckets(1, 10, 3), // 1 ~ 1000
+			Buckets:   prometheus.ExponentialBuckets(1, 10, 5), // 1 ~ 100000
 		}, []string{resourceGroupNameLabel})
 
 	// Resource cost metrics.
