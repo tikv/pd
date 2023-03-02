@@ -126,6 +126,11 @@ func (s *Server) Close() {
 	log.Info("resource manager server is closed")
 }
 
+// GetRequestUnitConfig returns the RU config.
+func (s *Server) GetRequestUnitConfig() *RequestUnitConfig {
+	return &s.cfg.RequestUnit
+}
+
 // GetClient returns builtin etcd client.
 func (s *Server) GetClient() *clientv3.Client {
 	return s.etcdClient
@@ -152,7 +157,7 @@ func (s *Server) IsClosed() bool {
 	return atomic.LoadInt64(&s.isServing) == 0
 }
 
-// AddServiceReadyCallback adds the callback function when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
@@ -253,7 +258,7 @@ func (s *Server) GetPrimary() bs.MemberProvider {
 }
 
 func (s *Server) startServer() error {
-	manager := NewManager(s)
+	manager := NewManager[*Server](s)
 	s.service = &Service{
 		ctx:     s.ctx,
 		manager: manager,
@@ -291,7 +296,7 @@ func (s *Server) startServer() error {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, defaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.GetClient(), "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }

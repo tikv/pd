@@ -290,7 +290,7 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 	res, revision, err := suite.client.LoadGlobalConfig(suite.server.Context(), nil, globalConfigPath)
 	suite.NoError(err)
 	suite.Len(res, 1)
-	suite.Equal(r.Header.GetRevision(), revision)
+	suite.LessOrEqual(r.Header.GetRevision(), revision)
 	suite.Equal(pd.GlobalConfigItem{EventType: pdpb.EventType_PUT, Name: suite.GetEtcdPath("test"), PayLoad: []byte("test"), Value: "test"}, res[0])
 	// Mock when start watcher there are existed some keys, will load firstly
 	for i := 0; i < 6; i++ {

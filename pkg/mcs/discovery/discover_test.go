@@ -35,9 +35,9 @@ func TestDiscover(t *testing.T) {
 	re.NoError(err)
 
 	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
+	re.NoError(err)
+
+	client, err := clientv3.NewFromURL(ep)
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()

@@ -32,19 +32,19 @@ import (
 	"go.uber.org/zap"
 )
 
-const defaultConsumptionChanSize = 1024
-
 const (
-	metricsCleanupInterval = time.Minute
-	metricsCleanupTimeout  = 20 * time.Minute
+	defaultConsumptionChanSize = 1024
+	metricsCleanupInterval     = time.Minute
+	metricsCleanupTimeout      = 20 * time.Minute
 )
 
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	srv     bs.Server
-	groups  map[string]*ResourceGroup
-	storage endpoint.ResourceGroupStorage
+	srv      bs.Server
+	ruConfig *RequestUnitConfig
+	groups   map[string]*ResourceGroup
+	storage  endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
@@ -52,18 +52,26 @@ type Manager struct {
 		*rmpb.Consumption
 	}
 	// record update time of each resource group
-	comsumptionRecord map[string]time.Time
+	consumptionRecord map[string]time.Time
 }
 
-// NewManager returns a new Manager.
-func NewManager(srv bs.Server) *Manager {
+// RUConfigProvider is used to get RU config from the given
+// `bs.server` without modifying its interface.
+type RUConfigProvider interface {
+	GetRequestUnitConfig() *RequestUnitConfig
+}
+
+// NewManager returns a new manager base on the given server,
+// which should implement the `RUConfigProvider` interface.
+func NewManager[T RUConfigProvider](srv bs.Server) *Manager {
 	m := &Manager{
-		groups: make(map[string]*ResourceGroup),
+		ruConfig: srv.(T).GetRequestUnitConfig(),
+		groups:   make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
 		}, defaultConsumptionChanSize),
-		comsumptionRecord: make(map[string]time.Time),
+		consumptionRecord: make(map[string]time.Time),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -86,7 +94,9 @@ func (m *Manager) GetBasicServer() bs.Server {
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
-	// Reset the resource groups first.
+	// Store the RU model config into the storage.
+	m.storage.SaveRequestUnitConfig(m.ruConfig)
+	// Load resource group meta info from storage.
 	m.groups = make(map[string]*ResourceGroup)
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
@@ -97,6 +107,7 @@ func (m *Manager) Init(ctx context.Context) {
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
 	m.storage.LoadResourceGroupSettings(handler)
+	// Load resource group states from storage.
 	tokenHandler := func(k, v string) {
 		tokens := &GroupStates{}
 		if err := json.Unmarshal([]byte(v), tokens); err != nil {
@@ -289,11 +300,11 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
 			}
 
-			m.comsumptionRecord[name] = time.Now()
+			m.consumptionRecord[name] = time.Now()
 
 		case <-ticker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for name, lastTime := range m.comsumptionRecord {
+			for name, lastTime := range m.consumptionRecord {
 				if time.Since(lastTime) > metricsCleanupTimeout {
 					readRequestUnitCost.DeleteLabelValues(name)
 					writeRequestUnitCost.DeleteLabelValues(name)
@@ -303,7 +314,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					sqlCPUCost.DeleteLabelValues(name)
 					requestCount.DeleteLabelValues(name, readTypeLabel)
 					requestCount.DeleteLabelValues(name, writeTypeLabel)
-					delete(m.comsumptionRecord, name)
+					delete(m.consumptionRecord, name)
 				}
 			}
 		}

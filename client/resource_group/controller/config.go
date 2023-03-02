@@ -54,7 +54,7 @@ const (
 
 const (
 	defaultReadBaseCost  = 0.25
-	defaultWriteBaseCost = 1.5
+	defaultWriteBaseCost = 1
 	// 1 RU = 64 KiB read bytes
 	defaultReadCostPerByte = 1. / (64 * 1024)
 	// 1 RU = 1 KiB written bytes
@@ -81,8 +81,8 @@ type RequestUnitConfig struct {
 	CPUMsCost float64 `toml:"read-cpu-ms-cost" json:"read-cpu-ms-cost"`
 }
 
-// DefaultRequestUnitConfig returns the default request unit configuration.
-func DefaultRequestUnitConfig() *RequestUnitConfig {
+// defaultRequestUnitConfig returns the default request unit configuration.
+func defaultRequestUnitConfig() *RequestUnitConfig {
 	return &RequestUnitConfig{
 		ReadBaseCost:     defaultReadBaseCost,
 		ReadCostPerByte:  defaultReadCostPerByte,
@@ -106,13 +106,13 @@ type Config struct {
 
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
-	cfg := generateConfig(
-		DefaultRequestUnitConfig(),
+	return GenerateConfig(
+		defaultRequestUnitConfig(),
 	)
-	return cfg
 }
 
-func generateConfig(ruConfig *RequestUnitConfig) *Config {
+// GenerateConfig generates the configuration by the given request unit configuration.
+func GenerateConfig(ruConfig *RequestUnitConfig) *Config {
 	cfg := &Config{
 		ReadBaseCost:   RequestUnit(ruConfig.ReadBaseCost),
 		ReadBytesCost:  RequestUnit(ruConfig.ReadCostPerByte),

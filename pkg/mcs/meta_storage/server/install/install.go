@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,8 @@
 package install
 
 import (
+	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
-
-	// init API group
-	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1"
 )
 
 func init() {
@@ -28,5 +25,5 @@ func init() {
 
 // Install registers the API group and grpc service.
 func Install(register *registry.ServiceRegistry) {
-	register.RegisterService("ResourceManager", rm_server.NewService[*rm_server.Server])
+	register.RegisterService("MetaStorage", ms_server.NewService[ms_server.ClusterIDProvider])
 }

@@ -43,9 +43,6 @@ const (
 
 // gRPC errors
 var (
-	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
-	// TODO: work as proxy.
-	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
 	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
 )
 
