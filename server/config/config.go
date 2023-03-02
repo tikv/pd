@@ -208,11 +208,12 @@ const (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
 	DefaultMinResolvedTSPersistenceInterval = time.Second
 
-	defaultStrictlyMatchLabel   = false
-	defaultEnablePlacementRules = true
-	defaultEnableGRPCGateway    = true
-	defaultDisableErrorVerbose  = true
-	defaultEnableWitness        = false
+	defaultStrictlyMatchLabel        = false
+	defaultEnablePlacementRules      = true
+	defaultEnablePlacementRulesCache = true
+	defaultEnableGRPCGateway         = true
+	defaultDisableErrorVerbose       = true
+	defaultEnableWitness             = false
 
 	defaultDashboardAddress = "auto"
 
@@ -1000,7 +1001,7 @@ type ReplicationConfig struct {
 	// When PlacementRules feature is enabled. MaxReplicas, LocationLabels and IsolationLabels are not used any more.
 	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
 
-	// EnablePlacementRuleCache controls whether use cache during rule checker
+	// EnablePlacementRulesCache controls whether PD use cache during rule checker
 	EnablePlacementRulesCache bool `toml:"enable-placement-rules-cache" json:"enable-placement-rules-cache,string"`
 
 	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
@@ -1045,6 +1046,9 @@ func (c *ReplicationConfig) adjust(meta *configutil.ConfigMetaData) error {
 	configutil.AdjustUint64(&c.MaxReplicas, defaultMaxReplicas)
 	if !meta.IsDefined("enable-placement-rules") {
 		c.EnablePlacementRules = defaultEnablePlacementRules
+	}
+	if !meta.IsDefined("enable-placement-rules-cache") {
+		c.EnablePlacementRulesCache = defaultEnablePlacementRulesCache
 	}
 	if !meta.IsDefined("strictly-match-label") {
 		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
