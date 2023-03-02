@@ -24,6 +24,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// DefaultLeaseInSeconds is the default lease time in seconds.
+const DefaultLeaseInSeconds = 3
+
 // ServiceRegister is used to register the service to etcd.
 type ServiceRegister struct {
 	ctx    context.Context

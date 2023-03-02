@@ -43,6 +43,7 @@ import (
 	"github.com/spf13/cobra"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
@@ -117,6 +118,7 @@ type Server struct {
 	startCallbacks []func()
 	// primaryCallbacks will be called after the server becomes the primary.
 	primaryCallbacks []func(context.Context)
+	serviceRegister  *discovery.ServiceRegister
 }
 
 // Implement the following methods defined in bs.Server
@@ -275,7 +277,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing tso server ...")
-
+	s.serviceRegister.Deregister()
 	// TODO: double check when muxListener is closed, grpc.Server.serve() and http.Server.serve()
 	// will also close with error cmux.ErrListenerClosed.
 	s.muxListener.Close()
@@ -594,6 +596,8 @@ func (s *Server) startServer() (err error) {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "tso", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister.Register()
 	return nil
 }
 

@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
@@ -237,6 +238,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders
 		s.registry = registry.ServerServiceRegistry
 	})
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 

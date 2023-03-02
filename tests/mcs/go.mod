@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230220070831-5cc42e4327e4
+	github.com/pingcap/kvproto v0.0.0-20230228041042-1e9aca94bab6
 	github.com/stretchr/testify v1.8.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
@@ -36,6 +36,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4 // indirect
+	github.com/elastic/gosigar v0.14.2 // indirect
 	github.com/elliotchance/pie/v2 v2.1.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/gin-contrib/cors v1.4.0 // indirect

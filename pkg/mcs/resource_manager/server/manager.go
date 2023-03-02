@@ -265,6 +265,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				name                     = consumptionInfo.resourceGroupName
 				rruMetrics               = readRequestUnitCost.WithLabelValues(name)
 				wruMetrics               = writeRequestUnitCost.WithLabelValues(name)
+				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name)
 				readByteMetrics          = readByteCost.WithLabelValues(name)
 				writeByteMetrics         = writeByteCost.WithLabelValues(name)
 				kvCPUMetrics             = kvCPUCost.WithLabelValues(name)
@@ -289,6 +290,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			// CPU time info.
 			if consumption.TotalCpuTimeMs > 0 {
 				if consumption.SqlLayerCpuTimeMs > 0 {
+					sqlLayerRuMetrics.Add(consumption.SqlLayerCpuTimeMs * m.ruConfig.CPUMsCost)
 					sqlCPUMetrics.Observe(consumption.SqlLayerCpuTimeMs)
 				}
 				kvCPUMetrics.Observe(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
@@ -309,6 +311,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if time.Since(lastTime) > metricsCleanupTimeout {
 					readRequestUnitCost.DeleteLabelValues(name)
 					writeRequestUnitCost.DeleteLabelValues(name)
+					sqlLayerRequestUnitCost.DeleteLabelValues(name)
 					readByteCost.DeleteLabelValues(name)
 					writeByteCost.DeleteLabelValues(name)
 					kvCPUCost.DeleteLabelValues(name)

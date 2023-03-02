@@ -53,15 +53,15 @@ func TestTSOServerStartAndStopNormally(t *testing.T) {
 	cfg.BackendEndpoints = leader.GetAddr()
 	cfg.ListenAddr = strings.TrimPrefix(tempurl.Alloc(), "http://")
 
-	s, cleanup, err := newTestServer(ctx, cancel, re, cfg)
+	s, cleanup, err := newTestServer(ctx, re, cfg)
 	re.NoError(err)
+	defer cleanup()
 	testutil.Eventually(re, func() bool {
 		return s.IsServing()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
-	_, err = grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithInsecure())
+	cc, err := grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithInsecure())
 	re.NoError(err)
-
-	cleanup()
+	cc.Close()
 }

@@ -23,11 +23,13 @@ import (
 	"path"
 	"reflect"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -44,6 +46,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
 
@@ -1421,4 +1424,146 @@ func (suite *clientTestSuite) TestScatterRegion() {
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
 	}, testutil.WithTickInterval(time.Second))
+}
+
+func TestWatch(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+	client := setupCli(re, ctx, endpoints)
+	defer client.Close()
+
+	key := "test"
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ch, err := client.Watch(ctx, []byte(key))
+		re.NoError(err)
+		var events []*meta_storagepb.Event
+		for e := range ch {
+			events = append(events, e...)
+			if len(events) >= 3 {
+				break
+			}
+		}
+		re.Equal(meta_storagepb.Event_PUT, events[0].GetType())
+		re.Equal("1", string(events[0].GetKv().GetValue()))
+		re.Equal(meta_storagepb.Event_PUT, events[1].GetType())
+		re.Equal("2", string(events[1].GetKv().GetValue()))
+		re.Equal(meta_storagepb.Event_DELETE, events[2].GetType())
+	}()
+
+	cli, err := clientv3.NewFromURLs(endpoints)
+	re.NoError(err)
+	defer cli.Close()
+	cli.Put(context.Background(), key, "1")
+	cli.Put(context.Background(), key, "2")
+	cli.Delete(context.Background(), key)
+	wg.Wait()
+}
+
+func TestPutGet(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+	client := setupCli(re, ctx, endpoints)
+	defer client.Close()
+
+	key := []byte("test")
+	putResp, err := client.Put(context.Background(), key, []byte("1"))
+	re.NoError(err)
+	re.Empty(putResp.GetPrevKv())
+	getResp, err := client.Get(context.Background(), key)
+	re.NoError(err)
+	re.Equal([]byte("1"), getResp.GetKvs()[0].Value)
+	re.NotEqual(0, getResp.GetHeader().GetRevision())
+	putResp, err = client.Put(context.Background(), key, []byte("2"), pd.WithPrevKV())
+	re.NoError(err)
+	re.Equal([]byte("1"), putResp.GetPrevKv().Value)
+	getResp, err = client.Get(context.Background(), key)
+	re.NoError(err)
+	re.Equal([]byte("2"), getResp.GetKvs()[0].Value)
+	s := cluster.GetServer(cluster.GetLeader())
+	// use etcd client delete the key
+	_, err = s.GetEtcdClient().Delete(context.Background(), string(key))
+	re.NoError(err)
+	getResp, err = client.Get(context.Background(), key)
+	re.NoError(err)
+	re.Empty(getResp.GetKvs())
+}
+
+// TestClientWatchWithRevision is the same as TestClientWatchWithRevision in global config.
+func TestClientWatchWithRevision(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+	client := setupCli(re, ctx, endpoints)
+	defer client.Close()
+	s := cluster.GetServer(cluster.GetLeader())
+	watchPrefix := "watch_test"
+	defer func() {
+		_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+"test")
+		re.NoError(err)
+
+		for i := 3; i < 9; i++ {
+			_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+strconv.Itoa(i))
+			re.NoError(err)
+		}
+	}()
+	// Mock get revision by loading
+	r, err := s.GetEtcdClient().Put(context.Background(), watchPrefix+"test", "test")
+	re.NoError(err)
+	res, err := client.Get(context.Background(), []byte(watchPrefix), pd.WithPrefix())
+	re.NoError(err)
+	re.Len(res.Kvs, 1)
+	re.LessOrEqual(r.Header.GetRevision(), res.GetHeader().GetRevision())
+	// Mock when start watcher there are existed some keys, will load firstly
+
+	for i := 0; i < 6; i++ {
+		_, err = s.GetEtcdClient().Put(context.Background(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
+		re.NoError(err)
+	}
+	// Start watcher at next revision
+	ch, err := client.Watch(context.Background(), []byte(watchPrefix), pd.WithRev(res.GetHeader().GetRevision()), pd.WithPrefix(), pd.WithPrevKV())
+	re.NoError(err)
+	// Mock delete
+	for i := 0; i < 3; i++ {
+		_, err = s.GetEtcdClient().Delete(context.Background(), watchPrefix+strconv.Itoa(i))
+		re.NoError(err)
+	}
+	// Mock put
+	for i := 6; i < 9; i++ {
+		_, err = s.GetEtcdClient().Put(context.Background(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
+		re.NoError(err)
+	}
+	var watchCount int
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+			re.Equal(13, watchCount)
+			return
+		case res := <-ch:
+			for _, r := range res {
+				watchCount++
+				if r.GetType() == meta_storagepb.Event_DELETE {
+					re.Equal(watchPrefix+string(r.PrevKv.Value), string(r.Kv.Key))
+				} else {
+					re.Equal(watchPrefix+string(r.Kv.Value), string(r.Kv.Key))
+				}
+			}
+		}
+	}
 }
