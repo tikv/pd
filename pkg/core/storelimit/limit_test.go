@@ -15,7 +15,6 @@
 package storelimit
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,7 +39,7 @@ func TestStoreLimit(t *testing.T) {
 
 func TestSlidingWindow(t *testing.T) {
 	t.Parallel()
-	re := assert.New(t)
+	re := require.New(t)
 	capacity := int64(10)
 	s := NewSlidingWindows(float64(capacity))
 	re.Len(s.windows, int(priorityLevelLen))
@@ -80,7 +79,7 @@ func TestSlidingWindow(t *testing.T) {
 
 func TestWindow(t *testing.T) {
 	t.Parallel()
-	re := assert.New(t)
+	re := require.New(t)
 	capacity := int64(100 * 10)
 	s := newWindow(capacity)
 
