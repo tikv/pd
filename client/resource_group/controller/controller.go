@@ -131,7 +131,7 @@ func NewResourceGroupController(
 	for _, opt := range opts {
 		opt(controller)
 	}
-	controller.calculators = []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)}
+	controller.calculators = []ResourceCalculator{newKVCalculator(controller.config), newSQLCalculator(controller.config)}
 	return controller, nil
 }
 
