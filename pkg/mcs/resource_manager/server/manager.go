@@ -289,7 +289,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			// CPU time info.
 			if consumption.TotalCpuTimeMs > 0 {
 				if consumption.SqlLayerCpuTimeMs > 0 {
-					sqlLayerRuMetrics.Observe(consumption.SqlLayerCpuTimeMs * m.ruConfig.CPUMsCost)
+					sqlLayerRuMetrics.Add(consumption.SqlLayerCpuTimeMs * m.ruConfig.CPUMsCost)
 					sqlCPUMetrics.Observe(consumption.SqlLayerCpuTimeMs)
 				}
 				kvCPUMetrics.Observe(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
