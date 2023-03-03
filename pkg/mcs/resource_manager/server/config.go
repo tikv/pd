@@ -66,6 +66,12 @@ type Config struct {
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
+	// LeaderLease defines the time within which a Resource Manager primary/leader must
+	// update its TTL in etcd, otherwise etcd will expire the leader key and other servers
+	// can campaign the primary/leader again. Etcd only supports seconds TTL, so here is
+	// second too.
+	LeaderLease int64 `toml:"lease" json:"lease"`
+
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig
