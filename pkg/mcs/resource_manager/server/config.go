@@ -32,12 +32,14 @@ import (
 
 const (
 	defaultName              = "Resource Manager"
-	defaultBackendEndpoints  = "127.0.0.1:2379"
+	defaultBackendEndpoints  = "http://127.0.0.1:3379"
 	defaultListenAddr        = "127.0.0.1:3380"
 	defaultEnableGRPCGateway = true
 
 	defaultLogFormat           = "text"
 	defaultDisableErrorVerbose = true
+
+	defaultLeaderLease = int64(3)
 
 	defaultReadBaseCost  = 0.25
 	defaultWriteBaseCost = 1
@@ -185,6 +187,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	if len(c.Log.Format) == 0 {
 		c.Log.Format = defaultLogFormat
 	}
+
+	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
 
 	c.RequestUnit.Adjust()
 

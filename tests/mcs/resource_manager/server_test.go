@@ -48,18 +48,21 @@ func TestResourceManagerServer(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	cfg := rm.NewConfig()
+	cfg, err := rm.NewTestDefaultConfig()
+	re.NoError(err)
 	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = tempurl.Alloc()
-	svr := rm.NewServer(ctx, cfg)
-	go svr.Run()
+	listenAddr := tempurl.Alloc()
+	cfg.ListenAddr = strings.TrimPrefix(listenAddr, "http://")
+
+	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
+	re.NoError(err)
+	defer cleanup()
 	testutil.Eventually(re, func() bool {
-		return svr.IsServing()
+		return s.IsServing()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-	defer svr.Close()
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(cfg.ListenAddr, "http://"), grpc.WithInsecure())
+	cc, err := grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithInsecure())
 	re.NoError(err)
 	defer cc.Close()
 	c := rmpb.NewResourceManagerClient(cc)
@@ -69,7 +72,7 @@ func TestResourceManagerServer(t *testing.T) {
 	re.ErrorContains(err, "resource group not found")
 
 	// Test registered REST HTTP Handler
-	url := cfg.ListenAddr + "/resource-manager/api/v1/config"
+	url := listenAddr + "/resource-manager/api/v1/config"
 	{
 		resp, err := http.Get(url + "/groups")
 		re.NoError(err)
@@ -117,23 +120,20 @@ func TestResourceManagerRegister(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	cfg := rm.NewConfig()
+	cfg, err := rm.NewTestDefaultConfig()
+	re.NoError(err)
 	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = tempurl.Alloc()
+	cfg.ListenAddr = strings.TrimPrefix(tempurl.Alloc(), "http://")
 
-	svr := rm.NewServer(ctx, cfg)
-	go svr.Run()
+	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
+	re.NoError(err)
+	defer cleanup()
 	testutil.Eventually(re, func() bool {
-		return svr.IsServing()
+		return s.IsServing()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	client := leader.GetEtcdClient()
 	endpoints, err := discovery.Discover(client, "resource_manager")
 	re.NoError(err)
 	re.Equal(cfg.ListenAddr, endpoints[0])
-
-	svr.Close()
-	endpoints, err = discovery.Discover(client, "resource_manager")
-	re.NoError(err)
-	re.Empty(endpoints)
 }

@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -38,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
@@ -47,13 +49,17 @@ import (
 )
 
 const (
-	leaderTickInterval = 50 * time.Millisecond
-	tcpNetworkStr      = "tcp"
+	tcpNetworkStr = "tcp"
+	// resourceManagerKeyspaceGroupPrimaryElectionPrefix defines the key prefix for keyspace group primary election.
+	// The entire key is in the format of "/pd/<cluster-id>/microservice/resource_manager/keyspace-group-XXXXX/primary"
+	// in which XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
+	resourceManagerKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/resource_manager/keyspace-group-"
 	// defaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
 	defaultGRPCGracefulStopTimeout = 5 * time.Second
 	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
 	defaultHTTPGracefulShutdownTimeout = 5 * time.Second
 	defaultLeaseInSeconds              = 3
+	leaderTickInterval                 = 50 * time.Millisecond
 )
 
 // Server is the resource manager server, and it implements bs.Server.
@@ -66,10 +72,8 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg         *Config
-	name        string
-	backendURLs []url.URL
-	listenURL   *url.URL
+	cfg  *Config
+	name string
 
 	// for the primary election of resource manager
 	participant *member.Participant
@@ -205,6 +209,7 @@ func (s *Server) Close() {
 	log.Info("closing resource manager server ...")
 	s.serviceRegister.Deregister()
 	s.muxListener.Close()
+	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
 	if s.etcdClient != nil {
@@ -242,8 +247,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	// TODO: implement this function with primary.
-	return atomic.LoadInt64(&s.isServing) == 1
+	return s.participant.IsLeader()
 }
 
 // IsClosed checks if the server loop is closed
@@ -265,8 +269,7 @@ func (s *Server) initClient() error {
 	if err != nil {
 		return err
 	}
-	s.backendURLs = []url.URL(u)
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendURLs)
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL(u))
 	return err
 }
 
@@ -347,11 +350,23 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 
 // GetPrimary returns the primary member.
 func (s *Server) GetPrimary() bs.MemberProvider {
-	// TODO: implement this function with primary.
-	return nil
+	return s.participant.GetLeader()
 }
 
 func (s *Server) startServer() error {
+	// The independent Resource Manager service still reuses PD version info since PD and Resource Manager are just
+	// different service modes provided by the same pd-server binary
+	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+
+	uniqueName := s.cfg.ListenAddr
+	uniqueID := memberutil.GenerateUniqueID(uniqueName)
+	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
+	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
+	s.participant.InitInfo(uniqueName, resourceManagerKeyspaceGroupPrimaryElectionPrefix+fmt.Sprintf("%05d", 0), "primary", "keyspace group primary election")
+	s.participant.SetMemberDeployPath(s.participant.ID())
+	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
+	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
+
 	s.service = &Service{
 		ctx:     s.ctx,
 		manager: NewManager[*Server](s),
@@ -361,14 +376,10 @@ func (s *Server) startServer() error {
 	if err != nil {
 		return err
 	}
-	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
-	if err != nil {
-		return err
-	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(tcpNetworkStr, s.listenURL.Host, tlsConfig)
+		s.muxListener, err = tls.Listen(tcpNetworkStr, s.cfg.ListenAddr, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(tcpNetworkStr, s.listenURL.Host)
+		s.muxListener, err = net.Listen(tcpNetworkStr, s.cfg.ListenAddr)
 	}
 	if err != nil {
 		return err

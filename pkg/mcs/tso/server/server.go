@@ -16,9 +16,7 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
-	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"net"
@@ -50,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -311,7 +310,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
-// IsServing implments basicserver. It returns whether the server is the leader
+// IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
 	return s.participant.IsLeader()
@@ -554,8 +553,7 @@ func (s *Server) startServer() (err error) {
 	// TODO: Figure out how we should generated the unique id and name passed to Participant.
 	// For now, set the name to be listen address and generate the unique id from the name with sha256.
 	uniqueName := s.cfg.ListenAddr
-	hash := sha256.Sum256([]byte(uniqueName))
-	uniqueID := binary.LittleEndian.Uint64(hash[:8])
+	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
 	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
@@ -601,7 +599,7 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-// CreateServer creats the Server
+// CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *Config) *Server {
 	rand.New(rand.NewSource(time.Now().UnixNano()))
 	svr := &Server{
