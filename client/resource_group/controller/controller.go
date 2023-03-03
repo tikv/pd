@@ -166,6 +166,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.initRunState()
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	go func() {
+		c.run.responseDeadline = time.NewTimer(time.Second)
+		c.run.responseDeadline.Stop()
+		defer c.run.responseDeadline.Stop()
 		cleanupTicker := time.NewTicker(defaultGroupCleanupInterval)
 		defer cleanupTicker.Stop()
 		stateUpdateTicker := time.NewTicker(defaultGroupStateUpdateInterval)
@@ -220,6 +223,7 @@ func (c *ResourceGroupsController) Stop() error {
 		return errors.Errorf("resource groups controller does not start")
 	}
 	c.loopCancel()
+	c.run.responseDeadline.Stop()
 	return nil
 }
 
@@ -327,8 +331,10 @@ func (c *ResourceGroupsController) updateAvgRequestResourcePerSec() {
 }
 
 func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenBucketResponse) {
-	if c.run.responseDeadline != nil {
-		c.run.responseDeadline = nil
+	if c.responseDeadlineCh != nil {
+		if c.run.responseDeadline.Stop() {
+			<-c.run.responseDeadline.C
+		}
 		c.responseDeadlineCh = nil
 	}
 	c.run.inDegradedMode = false
@@ -367,8 +373,8 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		Requests:              requests,
 		TargetRequestPeriodMs: uint64(defaultTargetPeriod / time.Millisecond),
 	}
-	if c.run.responseDeadline == nil {
-		c.run.responseDeadline = time.NewTimer(time.Second)
+	if c.responseDeadlineCh == nil {
+		c.run.responseDeadline.Reset(time.Second)
 		c.responseDeadlineCh = c.run.responseDeadline.C
 	}
 	go func() {
