@@ -50,13 +50,6 @@ type BaseClient interface {
 	GetClusterID(context.Context) uint64
 	// GetURLs returns the URLs of the servers.
 	GetURLs() []string
-	// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
-	GetTSOAllocators() *sync.Map
-	// GetTSOAllocatorServingAddrByDCLocation returns the tso allocator of the given dcLocation
-	GetTSOAllocatorServingAddrByDCLocation(dcLocation string) (string, bool)
-	// GetTSOAllocatorClientConnByDCLocation returns the tso allocator grpc client connection
-	// of the given dcLocation
-	GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string)
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
 	// which is the leader in a quorum-based cluster or the primary in a primary/secondy
 	// configured cluster.
@@ -85,6 +78,16 @@ type BaseClient interface {
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
 	AddServiceAddrsSwitchedCallback(callbacks ...func())
+
+	// TODO: Separate the following TSO related service discovery methods from the above methods.
+
+	// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
+	GetTSOAllocators() *sync.Map
+	// GetTSOAllocatorServingAddrByDCLocation returns the tso allocator of the given dcLocation
+	GetTSOAllocatorServingAddrByDCLocation(dcLocation string) (string, bool)
+	// GetTSOAllocatorClientConnByDCLocation returns the tso allocator grpc client connection
+	// of the given dcLocation
+	GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string)
 	// AddTSOAllocatorServingAddrSwitchedCallback adds callbacks which will be called
 	// when any global/local tso allocator service endpoint is switched.
 	AddTSOAllocatorServingAddrSwitchedCallback(callbacks ...func())
