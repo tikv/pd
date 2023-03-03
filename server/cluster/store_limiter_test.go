@@ -20,13 +20,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
 func TestCollect(t *testing.T) {
 	re := require.New(t)
 
-	limiter := NewStoreLimiter(config.NewTestOptions())
+	limiter := NewStoreLimiter(mockconfig.NewTestOptions())
 
 	limiter.Collect(&pdpb.StoreStats{})
 	re.Equal(int64(1), limiter.state.cst.total)
@@ -35,7 +35,7 @@ func TestCollect(t *testing.T) {
 func TestStoreLimitScene(t *testing.T) {
 	re := require.New(t)
 
-	limiter := NewStoreLimiter(config.NewTestOptions())
+	limiter := NewStoreLimiter(mockconfig.NewTestOptions())
 	re.Equal(storelimit.DefaultScene(storelimit.AddPeer), limiter.scene[storelimit.AddPeer])
 	re.Equal(storelimit.DefaultScene(storelimit.RemovePeer), limiter.scene[storelimit.RemovePeer])
 }
@@ -43,7 +43,7 @@ func TestStoreLimitScene(t *testing.T) {
 func TestReplaceStoreLimitScene(t *testing.T) {
 	re := require.New(t)
 
-	limiter := NewStoreLimiter(config.NewTestOptions())
+	limiter := NewStoreLimiter(mockconfig.NewTestOptions())
 
 	sceneAddPeer := &storelimit.Scene{Idle: 4, Low: 3, Normal: 2, High: 1}
 	limiter.ReplaceStoreLimitScene(sceneAddPeer, storelimit.AddPeer)

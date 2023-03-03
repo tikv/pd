@@ -21,8 +21,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -32,7 +32,7 @@ func TestRegionStatistics(t *testing.T) {
 	manager := placement.NewRuleManager(store, nil, nil)
 	err := manager.Initialize(3, []string{"zone", "rack", "host"})
 	re.NoError(err)
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},
@@ -137,7 +137,7 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 	manager := placement.NewRuleManager(store, nil, nil)
 	err := manager.Initialize(3, []string{"zone", "rack", "host"})
 	re.NoError(err)
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(true)
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},

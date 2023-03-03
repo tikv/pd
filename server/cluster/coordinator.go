@@ -38,7 +38,7 @@ import (
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
@@ -93,7 +93,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		cancel:            cancel,
 		cluster:           cluster,
 		prepareChecker:    newPrepareChecker(),
-		checkers:          checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
+		checkers:          checker.NewController(ctx, cluster, cluster.opt, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer:   schedule.NewRegionScatterer(ctx, cluster, opController),
 		regionSplitter:    schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:        schedulers,
@@ -768,7 +768,7 @@ func (c *coordinator) isSchedulerDisabled(name string) (bool, error) {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	t := s.GetType()
-	scheduleConfig := c.cluster.GetOpts().GetScheduleConfig()
+	scheduleConfig := c.cluster.GetScheduleConfig()
 	for _, s := range scheduleConfig.Schedulers {
 		if t == s.Type {
 			return s.Disable, nil

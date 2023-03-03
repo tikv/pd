@@ -16,7 +16,7 @@ package filter
 
 import (
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -67,6 +67,6 @@ func ReplicatedRegion(cluster regionHealthCluster) func(*core.RegionInfo) bool {
 type regionHealthCluster interface {
 	core.StoreSetInformer
 	core.RegionSetInformer
-	GetOpts() *config.PersistOptions
+	GetOpts() config.Config
 	GetRuleManager() *placement.RuleManager
 }

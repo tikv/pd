@@ -19,7 +19,7 @@ import (
 	"sort"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
@@ -35,14 +35,14 @@ func NewCandidates(stores []*core.StoreInfo) *StoreCandidates {
 }
 
 // FilterSource keeps stores that can pass all source filters.
-func (c *StoreCandidates) FilterSource(opt *config.PersistOptions, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
-	c.Stores = SelectSourceStores(c.Stores, filters, opt, collector, counter)
+func (c *StoreCandidates) FilterSource(conf config.Config, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
+	c.Stores = SelectSourceStores(c.Stores, filters, conf, collector, counter)
 	return c
 }
 
 // FilterTarget keeps stores that can pass all target filters.
-func (c *StoreCandidates) FilterTarget(opt *config.PersistOptions, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
-	c.Stores = SelectTargetStores(c.Stores, filters, opt, collector, counter)
+func (c *StoreCandidates) FilterTarget(conf config.Config, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
+	c.Stores = SelectTargetStores(c.Stores, filters, conf, collector, counter)
 	return c
 }
 
