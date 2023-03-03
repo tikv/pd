@@ -60,7 +60,7 @@ var cases []testcase = []testcase{
 func BenchmarkMedianFilterAddAndGet1(b *testing.B) {
 	n := 5
 	mf := NewMedianFilter(n)
-	rand.Seed(time.Now().UnixNano())
+	var rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 	for j := 0; j < n; j++ {
 		mf.Add(rand.Float64())
 	}
@@ -78,7 +78,7 @@ func BenchmarkMedianFilterAddAndGet1(b *testing.B) {
 func BenchmarkMedianFilterAddAndGet2(b *testing.B) {
 	n := 5
 	mf := NewMedianFilter(n)
-	rand.Seed(time.Now().UnixNano())
+	var rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 	for j := 0; j < n; j++ {
 		mf.Add(rand.Float64())
 	}
@@ -96,7 +96,7 @@ func BenchmarkMedianFilterAddAndGet2(b *testing.B) {
 func BenchmarkMedianFilterAddAndGet3(b *testing.B) {
 	n := 5
 	mf := NewMedianFilter(n)
-	rand.Seed(time.Now().UnixNano())
+	var rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 	for j := 0; j < n; j++ {
 		mf.Add(rand.Float64())
 	}
@@ -114,7 +114,7 @@ func BenchmarkMedianFilterAddAndGet3(b *testing.B) {
 func BenchmarkMedianFilterAddAndGet4(b *testing.B) {
 	n := 5
 	mf := NewMedianFilter(n)
-	rand.Seed(time.Now().UnixNano())
+	var rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 	for j := 0; j < n; j++ {
 		mf.Add(rand.Float64())
 	}

@@ -56,7 +56,7 @@ func checkMedianAdd(re *require.Assertions, ma *MedianFilter, n int, rate float6
 		return median
 	}
 
-	rand.Seed(time.Now().UnixNano())
+	var rand = rand.New(rand.NewSource(time.Now().UnixNano()))
 	last := rand.Float64()
 	for i := 0; i < n; i++ {
 		if rand.Float64() < rate {
