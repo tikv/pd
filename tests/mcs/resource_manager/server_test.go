@@ -136,4 +136,9 @@ func TestResourceManagerRegister(t *testing.T) {
 	endpoints, err := discovery.Discover(client, "resource_manager")
 	re.NoError(err)
 	re.Equal(cfg.ListenAddr, endpoints[0])
+
+	s.Close()
+	endpoints, err = discovery.Discover(client, "resource_manager")
+	re.NoError(err)
+	re.Empty(endpoints)
 }
