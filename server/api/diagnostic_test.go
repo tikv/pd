@@ -22,13 +22,13 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/apiutil"
-	tu "github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 )
 
 type diagnosticTestSuite struct {
@@ -56,10 +56,21 @@ func (suite *diagnosticTestSuite) SetupSuite() {
 
 	mustBootstrapCluster(re, suite.svr)
 	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 }
 
 func (suite *diagnosticTestSuite) TearDownSuite() {
 	suite.cleanup()
+}
+
+func (suite *diagnosticTestSuite) checkStatus(status string, url string) {
+	re := suite.Require()
+	suite.Eventually(func() bool {
+		result := &cluster.DiagnosticResult{}
+		err := tu.ReadGetJSON(re, testDialClient, url, result)
+		suite.NoError(err)
+		return result.Status == status
+	}, time.Second, time.Millisecond*50)
 }
 
 func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
@@ -98,12 +109,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex, body, tu.StatusOK(suite.Require()))
 	suite.NoError(err)
-
-	time.Sleep(time.Millisecond * 50)
-	result = &cluster.DiagnosticResult{}
-	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
-	suite.NoError(err)
-	suite.Equal("pending", result.Status)
+	suite.checkStatus("pending", balanceRegionURL)
 
 	input = make(map[string]interface{})
 	input["delay"] = 30
@@ -111,35 +117,20 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
 	suite.NoError(err)
-	time.Sleep(time.Millisecond * 50)
-	result = &cluster.DiagnosticResult{}
-	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
-	suite.NoError(err)
-	suite.Equal("paused", result.Status)
+	suite.checkStatus("paused", balanceRegionURL)
 
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
 	suite.NoError(err)
-	time.Sleep(time.Millisecond * 50)
-	result = &cluster.DiagnosticResult{}
-	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
-	suite.NoError(err)
-	suite.Equal("pending", result.Status)
+	suite.checkStatus("pending", balanceRegionURL)
 
 	mustPutRegion(re, suite.svr, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
-	time.Sleep(time.Millisecond * 50)
-	result = &cluster.DiagnosticResult{}
-	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
-	suite.NoError(err)
-	suite.Equal("normal", result.Status)
+	suite.checkStatus("normal", balanceRegionURL)
 
 	deleteURL := fmt.Sprintf("%s/%s", suite.schedulerPrifex, schedulers.BalanceRegionName)
 	_, err = apiutil.DoDelete(testDialClient, deleteURL)
 	suite.NoError(err)
-	result = &cluster.DiagnosticResult{}
-	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
-	suite.NoError(err)
-	suite.Equal("disabled", result.Status)
+	suite.checkStatus("disabled", balanceRegionURL)
 }

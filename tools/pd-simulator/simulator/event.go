@@ -17,7 +17,7 @@ package simulator
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -145,11 +145,10 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 
 	config := raft.storeConfig
 	s := &cases.Store{
-		ID:        id,
-		Status:    metapb.StoreState_Up,
-		Capacity:  uint64(config.RaftStore.Capacity),
-		Available: uint64(config.RaftStore.Available),
-		Version:   config.StoreVersion,
+		ID:       id,
+		Status:   metapb.StoreState_Up,
+		Capacity: uint64(config.RaftStore.Capacity),
+		Version:  config.StoreVersion,
 	}
 	n, err := NewNode(s, raft.conn.pdAddr, config)
 	if err != nil {

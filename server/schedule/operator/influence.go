@@ -15,8 +15,8 @@
 package operator
 
 import (
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 )
 
 // OpInfluence records the influence of the cluster.
@@ -28,18 +28,6 @@ type OpInfluence struct {
 func NewOpInfluence() *OpInfluence {
 	return &OpInfluence{
 		StoresInfluence: make(map[uint64]*StoreInfluence),
-	}
-}
-
-func (m *OpInfluence) Add(other *OpInfluence) {
-	for id, v := range other.StoresInfluence {
-		m.GetStoreInfluence(id).add(v)
-	}
-}
-
-func (m *OpInfluence) Sub(other *OpInfluence) {
-	for id, v := range other.StoresInfluence {
-		m.GetStoreInfluence(id).sub(v)
 	}
 }
 
@@ -55,39 +43,18 @@ func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 
 // StoreInfluence records influences that pending operators will make.
 type StoreInfluence struct {
-	RegionSize  int64
-	RegionCount int64
-	LeaderSize  int64
-	LeaderCount int64
-	StepCost    map[storelimit.Type]int64
-	SendCost    int64
+	RegionSize   int64
+	RegionCount  int64
+	LeaderSize   int64
+	LeaderCount  int64
+	WitnessCount int64
+	StepCost     map[storelimit.Type]int64
+	SendCost     int64
 }
 
 // GetSendCost returns the cost of sending snapshot.
 func (s *StoreInfluence) GetSendCost() int64 {
 	return s.SendCost
-}
-
-func (s *StoreInfluence) add(other *StoreInfluence) {
-	s.RegionCount += other.RegionCount
-	s.RegionSize += other.RegionSize
-	s.LeaderSize += other.LeaderSize
-	s.LeaderCount += other.LeaderCount
-	for _, v := range storelimit.TypeNameValue {
-		s.addStepCost(v, other.GetStepCost(v))
-	}
-	s.SendCost += other.SendCost
-}
-
-func (s *StoreInfluence) sub(other *StoreInfluence) {
-	s.RegionCount -= other.RegionCount
-	s.RegionSize -= other.RegionSize
-	s.LeaderSize -= other.LeaderSize
-	s.LeaderCount -= other.LeaderCount
-	for _, v := range storelimit.TypeNameValue {
-		s.addStepCost(v, -other.GetStepCost(v))
-	}
-	s.SendCost += other.SendCost
 }
 
 // ResourceProperty returns delta size of leader/region by influence.
@@ -104,6 +71,8 @@ func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
 		}
 	case core.RegionKind:
 		return s.RegionSize
+	case core.WitnessKind:
+		return s.WitnessCount
 	default:
 		return 0
 	}

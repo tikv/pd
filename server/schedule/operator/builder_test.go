@@ -21,9 +21,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/server/schedule/config"
 )
 
 type operatorBuilderTestSuite struct {
@@ -39,12 +40,10 @@ func TestOperatorBuilderTestSuite(t *testing.T) {
 }
 
 func (suite *operatorBuilderTestSuite) SetupTest() {
-	opts := config.NewTestOptions()
+	opts := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, opts)
-	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		config.RejectLeader: {{Key: "noleader", Value: "true"}},
-	})
+	suite.cluster.SetLabelProperty(config.RejectLeader, "noleader", "true")
 	suite.cluster.SetLocationLabels([]string{"zone", "host"})
 	suite.cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
 	suite.cluster.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h1"})

@@ -118,6 +118,7 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
 		}, []string{"address", "store"})
 
+	// TODO: pre-allocate gauge metrics
 	storeHeartbeatHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -142,7 +143,14 @@ var (
 			Name:      "audit_handling_seconds",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "component"})
+		}, []string{"service", "method", "component", "ip"})
+	serverMaxProcs = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "maxprocs",
+			Help:      "The value of GOMAXPROCS.",
+		})
 )
 
 func init() {
@@ -161,4 +169,5 @@ func init() {
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
 	prometheus.MustRegister(bucketReportInterval)
+	prometheus.MustRegister(serverMaxProcs)
 }

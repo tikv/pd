@@ -17,8 +17,8 @@ package input
 import (
 	"github.com/pingcap/log"
 	regionpkg "github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -108,6 +108,6 @@ func clusterScan(rc *core.BasicCluster) RegionsInfo {
 		}
 	}
 
-	log.Debug("Update key visual regions", zap.Int("total-length", len(regions)))
+	log.Debug("update key visual regions", zap.Int("total-length", len(regions)))
 	return regions
 }

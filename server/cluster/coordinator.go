@@ -27,18 +27,19 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
 )
 
@@ -55,6 +56,12 @@ const (
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
 	PluginUnload = "PluginUnload"
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	waitingListGauge  = regionListGauge.WithLabelValues("waiting_list")
+	priorityListGauge = regionListGauge.WithLabelValues("priority_list")
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -86,7 +93,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		cancel:            cancel,
 		cluster:           cluster,
 		prepareChecker:    newPrepareChecker(),
-		checkers:          checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
+		checkers:          checker.NewController(ctx, cluster, cluster.opt, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer:   schedule.NewRegionScatterer(ctx, cluster, opController),
 		regionSplitter:    schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:        schedulers,
@@ -116,7 +123,10 @@ func (c *coordinator) patrolRegions() {
 
 	log.Info("coordinator starts patrol regions")
 	start := time.Now()
-	var key []byte
+	var (
+		key     []byte
+		regions []*core.RegionInfo
+	)
 	for {
 		select {
 		case <-timer.C:
@@ -137,33 +147,9 @@ func (c *coordinator) patrolRegions() {
 		// Check regions in the waiting list
 		c.checkWaitingRegions()
 
-		regions := c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
+		key, regions = c.checkRegions(key)
 		if len(regions) == 0 {
-			// Resets the scan key.
-			key = nil
 			continue
-		}
-
-		for _, region := range regions {
-			// Skips the region if there is already a pending operator.
-			if c.opController.GetOperator(region.GetID()) != nil {
-				continue
-			}
-
-			ops := c.checkers.CheckRegion(region)
-
-			key = region.GetEndKey()
-			if len(ops) == 0 {
-				continue
-			}
-
-			if !c.opController.ExceedStoreLimit(ops...) {
-				c.opController.AddWaitingOperator(ops...)
-				c.checkers.RemoveWaitingRegion(region.GetID())
-				c.checkers.RemoveSuspectRegion(region.GetID())
-			} else {
-				c.checkers.AddWaitingRegion(region)
-			}
 		}
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
@@ -177,11 +163,42 @@ func (c *coordinator) patrolRegions() {
 	}
 }
 
+func (c *coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
+	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
+	if len(regions) == 0 {
+		// Resets the scan key.
+		key = nil
+		return
+	}
+
+	for _, region := range regions {
+		c.tryAddOperators(region)
+		key = region.GetEndKey()
+	}
+	return
+}
+
+func (c *coordinator) checkSuspectRegions() {
+	for _, id := range c.checkers.GetSuspectRegions() {
+		region := c.cluster.GetRegion(id)
+		c.tryAddOperators(region)
+	}
+}
+
+func (c *coordinator) checkWaitingRegions() {
+	items := c.checkers.GetWaitingRegions()
+	waitingListGauge.Set(float64(len(items)))
+	for _, item := range items {
+		region := c.cluster.GetRegion(item.Key)
+		c.tryAddOperators(region)
+	}
+}
+
 // checkPriorityRegions checks priority regions
 func (c *coordinator) checkPriorityRegions() {
 	items := c.checkers.GetPriorityRegions()
 	removes := make([]uint64, 0)
-	regionListGauge.WithLabelValues("priority_list").Set(float64(len(items)))
+	priorityListGauge.Set(float64(len(items)))
 	for _, id := range items {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
@@ -199,29 +216,6 @@ func (c *coordinator) checkPriorityRegions() {
 	}
 	for _, v := range removes {
 		c.checkers.RemovePriorityRegions(v)
-	}
-}
-
-func (c *coordinator) checkSuspectRegions() {
-	for _, id := range c.checkers.GetSuspectRegions() {
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			// the region could be recent split, continue to wait.
-			continue
-		}
-		if c.opController.GetOperator(id) != nil {
-			c.checkers.RemoveSuspectRegion(id)
-			continue
-		}
-		ops := c.checkers.CheckRegion(region)
-		if len(ops) == 0 {
-			continue
-		}
-
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-			c.checkers.RemoveSuspectRegion(region.GetID())
-		}
 	}
 }
 
@@ -264,29 +258,28 @@ func (c *coordinator) checkSuspectRanges() {
 	}
 }
 
-func (c *coordinator) checkWaitingRegions() {
-	items := c.checkers.GetWaitingRegions()
-	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
-	for _, item := range items {
-		id := item.Key
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			// the region could be recent split, continue to wait.
-			continue
-		}
-		if c.opController.GetOperator(id) != nil {
-			c.checkers.RemoveWaitingRegion(id)
-			continue
-		}
-		ops := c.checkers.CheckRegion(region)
-		if len(ops) == 0 {
-			continue
-		}
+func (c *coordinator) tryAddOperators(region *core.RegionInfo) {
+	if region == nil {
+		// the region could be recent split, continue to wait.
+		return
+	}
+	id := region.GetID()
+	if c.opController.GetOperator(id) != nil {
+		c.checkers.RemoveWaitingRegion(id)
+		c.checkers.RemoveSuspectRegion(id)
+		return
+	}
+	ops := c.checkers.CheckRegion(region)
+	if len(ops) == 0 {
+		return
+	}
 
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-			c.checkers.RemoveWaitingRegion(region.GetID())
-		}
+	if !c.opController.ExceedStoreLimit(ops...) {
+		c.opController.AddWaitingOperator(ops...)
+		c.checkers.RemoveWaitingRegion(id)
+		c.checkers.RemoveSuspectRegion(id)
+	} else {
+		c.checkers.AddWaitingRegion(region)
 	}
 }
 
@@ -497,16 +490,26 @@ func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.Sto
 	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
 	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
+	var infos *statistics.StoreHotPeersInfos
 	switch typ {
 	case statistics.Write:
 		regionStats := c.cluster.RegionWriteStats()
-		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
 	case statistics.Read:
 		regionStats := c.cluster.RegionReadStats()
-		return statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
 	default:
 	}
-	return nil
+	// update params `IsLearner` and `LastUpdateTime`
+	for _, stores := range []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer} {
+		for _, store := range stores {
+			for _, hotPeer := range store.Stats {
+				region := c.cluster.GetRegion(hotPeer.RegionID)
+				hotPeer.UpdateHotPeerStatShow(region)
+			}
+		}
+	}
+	return infos
 }
 
 func (c *coordinator) getSchedulers() []string {
@@ -553,8 +556,6 @@ func (c *coordinator) collectHotSpotMetrics() {
 	collectHotMetrics(c.cluster, stores, statistics.Write)
 	// Collects hot read region metrics.
 	collectHotMetrics(c.cluster, stores, statistics.Read)
-	// Collects pending influence.
-	collectPendingInfluence(stores)
 }
 
 func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ statistics.RWType) {
@@ -571,14 +572,15 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 		regionStats = cluster.RegionWriteStats()
 		kind = statistics.Write.String()
 	}
-	status := statistics.GetHotStatus(stores, cluster.GetStoresLoads(), regionStats, typ, cluster.GetOpts().IsTraceRegionFlow())
+	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
 	for _, s := range stores {
+		// TODO: pre-allocate gauge metrics
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)
-		stat, ok := status.AsLeader[storeID]
-		if ok {
+		stat, hasHotLeader := status.AsLeader[storeID]
+		if hasHotLeader {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalQueryRate)
@@ -590,8 +592,8 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader")
 		}
 
-		stat, ok = status.AsPeer[storeID]
-		if ok {
+		stat, hasHotPeer := status.AsPeer[storeID]
+		if hasHotPeer {
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalQueryRate)
@@ -602,29 +604,18 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer")
 		}
-	}
-}
 
-func collectPendingInfluence(stores []*core.StoreInfo) {
-	pendings := statistics.GetPendingInfluence(stores)
-	for _, s := range stores {
-		storeAddress := s.GetAddress()
-		storeID := s.GetID()
-		storeLabel := strconv.FormatUint(storeID, 10)
-		if infl := pendings[storeID]; infl != nil {
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_byte_rate").Set(infl.Loads[statistics.RegionReadBytes])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_key_rate").Set(infl.Loads[statistics.RegionReadKeys])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "read_pending_influence_query_rate").Set(infl.Loads[statistics.RegionReadQueryNum])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_byte_rate").Set(infl.Loads[statistics.RegionWriteBytes])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_key_rate").Set(infl.Loads[statistics.RegionWriteKeys])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "write_pending_influence_query_rate").Set(infl.Loads[statistics.RegionWriteQueryNum])
-			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "pending_influence_count").Set(infl.Count)
+		if !hasHotLeader && !hasHotPeer {
+			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, _ statistics.RegionStatKind) {
+				hotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), statistics.DimToString(dim))
+			})
 		}
 	}
 }
 
 func (c *coordinator) resetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
+	hotPendingSum.Reset()
 }
 
 func (c *coordinator) shouldRun() bool {
@@ -777,7 +768,7 @@ func (c *coordinator) isSchedulerDisabled(name string) (bool, error) {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	t := s.GetType()
-	scheduleConfig := c.cluster.GetOpts().GetScheduleConfig()
+	scheduleConfig := c.cluster.GetScheduleConfig()
 	for _, s := range scheduleConfig.Schedulers {
 		if t == s.Type {
 			return s.Disable, nil
@@ -992,4 +983,20 @@ func (c *coordinator) getPausedSchedulerDelayUntil(name string) (int64, error) {
 		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return s.GetDelayUntil(), nil
+}
+
+// CheckTransferWitnessLeader determines if transfer leader is required, then sends to the scheduler if needed
+func (c *coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
+	if core.NeedTransferWitnessLeader(region) {
+		c.RLock()
+		s, ok := c.schedulers[schedulers.TransferWitnessLeaderName]
+		c.RUnlock()
+		if ok {
+			select {
+			case schedulers.RecvRegionInfo(s.Scheduler) <- region:
+			default:
+				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
+			}
+		}
+	}
 }

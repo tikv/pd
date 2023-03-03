@@ -25,14 +25,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -118,6 +118,9 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 			}
 			oc.SendScheduleCommand(region, step, source)
 		case operator.SUCCESS:
+			if op.ContainNonWitnessStep() {
+				oc.cluster.RecordOpStepWithTTL(op.RegionID())
+			}
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
@@ -481,16 +484,13 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			log.Info("missing store", zap.Uint64("store-id", storeID))
 			continue
 		}
+		limit := store.GetStoreLimit()
 		for n, v := range storelimit.TypeNameValue {
-			storeLimit := store.GetStoreLimit(v)
-			if storeLimit == nil {
-				continue
-			}
 			stepCost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
 			if stepCost == 0 {
 				continue
 			}
-			storeLimit.Take(stepCost)
+			limit.Take(stepCost, v, storelimit.Low)
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
@@ -744,10 +744,6 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 
 // AddOpInfluence add operator influence for cluster
 func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster Cluster) {
-	if op.HasInfluence() {
-		op.TotalInfluence(influence, nil)
-		return
-	}
 	region := cluster.GetRegion(op.RegionID())
 	// region may be nil when the operator's is merged or the region is splitting.
 	if region != nil {
@@ -834,6 +830,14 @@ func (oc *OperatorController) ExceedStoreLimit(ops ...*operator.Operator) bool {
 
 // exceedStoreLimitLocked returns true if the store exceeds the cost limit after adding the operator. Otherwise, returns false.
 func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) bool {
+	// The operator with Urgent priority, like admin operators, should ignore the store limit check.
+	var desc string
+	if len(ops) != 0 {
+		desc = ops[0].Desc()
+		if ops[0].GetPriorityLevel() == core.Urgent {
+			return false
+		}
+	}
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
 		for _, v := range storelimit.TypeNameValue {
@@ -845,7 +849,8 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if !limiter.Available(stepCost) {
+			if !limiter.Available(stepCost, v, storelimit.Low) {
+				operator.OperatorExceededStoreLimitCounter.WithLabelValues(desc).Inc()
 				return true
 			}
 		}
@@ -854,18 +859,15 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 }
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
-func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) *storelimit.StoreLimit {
+func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) storelimit.StoreLimit {
 	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
 	if s == nil {
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
 		return nil
 	}
-	if s.GetStoreLimit(limitType) == nil {
-		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
-	}
-	if ratePerSec != s.GetStoreLimit(limitType).Rate() {
-		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
-	}
-	return s.GetStoreLimit(limitType)
+
+	limit := s.GetStoreLimit()
+	limit.Reset(ratePerSec, limitType)
+	return limit
 }

@@ -17,6 +17,7 @@ package hbstream
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
+	// TODO: pre-allocate gauge metrics
 	heartbeatStreamCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",

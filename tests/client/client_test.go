@@ -23,27 +23,30 @@ import (
 	"path"
 	"reflect"
 	"sort"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/pkg/assertutil"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/tsoutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage/endpoint"
-	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
 
@@ -54,13 +57,6 @@ const (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
-
-type client interface {
-	GetLeaderAddr() string
-	ScheduleCheckLeader()
-	GetURLs() []string
-	GetAllocatorLeaderURLs() map[string]string
 }
 
 func TestClientClusterIDCheck(t *testing.T) {
@@ -91,7 +87,7 @@ func TestClientClusterIDCheck(t *testing.T) {
 		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
 	)
 	re.Error(err)
-	re.Contains(err.Error(), "ErrClientGetLeader")
+	re.Contains(err.Error(), "ErrClientGetMember")
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipFirstUpdateMember"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipClusterIDCheck"))
 }
@@ -106,6 +102,8 @@ func TestClientLeaderChange(t *testing.T) {
 
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints)
+	innerCli, ok := cli.(interface{ GetBaseClient() pd.BaseClient })
+	re.True(ok)
 
 	var ts1, ts2 uint64
 	testutil.Eventually(re, func() bool {
@@ -120,13 +118,14 @@ func TestClientLeaderChange(t *testing.T) {
 	re.True(cluster.CheckTSOUnique(ts1))
 
 	leader := cluster.GetLeader()
-	waitLeader(re, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetBaseClient(), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	err = cluster.GetServer(leader).Stop()
 	re.NoError(err)
 	leader = cluster.WaitLeader()
 	re.NotEmpty(leader)
-	waitLeader(re, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
+
+	waitLeader(re, innerCli.GetBaseClient(), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	// Check TS won't fall back after leader changed.
 	testutil.Eventually(re, func() bool {
@@ -143,7 +142,7 @@ func TestClientLeaderChange(t *testing.T) {
 
 	// Check URL list.
 	cli.Close()
-	urls := cli.(client).GetURLs()
+	urls := innerCli.GetBaseClient().GetURLs()
 	sort.Strings(urls)
 	sort.Strings(endpoints)
 	re.Equal(endpoints, urls)
@@ -238,7 +237,7 @@ func TestUpdateAfterResetTSO(t *testing.T) {
 		return err == nil
 	})
 	// Transfer leader back.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/delaySyncTimestamp", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
 	err = cluster.GetServer(newLeaderName).ResignLeader()
 	re.NoError(err)
 	// Should NOT panic here.
@@ -246,7 +245,7 @@ func TestUpdateAfterResetTSO(t *testing.T) {
 		_, _, err := cli.GetTS(context.TODO())
 		return err == nil
 	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp"))
 }
 
 func TestTSOAllocatorLeader(t *testing.T) {
@@ -289,12 +288,14 @@ func TestTSOAllocatorLeader(t *testing.T) {
 		allocatorLeaderMap[dcLocation] = pdName
 	}
 	cli := setupCli(re, ctx, endpoints)
+	innerCli, ok := cli.(interface{ GetBaseClient() pd.BaseClient })
+	re.True(ok)
 
 	// Check allocator leaders URL map.
 	cli.Close()
-	for dcLocation, url := range cli.(client).GetAllocatorLeaderURLs() {
+	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(innerCli.GetBaseClient()) {
 		if dcLocation == tso.GlobalDCLocation {
-			urls := cli.(client).GetURLs()
+			urls := innerCli.GetBaseClient().GetURLs()
 			sort.Strings(urls)
 			sort.Strings(endpoints)
 			re.Equal(endpoints, urls)
@@ -345,6 +346,69 @@ func TestTSOFollowerProxy(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
+func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(re, ctx, endpoints)
+
+	var wg sync.WaitGroup
+	var maxUnavailableTime, leaderReadyTime time.Time
+	getTsoFunc := func() {
+		defer wg.Done()
+		var lastTS uint64
+		for i := 0; i < tsoRequestRound; i++ {
+			var physical, logical int64
+			var ts uint64
+			physical, logical, err = cli.GetTS(context.Background())
+			ts = tsoutil.ComposeTS(physical, logical)
+			if err != nil {
+				maxUnavailableTime = time.Now()
+				continue
+			}
+			re.NoError(err)
+			re.Less(lastTS, ts)
+			lastTS = ts
+		}
+	}
+
+	// test resign pd leader or stop pd leader
+	wg.Add(1 + 1)
+	go getTsoFunc()
+	go func() {
+		defer wg.Done()
+		leader := cluster.GetServer(cluster.GetLeader())
+		leader.Stop()
+		cluster.WaitLeader()
+		leaderReadyTime = time.Now()
+		cluster.RunServers([]*tests.TestServer{leader})
+	}()
+	wg.Wait()
+	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
+
+	// test kill pd leader pod or network of leader is unreachable
+	wg.Add(1 + 1)
+	maxUnavailableTime, leaderReadyTime = time.Time{}, time.Time{}
+	go getTsoFunc()
+	go func() {
+		defer wg.Done()
+		leader := cluster.GetServer(cluster.GetLeader())
+		re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
+		leader.Stop()
+		cluster.WaitLeader()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+		leaderReadyTime = time.Now()
+	}()
+	wg.Wait()
+	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
 }
 
 func TestGlobalAndLocalTSO(t *testing.T) {
@@ -446,6 +510,15 @@ func requestGlobalAndLocalTSO(
 		}
 	}
 	wg.Wait()
+}
+
+func getTSOAllocatorServingEndpointURLs(c pd.BaseClient) map[string]string {
+	allocatorLeaders := make(map[string]string)
+	c.GetTSOAllocators().Range(func(dcLocation, url interface{}) bool {
+		allocatorLeaders[dcLocation.(string)] = url.(string)
+		return true
+	})
+	return allocatorLeaders
 }
 
 func TestCustomTimeout(t *testing.T) {
@@ -593,10 +666,10 @@ func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, o
 	return cli
 }
 
-func waitLeader(re *require.Assertions, cli client, leader string) {
+func waitLeader(re *require.Assertions, cli pd.BaseClient, leader string) {
 	testutil.Eventually(re, func() bool {
-		cli.ScheduleCheckLeader()
-		return cli.GetLeaderAddr() == leader
+		cli.ScheduleCheckMemberChanged()
+		return cli.GetServingAddr() == leader
 	})
 }
 
@@ -723,7 +796,7 @@ func TestClientTestSuite(t *testing.T) {
 func (suite *clientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = server.NewTestServer(assertutil.CheckerWithNilAssert(re))
+	suite.srv, suite.cleanup, err = server.NewTestServer(re, assertutil.CheckerWithNilAssert(re))
 	suite.NoError(err)
 	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
@@ -751,8 +824,7 @@ func (suite *clientTestSuite) SetupSuite() {
 			},
 		})
 	}
-	config := cluster.GetStoreConfig()
-	config.EnableRegionBucket = true
+	cluster.GetStoreConfig().SetRegionBucketEnabled(true)
 }
 
 func (suite *clientTestSuite) TearDownSuite() {
@@ -883,8 +955,8 @@ func (suite *clientTestSuite) TestGetRegion() {
 		}
 		return r.Buckets != nil
 	})
-	config := suite.srv.GetRaftCluster().GetStoreConfig()
-	config.EnableRegionBucket = false
+	suite.srv.GetRaftCluster().GetStoreConfig().SetRegionBucketEnabled(false)
+
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
 		suite.NoError(err)
@@ -893,7 +965,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 		}
 		return r.Buckets == nil
 	})
-	config.EnableRegionBucket = true
+	suite.srv.GetRaftCluster().GetStoreConfig().SetRegionBucketEnabled(true)
 
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`))
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`))
@@ -1341,7 +1413,6 @@ func (suite *clientTestSuite) TestScatterRegion() {
 	testutil.Eventually(re, func() bool {
 		err := suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
-			fmt.Println(err)
 			return false
 		}
 		resp, err := suite.client.GetOperator(context.Background(), regionID)
@@ -1352,4 +1423,146 @@ func (suite *clientTestSuite) TestScatterRegion() {
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
 	}, testutil.WithTickInterval(time.Second))
+}
+
+func TestWatch(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+	client := setupCli(re, ctx, endpoints)
+	defer client.Close()
+
+	key := "test"
+	wg := sync.WaitGroup{}
+	ch, err := client.Watch(ctx, []byte(key))
+	re.NoError(err)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var events []*meta_storagepb.Event
+		for e := range ch {
+			events = append(events, e...)
+			if len(events) >= 3 {
+				break
+			}
+		}
+		re.Equal(meta_storagepb.Event_PUT, events[0].GetType())
+		re.Equal("1", string(events[0].GetKv().GetValue()))
+		re.Equal(meta_storagepb.Event_PUT, events[1].GetType())
+		re.Equal("2", string(events[1].GetKv().GetValue()))
+		re.Equal(meta_storagepb.Event_DELETE, events[2].GetType())
+	}()
+
+	cli, err := clientv3.NewFromURLs(endpoints)
+	re.NoError(err)
+	defer cli.Close()
+	cli.Put(context.Background(), key, "1")
+	cli.Put(context.Background(), key, "2")
+	cli.Delete(context.Background(), key)
+	wg.Wait()
+}
+
+func TestPutGet(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+	client := setupCli(re, ctx, endpoints)
+	defer client.Close()
+
+	key := []byte("test")
+	putResp, err := client.Put(context.Background(), key, []byte("1"))
+	re.NoError(err)
+	re.Empty(putResp.GetPrevKv())
+	getResp, err := client.Get(context.Background(), key)
+	re.NoError(err)
+	re.Equal([]byte("1"), getResp.GetKvs()[0].Value)
+	re.NotEqual(0, getResp.GetHeader().GetRevision())
+	putResp, err = client.Put(context.Background(), key, []byte("2"), pd.WithPrevKV())
+	re.NoError(err)
+	re.Equal([]byte("1"), putResp.GetPrevKv().Value)
+	getResp, err = client.Get(context.Background(), key)
+	re.NoError(err)
+	re.Equal([]byte("2"), getResp.GetKvs()[0].Value)
+	s := cluster.GetServer(cluster.GetLeader())
+	// use etcd client delete the key
+	_, err = s.GetEtcdClient().Delete(context.Background(), string(key))
+	re.NoError(err)
+	getResp, err = client.Get(context.Background(), key)
+	re.NoError(err)
+	re.Empty(getResp.GetKvs())
+}
+
+// TestClientWatchWithRevision is the same as TestClientWatchWithRevision in global config.
+func TestClientWatchWithRevision(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+	client := setupCli(re, ctx, endpoints)
+	defer client.Close()
+	s := cluster.GetServer(cluster.GetLeader())
+	watchPrefix := "watch_test"
+	defer func() {
+		_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+"test")
+		re.NoError(err)
+
+		for i := 3; i < 9; i++ {
+			_, err := s.GetEtcdClient().Delete(context.Background(), watchPrefix+strconv.Itoa(i))
+			re.NoError(err)
+		}
+	}()
+	// Mock get revision by loading
+	r, err := s.GetEtcdClient().Put(context.Background(), watchPrefix+"test", "test")
+	re.NoError(err)
+	res, err := client.Get(context.Background(), []byte(watchPrefix), pd.WithPrefix())
+	re.NoError(err)
+	re.Len(res.Kvs, 1)
+	re.LessOrEqual(r.Header.GetRevision(), res.GetHeader().GetRevision())
+	// Mock when start watcher there are existed some keys, will load firstly
+
+	for i := 0; i < 6; i++ {
+		_, err = s.GetEtcdClient().Put(context.Background(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
+		re.NoError(err)
+	}
+	// Start watcher at next revision
+	ch, err := client.Watch(context.Background(), []byte(watchPrefix), pd.WithRev(res.GetHeader().GetRevision()), pd.WithPrefix(), pd.WithPrevKV())
+	re.NoError(err)
+	// Mock delete
+	for i := 0; i < 3; i++ {
+		_, err = s.GetEtcdClient().Delete(context.Background(), watchPrefix+strconv.Itoa(i))
+		re.NoError(err)
+	}
+	// Mock put
+	for i := 6; i < 9; i++ {
+		_, err = s.GetEtcdClient().Put(context.Background(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
+		re.NoError(err)
+	}
+	var watchCount int
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+			re.Equal(13, watchCount)
+			return
+		case res := <-ch:
+			for _, r := range res {
+				watchCount++
+				if r.GetType() == meta_storagepb.Event_DELETE {
+					re.Equal(watchPrefix+string(r.PrevKv.Value), string(r.Kv.Key))
+				} else {
+					re.Equal(watchPrefix+string(r.Kv.Value), string(r.Kv.Key))
+				}
+			}
+		}
+	}
 }

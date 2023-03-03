@@ -16,7 +16,7 @@ package checker
 
 import (
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"go.uber.org/zap"
@@ -31,6 +31,7 @@ type ReplicaStrategy struct {
 	isolationLevel string
 	region         *core.RegionInfo
 	extraFilters   []filter.Filter
+	fastFailover   bool
 }
 
 // SelectStoreToAdd returns the store to add a replica to a region.
@@ -69,14 +70,14 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	}
 
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
-	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true}
+	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowFastFailover: s.fastFailover}
 	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
-		FilterTarget(s.cluster.GetOpts(), nil, filters...).
+		FilterTarget(s.cluster.GetOpts(), nil, nil, filters...).
 		KeepTheTopStores(isolationComparer, false) // greater isolation score is better
 	if targetCandidate.Len() == 0 {
 		return 0, false
 	}
-	target := targetCandidate.FilterTarget(s.cluster.GetOpts(), nil, strictStateFilter).
+	target := targetCandidate.FilterTarget(s.cluster.GetOpts(), nil, nil, strictStateFilter).
 		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), true) // less region score is better
 	if target == nil {
 		return 0, true // filter by temporary states
@@ -123,7 +124,7 @@ func (s *ReplicaStrategy) swapStoreToFirst(stores []*core.StoreInfo, id uint64) 
 func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) uint64 {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	source := filter.NewCandidates(coLocationStores).
-		FilterSource(s.cluster.GetOpts(), nil, &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
+		FilterSource(s.cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true}).
 		KeepTheTopStores(isolationComparer, true).
 		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), false)
 	if source == nil {

@@ -28,7 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/requestutil"
+	"github.com/tikv/pd/pkg/utils/requestutil"
 )
 
 func TestLabelMatcher(t *testing.T) {
@@ -51,7 +51,7 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 			Name:      "audit_handling_seconds_test",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "component"})
+		}, []string{"service", "method", "component", "ip"})
 
 	prometheus.MustRegister(serviceAuditHistogramTest)
 
@@ -63,6 +63,7 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	info := requestutil.GetRequestInfo(req)
 	info.ServiceLabel = "test"
 	info.Component = "user1"
+	info.IP = "localhost"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.False(backend.ProcessHTTPRequest(req))
 
@@ -84,8 +85,8 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	defer resp.Body.Close()
 	content, _ := io.ReadAll(resp.Body)
 	output := string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",method=\"HTTP\",service=\"test\"} 2")
-	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",method=\"HTTP\",service=\"test\"} 1")
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 2")
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 1")
 }
 
 func TestLocalLogBackendUsingFile(t *testing.T) {
@@ -102,7 +103,7 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 	b, _ := os.ReadFile(fname)
 	output := strings.SplitN(string(b), "]", 4)
 	re.Equal(
-		fmt.Sprintf(" [\"Audit Log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
+		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
 			"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
 			time.Unix(info.StartTimeStamp, 0).String()),
 		output[3],

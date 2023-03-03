@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"

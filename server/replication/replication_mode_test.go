@@ -24,11 +24,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage"
 )
 
 func TestInitial(t *testing.T) {
@@ -37,7 +38,7 @@ func TestInitial(t *testing.T) {
 	defer cancel()
 	store := storage.NewStorageWithMemoryBackend()
 	conf := config.ReplicationModeConfig{ReplicationMode: modeMajority}
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)
 	re.Equal(&pb.ReplicationStatus{Mode: pb.ReplicationMode_MAJORITY}, rep.GetReplicationStatus())
@@ -71,7 +72,7 @@ func TestStatus(t *testing.T) {
 	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
 		LabelKey: "dr-label",
 	}}
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)
 	re.Equal(&pb.ReplicationStatus{
@@ -170,7 +171,7 @@ func TestStateSwitch(t *testing.T) {
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
@@ -356,7 +357,7 @@ func TestReplicateState(t *testing.T) {
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
@@ -398,7 +399,7 @@ func TestAsynctimeout(t *testing.T) {
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	var replicator mockFileReplicator
 	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
 	re.NoError(err)
@@ -441,7 +442,7 @@ func TestRecoverProgress(t *testing.T) {
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)
@@ -503,7 +504,7 @@ func TestRecoverProgressWithSplitAndMerge(t *testing.T) {
 		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)

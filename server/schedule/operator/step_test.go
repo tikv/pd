@@ -20,9 +20,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
 type operatorStepTestSuite struct {
@@ -43,7 +43,7 @@ type testCase struct {
 }
 
 func (suite *operatorStepTestSuite) SetupTest() {
-	suite.cluster = mockcluster.NewCluster(context.Background(), config.NewTestOptions())
+	suite.cluster = mockcluster.NewCluster(context.Background(), mockconfig.NewTestOptions())
 	for i := 1; i <= 10; i++ {
 		suite.cluster.PutStoreWithLabels(uint64(i))
 	}
@@ -293,6 +293,113 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 	suite.check(cpe, desc, testCases)
 }
 
+func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
+	cpe := ChangePeerV2Enter{
+		PromoteLearners: []PromoteLearner{{PeerID: 3, ToStore: 3}},
+	}
+	testCases := []testCase{
+		{ // before step
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
+			},
+			0,
+			false,
+			suite.NoError,
+		},
+		{ // after step
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+			},
+			1,
+			true,
+			suite.NoError,
+		},
+		{ // after step (direct)
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			1,
+			true,
+			suite.NoError,
+		},
+		{ // error role
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
+			},
+			0,
+			false,
+			suite.Error,
+		},
+	}
+	desc := "use joint consensus, promote learner peer 3 on store 3 to voter"
+	suite.check(cpe, desc, testCases)
+
+	cpe = ChangePeerV2Enter{
+		DemoteVoters: []DemoteVoter{{PeerID: 3, ToStore: 3}},
+	}
+	testCases = []testCase{
+		{ // before step
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			suite.NoError,
+		},
+		{ // after step
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
+			},
+			1,
+			true,
+			suite.NoError,
+		},
+		{ // after step (direct)
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner},
+			},
+			1,
+			true,
+			suite.NoError,
+		},
+		{ // demote and remove peer
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			1, // correct calculation is required
+			false,
+			suite.Error,
+		},
+		{ // error role
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+			},
+			0,
+			false,
+			suite.Error,
+		},
+	}
+	desc = "use joint consensus, demote voter peer 3 on store 3 to learner"
+	suite.check(cpe, desc, testCases)
+}
+
 func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 	cpl := ChangePeerV2Leave{
 		PromoteLearners: []PromoteLearner{{PeerID: 3, ToStore: 3}, {PeerID: 4, ToStore: 4}},
@@ -419,6 +526,40 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 	suite.check(cpl, desc, testCases)
 }
 
+func (suite *operatorStepTestSuite) TestSwitchToWitness() {
+	step := BecomeWitness{StoreID: 2, PeerID: 2}
+	testCases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner},
+			},
+			0,
+			false,
+			suite.NoError,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+			},
+			0,
+			false,
+			suite.NoError,
+		},
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			1,
+			true,
+			suite.NoError,
+		},
+	}
+	suite.check(step, "switch peer 2 on store 2 to witness", testCases)
+}
+
 func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []testCase) {
 	suite.Equal(desc, step.String())
 	for _, testCase := range testCases {
@@ -427,5 +568,13 @@ func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []
 		suite.Equal(testCase.IsFinish, step.IsFinish(region))
 		err := step.CheckInProgress(suite.cluster, region)
 		testCase.CheckInProgress(err)
+		_ = step.GetCmd(region, true)
+
+		if _, ok := step.(ChangePeerV2Leave); ok {
+			// Ref https://github.com/tikv/pd/issues/5788
+			pendingPeers := region.GetLearners()
+			region = region.Clone(core.WithPendingPeers(pendingPeers))
+			suite.Equal(testCase.IsFinish, step.IsFinish(region))
+		}
 	}
 }

@@ -18,9 +18,9 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/cache"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -30,15 +30,15 @@ const defaultPriorityQueueSize = 1280
 // PriorityInspector ensures high priority region should run first
 type PriorityInspector struct {
 	cluster schedule.Cluster
-	opts    *config.PersistOptions
+	conf    config.Config
 	queue   *cache.PriorityQueue
 }
 
 // NewPriorityInspector creates a priority inspector.
-func NewPriorityInspector(cluster schedule.Cluster) *PriorityInspector {
+func NewPriorityInspector(cluster schedule.Cluster, conf config.Config) *PriorityInspector {
 	return &PriorityInspector{
 		cluster: cluster,
-		opts:    cluster.GetOpts(),
+		conf:    conf,
 		queue:   cache.NewPriorityQueue(defaultPriorityQueueSize),
 	}
 }
@@ -63,7 +63,7 @@ func NewRegionEntry(regionID uint64) *RegionPriorityEntry {
 // Inspect inspects region's replicas, it will put into priority queue if the region lack of replicas.
 func (p *PriorityInspector) Inspect(region *core.RegionInfo) (fit *placement.RegionFit) {
 	var makeupCount int
-	if p.opts.IsPlacementRulesEnabled() {
+	if p.conf.IsPlacementRulesEnabled() {
 		makeupCount, fit = p.inspectRegionInPlacementRule(region)
 	} else {
 		makeupCount = p.inspectRegionInReplica(region)
@@ -92,7 +92,7 @@ func (p *PriorityInspector) inspectRegionInPlacementRule(region *core.RegionInfo
 
 // inspectReplicas inspects region in replica mode
 func (p *PriorityInspector) inspectRegionInReplica(region *core.RegionInfo) (makeupCount int) {
-	return p.opts.GetMaxReplicas() - len(region.GetPeers())
+	return p.conf.GetMaxReplicas() - len(region.GetPeers())
 }
 
 // addOrRemoveRegion add or remove region from queue
@@ -119,7 +119,7 @@ func (p *PriorityInspector) GetPriorityRegions() (ids []uint64) {
 		re := e.Value.(*RegionPriorityEntry)
 		// avoid to some priority region occupy checker, region don't need check on next check interval
 		// the next run time is : last_time+retry*10*patrol_region_interval
-		if t := re.Last.Add(time.Duration(re.Attempt*10) * p.opts.GetPatrolRegionInterval()); t.Before(time.Now()) {
+		if t := re.Last.Add(time.Duration(re.Attempt*10) * p.conf.GetPatrolRegionInterval()); t.Before(time.Now()) {
 			ids = append(ids, re.regionID)
 		}
 	}

@@ -15,8 +15,52 @@
 package statistics
 
 import (
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
+
+const (
+	// BytePriority indicates hot-region-scheduler prefer byte dim
+	BytePriority = "byte"
+	// KeyPriority indicates hot-region-scheduler prefer key dim
+	KeyPriority = "key"
+	// QueryPriority indicates hot-region-scheduler prefer query dim
+	QueryPriority = "query"
+)
+
+// Indicator dims.
+const (
+	ByteDim int = iota
+	KeyDim
+	QueryDim
+	DimLen
+)
+
+// StringToDim return dim according to string.
+func StringToDim(name string) int {
+	switch name {
+	case BytePriority:
+		return ByteDim
+	case KeyPriority:
+		return KeyDim
+	case QueryPriority:
+		return QueryDim
+	}
+	return ByteDim
+}
+
+// DimToString return string according to dim.
+func DimToString(dim int) string {
+	switch dim {
+	case ByteDim:
+		return BytePriority
+	case KeyDim:
+		return KeyPriority
+	case QueryDim:
+		return QueryPriority
+	default:
+		return ""
+	}
+}
 
 // RegionStatKind represents the statistics type of region.
 type RegionStatKind int
@@ -159,10 +203,29 @@ func (rw RWType) Inverse() RWType {
 	switch rw {
 	case Write:
 		return Read
-	case Read:
+	default: // Case Read
 		return Write
 	}
-	return Read
+}
+
+// ReportInterval returns the report interval of read or write.
+func (rw RWType) ReportInterval() int {
+	switch rw {
+	case Write:
+		return WriteReportInterval
+	default: // Case Read
+		return ReadReportInterval
+	}
+}
+
+// DefaultAntiCount returns the default anti count of read or write.
+func (rw RWType) DefaultAntiCount() int {
+	switch rw {
+	case Write:
+		return HotRegionAntiCount
+	default: // Case Read
+		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
+	}
 }
 
 // GetLoadRatesFromPeer gets the load rates of the read or write type from PeerInfo.
@@ -183,6 +246,15 @@ func (rw RWType) SetFullLoadRates(full []float64, loads []float64) {
 	}
 }
 
+// ForeachRegionStats foreach all region stats of read and write.
+func ForeachRegionStats(f func(RWType, int, RegionStatKind)) {
+	for _, rwTy := range []RWType{Read, Write} {
+		for dim, kind := range rwTy.RegionStats() {
+			f(rwTy, dim, kind)
+		}
+	}
+}
+
 // ActionType indicates the action type for the stat item.
 type ActionType int
 
@@ -191,6 +263,7 @@ const (
 	Add ActionType = iota
 	Remove
 	Update
+	ActionTypeLen
 )
 
 func (t ActionType) String() string {

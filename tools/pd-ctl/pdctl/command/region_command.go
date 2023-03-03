@@ -41,6 +41,7 @@ var (
 	regionsVersionPrefix    = "pd/api/v1/regions/version"
 	regionsSizePrefix       = "pd/api/v1/regions/size"
 	regionTopKeysPrefix     = "pd/api/v1/regions/keys"
+	regionTopCPUPrefix      = "pd/api/v1/regions/cpu"
 	regionsKeyPrefix        = "pd/api/v1/regions/key"
 	regionsSiblingPrefix    = "pd/api/v1/regions/sibling"
 	regionsRangeHolesPrefix = "pd/api/v1/regions/range-holes"
@@ -51,7 +52,7 @@ var (
 // NewRegionCommand returns a region subcommand of rootCmd
 func NewRegionCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   `region <region_id> [-jq="<query string>"]`,
+		Use:   `region <region_id> [--jq="<query string>"]`,
 		Short: "show the region status",
 		Run:   showRegionCommandFunc,
 	}
@@ -109,6 +110,14 @@ func NewRegionCommand() *cobra.Command {
 	}
 	topKeys.Flags().String("jq", "", "jq query")
 	r.AddCommand(topKeys)
+
+	topCPU := &cobra.Command{
+		Use:   `topcpu <limit> [--jq="<query string>"]`,
+		Short: "show regions with top CPU usage",
+		Run:   showRegionsTopCommand(regionTopCPUPrefix),
+	}
+	topCPU.Flags().String("jq", "", "jq query")
+	r.AddCommand(topCPU)
 
 	scanRegion := &cobra.Command{
 		Use:   `scan [--jq="<query string>"]`,
@@ -354,10 +363,12 @@ func showRegionsByKeysCommandFunc(cmd *cobra.Command, args []string) {
 // NewRegionWithCheckCommand returns a region with check subcommand of regionCmd
 func NewRegionWithCheckCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "check [miss-peer|extra-peer|down-peer|learner-peer|pending-peer|offline-peer|empty-region|oversized-region|undersized-region|hist-size|hist-keys]",
+		Use:   `check [miss-peer|extra-peer|down-peer|learner-peer|pending-peer|offline-peer|empty-region|oversized-region|undersized-region|hist-size|hist-keys] [--jq="<query string>"]`,
 		Short: "show the region with check specific status",
 		Run:   showRegionWithCheckCommandFunc,
 	}
+
+	r.Flags().String("jq", "", "jq query")
 	return r
 }
 
@@ -394,6 +405,11 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to get region: %s\n", err)
 		return
 	}
+	if flag := cmd.Flag("jq"); flag != nil && flag.Value.String() != "" {
+		printWithJQFilter(r, flag.Value.String())
+		return
+	}
+
 	cmd.Println(r)
 }
 

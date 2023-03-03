@@ -17,8 +17,8 @@ package checker
 import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -32,6 +32,14 @@ type SplitChecker struct {
 	ruleManager *placement.RuleManager
 	labeler     *labeler.RegionLabeler
 }
+
+const splitCheckerName = "split_checker"
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	splitCheckerCounter       = checkerCounter.WithLabelValues(splitCheckerName, "check")
+	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitCheckerName, "paused")
+)
 
 // NewSplitChecker creates a new SplitChecker.
 func NewSplitChecker(cluster schedule.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler) *SplitChecker {
@@ -49,10 +57,10 @@ func (c *SplitChecker) GetType() string {
 
 // Check checks whether the region need to split and returns Operator to fix.
 func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
-	checkerCounter.WithLabelValues("split_checker", "check").Inc()
+	splitCheckerCounter.Inc()
 
 	if c.IsPaused() {
-		checkerCounter.WithLabelValues("split_checker", "paused").Inc()
+		splitCheckerPausedCounter.Inc()
 		return nil
 	}
 

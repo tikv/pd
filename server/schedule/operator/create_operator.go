@@ -22,9 +22,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
 )
@@ -76,12 +76,20 @@ func CreateForceTransferLeaderOperator(desc string, ci ClusterInformer, region *
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
 func CreateMoveRegionOperator(desc string, ci ClusterInformer, region *core.RegionInfo, kind OpKind, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
 	// construct the peers from roles
+	oldPeers := region.GetPeers()
 	peers := make(map[uint64]*metapb.Peer)
+	i := 0
 	for storeID, role := range roles {
-		peers[storeID] = &metapb.Peer{
-			StoreId: storeID,
-			Role:    role.MetaPeerRole(),
+		isWitness := false
+		if i < len(oldPeers) {
+			isWitness = oldPeers[i].GetIsWitness()
 		}
+		peers[storeID] = &metapb.Peer{
+			StoreId:   storeID,
+			Role:      role.MetaPeerRole(),
+			IsWitness: isWitness,
+		}
+		i += 1
 	}
 	builder := NewBuilder(desc, ci, region).SetPeers(peers).SetExpectedRoles(roles)
 	return builder.Build(kind)
@@ -93,6 +101,14 @@ func CreateMovePeerOperator(desc string, ci ClusterInformer, region *core.Region
 		RemovePeer(oldStore).
 		AddPeer(peer).
 		Build(kind)
+}
+
+// CreateMoveWitnessOperator creates an operator that replaces an old witness with a new witness.
+func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
+		BecomeNonWitness(sourceStoreID).
+		BecomeWitness(targetStoreID).
+		Build(OpWitness)
 }
 
 // CreateReplaceLeaderPeerOperator creates an operator that replaces an old peer with a new peer, and move leader from old store firstly.
@@ -150,8 +166,9 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 		peers := make(map[uint64]*metapb.Peer)
 		for _, p := range target.GetPeers() {
 			peers[p.GetStoreId()] = &metapb.Peer{
-				StoreId: p.GetStoreId(),
-				Role:    p.GetRole(),
+				StoreId:   p.GetStoreId(),
+				Role:      p.GetRole(),
+				IsWitness: p.GetIsWitness(),
 			}
 		}
 		matchOp, err := NewBuilder("", ci, source).
@@ -178,6 +195,7 @@ func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.Reg
 		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
 	})
+	op2.Sync(op1)
 
 	return []*Operator{op1, op2}, nil
 }
@@ -188,7 +206,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 	}
 	for _, pa := range a.GetPeers() {
 		pb := b.GetStorePeer(pa.GetStoreId())
-		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) {
+		if pb == nil || core.IsLearner(pb) != core.IsLearner(pa) || core.IsWitness(pb) != core.IsWitness(pa) {
 			return false
 		}
 	}
@@ -281,4 +299,18 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 
 	b.execChangePeerV2(false, true)
 	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...), nil
+}
+
+// CreateWitnessPeerOperator creates an operator that set a follower or learner peer with witness
+func CreateWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
+		BecomeWitness(peer.GetStoreId()).
+		Build(OpWitness)
+}
+
+// CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
+func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+	return NewBuilder(desc, ci, region).
+		BecomeNonWitness(peer.GetStoreId()).
+		Build(OpWitness)
 }

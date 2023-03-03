@@ -26,7 +26,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/statistics"
 )
 
 var (
@@ -151,6 +151,9 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewEvictSlowStoreSchedulerCommand())
 	c.AddCommand(NewGrantHotRegionSchedulerCommand())
 	c.AddCommand(NewSplitBucketSchedulerCommand())
+	c.AddCommand(NewSlowTrendEvictLeaderSchedulerCommand())
+	c.AddCommand(NewBalanceWitnessSchedulerCommand())
+	c.AddCommand(NewTransferWitnessLeaderSchedulerCommand())
 	return c
 }
 
@@ -348,6 +351,36 @@ func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 		Use:   "grant-hot-region-scheduler <store_leader_id> <store_leader_id,store_peer_id_1,store_peer_id_2>",
 		Short: "add a scheduler to grant hot region to fixed stores",
 		Run:   addSchedulerForGrantHotRegionCommandFunc,
+	}
+	return c
+}
+
+// NewBalanceWitnessSchedulerCommand returns a command to add a balance-witness-scheduler.
+func NewBalanceWitnessSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "balance-witness-scheduler",
+		Short: "add a scheduler to balance witness",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewTransferWitnessLeaderSchedulerCommand returns a command to add a transfer-witness-leader-shceudler.
+func NewTransferWitnessLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "transfer-witness-leader-scheduler",
+		Short: "add a scheduler to transfer witness leader",
+		Run:   addSchedulerCommandFunc,
+	}
+	return c
+}
+
+// NewSlowTrendEvictLeaderSchedulerCommand returns a command to add a evict-slow-trend-scheduler.
+func NewSlowTrendEvictLeaderSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-slow-trend-scheduler",
+		Short: "add a scheduler to detect and evict slow stores by trend",
+		Run:   addSchedulerCommandFunc,
 	}
 	return c
 }
@@ -684,15 +717,15 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 		priorities := make([]string, 0)
 		prioritiesMap := make(map[string]struct{})
 		for _, priority := range strings.Split(value, ",") {
-			if priority != schedulers.BytePriority && priority != schedulers.KeyPriority && priority != schedulers.QueryPriority {
+			if priority != statistics.BytePriority && priority != statistics.KeyPriority && priority != statistics.QueryPriority {
 				cmd.Println(fmt.Sprintf("priority should be one of [%s, %s, %s]",
-					schedulers.BytePriority,
-					schedulers.QueryPriority,
-					schedulers.KeyPriority))
+					statistics.BytePriority,
+					statistics.QueryPriority,
+					statistics.KeyPriority))
 				return
 			}
-			if priority == schedulers.QueryPriority && key == "write-peer-priorities" {
-				cmd.Println("qps is not allowed to be set in priorities for write-peer-priorities")
+			if priority == statistics.QueryPriority && key == "write-peer-priorities" {
+				cmd.Println("query is not allowed to be set in priorities for write-peer-priorities")
 				return
 			}
 			priorities = append(priorities, priority)

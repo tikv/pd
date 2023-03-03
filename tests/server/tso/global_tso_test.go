@@ -26,11 +26,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/grpcutil"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
 
@@ -171,7 +171,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 		DcLocation: tso.GlobalDCLocation,
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/delaySyncTimestamp", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
 
 	// Make the old leader resign and wait for the new leader to get a lease
 	leaderServer.ResignLeader()
@@ -185,7 +185,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	resp, err := tsoClient.Recv()
 	re.NoError(err)
 	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp"))
 }
 
 func TestLogicalOverflow(t *testing.T) {

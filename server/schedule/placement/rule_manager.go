@@ -26,13 +26,14 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/schedule/config"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 // RuleManager is responsible for the lifecycle of all placement Rules.
@@ -48,15 +49,15 @@ type RuleManager struct {
 	keyType          string
 	storeSetInformer core.StoreSetInformer
 	cache            *RegionRuleFitCacheManager
-	opt              *config.PersistOptions
+	conf             config.Config
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, opt *config.PersistOptions) *RuleManager {
+func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.Config) *RuleManager {
 	return &RuleManager{
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
-		opt:              opt,
+		conf:             conf,
 		ruleConfig:       newRuleConfig(),
 		cache:            NewRegionRuleFitCacheManager(),
 	}
@@ -204,9 +205,15 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 	if r.Role == Leader && r.Count > 1 {
 		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple leaders by count %d", r.Count))
 	}
+	if r.IsWitness && r.Count > 1 {
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple witness by count %d", r.Count))
+	}
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
 			return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("invalid op %s", c.Op))
+		}
+		if r.IsWitness && c.Key == core.EngineKey && slices.Contains(c.Values, core.EngineTiFlash) {
+			return errs.ErrRuleContent.FastGenByArgs("witness can't combine with tiflash")
 		}
 	}
 
@@ -318,18 +325,30 @@ func (m *RuleManager) GetRulesForApplyRange(start, end []byte) []*Rule {
 	return m.ruleList.getRulesForApplyRange(start, end)
 }
 
-// FitRegion fits a region to the rules it matches.
-func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *RegionFit {
+// IsRegionFitCached returns whether the RegionFit can be cached.
+func (m *RuleManager) IsRegionFitCached(storeSet StoreSet, region *core.RegionInfo) bool {
 	regionStores := getStoresByRegion(storeSet, region)
 	rules := m.GetRulesForApplyRegion(region)
-	if m.opt.IsPlacementRulesCacheEnabled() {
-		if ok, fit := m.cache.CheckAndGetCache(region, rules, regionStores); fit != nil && ok {
+	isCached, _ := m.cache.CheckAndGetCache(region, rules, regionStores)
+	return isCached
+}
+
+// FitRegion fits a region to the rules it matches.
+func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) (fit *RegionFit) {
+	regionStores := getStoresByRegion(storeSet, region)
+	rules := m.GetRulesForApplyRegion(region)
+	var isCached bool
+	if m.conf.IsPlacementRulesCacheEnabled() {
+		if isCached, fit = m.cache.CheckAndGetCache(region, rules, regionStores); isCached && fit != nil {
 			return fit
 		}
 	}
-	fit := fitRegion(regionStores, region, rules)
+	fit = fitRegion(regionStores, region, rules, m.conf.IsWitnessAllowed())
 	fit.regionStores = regionStores
 	fit.rules = rules
+	if isCached {
+		m.SetRegionFitCache(region, fit)
+	}
 	return fit
 }
 
@@ -341,6 +360,24 @@ func (m *RuleManager) SetRegionFitCache(region *core.RegionInfo, fit *RegionFit)
 // InvalidCache invalids the cache.
 func (m *RuleManager) InvalidCache(regionID uint64) {
 	m.cache.Invalid(regionID)
+}
+
+// SetPlaceholderRegionFitCache sets a placeholder region fit cache information
+// Only used for testing
+func (m *RuleManager) SetPlaceholderRegionFitCache(region *core.RegionInfo) {
+	placeholderCache := &regionRuleFitCache{region: toRegionCache(region)}
+	m.cache.mu.Lock()
+	defer m.cache.mu.Unlock()
+	m.cache.regionCaches[region.GetID()] = placeholderCache
+}
+
+// CheckIsCachedDirectly returns whether the region's fit is cached
+// Only used for testing
+func (m *RuleManager) CheckIsCachedDirectly(regionID uint64) bool {
+	m.cache.mu.RLock()
+	defer m.cache.mu.RUnlock()
+	_, ok := m.cache.regionCaches[regionID]
+	return ok
 }
 
 func (m *RuleManager) beginPatch() *ruleConfigPatch {

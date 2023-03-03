@@ -22,17 +22,18 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/goleak"
 )
 
@@ -54,14 +55,12 @@ func TestMergeCheckerTestSuite(t *testing.T) {
 }
 
 func (suite *mergeCheckerTestSuite) SetupTest() {
-	cfg := config.NewTestOptions()
+	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetMaxMergeRegionSize(2)
 	suite.cluster.SetMaxMergeRegionKeys(2)
-	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		config.RejectLeader: {{Key: "reject", Value: "leader"}},
-	})
+	suite.cluster.SetLabelProperty(config.RejectLeader, "reject", "leader")
 	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
@@ -74,14 +73,14 @@ func (suite *mergeCheckerTestSuite) SetupTest() {
 	suite.regions = []*core.RegionInfo{
 		newRegionInfo(1, "", "a", 1, 1, []uint64{101, 1}, []uint64{101, 1}, []uint64{102, 2}),
 		newRegionInfo(2, "a", "t", 200, 200, []uint64{104, 4}, []uint64{103, 1}, []uint64{104, 4}, []uint64{105, 5}),
-		newRegionInfo(3, "t", "x", 1, 1, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
+		newRegionInfo(3, "t", "x", 0, 0, []uint64{108, 6}, []uint64{106, 2}, []uint64{107, 5}, []uint64{108, 6}),
 		newRegionInfo(4, "x", "", 1, 1, []uint64{109, 4}, []uint64{109, 4}),
 	}
 
 	for _, region := range suite.regions {
 		suite.cluster.PutRegion(region)
 	}
-	suite.mc = NewMergeChecker(suite.ctx, suite.cluster)
+	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetOpts())
 }
 
 func (suite *mergeCheckerTestSuite) TearDownTest() {
@@ -103,12 +102,12 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 	suite.Nil(ops)
 
 	// it can merge if the max region size of the store is greater than the target region size.
-	config := suite.cluster.GetStoreConfig()
-	config.RegionMaxSize = "10Gib"
+	suite.cluster.SetRegionMaxSize("144MiB")
+	suite.cluster.SetRegionSizeMB(1024)
 
 	ops = suite.mc.Check(suite.regions[2])
 	suite.NotNil(ops)
-	config.RegionMaxSize = "144Mib"
+	suite.cluster.SetRegionSizeMB(144)
 	ops = suite.mc.Check(suite.regions[2])
 	suite.Nil(ops)
 	// change the size back
@@ -442,7 +441,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 }
 
 func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
-	cfg := config.NewTestOptions()
+	cfg := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, cfg)
 	tc.SetMaxMergeRegionSize(2)
 	tc.SetMaxMergeRegionKeys(2)
@@ -462,7 +461,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 		tc.PutRegion(region)
 	}
 
-	mc := NewMergeChecker(suite.ctx, tc)
+	mc := NewMergeChecker(suite.ctx, tc, tc.GetOpts())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
 	oc := schedule.NewOperatorController(suite.ctx, tc, stream)
 
@@ -510,7 +509,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 }
 
 func (suite *mergeCheckerTestSuite) TestCache() {
-	cfg := config.NewTestOptions()
+	cfg := mockconfig.NewTestOptions()
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetMaxMergeRegionSize(2)
 	suite.cluster.SetMaxMergeRegionKeys(2)
@@ -531,7 +530,7 @@ func (suite *mergeCheckerTestSuite) TestCache() {
 		suite.cluster.PutRegion(region)
 	}
 
-	suite.mc = NewMergeChecker(suite.ctx, suite.cluster)
+	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetOpts())
 
 	ops := suite.mc.Check(suite.regions[1])
 	suite.Nil(ops)

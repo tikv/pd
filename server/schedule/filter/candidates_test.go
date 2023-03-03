@@ -19,8 +19,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
@@ -48,9 +48,9 @@ func idComparer2(a, b *core.StoreInfo) int {
 
 type idFilter func(uint64) bool
 
-func (f idFilter) Scope() string { return "idFilter" }
-func (f idFilter) Type() string  { return "idFilter" }
-func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+func (f idFilter) Scope() string    { return "idFilter" }
+func (f idFilter) Type() filterType { return filterType(0) }
+func (f idFilter) Source(conf config.Config, store *core.StoreInfo) *plan.Status {
 	if f(store.GetID()) {
 		return statusOK
 	}
@@ -58,7 +58,7 @@ func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *pla
 	return statusStoreScoreDisallowed
 }
 
-func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+func (f idFilter) Target(conf config.Config, store *core.StoreInfo) *plan.Status {
 	if f(store.GetID()) {
 		return statusOK
 	}
@@ -68,11 +68,11 @@ func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) *pla
 func TestCandidates(t *testing.T) {
 	re := require.New(t)
 	cs := newTestCandidates(1, 2, 3, 4, 5)
-	cs.FilterSource(nil, nil, idFilter(func(id uint64) bool { return id > 2 }))
+	cs.FilterSource(nil, nil, nil, idFilter(func(id uint64) bool { return id > 2 }))
 	check(re, cs, 3, 4, 5)
-	cs.FilterTarget(nil, nil, idFilter(func(id uint64) bool { return id%2 == 1 }))
+	cs.FilterTarget(nil, nil, nil, idFilter(func(id uint64) bool { return id%2 == 1 }))
 	check(re, cs, 3, 5)
-	cs.FilterTarget(nil, nil, idFilter(func(id uint64) bool { return id > 100 }))
+	cs.FilterTarget(nil, nil, nil, idFilter(func(id uint64) bool { return id > 100 }))
 	check(re, cs)
 	store := cs.PickFirst()
 	re.Nil(store)

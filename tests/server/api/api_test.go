@@ -33,13 +33,13 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/apiutil/serverapi"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	"go.uber.org/goleak"
@@ -207,40 +207,10 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		doTestRequest(leader)
+		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
 	cluster.Destroy()
-}
-
-func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
-	b.StopTimer()
-	ctx, cancel := context.WithCancel(context.Background())
-	cluster, _ := tests.NewTestCluster(ctx, 1)
-	cluster.RunInitialServers()
-	cluster.WaitLeader()
-	leader := cluster.GetServer(cluster.GetLeader())
-	input := map[string]interface{}{
-		"enable-audit": "false",
-	}
-	data, _ := json.Marshal(input)
-	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, _ := dialClient.Do(req)
-	resp.Body.Close()
-	b.StartTimer()
-	for i := 0; i < b.N; i++ {
-		doTestRequest(leader)
-	}
-	cancel()
-	cluster.Destroy()
-}
-
-func doTestRequest(srv *tests.TestServer) {
-	timeUnix := time.Now().Unix() - 20
-	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), nil)
-	req.Header.Set("component", "test")
-	resp, _ := dialClient.Do(req)
-	resp.Body.Close()
 }
 
 func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
@@ -433,7 +403,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	defer resp.Body.Close()
 	content, _ := io.ReadAll(resp.Body)
 	output := string(content)
-	suite.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 1")
+	suite.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 1")
 
 	// resign to test persist config
 	oldLeaderName := leader.GetServer().Name()
@@ -459,7 +429,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	defer resp.Body.Close()
 	content, _ = io.ReadAll(resp.Body)
 	output = string(content)
-	suite.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",method=\"HTTP\",service=\"GetTrend\"} 2")
+	suite.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 2")
 
 	input = map[string]interface{}{
 		"enable-audit": "false",
@@ -498,7 +468,7 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	b, _ := os.ReadFile(tempStdoutFile.Name())
-	suite.Contains(string(b), "Audit Log")
+	suite.Contains(string(b), "audit log")
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
 
@@ -521,13 +491,35 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		doTestRequest(leader)
+		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
 	cluster.Destroy()
 }
 
-func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
+func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
+	b.StopTimer()
+	ctx, cancel := context.WithCancel(context.Background())
+	cluster, _ := tests.NewTestCluster(ctx, 1)
+	cluster.RunInitialServers()
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	input := map[string]interface{}{
+		"enable-audit": "true",
+	}
+	data, _ := json.Marshal(input)
+	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+	b.StartTimer()
+	for i := 0; i < b.N; i++ {
+		doTestRequestWithPrometheus(leader)
+	}
+	cancel()
+	cluster.Destroy()
+}
+
+func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	b.StopTimer()
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, _ := tests.NewTestCluster(ctx, 1)
@@ -543,10 +535,25 @@ func BenchmarkDoRequestWithoutLocalLogAudit(b *testing.B) {
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		doTestRequest(leader)
+		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
 	cluster.Destroy()
+}
+
+func doTestRequestWithLogAudit(srv *tests.TestServer) {
+	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/pd/api/v1/admin/cache/regions", srv.GetAddr()), nil)
+	req.Header.Set("component", "test")
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
+}
+
+func doTestRequestWithPrometheus(srv *tests.TestServer) {
+	timeUnix := time.Now().Unix() - 20
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), nil)
+	req.Header.Set("component", "test")
+	resp, _ := dialClient.Do(req)
+	resp.Body.Close()
 }
 
 type redirectorTestSuite struct {
@@ -606,10 +613,10 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	addr := follower.GetAddr() + "/pd/api/v1/version"
 	request, err := http.NewRequest(http.MethodGet, addr, nil)
 	suite.NoError(err)
-	request.Header.Add(serverapi.AllowFollowerHandle, "true")
+	request.Header.Add(serverapi.PDAllowFollowerHandle, "true")
 	resp, err := dialClient.Do(request)
 	suite.NoError(err)
-	suite.Equal("", resp.Header.Get(serverapi.RedirectorHeader))
+	suite.Equal("", resp.Header.Get(serverapi.PDRedirectorHeader))
 	defer resp.Body.Close()
 	suite.Equal(http.StatusOK, resp.StatusCode)
 	_, err = io.ReadAll(resp.Body)
@@ -640,7 +647,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 
 	// Request to follower with redirectorHeader will fail.
 	request.RequestURI = ""
-	request.Header.Set(serverapi.RedirectorHeader, "pd")
+	request.Header.Set(serverapi.PDRedirectorHeader, "pd")
 	resp1, err := dialClient.Do(request)
 	suite.NoError(err)
 	defer resp1.Body.Close()

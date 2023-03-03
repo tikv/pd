@@ -27,11 +27,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/grpcutil"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/tsoutil"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
 
@@ -226,9 +226,9 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSOOverflow() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/globalTSOOverflow", `return(true)`))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/globalTSOOverflow", `return(true)`))
 	suite.getTimestampByDC(ctx, cluster, tso.GlobalDCLocation)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/globalTSOOverflow"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/globalTSOOverflow"))
 }
 
 func (suite *tsoConsistencyTestSuite) TestLocalAllocatorLeaderChange() {
@@ -326,7 +326,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 	time.Sleep(time.Second * 5)
 
 	// Mock the situation that the system time of PD nodes in dc-4 is slower than others.
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/systemTimeSlow", `return(true)`))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/systemTimeSlow", `return(true)`))
 
 	// Join a new dc-location
 	pd4, err := cluster.Join(suite.ctx, func(conf *config.Config, serverName string) {
@@ -343,7 +343,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 	))
 	suite.testTSO(cluster, dcLocationConfig, previousTS)
 
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/systemTimeSlow"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/systemTimeSlow"))
 }
 
 func (suite *tsoConsistencyTestSuite) testTSO(cluster *tests.TestCluster, dcLocationConfig map[string]string, previousTS *pdpb.Timestamp) {
@@ -401,8 +401,8 @@ func TestFallbackTSOConsistency(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/fallBackSync", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/fallBackUpdate", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackSync", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackUpdate", `return(true)`))
 	var err error
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -415,8 +415,8 @@ func TestFallbackTSOConsistency(t *testing.T) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, server.GetAddr())
 	svr := server.GetServer()
 	svr.Close()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/fallBackSync"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/fallBackUpdate"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackSync"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackUpdate"))
 	re.NoError(svr.Run())
 	cluster.WaitLeader()
 	var wg sync.WaitGroup

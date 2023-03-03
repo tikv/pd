@@ -14,23 +14,30 @@
 
 package errs
 
-import "github.com/pingcap/errors"
+import (
+	"fmt"
+
+	"github.com/pingcap/errors"
+)
 
 const (
 	// NotLeaderErr indicates the the non-leader member received the requests which should be received by leader.
 	NotLeaderErr = "is not leader"
 	// MismatchLeaderErr indicates the the non-leader member received the requests which should be received by leader.
 	MismatchLeaderErr = "mismatch leader id"
+	RetryTimeoutErr   = "retry timeout"
 )
 
 // client errors
 var (
-	ErrClientCreateTSOStream = errors.Normalize("create TSO stream failed, %s", errors.RFCCodeText("PD:client:ErrClientCreateTSOStream"))
-	ErrClientGetTSOTimeout   = errors.Normalize("get TSO timeout", errors.RFCCodeText("PD:client:ErrClientGetTSOTimeout"))
-	ErrClientGetTSO          = errors.Normalize("get TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
-	ErrClientGetLeader       = errors.Normalize("get leader from %v error", errors.RFCCodeText("PD:client:ErrClientGetLeader"))
-	ErrClientGetMember       = errors.Normalize("get member failed", errors.RFCCodeText("PD:client:ErrClientGetMember"))
-	ErrClientUpdateMember    = errors.Normalize("update member failed, %v", errors.RFCCodeText("PD:client:ErrUpdateMember"))
+	ErrClientCreateTSOStream  = errors.Normalize("create TSO stream failed, %s", errors.RFCCodeText("PD:client:ErrClientCreateTSOStream"))
+	ErrClientGetTSOTimeout    = errors.Normalize("get TSO timeout", errors.RFCCodeText("PD:client:ErrClientGetTSOTimeout"))
+	ErrClientGetTSO           = errors.Normalize("get TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
+	ErrClientGetLeader        = errors.Normalize("get leader from %v error", errors.RFCCodeText("PD:client:ErrClientGetLeader"))
+	ErrClientGetMember        = errors.Normalize("get member failed", errors.RFCCodeText("PD:client:ErrClientGetMember"))
+	ErrClientUpdateMember     = errors.Normalize("update member failed, %v", errors.RFCCodeText("PD:client:ErrUpdateMember"))
+	ErrClientProtoUnmarshal   = errors.Normalize("failed to unmarshal proto", errors.RFCCodeText("PD:proto:ErrClientProtoUnmarshal"))
+	ErrClientGetMultiResponse = errors.Normalize("get invalid value response %v, must only one", errors.RFCCodeText("PD:client:ErrClientGetMultiResponse"))
 )
 
 // grpcutil errors
@@ -60,3 +67,19 @@ var (
 	ErrCryptoX509KeyPair        = errors.Normalize("x509 keypair error", errors.RFCCodeText("PD:crypto:ErrCryptoX509KeyPair"))
 	ErrCryptoAppendCertsFromPEM = errors.Normalize("cert pool append certs error", errors.RFCCodeText("PD:crypto:ErrCryptoAppendCertsFromPEM"))
 )
+
+// resource group errors
+var (
+	ErrClientListResourceGroup              = errors.Normalize("get all resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientListResourceGroup"))
+	ErrClientResourceGroupConfigUnavailable = errors.Normalize("resource group config is unavailable, %v", errors.RFCCodeText("PD:client:ErrClientResourceGroupConfigUnavailable"))
+	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
+)
+
+type ErrClientGetResourceGroup struct {
+	ResourceGroupName string
+	Cause             string
+}
+
+func (e *ErrClientGetResourceGroup) Error() string {
+	return fmt.Sprintf("get resource group %v failed, %v", e.ResourceGroupName, e.Cause)
+}

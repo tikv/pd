@@ -91,7 +91,7 @@ func forEachLine(filename string, solve func(string) error) error {
 	}
 	defer func() {
 		if err := fi.Close(); err != nil {
-			log.Printf("Error closing file: %s\n", err)
+			log.Printf("error closing file: %s\n", err)
 		}
 	}()
 	br := bufio.NewReader(fi)
@@ -134,7 +134,7 @@ func currentTime(layout string) func(content string) (time.Time, error) {
 			log.Fatal(err)
 		}
 	} else {
-		log.Fatal("Unsupported time layout.")
+		log.Fatal("unsupported time layout")
 	}
 	return func(content string) (time.Time, error) {
 		result := r.FindStringSubmatch(content)

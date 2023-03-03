@@ -17,7 +17,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -50,7 +50,7 @@ type minResolvedTS struct {
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := h.svr.GetRaftCluster()
 	value := c.GetMinResolvedTS()
-	persistInterval := c.GetOpts().GetPDServerConfig().MinResolvedTSPersistenceInterval
+	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
 	h.rd.JSON(w, http.StatusOK, minResolvedTS{
 		MinResolvedTS:   value,
 		PersistInterval: persistInterval,

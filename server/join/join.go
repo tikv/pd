@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -45,7 +45,7 @@ var listMemberRetryTimes = 20
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
 // and returns the initial configuration of the PD cluster.
 //
-// TL;TR: The join functionality is safe. With data, join does nothing, w/o data
+// TL;DR: The join functionality is safe. With data, join does nothing, w/o data
 //
 //	and it is not a member of cluster, join does MemberAdd, it returns an
 //	error if PD tries to join itself, missing data or join a duplicated PD.

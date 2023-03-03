@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -36,11 +36,8 @@ func newImportData() *Case {
 	// Initialize the cluster
 	for i := 1; i <= 10; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        IDAllocator.nextID(),
-			Status:    metapb.StoreState_Up,
-			Capacity:  1 * units.TiB,
-			Available: 900 * units.GiB,
-			Version:   "2.1.0",
+			ID:     IDAllocator.nextID(),
+			Status: metapb.StoreState_Up,
 		})
 	}
 
@@ -187,6 +184,6 @@ func renderPlot(name string, data [][3]int, len, minCount, maxCount int) {
 	f, _ := os.Create(name)
 	err := bar3d.Render(f)
 	if err != nil {
-		log.Error("Render error", zap.Error(err))
+		log.Error("render error", zap.Error(err))
 	}
 }

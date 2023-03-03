@@ -30,12 +30,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
-	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -195,6 +195,7 @@ const (
 	maxMergeRegionKeysKey          = "schedule.max-merge-region-keys"
 	leaderScheduleLimitKey         = "schedule.leader-schedule-limit"
 	regionScheduleLimitKey         = "schedule.region-schedule-limit"
+	witnessScheduleLimitKey        = "schedule.witness-schedule-limit"
 	replicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
 	mergeScheduleLimitKey          = "schedule.merge-schedule-limit"
 	hotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
@@ -272,6 +273,11 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
+// GetSwitchWitnessInterval returns the interval between promote to non-witness and starting to switch to witness.
+func (o *PersistOptions) GetSwitchWitnessInterval() time.Duration {
+	return o.GetScheduleConfig().SwitchWitnessInterval.Duration
+}
+
 // IsDiagnosticAllowed returns whether is enable to use diagnostic.
 func (o *PersistOptions) IsDiagnosticAllowed() bool {
 	return o.GetScheduleConfig().EnableDiagnostic
@@ -281,6 +287,18 @@ func (o *PersistOptions) IsDiagnosticAllowed() bool {
 func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
 	v := o.GetScheduleConfig().Clone()
 	v.EnableDiagnostic = enable
+	o.SetScheduleConfig(v)
+}
+
+// IsWitnessAllowed returns whether is enable to use witness.
+func (o *PersistOptions) IsWitnessAllowed() bool {
+	return o.GetScheduleConfig().EnableWitness
+}
+
+// SetEnableWitness to set the option for witness. It's only used to test.
+func (o *PersistOptions) SetEnableWitness(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableWitness = enable
 	o.SetScheduleConfig(v)
 }
 
@@ -379,6 +397,11 @@ func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
 	return o.getTTLUintOr(regionScheduleLimitKey, o.GetScheduleConfig().RegionScheduleLimit)
 }
 
+// GetWitnessScheduleLimit returns the limit for region schedule.
+func (o *PersistOptions) GetWitnessScheduleLimit() uint64 {
+	return o.getTTLUintOr(witnessScheduleLimitKey, o.GetScheduleConfig().WitnessScheduleLimit)
+}
+
 // GetReplicaScheduleLimit returns the limit for replica schedule.
 func (o *PersistOptions) GetReplicaScheduleLimit() uint64 {
 	return o.getTTLUintOr(replicaRescheduleLimitKey, o.GetScheduleConfig().ReplicaScheduleLimit)
@@ -474,6 +497,11 @@ func (o *PersistOptions) GetLowSpaceRatio() float64 {
 	return o.GetScheduleConfig().LowSpaceRatio
 }
 
+// GetSlowStoreEvictingAffectedStoreRatioThreshold returns the affected ratio threshold when judging a store is slow.
+func (o *PersistOptions) GetSlowStoreEvictingAffectedStoreRatioThreshold() float64 {
+	return o.GetScheduleConfig().SlowStoreEvictingAffectedStoreRatioThreshold
+}
+
 // GetHighSpaceRatio returns the high space ratio.
 func (o *PersistOptions) GetHighSpaceRatio() float64 {
 	return o.GetScheduleConfig().HighSpaceRatio
@@ -514,6 +542,26 @@ func (o *PersistOptions) IsUseRegionStorage() bool {
 	return o.GetPDServerConfig().UseRegionStorage
 }
 
+// GetServerMemoryLimit gets ServerMemoryLimit config.
+func (o *PersistOptions) GetServerMemoryLimit() float64 {
+	return o.GetPDServerConfig().ServerMemoryLimit
+}
+
+// GetServerMemoryLimitGCTrigger gets the ServerMemoryLimitGCTrigger config.
+func (o *PersistOptions) GetServerMemoryLimitGCTrigger() float64 {
+	return o.GetPDServerConfig().ServerMemoryLimitGCTrigger
+}
+
+// GetEnableGOGCTuner gets the EnableGOGCTuner config.
+func (o *PersistOptions) GetEnableGOGCTuner() bool {
+	return o.GetPDServerConfig().EnableGOGCTuner
+}
+
+// GetGCTunerThreshold gets the GC tuner threshold.
+func (o *PersistOptions) GetGCTunerThreshold() float64 {
+	return o.GetPDServerConfig().GCTunerThreshold
+}
+
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
 func (o *PersistOptions) IsRemoveDownReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveDownReplica
@@ -541,14 +589,7 @@ func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
 
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
-	if v, ok := o.GetTTLData(enableLocationReplacement); ok {
-		result, err := strconv.ParseBool(v)
-		if err == nil {
-			return result
-		}
-		log.Warn("failed to parse " + enableLocationReplacement + " from PersistOptions's ttl storage")
-	}
-	return o.GetScheduleConfig().EnableLocationReplacement
+	return o.getTTLBoolOr(enableLocationReplacement, o.GetScheduleConfig().EnableLocationReplacement)
 }
 
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
@@ -568,6 +609,13 @@ func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 // IsUseJointConsensus returns if using joint consensus as a operator step is enabled.
 func (o *PersistOptions) IsUseJointConsensus() bool {
 	return o.GetScheduleConfig().EnableJointConsensus
+}
+
+// SetEnableUseJointConsensus to set the option for using joint consensus. It's only used to test.
+func (o *PersistOptions) SetEnableUseJointConsensus(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableJointConsensus = enable
+	o.SetScheduleConfig(v)
 }
 
 // IsTraceRegionFlow returns if the region flow is tracing.

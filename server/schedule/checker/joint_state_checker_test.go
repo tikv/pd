@@ -20,9 +20,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
@@ -30,7 +30,7 @@ func TestLeaveJointState(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	jsc := NewJointStateChecker(cluster)
 	for id := uint64(1); id <= 10; id++ {
 		cluster.PutStoreWithLabels(id)

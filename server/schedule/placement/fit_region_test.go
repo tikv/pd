@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 type mockStoresSet struct {
@@ -121,7 +121,7 @@ func BenchmarkFitRegion(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }
 
@@ -140,7 +140,7 @@ func BenchmarkFitRegionMoreStores(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }
 
@@ -159,7 +159,7 @@ func BenchmarkFitRegionMorePeers(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }
 
@@ -185,7 +185,7 @@ func BenchmarkFitRegionMorePeersEquals(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }
 
@@ -213,7 +213,7 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }
 
@@ -241,7 +241,7 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }
 
@@ -252,7 +252,7 @@ func BenchmarkFitRegionTiflash(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }
 
@@ -279,7 +279,7 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }
 
@@ -343,7 +343,7 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }
 
@@ -401,6 +401,6 @@ func BenchmarkFitRegionWithLocationLabels(b *testing.B) {
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		fitRegion(stores, region, rules)
+		fitRegion(stores, region, rules, false)
 	}
 }

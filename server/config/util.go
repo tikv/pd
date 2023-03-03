@@ -18,7 +18,6 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -70,30 +69,6 @@ func ValidateURLWithScheme(rawURL string) error {
 		return errors.Errorf("%s has no scheme", rawURL)
 	}
 	return nil
-}
-
-var schedulerMap sync.Map
-
-// RegisterScheduler registers the scheduler type.
-func RegisterScheduler(typ string) {
-	schedulerMap.Store(typ, struct{}{})
-}
-
-// IsSchedulerRegistered checks if the named scheduler type is registered.
-func IsSchedulerRegistered(name string) bool {
-	_, ok := schedulerMap.Load(name)
-	return ok
-}
-
-// NewTestOptions creates default options for testing.
-func NewTestOptions() *PersistOptions {
-	// register default schedulers in case config check fail.
-	for _, d := range DefaultSchedulers {
-		RegisterScheduler(d.Type)
-	}
-	c := NewConfig()
-	c.Adjust(nil, false)
-	return NewPersistOptions(c)
 }
 
 // parseUrls parse a string into multiple urls.
