@@ -238,6 +238,13 @@ const (
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
+
+	defaultEnableKeyspaceGC   = false
+	defaultKeyspaceGCInterval = 10 * time.Minute
+	minKeyspaceGCInterval     = 10 * time.Minute
+	maxKeyspaceGCInterval     = 24 * time.Hour
+	defaultKeyspaceGCLifeTime = 7 * 24 * time.Hour
+	minKeyspaceGCLifeTime     = 1 * time.Hour
 )
 
 // Special keys for Labels
@@ -504,6 +511,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
 	c.Security.Encryption.Adjust()
+
+	c.Keyspace.adjust(configMetaData.Child("keyspace"))
 
 	if len(c.Log.Format) == 0 {
 		c.Log.Format = defaultLogFormat
@@ -1390,4 +1399,53 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
+
+	// GCEnable specifies whether to enable background keyspace cleaning.
+	GCEnable bool `toml:"gc-enable" json:"gc-enable"`
+	// GCRunInterval specifies how often cleaning process should be run.
+	GCRunInterval typeutil.Duration `toml:"gc-run-interval" json:"gc-run-interval"`
+	// GCLifeTime specifies how log after keyspace has been archived should it's data be gc.
+	GCLifeTime typeutil.Duration `toml:"gc-life-time" json:"gc-life-time"`
+}
+
+func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
+	if !meta.IsDefined("gc-enable") {
+		c.GCEnable = defaultEnableKeyspaceGC
+	}
+	if !meta.IsDefined("gc-run-interval") {
+		c.GCRunInterval = typeutil.NewDuration(defaultKeyspaceGCInterval)
+	}
+
+	if c.GCRunInterval.Duration > maxKeyspaceGCInterval {
+		c.GCRunInterval.Duration = maxKeyspaceGCInterval
+	} else if c.GCRunInterval.Duration < minKeyspaceGCInterval {
+		c.GCRunInterval.Duration = minKeyspaceGCInterval
+	}
+
+	if !meta.IsDefined("gc-life-time") {
+		c.GCLifeTime = typeutil.NewDuration(defaultKeyspaceGCLifeTime)
+	}
+	if c.GCRunInterval.Duration < minKeyspaceGCLifeTime {
+		c.GCRunInterval.Duration = minKeyspaceGCLifeTime
+	}
+}
+
+func (c *KeyspaceConfig) Validate() error {
+	if c.GCRunInterval.Duration > maxKeyspaceGCInterval || c.GCRunInterval.Duration < minKeyspaceGCInterval {
+		return errors.New(fmt.Sprintf("[keyspace] keyspace gc interval should between %v and %v",
+			minKeyspaceGCInterval, maxKeyspaceGCInterval))
+	}
+	if c.GCRunInterval.Duration < minKeyspaceGCLifeTime {
+		return errors.New(fmt.Sprintf("[keyspace] keyspace gc lifetime should be at leaset %v",
+			minKeyspaceGCLifeTime))
+	}
+	return nil
+}
+
+// Clone makes a deep copy of the keyspace config.
+func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
+	preAlloc := append(c.PreAlloc[:0:0], c.PreAlloc...)
+	cfg := *c
+	cfg.PreAlloc = preAlloc
+	return &cfg
 }

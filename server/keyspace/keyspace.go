@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -63,6 +64,8 @@ type Manager struct {
 	ctx context.Context
 	// config is the configurations of the manager.
 	config config.KeyspaceConfig
+	// member is the current pd's member information, used to check if server is leader.
+	member *member.Member
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -80,6 +83,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 	rc *cluster.RaftCluster,
 	idAllocator id.Allocator,
 	config config.KeyspaceConfig,
+	member *member.Member,
 ) *Manager {
 	return &Manager{
 		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
@@ -88,6 +92,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 		rc:          rc,
 		ctx:         context.TODO(),
 		config:      config,
+		member:      member,
 	}
 }
 
@@ -124,6 +129,7 @@ func (manager *Manager) Bootstrap() error {
 			return err
 		}
 	}
+	go manager.keyspaceGCLoop()
 	return nil
 }
 
@@ -445,6 +451,11 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		zap.String("new state", newState.String()),
 	)
 	return meta, nil
+}
+
+// UpdateConfig update keyspace manager's config.
+func (manager *Manager) UpdateConfig(cfg *config.KeyspaceConfig) {
+	manager.config = *cfg
 }
 
 // updateKeyspaceState updates keyspace meta and record the update time.

@@ -49,6 +49,7 @@ type PersistOptions struct {
 	pdServerConfig  atomic.Value
 	replicationMode atomic.Value
 	labelProperty   atomic.Value
+	keyspaceConfig  atomic.Value
 	clusterVersion  unsafe.Pointer
 }
 
@@ -60,6 +61,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.pdServerConfig.Store(&cfg.PDServerCfg)
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
+	o.keyspaceConfig.Store(&cfg.Keyspace)
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.ttl = nil
 	return o
@@ -113,6 +115,16 @@ func (o *PersistOptions) GetLabelPropertyConfig() LabelPropertyConfig {
 // SetLabelPropertyConfig sets the label property configuration.
 func (o *PersistOptions) SetLabelPropertyConfig(cfg LabelPropertyConfig) {
 	o.labelProperty.Store(cfg)
+}
+
+// GetKeyspaceConfig returns the keyspace config.
+func (o *PersistOptions) GetKeyspaceConfig() *KeyspaceConfig {
+	return o.keyspaceConfig.Load().(*KeyspaceConfig)
+}
+
+// SetKeyspaceConfig sets the keyspace configuration.
+func (o *PersistOptions) SetKeyspaceConfig(cfg *KeyspaceConfig) {
+	o.keyspaceConfig.Store(cfg)
 }
 
 // GetClusterVersion returns the cluster version.
@@ -708,6 +720,7 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 		PDServerCfg:     *o.GetPDServerConfig(),
 		ReplicationMode: *o.GetReplicationModeConfig(),
 		LabelProperty:   o.GetLabelPropertyConfig(),
+		Keyspace:        *o.GetKeyspaceConfig(),
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
 	err := storage.SaveConfig(cfg)
@@ -735,6 +748,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		o.pdServerConfig.Store(&cfg.PDServerCfg)
 		o.replicationMode.Store(&cfg.ReplicationMode)
 		o.labelProperty.Store(cfg.LabelProperty)
+		o.keyspaceConfig.Store(&cfg.Keyspace)
 		o.SetClusterVersion(&cfg.ClusterVersion)
 	}
 	return nil

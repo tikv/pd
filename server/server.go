@@ -406,7 +406,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace)
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace, s.member)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -857,6 +857,31 @@ func (s *Server) GetConfig() *config.Config {
 	}
 	cfg.Schedule.SchedulersPayload = payload
 	return cfg
+}
+
+// GetKeyspaceConfig gets the keyspace config information.
+func (s *Server) GetKeyspaceConfig() *config.KeyspaceConfig {
+	return s.persistOptions.GetKeyspaceConfig().Clone()
+}
+
+// SetKeyspaceConfig sets the keyspace config information.
+func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	old := s.persistOptions.GetKeyspaceConfig()
+	s.persistOptions.SetKeyspaceConfig(&cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetKeyspaceConfig(old)
+		log.Error("failed to update keyspace config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	s.keyspaceManager.UpdateConfig(&cfg)
+	log.Info("keyspace config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
 }
 
 // GetScheduleConfig gets the balance config information.
@@ -1551,6 +1576,7 @@ func (s *Server) reloadConfigFromKV() error {
 		return err
 	}
 	s.loadRateLimitConfig()
+	s.loadKeyspaceConfig()
 	useRegionStorage := s.persistOptions.IsUseRegionStorage()
 	regionStorage := storage.TrySwitchRegionStorage(s.storage, useRegionStorage)
 	if regionStorage != nil {
@@ -1569,6 +1595,11 @@ func (s *Server) loadRateLimitConfig() {
 		value := cfg[key]
 		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(&value))
 	}
+}
+
+func (s *Server) loadKeyspaceConfig() {
+	cfg := s.persistOptions.GetKeyspaceConfig()
+	s.keyspaceManager.UpdateConfig(cfg)
 }
 
 // ReplicateFileToMember is used to synchronize state to a member.
