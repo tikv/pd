@@ -83,10 +83,8 @@ type RPCClient struct {
 	sync.RWMutex
 
 	clientConns map[string]*clientConn
-
-	isClosed bool
-
-	option *option
+	isClosed    bool
+	option      *option
 }
 
 // NewRPCClient creates a RPC client
