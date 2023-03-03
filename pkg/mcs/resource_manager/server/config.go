@@ -47,6 +47,8 @@ const (
 	defaultWriteCostPerByte = 1. / 1024
 	// 1 RU = 3 millisecond CPU time
 	defaultCPUMsCost = 1. / 3
+
+	defaultEnableDegradedMode = true
 )
 
 // Config is the configuration for the resource manager.
@@ -69,6 +71,24 @@ type Config struct {
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig
+
+	RMServer RMServerConfig `toml:"rm-server" json:"rm-server"`
+}
+
+// RMServerConfig is the configuration of the resource manager which includes some option for client needed from server.
+type RMServerConfig struct {
+	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
+	EnableDegradedMode bool `toml:"enable-degraded-mode" json:"enable-degraded-mode"`
+}
+
+// Adjust adjusts the configuration and initializes it with the default value if necessary.
+func (rmc *RMServerConfig) Adjust(meta *configutil.ConfigMetaData) {
+	if rmc == nil {
+		return
+	}
+	if !meta.IsDefined("enable-degraded-mode") {
+		rmc.EnableDegradedMode = defaultEnableDegradedMode
+	}
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
@@ -181,6 +201,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 
 	c.RequestUnit.Adjust()
+
+	c.RMServer.Adjust(configMetaData.Child("rm-server"))
 
 	return nil
 }

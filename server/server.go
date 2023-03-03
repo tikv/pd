@@ -1156,6 +1156,11 @@ func (s *Server) GetRequestUnitConfig() *rm_server.RequestUnitConfig {
 	return &s.cfg.RequestUnit
 }
 
+// GetRMServerConfig return the resource manager server config.
+func (s *Server) GetRMServerConfig() *rm_server.RMServerConfig {
+	return &s.cfg.RMServer
+}
+
 // GetRaftCluster gets Raft cluster.
 // If cluster has not been bootstrapped, return nil.
 func (s *Server) GetRaftCluster() *cluster.RaftCluster {

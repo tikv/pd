@@ -27,6 +27,7 @@ type ResourceGroupStorage interface {
 	SaveResourceGroupStates(name string, obj interface{}) error
 	DeleteResourceGroupStates(name string) error
 	SaveRequestUnitConfig(config interface{}) error
+	SaveRMServerConfig(config interface{}) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
@@ -64,4 +65,9 @@ func (se *StorageEndpoint) LoadResourceGroupStates(f func(k, v string)) error {
 // SaveRequestUnitConfig stores the request unit config to storage.
 func (se *StorageEndpoint) SaveRequestUnitConfig(config interface{}) error {
 	return se.saveJSON(requestUnitConfigPath, config)
+}
+
+// SaveRMServerConfig stores the resource manager server config to storage.
+func (se *StorageEndpoint) SaveRMServerConfig(config interface{}) error {
+	return se.saveJSON(rmServerConfigPath, config)
 }

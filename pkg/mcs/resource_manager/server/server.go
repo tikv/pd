@@ -131,6 +131,11 @@ func (s *Server) GetRequestUnitConfig() *RequestUnitConfig {
 	return &s.cfg.RequestUnit
 }
 
+// GetRMServerConfig return the resource manager server config.
+func (s *Server) GetRMServerConfig() *RMServerConfig {
+	return &s.cfg.RMServer
+}
+
 // GetClient returns builtin etcd client.
 func (s *Server) GetClient() *clientv3.Client {
 	return s.etcdClient

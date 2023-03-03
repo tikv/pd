@@ -61,7 +61,21 @@ const (
 	defaultWriteCostPerByte = 1. / 1024
 	// 1 RU = 3 millisecond CPU time
 	defaultCPUMsCost = 1. / 3
+
+	defaultEnableDegradedMode = true
 )
+
+type RMServerConfig struct {
+	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
+	EnableDegradedMode bool `toml:"enable-degraded-mode" json:"enable-degraded-mode"`
+}
+
+// DefaultRMServerConfig returns the default resource manager server configuration.
+func DefaultRMServerConfig() *RMServerConfig {
+	return &RMServerConfig{
+		EnableDegradedMode: defaultEnableDegradedMode,
+	}
+}
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
 // the RRU and WRU cost. This configuration should be modified carefully.
@@ -104,23 +118,26 @@ type Config struct {
 	CPUMsCost      RequestUnit
 	// The CPU statistics need to distinguish between different environments.
 	isSingleGroupByKeyspace bool
+	EnableDegradedMode      bool
 }
 
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return GenerateConfig(
 		DefaultRequestUnitConfig(),
+		DefaultRMServerConfig(),
 	)
 }
 
 // GenerateConfig generates the configuration by the given request unit configuration.
-func GenerateConfig(ruConfig *RequestUnitConfig) *Config {
+func GenerateConfig(ruConfig *RequestUnitConfig, rmServerConfig *RMServerConfig) *Config {
 	cfg := &Config{
-		ReadBaseCost:   RequestUnit(ruConfig.ReadBaseCost),
-		ReadBytesCost:  RequestUnit(ruConfig.ReadCostPerByte),
-		WriteBaseCost:  RequestUnit(ruConfig.WriteBaseCost),
-		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
-		CPUMsCost:      RequestUnit(ruConfig.CPUMsCost),
+		ReadBaseCost:       RequestUnit(ruConfig.ReadBaseCost),
+		ReadBytesCost:      RequestUnit(ruConfig.ReadCostPerByte),
+		WriteBaseCost:      RequestUnit(ruConfig.WriteBaseCost),
+		WriteBytesCost:     RequestUnit(ruConfig.WriteCostPerByte),
+		CPUMsCost:          RequestUnit(ruConfig.CPUMsCost),
+		EnableDegradedMode: rmServerConfig.EnableDegradedMode,
 	}
 	return cfg
 }

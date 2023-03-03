@@ -33,6 +33,7 @@ import (
 
 const (
 	requestUnitConfigPath  = "resource_group/ru_config"
+	serverConfigPath       = "resource_group/rm_server"
 	defaultMaxWaitDuration = time.Second
 	maxRetry               = 3
 	maxNotificationChanLen = 200
@@ -124,7 +125,11 @@ func NewResourceGroupController(
 			return nil, err
 		}
 	}
-	config := GenerateConfig(requestUnitConfig)
+	rmServerConfig, err := loadServerConfig(ctx, provider)
+	if err != nil {
+		return nil, err
+	}
+	config := GenerateConfig(requestUnitConfig, rmServerConfig)
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
@@ -156,6 +161,22 @@ func loadRequestUnitConfig(ctx context.Context, provider ResourceGroupProvider) 
 	return ruConfig, nil
 }
 
+func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*RMServerConfig, error) {
+	items, _, err := provider.LoadGlobalConfig(ctx, nil, serverConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, errors.Errorf("failed to load the server config from remote server")
+	}
+	rmConfig := &RMServerConfig{}
+	err = json.Unmarshal(items[0].PayLoad, rmConfig)
+	if err != nil {
+		return nil, err
+	}
+	return rmConfig, nil
+}
+
 // GetConfig returns the config of controller. It's only used for test.
 func (c *ResourceGroupsController) GetConfig() *Config {
 	return c.config
@@ -179,8 +200,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case <-c.loopCtx.Done():
 				return
 			case <-c.responseDeadlineCh:
-				c.run.inDegradedMode = true
-				c.applyDegradedMode()
+				if c.config.EnableDegradedMode {
+					c.run.inDegradedMode = true
+					c.applyDegradedMode()
+					log.Warn("[resource group controller] enter degraded mode")
+				}
 			case resp := <-c.tokenResponseChan:
 				c.run.requestInProgress = false
 				if resp != nil {

@@ -60,7 +60,7 @@ type Service struct {
 }
 
 // NewService creates a new resource manager service.
-func NewService[T RUConfigProvider](svr bs.Server) registry.RegistrableService {
+func NewService[T ResourceManagerConfigProvider](svr bs.Server) registry.RegistrableService {
 	manager := NewManager[T](svr)
 
 	return &Service{

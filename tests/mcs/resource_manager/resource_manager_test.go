@@ -778,10 +778,11 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.NoError(err)
 	config = ctr.GetConfig()
 	re.NotNil(config)
-	expectedConfig = controller.GenerateConfig(ruConfig)
+	expectedConfig = controller.GenerateConfig(ruConfig, controller.DefaultRMServerConfig())
 	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
 	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
 	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
 	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
 	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
+	re.True(expectedConfig.EnableDegradedMode)
 }

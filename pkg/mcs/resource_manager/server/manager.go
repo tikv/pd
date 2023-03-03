@@ -41,10 +41,11 @@ const (
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	srv      bs.Server
-	ruConfig *RequestUnitConfig
-	groups   map[string]*ResourceGroup
-	storage  endpoint.ResourceGroupStorage
+	srv            bs.Server
+	ruConfig       *RequestUnitConfig
+	rmServerConfig *RMServerConfig
+	groups         map[string]*ResourceGroup
+	storage        endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
@@ -55,18 +56,20 @@ type Manager struct {
 	consumptionRecord map[string]time.Time
 }
 
-// RUConfigProvider is used to get RU config from the given
+// ResourceManagerConfigProvider is used to get resource manager config from the given
 // `bs.server` without modifying its interface.
-type RUConfigProvider interface {
+type ResourceManagerConfigProvider interface {
 	GetRequestUnitConfig() *RequestUnitConfig
+	GetRMServerConfig() *RMServerConfig
 }
 
 // NewManager returns a new manager base on the given server,
-// which should implement the `RUConfigProvider` interface.
-func NewManager[T RUConfigProvider](srv bs.Server) *Manager {
+// which should implement the `ResourceManagerConfigProvider` interface.
+func NewManager[T ResourceManagerConfigProvider](srv bs.Server) *Manager {
 	m := &Manager{
-		ruConfig: srv.(T).GetRequestUnitConfig(),
-		groups:   make(map[string]*ResourceGroup),
+		ruConfig:       srv.(T).GetRequestUnitConfig(),
+		rmServerConfig: srv.(T).GetRMServerConfig(),
+		groups:         make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
@@ -94,8 +97,11 @@ func (m *Manager) GetBasicServer() bs.Server {
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
+	// Todo: If we can modify following configs in the future, we should reload these configs.
 	// Store the RU model config into the storage.
 	m.storage.SaveRequestUnitConfig(m.ruConfig)
+	// Store the resource manager server config into the storage.
+	m.storage.SaveRMServerConfig(m.rmServerConfig)
 	// Load resource group meta info from storage.
 	m.groups = make(map[string]*ResourceGroup)
 	handler := func(k, v string) {
