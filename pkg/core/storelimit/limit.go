@@ -14,6 +14,10 @@
 
 package storelimit
 
+import (
+	"github.com/tikv/pd/pkg/core/constant"
+)
+
 // Type indicates the type of store limit
 type Type int
 
@@ -26,28 +30,12 @@ const (
 	storeLimitTypeLen
 )
 
-// PriorityLevel higher level means higher priority
-type PriorityLevel int
-
-const (
-	// Low represent the lowest level.
-	Low PriorityLevel = iota
-	// Medium represent the medium level.
-	Medium
-	// High represent the high level.
-	High
-	// Urgent represent the urgent level.
-	Urgent
-
-	priorityLevelLen
-)
-
 // StoreLimit is an interface to control the operator rate of store
 type StoreLimit interface {
 	// Available returns true if the store can accept the operator
-	Available(cost int64, typ Type, level PriorityLevel) bool
+	Available(cost int64, typ Type, level constant.PriorityLevel) bool
 	// Take takes the cost of the operator, it returns false if the store can't accept any operators.
-	Take(count int64, typ Type, level PriorityLevel) bool
+	Take(count int64, typ Type, level constant.PriorityLevel) bool
 	// Reset resets the store limit
 	Reset(rate float64, typ Type)
 }

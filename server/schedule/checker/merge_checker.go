@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/server/schedule"
@@ -284,14 +285,14 @@ func AllowMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) boo
 
 	policy := cluster.GetOpts().GetKeyType()
 	switch policy {
-	case core.Table:
+	case constant.Table:
 		if cluster.GetOpts().IsCrossTableMergeEnabled() {
 			return true
 		}
 		return isTableIDSame(region, adjacent)
-	case core.Raw:
+	case constant.Raw:
 		return true
-	case core.Txn:
+	case constant.Txn:
 		return true
 	default:
 		return isTableIDSame(region, adjacent)

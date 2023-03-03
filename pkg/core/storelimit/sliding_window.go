@@ -14,7 +14,10 @@
 
 package storelimit
 
-import "github.com/tikv/pd/pkg/utils/syncutil"
+import (
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+)
 
 const (
 	// minSnapSize is the min value to check the windows has enough size.
@@ -32,8 +35,8 @@ func NewSlidingWindows(cap float64) *SlidingWindows {
 	if cap < 0 {
 		cap = minSnapSize
 	}
-	windows := make([]*window, priorityLevelLen)
-	for i := 0; i < int(priorityLevelLen); i++ {
+	windows := make([]*window, constant.PriorityLevelLen)
+	for i := 0; i < int(constant.PriorityLevelLen); i++ {
 		windows[i] = newWindow(int64(cap) >> i)
 	}
 	return &SlidingWindows{
@@ -68,7 +71,7 @@ func (s *SlidingWindows) GetUsed() int64 {
 // Available returns whether the token can be taken.
 // The order of checking windows is from low to high.
 // It checks the given window finally if the lower window has no free size.
-func (s *SlidingWindows) Available(_ int64, _ Type, level PriorityLevel) bool {
+func (s *SlidingWindows) Available(_ int64, _ Type, level constant.PriorityLevel) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i := 0; i <= int(level); i++ {
@@ -81,7 +84,7 @@ func (s *SlidingWindows) Available(_ int64, _ Type, level PriorityLevel) bool {
 
 // Take tries to take the token.
 // It will consume the given window finally if the lower window has no free size.
-func (s *SlidingWindows) Take(token int64, _ Type, level PriorityLevel) bool {
+func (s *SlidingWindows) Take(token int64, _ Type, level constant.PriorityLevel) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := 0; i <= int(level); i++ {
@@ -98,7 +101,7 @@ func (s *SlidingWindows) Take(token int64, _ Type, level PriorityLevel) bool {
 func (s *SlidingWindows) Ack(token int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := priorityLevelLen - 1; i >= 0; i-- {
+	for i := constant.PriorityLevelLen - 1; i >= 0; i-- {
 		if token = s.windows[i].ack(token); token <= 0 {
 			break
 		}

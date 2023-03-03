@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -43,7 +44,7 @@ const (
 type solver struct {
 	*balanceSchedulerPlan
 	schedule.Cluster
-	kind              core.ScheduleKind
+	kind              constant.ScheduleKind
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
 	tolerantSource    int64
@@ -53,7 +54,7 @@ type solver struct {
 	targetScore float64
 }
 
-func newSolver(basePlan *balanceSchedulerPlan, kind core.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *balanceSchedulerPlan, kind constant.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *solver {
 	return &solver{
 		balanceSchedulerPlan: basePlan,
 		Cluster:              cluster,
@@ -100,13 +101,13 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 	}
 	var score float64
 	switch p.kind.Resource {
-	case core.LeaderKind:
+	case constant.LeaderKind:
 		sourceDelta := influence - tolerantResource
 		score = p.source.LeaderScore(p.kind.Policy, sourceDelta)
-	case core.RegionKind:
+	case constant.RegionKind:
 		sourceDelta := influence*influenceAmp - tolerantResource
 		score = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
-	case core.WitnessKind:
+	case constant.WitnessKind:
 		sourceDelta := influence - tolerantResource
 		score = p.source.WitnessScore(sourceDelta)
 	}
@@ -131,13 +132,13 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 	}
 	var score float64
 	switch p.kind.Resource {
-	case core.LeaderKind:
+	case constant.LeaderKind:
 		targetDelta := influence + tolerantResource
 		score = p.target.LeaderScore(p.kind.Policy, targetDelta)
-	case core.RegionKind:
+	case constant.RegionKind:
 		targetDelta := influence*influenceAmp + tolerantResource
 		score = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
-	case core.WitnessKind:
+	case constant.WitnessKind:
 		targetDelta := influence + tolerantResource
 		score = p.target.WitnessScore(targetDelta)
 	}
@@ -171,7 +172,7 @@ func (p *solver) getTolerantResource() int64 {
 		return p.tolerantSource
 	}
 
-	if (p.kind.Resource == core.LeaderKind || p.kind.Resource == core.WitnessKind) && p.kind.Policy == core.ByCount {
+	if (p.kind.Resource == constant.LeaderKind || p.kind.Resource == constant.WitnessKind) && p.kind.Policy == constant.ByCount {
 		p.tolerantSource = int64(p.tolerantSizeRatio)
 	} else {
 		regionSize := p.GetAverageRegionSize()
@@ -180,7 +181,7 @@ func (p *solver) getTolerantResource() int64 {
 	return p.tolerantSource
 }
 
-func adjustTolerantRatio(cluster schedule.Cluster, kind core.ScheduleKind) float64 {
+func adjustTolerantRatio(cluster schedule.Cluster, kind constant.ScheduleKind) float64 {
 	var tolerantSizeRatio float64
 	switch c := cluster.(type) {
 	case *schedule.RangeCluster:
@@ -189,7 +190,7 @@ func adjustTolerantRatio(cluster schedule.Cluster, kind core.ScheduleKind) float
 	default:
 		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
 	}
-	if kind.Resource == core.LeaderKind && kind.Policy == core.ByCount {
+	if kind.Resource == constant.LeaderKind && kind.Policy == constant.ByCount {
 		if tolerantSizeRatio == 0 {
 			return leaderTolerantSizeRatio
 		}

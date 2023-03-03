@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -41,7 +42,7 @@ type testBalanceSpeedCase struct {
 	targetCount    uint64
 	regionSize     int64
 	expectedResult bool
-	kind           core.SchedulePolicy
+	kind           constant.SchedulePolicy
 }
 
 func TestInfluenceAmp(t *testing.T) {
@@ -50,7 +51,7 @@ func TestInfluenceAmp(t *testing.T) {
 	re := require.New(t)
 
 	R := int64(96)
-	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
 
 	influence := oc.GetOpInfluence(tc)
 	influence.GetStoreInfluence(1).RegionSize = R
@@ -87,52 +88,52 @@ func TestShouldBalance(t *testing.T) {
 	const R = 96
 	testCases := []testBalanceSpeedCase{
 		// target size is zero
-		{2, 0, R / 10, true, core.BySize},
-		{2, 0, R, false, core.BySize},
+		{2, 0, R / 10, true, constant.BySize},
+		{2, 0, R, false, constant.BySize},
 		// all in high space stage
-		{10, 5, R / 10, true, core.BySize},
-		{10, 5, 2 * R, false, core.BySize},
-		{10, 10, R / 10, false, core.BySize},
-		{10, 10, 2 * R, false, core.BySize},
+		{10, 5, R / 10, true, constant.BySize},
+		{10, 5, 2 * R, false, constant.BySize},
+		{10, 10, R / 10, false, constant.BySize},
+		{10, 10, 2 * R, false, constant.BySize},
 		// all in transition stage
-		{700, 680, R / 10, true, core.BySize},
-		{700, 680, 5 * R, false, core.BySize},
-		{700, 700, R / 10, false, core.BySize},
+		{700, 680, R / 10, true, constant.BySize},
+		{700, 680, 5 * R, false, constant.BySize},
+		{700, 700, R / 10, false, constant.BySize},
 		// all in low space stage
-		{900, 890, R / 10, true, core.BySize},
-		{900, 890, 5 * R, false, core.BySize},
-		{900, 900, R / 10, false, core.BySize},
+		{900, 890, R / 10, true, constant.BySize},
+		{900, 890, 5 * R, false, constant.BySize},
+		{900, 900, R / 10, false, constant.BySize},
 		// one in high space stage, other in transition stage
-		{650, 550, R, true, core.BySize},
-		{650, 500, 50 * R, false, core.BySize},
+		{650, 550, R, true, constant.BySize},
+		{650, 500, 50 * R, false, constant.BySize},
 		// one in transition space stage, other in low space stage
-		{800, 700, R, true, core.BySize},
-		{800, 700, 50 * R, false, core.BySize},
+		{800, 700, R, true, constant.BySize},
+		{800, 700, 50 * R, false, constant.BySize},
 
 		// default leader tolerant ratio is 5, when schedule by count
 		// target size is zero
-		{2, 0, R / 10, false, core.ByCount},
-		{2, 0, R, false, core.ByCount},
+		{2, 0, R / 10, false, constant.ByCount},
+		{2, 0, R, false, constant.ByCount},
 		// all in high space stage
-		{10, 5, R / 10, true, core.ByCount},
-		{10, 5, 2 * R, true, core.ByCount},
-		{10, 6, 2 * R, false, core.ByCount},
-		{10, 10, R / 10, false, core.ByCount},
-		{10, 10, 2 * R, false, core.ByCount},
+		{10, 5, R / 10, true, constant.ByCount},
+		{10, 5, 2 * R, true, constant.ByCount},
+		{10, 6, 2 * R, false, constant.ByCount},
+		{10, 10, R / 10, false, constant.ByCount},
+		{10, 10, 2 * R, false, constant.ByCount},
 		// all in transition stage
-		{70, 50, R / 10, true, core.ByCount},
-		{70, 50, 5 * R, true, core.ByCount},
-		{70, 70, R / 10, false, core.ByCount},
+		{70, 50, R / 10, true, constant.ByCount},
+		{70, 50, 5 * R, true, constant.ByCount},
+		{70, 70, R / 10, false, constant.ByCount},
 		// all in low space stage
-		{90, 80, R / 10, true, core.ByCount},
-		{90, 80, 5 * R, true, core.ByCount},
-		{90, 90, R / 10, false, core.ByCount},
+		{90, 80, R / 10, true, constant.ByCount},
+		{90, 80, 5 * R, true, constant.ByCount},
+		{90, 90, R / 10, false, constant.ByCount},
 		// one in high space stage, other in transition stage
-		{65, 55, R / 2, true, core.ByCount},
-		{65, 50, 5 * R, true, core.ByCount},
+		{65, 55, R / 2, true, constant.ByCount},
+		{65, 50, 5 * R, true, constant.ByCount},
 		// one in transition space stage, other in low space stage
-		{80, 70, R / 2, true, core.ByCount},
-		{80, 70, 5 * R, true, core.ByCount},
+		{80, 70, R / 2, true, constant.ByCount},
+		{80, 70, 5 * R, true, constant.ByCount},
 	}
 
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -148,7 +149,7 @@ func TestShouldBalance(t *testing.T) {
 		region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.regionSize))
 		tc.PutRegion(region)
 		tc.SetLeaderSchedulePolicy(testCase.kind.String())
-		kind := core.NewScheduleKind(core.LeaderKind, testCase.kind)
+		kind := constant.NewScheduleKind(constant.LeaderKind, testCase.kind)
 		basePlan := NewBalanceSchedulerPlan()
 		solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
 		solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
@@ -157,12 +158,12 @@ func TestShouldBalance(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		if testCase.kind.String() == core.BySize.String() {
+		if testCase.kind.String() == constant.BySize.String() {
 			tc.AddRegionStore(1, int(testCase.sourceCount))
 			tc.AddRegionStore(2, int(testCase.targetCount))
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.regionSize))
 			tc.PutRegion(region)
-			kind := core.NewScheduleKind(core.RegionKind, testCase.kind)
+			kind := constant.NewScheduleKind(constant.RegionKind, testCase.kind)
 			basePlan := NewBalanceSchedulerPlan()
 			solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
 			solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
@@ -183,31 +184,31 @@ func TestTolerantRatio(t *testing.T) {
 
 	tbl := []struct {
 		ratio                  float64
-		kind                   core.ScheduleKind
-		expectTolerantResource func(core.ScheduleKind) int64
+		kind                   constant.ScheduleKind
+		expectTolerantResource func(constant.ScheduleKind) int64
 	}{
-		{0, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}, func(k core.ScheduleKind) int64 {
+		{0, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount}, func(k constant.ScheduleKind) int64 {
 			return int64(leaderTolerantSizeRatio)
 		}},
-		{0, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}, func(k core.ScheduleKind) int64 {
+		{0, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
 			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
 		}},
-		{0, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}, func(k core.ScheduleKind) int64 {
+		{0, constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.ByCount}, func(k constant.ScheduleKind) int64 {
 			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
 		}},
-		{0, core.ScheduleKind{Resource: core.RegionKind, Policy: core.BySize}, func(k core.ScheduleKind) int64 {
+		{0, constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
 			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
 		}},
-		{10, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.ByCount}, func(k core.ScheduleKind) int64 {
+		{10, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount}, func(k constant.ScheduleKind) int64 {
 			return int64(tc.GetScheduleConfig().TolerantSizeRatio)
 		}},
-		{10, core.ScheduleKind{Resource: core.LeaderKind, Policy: core.BySize}, func(k core.ScheduleKind) int64 {
+		{10, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
 			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
 		}},
-		{10, core.ScheduleKind{Resource: core.RegionKind, Policy: core.ByCount}, func(k core.ScheduleKind) int64 {
+		{10, constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.ByCount}, func(k constant.ScheduleKind) int64 {
 			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
 		}},
-		{10, core.ScheduleKind{Resource: core.RegionKind, Policy: core.BySize}, func(k core.ScheduleKind) int64 {
+		{10, constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
 			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
 		}},
 	}
@@ -306,14 +307,14 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderSchedulePolicy() 
 	suite.tc.AddLeaderStore(3, 10, 100*units.MiB)
 	suite.tc.AddLeaderStore(4, 10, 100*units.MiB)
 	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	suite.Equal(core.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
+	suite.Equal(constant.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
 	suite.Empty(suite.schedule())
 	plans := suite.dryRun()
 	suite.NotEmpty(plans)
 	suite.Equal(3, plans[0].GetStep())
 	suite.Equal(plan.StatusStoreScoreDisallowed, int(plans[0].GetStatus().StatusCode))
 
-	suite.tc.SetLeaderSchedulePolicy(core.BySize.String())
+	suite.tc.SetLeaderSchedulePolicy(constant.BySize.String())
 	suite.NotEmpty(suite.schedule())
 }
 
@@ -329,7 +330,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderTolerantRatio() {
 	suite.tc.AddLeaderStore(3, 10, 100)
 	suite.tc.AddLeaderStore(4, 10, 100)
 	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	suite.Equal(core.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
+	suite.Equal(constant.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
 	suite.Empty(suite.schedule())
 	suite.Equal(14, suite.tc.GetStore(1).GetLeaderCount())
 	suite.tc.AddLeaderStore(1, 15, 100)
@@ -355,9 +356,9 @@ func (suite *balanceLeaderSchedulerTestSuite) TestScheduleWithOpInfluence() {
 	// After considering the scheduled operator, leaders of store1 and store4 are 8
 	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
 	// returns false when leader difference is not greater than 5.
-	suite.Equal(core.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
+	suite.Equal(constant.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
 	suite.NotEmpty(suite.schedule())
-	suite.tc.SetLeaderSchedulePolicy(core.BySize.String())
+	suite.tc.SetLeaderSchedulePolicy(constant.BySize.String())
 	suite.Empty(suite.schedule())
 
 	// Stores:     1    2    3    4

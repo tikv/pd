@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/storage"
@@ -1071,7 +1072,7 @@ func TestOperatorCount(t *testing.T) {
 		re.Equal(uint64(1), oc.OperatorCount(operator.OpRegion)) // 1:region 2:leader
 		re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader))
 		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion)
-		op2.SetPriorityLevel(core.High)
+		op2.SetPriorityLevel(constant.High)
 		oc.AddWaitingOperator(op2)
 		re.Equal(uint64(2), oc.OperatorCount(operator.OpRegion)) // 1:region 2:region
 		re.Equal(uint64(0), oc.OperatorCount(operator.OpLeader))
@@ -1154,7 +1155,7 @@ func TestStoreOverloadedWithReplace(t *testing.T) {
 	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 1})
 	re.True(oc.AddOperator(op1))
 	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 2})
-	op2.SetPriorityLevel(core.High)
+	op2.SetPriorityLevel(constant.High)
 	re.True(oc.AddOperator(op2))
 	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	re.False(oc.AddOperator(op3))
@@ -1266,7 +1267,7 @@ func TestController(t *testing.T) {
 	// add a PriorityKind operator will remove old operator
 	{
 		op3 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpHotRegion)
-		op3.SetPriorityLevel(core.High)
+		op3.SetPriorityLevel(constant.High)
 		re.Equal(1, oc.AddWaitingOperator(op11))
 		re.False(sc.AllowSchedule(false))
 		re.Equal(1, oc.AddWaitingOperator(op3))
@@ -1280,7 +1281,7 @@ func TestController(t *testing.T) {
 		re.Equal(1, oc.AddWaitingOperator(op2))
 		re.False(sc.AllowSchedule(false))
 		op4 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpAdmin)
-		op4.SetPriorityLevel(core.High)
+		op4.SetPriorityLevel(constant.High)
 		re.Equal(1, oc.AddWaitingOperator(op4))
 		re.True(sc.AllowSchedule(false))
 		re.True(oc.RemoveOperator(op4))

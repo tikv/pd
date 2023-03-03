@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -76,10 +77,10 @@ func TestAdjustRule(t *testing.T) {
 		re.Error(manager.adjustRule(&rules[i], "group"))
 	}
 
-	manager.SetKeyType(core.Table.String())
+	manager.SetKeyType(constant.Table.String())
 	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"))
 
-	manager.SetKeyType(core.Txn.String())
+	manager.SetKeyType(constant.Txn.String())
 	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"))
 
 	re.Error(manager.adjustRule(&Rule{

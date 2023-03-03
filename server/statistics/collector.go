@@ -14,16 +14,19 @@
 
 package statistics
 
-import "github.com/tikv/pd/pkg/core"
+import (
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+)
 
 // storeCollector define the behavior of different engines of stores.
 type storeCollector interface {
 	// Engine returns the type of Store.
 	Engine() string
 	// Filter determines whether the Store needs to be handled by itself.
-	Filter(info *StoreSummaryInfo, kind core.ResourceKind) bool
+	Filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool
 	// GetLoads obtains available loads from storeLoads and peerLoadSum according to rwTy and kind.
-	GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, kind core.ResourceKind) (loads []float64)
+	GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, kind constant.ResourceKind) (loads []float64)
 }
 
 type tikvCollector struct{}
@@ -36,20 +39,20 @@ func (c tikvCollector) Engine() string {
 	return core.EngineTiKV
 }
 
-func (c tikvCollector) Filter(info *StoreSummaryInfo, kind core.ResourceKind) bool {
+func (c tikvCollector) Filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool {
 	if info.IsTiFlash() {
 		return false
 	}
 	switch kind {
-	case core.LeaderKind:
+	case constant.LeaderKind:
 		return info.AllowLeaderTransfer()
-	case core.RegionKind:
+	case constant.RegionKind:
 		return true
 	}
 	return false
 }
 
-func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, kind core.ResourceKind) (loads []float64) {
+func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, kind constant.ResourceKind) (loads []float64) {
 	loads = make([]float64, DimLen)
 	switch rwTy {
 	case Read:
@@ -58,7 +61,7 @@ func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, 
 		loads[QueryDim] = storeLoads[StoreReadQuery]
 	case Write:
 		switch kind {
-		case core.LeaderKind:
+		case constant.LeaderKind:
 			// Use sum of hot peers to estimate leader-only byte rate.
 			// For Write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
 			// while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
@@ -66,7 +69,7 @@ func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, 
 			loads[ByteDim] = peerLoadSum[ByteDim]
 			loads[KeyDim] = peerLoadSum[KeyDim]
 			loads[QueryDim] = storeLoads[StoreWriteQuery]
-		case core.RegionKind:
+		case constant.RegionKind:
 			loads[ByteDim] = storeLoads[StoreWriteBytes]
 			loads[KeyDim] = storeLoads[StoreWriteKeys]
 			// The `Write-peer` does not have `QueryDim`
@@ -87,26 +90,26 @@ func (c tiflashCollector) Engine() string {
 	return core.EngineTiFlash
 }
 
-func (c tiflashCollector) Filter(info *StoreSummaryInfo, kind core.ResourceKind) bool {
+func (c tiflashCollector) Filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool {
 	switch kind {
-	case core.LeaderKind:
+	case constant.LeaderKind:
 		return false
-	case core.RegionKind:
+	case constant.RegionKind:
 		return info.IsTiFlash()
 	}
 	return false
 }
 
-func (c tiflashCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, kind core.ResourceKind) (loads []float64) {
+func (c tiflashCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, kind constant.ResourceKind) (loads []float64) {
 	loads = make([]float64, DimLen)
 	switch rwTy {
 	case Read:
 		// TODO: Need TiFlash StoreHeartbeat support
 	case Write:
 		switch kind {
-		case core.LeaderKind:
+		case constant.LeaderKind:
 			// There is no Leader on TiFlash
-		case core.RegionKind:
+		case constant.RegionKind:
 			// TiFlash is currently unable to report statistics in the same unit as Region,
 			// so it uses the sum of Regions. If it is not accurate enough, use sum of hot peer.
 			if c.isTraceRegionFlow {
