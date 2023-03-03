@@ -357,7 +357,7 @@ func ioCopy(dst io.Writer, src io.Reader, enableDiscard *atomic.Bool) (err error
 		}
 		readNum, errRead := src.Read(buffer)
 		if readNum > 0 {
-			writeNum, errWrite := dst.Write(buffer[0:readNum])
+			writeNum, errWrite := dst.Write(buffer[:readNum])
 			if errWrite != nil {
 				return errWrite
 			}
