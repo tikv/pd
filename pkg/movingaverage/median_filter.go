@@ -23,6 +23,7 @@ import (
 // There are at most `size` data points for calculating.
 // References: https://en.wikipedia.org/wiki/Median_filter.
 // Note: MedianFilter is not Thread-Safety.
+// If the some items are `math.MaxFloat64`, no guarantee that the results are correct.
 type MedianFilter struct {
 	records []float64
 	size    uint64
@@ -57,9 +58,6 @@ func (r *MedianFilter) findTwoMinNumber(needSecond bool) (first, second float64,
 			pos = i
 		}
 	}
-	if !(first < math.MaxFloat64) {
-		return 0, 0, errors.New("invalid values")
-	}
 	if needSecond {
 		for i := uint64(0); i < len; i++ {
 			if i != pos && r.records[i] > r.result && r.records[i] < second {
@@ -86,9 +84,6 @@ func (r *MedianFilter) findTwoMaxNumber(needSecond bool) (first, second float64,
 			first = r.records[i]
 			pos = i
 		}
-	}
-	if !(first > -math.MaxFloat64) {
-		return 0, 0, errors.New("invalid values")
 	}
 	if needSecond {
 		for i := uint64(0); i < len; i++ {
