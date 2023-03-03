@@ -140,7 +140,7 @@ func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*serv
 		log.Fatal("setup logger error", zap.Error(err))
 	}
 
-	s, err := server.CreateServer(ctx, simConfig.ServerConfig, api.NewHandler)
+	s, err := server.CreateServer(ctx, simConfig.ServerConfig, nil, api.NewHandler)
 	if err != nil {
 		panic("create server failed")
 	}

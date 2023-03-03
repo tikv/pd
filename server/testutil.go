@@ -44,7 +44,7 @@ func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, Clea
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	s, err := CreateServer(ctx, cfg, mockHandler)
+	s, err := CreateServer(ctx, cfg, nil, mockHandler)
 	if err != nil {
 		cancel()
 		return nil, nil, err
