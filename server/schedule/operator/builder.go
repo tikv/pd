@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/placement"
 )
@@ -32,8 +32,8 @@ import (
 // ClusterInformer provides the necessary information for building operator.
 type ClusterInformer interface {
 	GetBasicCluster() *core.BasicCluster
-	GetOpts() *config.PersistOptions
-	GetStoreConfig() *config.StoreConfig
+	GetOpts() config.Config
+	GetStoreConfig() config.StoreConfig
 	GetRuleManager() *placement.RuleManager
 	GetAllocator() id.Allocator
 }

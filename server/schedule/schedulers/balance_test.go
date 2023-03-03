@@ -30,8 +30,8 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
 )
@@ -229,7 +229,7 @@ type balanceLeaderSchedulerTestSuite struct {
 	tc     *mockcluster.Cluster
 	lb     schedule.Scheduler
 	oc     *schedule.OperatorController
-	opt    *config.PersistOptions
+	conf   config.Config
 }
 
 func TestBalanceLeaderSchedulerTestSuite(t *testing.T) {
@@ -237,7 +237,7 @@ func TestBalanceLeaderSchedulerTestSuite(t *testing.T) {
 }
 
 func (suite *balanceLeaderSchedulerTestSuite) SetupTest() {
-	suite.cancel, suite.opt, suite.tc, suite.oc = prepareSchedulersTest()
+	suite.cancel, suite.conf, suite.tc, suite.oc = prepareSchedulersTest()
 	lb, err := schedule.CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	suite.NoError(err)
 	suite.lb = lb

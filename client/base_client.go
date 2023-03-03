@@ -39,35 +39,17 @@ const (
 	memberUpdateInterval = time.Minute
 )
 
-type tsoRequest struct {
-	start      time.Time
-	clientCtx  context.Context
-	requestCtx context.Context
-	done       chan error
-	physical   int64
-	logical    int64
-	dcLocation string
-	keyspaceID uint32
-}
-
 // BaseClient defines the general interface for service discovery on a quorum-based cluster
 // or a primary/secondy configured cluster.
 type BaseClient interface {
 	// Init initialize the concrete client underlying
 	Init() error
-	// Close all grpc client connnections
-	CloseClientConns()
+	// Close releases all resources
+	Close()
 	// GetClusterID returns the ID of the cluster
 	GetClusterID(context.Context) uint64
 	// GetURLs returns the URLs of the servers.
 	GetURLs() []string
-	// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
-	GetTSOAllocators() *sync.Map
-	// GetTSOAllocatorServingAddrByDCLocation returns the tso allocator of the given dcLocation
-	GetTSOAllocatorServingAddrByDCLocation(dcLocation string) (string, bool)
-	// GetTSOAllocatorClientConnByDCLocation returns the tso allocator grpc client connection
-	// of the given dcLocation
-	GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string)
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
 	// which is the leader in a quorum-based cluster or the primary in a primary/secondy
 	// configured cluster.
@@ -96,6 +78,16 @@ type BaseClient interface {
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
 	AddServiceAddrsSwitchedCallback(callbacks ...func())
+
+	// TODO: Separate the following TSO related service discovery methods from the above methods.
+
+	// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
+	GetTSOAllocators() *sync.Map
+	// GetTSOAllocatorServingAddrByDCLocation returns the tso allocator of the given dcLocation
+	GetTSOAllocatorServingAddrByDCLocation(dcLocation string) (string, bool)
+	// GetTSOAllocatorClientConnByDCLocation returns the tso allocator grpc client connection
+	// of the given dcLocation
+	GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string)
 	// AddTSOAllocatorServingAddrSwitchedCallback adds callbacks which will be called
 	// when any global/local tso allocator service endpoint is switched.
 	AddTSOAllocatorServingAddrSwitchedCallback(callbacks ...func())
@@ -205,12 +197,13 @@ func (c *pdBaseClient) memberLoop() {
 	}
 }
 
-// Close all grpc client connnections
-func (c *pdBaseClient) CloseClientConns() {
-	c.clientConns.Range(func(_, cc interface{}) bool {
+// Close releases all resources
+func (c *pdBaseClient) Close() {
+	c.clientConns.Range(func(key, cc interface{}) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
 			log.Error("[pd] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
+		c.clientConns.Delete(key)
 		return true
 	})
 }

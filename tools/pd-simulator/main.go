@@ -32,7 +32,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"github.com/tikv/pd/tools/pd-simulator/simulator"
@@ -140,7 +140,7 @@ func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*serv
 		log.Fatal("setup logger error", zap.Error(err))
 	}
 
-	s, err := server.CreateServer(ctx, simConfig.ServerConfig, api.NewHandler)
+	s, err := server.CreateServer(ctx, simConfig.ServerConfig, nil, api.NewHandler)
 	if err != nil {
 		panic("create server failed")
 	}

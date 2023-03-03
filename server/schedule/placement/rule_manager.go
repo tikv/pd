@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/config"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 )
@@ -49,15 +49,15 @@ type RuleManager struct {
 	keyType          string
 	storeSetInformer core.StoreSetInformer
 	cache            *RegionRuleFitCacheManager
-	opt              *config.PersistOptions
+	conf             config.Config
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, opt *config.PersistOptions) *RuleManager {
+func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.Config) *RuleManager {
 	return &RuleManager{
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
-		opt:              opt,
+		conf:             conf,
 		ruleConfig:       newRuleConfig(),
 		cache:            NewRegionRuleFitCacheManager(),
 	}
@@ -338,12 +338,12 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) (fit
 	regionStores := getStoresByRegion(storeSet, region)
 	rules := m.GetRulesForApplyRegion(region)
 	var isCached bool
-	if m.opt.IsPlacementRulesCacheEnabled() {
+	if m.conf.IsPlacementRulesCacheEnabled() {
 		if isCached, fit = m.cache.CheckAndGetCache(region, rules, regionStores); isCached && fit != nil {
 			return fit
 		}
 	}
-	fit = fitRegion(regionStores, region, rules, m.opt.IsWitnessAllowed())
+	fit = fitRegion(regionStores, region, rules, m.conf.IsWitnessAllowed())
 	fit.regionStores = regionStores
 	fit.rules = rules
 	if isCached {
