@@ -25,7 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"github.com/unrolled/render"
 )
 
@@ -155,8 +155,23 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+	case schedulers.BalanceWitnessName:
+		if err := h.AddBalanceWitnessScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case schedulers.TransferWitnessLeaderName:
+		if err := h.AddTransferWitnessLeaderScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	case schedulers.HotRegionName:
 		if err := h.AddBalanceHotRegionScheduler(); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	case schedulers.EvictSlowTrendName:
+		if err := h.AddEvictSlowTrendScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

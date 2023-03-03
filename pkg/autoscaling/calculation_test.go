@@ -23,9 +23,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
 func TestGetScaledTiKVGroups(t *testing.T) {
@@ -34,7 +34,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// case1 indicates the tikv cluster with not any group existed
-	case1 := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	case1 := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	case1.AddLabelsStore(1, 1, map[string]string{})
 	case1.AddLabelsStore(2, 1, map[string]string{
 		"foo": "bar",
@@ -44,7 +44,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 	})
 
 	// case2 indicates the tikv cluster with 1 auto-scaling group existed
-	case2 := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	case2 := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	case2.AddLabelsStore(1, 1, map[string]string{})
 	case2.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),
@@ -56,7 +56,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 	})
 
 	// case3 indicates the tikv cluster with other group existed
-	case3 := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	case3 := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	case3.AddLabelsStore(1, 1, map[string]string{})
 	case3.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey: "foo",
@@ -331,7 +331,7 @@ func TestStrategyChangeCount(t *testing.T) {
 	// tikv cluster with 1 auto-scaling group existed
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	cluster.AddLabelsStore(2, 1, map[string]string{
 		groupLabelKey:        fmt.Sprintf("%s-%s-0", autoScalingGroupLabelKeyPrefix, TiKV.String()),

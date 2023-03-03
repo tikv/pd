@@ -17,25 +17,30 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
+	"math/rand"
 	"net/http"
 	"net/url"
-	"testing"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 )
 
 const (
+	// defaultEtcdClientTimeout is the default timeout for etcd client.
+	defaultEtcdClientTimeout = 3 * time.Second
+
+	// defaultAutoSyncInterval is the interval to sync etcd cluster.
+	defaultAutoSyncInterval = 60 * time.Second
+
 	// DefaultDialTimeout is the maximum amount of time a dial will wait for a
 	// connection to setup. 30s is long enough for most of the network conditions.
 	DefaultDialTimeout = 30 * time.Second
@@ -181,24 +186,102 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
 }
 
-// NewTestSingleConfig is used to create a etcd config for the unit test purpose.
-func NewTestSingleConfig(t *testing.T) *embed.Config {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd"
-	cfg.Dir = t.TempDir()
-	cfg.WalDir = ""
-	cfg.Logger = "zap"
-	cfg.LogOutputs = []string{"stdout"}
+// CreateClients creates etcd v3 client and http client.
+func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
+	client, err := createEtcdClient(tlsConfig, acUrls)
+	if err != nil {
+		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   tlsConfig,
+		},
+	}
+	return client, httpClient, nil
+}
 
-	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
+func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, error) {
+	if len(acUrls) == 0 {
+		return nil, errs.ErrNewEtcdClient.FastGenByArgs("no available etcd address")
+	}
+	endpoints := make([]string, 0, len(acUrls))
+	for _, u := range acUrls {
+		endpoints = append(endpoints, u.String())
+	}
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
+	autoSyncInterval := defaultAutoSyncInterval
+	failpoint.Inject("autoSyncInterval", func() {
+		autoSyncInterval = 10 * time.Millisecond
+	})
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:        endpoints,
+		DialTimeout:      defaultEtcdClientTimeout,
+		AutoSyncInterval: autoSyncInterval,
+		TLS:              tlsConfig,
+		LogConfig:        &lgc,
+	})
+	if err != nil {
+		log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
+	}
+	return client, err
+}
 
-	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	return cfg
+// InitClusterID creates a cluster ID for the given key if it hasn't existed.
+// This function assumes the cluster ID has already existed and always use a
+// cheaper read to retrieve it; if it doesn't exist, invoke the more expensive
+// operation InitOrGetClusterID().
+func InitClusterID(c *clientv3.Client, key string) (clusterID uint64, err error) {
+	// Get any cluster key to parse the cluster ID.
+	resp, err := EtcdKVGet(c, key)
+	if err != nil {
+		return 0, err
+	}
+	// If no key exist, generate a random cluster ID.
+	if len(resp.Kvs) == 0 {
+		return InitOrGetClusterID(c, key)
+	}
+	return typeutil.BytesToUint64(resp.Kvs[0].Value)
+}
+
+// InitOrGetClusterID creates a cluster ID for the given key with a CAS operation,
+// if the cluster ID doesn't exist.
+func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
+	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
+	defer cancel()
+
+	// Generate a random cluster ID.
+	ts := uint64(time.Now().Unix())
+	clusterID := (ts << 32) + uint64(rand.Uint32())
+	value := typeutil.Uint64ToBytes(clusterID)
+
+	// Multiple servers may try to init the cluster ID at the same time.
+	// Only one server can commit this transaction, then other servers
+	// can get the committed cluster ID.
+	resp, err := c.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
+		Then(clientv3.OpPut(key, string(value))).
+		Else(clientv3.OpGet(key)).
+		Commit()
+	if err != nil {
+		return 0, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+	}
+
+	// Txn commits ok, return the generated cluster ID.
+	if resp.Succeeded {
+		return clusterID, nil
+	}
+
+	// Otherwise, parse the committed cluster ID.
+	if len(resp.Responses) == 0 {
+		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+
+	response := resp.Responses[0].GetResponseRange()
+	if response == nil || len(response.Kvs) != 1 {
+		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+
+	return typeutil.BytesToUint64(response.Kvs[0].Value)
 }

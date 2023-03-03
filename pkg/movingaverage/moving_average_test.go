@@ -25,7 +25,7 @@ import (
 )
 
 func addRandData(ma MovingAvg, n int, mx float64) {
-	rand.Seed(time.Now().UnixNano())
+	rand.New(rand.NewSource(time.Now().UnixNano()))
 	for i := 0; i < n; i++ {
 		ma.Add(rand.Float64() * mx)
 	}
@@ -44,6 +44,7 @@ func checkAdd(re *require.Assertions, ma MovingAvg, data []float64, expected []f
 	re.Len(data, len(expected))
 	for i, x := range data {
 		ma.Add(x)
+		re.Equal(x, ma.GetInstantaneous())
 		re.LessOrEqual(math.Abs(ma.Get()-expected[i]), 1e-7)
 	}
 }

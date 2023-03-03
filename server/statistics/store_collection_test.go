@@ -20,13 +20,13 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
 func TestStoreStatistics(t *testing.T) {
 	re := require.New(t)
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	rep := opt.GetReplicationConfig().Clone()
 	rep.LocationLabels = []string{"zone", "host"}
 	opt.SetReplicationConfig(rep)

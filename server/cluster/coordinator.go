@@ -27,19 +27,19 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage"
 	"go.uber.org/zap"
 )
 
@@ -56,6 +56,12 @@ const (
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
 	PluginUnload = "PluginUnload"
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	waitingListGauge  = regionListGauge.WithLabelValues("waiting_list")
+	priorityListGauge = regionListGauge.WithLabelValues("priority_list")
 )
 
 // coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -87,7 +93,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		cancel:            cancel,
 		cluster:           cluster,
 		prepareChecker:    newPrepareChecker(),
-		checkers:          checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
+		checkers:          checker.NewController(ctx, cluster, cluster.opt, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer:   schedule.NewRegionScatterer(ctx, cluster, opController),
 		regionSplitter:    schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:        schedulers,
@@ -181,7 +187,7 @@ func (c *coordinator) checkSuspectRegions() {
 
 func (c *coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
-	regionListGauge.WithLabelValues("waiting_list").Set(float64(len(items)))
+	waitingListGauge.Set(float64(len(items)))
 	for _, item := range items {
 		region := c.cluster.GetRegion(item.Key)
 		c.tryAddOperators(region)
@@ -192,7 +198,7 @@ func (c *coordinator) checkWaitingRegions() {
 func (c *coordinator) checkPriorityRegions() {
 	items := c.checkers.GetPriorityRegions()
 	removes := make([]uint64, 0)
-	regionListGauge.WithLabelValues("priority_list").Set(float64(len(items)))
+	priorityListGauge.Set(float64(len(items)))
 	for _, id := range items {
 		region := c.cluster.GetRegion(id)
 		if region == nil {
@@ -569,6 +575,7 @@ func collectHotMetrics(cluster *RaftCluster, stores []*core.StoreInfo, typ stati
 	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
 	for _, s := range stores {
+		// TODO: pre-allocate gauge metrics
 		storeAddress := s.GetAddress()
 		storeID := s.GetID()
 		storeLabel := strconv.FormatUint(storeID, 10)
@@ -761,7 +768,7 @@ func (c *coordinator) isSchedulerDisabled(name string) (bool, error) {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	t := s.GetType()
-	scheduleConfig := c.cluster.GetOpts().GetScheduleConfig()
+	scheduleConfig := c.cluster.GetScheduleConfig()
 	for _, s := range scheduleConfig.Schedulers {
 		if t == s.Type {
 			return s.Disable, nil

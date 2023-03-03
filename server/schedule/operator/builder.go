@@ -20,11 +20,11 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/placement"
 )
@@ -32,8 +32,8 @@ import (
 // ClusterInformer provides the necessary information for building operator.
 type ClusterInformer interface {
 	GetBasicCluster() *core.BasicCluster
-	GetOpts() *config.PersistOptions
-	GetStoreConfig() *config.StoreConfig
+	GetOpts() config.Config
+	GetStoreConfig() config.StoreConfig
 	GetRuleManager() *placement.RuleManager
 	GetAllocator() id.Allocator
 }
@@ -523,8 +523,8 @@ func (b *Builder) prepareBuild() (string, error) {
 		}
 	}
 
-	// Although switch witness may have nothing to do with conf change (except switch witness voter to non-witness voter:
-	// it will domote to learner first, then switch witness, finally promote the non-witness learner to voter back),
+	// Although switching witness may have nothing to do with conf change (except switch witness voter to non-witness voter:
+	// it will demote to learner first, then switch witness, finally promote the non-witness learner to voter back),
 	// the logic here is reused for batch switch.
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toWitness)+len(b.toNonWitness)+len(b.toPromoteNonWitness) <= 1 &&
 		len(b.toDemote) == 0 && !(len(b.toRemove) == 1 && len(b.targetPeers) == 1) {
@@ -555,14 +555,14 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("promote peer: store %s", b.toPromote)
 	case len(b.toDemote) > 0:
 		return fmt.Sprintf("demote peer: store %s", b.toDemote)
-	case len(b.targetLeaderStoreIDs) != 0:
-		return fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
-	case b.originLeaderStoreID != b.targetLeaderStoreID:
-		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
 	case len(b.toWitness) > 0:
 		return fmt.Sprintf("switch peer: store %s to witness", b.toWitness)
 	case len(b.toNonWitness) > 0:
 		return fmt.Sprintf("switch peer: store %s to non-witness", b.toNonWitness)
+	case len(b.targetLeaderStoreIDs) != 0:
+		return fmt.Sprintf("evict leader: from store %d to one in %v, or to %d (for compatibility)", b.originLeaderStoreID, b.targetLeaderStoreIDs, b.targetLeaderStoreID)
+	case b.originLeaderStoreID != b.targetLeaderStoreID:
+		return fmt.Sprintf("transfer leader: store %d to %d", b.originLeaderStoreID, b.targetLeaderStoreID)
 	default:
 		return ""
 	}

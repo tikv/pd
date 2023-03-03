@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.uber.org/zap"
@@ -45,8 +44,8 @@ const (
 	dcLocationConfigEtcdPrefix = "dc-location"
 )
 
-// Member is used for the election related logic.
-type Member struct {
+// EmbeddedEtcdMember is used for the election related logic. It implements Member interface.
+type EmbeddedEtcdMember struct {
 	leadership *election.Leadership
 	leader     atomic.Value // stored as *pdpb.Member
 	// etcd and cluster information.
@@ -62,8 +61,8 @@ type Member struct {
 }
 
 // NewMember create a new Member.
-func NewMember(etcd *embed.Etcd, client *clientv3.Client, id uint64) *Member {
-	return &Member{
+func NewMember(etcd *embed.Etcd, client *clientv3.Client, id uint64) *EmbeddedEtcdMember {
+	return &EmbeddedEtcdMember{
 		etcd:   etcd,
 		client: client,
 		id:     id,
@@ -71,42 +70,42 @@ func NewMember(etcd *embed.Etcd, client *clientv3.Client, id uint64) *Member {
 }
 
 // ID returns the unique etcd ID for this server in etcd cluster.
-func (m *Member) ID() uint64 {
+func (m *EmbeddedEtcdMember) ID() uint64 {
 	return m.id
 }
 
 // MemberValue returns the member value.
-func (m *Member) MemberValue() string {
+func (m *EmbeddedEtcdMember) MemberValue() string {
 	return m.memberValue
 }
 
 // Member returns the member.
-func (m *Member) Member() *pdpb.Member {
+func (m *EmbeddedEtcdMember) Member() *pdpb.Member {
 	return m.member
 }
 
 // Etcd returns etcd related information.
-func (m *Member) Etcd() *embed.Etcd {
+func (m *EmbeddedEtcdMember) Etcd() *embed.Etcd {
 	return m.etcd
 }
 
 // Client returns the etcd client.
-func (m *Member) Client() *clientv3.Client {
+func (m *EmbeddedEtcdMember) Client() *clientv3.Client {
 	return m.client
 }
 
 // IsLeader returns whether the server is PD leader or not by checking its leadership's lease and leader info.
-func (m *Member) IsLeader() bool {
+func (m *EmbeddedEtcdMember) IsLeader() bool {
 	return m.leadership.Check() && m.GetLeader().GetMemberId() == m.member.GetMemberId()
 }
 
 // GetLeaderID returns current PD leader's member ID.
-func (m *Member) GetLeaderID() uint64 {
+func (m *EmbeddedEtcdMember) GetLeaderID() uint64 {
 	return m.GetLeader().GetMemberId()
 }
 
 // GetLeader returns current PD leader of PD cluster.
-func (m *Member) GetLeader() *pdpb.Member {
+func (m *EmbeddedEtcdMember) GetLeader() *pdpb.Member {
 	leader := m.leader.Load()
 	if leader == nil {
 		return nil
@@ -119,45 +118,53 @@ func (m *Member) GetLeader() *pdpb.Member {
 }
 
 // setLeader sets the member's PD leader.
-func (m *Member) setLeader(member *pdpb.Member) {
+func (m *EmbeddedEtcdMember) setLeader(member *pdpb.Member) {
 	m.leader.Store(member)
 }
 
 // unsetLeader unsets the member's PD leader.
-func (m *Member) unsetLeader() {
+func (m *EmbeddedEtcdMember) unsetLeader() {
 	m.leader.Store(&pdpb.Member{})
 }
 
 // EnableLeader sets the member itself to a PD leader.
-func (m *Member) EnableLeader() {
+func (m *EmbeddedEtcdMember) EnableLeader() {
 	m.setLeader(m.member)
 }
 
 // GetLeaderPath returns the path of the PD leader.
-func (m *Member) GetLeaderPath() string {
+func (m *EmbeddedEtcdMember) GetLeaderPath() string {
 	return path.Join(m.rootPath, "leader")
 }
 
 // GetLeadership returns the leadership of the PD member.
-func (m *Member) GetLeadership() *election.Leadership {
+func (m *EmbeddedEtcdMember) GetLeadership() *election.Leadership {
 	return m.leadership
 }
 
 // CampaignLeader is used to campaign a PD member's leadership
 // and make it become a PD leader.
-func (m *Member) CampaignLeader(leaseTimeout int64) error {
+func (m *EmbeddedEtcdMember) CampaignLeader(leaseTimeout int64) error {
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
 // KeepLeader is used to keep the PD leader's leadership.
-func (m *Member) KeepLeader(ctx context.Context) {
+func (m *EmbeddedEtcdMember) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// CheckLeader checks returns true if it is needed to check later.
-func (m *Member) CheckLeader() (*pdpb.Member, int64, bool) {
+// PrecheckLeader does some pre-check before checking whether or not it's the leader.
+func (m *EmbeddedEtcdMember) PrecheckLeader() error {
 	if m.GetEtcdLeader() == 0 {
-		log.Error("no etcd leader, check pd leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
+		return errs.ErrEtcdLeaderNotFound
+	}
+	return nil
+}
+
+// CheckLeader checks returns true if it is needed to check later.
+func (m *EmbeddedEtcdMember) CheckLeader() (*pdpb.Member, int64, bool) {
+	if err := m.PrecheckLeader(); err != nil {
+		log.Error("failed to pass pre-check, check pd leader later", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
@@ -169,7 +176,7 @@ func (m *Member) CheckLeader() (*pdpb.Member, int64, bool) {
 		return nil, 0, true
 	}
 	if leader != nil {
-		if m.isSameLeader(leader) {
+		if m.IsSameLeader(leader) {
 			// oh, we are already a PD leader, which indicates we may meet something wrong
 			// in previous CampaignLeader. We should delete the leadership and campaign again.
 			log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
@@ -187,7 +194,7 @@ func (m *Member) CheckLeader() (*pdpb.Member, int64, bool) {
 }
 
 // WatchLeader is used to watch the changes of the leader.
-func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
+func (m *EmbeddedEtcdMember) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(serverCtx, revision)
 	m.unsetLeader()
@@ -195,13 +202,13 @@ func (m *Member) WatchLeader(serverCtx context.Context, leader *pdpb.Member, rev
 
 // ResetLeader is used to reset the PD member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
-func (m *Member) ResetLeader() {
+func (m *EmbeddedEtcdMember) ResetLeader() {
 	m.leadership.Reset()
 	m.unsetLeader()
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
-func (m *Member) CheckPriority(ctx context.Context) {
+func (m *EmbeddedEtcdMember) CheckPriority(ctx context.Context) {
 	etcdLeader := m.GetEtcdLeader()
 	if etcdLeader == m.ID() || etcdLeader == 0 {
 		return
@@ -229,7 +236,7 @@ func (m *Member) CheckPriority(ctx context.Context) {
 }
 
 // MoveEtcdLeader tries to transfer etcd leader.
-func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
+func (m *EmbeddedEtcdMember) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
 	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
 	defer cancel()
 	err := m.etcd.Server.MoveLeader(moveCtx, old, new)
@@ -240,22 +247,22 @@ func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
 }
 
 // GetEtcdLeader returns the etcd leader ID.
-func (m *Member) GetEtcdLeader() uint64 {
+func (m *EmbeddedEtcdMember) GetEtcdLeader() uint64 {
 	return m.etcd.Server.Lead()
 }
 
-// isSameLeader checks whether a server is the leader itself.
-func (m *Member) isSameLeader(leader *pdpb.Member) bool {
+// IsSameLeader checks whether a server is the leader itself.
+func (m *EmbeddedEtcdMember) IsSameLeader(leader *pdpb.Member) bool {
 	return leader.GetMemberId() == m.ID()
 }
 
-// MemberInfo initializes the member info.
-func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
+// InitMemberInfo initializes the member info.
+func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUrls, name string, rootPath string) {
 	leader := &pdpb.Member{
 		Name:       name,
 		MemberId:   m.ID(),
-		ClientUrls: strings.Split(cfg.AdvertiseClientUrls, ","),
-		PeerUrls:   strings.Split(cfg.AdvertisePeerUrls, ","),
+		ClientUrls: strings.Split(advertiseClientUrls, ","),
+		PeerUrls:   strings.Split(advertisePeerUrls, ","),
 	}
 
 	data, err := leader.Marshal()
@@ -266,12 +273,12 @@ func (m *Member) MemberInfo(cfg *config.Config, name string, rootPath string) {
 	m.member = leader
 	m.memberValue = string(data)
 	m.rootPath = rootPath
-	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "pd leader election")
+	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "leader election")
 }
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
 // other pd-servers can campaign.
-func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLeader string) error {
+func (m *EmbeddedEtcdMember) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLeader string) error {
 	log.Info("try to resign etcd leader to next pd-server", zap.String("from", from), zap.String("to", nextEtcdLeader))
 	// Determine next etcd leader candidates.
 	var etcdLeaderIDs []uint64
@@ -297,22 +304,22 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)
 }
 
-func (m *Member) getMemberLeaderPriorityPath(id uint64) string {
+func (m *EmbeddedEtcdMember) getMemberLeaderPriorityPath(id uint64) string {
 	return path.Join(m.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
 }
 
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
-func (m *Member) GetDCLocationPathPrefix() string {
+func (m *EmbeddedEtcdMember) GetDCLocationPathPrefix() string {
 	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix)
 }
 
 // GetDCLocationPath returns the dc-location path of a member with the given member ID.
-func (m *Member) GetDCLocationPath(id uint64) string {
+func (m *EmbeddedEtcdMember) GetDCLocationPath(id uint64) string {
 	return path.Join(m.GetDCLocationPathPrefix(), fmt.Sprint(id))
 }
 
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
-func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
+func (m *EmbeddedEtcdMember) SetMemberLeaderPriority(id uint64, priority int) error {
 	key := m.getMemberLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
 	if err != nil {
@@ -326,7 +333,7 @@ func (m *Member) SetMemberLeaderPriority(id uint64, priority int) error {
 }
 
 // DeleteMemberLeaderPriority removes a member's etcd leader priority config.
-func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
+func (m *EmbeddedEtcdMember) DeleteMemberLeaderPriority(id uint64) error {
 	key := m.getMemberLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
@@ -340,7 +347,7 @@ func (m *Member) DeleteMemberLeaderPriority(id uint64) error {
 }
 
 // DeleteMemberDCLocationInfo removes a member's dc-location info.
-func (m *Member) DeleteMemberDCLocationInfo(id uint64) error {
+func (m *EmbeddedEtcdMember) DeleteMemberDCLocationInfo(id uint64) error {
 	key := m.GetDCLocationPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
@@ -354,7 +361,7 @@ func (m *Member) DeleteMemberDCLocationInfo(id uint64) error {
 }
 
 // GetMemberLeaderPriority loads a member's priority to be elected as the etcd leader.
-func (m *Member) GetMemberLeaderPriority(id uint64) (int, error) {
+func (m *EmbeddedEtcdMember) GetMemberLeaderPriority(id uint64) (int, error) {
 	key := m.getMemberLeaderPriorityPath(id)
 	res, err := etcdutil.EtcdKVGet(m.client, key)
 	if err != nil {
@@ -370,12 +377,12 @@ func (m *Member) GetMemberLeaderPriority(id uint64) (int, error) {
 	return int(priority), nil
 }
 
-func (m *Member) getMemberBinaryDeployPath(id uint64) string {
+func (m *EmbeddedEtcdMember) getMemberBinaryDeployPath(id uint64) string {
 	return path.Join(m.rootPath, fmt.Sprintf("member/%d/deploy_path", id))
 }
 
 // GetMemberDeployPath loads a member's binary deploy path.
-func (m *Member) GetMemberDeployPath(id uint64) (string, error) {
+func (m *EmbeddedEtcdMember) GetMemberDeployPath(id uint64) (string, error) {
 	key := m.getMemberBinaryDeployPath(id)
 	res, err := etcdutil.EtcdKVGet(m.client, key)
 	if err != nil {
@@ -388,7 +395,7 @@ func (m *Member) GetMemberDeployPath(id uint64) (string, error) {
 }
 
 // SetMemberDeployPath saves a member's binary deploy path.
-func (m *Member) SetMemberDeployPath(id uint64) error {
+func (m *EmbeddedEtcdMember) SetMemberDeployPath(id uint64) error {
 	key := m.getMemberBinaryDeployPath(id)
 	txn := kv.NewSlowLogTxn(m.client)
 	execPath, err := os.Executable()
@@ -406,16 +413,16 @@ func (m *Member) SetMemberDeployPath(id uint64) error {
 	return nil
 }
 
-func (m *Member) getMemberGitHashPath(id uint64) string {
+func (m *EmbeddedEtcdMember) getMemberGitHashPath(id uint64) string {
 	return path.Join(m.rootPath, fmt.Sprintf("member/%d/git_hash", id))
 }
 
-func (m *Member) getMemberBinaryVersionPath(id uint64) string {
+func (m *EmbeddedEtcdMember) getMemberBinaryVersionPath(id uint64) string {
 	return path.Join(m.rootPath, fmt.Sprintf("member/%d/binary_version", id))
 }
 
 // GetMemberBinaryVersion loads a member's binary version.
-func (m *Member) GetMemberBinaryVersion(id uint64) (string, error) {
+func (m *EmbeddedEtcdMember) GetMemberBinaryVersion(id uint64) (string, error) {
 	key := m.getMemberBinaryVersionPath(id)
 	res, err := etcdutil.EtcdKVGet(m.client, key)
 	if err != nil {
@@ -428,7 +435,7 @@ func (m *Member) GetMemberBinaryVersion(id uint64) (string, error) {
 }
 
 // GetMemberGitHash loads a member's git hash.
-func (m *Member) GetMemberGitHash(id uint64) (string, error) {
+func (m *EmbeddedEtcdMember) GetMemberGitHash(id uint64) (string, error) {
 	key := m.getMemberGitHashPath(id)
 	res, err := etcdutil.EtcdKVGet(m.client, key)
 	if err != nil {
@@ -441,7 +448,7 @@ func (m *Member) GetMemberGitHash(id uint64) (string, error) {
 }
 
 // SetMemberBinaryVersion saves a member's binary version.
-func (m *Member) SetMemberBinaryVersion(id uint64, releaseVersion string) error {
+func (m *EmbeddedEtcdMember) SetMemberBinaryVersion(id uint64, releaseVersion string) error {
 	key := m.getMemberBinaryVersionPath(id)
 	txn := kv.NewSlowLogTxn(m.client)
 	res, err := txn.Then(clientv3.OpPut(key, releaseVersion)).Commit()
@@ -455,7 +462,7 @@ func (m *Member) SetMemberBinaryVersion(id uint64, releaseVersion string) error 
 }
 
 // SetMemberGitHash saves a member's git hash.
-func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
+func (m *EmbeddedEtcdMember) SetMemberGitHash(id uint64, gitHash string) error {
 	key := m.getMemberGitHashPath(id)
 	txn := kv.NewSlowLogTxn(m.client)
 	res, err := txn.Then(clientv3.OpPut(key, gitHash)).Commit()
@@ -469,6 +476,6 @@ func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 }
 
 // Close gracefully shuts down all servers/listeners.
-func (m *Member) Close() {
+func (m *EmbeddedEtcdMember) Close() {
 	m.Etcd().Close()
 }

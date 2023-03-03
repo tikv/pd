@@ -28,11 +28,11 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/core"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 )

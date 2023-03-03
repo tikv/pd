@@ -21,10 +21,10 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/rangelist"
 	"go.uber.org/zap"
 )
@@ -62,9 +62,9 @@ func (l *RegionLabeler) doGC(gcInterval time.Duration) {
 		select {
 		case <-ticker.C:
 			l.checkAndClearExpiredLabels()
-			log.Debug("RegionLabeler GC")
+			log.Debug("region labeler GC")
 		case <-l.ctx.Done():
-			log.Info("RegionLabeler GC stopped")
+			log.Info("region labeler GC stopped")
 			return
 		}
 	}

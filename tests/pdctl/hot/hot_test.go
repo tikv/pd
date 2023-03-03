@@ -25,13 +25,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -70,7 +70,7 @@ func TestHot(t *testing.T) {
 
 	// test hot store
 	ss := leaderServer.GetStore(1)
-	now := time.Now().Second()
+	now := time.Now().Unix()
 
 	newStats := typeutil.DeepClone(ss.GetStoreStats(), core.StoreStatsFactory)
 	bytesWritten := uint64(8 * units.MiB)
@@ -83,7 +83,7 @@ func TestHot(t *testing.T) {
 	newStats.KeysRead = keysRead
 	rc := leaderServer.GetRaftCluster()
 	for i := statistics.DefaultWriteMfSize; i > 0; i-- {
-		start := uint64(now - statistics.StoreHeartBeatReportInterval*i)
+		start := uint64(now - statistics.StoreHeartBeatReportInterval*int64(i))
 		end := start + statistics.StoreHeartBeatReportInterval
 		newStats.Interval = &pdpb.TimeInterval{StartTimestamp: start, EndTimestamp: end}
 		rc.GetStoresStats().Observe(ss.GetID(), newStats)
@@ -302,7 +302,7 @@ func TestHistoryHotRegions(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
-	startTime := time.Now().Second()
+	startTime := time.Now().Unix()
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-statistics.RegionHeartBeatReportInterval), uint64(startTime)))
 	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
@@ -314,12 +314,12 @@ func TestHistoryHotRegions(t *testing.T) {
 	// wait hot scheduler starts
 	testutil.Eventually(re, func() bool {
 		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
-		iter := hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, int64(startTime*1000), time.Now().UnixNano()/int64(time.Millisecond))
+		iter := hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime*1000, time.Now().UnixNano()/int64(time.Millisecond))
 		next, err := iter.Next()
 		return err == nil && next != nil
 	})
 	endTime := time.Now().UnixNano() / int64(time.Millisecond)
-	start := strconv.FormatInt(int64(startTime*1000), 10)
+	start := strconv.FormatInt(startTime*1000, 10)
 	end := strconv.FormatInt(endTime, 10)
 	args := []string{"-u", pdAddr, "hot", "history",
 		start, end,

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -27,21 +28,20 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -51,9 +51,6 @@ const (
 	// tso
 	maxMergeTSORequests    = 10000
 	defaultTSOProxyTimeout = 3 * time.Second
-
-	// global config
-	globalConfigPath = "/global/config/"
 )
 
 // gRPC errors
@@ -76,7 +73,7 @@ func (s *GrpcServer) unaryMiddleware(ctx context.Context, header *pdpb.RequestHe
 	failpoint.Inject("customTimeout", func() {
 		time.Sleep(5 * time.Second)
 	})
-	forwardedHost := getForwardedHost(ctx)
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
@@ -169,7 +166,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		streamCtx := stream.Context()
-		forwardedHost := getForwardedHost(streamCtx)
+		forwardedHost := grpcutil.GetForwardedHost(streamCtx)
 		if !s.isLocalRequest(forwardedHost) {
 			if errCh == nil {
 				doneCh = make(chan struct{})
@@ -768,7 +765,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		forwardedHost := getForwardedHost(stream.Context())
+		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		failpoint.Inject("grpcClientClosed", func() {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
 		})
@@ -863,7 +860,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			return errors.WithStack(err)
 		}
 
-		forwardedHost := getForwardedHost(stream.Context())
+		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -1788,17 +1785,6 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 	return client.(*grpc.ClientConn), nil
 }
 
-func getForwardedHost(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		log.Debug("failed to get forwarding metadata")
-	}
-	if t, ok := md[grpcutil.ForwardMetadataKey]; ok {
-		return t[0]
-	}
-	return ""
-}
-
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
 	failpoint.Inject("useForwardRequest", func() {
 		failpoint.Return(false)
@@ -1884,87 +1870,141 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	<-done
 }
 
+// for CDC compatibility, we need to initialize config path to `globalConfigPath`
+const globalConfigPath = "/global/config/"
+
 // StoreGlobalConfig store global config into etcd by transaction
+// Since item value needs to support marshal of different struct types,
+// it should be set to `Payload bytes` instead of `Value string`
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
+	configPath := request.GetConfigPath()
+	if configPath == "" {
+		configPath = globalConfigPath
+	}
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
-		name := globalConfigPath + item.GetName()
-		value := item.GetValue()
-		ops[i] = clientv3.OpPut(name, value)
+		name := path.Join(configPath, item.GetName())
+		switch item.GetKind() {
+		case pdpb.EventType_PUT:
+			// For CDC compatibility, we need to check the Value field firstly.
+			value := item.GetValue()
+			if value == "" {
+				value = string(item.GetPayload())
+			}
+			ops[i] = clientv3.OpPut(name, value)
+		case pdpb.EventType_DELETE:
+			ops[i] = clientv3.OpDelete(name)
+		}
 	}
 	res, err :=
 		kv.NewSlowLogTxn(s.client).Then(ops...).Commit()
 	if err != nil {
-		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}, err
+		return &pdpb.StoreGlobalConfigResponse{}, err
 	}
 	if !res.Succeeded {
-		return &pdpb.StoreGlobalConfigResponse{Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "failed to execute StoreGlobalConfig transaction"}}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
+		return &pdpb.StoreGlobalConfigResponse{}, errors.Errorf("failed to execute StoreGlobalConfig transaction")
 	}
-	return &pdpb.StoreGlobalConfigResponse{}, err
+	return &pdpb.StoreGlobalConfigResponse{}, nil
 }
 
-// LoadGlobalConfig load global config from etcd
+// LoadGlobalConfig support 2 ways to load global config from etcd
+// - `Names` iteratively get value from `ConfigPath/Name` but not care about revision
+// - `ConfigPath` if `Names` is nil can get all values and revision of current path
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
-	names := request.Names
-	res := make([]*pdpb.GlobalConfigItem, len(names))
-	for i, name := range names {
-		r, err := s.client.Get(ctx, globalConfigPath+name)
-		if err != nil {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
-		} else if len(r.Kvs) == 0 {
-			msg := "key " + name + " not found"
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
-		} else {
-			res[i] = &pdpb.GlobalConfigItem{Name: name, Value: string(r.Kvs[0].Value)}
-		}
+	configPath := request.GetConfigPath()
+	if configPath == "" {
+		configPath = globalConfigPath
 	}
-	return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
+	// Since item value needs to support marshal of different struct types,
+	// it should be set to `Payload bytes` instead of `Value string`.
+	if request.Names != nil {
+		res := make([]*pdpb.GlobalConfigItem, len(request.Names))
+		for i, name := range request.Names {
+			r, err := s.client.Get(ctx, path.Join(configPath, name))
+			if err != nil {
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
+			} else if len(r.Kvs) == 0 {
+				msg := "key " + name + " not found"
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_GLOBAL_CONFIG_NOT_FOUND, Message: msg}}
+			} else {
+				res[i] = &pdpb.GlobalConfigItem{Name: name, Payload: r.Kvs[0].Value, Kind: pdpb.EventType_PUT}
+			}
+		}
+		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
+	}
+	r, err := s.client.Get(ctx, configPath, clientv3.WithPrefix())
+	if err != nil {
+		return &pdpb.LoadGlobalConfigResponse{}, err
+	}
+	res := make([]*pdpb.GlobalConfigItem, len(r.Kvs))
+	for i, value := range r.Kvs {
+		res[i] = &pdpb.GlobalConfigItem{Kind: pdpb.EventType_PUT, Name: string(value.Key), Payload: value.Value}
+	}
+	return &pdpb.LoadGlobalConfigResponse{Items: res, Revision: r.Header.GetRevision()}, nil
 }
 
-// WatchGlobalConfig if the connection of WatchGlobalConfig is end
-// or stoped by whatever reason
-// just reconnect to it.
-func (s *GrpcServer) WatchGlobalConfig(_ *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
+// WatchGlobalConfig will retry on recoverable errors forever until reconnected
+// by Etcd.Watch() as long as the context has not been canceled or timed out.
+// Watch on revision which greater than or equal to the required revision.
+func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
-	err := s.sendAllGlobalConfig(ctx, server)
-	if err != nil {
-		return err
+	configPath := req.GetConfigPath()
+	if configPath == "" {
+		configPath = globalConfigPath
 	}
-	watchChan := s.client.Watch(ctx, globalConfigPath, clientv3.WithPrefix())
+	revision := req.GetRevision()
+	// If the revision is compacted, will meet required revision has been compacted error.
+	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
+	// - If required revision >= CompactRevision, just keep watching.
+	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
+	watchChan := s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case res := <-watchChan:
+			if res.Err() != nil {
+				var resp pdpb.WatchGlobalConfigResponse
+				if revision < res.CompactRevision {
+					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", revision, res.CompactRevision))
+				} else {
+					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
+				}
+				if err := server.Send(&resp); err != nil {
+					return err
+				}
+				// Err() indicates that this WatchResponse holds a channel-closing error.
+				return res.Err()
+			}
+			revision = res.Header.GetRevision()
+
 			cfgs := make([]*pdpb.GlobalConfigItem, 0, len(res.Events))
 			for _, e := range res.Events {
-				if e.Type != clientv3.EventTypePut {
-					continue
+				// Since item value needs to support marshal of different struct types,
+				// it should be set to `Payload bytes` instead of `Value string`.
+				switch e.Type {
+				case clientv3.EventTypePut:
+					cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.Kv.Value, Kind: pdpb.EventType(e.Type)})
+				case clientv3.EventTypeDelete:
+					if e.PrevKv != nil {
+						cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Payload: e.PrevKv.Value, Kind: pdpb.EventType(e.Type)})
+					} else {
+						// Prev-kv is compacted means there must have been a delete event before this event,
+						// which means that this is just a duplicated event, so we can just ignore it.
+						log.Info("previous key-value pair has been compacted", zap.String("previous key", string(e.Kv.Key)))
+					}
 				}
-				cfgs = append(cfgs, &pdpb.GlobalConfigItem{Name: string(e.Kv.Key), Value: string(e.Kv.Value)})
 			}
 			if len(cfgs) > 0 {
-				err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs})
-				if err != nil {
+				if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs, Revision: res.Header.GetRevision()}); err != nil {
 					return err
 				}
 			}
 		}
 	}
-}
-
-func (s *GrpcServer) sendAllGlobalConfig(ctx context.Context, server pdpb.PD_WatchGlobalConfigServer) error {
-	configList, err := s.client.Get(ctx, globalConfigPath, clientv3.WithPrefix())
-	if err != nil {
-		return err
-	}
-	ls := make([]*pdpb.GlobalConfigItem, configList.Count)
-	for i, kv := range configList.Kvs {
-		ls[i] = &pdpb.GlobalConfigItem{Name: string(kv.Key), Value: string(kv.Value)}
-	}
-	err = server.Send(&pdpb.WatchGlobalConfigResponse{Changes: ls})
-	return err
 }
 
 // Evict the leaders when the store is damaged. Damaged regions are emergency errors
@@ -1992,7 +2032,7 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 
 // ReportMinResolvedTS implements gRPC PDServer.
 func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.ReportMinResolvedTsRequest) (*pdpb.ReportMinResolvedTsResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
@@ -2026,7 +2066,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 
 // SetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
@@ -2053,7 +2093,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 
 // GetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
-	forwardedHost := getForwardedHost(ctx)
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {

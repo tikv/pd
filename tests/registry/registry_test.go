@@ -1,3 +1,17 @@
+// Copyright 2023 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package registry_test
 
 import (
@@ -7,10 +21,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/msc/registry"
+	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
@@ -30,7 +46,7 @@ func (t *testServiceRegistry) RegisterGRPCService(g *grpc.Server) {
 }
 
 func (t *testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
-	group := server.APIServiceGroup{
+	group := apiutil.APIServiceGroup{
 		Name:       "my-http-service",
 		Version:    "v1alpha1",
 		IsCore:     false,
@@ -40,23 +56,17 @@ func (t *testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Hello World!"))
 	})
-	server.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
-func newtestServiceRegistry(_ *server.Server) registry.RegistrableService {
+func newTestServiceRegistry(_ bs.Server) registry.RegistrableService {
 	return &testServiceRegistry{}
 }
 
-func install(register *registry.ServiceRegistry) {
-	register.RegisterService("test", newtestServiceRegistry)
-	server.NewServiceregistry = func() server.Serviceregistry {
-		return register
-	}
-}
-
 func TestRegistryService(t *testing.T) {
-	install(registry.ServerServiceRegistry)
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/useGlobalRegistry", "return(true)"))
+	registry.ServerServiceRegistry.RegisterService("test", newTestServiceRegistry)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
@@ -73,8 +83,8 @@ func TestRegistryService(t *testing.T) {
 	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(leader.GetAddr(), "http://"), grpc.WithInsecure())
 	re.NoError(err)
 	defer cc.Close()
-	grpclient := grpc_testing.NewTestServiceClient(cc)
-	resp, err := grpclient.EmptyCall(context.Background(), &grpc_testing.Empty{})
+	grpcClient := grpc_testing.NewTestServiceClient(cc)
+	resp, err := grpcClient.EmptyCall(context.Background(), &grpc_testing.Empty{})
 	re.ErrorContains(err, "Unimplemented")
 	re.Nil(resp)
 
@@ -86,4 +96,5 @@ func TestRegistryService(t *testing.T) {
 	respString, err := io.ReadAll(resp1.Body)
 	re.NoError(err)
 	re.Equal("Hello World!", string(respString))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/useGlobalRegistry"))
 }

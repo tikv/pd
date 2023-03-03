@@ -15,8 +15,8 @@
 package filter
 
 import (
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 )
@@ -147,4 +147,20 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
 func isEmptyRegionAllowBalance(cluster regionHealthCluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < core.InitClusterRegionThreshold
+}
+
+type regionWitnessFilter struct {
+	storeID uint64
+}
+
+// NewRegionWitnessFilter returns creates a RegionFilter that filters regions with witness peer on the specific store.
+func NewRegionWitnessFilter(storeID uint64) RegionFilter {
+	return &regionWitnessFilter{storeID: storeID}
+}
+
+func (f *regionWitnessFilter) Select(region *core.RegionInfo) *plan.Status {
+	if region.GetStoreWitness(f.storeID) != nil {
+		return statusRegionWitnessPeer
+	}
+	return statusOK
 }

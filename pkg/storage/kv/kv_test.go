@@ -15,6 +15,7 @@
 package kv
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"path"
@@ -45,6 +46,8 @@ func TestEtcd(t *testing.T) {
 	kv := NewEtcdKVBase(client, rootPath)
 	testReadWrite(re, kv)
 	testRange(re, kv)
+	testSaveMultiple(re, kv, 20)
+	testLoadConflict(re, kv)
 }
 
 func TestLevelDB(t *testing.T) {
@@ -55,6 +58,7 @@ func TestLevelDB(t *testing.T) {
 
 	testReadWrite(re, kv)
 	testRange(re, kv)
+	testSaveMultiple(re, kv, 20)
 }
 
 func TestMemKV(t *testing.T) {
@@ -62,6 +66,7 @@ func TestMemKV(t *testing.T) {
 	kv := NewMemoryKV()
 	testReadWrite(re, kv)
 	testRange(re, kv)
+	testSaveMultiple(re, kv, 20)
 }
 
 func testReadWrite(re *require.Assertions, kv Base) {
@@ -136,4 +141,52 @@ func newTestSingleConfig(t *testing.T) *embed.Config {
 	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
+}
+
+func testSaveMultiple(re *require.Assertions, kv Base, count int) {
+	err := kv.RunInTxn(context.Background(), func(txn Txn) error {
+		var saveErr error
+		for i := 0; i < count; i++ {
+			saveErr = txn.Save("key"+strconv.Itoa(i), "val"+strconv.Itoa(i))
+			if saveErr != nil {
+				return saveErr
+			}
+		}
+		return nil
+	})
+	re.NoError(err)
+	for i := 0; i < count; i++ {
+		val, loadErr := kv.Load("key" + strconv.Itoa(i))
+		re.NoError(loadErr)
+		re.Equal("val"+strconv.Itoa(i), val)
+	}
+}
+
+// testLoadConflict checks that if any value loaded during the current transaction
+// has been modified by another transaction before the current one commit,
+// then the current transaction must fail.
+func testLoadConflict(re *require.Assertions, kv Base) {
+	re.NoError(kv.Save("testKey", "initialValue"))
+	// loader loads the test key value.
+	loader := func(txn Txn) error {
+		_, err := txn.Load("testKey")
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	// When no other writer, loader must succeed.
+	re.NoError(kv.RunInTxn(context.Background(), loader))
+
+	conflictLoader := func(txn Txn) error {
+		_, err := txn.Load("testKey")
+		// update key after load.
+		re.NoError(kv.Save("testKey", "newValue"))
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	// When other writer exists, loader must error.
+	re.Error(kv.RunInTxn(context.Background(), conflictLoader))
 }

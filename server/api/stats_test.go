@@ -21,9 +21,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/statistics"
 )
 

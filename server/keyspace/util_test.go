@@ -15,10 +15,13 @@
 package keyspace
 
 import (
+	"encoding/hex"
 	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/server/schedule/labeler"
 )
 
 func TestValidateID(t *testing.T) {
@@ -58,5 +61,65 @@ func TestValidateName(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		re.Equal(testCase.hasErr, validateName(testCase.name) != nil)
+	}
+}
+
+func TestMakeLabelRule(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		id                uint32
+		expectedLabelRule *labeler.LabelRule
+	}{
+		{
+			id: 0,
+			expectedLabelRule: &labeler.LabelRule{
+				ID:    "keyspaces/0",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "0",
+					},
+				},
+				RuleType: "key-range",
+				Data: []interface{}{
+					map[string]interface{}{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 0})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 1})),
+					},
+					map[string]interface{}{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 0})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 1})),
+					},
+				},
+			},
+		},
+		{
+			id: 4242,
+			expectedLabelRule: &labeler.LabelRule{
+				ID:    "keyspaces/4242",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "4242",
+					},
+				},
+				RuleType: "key-range",
+				Data: []interface{}{
+					map[string]interface{}{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x93})),
+					},
+					map[string]interface{}{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x92})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x93})),
+					},
+				},
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		re.Equal(testCase.expectedLabelRule, makeLabelRule(testCase.id))
 	}
 }

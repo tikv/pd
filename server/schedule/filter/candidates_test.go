@@ -19,8 +19,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/plan"
 )
 
@@ -50,7 +50,7 @@ type idFilter func(uint64) bool
 
 func (f idFilter) Scope() string    { return "idFilter" }
 func (f idFilter) Type() filterType { return filterType(0) }
-func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+func (f idFilter) Source(conf config.Config, store *core.StoreInfo) *plan.Status {
 	if f(store.GetID()) {
 		return statusOK
 	}
@@ -58,7 +58,7 @@ func (f idFilter) Source(opt *config.PersistOptions, store *core.StoreInfo) *pla
 	return statusStoreScoreDisallowed
 }
 
-func (f idFilter) Target(opt *config.PersistOptions, store *core.StoreInfo) *plan.Status {
+func (f idFilter) Target(conf config.Config, store *core.StoreInfo) *plan.Status {
 	if f(store.GetID()) {
 		return statusOK
 	}

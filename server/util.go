@@ -16,62 +16,20 @@ package server
 
 import (
 	"context"
-	"fmt"
-	"math/rand"
 	"net/http"
-	"path"
 	"strings"
-	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/urfave/negroni"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
-
-const (
-	requestTimeout = etcdutil.DefaultRequestTimeout
-)
-
-// LogPDInfo prints the PD version information.
-func LogPDInfo() {
-	log.Info("Welcome to Placement Driver (PD)")
-	log.Info("PD", zap.String("release-version", versioninfo.PDReleaseVersion))
-	log.Info("PD", zap.String("edition", versioninfo.PDEdition))
-	log.Info("PD", zap.String("git-hash", versioninfo.PDGitHash))
-	log.Info("PD", zap.String("git-branch", versioninfo.PDGitBranch))
-	log.Info("PD", zap.String("utc-build-time", versioninfo.PDBuildTS))
-}
-
-// PrintPDInfo prints the PD version information without log info.
-func PrintPDInfo() {
-	fmt.Println("Release Version:", versioninfo.PDReleaseVersion)
-	fmt.Println("Edition:", versioninfo.PDEdition)
-	fmt.Println("Git Commit Hash:", versioninfo.PDGitHash)
-	fmt.Println("Git Branch:", versioninfo.PDGitBranch)
-	fmt.Println("UTC Build Time: ", versioninfo.PDBuildTS)
-}
-
-// PrintConfigCheckMsg prints the message about configuration checks.
-func PrintConfigCheckMsg(cfg *config.Config) {
-	if len(cfg.WarningMsgs) == 0 {
-		fmt.Println("config check successful")
-		return
-	}
-
-	for _, msg := range cfg.WarningMsgs {
-		fmt.Println(msg)
-	}
-}
 
 // CheckPDVersion checks if PD needs to be upgraded.
 func CheckPDVersion(opt *config.PersistOptions) {
@@ -87,45 +45,6 @@ func CheckPDVersion(opt *config.PersistOptions) {
 			zap.String("PD-version", pdVersion.String()),
 			zap.String("cluster-version", clusterVersion.String()))
 	}
-}
-
-func initOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
-	ctx, cancel := context.WithTimeout(c.Ctx(), requestTimeout)
-	defer cancel()
-
-	// Generate a random cluster ID.
-	ts := uint64(time.Now().Unix())
-	clusterID := (ts << 32) + uint64(rand.Uint32())
-	value := typeutil.Uint64ToBytes(clusterID)
-
-	// Multiple PDs may try to init the cluster ID at the same time.
-	// Only one PD can commit this transaction, then other PDs can get
-	// the committed cluster ID.
-	resp, err := c.Txn(ctx).
-		If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
-		Then(clientv3.OpPut(key, string(value))).
-		Else(clientv3.OpGet(key)).
-		Commit()
-	if err != nil {
-		return 0, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-
-	// Txn commits ok, return the generated cluster ID.
-	if resp.Succeeded {
-		return clusterID, nil
-	}
-
-	// Otherwise, parse the committed cluster ID.
-	if len(resp.Responses) == 0 {
-		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-
-	response := resp.Responses[0].GetResponseRange()
-	if response == nil || len(response.Kvs) != 1 {
-		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-
-	return typeutil.BytesToUint64(response.Kvs[0].Value)
 }
 
 func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
@@ -164,63 +83,6 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	return nil
 }
 
-/// REST API and GRPC services relative Utils.
-
-// Serviceregistry used to install the registered services, including gRPC and HTTP API.
-type Serviceregistry interface {
-	InstallAllGRPCServices(srv *Server, g *grpc.Server)
-	InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler)
-}
-
-// NewServiceregistry is a hook for msc code which implements the micro service.
-var NewServiceregistry = func() Serviceregistry {
-	return dummyServiceregistry{}
-}
-
-type dummyServiceregistry struct{}
-
-func (d dummyServiceregistry) InstallAllGRPCServices(srv *Server, g *grpc.Server) {
-}
-
-func (d dummyServiceregistry) InstallAllRESTHandler(srv *Server, userDefineHandler map[string]http.Handler) {
-}
-
-// APIServiceGroup used to register the HTTP REST API.
-type APIServiceGroup struct {
-	Name       string
-	Version    string
-	IsCore     bool
-	PathPrefix string
-}
-
-// Path returns the path of the service.
-func (sg *APIServiceGroup) Path() string {
-	if len(sg.PathPrefix) > 0 {
-		return sg.PathPrefix
-	}
-	if sg.IsCore {
-		return CorePath
-	}
-	if len(sg.Name) > 0 && len(sg.Version) > 0 {
-		return path.Join(ExtensionsPath, sg.Name, sg.Version)
-	}
-	return ""
-}
-
-// RegisterUserDefinedHandlers register the user defined handlers.
-func RegisterUserDefinedHandlers(registerMap map[string]http.Handler, group *APIServiceGroup, handler http.Handler) error {
-	pathPrefix := group.Path()
-	if _, ok := registerMap[pathPrefix]; ok {
-		return errs.ErrServiceRegistered.FastGenByArgs(pathPrefix)
-	}
-	if len(pathPrefix) == 0 {
-		return errs.ErrAPIInformationInvalid.FastGenByArgs(group.Name, group.Version)
-	}
-	registerMap[pathPrefix] = handler
-	log.Info("register REST path", zap.String("path", pathPrefix))
-	return nil
-}
-
 func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
 	userHandlers := make(map[string]http.Handler)
 	registerMap := make(map[string]http.Handler)
@@ -239,16 +101,16 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
 		}
 
-		if err := RegisterUserDefinedHandlers(registerMap, &info, handler); err != nil {
+		if err := apiutil.RegisterUserDefinedHandlers(registerMap, &info, handler); err != nil {
 			return nil, err
 		}
 	}
 
 	// Combine the pd service to the router. the extension service will be added to the userHandlers.
 	for pathPrefix, handler := range registerMap {
-		if strings.Contains(pathPrefix, CorePath) || strings.Contains(pathPrefix, ExtensionsPath) {
+		if strings.Contains(pathPrefix, apiutil.CorePath) || strings.Contains(pathPrefix, apiutil.ExtensionsPath) {
 			router.PathPrefix(pathPrefix).Handler(handler)
-			if pathPrefix == CorePath {
+			if pathPrefix == apiutil.CorePath {
 				// Deprecated
 				router.Path("/pd/health").Handler(handler)
 				// Deprecated

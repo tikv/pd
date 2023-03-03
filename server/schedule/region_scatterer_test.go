@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -26,10 +27,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -87,7 +88,7 @@ func checkOperator(re *require.Assertions, op *operator.Operator) {
 func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -144,7 +145,7 @@ func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool
 func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores, numRegions uint64) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -222,7 +223,7 @@ func TestStoreLimit(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -254,7 +255,7 @@ func TestScatterCheck(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -303,7 +304,7 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -348,7 +349,7 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -420,7 +421,7 @@ func TestScatterForManyRegion(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -448,7 +449,7 @@ func TestScattersGroup(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -537,7 +538,7 @@ func TestRegionFromDifferentGroups(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -573,7 +574,7 @@ func TestRegionHasLearner(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -655,13 +656,13 @@ func TestRegionHasLearner(t *testing.T) {
 	checkLeader(scatterer.ordinaryEngine.selectedLeader)
 }
 
-// TestSelectedStores tests if the peer count has changed due to the picking strategy.
+// TestSelectedStoresTooFewPeers tests if the peer count has changed due to the picking strategy.
 // Ref https://github.com/tikv/pd/issues/4565
-func TestSelectedStores(t *testing.T) {
+func TestSelectedStoresTooFewPeers(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
 	oc := NewOperatorController(ctx, tc, stream)
@@ -689,6 +690,73 @@ func TestSelectedStores(t *testing.T) {
 		region := tc.AddLeaderRegion(i+200, i%3+2, (i+1)%3+2, (i+2)%3+2)
 		op := scatterer.scatterRegion(region, group)
 		re.False(isPeerCountChanged(op))
+	}
+}
+
+// TestSelectedStoresTooManyPeers tests if the peer count has changed due to the picking strategy.
+// Ref https://github.com/tikv/pd/issues/5909
+func TestSelectedStoresTooManyPeers(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 4 stores.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+	group := "group"
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	// priority 4 > 1 > 5 > 2 == 3
+	for i := 0; i < 1200; i++ {
+		scatterer.ordinaryEngine.selectedPeer.Put(2, group)
+		scatterer.ordinaryEngine.selectedPeer.Put(3, group)
+	}
+	for i := 0; i < 800; i++ {
+		scatterer.ordinaryEngine.selectedPeer.Put(5, group)
+	}
+	for i := 0; i < 400; i++ {
+		scatterer.ordinaryEngine.selectedPeer.Put(1, group)
+	}
+	// test region with peer 1 2 3
+	for i := uint64(1); i < 20; i++ {
+		region := tc.AddLeaderRegion(i+200, i%3+1, (i+1)%3+1, (i+2)%3+1)
+		op := scatterer.scatterRegion(region, group)
+		re.False(isPeerCountChanged(op))
+	}
+}
+
+// TestBalanceRegion tests whether region peers and leaders are balanced after scatter.
+// ref https://github.com/tikv/pd/issues/6017
+func TestBalanceRegion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	opt.SetLocationLabels([]string{"host"})
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := NewOperatorController(ctx, tc, stream)
+	// Add 6 stores in 3 hosts.
+	for i := uint64(2); i <= 7; i++ {
+		tc.AddLabelsStore(i, 0, map[string]string{"host": strconv.FormatUint(i/2, 10)})
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+	group := "group"
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+	for i := uint64(1001); i <= 1300; i++ {
+		region := tc.AddLeaderRegion(i, 2, 4, 6)
+		op := scatterer.scatterRegion(region, group)
+		re.False(isPeerCountChanged(op))
+	}
+	for i := uint64(2); i <= 7; i++ {
+		re.Equal(uint64(150), scatterer.ordinaryEngine.selectedPeer.Get(i, group))
+		re.Equal(uint64(50), scatterer.ordinaryEngine.selectedLeader.Get(i, group))
 	}
 }
 

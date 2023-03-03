@@ -33,7 +33,7 @@ const (
 func MustGetResPath() string {
 	exePath, err := os.Executable()
 	if err != nil {
-		log.Fatal("Failed to read the execution path", zap.Error(err))
+		log.Fatal("failed to read the execution path", zap.Error(err))
 		return ""
 	}
 	return path.Join(path.Dir(exePath), resFolderName)
@@ -46,8 +46,8 @@ func MustLoadAndReplaceStrings() {
 	resPath := MustGetResPath()
 	strings, err := distro.ReadResourceStringsFromFile(path.Join(resPath, stringsFileName))
 	if err != nil {
-		log.Fatal("Failed to load distro strings", zap.Error(err))
+		log.Fatal("failed to load distro strings", zap.Error(err))
 	}
-	log.Info("Using distribution strings", zap.Any("strings", strings))
+	log.Info("using distribution strings", zap.Any("strings", strings))
 	distro.ReplaceGlobal(strings)
 }

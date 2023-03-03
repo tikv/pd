@@ -5,8 +5,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	flag "github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/utils/configutil"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 const (
@@ -32,8 +32,8 @@ type Config struct {
 	StatusAddr string
 
 	Log      log.Config `toml:"log" json:"log"`
-	logger   *zap.Logger
-	logProps *log.ZapProperties
+	Logger   *zap.Logger
+	LogProps *log.ZapProperties
 
 	StoreCount        int     `toml:"store-count" json:"store-count"`
 	RegionCount       int     `toml:"region-count" json:"region-count"`
@@ -71,7 +71,7 @@ func (c *Config) Parse(arguments []string) error {
 	// Load config file if specified.
 	var meta *toml.MetaData
 	if c.configFile != "" {
-		meta, err = c.configFromFile(c.configFile)
+		meta, err = configutil.ConfigFromFile(c, c.configFile)
 		if err != nil {
 			return err
 		}
@@ -97,76 +97,37 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 		c.Log.Format = defaultLogFormat
 	}
 	if !meta.IsDefined("round") {
-		adjustInt(&c.Round, defaultRound)
+		configutil.AdjustInt(&c.Round, defaultRound)
 	}
 
 	if !meta.IsDefined("store-count") {
-		adjustInt(&c.StoreCount, defaultStoreCount)
+		configutil.AdjustInt(&c.StoreCount, defaultStoreCount)
 	}
 	if !meta.IsDefined("region-count") {
-		adjustInt(&c.RegionCount, defaultRegionCount)
+		configutil.AdjustInt(&c.RegionCount, defaultRegionCount)
 	}
 
 	if !meta.IsDefined("key-length") {
-		adjustInt(&c.KeyLength, defaultKeyLength)
+		configutil.AdjustInt(&c.KeyLength, defaultKeyLength)
 	}
 
 	if !meta.IsDefined("replica") {
-		adjustInt(&c.Replica, defaultReplica)
+		configutil.AdjustInt(&c.Replica, defaultReplica)
 	}
 
 	if !meta.IsDefined("leader-update-ratio") {
-		adjustFloat64(&c.LeaderUpdateRatio, defaultLeaderUpdateRatio)
+		configutil.AdjustFloat64(&c.LeaderUpdateRatio, defaultLeaderUpdateRatio)
 	}
 	if !meta.IsDefined("epoch-update-ratio") {
-		adjustFloat64(&c.EpochUpdateRatio, defaultEpochUpdateRatio)
+		configutil.AdjustFloat64(&c.EpochUpdateRatio, defaultEpochUpdateRatio)
 	}
 	if !meta.IsDefined("space-update-ratio") {
-		adjustFloat64(&c.SpaceUpdateRatio, defaultSpaceUpdateRatio)
+		configutil.AdjustFloat64(&c.SpaceUpdateRatio, defaultSpaceUpdateRatio)
 	}
 	if !meta.IsDefined("flow-update-ratio") {
-		adjustFloat64(&c.FlowUpdateRatio, defaultFlowUpdateRatio)
+		configutil.AdjustFloat64(&c.FlowUpdateRatio, defaultFlowUpdateRatio)
 	}
 	if !meta.IsDefined("sample") {
 		c.Sample = defaultSample
-	}
-}
-
-// configFromFile loads config from file.
-func (c *Config) configFromFile(path string) (*toml.MetaData, error) {
-	meta, err := toml.DecodeFile(path, c)
-	return &meta, err
-}
-
-// SetupLogger setup the logger.
-func (c *Config) SetupLogger() error {
-	lg, p, err := log.InitLogger(&c.Log, zap.AddStacktrace(zapcore.FatalLevel))
-	if err != nil {
-		return err
-	}
-	c.logger = lg
-	c.logProps = p
-	return nil
-}
-
-// GetZapLogger gets the created zap logger.
-func (c *Config) GetZapLogger() *zap.Logger {
-	return c.logger
-}
-
-// GetZapLogProperties gets properties of the zap logger.
-func (c *Config) GetZapLogProperties() *log.ZapProperties {
-	return c.logProps
-}
-
-func adjustFloat64(v *float64, defValue float64) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
-func adjustInt(v *int, defValue int) {
-	if *v == 0 {
-		*v = defValue
 	}
 }

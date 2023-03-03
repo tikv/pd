@@ -131,3 +131,11 @@ func (aot *AvgOverTime) Clone() *AvgOverTime {
 func (aot *AvgOverTime) GetIntervalSum() time.Duration {
 	return aot.intervalSum
 }
+
+// GetInstantaneous returns the value just added.
+func (aot *AvgOverTime) GetInstantaneous() float64 {
+	if aot.que.Len() == 0 || aot.que.Back() == nil {
+		return 0
+	}
+	return aot.que.Back().(deltaWithInterval).delta
+}

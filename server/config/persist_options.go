@@ -30,12 +30,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -195,6 +195,7 @@ const (
 	maxMergeRegionKeysKey          = "schedule.max-merge-region-keys"
 	leaderScheduleLimitKey         = "schedule.leader-schedule-limit"
 	regionScheduleLimitKey         = "schedule.region-schedule-limit"
+	witnessScheduleLimitKey        = "schedule.witness-schedule-limit"
 	replicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
 	mergeScheduleLimitKey          = "schedule.merge-schedule-limit"
 	hotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
@@ -396,6 +397,11 @@ func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
 	return o.getTTLUintOr(regionScheduleLimitKey, o.GetScheduleConfig().RegionScheduleLimit)
 }
 
+// GetWitnessScheduleLimit returns the limit for region schedule.
+func (o *PersistOptions) GetWitnessScheduleLimit() uint64 {
+	return o.getTTLUintOr(witnessScheduleLimitKey, o.GetScheduleConfig().WitnessScheduleLimit)
+}
+
 // GetReplicaScheduleLimit returns the limit for replica schedule.
 func (o *PersistOptions) GetReplicaScheduleLimit() uint64 {
 	return o.getTTLUintOr(replicaRescheduleLimitKey, o.GetScheduleConfig().ReplicaScheduleLimit)
@@ -491,6 +497,11 @@ func (o *PersistOptions) GetLowSpaceRatio() float64 {
 	return o.GetScheduleConfig().LowSpaceRatio
 }
 
+// GetSlowStoreEvictingAffectedStoreRatioThreshold returns the affected ratio threshold when judging a store is slow.
+func (o *PersistOptions) GetSlowStoreEvictingAffectedStoreRatioThreshold() float64 {
+	return o.GetScheduleConfig().SlowStoreEvictingAffectedStoreRatioThreshold
+}
+
 // GetHighSpaceRatio returns the high space ratio.
 func (o *PersistOptions) GetHighSpaceRatio() float64 {
 	return o.GetScheduleConfig().HighSpaceRatio
@@ -529,6 +540,26 @@ func (o *PersistOptions) GetDashboardAddress() string {
 // IsUseRegionStorage returns if the independent region storage is enabled.
 func (o *PersistOptions) IsUseRegionStorage() bool {
 	return o.GetPDServerConfig().UseRegionStorage
+}
+
+// GetServerMemoryLimit gets ServerMemoryLimit config.
+func (o *PersistOptions) GetServerMemoryLimit() float64 {
+	return o.GetPDServerConfig().ServerMemoryLimit
+}
+
+// GetServerMemoryLimitGCTrigger gets the ServerMemoryLimitGCTrigger config.
+func (o *PersistOptions) GetServerMemoryLimitGCTrigger() float64 {
+	return o.GetPDServerConfig().ServerMemoryLimitGCTrigger
+}
+
+// GetEnableGOGCTuner gets the EnableGOGCTuner config.
+func (o *PersistOptions) GetEnableGOGCTuner() bool {
+	return o.GetPDServerConfig().EnableGOGCTuner
+}
+
+// GetGCTunerThreshold gets the GC tuner threshold.
+func (o *PersistOptions) GetGCTunerThreshold() float64 {
+	return o.GetPDServerConfig().GCTunerThreshold
 }
 
 // IsRemoveDownReplicaEnabled returns if remove down replica is enabled.

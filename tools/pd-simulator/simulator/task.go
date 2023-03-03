@@ -24,7 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -531,7 +531,7 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 	}
 
 	// store should Generate/Receive snapshot by chunk size.
-	// todo: the process of snapshot is single thread, the later snapshot task must wait the first one.
+	// TODO: the process of snapshot is single thread, the later snapshot task must wait the first one.
 	for stat.remainSize > 0 && n.limiter.AllowN(chunkSize) {
 		stat.remainSize -= chunkSize
 	}

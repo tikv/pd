@@ -24,10 +24,11 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/server/schedule/config"
 )
 
 type operatorTestSuite struct {
@@ -43,14 +44,12 @@ func TestOperatorTestSuite(t *testing.T) {
 }
 
 func (suite *operatorTestSuite) SetupTest() {
-	cfg := config.NewTestOptions()
+	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetMaxMergeRegionSize(2)
 	suite.cluster.SetMaxMergeRegionKeys(2)
-	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		config.RejectLeader: {{Key: "reject", Value: "leader"}},
-	})
+	suite.cluster.SetLabelProperty(config.RejectLeader, "reject", "leader")
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
 		7: {"reject", "leader"},
@@ -121,7 +120,7 @@ func (suite *operatorTestSuite) TestOperator() {
 	suite.Nil(op.Check(region))
 
 	suite.Equal(SUCCESS, op.Status())
-	SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowStepWaitTime-time.Second))
+	op.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime-time.Second))
 	suite.False(op.CheckTimeout())
 
 	// addPeer1, transferLeader1, removePeer2
@@ -137,9 +136,9 @@ func (suite *operatorTestSuite) TestOperator() {
 	suite.Equal(RemovePeer{FromStore: 2}, op.Check(region))
 	suite.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
 	suite.False(op.CheckTimeout())
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastStepWaitTime-2*FastStepWaitTime+time.Second))
+	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-2*FastStepWaitTime+time.Second))
 	suite.False(op.CheckTimeout())
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-SlowStepWaitTime-2*FastStepWaitTime-time.Second))
+	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-SlowStepWaitTime-2*FastStepWaitTime-time.Second))
 	suite.True(op.CheckTimeout())
 	res, err := json.Marshal(op)
 	suite.NoError(err)
@@ -150,7 +149,7 @@ func (suite *operatorTestSuite) TestOperator() {
 	op = suite.newTestOperator(1, OpLeader, steps...)
 	op.Start()
 	suite.False(op.CheckTimeout())
-	SetOperatorStatusReachTime(op, STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
+	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
 	suite.True(op.CheckTimeout())
 
 	// case2: check timeout operator will return false not panic.
@@ -311,7 +310,7 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 		suite.Equal(CREATED, op.Status())
 		suite.True(op.Start())
 		op.currentStep = int32(len(op.steps))
-		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowStepWaitTime))
+		op.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime))
 		suite.False(op.CheckTimeout())
 		suite.Equal(SUCCESS, op.Status())
 	}
@@ -340,7 +339,7 @@ func (suite *operatorTestSuite) TestCheckExpired() {
 	op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
 	suite.False(op.CheckExpired())
 	suite.Equal(CREATED, op.Status())
-	SetOperatorStatusReachTime(op, CREATED, time.Now().Add(-OperatorExpireTime))
+	op.SetStatusReachTime(CREATED, time.Now().Add(-OperatorExpireTime))
 	suite.True(op.CheckExpired())
 	suite.Equal(EXPIRED, op.Status())
 }
@@ -374,7 +373,7 @@ func (suite *operatorTestSuite) TestCheck() {
 		suite.True(op.Start())
 		suite.NotNil(op.Check(region))
 		suite.Equal(STARTED, op.Status())
-		SetOperatorStatusReachTime(op, STARTED, time.Now().Add(-SlowStepWaitTime-2*FastStepWaitTime))
+		op.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime-2*FastStepWaitTime))
 		suite.NotNil(op.Check(region))
 		suite.Equal(TIMEOUT, op.Status())
 	}

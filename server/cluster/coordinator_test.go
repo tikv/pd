@@ -28,19 +28,19 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage"
 )
 
 func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
@@ -124,7 +124,7 @@ func (c *testCluster) setStoreDown(storeID uint64) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(
 		core.UpStore(),
-		core.SetLastHeartbeatTS(time.Time{}),
+		core.SetLastHeartbeatTS(typeutil.ZeroTime),
 	)
 	c.Lock()
 	defer c.Unlock()
@@ -536,10 +536,9 @@ func TestCheckCache(t *testing.T) {
 	re.Len(co.checkers.GetWaitingRegions(), 1)
 
 	// cancel the replica-schedule-limit restriction
-	opt := tc.GetOpts()
-	cfg := opt.GetScheduleConfig()
+	cfg := tc.GetScheduleConfig()
 	cfg.ReplicaScheduleLimit = 10
-	tc.GetOpts().SetScheduleConfig(cfg)
+	tc.SetScheduleConfig(cfg)
 	co.wg.Add(1)
 	co.patrolRegions()
 	oc := co.opController
@@ -713,6 +712,8 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
 	re.NoError(co.removeScheduler(schedulers.SplitBucketName))
+	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
+	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	re.Empty(co.schedulers)
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -788,7 +789,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(tc.addLeaderStore(1, 1))
 	re.NoError(tc.addLeaderStore(2, 1))
 
-	re.Len(co.schedulers, 4)
+	re.Len(co.schedulers, 6)
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
@@ -798,14 +799,16 @@ func TestPersistScheduler(t *testing.T) {
 	evict, err := schedule.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
 	re.NoError(err)
 	re.NoError(co.addScheduler(evict, "2"))
-	re.Len(co.schedulers, 6)
+	re.Len(co.schedulers, 8)
 	sches, _, err := storage.LoadAllScheduleConfig()
 	re.NoError(err)
-	re.Len(sches, 6)
+	re.Len(sches, 8)
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
 	re.NoError(co.removeScheduler(schedulers.SplitBucketName))
+	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
+	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	re.Len(co.schedulers, 2)
 	re.NoError(co.cluster.opt.Persist(storage))
 	co.stop()
@@ -821,7 +824,7 @@ func TestPersistScheduler(t *testing.T) {
 	defer func() {
 		config.DefaultSchedulers = config.DefaultSchedulers[:len(config.DefaultSchedulers)-1]
 	}()
-	re.Len(newOpt.GetSchedulers(), 4)
+	re.Len(newOpt.GetSchedulers(), 6)
 	re.NoError(newOpt.Reload(storage))
 	// only remains 3 items with independent config.
 	sches, _, err = storage.LoadAllScheduleConfig()
@@ -829,7 +832,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(sches, 3)
 
 	// option have 6 items because the default scheduler do not remove.
-	re.Len(newOpt.GetSchedulers(), 7)
+	re.Len(newOpt.GetSchedulers(), 9)
 	re.NoError(newOpt.Persist(storage))
 	tc.RaftCluster.opt = newOpt
 
@@ -856,10 +859,10 @@ func TestPersistScheduler(t *testing.T) {
 
 	// the scheduler option should contain 6 items
 	// the `hot scheduler` are disabled
-	re.Len(co.cluster.opt.GetSchedulers(), 7)
+	re.Len(co.cluster.opt.GetSchedulers(), 9)
 	re.NoError(co.removeScheduler(schedulers.GrantLeaderName))
 	// the scheduler that is not enable by default will be completely deleted
-	re.Len(co.cluster.opt.GetSchedulers(), 6)
+	re.Len(co.cluster.opt.GetSchedulers(), 8)
 	re.Len(co.schedulers, 4)
 	re.NoError(co.cluster.opt.Persist(co.cluster.storage))
 	co.stop()
@@ -891,17 +894,17 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(tc.addLeaderStore(1, 1))
 	re.NoError(tc.addLeaderStore(2, 1))
 
-	re.Len(co.schedulers, 4)
+	re.Len(co.schedulers, 6)
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
 	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	re.NoError(err)
 	re.NoError(co.addScheduler(gls1, "1"))
-	re.Len(co.schedulers, 5)
+	re.Len(co.schedulers, 7)
 	sches, _, err := storage.LoadAllScheduleConfig()
 	re.NoError(err)
-	re.Len(sches, 5)
+	re.Len(sches, 7)
 
 	// remove all schedulers
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
@@ -909,6 +912,8 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
 	re.NoError(co.removeScheduler(schedulers.GrantLeaderName))
 	re.NoError(co.removeScheduler(schedulers.SplitBucketName))
+	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
+	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
 	re.NoError(err)
@@ -927,7 +932,7 @@ func TestRemoveScheduler(t *testing.T) {
 	co.run()
 	re.Empty(co.schedulers)
 	// the option remains default scheduler
-	re.Len(co.cluster.opt.GetSchedulers(), 4)
+	re.Len(co.cluster.opt.GetSchedulers(), 6)
 	co.stop()
 	co.wg.Wait()
 }

@@ -15,13 +15,12 @@
 package serverapi
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
@@ -29,22 +28,17 @@ import (
 
 // HTTP headers.
 const (
-	RedirectorHeader    = "PD-Redirector"
-	AllowFollowerHandle = "PD-Allow-follower-handle"
-)
-
-const (
-	errRedirectFailed      = "redirect failed"
-	errRedirectToNotLeader = "redirect to not leader"
+	PDRedirectorHeader    = "PD-Redirector"
+	PDAllowFollowerHandle = "PD-Allow-follower-handle"
 )
 
 type runtimeServiceValidator struct {
 	s     *server.Server
-	group server.APIServiceGroup
+	group apiutil.APIServiceGroup
 }
 
 // NewRuntimeServiceValidator checks if the path is invalid.
-func NewRuntimeServiceValidator(s *server.Server, group server.APIServiceGroup) negroni.Handler {
+func NewRuntimeServiceValidator(s *server.Server, group apiutil.APIServiceGroup) negroni.Handler {
 	return &runtimeServiceValidator{s: s, group: group}
 }
 
@@ -58,7 +52,7 @@ func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Reque
 }
 
 // IsServiceAllowed checks the service through the path.
-func IsServiceAllowed(s *server.Server, group server.APIServiceGroup) bool {
+func IsServiceAllowed(s *server.Server, group apiutil.APIServiceGroup) bool {
 	// for core path
 	if group.IsCore {
 		return true
@@ -87,7 +81,7 @@ func NewRedirector(s *server.Server) negroni.Handler {
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	allowFollowerHandle := len(r.Header.Get(AllowFollowerHandle)) > 0
+	allowFollowerHandle := len(r.Header.Get(PDAllowFollowerHandle)) > 0
 	isLeader := h.s.GetMember().IsLeader()
 	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) {
 		next(w, r)
@@ -95,13 +89,13 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	}
 
 	// Prevent more than one redirection.
-	if name := r.Header.Get(RedirectorHeader); len(name) != 0 {
+	if name := r.Header.Get(PDRedirectorHeader); len(name) != 0 {
 		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
-		http.Error(w, errRedirectToNotLeader, http.StatusInternalServerError)
+		http.Error(w, apiutil.ErrRedirectToNotLeader, http.StatusInternalServerError)
 		return
 	}
 
-	r.Header.Set(RedirectorHeader, h.s.Name())
+	r.Header.Set(PDRedirectorHeader, h.s.Name())
 
 	leader := h.s.GetMember().GetLeader()
 	if leader == nil {
@@ -120,63 +114,5 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		urls = append(urls, *u)
 	}
 	client := h.s.GetHTTPClient()
-	NewCustomReverseProxies(client, urls).ServeHTTP(w, r)
-}
-
-type customReverseProxies struct {
-	urls   []url.URL
-	client *http.Client
-}
-
-// NewCustomReverseProxies returns the custom reverse proxies.
-func NewCustomReverseProxies(dialClient *http.Client, urls []url.URL) http.Handler {
-	p := &customReverseProxies{
-		client: dialClient,
-	}
-
-	p.urls = append(p.urls, urls...)
-
-	return p
-}
-
-func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for _, url := range p.urls {
-		r.RequestURI = ""
-		r.URL.Host = url.Host
-		r.URL.Scheme = url.Scheme
-
-		resp, err := p.client.Do(r)
-		if err != nil {
-			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
-			continue
-		}
-
-		b, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			log.Error("read failed", errs.ZapError(errs.ErrIORead, err))
-			continue
-		}
-
-		copyHeader(w.Header(), resp.Header)
-		w.WriteHeader(resp.StatusCode)
-		if _, err := w.Write(b); err != nil {
-			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err))
-			continue
-		}
-
-		return
-	}
-	http.Error(w, errRedirectFailed, http.StatusInternalServerError)
-}
-
-func copyHeader(dst, src http.Header) {
-	for k, vv := range src {
-		values := dst[k]
-		for _, v := range vv {
-			if !slice.Contains(values, v) {
-				dst.Add(k, v)
-			}
-		}
-	}
+	apiutil.NewCustomReverseProxies(client, urls).ServeHTTP(w, r)
 }

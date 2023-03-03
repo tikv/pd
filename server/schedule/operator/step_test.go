@@ -20,9 +20,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
 type operatorStepTestSuite struct {
@@ -43,7 +43,7 @@ type testCase struct {
 }
 
 func (suite *operatorStepTestSuite) SetupTest() {
-	suite.cluster = mockcluster.NewCluster(context.Background(), config.NewTestOptions())
+	suite.cluster = mockcluster.NewCluster(context.Background(), mockconfig.NewTestOptions())
 	for i := 1; i <= 10; i++ {
 		suite.cluster.PutStoreWithLabels(uint64(i))
 	}
@@ -569,5 +569,12 @@ func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []
 		err := step.CheckInProgress(suite.cluster, region)
 		testCase.CheckInProgress(err)
 		_ = step.GetCmd(region, true)
+
+		if _, ok := step.(ChangePeerV2Leave); ok {
+			// Ref https://github.com/tikv/pd/issues/5788
+			pendingPeers := region.GetLearners()
+			region = region.Clone(core.WithPendingPeers(pendingPeers))
+			suite.Equal(testCase.IsFinish, step.IsFinish(region))
+		}
 	}
 }

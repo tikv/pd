@@ -21,16 +21,17 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/server/core"
 )
 
 func newTestManager(t *testing.T) (endpoint.RuleStorage, *RuleManager) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
-	manager := NewRuleManager(store, nil, nil)
+	manager := NewRuleManager(store, nil, mockconfig.NewTestOptions())
 	err = manager.Initialize(3, []string{"zone", "rack", "host"})
 	re.NoError(err)
 	return store, manager
@@ -419,6 +420,49 @@ func TestCheckApplyRules(t *testing.T) {
 		},
 	})
 	re.Regexp("needs at least one leader or voter", err.Error())
+}
+
+func TestCacheManager(t *testing.T) {
+	re := require.New(t)
+	_, manager := newTestManager(t)
+	manager.conf.SetPlacementRulesCacheEnabled(true)
+	rules := addExtraRules(0)
+	re.NoError(manager.SetRules(rules))
+	stores := makeStores()
+
+	regionMeta := &metapb.Region{
+		Id:          1,
+		StartKey:    []byte(""),
+		EndKey:      []byte(""),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 0, Version: 0},
+		Peers: []*metapb.Peer{
+			{Id: 11, StoreId: 1111, Role: metapb.PeerRole_Voter},
+			{Id: 12, StoreId: 2111, Role: metapb.PeerRole_Voter},
+			{Id: 13, StoreId: 3111, Role: metapb.PeerRole_Voter},
+		},
+	}
+	region := core.NewRegionInfo(regionMeta, regionMeta.Peers[0])
+	fit := manager.FitRegion(stores, region)
+	manager.SetRegionFitCache(region, fit)
+	// bestFit is not stored when the total number of hits is insufficient.
+	for i := 1; i < minHitCountToCacheHit/2; i++ {
+		manager.FitRegion(stores, region)
+		re.True(manager.IsRegionFitCached(stores, region))
+		cache := manager.cache.regionCaches[1]
+		re.Equal(uint32(i), cache.hitCount)
+		re.Nil(cache.bestFit)
+	}
+	// Store bestFit when the total number of hits is sufficient.
+	for i := 0; i < minHitCountToCacheHit; i++ {
+		manager.FitRegion(stores, region)
+	}
+	cache := manager.cache.regionCaches[1]
+	re.Equal(uint32(minHitCountToCacheHit), cache.hitCount)
+	re.NotNil(cache.bestFit)
+	// Cache invalidation after change
+	regionMeta.Peers[2] = &metapb.Peer{Id: 14, StoreId: 4111, Role: metapb.PeerRole_Voter}
+	region = core.NewRegionInfo(regionMeta, regionMeta.Peers[0])
+	re.False(manager.IsRegionFitCached(stores, region))
 }
 
 func dhex(hk string) []byte {

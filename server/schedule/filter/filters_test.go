@@ -18,12 +18,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 )
@@ -32,12 +33,12 @@ func TestDistinctScoreFilter(t *testing.T) {
 	re := require.New(t)
 	labels := []string{"zone", "rack", "host"}
 	allStores := []*core.StoreInfo{
-		core.NewStoreInfoWithLabel(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}),
-		core.NewStoreInfoWithLabel(2, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"}),
-		core.NewStoreInfoWithLabel(3, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"}),
-		core.NewStoreInfoWithLabel(4, 1, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"}),
-		core.NewStoreInfoWithLabel(5, 1, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"}),
-		core.NewStoreInfoWithLabel(6, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"}),
+		core.NewStoreInfoWithLabel(1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}),
+		core.NewStoreInfoWithLabel(2, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"}),
+		core.NewStoreInfoWithLabel(3, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"}),
+		core.NewStoreInfoWithLabel(4, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"}),
+		core.NewStoreInfoWithLabel(5, map[string]string{"zone": "z2", "rack": "r2", "host": "h1"}),
+		core.NewStoreInfoWithLabel(6, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"}),
 	}
 
 	testCases := []struct {
@@ -58,8 +59,8 @@ func TestDistinctScoreFilter(t *testing.T) {
 		}
 		ls := NewLocationSafeguard("", labels, stores, allStores[testCase.source-1])
 		li := NewLocationImprover("", labels, stores, allStores[testCase.source-1])
-		re.Equal(testCase.safeGuardRes, ls.Target(config.NewTestOptions(), allStores[testCase.target-1]).StatusCode)
-		re.Equal(testCase.improverRes, li.Target(config.NewTestOptions(), allStores[testCase.target-1]).StatusCode)
+		re.Equal(testCase.safeGuardRes, ls.Target(mockconfig.NewTestOptions(), allStores[testCase.target-1]).StatusCode)
+		re.Equal(testCase.improverRes, li.Target(mockconfig.NewTestOptions(), allStores[testCase.target-1]).StatusCode)
 	}
 }
 
@@ -68,9 +69,9 @@ func TestLabelConstraintsFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
-	store := core.NewStoreInfoWithLabel(1, 1, map[string]string{"id": "1"})
+	store := core.NewStoreInfoWithLabel(1, map[string]string{"id": "1"})
 
 	testCases := []struct {
 		key    string
@@ -99,7 +100,7 @@ func TestRuleFitFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone"})
@@ -155,8 +156,8 @@ func TestStoreStateFilter(t *testing.T) {
 		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
 	}
-	opt := config.NewTestOptions()
-	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
+	opt := mockconfig.NewTestOptions()
+	store := core.NewStoreInfoWithLabel(1, map[string]string{})
 
 	type testCase struct {
 		filterIdx int
@@ -207,8 +208,8 @@ func TestStoreStateFilterReason(t *testing.T) {
 		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
 	}
-	opt := config.NewTestOptions()
-	store := core.NewStoreInfoWithLabel(1, 0, map[string]string{})
+	opt := mockconfig.NewTestOptions()
+	store := core.NewStoreInfoWithLabel(1, map[string]string{})
 
 	type testCase struct {
 		filterIdx    int
@@ -259,7 +260,7 @@ func TestIsolationFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone", "rack", "host"})
 	allStores := []struct {
@@ -330,7 +331,7 @@ func TestPlacementGuard(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone"})
@@ -358,7 +359,7 @@ func TestSpecialUseFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
 
 	testCases := []struct {
@@ -375,7 +376,8 @@ func TestSpecialUseFilter(t *testing.T) {
 		{map[string]string{core.EngineKey: core.EngineTiKV}, []string{""}, plan.StatusOK, plan.StatusOK},
 	}
 	for _, testCase := range testCases {
-		store := core.NewStoreInfoWithLabel(1, 1, testCase.label)
+		store := core.NewStoreInfoWithLabel(1, testCase.label)
+		store = store.Clone(core.SetStoreStats(&pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB}))
 		filter := NewSpecialUseFilter("", testCase.allowUse...)
 		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), store).StatusCode)
 		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), store).StatusCode)

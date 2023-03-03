@@ -25,9 +25,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
 	"go.uber.org/zap"
 )
 
@@ -152,7 +152,11 @@ func (ap AddPeer) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (ap AddPeer) String() string {
-	return fmt.Sprintf("add peer %v on store %v", ap.PeerID, ap.ToStore)
+	info := "peer"
+	if ap.IsWitness {
+		info = "witness peer"
+	}
+	return fmt.Sprintf("add %v %v on store %v", info, ap.PeerID, ap.ToStore)
 }
 
 // IsFinish checks if current step is finished.
@@ -175,9 +179,13 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(ap.ToStore)
 
 	regionSize := region.GetApproximateSize()
-	to.RegionSize += regionSize
+	if ap.IsWitness {
+		to.WitnessCount += 1
+	} else {
+		to.RegionSize += regionSize
+	}
 	to.RegionCount++
-	if ap.IsLightWeight {
+	if ap.IsLightWeight || ap.IsWitness {
 		return
 	}
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
@@ -254,6 +262,7 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 	to := opInfluence.GetStoreInfluence(bw.StoreID)
 
 	regionSize := region.GetApproximateSize()
+	to.WitnessCount += 1
 	to.RegionSize -= regionSize
 	to.AdjustStepCost(storelimit.RemovePeer, regionSize)
 }
@@ -276,7 +285,10 @@ type BecomeNonWitness struct {
 // ConfVerChanged returns the delta value for version increased by this step.
 func (bn BecomeNonWitness) ConfVerChanged(region *core.RegionInfo) uint64 {
 	peer := region.GetStorePeer(bn.StoreID)
-	return typeutil.BoolToUint64((peer.GetId() == bn.PeerID) && !peer.GetIsWitness() && (region.GetPendingPeer(peer.GetId()) == nil))
+	// After TiKV has applied this raftcmd, the region ConfVer will be changed immediately,
+	// non-witness will be in pending state until apply snapshot completes, will check
+	// pending stat in `IsFinish`.
+	return typeutil.BoolToUint64((peer.GetId() == bn.PeerID) && !peer.GetIsWitness())
 }
 
 func (bn BecomeNonWitness) String() string {
@@ -312,6 +324,8 @@ func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.Regio
 	to := opInfluence.GetStoreInfluence(bn.StoreID)
 
 	regionSize := region.GetApproximateSize()
+	to.WitnessCount -= 1
+	to.RegionSize += regionSize
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
 }
 
@@ -400,8 +414,8 @@ func (bsw BatchSwitchWitness) Influence(opInfluence OpInfluence, region *core.Re
 
 // Timeout returns duration that current step may take.
 func (bsw BatchSwitchWitness) Timeout(regionSize int64) time.Duration {
-	count := uint64(len(bsw.ToWitnesses)+len(bsw.ToNonWitnesses)) + 1
-	return fastStepWaitDuration(regionSize) * time.Duration(count)
+	count := uint64(len(bsw.ToNonWitnesses)) + 1
+	return slowStepWaitDuration(regionSize) * time.Duration(count)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
@@ -434,7 +448,11 @@ func (al AddLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (al AddLearner) String() string {
-	return fmt.Sprintf("add learner peer %v on store %v", al.PeerID, al.ToStore)
+	info := "learner peer"
+	if al.IsWitness {
+		info = "witness learner peer"
+	}
+	return fmt.Sprintf("add %v %v on store %v", info, al.PeerID, al.ToStore)
 }
 
 // IsFinish checks if current step is finished.
@@ -475,9 +493,13 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	to := opInfluence.GetStoreInfluence(al.ToStore)
 
 	regionSize := region.GetApproximateSize()
-	to.RegionSize += regionSize
+	if al.IsWitness {
+		to.WitnessCount += 1
+	} else {
+		to.RegionSize += regionSize
+	}
 	to.RegionCount++
-	if al.IsLightWeight {
+	if al.IsLightWeight || al.IsWitness {
 		return
 	}
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
@@ -512,7 +534,11 @@ func (pl PromoteLearner) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (pl PromoteLearner) String() string {
-	return fmt.Sprintf("promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
+	info := "learner peer"
+	if pl.IsWitness {
+		info = "witness learner peer"
+	}
+	return fmt.Sprintf("promote %v %v on store %v to voter", info, pl.PeerID, pl.ToStore)
 }
 
 // IsFinish checks if current step is finished. It is also used by ChangePeerV2Leave.
@@ -589,9 +615,14 @@ func (rp RemovePeer) CheckInProgress(_ ClusterInformer, region *core.RegionInfo)
 func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
-	regionSize := region.GetApproximateSize()
+	regionSize := region.GetStorePeerApproximateSize(rp.FromStore)
 	from.RegionSize -= regionSize
 	from.RegionCount--
+	peer := region.GetStorePeer(rp.FromStore)
+	if peer != nil && peer.IsWitness {
+		from.WitnessCount--
+		return
+	}
 
 	if rp.IsDownStore && regionSize > storelimit.SmallRegionThreshold {
 		regionSize = storelimit.SmallRegionThreshold
@@ -738,14 +769,19 @@ type DemoteVoter struct {
 }
 
 func (dv DemoteVoter) String() string {
-	return fmt.Sprintf("demote voter peer %v on store %v to learner", dv.PeerID, dv.ToStore)
+	info := "voter peer"
+	if dv.IsWitness {
+		info = "witness voter peer"
+	}
+	return fmt.Sprintf("demote %v %v on store %v to learner", info, dv.PeerID, dv.ToStore)
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
 func (dv DemoteVoter) ConfVerChanged(region *core.RegionInfo) uint64 {
 	peer := region.GetStorePeer(dv.ToStore)
-	// the demoting peer may be removed later.
-	return typeutil.BoolToUint64(peer == nil || (peer.GetId() == dv.PeerID && peer.GetRole() == metapb.PeerRole_Learner))
+	// the demoting peer may be removed later, and when merging witness region the two witnesses may be not on the same store,
+	// witness scheduling will occur, cause a voter witness -> non-witness learner -> voter.
+	return typeutil.BoolToUint64(peer == nil || (peer.GetId() == dv.PeerID && peer.GetRole() == metapb.PeerRole_Learner) || (dv.IsWitness && !peer.GetIsWitness()))
 }
 
 // IsFinish checks if current step is finished.
@@ -755,7 +791,7 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 			log.Warn("obtain unexpected peer", zap.String("expect", dv.String()), zap.Uint64("obtain-learner", peer.GetId()))
 			return false
 		}
-		return region.GetPendingLearner(peer.GetId()) == nil
+		return peer.GetId() == dv.PeerID
 	}
 	return false
 }
@@ -798,8 +834,9 @@ func (cpe ChangePeerV2Enter) ConfVerChanged(region *core.RegionInfo) uint64 {
 	}
 	for _, dv := range cpe.DemoteVoters {
 		peer := region.GetStorePeer(dv.ToStore)
-		// the demoting peer may be removed later.
-		if peer != nil && (peer.GetId() != dv.PeerID || !core.IsLearnerOrDemotingVoter(peer)) {
+		// the demoting peer may be removed later, and when merging witness region the two witnesses may be not on the same store,
+		// witness scheduling will occur, cause a voter witness -> non-witness learner -> voter.
+		if peer != nil && (peer.GetId() != dv.PeerID || (!core.IsLearnerOrDemotingVoter(peer) && !(dv.IsWitness && !peer.GetIsWitness()))) {
 			return 0
 		}
 	}

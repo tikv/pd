@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 )
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
@@ -167,6 +167,7 @@ func summaryStoresLoadByEngine(
 		}
 		{
 			// Metric for debug.
+			// TODO: pre-allocate gauge metrics
 			ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[ByteDim])
 			ty = "key-rate-" + rwTy.String() + "-" + kind.String()

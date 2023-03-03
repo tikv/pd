@@ -25,12 +25,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 )
@@ -49,7 +49,7 @@ type ruleCheckerTestSuite struct {
 }
 
 func (suite *ruleCheckerTestSuite) SetupTest() {
-	cfg := config.NewTestOptions()
+	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
@@ -124,8 +124,8 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	r = r.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: r.GetStorePeer(2), DownSeconds: 60000}}))
 	op = suite.rc.Check(r)
 	suite.NotNil(op)
-	suite.Equal("replace-rule-down-peer", op.Desc())
-	suite.Equal(core.High, op.GetPriorityLevel())
+	suite.Equal("fast-replace-rule-down-peer", op.Desc())
+	suite.Equal(core.Urgent, op.GetPriorityLevel())
 	var add operator.AddLearner
 	suite.IsType(add, op.Step(0))
 	suite.cluster.SetStoreUp(2)
@@ -604,7 +604,7 @@ func (suite *ruleCheckerTestSuite) TestIssue2419() {
 	suite.Equal(uint64(3), op.Step(2).(operator.RemovePeer).FromStore)
 }
 
-// Ref https://github.com/tikv/pd/issues/3521
+// Ref https://github.com/tikv/pd/issues/3521 https://github.com/tikv/pd/issues/5786
 // The problem is when offline a store, we may add learner multiple times if
 // the operator is timeout.
 func (suite *ruleCheckerTestSuite) TestPriorityFixOrphanPeer() {
@@ -618,18 +618,33 @@ func (suite *ruleCheckerTestSuite) TestPriorityFixOrphanPeer() {
 	suite.Nil(op)
 	var add operator.AddLearner
 	var remove operator.RemovePeer
+	// Ref 5786
+	originRegion := suite.cluster.GetRegion(1)
+	learner4 := &metapb.Peer{Id: 114, StoreId: 4, Role: metapb.PeerRole_Learner}
+	testRegion := originRegion.Clone(
+		core.WithAddPeer(learner4),
+		core.WithAddPeer(&metapb.Peer{Id: 115, StoreId: 5, Role: metapb.PeerRole_Learner}),
+		core.WithPendingPeers([]*metapb.Peer{originRegion.GetStorePeer(2), learner4}),
+	)
+	suite.cluster.PutRegion(testRegion)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("remove-orphan-peer", op.Desc())
+	suite.IsType(remove, op.Step(0))
+	// Ref #3521
 	suite.cluster.SetStoreOffline(2)
+	suite.cluster.PutRegion(originRegion)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.IsType(add, op.Step(0))
 	suite.Equal("replace-rule-offline-peer", op.Desc())
-	r := suite.cluster.GetRegion(1).Clone(core.WithAddPeer(
+	testRegion = suite.cluster.GetRegion(1).Clone(core.WithAddPeer(
 		&metapb.Peer{
-			Id:      5,
+			Id:      125,
 			StoreId: 4,
 			Role:    metapb.PeerRole_Learner,
 		}))
-	suite.cluster.PutRegion(r)
+	suite.cluster.PutRegion(testRegion)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.IsType(remove, op.Step(0))
 	suite.Equal("remove-orphan-peer", op.Desc())
@@ -879,7 +894,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness() {
 	op := suite.rc.Check(r)
 
 	suite.NotNil(op)
-	suite.Equal("promote-witness", op.Desc())
+	suite.Equal("promote-witness-for-down", op.Desc())
 	suite.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
 	suite.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
 	suite.Equal(uint64(3), op.Step(2).(operator.BecomeNonWitness).StoreID)
@@ -951,7 +966,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness3() {
 	op := suite.rc.Check(r)
 
 	suite.NotNil(op)
-	suite.Equal("replace-rule-down-peer", op.Desc())
+	suite.Equal("fast-replace-rule-down-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 	suite.True(op.Step(0).(operator.AddLearner).IsWitness)
 	suite.Equal(uint64(4), op.Step(1).(operator.PromoteLearner).ToStore)
@@ -975,7 +990,7 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithAvailableWitness4() {
 	op := suite.rc.Check(r)
 
 	suite.NotNil(op)
-	suite.Equal("replace-rule-down-peer", op.Desc())
+	suite.Equal("fast-replace-rule-down-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 	suite.True(op.Step(0).(operator.AddLearner).IsWitness)
 	suite.Equal(uint64(4), op.Step(1).(operator.PromoteLearner).ToStore)
@@ -1045,6 +1060,75 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvaliableWitness() {
 	op := suite.rc.Check(r)
 	suite.NotNil(op)
 	suite.Equal("replace-rule-offline-peer", op.Desc())
+}
+
+func (suite *ruleCheckerTestSuite) TestFixPendingVoterWithAvailableWitness() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	r := suite.cluster.GetRegion(1)
+	// set peer2 as pending voter
+	r = r.Clone(core.WithPendingPeers([]*metapb.Peer{r.GetPeer(2)}))
+	// set peer3 to witness
+	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
+
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   2,
+	})
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:   "pd",
+		ID:        "r1",
+		Role:      placement.Voter,
+		Count:     1,
+		IsWitness: true,
+	})
+
+	op := suite.rc.Check(r)
+
+	suite.NotNil(op)
+	suite.Equal("promote-witness-for-pending", op.Desc())
+	suite.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
+	suite.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
+	suite.Equal(uint64(3), op.Step(2).(operator.BecomeNonWitness).StoreID)
+	suite.Equal(uint64(3), op.Step(3).(operator.PromoteLearner).ToStore)
+}
+
+func (suite *ruleCheckerTestSuite) TestFixPendingVoterWithAvailableWitness2() {
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	r := suite.cluster.GetRegion(1)
+	// set peer2 as pending learner
+	peer := r.GetPeer(2)
+	peer.Role = metapb.PeerRole_Learner
+	r = r.Clone(core.WithPendingPeers([]*metapb.Peer{peer}))
+	// set peer3 to witness
+	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
+
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "pd",
+		ID:      "default",
+		Role:    placement.Voter,
+		Count:   2,
+	})
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:   "pd",
+		ID:        "r1",
+		Role:      placement.Voter,
+		Count:     1,
+		IsWitness: true,
+	})
+
+	op := suite.rc.Check(r)
+
+	suite.Nil(op)
 }
 
 func (suite *ruleCheckerTestSuite) TestRuleCache() {
@@ -1258,7 +1342,7 @@ func (suite *ruleCheckerTestSuite) TestOfflineAndDownStore() {
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(2), DownSeconds: 60000}}))
 	op = suite.rc.Check(region)
 	suite.NotNil(op)
-	suite.Equal("replace-rule-down-peer", op.Desc())
+	suite.Equal("fast-replace-rule-down-peer", op.Desc())
 }
 
 func (suite *ruleCheckerTestSuite) TestPendingList() {

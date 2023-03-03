@@ -22,11 +22,11 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -41,26 +41,52 @@ const (
 // When a region has label `merge_option=deny`, skip merging the region.
 // If label value is `allow` or other value, it will be treated as `allow`.
 const (
+	mergeCheckerName     = "merge_checker"
 	mergeOptionLabel     = "merge_option"
 	mergeOptionValueDeny = "deny"
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	mergeCheckerCounter                     = checkerCounter.WithLabelValues(mergeCheckerName, "check")
+	mergeCheckerPausedCounter               = checkerCounter.WithLabelValues(mergeCheckerName, "paused")
+	mergeCheckerRecentlySplitCounter        = checkerCounter.WithLabelValues(mergeCheckerName, "recently-split")
+	mergeCheckerRecentlyStartCounter        = checkerCounter.WithLabelValues(mergeCheckerName, "recently-start")
+	mergeCheckerSkipUninitRegionCounter     = checkerCounter.WithLabelValues(mergeCheckerName, "skip-uninit-region")
+	mergeCheckerNoNeedCounter               = checkerCounter.WithLabelValues(mergeCheckerName, "no-need")
+	mergeCheckerSpecialPeerCounter          = checkerCounter.WithLabelValues(mergeCheckerName, "special-peer")
+	mergeCheckerAbnormalReplicaCounter      = checkerCounter.WithLabelValues(mergeCheckerName, "abnormal-replica")
+	mergeCheckerHotRegionCounter            = checkerCounter.WithLabelValues(mergeCheckerName, "hot-region")
+	mergeCheckerNoTargetCounter             = checkerCounter.WithLabelValues(mergeCheckerName, "no-target")
+	mergeCheckerTargetTooLargeCounter       = checkerCounter.WithLabelValues(mergeCheckerName, "target-too-large")
+	mergeCheckerSplitSizeAfterMergeCounter  = checkerCounter.WithLabelValues(mergeCheckerName, "split-size-after-merge")
+	mergeCheckerSplitKeysAfterMergeCounter  = checkerCounter.WithLabelValues(mergeCheckerName, "split-keys-after-merge")
+	mergeCheckerNewOpCounter                = checkerCounter.WithLabelValues(mergeCheckerName, "new-operator")
+	mergeCheckerLargerSourceCounter         = checkerCounter.WithLabelValues(mergeCheckerName, "larger-source")
+	mergeCheckerAdjNotExistCounter          = checkerCounter.WithLabelValues(mergeCheckerName, "adj-not-exist")
+	mergeCheckerAdjRecentlySplitCounter     = checkerCounter.WithLabelValues(mergeCheckerName, "adj-recently-split")
+	mergeCheckerAdjRegionHotCounter         = checkerCounter.WithLabelValues(mergeCheckerName, "adj-region-hot")
+	mergeCheckerAdjDisallowMergeCounter     = checkerCounter.WithLabelValues(mergeCheckerName, "adj-disallow-merge")
+	mergeCheckerAdjAbnormalPeerStoreCounter = checkerCounter.WithLabelValues(mergeCheckerName, "adj-abnormal-peerstore")
+	mergeCheckerAdjSpecialPeerCounter       = checkerCounter.WithLabelValues(mergeCheckerName, "adj-special-peer")
+	mergeCheckerAdjAbnormalReplicaCounter   = checkerCounter.WithLabelValues(mergeCheckerName, "adj-abnormal-replica")
 )
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	PauseController
 	cluster    schedule.Cluster
-	opts       *config.PersistOptions
+	conf       config.Config
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster schedule.Cluster) *MergeChecker {
-	opts := cluster.GetOpts()
-	splitCache := cache.NewIDTTL(ctx, time.Minute, opts.GetSplitMergeInterval())
+func NewMergeChecker(ctx context.Context, cluster schedule.Cluster, conf config.Config) *MergeChecker {
+	splitCache := cache.NewIDTTL(ctx, time.Minute, conf.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,
-		opts:       opts,
+		conf:       conf,
 		splitCache: splitCache,
 		startTime:  time.Now(),
 	}
@@ -75,57 +101,57 @@ func (m *MergeChecker) GetType() string {
 // will skip check it for a while.
 func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
 	for _, regionID := range regionIDs {
-		m.splitCache.PutWithTTL(regionID, nil, m.opts.GetSplitMergeInterval())
+		m.splitCache.PutWithTTL(regionID, nil, m.conf.GetSplitMergeInterval())
 	}
 }
 
 // Check verifies a region's replicas, creating an Operator if need.
 func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
-	checkerCounter.WithLabelValues("merge_checker", "check").Inc()
+	mergeCheckerCounter.Inc()
 
 	if m.IsPaused() {
-		checkerCounter.WithLabelValues("merge_checker", "paused").Inc()
+		mergeCheckerPausedCounter.Inc()
 		return nil
 	}
 
-	expireTime := m.startTime.Add(m.opts.GetSplitMergeInterval())
+	expireTime := m.startTime.Add(m.conf.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
-		checkerCounter.WithLabelValues("merge_checker", "recently-start").Inc()
+		mergeCheckerRecentlyStartCounter.Inc()
 		return nil
 	}
 
-	m.splitCache.UpdateTTL(m.opts.GetSplitMergeInterval())
+	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
 	if m.splitCache.Exists(region.GetID()) {
-		checkerCounter.WithLabelValues("merge_checker", "recently-split").Inc()
+		mergeCheckerRecentlySplitCounter.Inc()
 		return nil
 	}
 
 	// when pd just started, it will load region meta from region storage,
 	if region.GetLeader() == nil {
-		checkerCounter.WithLabelValues("merge_checker", "skip-uninit-region").Inc()
+		mergeCheckerSkipUninitRegionCounter.Inc()
 		return nil
 	}
 
 	// region is not small enough
-	if !region.NeedMerge(int64(m.opts.GetMaxMergeRegionSize()), int64(m.opts.GetMaxMergeRegionKeys())) {
-		checkerCounter.WithLabelValues("merge_checker", "no-need").Inc()
+	if !region.NeedMerge(int64(m.conf.GetMaxMergeRegionSize()), int64(m.conf.GetMaxMergeRegionKeys())) {
+		mergeCheckerNoNeedCounter.Inc()
 		return nil
 	}
 
 	// skip region has down peers or pending peers
 	if !filter.IsRegionHealthy(region) {
-		checkerCounter.WithLabelValues("merge_checker", "special-peer").Inc()
+		mergeCheckerSpecialPeerCounter.Inc()
 		return nil
 	}
 
 	if !filter.IsRegionReplicated(m.cluster, region) {
-		checkerCounter.WithLabelValues("merge_checker", "abnormal-replica").Inc()
+		mergeCheckerAbnormalReplicaCounter.Inc()
 		return nil
 	}
 
 	// skip hot region
 	if m.cluster.IsRegionHot(region) {
-		checkerCounter.WithLabelValues("merge_checker", "hot-region").Inc()
+		mergeCheckerHotRegionCounter.Inc()
 		return nil
 	}
 
@@ -135,14 +161,14 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if m.checkTarget(region, next) {
 		target = next
 	}
-	if !m.opts.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
+	if !m.conf.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
 		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
 			target = prev
 		}
 	}
 
 	if target == nil {
-		checkerCounter.WithLabelValues("merge_checker", "no-target").Inc()
+		mergeCheckerNoTargetCounter.Inc()
 		return nil
 	}
 
@@ -152,18 +178,18 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		maxTargetRegionSizeThreshold = maxTargetRegionSize
 	}
 	if target.GetApproximateSize() > maxTargetRegionSizeThreshold {
-		checkerCounter.WithLabelValues("merge_checker", "target-too-large").Inc()
+		mergeCheckerTargetTooLargeCounter.Inc()
 		return nil
 	}
 	if err := m.cluster.GetStoreConfig().CheckRegionSize(uint64(target.GetApproximateSize()+region.GetApproximateSize()),
-		m.opts.GetMaxMergeRegionSize()); err != nil {
-		checkerCounter.WithLabelValues("merge_checker", "split-size-after-merge").Inc()
+		m.conf.GetMaxMergeRegionSize()); err != nil {
+		mergeCheckerSplitSizeAfterMergeCounter.Inc()
 		return nil
 	}
 
 	if err := m.cluster.GetStoreConfig().CheckRegionKeys(uint64(target.GetApproximateKeys()+region.GetApproximateKeys()),
-		m.opts.GetMaxMergeRegionKeys()); err != nil {
-		checkerCounter.WithLabelValues("merge_checker", "split-keys-after-merge").Inc()
+		m.conf.GetMaxMergeRegionKeys()); err != nil {
+		mergeCheckerSplitKeysAfterMergeCounter.Inc()
 		return nil
 	}
 
@@ -175,47 +201,47 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		log.Warn("create merge region operator failed", errs.ZapError(err))
 		return nil
 	}
-	checkerCounter.WithLabelValues("merge_checker", "new-operator").Inc()
+	mergeCheckerNewOpCounter.Inc()
 	if region.GetApproximateSize() > target.GetApproximateSize() ||
 		region.GetApproximateKeys() > target.GetApproximateKeys() {
-		checkerCounter.WithLabelValues("merge_checker", "larger-source").Inc()
+		mergeCheckerLargerSourceCounter.Inc()
 	}
 	return ops
 }
 
 func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 	if adjacent == nil {
-		checkerCounter.WithLabelValues("merge_checker", "adj-not-exist").Inc()
+		mergeCheckerAdjNotExistCounter.Inc()
 		return false
 	}
 
 	if m.splitCache.Exists(adjacent.GetID()) {
-		checkerCounter.WithLabelValues("merge_checker", "adj-recently-split").Inc()
+		mergeCheckerAdjRecentlySplitCounter.Inc()
 		return false
 	}
 
 	if m.cluster.IsRegionHot(adjacent) {
-		checkerCounter.WithLabelValues("merge_checker", "adj-region-hot").Inc()
+		mergeCheckerAdjRegionHotCounter.Inc()
 		return false
 	}
 
 	if !AllowMerge(m.cluster, region, adjacent) {
-		checkerCounter.WithLabelValues("merge_checker", "adj-disallow-merge").Inc()
+		mergeCheckerAdjDisallowMergeCounter.Inc()
 		return false
 	}
 
 	if !checkPeerStore(m.cluster, region, adjacent) {
-		checkerCounter.WithLabelValues("merge_checker", "adj-abnormal-peerstore").Inc()
+		mergeCheckerAdjAbnormalPeerStoreCounter.Inc()
 		return false
 	}
 
 	if !filter.IsRegionHealthy(adjacent) {
-		checkerCounter.WithLabelValues("merge_checker", "adj-special-peer").Inc()
+		mergeCheckerAdjSpecialPeerCounter.Inc()
 		return false
 	}
 
 	if !filter.IsRegionReplicated(m.cluster, adjacent) {
-		checkerCounter.WithLabelValues("merge_checker", "adj-abnormal-replica").Inc()
+		mergeCheckerAdjAbnormalReplicaCounter.Inc()
 		return false
 	}
 
