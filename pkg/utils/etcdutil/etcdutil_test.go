@@ -365,7 +365,7 @@ func ioCopy(dst io.Writer, src io.Reader, enableDiscard *atomic.Bool) (err error
 				return io.ErrShortWrite
 			}
 		}
-		if errRead != nil && errRead != io.EOF {
+		if errRead != nil {
 			err = errRead
 			break
 		}
