@@ -65,7 +65,7 @@ type Manager struct {
 	// config is the configurations of the manager.
 	config config.KeyspaceConfig
 	// member is the current pd's member information, used to check if server is leader.
-	member *member.Member
+	member *member.EmbeddedEtcdMember
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -83,7 +83,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 	rc *cluster.RaftCluster,
 	idAllocator id.Allocator,
 	config config.KeyspaceConfig,
-	member *member.Member,
+	member *member.EmbeddedEtcdMember,
 ) *Manager {
 	return &Manager{
 		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
