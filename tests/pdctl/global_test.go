@@ -50,7 +50,7 @@ func TestSendAndGetComponent(t *testing.T) {
 	}
 	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := server.CreateServer(ctx, cfg, handler)
+	svr, err := server.CreateServer(ctx, cfg, nil, handler)
 	re.NoError(err)
 	err = svr.Run()
 	re.NoError(err)

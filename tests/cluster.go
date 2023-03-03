@@ -87,7 +87,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	}
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, nil, serviceBuilders...)
 	if err != nil {
 		return nil, err
 	}

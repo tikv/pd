@@ -49,24 +49,7 @@ func main() {
 		Run:   createServerWrapper,
 	}
 
-	rootCmd.Flags().BoolP("version", "V", false, "print version information and exit")
-	rootCmd.Flags().StringP("config", "", "", "config file")
-	rootCmd.Flags().BoolP("config-check", "", false, "check config file validity and exit")
-	rootCmd.Flags().StringP("name", "", "", "human-readable name for this pd member")
-	rootCmd.Flags().StringP("data-dir", "", "", "path to the data directory (default 'default.${name}')")
-	rootCmd.Flags().StringP("client-urls", "", "", "url for client traffic")
-	rootCmd.Flags().StringP("advertise-client-urls", "", "", "advertise url for client traffic (default '${client-urls}')")
-	rootCmd.Flags().StringP("peer-urls", "", "", "url for peer traffic")
-	rootCmd.Flags().StringP("advertise-peer-urls", "", "", "advertise url for peer traffic (default '${peer-urls}')")
-	rootCmd.Flags().StringP("initial-cluster", "", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
-	rootCmd.Flags().StringP("join", "", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
-	rootCmd.Flags().StringP("metrics-addr", "", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
-	rootCmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
-	rootCmd.Flags().StringP("log-file", "", "", "log file path")
-	rootCmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
-	rootCmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
-	rootCmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
-	rootCmd.Flags().BoolP("force-new-cluster", "", false, "force to create a new one-member cluster")
+	addFlags(rootCmd)
 	rootCmd.AddCommand(NewServiceCommand())
 
 	rootCmd.SetOutput(os.Stdout)
@@ -79,11 +62,12 @@ func main() {
 // NewServiceCommand returns the service command.
 func NewServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "service <mode>",
-		Short: "Run a service, for example, tso, resource_manager",
+		Use:   "services <mode>",
+		Short: "Run services, for example, tso, resource_manager",
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
 	cmd.AddCommand(NewResourceManagerServiceCommand())
+	cmd.AddCommand(NewAPIServiceCommand())
 	return cmd
 }
 
@@ -91,7 +75,7 @@ func NewServiceCommand() *cobra.Command {
 func NewTSOServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tso",
-		Short: "Run the tso service",
+		Short: "Run the TSO service",
 		Run:   tso.CreateServerWrapper,
 	}
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
@@ -107,7 +91,7 @@ func NewTSOServiceCommand() *cobra.Command {
 // NewResourceManagerServiceCommand returns the resource manager service command.
 func NewResourceManagerServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "resource_manager",
+		Use:   "resource-manager",
 		Short: "Run the resource manager service",
 		Run:   resource_manager.CreateServerWrapper,
 	}
@@ -121,7 +105,47 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 	return cmd
 }
 
+// NewAPIServiceCommand returns the API service command.
+func NewAPIServiceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "api",
+		Short: "Run the API service",
+		Run:   createAPIServerWrapper,
+	}
+	addFlags(cmd)
+	return cmd
+}
+
+func addFlags(cmd *cobra.Command) {
+	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
+	cmd.Flags().StringP("config", "", "", "config file")
+	cmd.Flags().BoolP("config-check", "", false, "check config file validity and exit")
+	cmd.Flags().StringP("name", "", "", "human-readable name for this pd member")
+	cmd.Flags().StringP("data-dir", "", "", "path to the data directory (default 'default.${name}')")
+	cmd.Flags().StringP("client-urls", "", "http://127.0.0.1:2379", "url for client traffic")
+	cmd.Flags().StringP("advertise-client-urls", "", "", "advertise url for client traffic (default '${client-urls}')")
+	cmd.Flags().StringP("peer-urls", "", "http://127.0.0.1:2380", "url for peer traffic")
+	cmd.Flags().StringP("advertise-peer-urls", "", "", "advertise url for peer traffic (default '${peer-urls}')")
+	cmd.Flags().StringP("initial-cluster", "", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
+	cmd.Flags().StringP("join", "", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
+	cmd.Flags().StringP("metrics-addr", "", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
+	cmd.Flags().StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-file", "", "", "log file path")
+	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
+	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
+	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	cmd.Flags().BoolP("force-new-cluster", "", false, "force to create a new one-member cluster")
+}
+
+func createAPIServerWrapper(cmd *cobra.Command, args []string) {
+	start(cmd, args, cmd.CalledAs())
+}
+
 func createServerWrapper(cmd *cobra.Command, args []string) {
+	start(cmd, args)
+}
+
+func start(cmd *cobra.Command, args []string, services ...string) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
@@ -160,7 +184,11 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	versioninfo.Log("PD")
+	if len(services) != 0 {
+		versioninfo.Log(server.APIServiceMode)
+	} else {
+		versioninfo.Log(server.PDMode)
+	}
 
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
@@ -180,7 +208,7 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}
