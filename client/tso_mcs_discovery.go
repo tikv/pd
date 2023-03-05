@@ -46,9 +46,9 @@ var _ tsoAllocatorEventSource = (*tsoMcsDiscovery)(nil)
 // tsoMcsDiscovery is the service discovery client of TSO microservice which is primary/secondary configured
 type tsoMcsDiscovery struct {
 	keyspaceID uint32
+	urls       atomic.Value // Store as []string
 	// primary key is the etcd path used for discoverying the serving endpoint of this keyspace
 	primaryKey string
-	urls       atomic.Value // Store as []string
 	// TSO Primary URL
 	primary atomic.Value // Store as string
 	// TSO Secondary URLs

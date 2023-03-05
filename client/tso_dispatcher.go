@@ -278,13 +278,16 @@ func (c *tsoClient) createTSODispatcher(dcLocation string) {
 			make(chan *tsoRequest, defaultMaxTSOBatchSize*2),
 			defaultMaxTSOBatchSize),
 	}
-	// Each goroutine is responsible for handling the tso stream request for its dc-location.
-	// The only case that will make the dispatcher goroutine exit
-	// is that the loopCtx is done, otherwise there is no circumstance
-	// this goroutine should exit.
-	go c.handleDispatcher(dispatcherCtx, dcLocation, dispatcher.tsoBatchController)
-	c.tsoDispatcher.Store(dcLocation, dispatcher)
-	log.Info("[pd/tso] tso dispatcher created", zap.String("dc-location", dcLocation))
+
+	if _, ok := c.tsoDispatcher.LoadOrStore(dcLocation, dispatcher); !ok {
+		// Successfully stored the value. Start the following goroutine.
+		// Each goroutine is responsible for handling the tso stream request for its dc-location.
+		// The only case that will make the dispatcher goroutine exit
+		// is that the loopCtx is done, otherwise there is no circumstance
+		// this goroutine should exit.
+		go c.handleDispatcher(dispatcherCtx, dcLocation, dispatcher.tsoBatchController)
+		log.Info("[pd/tso] tso dispatcher created", zap.String("dc-location", dcLocation))
+	}
 }
 
 func (c *tsoClient) handleDispatcher(
