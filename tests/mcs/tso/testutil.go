@@ -12,23 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package tso
 
 import (
 	"context"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/testutil"
+	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 )
 
 // CleanupFunc closes test tso server(s) and deletes any files left behind.
 type CleanupFunc func()
 
-// NewTestServer creates a tso server for testing.
-func newTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, CleanupFunc, error) {
+// newTSOTestServer creates a tso server for testing.
+func newTSOTestServer(ctx context.Context, re *require.Assertions, cfg *tsosvr.Config) (*tsosvr.Server, CleanupFunc, error) {
 	// New zap logger
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
@@ -36,7 +41,7 @@ func newTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*S
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	s := CreateServer(ctx, cfg)
+	s := tsosvr.CreateServer(ctx, cfg)
 	if err = s.Run(); err != nil {
 		return nil, nil, err
 	}
@@ -48,14 +53,30 @@ func newTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*S
 	return s, cleanup, nil
 }
 
-// newTestDefaultConfig is only for test to create one pd.
+// newTSOTestDefaultConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
-func newTestDefaultConfig() (*Config, error) {
+func newTSOTestDefaultConfig() (*tsosvr.Config, error) {
 	cmd := &cobra.Command{
 		Use:   "tso",
 		Short: "Run the tso service",
 	}
-	cfg := NewConfig()
+	cfg := tsosvr.NewConfig()
 	flagSet := cmd.Flags()
 	return cfg, cfg.Parse(flagSet)
+}
+
+// startTSOTestServer creates and starts a tso server with default config for testing.
+func startSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints string) (*tsosvr.Server, CleanupFunc, error) {
+	cfg, err := newTSOTestDefaultConfig()
+	re.NoError(err)
+	cfg.BackendEndpoints = backendEndpoints
+	cfg.ListenAddr = strings.TrimPrefix(tempurl.Alloc(), "http://")
+
+	s, cleanup, err := newTSOTestServer(ctx, re, cfg)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	return s, cleanup, err
 }

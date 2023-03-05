@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -224,7 +225,7 @@ func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 			continue
 		}
 		op.Counters = append(op.Counters, grantLeaderNewOperatorCounter)
-		op.SetPriorityLevel(core.High)
+		op.SetPriorityLevel(constant.High)
 		ops = append(ops, op)
 	}
 

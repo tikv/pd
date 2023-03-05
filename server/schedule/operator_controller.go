@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -490,7 +491,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			if stepCost == 0 {
 				continue
 			}
-			limit.Take(stepCost, v, storelimit.Low)
+			limit.Take(stepCost, v, constant.Low)
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
@@ -835,7 +836,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 	var desc string
 	if len(ops) != 0 {
 		desc = ops[0].Desc()
-		if ops[0].GetPriorityLevel() == core.Urgent {
+		if ops[0].GetPriorityLevel() == constant.Urgent {
 			return false
 		}
 	}
@@ -850,7 +851,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if !limiter.Available(stepCost, v, storelimit.Low) {
+			if !limiter.Available(stepCost, v, constant.Low) {
 				operator.OperatorExceededStoreLimitCounter.WithLabelValues(desc).Inc()
 				return true
 			}
