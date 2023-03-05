@@ -66,6 +66,8 @@ type Manager struct {
 	config config.KeyspaceConfig
 	// member is the current pd's member information, used to check if server is leader.
 	member *member.EmbeddedEtcdMember
+	// gcWorker is used to clean up archived keyspace.
+	gcWorker *gcWorker
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -85,7 +87,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 	config config.KeyspaceConfig,
 	member *member.EmbeddedEtcdMember,
 ) *Manager {
-	return &Manager{
+	manager := &Manager{
 		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
 		idAllocator: idAllocator,
 		store:       store,
@@ -94,6 +96,8 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 		config:      config,
 		member:      member,
 	}
+	manager.gcWorker = manager.newGCWorker()
+	return manager
 }
 
 // Bootstrap saves default keyspace info.
@@ -129,7 +133,8 @@ func (manager *Manager) Bootstrap() error {
 			return err
 		}
 	}
-	go manager.keyspaceGCLoop()
+	// start gc loop.
+	go manager.gcWorker.run()
 	return nil
 }
 
@@ -456,6 +461,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg *config.KeyspaceConfig) {
 	manager.config = *cfg
+	manager.gcWorker.reloadConfig(cfg)
 }
 
 // updateKeyspaceState updates keyspace meta and record the update time.
