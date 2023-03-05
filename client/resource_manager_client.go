@@ -51,7 +51,7 @@ type ResourceManagerClient interface {
 
 // resourceManagerClient gets the ResourceManager client of current PD leader.
 func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
-	if cc, err := c.bc.GetOrCreateGRPCConn(c.GetLeaderAddr()); err == nil {
+	if cc, err := c.pdsd.GetOrCreateGRPCConn(c.GetLeaderAddr()); err == nil {
 		return rmpb.NewResourceManagerClient(cc)
 	}
 	return nil
@@ -60,7 +60,7 @@ func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *client) gRPCErrorHandler(err error) {
 	if strings.Contains(err.Error(), errNotPrimary) {
-		c.bc.ScheduleCheckMemberChanged()
+		c.pdsd.ScheduleCheckMemberChanged()
 	}
 }
 
@@ -303,7 +303,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		// If the stream is still nil, return an error.
 		if stream == nil {
 			firstRequest.done <- errors.Errorf("failed to get the stream connection")
-			c.bc.ScheduleCheckMemberChanged()
+			c.pdsd.ScheduleCheckMemberChanged()
 			connection.reset()
 			continue
 		}
@@ -315,7 +315,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		default:
 		}
 		if err = c.processTokenRequests(stream, firstRequest); err != nil {
-			c.bc.ScheduleCheckMemberChanged()
+			c.pdsd.ScheduleCheckMemberChanged()
 			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
 		}
