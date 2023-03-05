@@ -61,28 +61,29 @@ type gcWorker struct {
 
 // newGCWorker returns a newGCWorker.
 func (manager *Manager) newGCWorker() *gcWorker {
-	return &gcWorker{
+	worker := &gcWorker{
 		manager:       manager,
 		member:        manager.member,
 		sigCh:         make(chan runSig),
 		gcRunInterval: manager.config.GCRunInterval.Duration,
 		gcLifeTime:    manager.config.GCLifeTime.Duration,
 	}
+	worker.enable.Store(manager.config.GCEnable)
+	return worker
 }
 
 // run starts the main loop of the gc worker.
 // To avoid locking, it should be the only routine with access to worker's ticker, ctx and cancel.
 func (worker *gcWorker) run() {
-	worker.running.Store(true)
-	worker.ticker = time.NewTicker(worker.gcRunInterval)
-	// setting up gc worker's context to be child of the manager.
-	worker.ctx, worker.cancel = context.WithCancel(worker.manager.ctx)
-
 	// Load configuration here to make sure changes only takes effect after reload.
 	worker.configMu.RLock()
 	gcLifeTime := worker.gcLifeTime
 	gcRunInterval := worker.gcRunInterval
 	worker.configMu.RUnlock()
+
+	// Start at stop state, and wait for control loop to reset the ticker.
+	worker.ticker = time.NewTicker(time.Hour)
+	worker.ticker.Stop()
 
 	// start control loop.
 	go worker.controlLoop()
@@ -95,9 +96,6 @@ func (worker *gcWorker) run() {
 		case now := <-worker.ticker.C:
 			// Sanity check: if server currently not leader, don't do gc.
 			if !worker.member.IsLeader() {
-				worker.running.Store(false)
-				worker.ticker.Stop()
-				worker.cancel()
 				// continue here will make worker wait for the next signal from sigCh.
 				continue
 			}
@@ -108,8 +106,9 @@ func (worker *gcWorker) run() {
 			// Control signal received, act accordingly.
 			switch sig {
 			case sigStart:
+				// setting up gc worker's context to be child of the manager.
 				worker.ctx, worker.cancel = context.WithCancel(worker.manager.ctx)
-				worker.ticker = time.NewTicker(gcRunInterval)
+				worker.ticker.Reset(gcRunInterval)
 				log.Info("[keyspace] gc loop started")
 			case sigStop:
 				worker.ticker.Stop()
