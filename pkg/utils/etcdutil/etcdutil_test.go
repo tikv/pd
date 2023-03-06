@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -212,7 +213,6 @@ func TestInitClusterID(t *testing.T) {
 }
 
 func TestEtcdClientSync(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval", "return(true)"))
 
@@ -249,8 +249,20 @@ func TestEtcdClientSync(t *testing.T) {
 	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval"))
 }
 
-func TestEtcdWithHangLeader(t *testing.T) {
-	t.Parallel()
+func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
+	re := require.New(t)
+	var err error
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval", "return(true)"))
+	err = checkEtcdWithHangLeader(t)
+	re.NoError(err)
+	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck", "return(true)"))
+	err = checkEtcdWithHangLeader(t)
+	re.Error(err)
+	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck"))
+}
+
+func checkEtcdWithHangLeader(t *testing.T) error {
 	re := require.New(t)
 	// Start a etcd server.
 	cfg1 := NewTestSingleConfig(t)
@@ -274,20 +286,19 @@ func TestEtcdWithHangLeader(t *testing.T) {
 	etcd2 := checkAddEtcdMember(t, cfg1, client1)
 	defer etcd2.Close()
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
-	etcd2Addr := etcd2.Config().LCUrls[0].String()
-	client1.SetEndpoints(proxyAddr, etcd2Addr)
+	time.Sleep(1 * time.Second) // wait for etcd client sync endpoints
 
 	// Hang the etcd1 and wait for the client to connect to etcd2.
 	enableDiscard.Store(true)
 	time.Sleep(defaultDialKeepAliveTime + defaultDialKeepAliveTimeout*2)
 	_, err = EtcdKVGet(client1, "test/key1")
-	re.NoError(err)
+	return err
 }
 
 func checkAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
 	re := require.New(t)
 	cfg2 := NewTestSingleConfig(t)
-	cfg2.Name = "etcd2"
+	cfg2.Name = "test_etcd_" + strconv.FormatInt(time.Now().UnixNano()%1000, 10)
 	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
 	cfg2.ClusterState = embed.ClusterStateFlagExisting
 	peerURL := cfg2.LPUrls[0].String()

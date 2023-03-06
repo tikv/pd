@@ -219,8 +219,15 @@ func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
 	autoSyncInterval := defaultAutoSyncInterval
+	dialKeepAliveTime := defaultDialKeepAliveTime
+	dialKeepAliveTimeout := defaultDialKeepAliveTimeout
 	failpoint.Inject("autoSyncInterval", func() {
 		autoSyncInterval = 10 * time.Millisecond
+	})
+	failpoint.Inject("closeKeepAliveCheck", func() {
+		autoSyncInterval = 0
+		dialKeepAliveTime = 0
+		dialKeepAliveTimeout = 0
 	})
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:            endpoints,
@@ -228,8 +235,8 @@ func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client
 		AutoSyncInterval:     autoSyncInterval,
 		TLS:                  tlsConfig,
 		LogConfig:            &lgc,
-		DialKeepAliveTime:    defaultDialKeepAliveTime,
-		DialKeepAliveTimeout: defaultDialKeepAliveTimeout,
+		DialKeepAliveTime:    dialKeepAliveTime,
+		DialKeepAliveTimeout: dialKeepAliveTimeout,
 	})
 	if err == nil {
 		log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
