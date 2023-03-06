@@ -52,8 +52,6 @@ var (
 	// SchedulerConfigHandlerPath is the api router path of the schedule config handler.
 	SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
 
-	// ErrServerNotStarted is error info for server not started.
-	ErrServerNotStarted = errors.New("The server has not been started")
 	// ErrOperatorNotFound is error info for operator not found.
 	ErrOperatorNotFound = errors.New("operator not found")
 	// ErrAddOperator is error info for already have an operator when adding operator.
@@ -938,7 +936,7 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) er
 		return err
 	}
 	if tsoAllocator == nil {
-		return ErrServerNotStarted
+		return errs.ErrServerNotStarted
 	}
 	return tsoAllocator.SetTSO(ts, ignoreSmaller, skipUpperBoundCheck)
 }
