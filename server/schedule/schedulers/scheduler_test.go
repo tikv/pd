@@ -23,21 +23,22 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/statistics"
 )
 
-func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, *config.PersistOptions, *mockcluster.Cluster, *schedule.OperatorController) {
+func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.Config, *mockcluster.Cluster, *schedule.OperatorController) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	var stream *hbstream.HeartbeatStreams
 	if len(needToRunStream) == 0 {
@@ -79,12 +80,9 @@ func TestShuffleLeader(t *testing.T) {
 
 func TestRejectLeader(t *testing.T) {
 	re := require.New(t)
-	cancel, opt, tc, oc := prepareSchedulersTest()
+	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	opt.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		config.RejectLeader: {{Key: "noleader", Value: "true"}},
-	})
-
+	tc.SetLabelProperty(config.RejectLeader, "noleader", "true")
 	// Add 3 stores 1,2,3.
 	tc.AddLabelsStore(1, 1, map[string]string{"noleader": "true"})
 	tc.UpdateLeaderCount(1, 1)

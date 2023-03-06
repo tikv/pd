@@ -824,8 +824,7 @@ func (suite *clientTestSuite) SetupSuite() {
 			},
 		})
 	}
-	config := cluster.GetStoreConfig()
-	config.EnableRegionBucket = true
+	cluster.GetStoreConfig().SetRegionBucketEnabled(true)
 }
 
 func (suite *clientTestSuite) TearDownSuite() {
@@ -956,8 +955,8 @@ func (suite *clientTestSuite) TestGetRegion() {
 		}
 		return r.Buckets != nil
 	})
-	config := suite.srv.GetRaftCluster().GetStoreConfig()
-	config.EnableRegionBucket = false
+	suite.srv.GetRaftCluster().GetStoreConfig().SetRegionBucketEnabled(false)
+
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
 		suite.NoError(err)
@@ -966,7 +965,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 		}
 		return r.Buckets == nil
 	})
-	config.EnableRegionBucket = true
+	suite.srv.GetRaftCluster().GetStoreConfig().SetRegionBucketEnabled(true)
 
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`))
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`))
@@ -1439,11 +1438,11 @@ func TestWatch(t *testing.T) {
 
 	key := "test"
 	wg := sync.WaitGroup{}
+	ch, err := client.Watch(ctx, []byte(key))
+	re.NoError(err)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		ch, err := client.Watch(ctx, []byte(key))
-		re.NoError(err)
 		var events []*meta_storagepb.Event
 		for e := range ch {
 			events = append(events, e...)

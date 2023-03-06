@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -107,7 +108,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		return nil, nil
 	}
 	op.Counters = append(op.Counters, shuffleRegionNewOperatorCounter)
-	op.SetPriorityLevel(core.Low)
+	op.SetPriorityLevel(constant.Low)
 	return []*operator.Operator{op}, nil
 }
 

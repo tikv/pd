@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
 func TestRegionPendingFilter(t *testing.T) {
@@ -63,7 +63,7 @@ func TestRegionReplicatedFilter(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	opt.SetMaxReplicas(3)
 	testCluster := mockcluster.NewCluster(ctx, opt)
@@ -85,7 +85,7 @@ func TestRegionEmptyFilter(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	opt.SetMaxReplicas(3)
 	testCluster := mockcluster.NewCluster(ctx, opt)

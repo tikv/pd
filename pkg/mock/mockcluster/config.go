@@ -169,3 +169,19 @@ func (mc *Cluster) SetMaxReplicasWithLabel(enablePlacementRules bool, num int, l
 		mc.SetLocationLabels(labels)
 	}
 }
+
+// SetRegionMaxSize sets the region max size.
+func (mc *Cluster) SetRegionMaxSize(v string) {
+	mc.updateStoreConfig(func(r *config.StoreConfig) { r.RegionMaxSize = v })
+}
+
+// SetRegionSizeMB sets the region max size.
+func (mc *Cluster) SetRegionSizeMB(v uint64) {
+	mc.updateStoreConfig(func(r *config.StoreConfig) { r.RegionMaxSizeMB = v })
+}
+
+func (mc *Cluster) updateStoreConfig(f func(*config.StoreConfig)) {
+	r := mc.StoreConfigManager.GetStoreConfig().Clone()
+	f(r)
+	mc.SetStoreConfig(r)
+}

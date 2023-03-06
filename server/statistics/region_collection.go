@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server/config"
+	sc "github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/placement"
 )
 
@@ -73,7 +74,7 @@ type RegionInfo struct {
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
 	sync.RWMutex
-	opt                *config.PersistOptions
+	conf               sc.Config
 	stats              map[RegionStatisticType]map[uint64]*RegionInfo
 	offlineStats       map[RegionStatisticType]map[uint64]*core.RegionInfo
 	index              map[uint64]RegionStatisticType
@@ -83,9 +84,9 @@ type RegionStatistics struct {
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
-func NewRegionStatistics(opt *config.PersistOptions, ruleManager *placement.RuleManager, storeConfigManager *config.StoreConfigManager) *RegionStatistics {
+func NewRegionStatistics(conf sc.Config, ruleManager *placement.RuleManager, storeConfigManager *config.StoreConfigManager) *RegionStatistics {
 	r := &RegionStatistics{
-		opt:                opt,
+		conf:               conf,
 		ruleManager:        ruleManager,
 		storeConfigManager: storeConfigManager,
 		stats:              make(map[RegionStatisticType]map[uint64]*RegionInfo),
@@ -167,7 +168,7 @@ func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 		return true
 	}
 	return r.IsRegionStatsType(regionID, UndersizedRegion) !=
-		region.NeedMerge(int64(r.opt.GetMaxMergeRegionSize()), int64(r.opt.GetMaxMergeRegionKeys()))
+		region.NeedMerge(int64(r.conf.GetMaxMergeRegionSize()), int64(r.conf.GetMaxMergeRegionKeys()))
 }
 
 // Observe records the current regions' status.
@@ -181,9 +182,9 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		offlinePeerTypeIndex RegionStatisticType
 		deleteIndex          RegionStatisticType
 	)
-	desiredReplicas := r.opt.GetMaxReplicas()
+	desiredReplicas := r.conf.GetMaxReplicas()
 	desiredVoters := desiredReplicas
-	if r.opt.IsPlacementRulesEnabled() {
+	if r.conf.IsPlacementRulesEnabled() {
 		if !r.ruleManager.IsInitialized() {
 			log.Warn("ruleManager haven't been initialized")
 			return
@@ -226,8 +227,8 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys()),
 		),
 		UndersizedRegion: region.NeedMerge(
-			int64(r.opt.GetMaxMergeRegionSize()),
-			int64(r.opt.GetMaxMergeRegionKeys()),
+			int64(r.conf.GetMaxMergeRegionSize()),
+			int64(r.conf.GetMaxMergeRegionKeys()),
 		),
 		WitnessLeader: region.GetLeader().GetIsWitness(),
 	}

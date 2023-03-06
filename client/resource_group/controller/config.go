@@ -81,8 +81,8 @@ type RequestUnitConfig struct {
 	CPUMsCost float64 `toml:"read-cpu-ms-cost" json:"read-cpu-ms-cost"`
 }
 
-// defaultRequestUnitConfig returns the default request unit configuration.
-func defaultRequestUnitConfig() *RequestUnitConfig {
+// DefaultRequestUnitConfig returns the default request unit configuration.
+func DefaultRequestUnitConfig() *RequestUnitConfig {
 	return &RequestUnitConfig{
 		ReadBaseCost:     defaultReadBaseCost,
 		ReadCostPerByte:  defaultReadCostPerByte,
@@ -102,12 +102,14 @@ type Config struct {
 	WriteBaseCost  RequestUnit
 	WriteBytesCost RequestUnit
 	CPUMsCost      RequestUnit
+	// The CPU statistics need to distinguish between different environments.
+	isSingleGroupByKeyspace bool
 }
 
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return GenerateConfig(
-		defaultRequestUnitConfig(),
+		DefaultRequestUnitConfig(),
 	)
 }
 

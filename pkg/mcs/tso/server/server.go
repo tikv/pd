@@ -314,7 +314,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 // IsServing implments basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.participant.IsLeader()
+	return s.participant.IsLeader() && atomic.LoadInt64(&s.isServing) == 1
 }
 
 // GetPrimary returns the primary provider of this tso server.
@@ -440,7 +440,12 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	<-done
 }
 
-// GetTLSConfig get the security config.
+// GetConfig gets the config.
+func (s *Server) GetConfig() *Config {
+	return s.cfg
+}
+
+// GetTLSConfig gets the security config.
 func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }

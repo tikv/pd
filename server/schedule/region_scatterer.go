@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -392,7 +393,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 	if op != nil {
 		scatterSuccessCounter.Inc()
 		r.Put(targetPeers, targetLeader, group)
-		op.SetPriorityLevel(core.High)
+		op.SetPriorityLevel(constant.High)
 	}
 	return op
 }

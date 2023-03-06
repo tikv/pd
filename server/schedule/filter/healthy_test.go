@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
 func TestIsRegionHealthy(t *testing.T) {
@@ -68,7 +68,7 @@ func TestIsRegionHealthy(t *testing.T) {
 		{region(peers(1, 2, 3, 4), core.WithLearners(peers(1))), true, true, false, true, true, false},
 	}
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)

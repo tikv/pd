@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 )
 
 const (
@@ -45,7 +46,7 @@ type Operator struct {
 	stepsTime        []int64 // step finish time
 	currentStep      int32
 	status           OpStatusTracker
-	level            core.PriorityLevel
+	level            constant.PriorityLevel
 	Counters         []prometheus.Counter
 	FinishedCounters []prometheus.Counter
 	AdditionalInfos  map[string]string
@@ -55,9 +56,9 @@ type Operator struct {
 
 // NewOperator creates a new operator.
 func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, approximateSize int64, steps ...OpStep) *Operator {
-	level := core.Medium
+	level := constant.Medium
 	if kind&OpAdmin != 0 {
-		level = core.Urgent
+		level = constant.Urgent
 	}
 	maxDuration := float64(0)
 	for _, v := range steps {
@@ -321,12 +322,12 @@ func (o *Operator) ConfVerChanged(region *core.RegionInfo) (total uint64) {
 }
 
 // SetPriorityLevel sets the priority level for operator.
-func (o *Operator) SetPriorityLevel(level core.PriorityLevel) {
+func (o *Operator) SetPriorityLevel(level constant.PriorityLevel) {
 	o.level = level
 }
 
 // GetPriorityLevel gets the priority level.
-func (o *Operator) GetPriorityLevel() core.PriorityLevel {
+func (o *Operator) GetPriorityLevel() constant.PriorityLevel {
 	return o.level
 }
 
@@ -350,7 +351,7 @@ func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionIn
 type OpHistory struct {
 	FinishTime time.Time
 	From, To   uint64
-	Kind       core.ResourceKind
+	Kind       constant.ResourceKind
 }
 
 // History transfers the operator's steps to operator histories.
@@ -365,7 +366,7 @@ func (o *Operator) History() []OpHistory {
 				FinishTime: now,
 				From:       s.FromStore,
 				To:         s.ToStore,
-				Kind:       core.LeaderKind,
+				Kind:       constant.LeaderKind,
 			})
 		case AddPeer:
 			addPeerStores = append(addPeerStores, s.ToStore)
@@ -381,7 +382,7 @@ func (o *Operator) History() []OpHistory {
 				FinishTime: now,
 				From:       removePeerStores[i],
 				To:         addPeerStores[i],
-				Kind:       core.RegionKind,
+				Kind:       constant.RegionKind,
 			})
 		}
 	}
