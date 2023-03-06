@@ -72,8 +72,9 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg  *Config
-	name string
+	cfg       *Config
+	name      string
+	listenURL *url.URL
 
 	// for the primary election of resource manager
 	participant *member.Participant
@@ -376,10 +377,14 @@ func (s *Server) startServer() error {
 	if err != nil {
 		return err
 	}
+	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
+	if err != nil {
+		return err
+	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(tcpNetworkStr, s.cfg.ListenAddr, tlsConfig)
+		s.muxListener, err = tls.Listen(tcpNetworkStr, s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(tcpNetworkStr, s.cfg.ListenAddr)
+		s.muxListener, err = net.Listen(tcpNetworkStr, s.listenURL.Host)
 	}
 	if err != nil {
 		return err

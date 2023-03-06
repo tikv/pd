@@ -31,9 +31,11 @@ import (
 )
 
 const (
-	defaultName              = "Resource Manager"
-	defaultBackendEndpoints  = "http://127.0.0.1:2379"
-	defaultListenAddr        = "127.0.0.1:2380"
+	defaultName = "Resource Manager"
+	// defaultBackendEndpoints is the default etcd endpoints for the resource manager.
+	defaultBackendEndpoints = "http://127.0.0.1:2379"
+	// defaultListenAddr is the default listening address for the resource manager.
+	defaultListenAddr        = "http://127.0.0.1:3379"
 	defaultEnableGRPCGateway = true
 
 	defaultLogFormat           = "text"

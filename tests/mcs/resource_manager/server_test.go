@@ -25,12 +25,12 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"google.golang.org/grpc"
 )
 
 func TestResourceManagerServer(t *testing.T) {
@@ -51,8 +51,7 @@ func TestResourceManagerServer(t *testing.T) {
 	cfg, err := rm.NewTestDefaultConfig()
 	re.NoError(err)
 	cfg.BackendEndpoints = leader.GetAddr()
-	listenAddr := tempurl.Alloc()
-	cfg.ListenAddr = strings.TrimPrefix(listenAddr, "http://")
+	cfg.ListenAddr = tempurl.Alloc()
 
 	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
 	re.NoError(err)
@@ -62,9 +61,10 @@ func TestResourceManagerServer(t *testing.T) {
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, cfg.ListenAddr, grpc.WithInsecure())
+	cc, err := grpcutil.GetClientConn(ctx, cfg.ListenAddr, nil)
 	re.NoError(err)
 	defer cc.Close()
+
 	c := rmpb.NewResourceManagerClient(cc)
 	_, err = c.GetResourceGroup(context.Background(), &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: "pingcap",
@@ -72,7 +72,7 @@ func TestResourceManagerServer(t *testing.T) {
 	re.ErrorContains(err, "resource group not found")
 
 	// Test registered REST HTTP Handler
-	url := listenAddr + "/resource-manager/api/v1/config"
+	url := cfg.ListenAddr + "/resource-manager/api/v1/config"
 	{
 		resp, err := http.Get(url + "/groups")
 		re.NoError(err)
@@ -123,7 +123,7 @@ func TestResourceManagerRegister(t *testing.T) {
 	cfg, err := rm.NewTestDefaultConfig()
 	re.NoError(err)
 	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = strings.TrimPrefix(tempurl.Alloc(), "http://")
+	cfg.ListenAddr = tempurl.Alloc()
 
 	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
 	re.NoError(err)
