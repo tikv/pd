@@ -140,7 +140,7 @@ func (s *Server) GetHandler() *Handler {
 	return s.handler
 }
 
-// GetHandler returns the basic server.
+// GetBasicServer returns the basic server.
 func (s *Server) GetBasicServer() bs.Server {
 	return s
 }

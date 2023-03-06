@@ -42,7 +42,7 @@ func NewAdminHandler(handler Handler, rd *render.Render) *AdminHandler {
 	}
 }
 
-// ResetTS
+// ResetTS is the http.HandlerFunc of ResetTS
 // FIXME: details of input json body params
 // @Tags     admin
 // @Summary  Reset the ts.
