@@ -26,11 +26,12 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 )
@@ -49,7 +50,7 @@ type ruleCheckerTestSuite struct {
 }
 
 func (suite *ruleCheckerTestSuite) SetupTest() {
-	cfg := config.NewTestOptions()
+	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
@@ -72,7 +73,7 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeer() {
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
-	suite.Equal(core.High, op.GetPriorityLevel())
+	suite.Equal(constant.High, op.GetPriorityLevel())
 	suite.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 }
 
@@ -125,7 +126,7 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	op = suite.rc.Check(r)
 	suite.NotNil(op)
 	suite.Equal("fast-replace-rule-down-peer", op.Desc())
-	suite.Equal(core.Urgent, op.GetPriorityLevel())
+	suite.Equal(constant.Urgent, op.GetPriorityLevel())
 	var add operator.AddLearner
 	suite.IsType(add, op.Step(0))
 	suite.cluster.SetStoreUp(2)
@@ -133,7 +134,7 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("replace-rule-offline-peer", op.Desc())
-	suite.Equal(core.High, op.GetPriorityLevel())
+	suite.Equal(constant.High, op.GetPriorityLevel())
 	suite.IsType(add, op.Step(0))
 
 	suite.cluster.SetStoreUp(2)
@@ -1360,7 +1361,7 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
-	suite.Equal(core.High, op.GetPriorityLevel())
+	suite.Equal(constant.High, op.GetPriorityLevel())
 	suite.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 	_, exist = suite.rc.pendingList.Get(1)
 	suite.False(exist)

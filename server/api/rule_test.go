@@ -966,7 +966,7 @@ func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
 		re, "invalid region id"))
 	suite.NoError(err)
 
-	suite.svr.GetRaftCluster().GetOpts().GetReplicationConfig().EnablePlacementRules = false
+	suite.svr.GetRaftCluster().GetReplicationConfig().EnablePlacementRules = false
 	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 1)
 	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusPreconditionFailed), tu.StringContain(
 		re, "placement rules feature is disabled"))

@@ -21,8 +21,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
 )
@@ -37,11 +37,11 @@ type balanceWitnessSchedulerTestSuite struct {
 	tc     *mockcluster.Cluster
 	lb     schedule.Scheduler
 	oc     *schedule.OperatorController
-	opt    *config.PersistOptions
+	conf   config.Config
 }
 
 func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
-	suite.cancel, suite.opt, suite.tc, suite.oc = prepareSchedulersTest()
+	suite.cancel, suite.conf, suite.tc, suite.oc = prepareSchedulersTest()
 	suite.tc.RuleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "pd",

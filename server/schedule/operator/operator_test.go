@@ -25,9 +25,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/server/schedule/config"
 )
 
 type operatorTestSuite struct {
@@ -43,14 +45,12 @@ func TestOperatorTestSuite(t *testing.T) {
 }
 
 func (suite *operatorTestSuite) SetupTest() {
-	cfg := config.NewTestOptions()
+	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetMaxMergeRegionSize(2)
 	suite.cluster.SetMaxMergeRegionKeys(2)
-	suite.cluster.SetLabelPropertyConfig(config.LabelPropertyConfig{
-		config.RejectLeader: {{Key: "reject", Value: "leader"}},
-	})
+	suite.cluster.SetLabelProperty(config.RejectLeader, "reject", "leader")
 	stores := map[uint64][]string{
 		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {},
 		7: {"reject", "leader"},
@@ -115,7 +115,7 @@ func (suite *operatorTestSuite) TestOperator() {
 		RemovePeer{FromStore: 3},
 	}
 	op := suite.newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
-	suite.Equal(core.Urgent, op.GetPriorityLevel())
+	suite.Equal(constant.Urgent, op.GetPriorityLevel())
 	suite.checkSteps(op, steps)
 	op.Start()
 	suite.Nil(op.Check(region))
@@ -131,7 +131,7 @@ func (suite *operatorTestSuite) TestOperator() {
 		RemovePeer{FromStore: 2},
 	}
 	op = suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-	suite.Equal(core.Medium, op.GetPriorityLevel())
+	suite.Equal(constant.Medium, op.GetPriorityLevel())
 	suite.checkSteps(op, steps)
 	op.Start()
 	suite.Equal(RemovePeer{FromStore: 2}, op.Check(region))
