@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -33,6 +34,27 @@ import (
 type TSOClient interface {
 	// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 	GetTSOAllocators() *sync.Map
+}
+
+type tsoRequest struct {
+	start      time.Time
+	clientCtx  context.Context
+	requestCtx context.Context
+	done       chan error
+	physical   int64
+	logical    int64
+	keyspaceID uint32
+	dcLocation string
+}
+
+var tsoReqPool = sync.Pool{
+	New: func() interface{} {
+		return &tsoRequest{
+			done:     make(chan error, 1),
+			physical: 0,
+			logical:  0,
+		}
+	},
 }
 
 type tsoClient struct {

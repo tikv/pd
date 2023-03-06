@@ -512,27 +512,6 @@ func (c *client) getClient() pdpb.PDClient {
 	return c.leaderClient()
 }
 
-type tsoRequest struct {
-	start      time.Time
-	clientCtx  context.Context
-	requestCtx context.Context
-	done       chan error
-	physical   int64
-	logical    int64
-	keyspaceID uint32
-	dcLocation string
-}
-
-var tsoReqPool = sync.Pool{
-	New: func() interface{} {
-		return &tsoRequest{
-			done:     make(chan error, 1),
-			physical: 0,
-			logical:  0,
-		}
-	},
-}
-
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 	return c.GetLocalTSAsync(ctx, globalDCLocation)
 }
