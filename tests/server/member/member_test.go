@@ -307,7 +307,7 @@ func TestGetLeader(t *testing.T) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	done := make(chan bool)
-	svr, err := server.CreateServer(ctx, cfg, server.CreateMockHandler(re, "127.0.0.1"))
+	svr, err := server.CreateServer(ctx, cfg, nil, server.CreateMockHandler(re, "127.0.0.1"))
 	re.NoError(err)
 	defer svr.Close()
 	re.NoError(svr.Run())

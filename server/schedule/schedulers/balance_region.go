@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -135,7 +136,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	sourceStores := filter.SelectSourceStores(stores, s.filters, opts, collector, s.filterCounter)
 	opInfluence := s.opController.GetOpInfluence(cluster)
 	s.OpController.GetFastOpInfluence(cluster, opInfluence)
-	kind := core.NewScheduleKind(core.RegionKind, core.BySize)
+	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	sort.Slice(sourceStores, func(i, j int) bool {

@@ -16,7 +16,7 @@ package filter
 
 import (
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/config"
 )
 
 // StoreComparer compares 2 stores. Often used for StoreCandidates to
@@ -25,10 +25,10 @@ type StoreComparer func(a, b *core.StoreInfo) int
 
 // RegionScoreComparer creates a StoreComparer to sort store by region
 // score.
-func RegionScoreComparer(opt *config.PersistOptions) StoreComparer {
+func RegionScoreComparer(conf config.Config) StoreComparer {
 	return func(a, b *core.StoreInfo) int {
-		sa := a.RegionScore(opt.GetRegionScoreFormulaVersion(), opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0)
-		sb := b.RegionScore(opt.GetRegionScoreFormulaVersion(), opt.GetHighSpaceRatio(), opt.GetLowSpaceRatio(), 0)
+		sa := a.RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), 0)
+		sb := b.RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), 0)
 		switch {
 		case sa > sb:
 			return 1

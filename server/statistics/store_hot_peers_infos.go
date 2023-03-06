@@ -19,6 +19,7 @@ import (
 	"math"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 )
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
@@ -35,7 +36,7 @@ type StoreHotPeersStat map[uint64]*HotPeersStat
 // CollectHotPeerInfos only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*HotPeerStat) *StoreHotPeersInfos {
 	peerLoadSum := make([]float64, DimLen)
-	collect := func(kind core.ResourceKind) StoreHotPeersStat {
+	collect := func(kind constant.ResourceKind) StoreHotPeersStat {
 		ret := make(StoreHotPeersStat, len(stores))
 		for _, store := range stores {
 			id := store.GetID()
@@ -62,8 +63,8 @@ func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*Hot
 		return ret
 	}
 	return &StoreHotPeersInfos{
-		AsPeer:   collect(core.RegionKind),
-		AsLeader: collect(core.LeaderKind),
+		AsPeer:   collect(constant.RegionKind),
+		AsLeader: collect(constant.LeaderKind),
 	}
 }
 
@@ -76,13 +77,13 @@ func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, re
 		storesLoads,
 		regionStats,
 		isTraceRegionFlow,
-		typ, core.LeaderKind)
+		typ, constant.LeaderKind)
 	stLoadInfosAsPeer := SummaryStoresLoad(
 		stInfos,
 		storesLoads,
 		regionStats,
 		isTraceRegionFlow,
-		typ, core.RegionKind)
+		typ, constant.RegionKind)
 
 	asLeader := make(StoreHotPeersStat, len(stLoadInfosAsLeader))
 	asPeer := make(StoreHotPeersStat, len(stLoadInfosAsPeer))
@@ -107,7 +108,7 @@ func SummaryStoresLoad(
 	storeHotPeers map[uint64][]*HotPeerStat,
 	isTraceRegionFlow bool,
 	rwTy RWType,
-	kind core.ResourceKind,
+	kind constant.ResourceKind,
 ) map[uint64]*StoreLoadDetail {
 	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(rate,count)
 	loadDetail := make(map[uint64]*StoreLoadDetail, len(storesLoads))
@@ -138,7 +139,7 @@ func summaryStoresLoadByEngine(
 	storesLoads map[uint64][]float64,
 	storeHotPeers map[uint64][]*HotPeerStat,
 	rwTy RWType,
-	kind core.ResourceKind,
+	kind constant.ResourceKind,
 	collector storeCollector,
 ) []*StoreLoadDetail {
 	loadDetail := make([]*StoreLoadDetail, 0, len(storeInfos))
@@ -252,10 +253,10 @@ func summaryStoresLoadByEngine(
 	return loadDetail
 }
 
-func filterHotPeers(kind core.ResourceKind, peers []*HotPeerStat) []*HotPeerStat {
+func filterHotPeers(kind constant.ResourceKind, peers []*HotPeerStat) []*HotPeerStat {
 	ret := make([]*HotPeerStat, 0, len(peers))
 	for _, peer := range peers {
-		if kind != core.LeaderKind || peer.IsLeader() {
+		if kind != constant.LeaderKind || peer.IsLeader() {
 			ret = append(ret, peer)
 		}
 	}

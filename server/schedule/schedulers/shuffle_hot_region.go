@@ -17,7 +17,7 @@ package schedulers
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -97,7 +97,7 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bo
 	shuffleHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
-	operators := s.randomSchedule(cluster, s.stLoadInfos[buildResourceType(rw, core.LeaderKind)])
+	operators := s.randomSchedule(cluster, s.stLoadInfos[buildResourceType(rw, constant.LeaderKind)])
 	return operators, nil
 }
 
@@ -150,7 +150,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster schedule.Cluster, loa
 			log.Debug("fail to create move leader operator", errs.ZapError(err))
 			return nil
 		}
-		op.SetPriorityLevel(core.Low)
+		op.SetPriorityLevel(constant.Low)
 		op.Counters = append(op.Counters, shuffleHotRegionNewOperatorCounter)
 		return []*operator.Operator{op}
 	}

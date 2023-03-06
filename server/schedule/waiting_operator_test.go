@@ -19,7 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/server/schedule/operator"
 )
 
@@ -38,22 +38,22 @@ func addOperators(wop WaitingOperator) {
 	op := operator.NewTestOperator(uint64(1), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(1)},
 	}...)
-	op.SetPriorityLevel(core.Medium)
+	op.SetPriorityLevel(constant.Medium)
 	wop.PutOperator(op)
 	op = operator.NewTestOperator(uint64(2), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(2)},
 	}...)
-	op.SetPriorityLevel(core.High)
+	op.SetPriorityLevel(constant.High)
 	wop.PutOperator(op)
 	op = operator.NewTestOperator(uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(3)},
 	}...)
-	op.SetPriorityLevel(core.Low)
+	op.SetPriorityLevel(constant.Low)
 	wop.PutOperator(op)
 	op = operator.NewTestOperator(uint64(4), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
 		operator.RemovePeer{FromStore: uint64(4)},
 	}...)
-	op.SetPriorityLevel(core.Urgent)
+	op.SetPriorityLevel(constant.Urgent)
 	wop.PutOperator(op)
 }
 
@@ -107,7 +107,7 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 			operator.RemovePeer{FromStore: uint64(3)},
 		}...)
 		op.SetDesc("testOperatorHigh")
-		op.SetPriorityLevel(core.High)
+		op.SetPriorityLevel(constant.High)
 		rb.PutOperator(op)
 
 		for i := 0; i < 2; i++ {

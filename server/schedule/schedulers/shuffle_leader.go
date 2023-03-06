@@ -17,6 +17,7 @@ package schedulers
 import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -109,7 +110,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		log.Debug("fail to create shuffle leader operator", errs.ZapError(err))
 		return nil, nil
 	}
-	op.SetPriorityLevel(core.Low)
+	op.SetPriorityLevel(constant.Low)
 	op.Counters = append(op.Counters, shuffleLeaderNewOperatorCounter)
 	return []*operator.Operator{op}, nil
 }

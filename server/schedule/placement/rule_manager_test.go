@@ -22,16 +22,17 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/server/config"
 )
 
 func newTestManager(t *testing.T) (endpoint.RuleStorage, *RuleManager) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
-	manager := NewRuleManager(store, nil, config.NewTestOptions())
+	manager := NewRuleManager(store, nil, mockconfig.NewTestOptions())
 	err = manager.Initialize(3, []string{"zone", "rack", "host"})
 	re.NoError(err)
 	return store, manager
@@ -76,10 +77,10 @@ func TestAdjustRule(t *testing.T) {
 		re.Error(manager.adjustRule(&rules[i], "group"))
 	}
 
-	manager.SetKeyType(core.Table.String())
+	manager.SetKeyType(constant.Table.String())
 	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"))
 
-	manager.SetKeyType(core.Txn.String())
+	manager.SetKeyType(constant.Txn.String())
 	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"))
 
 	re.Error(manager.adjustRule(&Rule{
@@ -425,7 +426,7 @@ func TestCheckApplyRules(t *testing.T) {
 func TestCacheManager(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t)
-	manager.opt.SetPlacementRulesCacheEnabled(true)
+	manager.conf.SetPlacementRulesCacheEnabled(true)
 	rules := addExtraRules(0)
 	re.NoError(manager.SetRules(rules))
 	stores := makeStores()

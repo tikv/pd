@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
 type mockSplitRegionsHandler struct {
@@ -81,7 +81,7 @@ func (suite *regionSplitterTestSuite) TearDownTest() {
 }
 
 func (suite *regionSplitterTestSuite) TestRegionSplitter() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	handler := newMockSplitRegionsHandler()
@@ -108,7 +108,7 @@ func (suite *regionSplitterTestSuite) TestRegionSplitter() {
 }
 
 func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	handler := newMockSplitRegionsHandler()
