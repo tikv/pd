@@ -49,7 +49,8 @@ type StoreInfluence struct {
 	LeaderCount  int64
 	WitnessCount int64
 	StepCost     map[storelimit.Type]int64
-	SendCost     int64
+	// records the cost of the sender.
+	SendCost int64
 }
 
 // GetSendCost returns the cost of sending snapshot.

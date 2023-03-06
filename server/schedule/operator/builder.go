@@ -855,7 +855,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 }
 
 func (b *Builder) execSwitchToNonWitness(peer *metapb.Peer) {
-	b.steps = append(b.steps, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId()})
+	b.steps = append(b.steps, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId(), SendStore: b.originLeaderStoreID})
 	delete(b.toNonWitness, peer.GetStoreId())
 }
 
@@ -882,7 +882,7 @@ func (b *Builder) execBatchSwitchWitnesses() {
 
 	for _, nw := range b.toNonWitness.IDs() {
 		peer := b.toNonWitness[nw]
-		step.ToNonWitnesses = append(step.ToNonWitnesses, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId()})
+		step.ToNonWitnesses = append(step.ToNonWitnesses, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId(), SendStore: b.originLeaderStoreID})
 	}
 	b.toNonWitness = newPeersMap()
 

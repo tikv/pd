@@ -279,7 +279,7 @@ func (bw BecomeWitness) GetCmd(_ *core.RegionInfo, _ bool) *pdpb.RegionHeartbeat
 
 // BecomeNonWitness is an OpStep that makes a peer become a non-witness.
 type BecomeNonWitness struct {
-	PeerID, StoreID uint64
+	PeerID, StoreID, SendStore uint64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -327,6 +327,12 @@ func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.Regio
 	to.WitnessCount -= 1
 	to.RegionSize += regionSize
 	to.AdjustStepCost(storelimit.AddPeer, regionSize)
+
+	if bn.SendStore == 0 {
+		return
+	}
+	send := opInfluence.GetStoreInfluence(bn.SendStore)
+	send.SendCost += regionSize
 }
 
 // Timeout returns duration that current step may take.
@@ -491,7 +497,6 @@ func (al AddLearner) CheckInProgress(ci ClusterInformer, region *core.RegionInfo
 // Influence calculates the store difference that current step makes.
 func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	to := opInfluence.GetStoreInfluence(al.ToStore)
-	send := opInfluence.GetStoreInfluence(al.SendStore)
 	regionSize := region.GetApproximateSize()
 	if al.IsWitness {
 		to.WitnessCount += 1
@@ -506,7 +511,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	if al.SendStore == 0 {
 		return
 	}
-
+	send := opInfluence.GetStoreInfluence(al.SendStore)
 	send.SendCost += regionSize
 }
 

@@ -486,34 +486,3 @@ func (suite *operatorTestSuite) TestRecord() {
 	suite.Equal(now, ob.FinishTime)
 	suite.Greater(ob.duration.Seconds(), time.Second.Seconds())
 }
-
-func (suite *operatorTestSuite) TestInfluenceCache() {
-	region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
-	steps := []OpStep{
-		AddPeer{ToStore: 1, PeerID: 1},
-		TransferLeader{FromStore: 2, ToStore: 1},
-		RemovePeer{FromStore: 2},
-	}
-	op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-	influence := NewOpInfluence()
-	op.TotalInfluence(*influence, region)
-
-	check := func(influence *StoreInfluence, limit storelimit.Type) {
-		if limit == storelimit.AddPeer {
-			suite.Equal(int64(1), influence.RegionCount)
-			suite.Equal(int64(50), influence.RegionSize)
-			suite.Equal(int64(1000), influence.StepCost[storelimit.AddPeer])
-		} else {
-			suite.Equal(int64(-1), influence.RegionCount)
-			suite.Equal(int64(-50), influence.RegionSize)
-			suite.Equal(int64(1000), influence.StepCost[storelimit.RemovePeer])
-		}
-	}
-	check(influence.GetStoreInfluence(1), storelimit.AddPeer)
-	check(influence.GetStoreInfluence(2), storelimit.RemovePeer)
-
-	cache := NewOpInfluence()
-	op.TotalInfluence(*cache, nil)
-	check(cache.GetStoreInfluence(1), storelimit.AddPeer)
-	check(cache.GetStoreInfluence(2), storelimit.RemovePeer)
-}

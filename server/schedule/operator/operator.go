@@ -344,7 +344,6 @@ func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionIn
 	for step := 0; step < len(o.steps); step++ {
 		o.steps[step].Influence(opInfluence, region)
 	}
-	return
 }
 
 // OpHistory is used to log and visualize completed operators.
