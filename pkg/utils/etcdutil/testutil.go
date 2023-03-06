@@ -28,7 +28,7 @@ import (
 // NewTestSingleConfig is used to create a etcd config for the unit test purpose.
 func NewTestSingleConfig(t *testing.T) *embed.Config {
 	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd_" + strconv.FormatInt(time.Now().UnixNano()%1000, 10)
+	cfg.Name = genRandName()
 	cfg.Dir = t.TempDir()
 	cfg.WalDir = ""
 	cfg.Logger = "zap"
@@ -45,4 +45,8 @@ func NewTestSingleConfig(t *testing.T) *embed.Config {
 	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
+}
+
+func genRandName() string {
+	return "test_etcd_" + strconv.FormatInt(time.Now().UnixNano()%10000, 10)
 }

@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -248,10 +247,13 @@ func TestEtcdClientSync(t *testing.T) {
 func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	re := require.New(t)
 	var err error
+	// Test with enable check.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval", "return(true)"))
 	err = checkEtcdWithHangLeader(t)
 	re.NoError(err)
 	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval"))
+
+	// Test with disable check.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck", "return(true)"))
 	err = checkEtcdWithHangLeader(t)
 	re.Error(err)
@@ -294,7 +296,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 func checkAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
 	re := require.New(t)
 	cfg2 := NewTestSingleConfig(t)
-	cfg2.Name = "test_etcd_" + strconv.FormatInt(time.Now().UnixNano()%1000, 10)
+	cfg2.Name = genRandName()
 	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
 	cfg2.ClusterState = embed.ClusterStateFlagExisting
 	peerURL := cfg2.LPUrls[0].String()
