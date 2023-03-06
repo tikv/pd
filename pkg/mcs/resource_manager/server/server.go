@@ -53,7 +53,7 @@ const (
 	// resourceManagerKeyspaceGroupPrimaryElectionPrefix defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/pd/<cluster-id>/microservice/resource_manager/keyspace-group-XXXXX/primary"
 	// in which XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	resourceManagerKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/resource_manager/keyspace-group-"
+	resourceManagerKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/resource-manager/keyspace-group-"
 	// defaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
 	defaultGRPCGracefulStopTimeout = 5 * time.Second
 	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
@@ -169,7 +169,7 @@ func (s *Server) campaignLeader() {
 		s.participant.ResetLeader()
 	})
 
-	// maintain the the leadership, after this, Resource Manager could be ready to provide service.
+	// maintain the leadership, after this, Resource Manager could be ready to provide service.
 	s.participant.KeepLeader(ctx)
 	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Member().Name))
 
