@@ -23,16 +23,18 @@ import (
 	"github.com/unrolled/render"
 )
 
-// Handler defines the common basic behaviors of a tso handler
+// Handler defines the common behaviors of a basic tso handler.
 type Handler interface {
 	ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) error
 }
 
+// AdminHandler wrap the basic tso handler to provide http service.
 type AdminHandler struct {
 	handler Handler
 	rd      *render.Render
 }
 
+// NewAdminHandler returns a new admin handler.
 func NewAdminHandler(handler Handler, rd *render.Render) *AdminHandler {
 	return &AdminHandler{
 		handler: handler,
