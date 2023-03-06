@@ -101,13 +101,13 @@ func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitG
 		updateTSOConnectionCtxsCh: make(chan struct{}, 1),
 	}
 
-	eventSrc.AddTSOAllocServingAddrsUpdatedCallback(c.updateTSOAllocatorServingAddrs)
+	eventSrc.AddTSOServAddrsUpdatedCallback(c.updateTSOAllocatorServingAddrs)
 	c.sd.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
 
 	return c
 }
 
-func (c *tsoClient) Setup() error {
+func (c *tsoClient) setup() error {
 	// Start the daemons.
 	c.wg.Add(2)
 	go c.tsLoop()
@@ -120,6 +120,7 @@ func (c *tsoClient) Setup() error {
 	return nil
 }
 
+// Close closes the TSO client
 func (c *tsoClient) Close() {
 	c.tsoDispatcher.Range(func(_, dispatcherInterface interface{}) bool {
 		if dispatcherInterface != nil {
@@ -171,7 +172,7 @@ func (c *tsoClient) updateTSOAllocatorServingAddrs(allocatorMap map[string]strin
 		return nil
 	}
 
-	updated := 0
+	updated := false
 
 	// Switch to the new one
 	for dcLocation, addr := range allocatorMap {
@@ -182,7 +183,7 @@ func (c *tsoClient) updateTSOAllocatorServingAddrs(allocatorMap map[string]strin
 		if exist && addr == oldAddr {
 			continue
 		}
-		updated++
+		updated = true
 		if _, err := c.sd.GetOrCreateGRPCConn(addr); err != nil {
 			log.Warn("[pd[tso]] failed to connect dc tso allocator serving address",
 				zap.String("dc-location", dcLocation),
@@ -200,7 +201,7 @@ func (c *tsoClient) updateTSOAllocatorServingAddrs(allocatorMap map[string]strin
 	// Garbage collection of the old TSO allocator primaries
 	c.gcAllocatorServingAddr(allocatorMap)
 
-	if updated > 0 {
+	if updated {
 		c.scheduleCheckTSODispatcher()
 	}
 

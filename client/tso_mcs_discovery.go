@@ -58,14 +58,14 @@ type tsoMcsDiscovery struct {
 	// addr -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
-	// primarySwitchedCallbacks will be called after the primary swichted
-	primarySwitchedCallbacks []func()
-	// membersChangedCallbacks will be called after there is any membership
+	// primarySwitchedCbs will be called after the primary swichted
+	primarySwitchedCbs []func()
+	// membersChangedCbs will be called after there is any membership
 	// change in the primary and followers
-	membersChangedCallbacks []func()
-	// tsoAllocPrimariesUpdatedCallback will be called when the global/local
-	// tso allocator primary list is updated. The input is a map {DC Localtion -> Leader Addr}
-	tsoAllocPrimariesUpdatedCallback []tsoAllocServingAddrUpdatedFunc
+	membersChangedCbs []func()
+	// allocPrimariesUpdatedCbs will be called when the global/local tso allocator primary list is updated.
+	// The input is a map {DC Localtion -> Leader Addr}
+	allocPrimariesUpdatedCbs []tsoServAddrsUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
@@ -214,19 +214,19 @@ func (c *tsoMcsDiscovery) CheckMemberChanged() error {
 // AddServingAddrSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
 func (c *tsoMcsDiscovery) AddServingAddrSwitchedCallback(callbacks ...func()) {
-	c.primarySwitchedCallbacks = append(c.primarySwitchedCallbacks, callbacks...)
+	c.primarySwitchedCbs = append(c.primarySwitchedCbs, callbacks...)
 }
 
 // AddServiceAddrsSwitchedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.
 func (c *tsoMcsDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
-	c.membersChangedCallbacks = append(c.membersChangedCallbacks, callbacks...)
+	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
-// AddTSOAllocServingAddrsUpdatedCallback adds callbacks which will be called
+// AddTSOServAddrsUpdatedCallback adds callbacks which will be called
 // when the global/local tso allocator leader list is updated.
-func (c *tsoMcsDiscovery) AddTSOAllocServingAddrsUpdatedCallback(callbacks ...tsoAllocServingAddrUpdatedFunc) {
-	c.tsoAllocPrimariesUpdatedCallback = append(c.tsoAllocPrimariesUpdatedCallback, callbacks...)
+func (c *tsoMcsDiscovery) AddTSOServAddrsUpdatedCallback(callbacks ...tsoServAddrsUpdatedFunc) {
+	c.allocPrimariesUpdatedCbs = append(c.allocPrimariesUpdatedCbs, callbacks...)
 }
 
 // getPrimaryAddr returns the primary address.
@@ -263,7 +263,7 @@ func (c *tsoMcsDiscovery) switchPrimary(addrs []string) error {
 	c.primary.Store(addr)
 	c.switchTSOAllocatorPrimary(globalDCLocation, addr)
 	// Run callbacks
-	for _, cb := range c.primarySwitchedCallbacks {
+	for _, cb := range c.primarySwitchedCbs {
 		cb()
 	}
 	log.Info("[pd(tso)] switch primary", zap.String("new-primary", addr), zap.String("old-primary", oldPrimary))
@@ -274,7 +274,7 @@ func (c *tsoMcsDiscovery) switchTSOAllocatorPrimary(dcLocation string, addr stri
 	allocMap := map[string]string{dcLocation: addr}
 
 	// Run callbacks to refelect any possible change in the global/local tso allocator.
-	for _, cb := range c.tsoAllocPrimariesUpdatedCallback {
+	for _, cb := range c.allocPrimariesUpdatedCbs {
 		if err := cb(allocMap); err != nil {
 			return err
 		}

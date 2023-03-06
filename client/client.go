@@ -351,7 +351,7 @@ func (c *client) setup() error {
 	c.wg.Add(1)
 	go c.leaderCheckLoop()
 
-	return c.tsoc.Setup()
+	return c.tsoc.setup()
 }
 
 func (c *client) scheduleUpdateTokenConnection() {
