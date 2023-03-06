@@ -46,7 +46,7 @@ func init() {
 	}
 }
 
-// Service is the resource group service.
+// Service is the tso service.
 type Service struct {
 	apiHandlerEngine *gin.Engine
 	baseEndpoint     *gin.RouterGroup
@@ -100,7 +100,7 @@ func (s *Service) handler() http.Handler {
 // @Success  200  {string}  string  "Reset ts successfully."
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  403  {string}  string  "Reset ts is forbidden."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Failure  500  {string}  string  "TSO server failed to proceed the request."
 // @Router   /admin/reset-ts [post]
 // if force-use-larger=true:
 //
