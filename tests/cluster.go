@@ -43,7 +43,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/keyspace"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -87,7 +87,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	}
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, nil, serviceBuilders...)
 	if err != nil {
 		return nil, err
 	}

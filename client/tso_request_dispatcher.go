@@ -72,7 +72,7 @@ func (c *client) dispatchRequest(dcLocation string, request *tsoRequest) error {
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
 		log.Error("[pd/tso] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
-		c.bc.ScheduleCheckMemberChanged()
+		c.tsobc.ScheduleCheckMemberChanged()
 		return err
 	}
 	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
@@ -112,7 +112,7 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 
 func (c *client) updateTSODispatcher() {
 	// Set up the new TSO dispatcher and batch controller.
-	c.bc.GetTSOAllocators().Range(func(dcLocationKey, _ interface{}) bool {
+	c.tsobc.GetTSOAllocators().Range(func(dcLocationKey, _ interface{}) bool {
 		dcLocation := dcLocationKey.(string)
 		if !c.checkTSODispatcher(dcLocation) {
 			c.createTSODispatcher(dcLocation)
@@ -126,7 +126,7 @@ func (c *client) updateTSODispatcher() {
 		if dcLocation == globalDCLocation {
 			return true
 		}
-		if dispatcher, exist := c.bc.GetTSOAllocators().Load(dcLocation); !exist {
+		if dispatcher, exist := c.tsobc.GetTSOAllocators().Load(dcLocation); !exist {
 			log.Info("[pd/tso] delete unused tso dispatcher", zap.String("dc-location", dcLocation))
 			dispatcher.(*tsoDispatcher).dispatcherCancel()
 			c.tsoDispatcher.Delete(dcLocation)
@@ -151,7 +151,7 @@ func (c *client) tsCancelLoop() {
 	defer ticker.Stop()
 	for {
 		// Watch every dc-location's tsDeadlineCh
-		c.bc.GetTSOAllocators().Range(func(dcLocation, _ interface{}) bool {
+		c.tsobc.GetTSOAllocators().Range(func(dcLocation, _ interface{}) bool {
 			c.watchTSDeadline(tsCancelLoopCtx, dcLocation.(string))
 			return true
 		})
@@ -227,7 +227,7 @@ func (c *client) checkAllocator(
 		forwardCancel()
 		requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(0)
 	}()
-	cc, u := c.bc.GetTSOAllocatorClientConnByDCLocation(dc)
+	cc, u := c.tsobc.GetTSOAllocatorClientConnByDCLocation(dc)
 	healthCli := healthpb.NewHealthClient(cc)
 	for {
 		// the pd/allocator leader change, we need to re-establish the stream
@@ -257,7 +257,7 @@ func (c *client) checkAllocator(
 		case <-time.After(time.Second):
 			// To ensure we can get the latest allocator leader
 			// and once the leader is changed, we can exit this function.
-			_, u = c.bc.GetTSOAllocatorClientConnByDCLocation(dc)
+			_, u = c.tsobc.GetTSOAllocatorClientConnByDCLocation(dc)
 		}
 	}
 }
@@ -396,7 +396,7 @@ tsoBatchLoop:
 				case <-streamLoopTimer.C:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[pd/tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-					c.bc.ScheduleCheckMemberChanged()
+					c.tsobc.ScheduleCheckMemberChanged()
 					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					continue tsoBatchLoop
 				case <-time.After(retryInterval):
@@ -442,7 +442,7 @@ tsoBatchLoop:
 				return
 			default:
 			}
-			c.bc.ScheduleCheckMemberChanged()
+			c.tsobc.ScheduleCheckMemberChanged()
 			log.Error("[pd/tso] getTS error", zap.String("dc-location", dc), zap.String("stream-addr", streamAddr), errs.ZapError(errs.ErrClientGetTSO, err))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
@@ -450,7 +450,7 @@ tsoBatchLoop:
 			stream = nil
 			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
-				if err := c.bc.CheckMemberChanged(); err != nil {
+				if err := c.tsobc.CheckMemberChanged(); err != nil {
 					select {
 					case <-dispatcherCtx.Done():
 						return
@@ -477,7 +477,7 @@ func (c *client) allowTSOFollowerProxy(dc string) bool {
 // connectionCtxs will only have only one stream to choose when the TSO Follower Proxy is off.
 func (c *client) chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext) {
 	idx := 0
-	connectionCtxs.Range(func(addr, cc interface{}) bool {
+	connectionCtxs.Range(func(_, cc interface{}) bool {
 		j := rand.Intn(idx + 1)
 		if j < 1 {
 			connectionCtx = cc.(*tsoConnectionContext)
@@ -543,8 +543,8 @@ func (c *client) tryConnectToTSO(
 	// retry several times before falling back to the follower when the network problem happens
 
 	for i := 0; i < maxRetryTimes; i++ {
-		c.bc.ScheduleCheckMemberChanged()
-		cc, url = c.bc.GetTSOAllocatorClientConnByDCLocation(dc)
+		c.tsobc.ScheduleCheckMemberChanged()
+		cc, url = c.tsobc.GetTSOAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
 		failpoint.Inject("unreachableNetwork", func() {
@@ -580,7 +580,7 @@ func (c *client) tryConnectToTSO(
 		backupClientConn, addr := c.backupClientConn()
 		if backupClientConn != nil {
 			log.Info("[pd/tso] fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("addr", addr))
-			forwardedHost, ok := c.bc.GetTSOAllocatorServingAddrByDCLocation(dc)
+			forwardedHost, ok := c.tsobc.GetTSOAllocatorServingAddrByDCLocation(dc)
 			if !ok {
 				return errors.Errorf("cannot find the allocator leader in %s", dc)
 			}
@@ -608,7 +608,7 @@ func (c *client) tryConnectToTSO(
 // or of keyspace group primary/secondaries.
 func (c *client) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 	var (
-		addrs          = c.bc.GetURLs()
+		addrs          = c.tsobc.GetURLs()
 		streamBuilders = make(map[string]tsoStreamBuilder, len(addrs))
 		cc             *grpc.ClientConn
 		err            error
@@ -617,7 +617,7 @@ func (c *client) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 		if len(addrs) == 0 {
 			continue
 		}
-		if cc, err = c.bc.GetOrCreateGRPCConn(addr); err != nil {
+		if cc, err = c.tsobc.GetOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
 		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
@@ -635,7 +635,7 @@ func (c *client) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 func (c *client) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc string, connectionCtxs *sync.Map) error {
 	tsoStreamBuilders := c.getAllTSOStreamBuilders()
 	leaderAddr := c.GetLeaderAddr()
-	forwardedHost, ok := c.bc.GetTSOAllocatorServingAddrByDCLocation(dc)
+	forwardedHost, ok := c.tsobc.GetTSOAllocatorServingAddrByDCLocation(dc)
 	if !ok {
 		return errors.Errorf("cannot find the allocator leader in %s", dc)
 	}
@@ -692,7 +692,7 @@ func (c *client) processTSORequests(stream tsoStream, dcLocation string, tbc *ts
 
 	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
-	physical, logical, suffixBits, err := stream.processRequests(c.GetClusterID(c.ctx), dcLocation, requests, tbc.batchStartTime)
+	physical, logical, suffixBits, err := stream.processRequests(c.tsobc.GetClusterID(c.ctx), dcLocation, requests, tbc.batchStartTime)
 	if err != nil {
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err

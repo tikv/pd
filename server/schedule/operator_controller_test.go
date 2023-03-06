@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -58,7 +58,7 @@ func (suite *operatorControllerTestSuite) TearDownSuite() {
 
 // issue #1338
 func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	oc := NewOperatorController(suite.ctx, tc, nil)
 	tc.AddLeaderStore(2, 1)
@@ -100,7 +100,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 }
 
 func (suite *operatorControllerTestSuite) TestOperatorStatus() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(suite.ctx, tc, stream)
@@ -135,7 +135,7 @@ func (suite *operatorControllerTestSuite) TestOperatorStatus() {
 }
 
 func (suite *operatorControllerTestSuite) TestFastFailOperator() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(suite.ctx, tc, stream)
@@ -169,7 +169,7 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 
 // Issue 3353
 func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(suite.ctx, tc, stream)
@@ -189,7 +189,7 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/schedule/unexpectedOperator"))
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(suite.ctx, tc, stream)
@@ -254,7 +254,7 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 
 // issue #1716
 func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(suite.ctx, tc, stream)
@@ -295,7 +295,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 }
 
 func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(suite.ctx, tc, stream)
@@ -368,7 +368,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 }
 
 func (suite *operatorControllerTestSuite) TestStoreLimit() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(suite.ctx, tc, stream)
@@ -436,7 +436,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 
 // #1652
 func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
-	cluster := mockcluster.NewCluster(suite.ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(suite.ctx, cluster, stream)
 
@@ -486,7 +486,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 }
 
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {
-	cluster := mockcluster.NewCluster(suite.ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(suite.ctx, cluster, stream)
 
@@ -563,7 +563,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 }
 
 func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
-	cluster := mockcluster.NewCluster(suite.ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(suite.ctx, cluster, stream)
 
@@ -699,7 +699,7 @@ func (suite *operatorControllerTestSuite) checkRemoveOperatorSuccess(oc *Operato
 }
 
 func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
-	opts := config.NewTestOptions()
+	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(suite.ctx, opts)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(suite.ctx, cluster, stream)
@@ -783,7 +783,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 
 // issue #5279
 func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewOperatorController(suite.ctx, tc, stream)

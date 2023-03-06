@@ -21,12 +21,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
 func TestCheckPriorityRegions(t *testing.T) {
 	re := require.New(t)
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc := mockcluster.NewCluster(ctx, opt)
@@ -37,7 +37,7 @@ func TestCheckPriorityRegions(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3)
 	tc.AddLeaderRegion(3, 2)
 
-	pc := NewPriorityInspector(tc)
+	pc := NewPriorityInspector(tc, tc.GetOpts())
 	checkPriorityRegionTest(re, pc, tc)
 	opt.SetPlacementRuleEnabled(true)
 	re.True(opt.IsPlacementRulesEnabled())

@@ -50,7 +50,7 @@ type minResolvedTS struct {
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := h.svr.GetRaftCluster()
 	value := c.GetMinResolvedTS()
-	persistInterval := c.GetOpts().GetPDServerConfig().MinResolvedTSPersistenceInterval
+	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
 	h.rd.JSON(w, http.StatusOK, minResolvedTS{
 		MinResolvedTS:   value,
 		PersistInterval: persistInterval,

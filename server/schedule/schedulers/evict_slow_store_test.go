@@ -130,7 +130,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 }
 
 func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePersistFail() {
-	persisFail := "github.com/tikv/pd/server/schedulers/persistFail"
+	persisFail := "github.com/tikv/pd/server/schedule/schedulers/persistFail"
 	suite.NoError(failpoint.Enable(persisFail, "return(true)"))
 
 	storeInfo := suite.tc.GetStore(1)
