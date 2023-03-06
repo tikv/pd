@@ -245,6 +245,20 @@ func InitClusterID(c *clientv3.Client, key string) (clusterID uint64, err error)
 	return typeutil.BytesToUint64(resp.Kvs[0].Value)
 }
 
+// GetClusterID gets the cluster ID for the given key.
+func GetClusterID(c *clientv3.Client, key string) (clusterID uint64, err error) {
+	// Get any cluster key to parse the cluster ID.
+	resp, err := EtcdKVGet(c, key)
+	if err != nil {
+		return 0, err
+	}
+	// If no key exist, generate a random cluster ID.
+	if len(resp.Kvs) == 0 {
+		return 0, nil
+	}
+	return typeutil.BytesToUint64(resp.Kvs[0].Value)
+}
+
 // InitOrGetClusterID creates a cluster ID for the given key with a CAS operation,
 // if the cluster ID doesn't exist.
 func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
