@@ -23,6 +23,7 @@ import (
 	"github.com/gin-gonic/gin"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -67,6 +68,11 @@ func NewService(srv *tsoserver.Service) *Service {
 	apiHandlerEngine.Use(gin.Recovery())
 	apiHandlerEngine.Use(cors.Default())
 	apiHandlerEngine.Use(gzip.Gzip(gzip.DefaultCompression))
+	apiHandlerEngine.Use(func(c *gin.Context) {
+		c.Set("service", srv.GetBasicServer())
+		c.Next()
+	})
+	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
 		srv:              srv,

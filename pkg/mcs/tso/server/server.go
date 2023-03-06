@@ -140,6 +140,11 @@ func (s *Server) GetHandler() *Handler {
 	return s.handler
 }
 
+// GetHandler returns the basic server.
+func (s *Server) GetBasicServer() bs.Server {
+	return s
+}
+
 // Run runs the TSO server.
 func (s *Server) Run() error {
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
