@@ -36,7 +36,6 @@ import (
 )
 
 func TestMemberHelpers(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	cfg1 := NewTestSingleConfig(t)
 	etcd1, err := embed.StartEtcd(cfg1)
@@ -88,7 +87,6 @@ func TestMemberHelpers(t *testing.T) {
 }
 
 func TestEtcdKVGet(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	cfg := NewTestSingleConfig(t)
 	etcd, err := embed.StartEtcd(cfg)
@@ -139,7 +137,6 @@ func TestEtcdKVGet(t *testing.T) {
 }
 
 func TestEtcdKVPutWithTTL(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	cfg := NewTestSingleConfig(t)
 	etcd, err := embed.StartEtcd(cfg)
@@ -180,7 +177,6 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 }
 
 func TestInitClusterID(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	cfg := NewTestSingleConfig(t)
 	etcd, err := embed.StartEtcd(cfg)
