@@ -51,7 +51,7 @@ import (
 const (
 	tcpNetworkStr = "tcp"
 	// resourceManagerKeyspaceGroupPrimaryElectionPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/pd/<cluster-id>/microservice/resource_manager/keyspace-group-XXXXX/primary"
+	// The entire key is in the format of "/pd/<cluster-id>/microservice/resource-manager/keyspace-group-XXXXX/primary"
 	// in which XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
 	resourceManagerKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/resource-manager/keyspace-group-"
 	// defaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
