@@ -6,7 +6,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 )
 
@@ -43,7 +43,7 @@ type Config interface {
 	GetSplitMergeInterval() time.Duration
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
-	GetKeyType() core.KeyType
+	GetKeyType() constant.KeyType
 	IsOneWayMergeEnabled() bool
 	IsCrossTableMergeEnabled() bool
 
@@ -67,7 +67,7 @@ type Config interface {
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64
 	GetTolerantSizeRatio() float64
-	GetLeaderSchedulePolicy() core.SchedulePolicy
+	GetLeaderSchedulePolicy() constant.SchedulePolicy
 	GetRegionScoreFormulaVersion() string
 
 	GetMaxSnapshotCount() uint64

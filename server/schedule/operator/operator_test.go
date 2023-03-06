@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -114,7 +115,7 @@ func (suite *operatorTestSuite) TestOperator() {
 		RemovePeer{FromStore: 3},
 	}
 	op := suite.newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
-	suite.Equal(core.Urgent, op.GetPriorityLevel())
+	suite.Equal(constant.Urgent, op.GetPriorityLevel())
 	suite.checkSteps(op, steps)
 	op.Start()
 	suite.Nil(op.Check(region))
@@ -130,7 +131,7 @@ func (suite *operatorTestSuite) TestOperator() {
 		RemovePeer{FromStore: 2},
 	}
 	op = suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-	suite.Equal(core.Medium, op.GetPriorityLevel())
+	suite.Equal(constant.Medium, op.GetPriorityLevel())
 	suite.checkSteps(op, steps)
 	op.Start()
 	suite.Equal(RemovePeer{FromStore: 2}, op.Check(region))
