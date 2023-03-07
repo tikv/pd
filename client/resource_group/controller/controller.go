@@ -325,6 +325,13 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 	requests := make([]*rmpb.TokenBucketRequest, 0)
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
+		if equalRU(gc.run.lastRequestConsumption, gc.run.consumption) {
+			if gc.checkStaleTimes > defaultSlotStalePeriod {
+				c.groupsController.Delete(name)
+				return true
+			}
+			gc.checkStaleTimes += 1
+		}
 		request := gc.collectRequestAndConsumption(onlySelectLow)
 		if request != nil {
 			requests = append(requests, request)
@@ -424,6 +431,8 @@ type groupCostController struct {
 		resourceTokens    map[rmpb.RawResourceType]*tokenCounter
 		requestUnitTokens map[rmpb.RequestUnitType]*tokenCounter
 	}
+
+	checkStaleTimes uint64
 }
 
 type tokenCounter struct {
@@ -474,6 +483,7 @@ func newGroupCostController(
 		tokenBucketUpdateChan: tokenBucketUpdateChan,
 		lowRUNotifyChan:       lowRUNotifyChan,
 		burstable:             &atomic.Bool{},
+		checkStaleTimes:       0,
 	}
 
 	switch gc.mode {
@@ -702,7 +712,7 @@ func (gc *groupCostController) handleRUTokenResponse(resp *rmpb.TokenBucketRespo
 }
 
 func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket *rmpb.TokenBucket, trickleTimeMs int64) {
-	granted := bucket.Tokens
+	granted := bucket.GetTokens()
 	if !counter.lastDeadline.IsZero() {
 		// If last request came with a trickle duration, we may have RUs that were
 		// not made available to the bucket yet; throw them together with the newly
