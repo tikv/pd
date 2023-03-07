@@ -39,7 +39,7 @@ type RequestInfo interface {
 
 // ResponseInfo is the interface of the response information provider. A response should be
 // able to tell how many bytes it read and KV CPU cost in milliseconds.
-type RespontokenConsumptionPerSecondseInfo interface {
+type ResponseInfo interface {
 	ReadBytes() uint64
 	KVCPU() time.Duration
 	// Succeed is used to tell whether the request is successfully returned.
