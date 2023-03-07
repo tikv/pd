@@ -98,17 +98,17 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	cc.Close()
 	url := "http://" + s.GetConfig().ListenAddr + tsoapi.APIPathPrefix
 	{
-		resetJson := `{"tso":"121312", "force-use-larger":true}`
+		resetJSON := `{"tso":"121312", "force-use-larger":true}`
 		re.NoError(err)
-		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJson))
+		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJSON))
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
 	}
 	{
-		resetJson := `{}`
+		resetJSON := `{}`
 		re.NoError(err)
-		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJson))
+		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJSON))
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusBadRequest, resp.StatusCode)
