@@ -752,9 +752,7 @@ func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, clust
 
 // NewTotalOpInfluence creates a OpInfluence.
 func NewTotalOpInfluence(operators []*operator.Operator, cluster Cluster) operator.OpInfluence {
-	influence := operator.OpInfluence{
-		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
-	}
+	influence := *operator.NewOpInfluence()
 
 	for _, op := range operators {
 		AddOpInfluence(op, influence, cluster)
