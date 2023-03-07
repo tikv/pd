@@ -31,13 +31,17 @@ import (
 )
 
 const (
-	defaultName              = "Resource Manager"
-	defaultBackendEndpoints  = "127.0.0.1:2379"
-	defaultListenAddr        = "127.0.0.1:3380"
+	defaultName = "Resource Manager"
+	// defaultBackendEndpoints is the default etcd endpoints for the resource manager.
+	defaultBackendEndpoints = "http://127.0.0.1:2379"
+	// defaultListenAddr is the default listening address for the resource manager.
+	defaultListenAddr        = "http://127.0.0.1:3379"
 	defaultEnableGRPCGateway = true
 
 	defaultLogFormat           = "text"
 	defaultDisableErrorVerbose = true
+
+	defaultLeaderLease = int64(3)
 
 	defaultReadBaseCost  = 0.25
 	defaultWriteBaseCost = 1
@@ -67,6 +71,12 @@ type Config struct {
 	LogProps *log.ZapProperties
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
+
+	// LeaderLease defines the time within which a Resource Manager primary/leader must
+	// update its TTL in etcd, otherwise etcd will expire the leader key and other servers
+	// can campaign the primary/leader again. Etcd only supports seconds TTL, so here is
+	// second too.
+	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	Controller ControllerConfig `toml:"controller" json:"controller"`
 }
@@ -203,6 +213,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
+
+	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
 
 	return nil
 }

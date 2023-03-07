@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/schedule"
@@ -241,7 +242,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	if err != nil {
 		return nil, err
 	}
-	op.SetPriorityLevel(core.High)
+	op.SetPriorityLevel(constant.High)
 	return op, nil
 }
 
@@ -311,9 +312,9 @@ func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *place
 		c.record.incOfflineLeaderCount(newLeader.GetStoreId())
 	}
 	if fastFailover {
-		op.SetPriorityLevel(core.Urgent)
+		op.SetPriorityLevel(constant.Urgent)
 	} else {
-		op.SetPriorityLevel(core.High)
+		op.SetPriorityLevel(constant.High)
 	}
 	return op, nil
 }

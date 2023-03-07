@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/filter"
@@ -86,7 +87,7 @@ func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeaderBatch(name,
 				continue
 			}
 			if op != nil {
-				op.SetPriorityLevel(core.Urgent)
+				op.SetPriorityLevel(constant.Urgent)
 				op.Counters = append(op.Counters, transferWitnessLeaderNewOperatorCounter)
 				ops = append(ops, op)
 			}

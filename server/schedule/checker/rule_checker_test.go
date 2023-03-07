@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -72,7 +73,7 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeer() {
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
-	suite.Equal(core.High, op.GetPriorityLevel())
+	suite.Equal(constant.High, op.GetPriorityLevel())
 	suite.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 }
 
@@ -125,7 +126,7 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	op = suite.rc.Check(r)
 	suite.NotNil(op)
 	suite.Equal("fast-replace-rule-down-peer", op.Desc())
-	suite.Equal(core.Urgent, op.GetPriorityLevel())
+	suite.Equal(constant.Urgent, op.GetPriorityLevel())
 	var add operator.AddLearner
 	suite.IsType(add, op.Step(0))
 	suite.cluster.SetStoreUp(2)
@@ -133,7 +134,7 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("replace-rule-offline-peer", op.Desc())
-	suite.Equal(core.High, op.GetPriorityLevel())
+	suite.Equal(constant.High, op.GetPriorityLevel())
 	suite.IsType(add, op.Step(0))
 
 	suite.cluster.SetStoreUp(2)
@@ -1360,7 +1361,7 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
-	suite.Equal(core.High, op.GetPriorityLevel())
+	suite.Equal(constant.High, op.GetPriorityLevel())
 	suite.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 	_, exist = suite.rc.pendingList.Get(1)
 	suite.False(exist)

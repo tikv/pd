@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package constant
 
 // PriorityLevel lower level means higher priority
 type PriorityLevel int
@@ -23,6 +23,8 @@ const (
 	Medium
 	High
 	Urgent
+
+	PriorityLevelLen
 )
 
 // ScheduleKind distinguishes resources and schedule policy.

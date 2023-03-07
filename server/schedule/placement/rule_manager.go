@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -170,7 +171,7 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 		return errs.ErrRuleContent.FastGenByArgs("endKey should be greater than startKey")
 	}
 
-	if m.keyType == core.Table.String() || m.keyType == core.Txn.String() {
+	if m.keyType == constant.Table.String() || m.keyType == constant.Txn.String() {
 		if len(r.StartKey) > 0 {
 			if _, _, err = codec.DecodeBytes(r.StartKey); err != nil {
 				return errs.ErrRuleContent.FastGenByArgs(errors.Wrapf(err, "start key should be encoded in %s mode", m.keyType).Error())
