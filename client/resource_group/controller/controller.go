@@ -379,12 +379,13 @@ func (c *ResourceGroupsController) OnRequestWait(
 
 // OnResponse is used to consume tokens after receiving response
 func (c *ResourceGroupsController) OnResponse(_ context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
-	tmp, ok := c.groupsController.Load(resourceGroupName)
-	if !ok {
+	if tmp, ok := c.groupsController.Load(resourceGroupName); ok {
+		gc := tmp.(*groupCostController)
+		gc.onResponse(req, resp)
+	} else {
 		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
 	}
-	gc := tmp.(*groupCostController)
-	gc.onResponse(req, resp)
+
 	return nil
 }
 
