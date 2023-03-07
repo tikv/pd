@@ -29,7 +29,6 @@ import (
 
 // APIPathPrefix is the prefix of the API path.
 const APIPathPrefix = "/tso/api/v1"
-const ResetTSAPIPath = "/admin/reset-ts"
 
 var (
 	apiServiceGroup = apiutil.APIServiceGroup{
@@ -87,7 +86,7 @@ func NewService(srv *tsoserver.Service) *Service {
 // RegisterRouter registers the router of the service.
 func (s *Service) RegisterRouter() {
 	tsoAdminHandler := tso.NewAdminHandler(s.srv.GetHandler(), s.rd)
-	s.baseEndpoint.POST(ResetTSAPIPath, gin.WrapF(tsoAdminHandler.ResetTS))
+	s.baseEndpoint.POST("/admin/reset-ts", gin.WrapF(tsoAdminHandler.ResetTS))
 }
 
 func (s *Service) handler() http.Handler {
