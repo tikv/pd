@@ -1430,6 +1430,7 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 }
 
+// Validate checks if keyspace config falls within acceptable range.
 func (c *KeyspaceConfig) Validate() error {
 	if c.GCRunInterval.Duration > maxKeyspaceGCInterval || c.GCRunInterval.Duration < minKeyspaceGCInterval {
 		return errors.New(fmt.Sprintf("[keyspace] keyspace gc interval should between %v and %v",
