@@ -67,10 +67,11 @@ func NewParticipant(client *clientv3.Client, id uint64) *Participant {
 }
 
 // InitInfo initializes the member info. The leader key is path.Join(rootPath, leaderName)
-func (m *Participant) InitInfo(name string, rootPath string, leaderName string, purpose string) {
+func (m *Participant) InitInfo(name string, rootPath string, leaderName string, purpose string, listenURL string) {
 	leader := &pdpb.Member{
-		Name:     name,
-		MemberId: m.ID(),
+		Name:       name,
+		MemberId:   m.ID(),
+		ClientUrls: []string{listenURL},
 	}
 
 	data, err := leader.Marshal()
