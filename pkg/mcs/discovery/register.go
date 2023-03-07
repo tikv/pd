@@ -81,6 +81,13 @@ func (sr *ServiceRegister) Register() error {
 					// retry
 					t := time.NewTicker(time.Duration(sr.ttl) * time.Second / 2)
 					for {
+						select {
+						case <-sr.ctx.Done():
+							log.Info("exit register process", zap.String("key", sr.key))
+							return
+						default:
+						}
+
 						<-t.C
 						resp, err := sr.cli.Grant(sr.ctx, sr.ttl)
 						if err != nil {
