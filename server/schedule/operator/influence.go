@@ -16,6 +16,7 @@ package operator
 
 import (
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 )
 
@@ -59,20 +60,20 @@ func (s *StoreInfluence) GetSendCost() int64 {
 }
 
 // ResourceProperty returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
+func (s StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 	switch kind.Resource {
-	case core.LeaderKind:
+	case constant.LeaderKind:
 		switch kind.Policy {
-		case core.ByCount:
+		case constant.ByCount:
 			return s.LeaderCount
-		case core.BySize:
+		case constant.BySize:
 			return s.LeaderSize
 		default:
 			return 0
 		}
-	case core.RegionKind:
+	case constant.RegionKind:
 		return s.RegionSize
-	case core.WitnessKind:
+	case constant.WitnessKind:
 		return s.WitnessCount
 	default:
 		return 0

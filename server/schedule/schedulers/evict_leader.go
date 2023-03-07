@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -322,7 +323,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster schedule.Cluster, conf ev
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
 		}
-		op.SetPriorityLevel(core.Urgent)
+		op.SetPriorityLevel(constant.Urgent)
 		op.Counters = append(op.Counters, evictLeaderNewOperatorCounter)
 		ops = append(ops, op)
 	}

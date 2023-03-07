@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/config"
@@ -88,17 +89,17 @@ func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	}
 	if op := r.checkDownPeer(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
-		op.SetPriorityLevel(core.High)
+		op.SetPriorityLevel(constant.High)
 		return op
 	}
 	if op := r.checkOfflinePeer(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
-		op.SetPriorityLevel(core.High)
+		op.SetPriorityLevel(constant.High)
 		return op
 	}
 	if op := r.checkMakeUpReplica(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
-		op.SetPriorityLevel(core.High)
+		op.SetPriorityLevel(constant.High)
 		return op
 	}
 	if op := r.checkRemoveExtraReplica(region); op != nil {

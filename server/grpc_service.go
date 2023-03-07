@@ -99,7 +99,17 @@ func (s *GrpcServer) wrapErrorToHeader(errorType pdpb.ErrorType, message string)
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
-	members, err := s.Server.GetMembers()
+	if s.IsClosed() {
+		return &pdpb.GetMembersResponse{
+			Header: &pdpb.ResponseHeader{
+				Error: &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
+				},
+			},
+		}, nil
+	}
+	members, err := cluster.GetMembers(s.GetClient())
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
