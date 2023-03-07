@@ -254,7 +254,6 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 	for _, group := range groups {
 		latestGroups[group.GetName()] = struct{}{}
 	}
-	// TODO: maybe we should also clean up those resource groups that have not been used for a long time.
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		if _, ok := latestGroups[resourceGroupName]; !ok {
@@ -325,6 +324,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 	requests := make([]*rmpb.TokenBucketRequest, 0)
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
+		// Check stale resource group
 		if equalRU(gc.run.lastRequestConsumption, gc.run.consumption) {
 			if gc.checkStaleTimes > defaultSlotStalePeriod {
 				c.groupsController.Delete(name)
@@ -912,4 +912,9 @@ ret:
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
+}
+
+func (c *ResourceGroupsController) CheckResourceGroupExist(name string) bool {
+	_, ok := c.groupsController.Load(name)
+	return ok
 }

@@ -100,6 +100,18 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 				},
 			},
 		},
+		{
+			Name: "test3",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate: 20000,
+					},
+					Tokens: 100000,
+				},
+			},
+		},
 	}
 }
 
@@ -733,4 +745,48 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
 	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
 	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
+}
+
+func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
+	re := suite.Require()
+	cli := suite.client
+
+	for _, group := range suite.initGroups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+
+	ruConfig := &controller.RequestUnitConfig{
+		ReadBaseCost:    1,
+		ReadCostPerByte: 1,
+	}
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig)
+	controller.Start(suite.ctx)
+
+	testCases := struct {
+		tcs   tokenConsumptionPerSecond
+		times int
+	}{
+		tcs: tokenConsumptionPerSecond{
+			rruTokensAtATime: 100,
+		},
+		times: 100,
+	}
+	// Mock client binds different users sequentially
+	for _, group := range suite.initGroups {
+		rreq := testCases.tcs.makeReadRequest()
+		rres := testCases.tcs.makeReadResponse()
+		for j := 0; j < testCases.times; j++ {
+			controller.OnRequestWait(suite.ctx, group.Name, rreq)
+			controller.OnResponse(suite.ctx, group.Name, rreq, rres)
+			time.Sleep(100 * time.Microsecond)
+		}
+	}
+
+	re.False(controller.CheckResourceGroupExist(suite.initGroups[0].Name))
+	re.True(controller.CheckResourceGroupExist(suite.initGroups[2].Name))
+
+	suite.cleanupResourceGroups()
+	controller.Stop()
 }
