@@ -17,12 +17,15 @@ package tso
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
+	tsoAPIs "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -93,6 +96,23 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	cc, err := grpc.DialContext(suite.ctx, s.GetConfig().ListenAddr, grpc.WithInsecure())
 	re.NoError(err)
 	cc.Close()
+	url := "http://" + s.GetConfig().ListenAddr + tsoAPIs.APIPathPrefix
+	{
+		resetJson := `{"tso":"121312", "force-use-larger":true}`
+		re.NoError(err)
+		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJson))
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
+	}
+	{
+		resetJson := `{}`
+		re.NoError(err)
+		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJson))
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusBadRequest, resp.StatusCode)
+	}
 }
 
 func (suite *tsoServerTestSuite) TestTSOServerRegister() {
