@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
-	tsoAPIs "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
+	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -96,7 +96,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	cc, err := grpc.DialContext(suite.ctx, s.GetConfig().ListenAddr, grpc.WithInsecure())
 	re.NoError(err)
 	cc.Close()
-	url := "http://" + s.GetConfig().ListenAddr + tsoAPIs.APIPathPrefix
+	url := "http://" + s.GetConfig().ListenAddr + tsoapi.APIPathPrefix
 	{
 		resetJson := `{"tso":"121312", "force-use-larger":true}`
 		re.NoError(err)
