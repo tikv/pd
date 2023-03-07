@@ -86,9 +86,8 @@ func NewService(srv *tsoserver.Service) *Service {
 
 // RegisterRouter registers the router of the service.
 func (s *Service) RegisterRouter() {
-	configEndpoint := s.baseEndpoint.Group("/")
 	tsoAdminHandler := tso.NewAdminHandler(s.srv.GetHandler(), s.rd)
-	configEndpoint.POST(ResetTSAPIPath, gin.WrapF(tsoAdminHandler.ResetTS))
+	s.baseEndpoint.POST(ResetTSAPIPath, gin.WrapF(tsoAdminHandler.ResetTS))
 }
 
 func (s *Service) handler() http.Handler {
