@@ -20,6 +20,7 @@ import (
 
 const (
 	namespace              = "resource_manager"
+	serverSubsystem        = "server"
 	ruSubsystem            = "resource_unit"
 	resourceSubsystem      = "resource"
 	resourceGroupNameLabel = "name"
@@ -29,6 +30,14 @@ const (
 )
 
 var (
+	// Meta & Server info.
+	serverInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "info",
+			Help:      "Indicate the resource manager server info, and the value is the start timestamp (s).",
+		}, []string{"version", "hash"})
 	// RU cost metrics.
 	readRequestUnitCost = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -97,6 +106,7 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(serverInfo)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
 	prometheus.MustRegister(sqlLayerRequestUnitCost)
