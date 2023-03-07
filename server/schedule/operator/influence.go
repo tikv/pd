@@ -25,6 +25,13 @@ type OpInfluence struct {
 	StoresInfluence map[uint64]*StoreInfluence
 }
 
+// NewOpInfluence creates a OpInfluence.
+func NewOpInfluence() *OpInfluence {
+	return &OpInfluence{
+		StoresInfluence: make(map[uint64]*StoreInfluence),
+	}
+}
+
 // GetStoreInfluence get storeInfluence of specific store.
 func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
@@ -43,6 +50,13 @@ type StoreInfluence struct {
 	LeaderCount  int64
 	WitnessCount int64
 	StepCost     map[storelimit.Type]int64
+	// records the cost of the sender.
+	SendCost int64
+}
+
+// GetSendCost returns the cost of sending snapshot.
+func (s *StoreInfluence) GetSendCost() int64 {
+	return s.SendCost
 }
 
 // ResourceProperty returns delta size of leader/region by influence.
