@@ -40,11 +40,11 @@ const (
 	tsoKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/tso/keyspace-group-"
 )
 
-var _ ServiceDiscovery = (*tsoMcsDiscovery)(nil)
-var _ tsoAllocatorEventSource = (*tsoMcsDiscovery)(nil)
+var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
+var _ tsoAllocatorEventSource = (*tsoServiceDiscovery)(nil)
 
-// tsoMcsDiscovery is the service discovery client of TSO microservice which is primary/secondary configured
-type tsoMcsDiscovery struct {
+// tsoServiceDiscovery is the service discovery client of the independent TSO service which is primary/secondary configured
+type tsoServiceDiscovery struct {
 	keyspaceID uint32
 	urls       atomic.Value // Store as []string
 	// primary key is the etcd path used for discoverying the serving endpoint of this keyspace
@@ -79,10 +79,10 @@ type tsoMcsDiscovery struct {
 	option *option
 }
 
-// newTSOMcsDiscovery returns a new BaseClient of a TSO microservice.
-func newTSOMcsDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, metacli MetaStorageClient,
+// newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
+func newTSOServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, metacli MetaStorageClient,
 	keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) ServiceDiscovery {
-	bc := &tsoMcsDiscovery{
+	bc := &tsoServiceDiscovery{
 		ctx:               ctx,
 		cancel:            cancel,
 		wg:                wg,
@@ -99,7 +99,7 @@ func newTSOMcsDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync
 }
 
 // Init initialize the concrete client underlying
-func (c *tsoMcsDiscovery) Init() error {
+func (c *tsoServiceDiscovery) Init() error {
 	if err := c.initRetry(c.updateMember); err != nil {
 		c.cancel()
 		return err
@@ -109,7 +109,7 @@ func (c *tsoMcsDiscovery) Init() error {
 	return nil
 }
 
-func (c *tsoMcsDiscovery) initRetry(f func() error) error {
+func (c *tsoServiceDiscovery) initRetry(f func() error) error {
 	var err error
 	for i := 0; i < c.option.maxRetryTimes; i++ {
 		if err = f(); err == nil {
@@ -124,7 +124,7 @@ func (c *tsoMcsDiscovery) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
-func (c *tsoMcsDiscovery) startCheckMemberLoop() {
+func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -144,7 +144,7 @@ func (c *tsoMcsDiscovery) startCheckMemberLoop() {
 }
 
 // Close releases all resources
-func (c *tsoMcsDiscovery) Close() {
+func (c *tsoServiceDiscovery) Close() {
 	c.clientConns.Range(func(key, cc interface{}) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
 			log.Error("[pd(tso)] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
@@ -155,19 +155,19 @@ func (c *tsoMcsDiscovery) Close() {
 }
 
 // GetClusterID returns the ID of the cluster
-func (c *tsoMcsDiscovery) GetClusterID(context.Context) uint64 {
+func (c *tsoServiceDiscovery) GetClusterID(context.Context) uint64 {
 	return 0
 }
 
 // GetURLs returns the URLs of the servers.
 // For testing use. It should only be called when the client is closed.
-func (c *tsoMcsDiscovery) GetURLs() []string {
+func (c *tsoServiceDiscovery) GetURLs() []string {
 	return c.urls.Load().([]string)
 }
 
 // GetServingAddr returns the grpc client connection of the serving endpoint
 // which is the primary in a primary/secondary configured cluster.
-func (c *tsoMcsDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
+func (c *tsoServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	if cc, ok := c.clientConns.Load(c.getPrimaryAddr()); ok {
 		return cc.(*grpc.ClientConn)
 	}
@@ -175,30 +175,30 @@ func (c *tsoMcsDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 }
 
 // GetClientConns returns the mapping {addr -> a gRPC connectio}
-func (c *tsoMcsDiscovery) GetClientConns() *sync.Map {
+func (c *tsoServiceDiscovery) GetClientConns() *sync.Map {
 	return &c.clientConns
 }
 
 // GetServingAddr returns the serving endpoint which is the primary in a
 // primary/secondary configured cluster.
-func (c *tsoMcsDiscovery) GetServingAddr() string {
+func (c *tsoServiceDiscovery) GetServingAddr() string {
 	return c.getPrimaryAddr()
 }
 
 // GetBackupAddrs gets the addresses of the current reachable and healthy
 // backup service endpoints randomly. Backup service endpoints are secondaries in
 // a primary/secondary configured cluster.
-func (c *tsoMcsDiscovery) GetBackupAddrs() []string {
+func (c *tsoServiceDiscovery) GetBackupAddrs() []string {
 	return c.getSecondaryAddrs()
 }
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.
-func (c *tsoMcsDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
+func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
 // ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in ervice endpoints.
-func (c *tsoMcsDiscovery) ScheduleCheckMemberChanged() {
+func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
 	case c.checkMembershipCh <- struct{}{}:
 	default:
@@ -207,30 +207,30 @@ func (c *tsoMcsDiscovery) ScheduleCheckMemberChanged() {
 
 // Immediately check if there is any membership change among the primary/secondaries in
 // a primary/secondary configured cluster.
-func (c *tsoMcsDiscovery) CheckMemberChanged() error {
+func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
 // AddServingAddrSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
-func (c *tsoMcsDiscovery) AddServingAddrSwitchedCallback(callbacks ...func()) {
+func (c *tsoServiceDiscovery) AddServingAddrSwitchedCallback(callbacks ...func()) {
 	c.primarySwitchedCbs = append(c.primarySwitchedCbs, callbacks...)
 }
 
 // AddServiceAddrsSwitchedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.
-func (c *tsoMcsDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
+func (c *tsoServiceDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
 	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
 // AddTSOServAddrsUpdatedCallback adds callbacks which will be called
 // when the global/local tso allocator leader list is updated.
-func (c *tsoMcsDiscovery) AddTSOServAddrsUpdatedCallback(callbacks ...tsoServAddrsUpdatedFunc) {
+func (c *tsoServiceDiscovery) AddTSOServAddrsUpdatedCallback(callbacks ...tsoServAddrsUpdatedFunc) {
 	c.allocPrimariesUpdatedCbs = append(c.allocPrimariesUpdatedCbs, callbacks...)
 }
 
 // getPrimaryAddr returns the primary address.
-func (c *tsoMcsDiscovery) getPrimaryAddr() string {
+func (c *tsoServiceDiscovery) getPrimaryAddr() string {
 	primaryAddr := c.primary.Load()
 	if primaryAddr == nil {
 		return ""
@@ -239,7 +239,7 @@ func (c *tsoMcsDiscovery) getPrimaryAddr() string {
 }
 
 // getSecondaryAddrs returns the secondary addresses.
-func (c *tsoMcsDiscovery) getSecondaryAddrs() []string {
+func (c *tsoServiceDiscovery) getSecondaryAddrs() []string {
 	secondaryAddrs := c.secondaries.Load()
 	if secondaryAddrs == nil {
 		return []string{}
@@ -247,7 +247,7 @@ func (c *tsoMcsDiscovery) getSecondaryAddrs() []string {
 	return secondaryAddrs.([]string)
 }
 
-func (c *tsoMcsDiscovery) switchPrimary(addrs []string) error {
+func (c *tsoServiceDiscovery) switchPrimary(addrs []string) error {
 	// FIXME: How to safely compare primary urls? For now, only allows one client url.
 	addr := addrs[0]
 	oldPrimary := c.getPrimaryAddr()
@@ -270,7 +270,7 @@ func (c *tsoMcsDiscovery) switchPrimary(addrs []string) error {
 	return nil
 }
 
-func (c *tsoMcsDiscovery) switchTSOAllocatorPrimary(dcLocation string, addr string) error {
+func (c *tsoServiceDiscovery) switchTSOAllocatorPrimary(dcLocation string, addr string) error {
 	allocMap := map[string]string{dcLocation: addr}
 
 	// Run callbacks to refelect any possible change in the global/local tso allocator.
@@ -283,7 +283,7 @@ func (c *tsoMcsDiscovery) switchTSOAllocatorPrimary(dcLocation string, addr stri
 	return nil
 }
 
-func (c *tsoMcsDiscovery) updateMember() error {
+func (c *tsoServiceDiscovery) updateMember() error {
 	resp, err := c.metacli.Get(c.ctx, []byte(c.primaryKey))
 	if err != nil {
 		log.Error("[pd(tso)] failed to get the keyspace serving endpoint", errs.ZapError(err))

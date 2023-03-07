@@ -304,7 +304,7 @@ func NewTSOClientWithContext(ctx context.Context, keyspaceID uint32, svrAddrs []
 
 	c.keyspaceID = keyspaceID
 	c.svcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	tsoSvcDiscovery := newTSOMcsDiscovery(clientCtx, clientCancel, &c.wg, MetaStorageClient(c), keyspaceID, addrsToUrls(svrAddrs), tlsCfg, c.option)
+	tsoSvcDiscovery := newTSOServiceDiscovery(clientCtx, clientCancel, &c.wg, MetaStorageClient(c), keyspaceID, addrsToUrls(svrAddrs), tlsCfg, c.option)
 	c.tsoClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID, tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
 	if err := c.setup(); err != nil {
 		c.cancel()
@@ -371,7 +371,7 @@ func (c *client) GetLeaderAddr() string {
 	return c.svcDiscovery.GetServingAddr()
 }
 
-// GetServiceDiscovery returns BaseClient which contains service discovery client logic
+// GetServiceDiscovery returns the client-side service discovery object
 func (c *client) GetServiceDiscovery() ServiceDiscovery {
 	return c.svcDiscovery
 }
