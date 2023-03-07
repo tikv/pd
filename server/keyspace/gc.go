@@ -193,7 +193,7 @@ func (worker *gcWorker) scanKeyspacesAndDoGC(safePoint int64) (nextID uint32) {
 				worker.gcKeyspace(ctx, meta)
 			}
 		}
-		nextID = nextID + uint32(len(batch))
+		nextID += uint32(len(batch))
 	}
 }
 
@@ -222,5 +222,4 @@ func (worker *gcWorker) gcKeyspace(ctx context.Context, meta *keyspacepb.Keyspac
 	// TODO: Clean keyspace related etcd paths.
 	// And only when all of the above succeeded:
 	// TODO: Set keyspace state to TOMBSTONE
-	return
 }
