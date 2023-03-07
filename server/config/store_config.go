@@ -120,6 +120,14 @@ func (c *StoreConfig) IsEnableRegionBucket() bool {
 	return c.Coprocessor.EnableRegionBucket
 }
 
+// SetRegionBucketEnabled sets if the region bucket is enabled.
+func (c *StoreConfig) SetRegionBucketEnabled(enabled bool) {
+	if c == nil {
+		return
+	}
+	c.Coprocessor.EnableRegionBucket = enabled
+}
+
 // GetRegionBucketSize returns region bucket size if enable region buckets.
 func (c *StoreConfig) GetRegionBucketSize() uint64 {
 	if c == nil || !c.Coprocessor.EnableRegionBucket {
@@ -158,6 +166,12 @@ func (c *StoreConfig) CheckRegionKeys(keys, mergeKeys uint64) error {
 		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-keys")
 	}
 	return nil
+}
+
+// Clone makes a deep copy of the config.
+func (c *StoreConfig) Clone() *StoreConfig {
+	cfg := *c
+	return &cfg
 }
 
 // StoreConfigManager is used to manage the store config.
@@ -217,6 +231,14 @@ func (m *StoreConfigManager) GetStoreConfig() *StoreConfig {
 	}
 	config := m.config.Load()
 	return config.(*StoreConfig)
+}
+
+// SetStoreConfig sets the store configuration.
+func (m *StoreConfigManager) SetStoreConfig(cfg *StoreConfig) {
+	if m == nil {
+		return
+	}
+	m.config.Store(cfg)
 }
 
 // Source is used to get the store config.

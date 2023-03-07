@@ -53,6 +53,7 @@ func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
+
 	sl, err := schedule.CreateScheduler(TransferWitnessLeaderType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 
