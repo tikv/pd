@@ -39,7 +39,7 @@ const (
 )
 
 // ServiceDiscovery defines the general interface for service discovery on a quorum-based cluster
-// or a primary/secondy configured cluster.
+// or a primary/secondary configured cluster.
 type ServiceDiscovery interface {
 	// Init initialize the concrete client underlying
 	Init() error
@@ -50,13 +50,13 @@ type ServiceDiscovery interface {
 	// GetURLs returns the URLs of the servers.
 	GetURLs() []string
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
-	// which is the leader in a quorum-based cluster or the primary in a primary/secondy
+	// which is the leader in a quorum-based cluster or the primary in a primary/secondary
 	// configured cluster.
 	GetServingEndpointClientConn() *grpc.ClientConn
 	// GetClientConns returns the mapping {addr -> a gRPC connection}
 	GetClientConns() *sync.Map
 	// GetServingAddr returns the serving endpoint which is the leader in a quorum-based cluster
-	// or the primary in a primary/secondy configured cluster.
+	// or the primary in a primary/secondary configured cluster.
 	GetServingAddr() string
 	// GetBackupAddrs gets the addresses of the current reachable and healthy backup service
 	// endpoints randomly. Backup service endpoints are followers in a quorum-based cluster or
@@ -66,10 +66,10 @@ type ServiceDiscovery interface {
 	GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error)
 	// ScheduleCheckMemberChanged is used to trigger a check to see if there is any membership change
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
-	// primary/secondy configured cluster.
+	// primary/secondary configured cluster.
 	ScheduleCheckMemberChanged()
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
-	// in a quorum-based cluster or among the primary/secondaries in a primary/secondy configured cluster.
+	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
 	// AddServingAddrSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
@@ -225,7 +225,7 @@ func (c *pdServiceDiscovery) GetURLs() []string {
 }
 
 // GetServingAddr returns the grpc client connection of the serving endpoint
-// which is the leader in a quorum-based cluster or the primary in a primary/secondy
+// which is the leader in a quorum-based cluster or the primary in a primary/secondary
 // configured cluster.
 func (c *pdServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	if cc, ok := c.clientConns.Load(c.getLeaderAddr()); ok {
@@ -260,7 +260,7 @@ func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
 }
 
 // Immediately check if there is any membership change among the leader/followers in a
-// quorum-based cluster or among the primary/secondaries in a primary/secondy configured cluster.
+// quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 func (c *pdServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }

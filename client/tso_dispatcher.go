@@ -72,7 +72,7 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
 		log.Error("[pd/tso] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
-		c.sd.ScheduleCheckMemberChanged()
+		c.svcDiscovery.ScheduleCheckMemberChanged()
 		return err
 	}
 	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
@@ -399,7 +399,7 @@ tsoBatchLoop:
 				case <-streamLoopTimer.C:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[pd/tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-					c.sd.ScheduleCheckMemberChanged()
+					c.svcDiscovery.ScheduleCheckMemberChanged()
 					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					continue tsoBatchLoop
 				case <-time.After(retryInterval):
@@ -445,7 +445,7 @@ tsoBatchLoop:
 				return
 			default:
 			}
-			c.sd.ScheduleCheckMemberChanged()
+			c.svcDiscovery.ScheduleCheckMemberChanged()
 			log.Error("[pd/tso] getTS error", zap.String("dc-location", dc), zap.String("stream-addr", streamAddr), errs.ZapError(errs.ErrClientGetTSO, err))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
@@ -453,7 +453,7 @@ tsoBatchLoop:
 			stream = nil
 			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
-				if err := c.sd.CheckMemberChanged(); err != nil {
+				if err := c.svcDiscovery.CheckMemberChanged(); err != nil {
 					select {
 					case <-dispatcherCtx.Done():
 						return
@@ -546,7 +546,7 @@ func (c *tsoClient) tryConnectToTSO(
 	// retry several times before falling back to the follower when the network problem happens
 
 	for i := 0; i < maxRetryTimes; i++ {
-		c.sd.ScheduleCheckMemberChanged()
+		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
@@ -611,7 +611,7 @@ func (c *tsoClient) tryConnectToTSO(
 // or of keyspace group primary/secondaries.
 func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 	var (
-		addrs          = c.sd.GetURLs()
+		addrs          = c.svcDiscovery.GetURLs()
 		streamBuilders = make(map[string]tsoStreamBuilder, len(addrs))
 		cc             *grpc.ClientConn
 		err            error
@@ -620,7 +620,7 @@ func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 		if len(addrs) == 0 {
 			continue
 		}
-		if cc, err = c.sd.GetOrCreateGRPCConn(addr); err != nil {
+		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
 		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
@@ -637,7 +637,7 @@ func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 // a TSO proxy to reduce the pressure of the main serving service endpoint.
 func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc string, connectionCtxs *sync.Map) error {
 	tsoStreamBuilders := c.getAllTSOStreamBuilders()
-	leaderAddr := c.sd.GetServingAddr()
+	leaderAddr := c.svcDiscovery.GetServingAddr()
 	forwardedHost, ok := c.GetTSOAllocatorServingAddrByDCLocation(dc)
 	if !ok {
 		return errors.Errorf("cannot find the allocator leader in %s", dc)
@@ -695,7 +695,7 @@ func (c *tsoClient) processTSORequests(stream tsoStream, dcLocation string, tbc 
 
 	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
-	physical, logical, suffixBits, err := stream.processRequests(c.sd.GetClusterID(c.ctx), dcLocation, requests, tbc.batchStartTime)
+	physical, logical, suffixBits, err := stream.processRequests(c.svcDiscovery.GetClusterID(c.ctx), dcLocation, requests, tbc.batchStartTime)
 	if err != nil {
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err

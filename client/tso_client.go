@@ -63,8 +63,8 @@ type tsoClient struct {
 	wg     *sync.WaitGroup
 	option *option
 
-	keyspaceID uint32
-	sd         ServiceDiscovery
+	keyspaceID   uint32
+	svcDiscovery ServiceDiscovery
 	tsoStreamBuilderFactory
 	// tsoAllocators defines the mapping {dc-location -> TSO allocator leader URL}
 	tsoAllocators sync.Map // Store as map[string]string
@@ -87,14 +87,14 @@ type tsoClient struct {
 
 // newTSOClient returns a new TSO client.
 func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, option *option,
-	keyspaceID uint32, sd ServiceDiscovery, eventSrc tsoAllocatorEventSource, factory tsoStreamBuilderFactory) *tsoClient {
+	keyspaceID uint32, svcDiscovery ServiceDiscovery, eventSrc tsoAllocatorEventSource, factory tsoStreamBuilderFactory) *tsoClient {
 	c := &tsoClient{
 		ctx:                       ctx,
 		cancel:                    cancel,
 		wg:                        wg,
 		option:                    option,
 		keyspaceID:                keyspaceID,
-		sd:                        sd,
+		svcDiscovery:              svcDiscovery,
 		tsoStreamBuilderFactory:   factory,
 		checkTSDeadlineCh:         make(chan struct{}),
 		checkTSODispatcherCh:      make(chan struct{}, 1),
@@ -102,7 +102,7 @@ func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitG
 	}
 
 	eventSrc.AddTSOServAddrsUpdatedCallback(c.updateTSOAllocatorServingAddrs)
-	c.sd.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
+	c.svcDiscovery.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
 
 	return c
 }
@@ -113,7 +113,7 @@ func (c *tsoClient) setup() error {
 	go c.tsLoop()
 	go c.tsCancelLoop()
 
-	if err := c.sd.Init(); err != nil {
+	if err := c.svcDiscovery.Init(); err != nil {
 		return err
 	}
 	c.updateTSODispatcher()
@@ -154,7 +154,7 @@ func (c *tsoClient) GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*g
 	if !ok {
 		panic(fmt.Sprintf("the allocator leader in %s should exist", dcLocation))
 	}
-	cc, ok := c.sd.GetClientConns().Load(url)
+	cc, ok := c.svcDiscovery.GetClientConns().Load(url)
 	if !ok {
 		panic(fmt.Sprintf("the client connection of %s in %s should exist", url, dcLocation))
 	}
@@ -184,7 +184,7 @@ func (c *tsoClient) updateTSOAllocatorServingAddrs(allocatorMap map[string]strin
 			continue
 		}
 		updated = true
-		if _, err := c.sd.GetOrCreateGRPCConn(addr); err != nil {
+		if _, err := c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
 			log.Warn("[pd[tso]] failed to connect dc tso allocator serving address",
 				zap.String("dc-location", dcLocation),
 				zap.String("serving-address", addr),
@@ -228,7 +228,7 @@ func (c *tsoClient) gcAllocatorServingAddr(curAllocatorMap map[string]string) {
 // backup service endpoints randomly. Backup service endpoints are followers in a
 // quorum-based cluster or secondaries in a primary/secondary configured cluster.
 func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
-	addrs := c.sd.GetBackupAddrs()
+	addrs := c.svcDiscovery.GetBackupAddrs()
 	if len(addrs) < 1 {
 		return nil, ""
 	}
@@ -238,7 +238,7 @@ func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
 	)
 	for i := 0; i < len(addrs); i++ {
 		addr := addrs[rand.Intn(len(addrs))]
-		if cc, err = c.sd.GetOrCreateGRPCConn(addr); err != nil {
+		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
 		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)

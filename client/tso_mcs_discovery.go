@@ -166,7 +166,7 @@ func (c *tsoMcsDiscovery) GetURLs() []string {
 }
 
 // GetServingAddr returns the grpc client connection of the serving endpoint
-// which is the primary in a primary/secondy configured cluster.
+// which is the primary in a primary/secondary configured cluster.
 func (c *tsoMcsDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	if cc, ok := c.clientConns.Load(c.getPrimaryAddr()); ok {
 		return cc.(*grpc.ClientConn)
@@ -180,7 +180,7 @@ func (c *tsoMcsDiscovery) GetClientConns() *sync.Map {
 }
 
 // GetServingAddr returns the serving endpoint which is the primary in a
-// primary/secondy configured cluster.
+// primary/secondary configured cluster.
 func (c *tsoMcsDiscovery) GetServingAddr() string {
 	return c.getPrimaryAddr()
 }
@@ -205,8 +205,8 @@ func (c *tsoMcsDiscovery) ScheduleCheckMemberChanged() {
 	}
 }
 
-// Immediately checkif there is any membership change among the primary/secondaries in
-// a primary/secondy configured cluster.
+// Immediately check if there is any membership change among the primary/secondaries in
+// a primary/secondary configured cluster.
 func (c *tsoMcsDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
