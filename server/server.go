@@ -1169,14 +1169,9 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
-// GetRequestUnitConfig gets the RU config.
-func (s *Server) GetRequestUnitConfig() *rm_server.RequestUnitConfig {
-	return &s.cfg.RequestUnit
-}
-
-// GetRMServerConfig return the resource manager server config.
-func (s *Server) GetRMServerConfig() *rm_server.RMServerConfig {
-	return &s.cfg.RMServer
+// GetControllerConfig gets the resource manager controller config.
+func (s *Server) GetControllerConfig() *rm_server.ControllerConfig {
+	return &s.cfg.Controller
 }
 
 // GetRaftCluster gets Raft cluster.

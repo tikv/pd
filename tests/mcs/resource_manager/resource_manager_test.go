@@ -778,7 +778,9 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.NoError(err)
 	config = ctr.GetConfig()
 	re.NotNil(config)
-	expectedConfig = controller.GenerateConfig(ruConfig, controller.DefaultRMServerConfig())
+	controllerConfig := controller.DefaultControllerConfig()
+	controllerConfig.RequestUnit = *ruConfig
+	expectedConfig = controller.GenerateConfig(controllerConfig)
 	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
 	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
 	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)

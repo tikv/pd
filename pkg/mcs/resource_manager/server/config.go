@@ -68,24 +68,26 @@ type Config struct {
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
+	Controller ControllerConfig `toml:"controller" json:"controller"`
+}
+
+// ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
+type ControllerConfig struct {
+	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
+	EnableDegradedMode bool `toml:"enable-degraded-mode" json:"enable-degraded-mode"`
+
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig
-
-	RMServer RMServerConfig `toml:"rm-server" json:"rm-server"`
-}
-
-// RMServerConfig is the configuration of the resource manager which includes some option for client needed from server.
-type RMServerConfig struct {
-	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
-	EnableDegradedMode bool `toml:"enable-degraded-mode" json:"enable-degraded-mode"`
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
-func (rmc *RMServerConfig) Adjust(meta *configutil.ConfigMetaData) {
+func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if rmc == nil {
 		return
 	}
+	rmc.RequestUnit.Adjust()
+
 	if !meta.IsDefined("enable-degraded-mode") {
 		rmc.EnableDegradedMode = defaultEnableDegradedMode
 	}
@@ -200,9 +202,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.Log.Format = defaultLogFormat
 	}
 
-	c.RequestUnit.Adjust()
-
-	c.RMServer.Adjust(configMetaData.Child("rm-server"))
+	c.Controller.Adjust(configMetaData.Child("controller"))
 
 	return nil
 }

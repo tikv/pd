@@ -32,8 +32,7 @@ import (
 )
 
 const (
-	requestUnitConfigPath  = "resource_group/ru_config"
-	serverConfigPath       = "resource_group/rm_server"
+	controllerConfigPath   = "resource_group/control"
 	defaultMaxWaitDuration = time.Second
 	maxRetry               = 3
 	maxNotificationChanLen = 200
@@ -118,18 +117,17 @@ func NewResourceGroupController(
 	requestUnitConfig *RequestUnitConfig,
 	opts ...ResourceControlCreateOption,
 ) (*ResourceGroupsController, error) {
-	if requestUnitConfig == nil {
-		var err error
-		requestUnitConfig, err = loadRequestUnitConfig(ctx, provider)
-		if err != nil {
-			return nil, err
-		}
-	}
-	rmServerConfig, err := loadServerConfig(ctx, provider)
+	controllerConfig, err := loadServerConfig(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
-	config := GenerateConfig(requestUnitConfig, rmServerConfig)
+	if requestUnitConfig != nil {
+		controllerConfig.RequestUnit = *requestUnitConfig
+	}
+	if err != nil {
+		return nil, err
+	}
+	config := GenerateConfig(controllerConfig)
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
@@ -145,36 +143,20 @@ func NewResourceGroupController(
 	return controller, nil
 }
 
-func loadRequestUnitConfig(ctx context.Context, provider ResourceGroupProvider) (*RequestUnitConfig, error) {
-	items, _, err := provider.LoadGlobalConfig(ctx, nil, requestUnitConfigPath)
-	if err != nil {
-		return nil, err
-	}
-	if len(items) == 0 {
-		return nil, errors.Errorf("failed to load the ru config from remote server")
-	}
-	ruConfig := &RequestUnitConfig{}
-	err = json.Unmarshal(items[0].PayLoad, ruConfig)
-	if err != nil {
-		return nil, err
-	}
-	return ruConfig, nil
-}
-
-func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*RMServerConfig, error) {
-	items, _, err := provider.LoadGlobalConfig(ctx, nil, serverConfigPath)
+func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*ControllerConfig, error) {
+	items, _, err := provider.LoadGlobalConfig(ctx, nil, controllerConfigPath)
 	if err != nil {
 		return nil, err
 	}
 	if len(items) == 0 {
 		return nil, errors.Errorf("failed to load the server config from remote server")
 	}
-	rmConfig := &RMServerConfig{}
-	err = json.Unmarshal(items[0].PayLoad, rmConfig)
+	controllerConfig := &ControllerConfig{}
+	err = json.Unmarshal(items[0].PayLoad, controllerConfig)
 	if err != nil {
 		return nil, err
 	}
-	return rmConfig, nil
+	return controllerConfig, nil
 }
 
 // GetConfig returns the config of controller. It's only used for test.
@@ -247,7 +229,6 @@ func (c *ResourceGroupsController) Stop() error {
 		return errors.Errorf("resource groups controller does not start")
 	}
 	c.loopCancel()
-	c.run.responseDeadline.Stop()
 	return nil
 }
 
@@ -357,7 +338,10 @@ func (c *ResourceGroupsController) updateAvgRequestResourcePerSec() {
 func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenBucketResponse) {
 	if c.responseDeadlineCh != nil {
 		if c.run.responseDeadline.Stop() {
-			<-c.run.responseDeadline.C
+			select {
+			case <-c.run.responseDeadline.C:
+			default:
+			}
 		}
 		c.responseDeadlineCh = nil
 	}
@@ -691,6 +675,11 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 		if counter.limiter.GetBurst() >= 0 {
 			isBurstable = false
 		}
+		log.Info("[resource group controller] update avg ru per sec",
+			zap.Float64("tokens", counter.limiter.AvailableTokens(time.Now())),
+			zap.Bool("low", counter.limiter.IsLowTokens()),
+		)
+
 		if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}

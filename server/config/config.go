@@ -159,9 +159,7 @@ type Config struct {
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 
-	RequestUnit rm.RequestUnitConfig `toml:"request-unit" json:"request-unit"`
-
-	RMServer rm.RMServerConfig `toml:"resource-manager" json:"resource-manager"`
+	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
 }
 
 // NewConfig creates a new config.
@@ -511,9 +509,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.Log.Format = defaultLogFormat
 	}
 
-	c.RequestUnit.Adjust()
-
-	c.RMServer.Adjust(configMetaData.Child("rm-server"))
+	c.Controller.Adjust(configMetaData.Child("controller"))
 
 	return nil
 }

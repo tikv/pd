@@ -65,15 +65,21 @@ const (
 	defaultEnableDegradedMode = true
 )
 
-type RMServerConfig struct {
+// ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
+type ControllerConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
 	EnableDegradedMode bool `toml:"enable-degraded-mode" json:"enable-degraded-mode"`
+
+	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
+	// This configuration should be modified carefully.
+	RequestUnit RequestUnitConfig
 }
 
-// DefaultRMServerConfig returns the default resource manager server configuration.
-func DefaultRMServerConfig() *RMServerConfig {
-	return &RMServerConfig{
+// DefaultControllerConfig returns the default resource manager controller configuration.
+func DefaultControllerConfig() *ControllerConfig {
+	return &ControllerConfig{
 		EnableDegradedMode: defaultEnableDegradedMode,
+		RequestUnit:        DefaultRequestUnitConfig(),
 	}
 }
 
@@ -96,8 +102,8 @@ type RequestUnitConfig struct {
 }
 
 // DefaultRequestUnitConfig returns the default request unit configuration.
-func DefaultRequestUnitConfig() *RequestUnitConfig {
-	return &RequestUnitConfig{
+func DefaultRequestUnitConfig() RequestUnitConfig {
+	return RequestUnitConfig{
 		ReadBaseCost:     defaultReadBaseCost,
 		ReadCostPerByte:  defaultReadCostPerByte,
 		WriteBaseCost:    defaultWriteBaseCost,
@@ -124,20 +130,19 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return GenerateConfig(
-		DefaultRequestUnitConfig(),
-		DefaultRMServerConfig(),
+		DefaultControllerConfig(),
 	)
 }
 
 // GenerateConfig generates the configuration by the given request unit configuration.
-func GenerateConfig(ruConfig *RequestUnitConfig, rmServerConfig *RMServerConfig) *Config {
+func GenerateConfig(config *ControllerConfig) *Config {
 	cfg := &Config{
-		ReadBaseCost:       RequestUnit(ruConfig.ReadBaseCost),
-		ReadBytesCost:      RequestUnit(ruConfig.ReadCostPerByte),
-		WriteBaseCost:      RequestUnit(ruConfig.WriteBaseCost),
-		WriteBytesCost:     RequestUnit(ruConfig.WriteCostPerByte),
-		CPUMsCost:          RequestUnit(ruConfig.CPUMsCost),
-		EnableDegradedMode: rmServerConfig.EnableDegradedMode,
+		ReadBaseCost:       RequestUnit(config.RequestUnit.ReadBaseCost),
+		ReadBytesCost:      RequestUnit(config.RequestUnit.ReadCostPerByte),
+		WriteBaseCost:      RequestUnit(config.RequestUnit.WriteBaseCost),
+		WriteBytesCost:     RequestUnit(config.RequestUnit.WriteCostPerByte),
+		CPUMsCost:          RequestUnit(config.RequestUnit.CPUMsCost),
+		EnableDegradedMode: config.EnableDegradedMode,
 	}
 	return cfg
 }
