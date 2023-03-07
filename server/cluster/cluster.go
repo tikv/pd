@@ -94,12 +94,6 @@ const (
 	removingAction          = "removing"
 	preparingAction         = "preparing"
 	gcTunerCheckCfgInterval = 10 * time.Second
-
-	// minTolerateDurationSec is used to set to tolerate duration.
-	minTolerateDurationSec = 5
-	// snapshotErrAmp is the expected error between the executing duration and the total duration.
-	// default 2 means that the executing duration is equals the waiting duration.
-	snapshotErrAmp = 2
 )
 
 // Server is the interface for cluster.
@@ -900,23 +894,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
 
-	for _, stat := range stats.GetSnapshotStats() {
-		log.Debug("snapshot complete",
-			zap.Uint64("store-id", stats.GetStoreId()),
-			zap.Uint64("region-id", stat.GetRegionId()),
-			zap.Uint64("generate-snapshot-sec", stat.GetGenerateDurationSec()),
-			zap.Uint64("send-snapshot-sec", stat.GetSendDurationSec()),
-			zap.Uint64("takes", stat.GetTotalDurationSec()),
-			zap.Uint64("transport-size", stat.GetTransportSize()),
-		)
-		executeDur := stat.GetSendDurationSec() + stat.GetGenerateDurationSec()
-		if executeDur <= minTolerateDurationSec {
-			executeDur = minTolerateDurationSec
-		}
-
-		e := executeDur*snapshotErrAmp - stat.GetTotalDurationSec()
-		store.Feedback(float64(e))
-	}
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	return nil

@@ -32,8 +32,9 @@ const (
 
 // RegionInfluence represents the influence of a operator step, which is used by store limit.
 var RegionInfluence = []int64{
-	AddPeer:    influence,
-	RemovePeer: influence,
+	AddPeer:      influence,
+	RemovePeer:   influence,
+	SendSnapshot: influence,
 }
 
 // SmallRegionInfluence represents the influence of a operator step
@@ -79,9 +80,6 @@ func NewStoreRateLimit(ratePerSec float64) StoreLimit {
 		limits: limits,
 	}
 }
-
-// Feedback Store rate limit doesn't support it.
-func (l *StoreRateLimit) Feedback(_ float64, _ Type) {}
 
 // Available returns the number of available tokens.
 // notice that the priority level is not used.

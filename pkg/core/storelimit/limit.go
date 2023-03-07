@@ -40,6 +40,4 @@ type StoreLimit interface {
 	Take(count int64, typ Type, level constant.PriorityLevel) bool
 	// Reset resets the store limit
 	Reset(rate float64, typ Type)
-	// Feedback adjust the capacity dynamic.
-	Feedback(err float64, typ Type)
 }

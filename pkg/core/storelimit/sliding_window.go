@@ -22,19 +22,12 @@ import (
 const (
 	// minSnapSize is the min value to check the windows has enough size.
 	minSnapSize = 10
-
-	// DefaultCapocity is the default size of the sliding windows.
-	DefaultCapacity = 1000
-
-	defaultProportion = 20
-	defaultIntegral   = 10
 )
 
 // SlidingWindows is a multi sliding windows
 type SlidingWindows struct {
-	mu             syncutil.RWMutex
-	windows        []*window
-	accumulatedErr float64
+	mu      syncutil.RWMutex
+	windows []*window
 }
 
 // NewSlidingWindows is the construct of SlidingWindows.
@@ -47,27 +40,16 @@ func NewSlidingWindows(cap float64) *SlidingWindows {
 		windows[i] = newWindow(int64(cap) >> i)
 	}
 	return &SlidingWindows{
-		windows:        windows,
-		accumulatedErr: 0.0,
-	}
-}
-
-// Feedback adjust the capaity by dynamic
-func (s *SlidingWindows) Feedback(err float64, typ Type) {
-	if typ != SendSnapshot {
-		return
-	}
-	s.accumulatedErr += err
-	cap := defaultProportion*err + defaultIntegral*s.accumulatedErr
-	// the cap can't be less the default capacity
-	if cap > DefaultCapacity {
-		s.Reset(cap, AddPeer)
+		windows: windows,
 	}
 }
 
 // Reset resets the capacity of the sliding windows.
 // It doesn't clear all the used, only set the capacity.
-func (s *SlidingWindows) Reset(cap float64, _ Type) {
+func (s *SlidingWindows) Reset(cap float64, typ Type) {
+	if typ == SendSnapshot {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cap < 0 {
@@ -92,7 +74,10 @@ func (s *SlidingWindows) GetUsed() int64 {
 // Available returns whether the token can be taken.
 // The order of checking windows is from low to high.
 // It checks the given window finally if the lower window has no free size.
-func (s *SlidingWindows) Available(_ int64, _ Type, level constant.PriorityLevel) bool {
+func (s *SlidingWindows) Available(_ int64, typ Type, level constant.PriorityLevel) bool {
+	if typ != SendSnapshot {
+		return true
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i := 0; i <= int(level); i++ {
@@ -105,7 +90,10 @@ func (s *SlidingWindows) Available(_ int64, _ Type, level constant.PriorityLevel
 
 // Take tries to take the token.
 // It will consume the given window finally if the lower window has no free size.
-func (s *SlidingWindows) Take(token int64, _ Type, level constant.PriorityLevel) bool {
+func (s *SlidingWindows) Take(token int64, typ Type, level constant.PriorityLevel) bool {
+	if typ != SendSnapshot {
+		return true
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := 0; i <= int(level); i++ {
