@@ -72,7 +72,7 @@ type ControllerConfig struct {
 
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
-	RequestUnit RequestUnitConfig
+	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
 }
 
 // DefaultControllerConfig returns the default resource manager controller configuration.

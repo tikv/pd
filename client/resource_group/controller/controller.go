@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	controllerConfigPath   = "resource_group/control"
+	controllerConfigPath   = "resource_group/controller"
 	defaultMaxWaitDuration = time.Second
 	maxRetry               = 3
 	maxNotificationChanLen = 200
