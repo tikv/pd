@@ -449,7 +449,6 @@ func isHigherPriorityOperator(new, old *operator.Operator) bool {
 
 func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	regionID := op.RegionID()
-
 	log.Info("add operator",
 		zap.Uint64("region-id", regionID),
 		zap.Reflect("operator", op),
@@ -491,7 +490,7 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 			if stepCost == 0 {
 				continue
 			}
-			limit.Take(stepCost, v, constant.Low)
+			limit.Take(stepCost, v, op.GetPriorityLevel())
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
@@ -851,7 +850,7 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 			if limiter == nil {
 				return false
 			}
-			if !limiter.Available(stepCost, v, constant.Low) {
+			if !limiter.Available(stepCost, v, ops[0].GetPriorityLevel()) {
 				operator.OperatorExceededStoreLimitCounter.WithLabelValues(desc).Inc()
 				return true
 			}

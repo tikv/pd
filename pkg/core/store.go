@@ -306,6 +306,17 @@ func (s *StoreInfo) GetStoreLimit() storelimit.StoreLimit {
 	return s.limiter
 }
 
+func (s *StoreInfo) Feedback(e float64) {
+	if s.limiter == nil {
+		s.limiter.Reset(storelimit.DefaultCapacity, storelimit.SendSnapshot)
+	}
+	// it doesn't adjust the limit if the limit is not the bottleneck.
+	if s.limiter.Available(storelimit.DefaultCapacity, storelimit.SendSnapshot, constant.Low) {
+		return
+	}
+	s.limiter.Feedback(e, storelimit.SendSnapshot)
+}
+
 const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 

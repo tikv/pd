@@ -45,8 +45,9 @@ var SmallRegionInfluence = []int64{
 
 // TypeNameValue indicates the name of store limit type and the enum value
 var TypeNameValue = map[string]Type{
-	"add-peer":    AddPeer,
-	"remove-peer": RemovePeer,
+	"add-peer":      AddPeer,
+	"remove-peer":   RemovePeer,
+	"send-snapshot": SendSnapshot,
 }
 
 // String returns the representation of the Type
@@ -79,21 +80,32 @@ func NewStoreRateLimit(ratePerSec float64) StoreLimit {
 	}
 }
 
+// Feedback Store rate limit doesn't support it.
+func (l *StoreRateLimit) Feedback(_ float64, _ Type) {}
+
 // Available returns the number of available tokens.
 // notice that the priority level is not used.
 func (l *StoreRateLimit) Available(cost int64, typ Type, _ constant.PriorityLevel) bool {
+	if typ == SendSnapshot {
+		return true
+	}
 	return l.limits[typ].Available(cost)
 }
 
 // Take takes count tokens from the bucket without blocking.
 // notice that the priority level is not used.
 func (l *StoreRateLimit) Take(cost int64, typ Type, _ constant.PriorityLevel) bool {
+	if typ == SendSnapshot {
+		return true
+	}
 	return l.limits[typ].Take(cost)
 }
 
 // Reset resets the rate limit.
 func (l *StoreRateLimit) Reset(rate float64, typ Type) {
-	l.limits[typ].Reset(rate)
+	if typ != SendSnapshot {
+		l.limits[typ].Reset(rate)
+	}
 }
 
 // limit the operators of a store

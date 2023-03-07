@@ -22,12 +22,19 @@ import (
 const (
 	// minSnapSize is the min value to check the windows has enough size.
 	minSnapSize = 10
+
+	// DefaultCapocity is the default size of the sliding windows.
+	DefaultCapacity = 1000
+
+	defaultProportion = 20
+	defaultIntegral   = 10
 )
 
 // SlidingWindows is a multi sliding windows
 type SlidingWindows struct {
-	mu      syncutil.RWMutex
-	windows []*window
+	mu             syncutil.RWMutex
+	windows        []*window
+	accumulatedErr float64
 }
 
 // NewSlidingWindows is the construct of SlidingWindows.
@@ -40,7 +47,21 @@ func NewSlidingWindows(cap float64) *SlidingWindows {
 		windows[i] = newWindow(int64(cap) >> i)
 	}
 	return &SlidingWindows{
-		windows: windows,
+		windows:        windows,
+		accumulatedErr: 0.0,
+	}
+}
+
+// Feedback adjust the capaity by dynamic
+func (s *SlidingWindows) Feedback(err float64, typ Type) {
+	if typ != SendSnapshot {
+		return
+	}
+	s.accumulatedErr += err
+	cap := defaultProportion*err + defaultIntegral*s.accumulatedErr
+	// the cap can't be less the default capacity
+	if cap > DefaultCapacity {
+		s.Reset(cap, AddPeer)
 	}
 }
 

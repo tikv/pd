@@ -26,6 +26,8 @@ const (
 	AddPeer Type = iota
 	// RemovePeer indicates the type of store limit that limits the removing peer rate
 	RemovePeer
+	// SendSnapshot indicates the type of sending snapshot.
+	SendSnapshot
 
 	storeLimitTypeLen
 )
@@ -38,4 +40,6 @@ type StoreLimit interface {
 	Take(count int64, typ Type, level constant.PriorityLevel) bool
 	// Reset resets the store limit
 	Reset(rate float64, typ Type)
+	// Feedback adjust the capacity dynamic.
+	Feedback(err float64, typ Type)
 }
