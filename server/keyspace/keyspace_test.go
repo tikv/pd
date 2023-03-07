@@ -15,6 +15,7 @@
 package keyspace
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strconv"
@@ -50,7 +51,7 @@ func TestKeyspaceTestSuite(t *testing.T) {
 func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	suite.manager = NewKeyspaceManager(store, nil, allocator, config.KeyspaceConfig{}, nil)
+	suite.manager = NewKeyspaceManager(context.Background(), store, nil, allocator, config.KeyspaceConfig{}, nil)
 	suite.NoError(suite.manager.Bootstrap())
 }
 
