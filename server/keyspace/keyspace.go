@@ -92,7 +92,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 		idAllocator: idAllocator,
 		store:       store,
 		rc:          rc,
-		ctx:         context.TODO(),
+		ctx:         rc.Context(),
 		config:      config,
 		member:      member,
 	}
@@ -134,7 +134,7 @@ func (manager *Manager) Bootstrap() error {
 		}
 	}
 	// start gc loop.
-	go manager.gcWorker.run()
+	manager.gcWorker.run()
 	return nil
 }
 
