@@ -28,8 +28,8 @@ import (
 )
 
 // APIPathPrefix is the prefix of the API path.
-const APIPathPrefix = "/"
-const ResetTSAPIPath = "/pd/api/v1/admin/reset-ts"
+const APIPathPrefix = "/tso/api/v1"
+const ResetTSAPIPath = "/admin/reset-ts"
 
 var (
 	apiServiceGroup = apiutil.APIServiceGroup{
