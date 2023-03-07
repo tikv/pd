@@ -69,7 +69,7 @@ func NewService(srv *tsoserver.Service) *Service {
 	apiHandlerEngine.Use(cors.Default())
 	apiHandlerEngine.Use(gzip.Gzip(gzip.DefaultCompression))
 	apiHandlerEngine.Use(func(c *gin.Context) {
-		c.Set("service", srv.GetBasicServer())
+		c.Set("service", srv)
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
