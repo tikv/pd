@@ -915,7 +915,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		}
 
 		e := executeDur*snapshotErrAmp - stat.GetTotalDurationSec()
-		store.Feedback(e)
+		store.Feedback(float64(e))
 	}
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
