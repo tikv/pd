@@ -24,22 +24,19 @@ import (
 	"go.uber.org/zap"
 )
 
-// TSOStorage defines the storage operations on the TSO.
-// global tso: key is `/microservice/tso/{keyspaceGroupName}/timestamp`
-// local tso: key is `/microservice/tso/{keyspaceGroupName}/lts/{dcLocation}/timestamp`
-// FIXME: When we upgrade from the old version, there may be compatibility issues.
+// TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
-	LoadTimestamp(keyspaceGroupName string, dcLocationKey ...string) (time.Time, error)
-	SaveTimestamp(keyspaceGroupName string, ts time.Time, dcLocationKey ...string) error
+	LoadTimestamp(prefix string) (time.Time, error)
+	SaveTimestamp(key string, ts time.Time) error
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
 
-// LoadTimestamp loads a timestamp from the storage according to the keyspaceGroupName and dcLocation.
-func (se *StorageEndpoint) LoadTimestamp(keyspaceGroupName string, dcLocationKey ...string) (time.Time, error) {
-	prefix := timestampPrefix(keyspaceGroupName, dcLocationKey...)
+// LoadTimestamp will get all time windows of Local/Global TSOs from etcd and return the biggest one.
+// For the Global TSO, loadTimestamp will get all Local and Global TSO time windows persisted in etcd and choose the biggest one.
+// For the Local TSO, loadTimestamp will only get its own dc-location time window persisted before.
+func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return typeutil.ZeroTime, err
@@ -67,8 +64,7 @@ func (se *StorageEndpoint) LoadTimestamp(keyspaceGroupName string, dcLocationKey
 }
 
 // SaveTimestamp saves the timestamp to the storage.
-func (se *StorageEndpoint) SaveTimestamp(keyspaceGroupName string, ts time.Time, dcLocationKey ...string) error {
-	key := timestampPath(keyspaceGroupName, dcLocationKey...)
+func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
 	return se.Save(key, string(data))
 }

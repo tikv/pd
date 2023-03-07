@@ -43,6 +43,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -95,6 +97,7 @@ type Server struct {
 	cfg         *Config
 	clusterID   uint64
 	rootPath    string
+	storage     endpoint.TSOStorage
 	backendUrls []url.URL
 
 	// for the primary election in the TSO cluster
@@ -567,8 +570,9 @@ func (s *Server) startServer() (err error) {
 	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
 	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
 
+	s.storage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.rootPath), nil)
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.participant, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
+		s.participant, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
 		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
 	// Set up the Global TSO Allocator here, it will be initialized once this TSO participant campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(s.ctx, tso.GlobalDCLocation, s.participant.GetLeadership())

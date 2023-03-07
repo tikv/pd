@@ -17,6 +17,7 @@ package tso
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync/atomic"
 	"time"
 
@@ -58,7 +59,9 @@ func NewLocalTSOAllocator(
 		leadership:       leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
-			rootPath:               leadership.GetLeaderKey(),
+			rootPath:               am.rootPath,
+			ltsPath:                path.Join(localTSOAllocatorEtcdPrefix, dcLocation),
+			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
