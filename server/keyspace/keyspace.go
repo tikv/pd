@@ -461,7 +461,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg *config.KeyspaceConfig) {
 	manager.config = *cfg
-	manager.gcWorker.reloadConfig(cfg)
+	manager.gcWorker.reload(cfg)
 }
 
 // updateKeyspaceState updates keyspace meta and record the update time.

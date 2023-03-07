@@ -1,14 +1,28 @@
+// Copyright 2023 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package keyspace
 
 import (
 	"context"
-	"sync/atomic"
+	"sync"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/member"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
@@ -19,148 +33,94 @@ const (
 	gcPerLoopTimeout = 30 * time.Second
 	// gcKeyspaceBatch specifies batch size when fetching keyspaces.
 	gcKeyspaceBatch = 100
-	// controlLoopInterval specifies the interval between each etcd leader check.
-	controlLoopInterval = 30 * time.Second
-)
-
-// runSig is used to control the running of the gc loop.
-type runSig int
-
-// Signals for gcWorker.
-const (
-	sigStart runSig = iota
-	sigStop
-	sigReloadConfig
 )
 
 // gcWorker is used to clean up keyspace related information.
 type gcWorker struct {
-	running atomic.Bool
-
-	ctx     context.Context
-	cancel  context.CancelFunc
+	sync.RWMutex
 	manager *Manager
 	member  *member.EmbeddedEtcdMember
 
-	// sigCh is used to signal the gcWorker to start/stop.
-	sigCh          chan runSig
-	ticker         *time.Ticker
 	nextKeyspaceID uint32
-
-	// Below are the configurations for gcWorker,
-	// modification requires calling reloadConfig afterward to take effect.
-
-	enable atomic.Bool
-	// configMu protects gcRunInterval and gcLifeTime.
-	configMu syncutil.RWMutex
-	// gcRunInterval specifies how often should gc loop be run.
-	gcRunInterval time.Duration
+	ticker         *time.Ticker
 	// gcLifeTime specifies how long should we keep archived keyspace.
 	gcLifeTime time.Duration
 }
 
 // newGCWorker returns a newGCWorker.
 func (manager *Manager) newGCWorker() *gcWorker {
+	dummyTicker := time.NewTicker(time.Hour)
+	dummyTicker.Stop()
+
 	worker := &gcWorker{
-		manager:       manager,
-		member:        manager.member,
-		sigCh:         make(chan runSig),
-		gcRunInterval: manager.config.GCRunInterval.Duration,
-		gcLifeTime:    manager.config.GCLifeTime.Duration,
+		manager:    manager,
+		member:     manager.member,
+		ticker:     dummyTicker, // A dummy ticker, real ticker will be setup by reload.
+		gcLifeTime: manager.config.GCLifeTime.Duration,
 	}
-	worker.enable.Store(manager.config.GCEnable)
 	return worker
 }
 
 // run starts the main loop of the gc worker.
-// To avoid locking, it should be the only routine with access to worker's ticker, ctx and cancel.
 func (worker *gcWorker) run() {
-	// Load configuration here to make sure changes only takes effect after reload.
-	worker.configMu.RLock()
-	gcLifeTime := worker.gcLifeTime
-	gcRunInterval := worker.gcRunInterval
-	worker.configMu.RUnlock()
-
-	// Start at stop state, and wait for control loop to reset the ticker.
-	worker.ticker = time.NewTicker(time.Hour)
-	worker.ticker.Stop()
-
-	// start control loop.
-	go worker.controlLoop()
-
-	for {
-		select {
-		// If manager's context done, stop the loop completely.
-		case <-worker.manager.ctx.Done():
-			return
-		case now := <-worker.ticker.C:
-			// Sanity check: if server currently not leader, don't do gc.
-			if !worker.member.IsLeader() {
-				// continue here will make worker wait for the next signal from sigCh.
-				continue
-			}
-			// If a keyspace archived before safePoint, we should clean up the keyspace.
-			safePoint := now.Add(-gcLifeTime).Unix()
-			worker.nextKeyspaceID = worker.scanKeyspacesAndDoGC(safePoint)
-		case sig := <-worker.sigCh:
-			// Control signal received, act accordingly.
-			switch sig {
-			case sigStart:
-				// setting up gc worker's context to be child of the manager.
-				worker.ctx, worker.cancel = context.WithCancel(worker.manager.ctx)
-				worker.ticker.Reset(gcRunInterval)
-				log.Info("[keyspace] gc loop started")
-			case sigStop:
+	go func() {
+		for {
+			select {
+			// If manager's context done, stop the loop completely.
+			case <-worker.manager.ctx.Done():
 				worker.ticker.Stop()
-				worker.cancel()
-				log.Info("[keyspace] gc loop stopped")
-			case sigReloadConfig:
-				worker.configMu.RLock()
-				gcLifeTime = worker.gcLifeTime
-				gcRunInterval = worker.gcRunInterval
-				worker.configMu.RUnlock()
-			}
-		}
-	}
-}
-
-func (worker *gcWorker) reloadConfig(cfg *config.KeyspaceConfig) {
-	worker.enable.Store(cfg.GCEnable)
-	worker.configMu.Lock()
-	worker.gcLifeTime = cfg.GCLifeTime.Duration
-	worker.gcRunInterval = cfg.GCRunInterval.Duration
-	worker.configMu.Unlock()
-	worker.sigCh <- sigReloadConfig
-}
-
-func (worker *gcWorker) controlLoop() {
-	ticker := time.NewTicker(controlLoopInterval)
-	for {
-		select {
-		case <-worker.manager.ctx.Done():
-			// If manager's ctx done, return.
-			return
-		case <-ticker.C:
-			if worker.member.IsLeader() && worker.enable.Load() {
-				// Make sure the gc loop is running if it's not.
-				// Check if running first before CAS to avoid unnecessary operation.
-				if !worker.running.Load() && worker.running.CompareAndSwap(false, true) {
-					worker.sigCh <- sigStart
+				log.Info("[keyspace] gc loop stopped due to context cancel")
+				return
+			case now := <-worker.ticker.C:
+				if !worker.member.IsLeader() {
+					// If server currently not leader, stop the ticker and don't do gc.
+					worker.ticker.Stop()
+					log.Info("[keyspace] gc loop stopped, server is not leader")
+					continue
 				}
-			} else if worker.running.Load() && worker.running.CompareAndSwap(true, false) {
-				worker.sigCh <- sigStop
+				// If a keyspace archived before safePoint, we should clean up the keyspace.
+				worker.RLock()
+				safePoint := now.Add(-worker.gcLifeTime).Unix()
+				failpoint.Inject("safePoint", func(val failpoint.Value) {
+					// Adds an option to overwrite safePoint for easier testing.
+					injectedSafePoint, ok := val.(int64)
+					if ok {
+						safePoint = injectedSafePoint
+					}
+				})
+				worker.RUnlock()
+				log.Info("[keyspace] starting gc")
+				worker.nextKeyspaceID = worker.scanKeyspacesAndDoGC(worker.manager.ctx, safePoint)
 			}
 		}
+	}()
+}
+
+func (worker *gcWorker) reload(cfg *config.KeyspaceConfig) {
+	worker.ticker.Stop()
+	worker.Lock()
+	defer worker.Unlock()
+
+	if !cfg.GCEnable {
+		log.Info("[keyspace] gc disabled")
+		return
 	}
+	// Set the worker's gc lifetime and run duration
+	worker.gcLifeTime = cfg.GCLifeTime.Duration
+	worker.ticker.Reset(cfg.GCRunInterval.Duration)
+	log.Info("[keyspace] gc config reloaded",
+		zap.Duration("gc lifetime", worker.gcLifeTime),
+		zap.Duration("run interval", cfg.GCRunInterval.Duration),
+	)
 }
 
 // scanKeyspacesAndDoGC scans current keyspace and attempts to do one round of gc within gcPerLoopTimeout.
 // It starts with nextKeyspaceID, and return the last garbage collected keyspace's id + 1 as the starting id
 // for next round.
-func (worker *gcWorker) scanKeyspacesAndDoGC(safePoint int64) (nextID uint32) {
+func (worker *gcWorker) scanKeyspacesAndDoGC(ctx context.Context, safePoint int64) (nextID uint32) {
 	nextID = worker.nextKeyspaceID
 	// Set up per loop timeout and corresponding cancel function.
-	ctx, cancel := context.WithTimeout(worker.ctx, gcPerLoopTimeout)
+	ctx, cancel := context.WithTimeout(ctx, gcPerLoopTimeout)
 	defer cancel()
 
 	manager := worker.manager
