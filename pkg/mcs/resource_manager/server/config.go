@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/errors"
@@ -27,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -52,7 +54,7 @@ const (
 	// 1 RU = 3 millisecond CPU time
 	defaultCPUMsCost = 1. / 3
 
-	defaultEnableDegradedMode = true
+	defaultDegradedModeWaitDuration = time.Second
 )
 
 // Config is the configuration for the resource manager.
@@ -84,7 +86,7 @@ type Config struct {
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
 type ControllerConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
-	EnableDegradedMode bool `toml:"enable-degraded-mode" json:"enable-degraded-mode"`
+	DegradedModeWaitDuration typeutil.Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
 
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
@@ -98,9 +100,8 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	}
 	rmc.RequestUnit.Adjust()
 
-	if !meta.IsDefined("enable-degraded-mode") {
-		rmc.EnableDegradedMode = defaultEnableDegradedMode
-	}
+	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
+
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of

@@ -17,6 +17,7 @@ package server
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
@@ -26,7 +27,7 @@ func TestControllerConfig(t *testing.T) {
 	re := require.New(t)
 	cfgData := `
 [controller]
-enable-degraded-mode = false
+degraded-mode-wait-duration = "2s"
 [controller.request-unit]
 read-base-cost = 1.0
 read-cost-per-byte = 2.0
@@ -40,7 +41,7 @@ read-cpu-ms-cost =  5.0
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
-	re.False(cfg.Controller.EnableDegradedMode)
+	re.Equal(cfg.Controller.DegradedModeWaitDuration.Duration, time.Second*2)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.CPUMsCost-5), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteCostPerByte-4), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteBaseCost-3), 1e-7)

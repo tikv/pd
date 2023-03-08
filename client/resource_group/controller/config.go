@@ -62,13 +62,13 @@ const (
 	// 1 RU = 3 millisecond CPU time
 	defaultCPUMsCost = 1. / 3
 
-	defaultEnableDegradedMode = true
+	defaultDegradedModeWaitDuration = "1s"
 )
 
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
 type ControllerConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
-	EnableDegradedMode bool `toml:"enable-degraded-mode" json:"enable-degraded-mode"`
+	DegradedModeWaitDuration string `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
 
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
@@ -78,8 +78,8 @@ type ControllerConfig struct {
 // DefaultControllerConfig returns the default resource manager controller configuration.
 func DefaultControllerConfig() *ControllerConfig {
 	return &ControllerConfig{
-		EnableDegradedMode: defaultEnableDegradedMode,
-		RequestUnit:        DefaultRequestUnitConfig(),
+		DegradedModeWaitDuration: defaultDegradedModeWaitDuration,
+		RequestUnit:              DefaultRequestUnitConfig(),
 	}
 }
 
@@ -123,8 +123,8 @@ type Config struct {
 	WriteBytesCost RequestUnit
 	CPUMsCost      RequestUnit
 	// The CPU statistics need to distinguish between different environments.
-	isSingleGroupByKeyspace bool
-	EnableDegradedMode      bool
+	isSingleGroupByKeyspace  bool
+	DegradedModeWaitDuration time.Duration
 }
 
 // DefaultConfig returns the default configuration.
@@ -137,12 +137,17 @@ func DefaultConfig() *Config {
 // GenerateConfig generates the configuration by the given request unit configuration.
 func GenerateConfig(config *ControllerConfig) *Config {
 	cfg := &Config{
-		ReadBaseCost:       RequestUnit(config.RequestUnit.ReadBaseCost),
-		ReadBytesCost:      RequestUnit(config.RequestUnit.ReadCostPerByte),
-		WriteBaseCost:      RequestUnit(config.RequestUnit.WriteBaseCost),
-		WriteBytesCost:     RequestUnit(config.RequestUnit.WriteCostPerByte),
-		CPUMsCost:          RequestUnit(config.RequestUnit.CPUMsCost),
-		EnableDegradedMode: config.EnableDegradedMode,
+		ReadBaseCost:   RequestUnit(config.RequestUnit.ReadBaseCost),
+		ReadBytesCost:  RequestUnit(config.RequestUnit.ReadCostPerByte),
+		WriteBaseCost:  RequestUnit(config.RequestUnit.WriteBaseCost),
+		WriteBytesCost: RequestUnit(config.RequestUnit.WriteCostPerByte),
+		CPUMsCost:      RequestUnit(config.RequestUnit.CPUMsCost),
+	}
+	duration, err := time.ParseDuration(config.DegradedModeWaitDuration)
+	if err != nil {
+		cfg.DegradedModeWaitDuration, _ = time.ParseDuration(defaultDegradedModeWaitDuration)
+	} else {
+		cfg.DegradedModeWaitDuration = duration
 	}
 	return cfg
 }

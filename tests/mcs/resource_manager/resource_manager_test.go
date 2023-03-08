@@ -786,5 +786,5 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
 	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
 	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
-	re.True(expectedConfig.EnableDegradedMode)
+	re.Equal(expectedConfig.DegradedModeWaitDuration, config.DegradedModeWaitDuration)
 }

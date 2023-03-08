@@ -169,9 +169,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.initRunState()
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	go func() {
-		c.run.responseDeadline = time.NewTimer(time.Second)
-		c.run.responseDeadline.Stop()
-		defer c.run.responseDeadline.Stop()
+		if c.config.DegradedModeWaitDuration > 0 {
+			c.run.responseDeadline = time.NewTimer(c.config.DegradedModeWaitDuration)
+			c.run.responseDeadline.Stop()
+			defer c.run.responseDeadline.Stop()
+		}
 		cleanupTicker := time.NewTicker(defaultGroupCleanupInterval)
 		defer cleanupTicker.Stop()
 		stateUpdateTicker := time.NewTicker(defaultGroupStateUpdateInterval)
@@ -182,11 +184,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case <-c.loopCtx.Done():
 				return
 			case <-c.responseDeadlineCh:
-				if c.config.EnableDegradedMode {
-					c.run.inDegradedMode = true
-					c.applyDegradedMode()
-					log.Warn("[resource group controller] enter degraded mode")
-				}
+				c.run.inDegradedMode = true
+				c.applyDegradedMode()
+				log.Warn("[resource group controller] enter degraded mode")
 			case resp := <-c.tokenResponseChan:
 				c.run.requestInProgress = false
 				if resp != nil {
@@ -381,8 +381,8 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		Requests:              requests,
 		TargetRequestPeriodMs: uint64(defaultTargetPeriod / time.Millisecond),
 	}
-	if c.responseDeadlineCh == nil {
-		c.run.responseDeadline.Reset(time.Second)
+	if c.config.DegradedModeWaitDuration > 0 && c.responseDeadlineCh == nil {
+		c.run.responseDeadline.Reset(c.config.DegradedModeWaitDuration)
 		c.responseDeadlineCh = c.run.responseDeadline.C
 	}
 	go func() {
