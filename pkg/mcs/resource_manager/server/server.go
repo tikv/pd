@@ -350,9 +350,12 @@ func (s *Server) GetPrimary() bs.MemberProvider {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
-		return err
-	}
+	// TODO: uncomment the following code to generate a unique cluster id from the given ClusterIDPath
+	// after we add rpc for the client to retrieve the cluster id from the server then use it in every
+	// request for verification.
+	// if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
+	// 	return err
+	// }
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// The independent Resource Manager service still reuses PD version info since PD and Resource Manager are just
 	// different service modes provided by the same pd-server binary
