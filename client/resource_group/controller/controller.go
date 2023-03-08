@@ -43,6 +43,11 @@ type ResourceGroupKVInterceptor interface {
 	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) error
 	// OnResponse is used to consume tokens after receiving response
 	OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error
+	// IsInsufficientResource indicates whether resource group's resource is insufficient which decides whether request needs wait.
+	// Note: The semantic of IsInsufficientResource is different from `isLowTokens` in limiter.
+	IsInsufficientResource(resourceGroupName string) ([]bool, error)
+	// GetConsumption
+	GetConsumption(resourceGroupName string) ([]float64, error)
 }
 
 // ResourceGroupProvider provides some api to interact with resource manager server。
@@ -379,6 +384,26 @@ func (c *ResourceGroupsController) OnResponse(_ context.Context, resourceGroupNa
 	gc := tmp.(*groupCostController)
 	gc.onResponse(req, resp)
 	return nil
+}
+
+// IsInsufficientResource
+func (c *ResourceGroupsController) IsInsufficientResource(resourceGroupName string) ([]bool, error) {
+	tmp, ok := c.groupsController.Load(resourceGroupName)
+	if !ok {
+		return []bool{}, errors.Errorf("[resource group controller] resource group is stale or not existed.")
+	}
+	gc := tmp.(*groupCostController)
+	return gc.IsInsufficientResource(), nil
+}
+
+// GetConsumption
+func (c *ResourceGroupsController) GetConsumption(resourceGroupName string) ([]float64, error) {
+	tmp, ok := c.groupsController.Load(resourceGroupName)
+	if !ok {
+		return []float64{}, errors.Errorf("[resource group controller] resource group is stale or not existed.")
+	}
+	gc := tmp.(*groupCostController)
+	return gc.GetConsumption(), nil
 }
 
 type groupCostController struct {
@@ -901,4 +926,40 @@ ret:
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
+}
+
+func (gc *groupCostController) IsInsufficientResource() []bool {
+	var ret []bool
+	now := time.Now()
+	switch gc.mode {
+	case rmpb.GroupMode_RUMode:
+		ret = make([]bool, 0, len(gc.run.requestUnitTokens))
+		for _, counter := range gc.run.requestUnitTokens {
+			ret = append(ret, counter.limiter.AvailableTokens(now) < 0)
+		}
+	case rmpb.GroupMode_RawMode:
+		ret = make([]bool, 0, len(gc.run.resourceTokens))
+		for _, counter := range gc.run.resourceTokens {
+			ret = append(ret, counter.limiter.AvailableTokens(now) < 0)
+		}
+	}
+	return ret
+}
+
+// GetConsumption
+func (gc *groupCostController) GetConsumption() []float64 {
+	ret := make([]float64, 0, len(gc.run.requestUnitTokens))
+	gc.mu.Lock()
+	switch gc.mode {
+	case rmpb.GroupMode_RUMode:
+		for typ := range gc.run.requestUnitTokens {
+			ret = append(ret, getRUValueFromConsumption(gc.mu.consumption, typ))
+		}
+	case rmpb.GroupMode_RawMode:
+		for typ := range gc.run.resourceTokens {
+			ret = append(ret, getRawResourceValueFromConsumption(gc.mu.consumption, typ))
+		}
+	}
+	gc.mu.Unlock()
+	return ret
 }
