@@ -301,14 +301,31 @@ func (s *testUnsafeRecoverySuite) TestFailed(c *C) {
 	req := newStoreHeartbeat(2, nil)
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
+<<<<<<< HEAD
 	c.Assert(resp.RecoveryPlan, IsNil)
+=======
+	re.Equal(exitForceLeader, recoveryController.GetStage())
+>>>>>>> d87484018 (online recovery: fix online recovery timeout mechanism (#6108))
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
 		req.StoreReport = report
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
+<<<<<<< HEAD
 		c.Assert(resp.RecoveryPlan, IsNil)
+=======
+		re.NotNil(resp.RecoveryPlan)
+		applyRecoveryPlan(re, storeID, reports, resp)
+	}
+
+	for storeID, report := range reports {
+		req := newStoreHeartbeat(storeID, report)
+		req.StoreReport = report
+		resp := &pdpb.StoreHeartbeatResponse{}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		applyRecoveryPlan(re, storeID, reports, resp)
+>>>>>>> d87484018 (online recovery: fix online recovery timeout mechanism (#6108))
 	}
 	c.Assert(recoveryController.GetStage(), Equals, failed)
 }
@@ -961,7 +978,15 @@ func (s *testUnsafeRecoverySuite) TestJointState(c *C) {
 	}
 }
 
+<<<<<<< HEAD
 func (s *testUnsafeRecoverySuite) TestTimeout(c *C) {
+=======
+func TestExecutionTimeout(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+>>>>>>> d87484018 (online recovery: fix online recovery timeout mechanism (#6108))
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
@@ -977,10 +1002,43 @@ func (s *testUnsafeRecoverySuite) TestTimeout(c *C) {
 
 	time.Sleep(time.Second)
 	req := newStoreHeartbeat(1, nil)
-	req.StoreReport = &pdpb.StoreReport{Step: 1}
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
+<<<<<<< HEAD
 	c.Assert(recoveryController.GetStage(), Equals, failed)
+=======
+	re.Equal(exitForceLeader, recoveryController.GetStage())
+	req.StoreReport = &pdpb.StoreReport{Step: 2}
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	re.Equal(failed, recoveryController.GetStage())
+
+	output := recoveryController.Show()
+	re.Equal(len(output), 3)
+	re.Contains(output[1].Details[0], "triggered by error: Exceeds timeout")
+}
+
+func TestNoHeartbeatTimeout(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(3, "6.0.0") {
+		re.NoError(cluster.PutStore(store.GetMeta()))
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
+	}, 1, false))
+
+	time.Sleep(time.Second)
+	recoveryController.Show()
+	re.Equal(exitForceLeader, recoveryController.GetStage())
+>>>>>>> d87484018 (online recovery: fix online recovery timeout mechanism (#6108))
 }
 
 func (s *testUnsafeRecoverySuite) TestExitForceLeader(c *C) {
