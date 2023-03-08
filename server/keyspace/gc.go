@@ -63,37 +63,28 @@ func (manager *Manager) newGCWorker() *gcWorker {
 
 // run starts the main loop of the gc worker.
 func (worker *gcWorker) run() {
-	go func() {
-		for {
-			select {
-			// If manager's context done, stop the loop completely.
-			case <-worker.manager.ctx.Done():
+	for {
+		select {
+		// If manager's context done, stop the loop completely.
+		case <-worker.manager.ctx.Done():
+			worker.ticker.Stop()
+			log.Info("[keyspace] gc loop stopped due to context cancel")
+			return
+		case now := <-worker.ticker.C:
+			if !worker.member.IsLeader() {
+				// If server currently not leader, stop the ticker and don't do gc.
 				worker.ticker.Stop()
-				log.Info("[keyspace] gc loop stopped due to context cancel")
-				return
-			case now := <-worker.ticker.C:
-				if !worker.member.IsLeader() {
-					// If server currently not leader, stop the ticker and don't do gc.
-					worker.ticker.Stop()
-					log.Info("[keyspace] gc loop stopped, server is not leader")
-					continue
-				}
-				// If a keyspace archived before safePoint, we should clean up the keyspace.
-				worker.RLock()
-				safePoint := now.Add(-worker.gcLifeTime).Unix()
-				failpoint.Inject("safePoint", func(val failpoint.Value) {
-					// Adds an option to overwrite safePoint for easier testing.
-					injectedSafePoint, ok := val.(int64)
-					if ok {
-						safePoint = injectedSafePoint
-					}
-				})
-				worker.RUnlock()
-				log.Info("[keyspace] starting gc")
-				worker.nextKeyspaceID = worker.scanKeyspacesAndDoGC(worker.manager.ctx, safePoint)
+				log.Info("[keyspace] gc loop stopped, server is not leader")
+				continue
 			}
+			// If a keyspace archived before safePoint, we should clean up the keyspace.
+			worker.RLock()
+			safePoint := now.Add(-worker.gcLifeTime).Unix()
+			worker.RUnlock()
+			log.Info("[keyspace] starting gc")
+			worker.nextKeyspaceID = worker.scanKeyspacesAndDoGC(worker.manager.ctx, safePoint)
 		}
-	}()
+	}
 }
 
 func (worker *gcWorker) reload(cfg *config.KeyspaceConfig) {
@@ -144,9 +135,11 @@ func (worker *gcWorker) scanKeyspacesAndDoGC(ctx context.Context, safePoint int6
 		}
 		// Batch length of 0 means that we finished scanning one round of all keyspaces.
 		if len(batch) == 0 {
-			// start next batch should be from the beginning.
+			// Next batch should start from the beginning.
 			nextID = 0
-			continue
+			// Return here directly and wait for next tick instead of redo scanning from the beginning,
+			// this could prevent scanning keyspace at high frequency when keyspace count is low.
+			return
 		}
 		for _, meta := range batch {
 			if canGC(meta, safePoint) {
@@ -182,4 +175,12 @@ func (worker *gcWorker) gcKeyspace(ctx context.Context, meta *keyspacepb.Keyspac
 	// TODO: Clean keyspace related etcd paths.
 	// And only when all of the above succeeded:
 	// TODO: Set keyspace state to TOMBSTONE
+
+	// Inject a failpoint to test cleaning framework during test.
+	failpoint.Inject("doGC", func() {
+		_, err := worker.manager.UpdateKeyspaceState(meta.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+		if err != nil {
+			log.Warn("[keyspace] fail to tombstone keyspace when doing gc")
+		}
+	})
 }

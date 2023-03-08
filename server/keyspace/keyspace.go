@@ -136,7 +136,7 @@ func (manager *Manager) Bootstrap() error {
 		}
 	}
 	// start gc loop.
-	manager.gcWorker.run()
+	go manager.gcWorker.run()
 	return nil
 }
 
