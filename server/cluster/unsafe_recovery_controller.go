@@ -290,7 +290,7 @@ func (u *unsafeRecoveryController) HandleErr(err error) bool {
 	// blocks reads and writes.
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
-	u.timeout = time.Now().Add(storeRequestInterval)
+	u.timeout = time.Now().Add(storeRequestInterval * 2)
 	// empty recovery plan would trigger exit force leader
 	u.changeStage(exitForceLeader)
 	return false
