@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
@@ -121,8 +122,8 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return nil, nil
 	}
-	ops[0].SetPriorityLevel(core.Low)
-	ops[1].SetPriorityLevel(core.Low)
+	ops[0].SetPriorityLevel(constant.Low)
+	ops[1].SetPriorityLevel(constant.Low)
 	ops[0].Counters = append(ops[0].Counters, randomMergeNewOperatorCounter)
 	return ops, nil
 }

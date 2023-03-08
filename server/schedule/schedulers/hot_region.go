@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -111,7 +112,7 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 	h.storesLoads = cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
-	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource core.ResourceKind) {
+	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource constant.ResourceKind) {
 		ty := buildResourceType(rw, resource)
 		h.stLoadInfos[ty] = statistics.SummaryStoresLoad(
 			h.stInfos,
@@ -125,16 +126,16 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 		// update read statistics
 		if time.Since(h.updateReadTime) >= statisticsInterval {
 			regionRead := cluster.RegionReadStats()
-			prepare(regionRead, core.LeaderKind)
-			prepare(regionRead, core.RegionKind)
+			prepare(regionRead, constant.LeaderKind)
+			prepare(regionRead, constant.RegionKind)
 			h.updateReadTime = time.Now()
 		}
 	case statistics.Write:
 		// update write statistics
 		if time.Since(h.updateWriteTime) >= statisticsInterval {
 			regionWrite := cluster.RegionWriteStats()
-			prepare(regionWrite, core.LeaderKind)
-			prepare(regionWrite, core.RegionKind)
+			prepare(regionWrite, constant.LeaderKind)
+			prepare(regionWrite, constant.RegionKind)
 			h.updateWriteTime = time.Now()
 		}
 	}
@@ -1434,7 +1435,7 @@ func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID
 }
 
 func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, sourceLabel, targetLabel, typ, dim string) {
-	op.SetPriorityLevel(core.High)
+	op.SetPriorityLevel(constant.High)
 	op.FinishedCounters = append(op.FinishedCounters,
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),
@@ -1563,20 +1564,20 @@ func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
 	panic(fmt.Sprintf("invalid arguments for toResourceType: rwTy = %v, opTy = %v", rwTy, opTy))
 }
 
-func buildResourceType(rwTy statistics.RWType, ty core.ResourceKind) resourceType {
+func buildResourceType(rwTy statistics.RWType, ty constant.ResourceKind) resourceType {
 	switch rwTy {
 	case statistics.Write:
 		switch ty {
-		case core.RegionKind:
+		case constant.RegionKind:
 			return writePeer
-		case core.LeaderKind:
+		case constant.LeaderKind:
 			return writeLeader
 		}
 	case statistics.Read:
 		switch ty {
-		case core.RegionKind:
+		case constant.RegionKind:
 			return readPeer
-		case core.LeaderKind:
+		case constant.LeaderKind:
 			return readLeader
 		}
 	}

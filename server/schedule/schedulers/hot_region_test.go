@@ -279,7 +279,7 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	tc.SetHotRegionScheduleLimit(0)
 	re.False(hb.IsScheduleAllowed(tc))
 	clearPendingInfluence(hb.(*hotScheduler))
-	tc.SetHotRegionScheduleLimit(int(opt.GetScheduleConfig().HotRegionScheduleLimit))
+	tc.SetHotRegionScheduleLimit(int(opt.GetHotRegionScheduleLimit()))
 
 	for i := 0; i < 20; i++ {
 		ops, _ := hb.Schedule(tc, false)
@@ -546,9 +546,9 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,
 				[]float64{regionBytesSum / aliveTiFlashCount, regionKeysSum / aliveTiFlashCount, 0}))
 		// check IsTraceRegionFlow == false
-		pdServerCfg := tc.GetOpts().GetPDServerConfig()
+		pdServerCfg := tc.GetPDServerConfig()
 		pdServerCfg.FlowRoundByDigit = 8
-		tc.GetOpts().SetPDServerConfig(pdServerCfg)
+		tc.SetPDServerConfig(pdServerCfg)
 		clearPendingInfluence(hb)
 		ops, _ = hb.Schedule(tc, false)
 		re.NotEmpty(ops)
@@ -558,7 +558,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 				[]float64{hotRegionBytesSum / aliveTiFlashCount, hotRegionKeysSum / aliveTiFlashCount, 0}))
 		// revert
 		pdServerCfg.FlowRoundByDigit = 3
-		tc.GetOpts().SetPDServerConfig(pdServerCfg)
+		tc.SetPDServerConfig(pdServerCfg)
 	}
 	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is larger than other stores.
@@ -1446,7 +1446,6 @@ func TestHotCacheUpdateCache(t *testing.T) {
 
 func TestHotCacheKeyThresholds(t *testing.T) {
 	re := require.New(t)
-
 	statistics.ThresholdsUpdateInterval = 0
 	defer func() {
 		statistics.ThresholdsUpdateInterval = 8 * time.Second

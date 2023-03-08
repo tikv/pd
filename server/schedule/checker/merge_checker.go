@@ -23,10 +23,11 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -76,18 +77,17 @@ var (
 type MergeChecker struct {
 	PauseController
 	cluster    schedule.Cluster
-	opts       *config.PersistOptions
+	conf       config.Config
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster schedule.Cluster) *MergeChecker {
-	opts := cluster.GetOpts()
-	splitCache := cache.NewIDTTL(ctx, time.Minute, opts.GetSplitMergeInterval())
+func NewMergeChecker(ctx context.Context, cluster schedule.Cluster, conf config.Config) *MergeChecker {
+	splitCache := cache.NewIDTTL(ctx, time.Minute, conf.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,
-		opts:       opts,
+		conf:       conf,
 		splitCache: splitCache,
 		startTime:  time.Now(),
 	}
@@ -102,7 +102,7 @@ func (m *MergeChecker) GetType() string {
 // will skip check it for a while.
 func (m *MergeChecker) RecordRegionSplit(regionIDs []uint64) {
 	for _, regionID := range regionIDs {
-		m.splitCache.PutWithTTL(regionID, nil, m.opts.GetSplitMergeInterval())
+		m.splitCache.PutWithTTL(regionID, nil, m.conf.GetSplitMergeInterval())
 	}
 }
 
@@ -115,13 +115,13 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
-	expireTime := m.startTime.Add(m.opts.GetSplitMergeInterval())
+	expireTime := m.startTime.Add(m.conf.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		mergeCheckerRecentlyStartCounter.Inc()
 		return nil
 	}
 
-	m.splitCache.UpdateTTL(m.opts.GetSplitMergeInterval())
+	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
 	if m.splitCache.Exists(region.GetID()) {
 		mergeCheckerRecentlySplitCounter.Inc()
 		return nil
@@ -134,7 +134,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	// region is not small enough
-	if !region.NeedMerge(int64(m.opts.GetMaxMergeRegionSize()), int64(m.opts.GetMaxMergeRegionKeys())) {
+	if !region.NeedMerge(int64(m.conf.GetMaxMergeRegionSize()), int64(m.conf.GetMaxMergeRegionKeys())) {
 		mergeCheckerNoNeedCounter.Inc()
 		return nil
 	}
@@ -162,7 +162,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	if m.checkTarget(region, next) {
 		target = next
 	}
-	if !m.opts.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
+	if !m.conf.IsOneWayMergeEnabled() && m.checkTarget(region, prev) { // allow a region can be merged by two ways.
 		if target == nil || prev.GetApproximateSize() < next.GetApproximateSize() { // pick smaller
 			target = prev
 		}
@@ -183,13 +183,13 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 	if err := m.cluster.GetStoreConfig().CheckRegionSize(uint64(target.GetApproximateSize()+region.GetApproximateSize()),
-		m.opts.GetMaxMergeRegionSize()); err != nil {
+		m.conf.GetMaxMergeRegionSize()); err != nil {
 		mergeCheckerSplitSizeAfterMergeCounter.Inc()
 		return nil
 	}
 
 	if err := m.cluster.GetStoreConfig().CheckRegionKeys(uint64(target.GetApproximateKeys()+region.GetApproximateKeys()),
-		m.opts.GetMaxMergeRegionKeys()); err != nil {
+		m.conf.GetMaxMergeRegionKeys()); err != nil {
 		mergeCheckerSplitKeysAfterMergeCounter.Inc()
 		return nil
 	}
@@ -285,14 +285,14 @@ func AllowMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) boo
 
 	policy := cluster.GetOpts().GetKeyType()
 	switch policy {
-	case core.Table:
+	case constant.Table:
 		if cluster.GetOpts().IsCrossTableMergeEnabled() {
 			return true
 		}
 		return isTableIDSame(region, adjacent)
-	case core.Raw:
+	case constant.Raw:
 		return true
-	case core.Txn:
+	case constant.Txn:
 		return true
 	default:
 		return isTableIDSame(region, adjacent)

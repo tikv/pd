@@ -56,7 +56,7 @@ func TestGetVersion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan *server.Server)
 	go func(cfg *config.Config) {
-		s, err := server.CreateServer(ctx, cfg, NewHandler)
+		s, err := server.CreateServer(ctx, cfg, nil, NewHandler)
 		re.NoError(err)
 		re.NoError(failpoint.Enable("github.com/tikv/pd/server/memberNil", `return(true)`))
 		reqCh <- struct{}{}

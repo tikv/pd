@@ -16,12 +16,20 @@ package operator
 
 import (
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 )
 
 // OpInfluence records the influence of the cluster.
 type OpInfluence struct {
 	StoresInfluence map[uint64]*StoreInfluence
+}
+
+// NewOpInfluence creates a OpInfluence.
+func NewOpInfluence() *OpInfluence {
+	return &OpInfluence{
+		StoresInfluence: make(map[uint64]*StoreInfluence),
+	}
 }
 
 // GetStoreInfluence get storeInfluence of specific store.
@@ -42,23 +50,30 @@ type StoreInfluence struct {
 	LeaderCount  int64
 	WitnessCount int64
 	StepCost     map[storelimit.Type]int64
+	// records the cost of the sender.
+	SendCost int64
+}
+
+// GetSendCost returns the cost of sending snapshot.
+func (s *StoreInfluence) GetSendCost() int64 {
+	return s.SendCost
 }
 
 // ResourceProperty returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceProperty(kind core.ScheduleKind) int64 {
+func (s StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 	switch kind.Resource {
-	case core.LeaderKind:
+	case constant.LeaderKind:
 		switch kind.Policy {
-		case core.ByCount:
+		case constant.ByCount:
 			return s.LeaderCount
-		case core.BySize:
+		case constant.BySize:
 			return s.LeaderSize
 		default:
 			return 0
 		}
-	case core.RegionKind:
+	case constant.RegionKind:
 		return s.RegionSize
-	case core.WitnessKind:
+	case constant.WitnessKind:
 		return s.WitnessCount
 	default:
 		return 0
