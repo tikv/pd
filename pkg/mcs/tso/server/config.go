@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -33,21 +34,16 @@ import (
 )
 
 const (
-	defaultLeaderLease   = int64(3)
 	defaultMaxResetTSGap = 24 * time.Hour
 
-	defaultName              = "TSO"
-	defaultBackendEndpoints  = "http://127.0.0.1:2379"
-	defaultListenAddr        = "127.0.0.1:3379"
-	defaultEnableGRPCGateway = true
+	defaultName             = "TSO"
+	defaultBackendEndpoints = "http://127.0.0.1:2379"
+	defaultListenAddr       = "127.0.0.1:3379"
 
-	defaultTSOSaveInterval           = time.Duration(defaultLeaderLease) * time.Second
+	defaultTSOSaveInterval           = time.Duration(utils.DefaultLeaderLease) * time.Second
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
-
-	defaultLogFormat           = "text"
-	defaultDisableErrorVerbose = true
 )
 
 // Config is the configuration for the TSO.
@@ -163,7 +159,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
 	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default-datadir.%s", c.Name))
-	adjustPath(&c.DataDir)
+	configutil.AdjustPath(&c.DataDir)
 
 	if err := c.Validate(); err != nil {
 		return err
@@ -173,7 +169,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
 
 	configutil.AdjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
-	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
@@ -188,29 +184,22 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = defaultEnableGRPCGateway
+		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
 	c.Security.Encryption.Adjust()
 
 	if len(c.Log.Format) == 0 {
-		c.Log.Format = defaultLogFormat
+		c.Log.Format = utils.DefaultLogFormat
 	}
 
 	return nil
 }
 
-func adjustPath(p *string) {
-	absPath, err := filepath.Abs(*p)
-	if err == nil {
-		*p = absPath
-	}
-}
-
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
-		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
+		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
 	}
 }
 

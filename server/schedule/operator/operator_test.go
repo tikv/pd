@@ -169,6 +169,48 @@ func (suite *operatorTestSuite) TestInfluence() {
 	storeOpInfluence[1] = &StoreInfluence{}
 	storeOpInfluence[2] = &StoreInfluence{}
 
+	resetInfluence := func() {
+		storeOpInfluence[1] = &StoreInfluence{}
+		storeOpInfluence[2] = &StoreInfluence{}
+	}
+
+	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(opInfluence, region)
+	suite.Equal(StoreInfluence{
+		LeaderSize:  0,
+		LeaderCount: 0,
+		RegionSize:  50,
+		RegionCount: 1,
+		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+	}, *storeOpInfluence[2])
+
+	suite.Equal(StoreInfluence{
+		LeaderSize:  0,
+		LeaderCount: 0,
+		RegionSize:  0,
+		RegionCount: 0,
+		StepCost:    map[storelimit.Type]int64{storelimit.SendSnapshot: 50},
+	}, *storeOpInfluence[1])
+	resetInfluence()
+
+	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(opInfluence, region)
+	suite.Equal(StoreInfluence{
+		LeaderSize:   0,
+		LeaderCount:  0,
+		RegionSize:   50,
+		RegionCount:  0,
+		WitnessCount: -1,
+		StepCost:     map[storelimit.Type]int64{storelimit.AddPeer: 1000},
+	}, *storeOpInfluence[1])
+
+	suite.Equal(StoreInfluence{
+		LeaderSize:  0,
+		LeaderCount: 0,
+		RegionSize:  0,
+		RegionCount: 0,
+		StepCost:    map[storelimit.Type]int64{storelimit.SendSnapshot: 50},
+	}, *storeOpInfluence[2])
+	resetInfluence()
+
 	AddPeer{ToStore: 2, PeerID: 2}.Influence(opInfluence, region)
 	suite.Equal(StoreInfluence{
 		LeaderSize:  0,
