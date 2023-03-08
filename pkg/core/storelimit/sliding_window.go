@@ -47,7 +47,7 @@ func NewSlidingWindows(cap float64) *SlidingWindows {
 // Reset resets the capacity of the sliding windows.
 // It doesn't clear all the used, only set the capacity.
 func (s *SlidingWindows) Reset(cap float64, typ Type) {
-	if typ == SendSnapshot {
+	if typ != SendSnapshot {
 		return
 	}
 	s.mu.Lock()

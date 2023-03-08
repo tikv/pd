@@ -101,9 +101,10 @@ func (l *StoreRateLimit) Take(cost int64, typ Type, _ constant.PriorityLevel) bo
 
 // Reset resets the rate limit.
 func (l *StoreRateLimit) Reset(rate float64, typ Type) {
-	if typ != SendSnapshot {
-		l.limits[typ].Reset(rate)
+	if typ == SendSnapshot {
+		return
 	}
+	l.limits[typ].Reset(rate)
 }
 
 // limit the operators of a store

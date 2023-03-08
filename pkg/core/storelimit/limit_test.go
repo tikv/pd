@@ -67,16 +67,19 @@ func TestSlidingWindow(t *testing.T) {
 	re.EqualValues(s.GetUsed(), 0)
 
 	// case 2: it will occupy the core.High window size if the normal window is full.
-	capacity = 1000
+	capacity = 2000
 	s.Reset(float64(capacity), SendSnapshot)
-	re.True(s.Take(capacity, SendSnapshot, constant.Low))
+	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Low))
+	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Low))
 	re.False(s.Take(capacity, SendSnapshot, constant.Low))
-	re.True(s.Take(capacity-100, SendSnapshot, constant.Medium))
-	re.False(s.Take(capacity-100, SendSnapshot, constant.Medium))
-	re.EqualValues(s.GetUsed(), capacity+capacity-100)
-	s.Ack(capacity)
-	re.Equal(s.GetUsed(), capacity-100)
+	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
+	re.False(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
+	re.EqualValues(s.GetUsed(), capacity+capacity+capacity-minSnapSize*3)
+	s.Ack(capacity - minSnapSize)
+	s.Ack(capacity - minSnapSize)
+	re.Equal(s.GetUsed(), capacity-minSnapSize)
 
+	// case 3: skip the type is not the SendSnapshot
 	for i := 0; i < 10; i++ {
 		re.True(s.Take(capacity, AddPeer, constant.Low))
 	}
