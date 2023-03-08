@@ -783,9 +783,9 @@ func (b *Builder) execPromoteNonWitness(peer *metapb.Peer) {
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
 	if b.lightWeight {
-		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightWeight, IsWitness: peer.GetIsWitness()})
+		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightWeight, IsWitness: peer.GetIsWitness(), SendStore: b.originLeaderStoreID})
 	} else {
-		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness()})
+		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness(), SendStore: b.originLeaderStoreID})
 	}
 	if !core.IsLearner(peer) {
 		b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness()})
@@ -855,7 +855,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 }
 
 func (b *Builder) execSwitchToNonWitness(peer *metapb.Peer) {
-	b.steps = append(b.steps, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId()})
+	b.steps = append(b.steps, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId(), SendStore: b.originLeaderStoreID})
 	delete(b.toNonWitness, peer.GetStoreId())
 }
 
@@ -882,7 +882,7 @@ func (b *Builder) execBatchSwitchWitnesses() {
 
 	for _, nw := range b.toNonWitness.IDs() {
 		peer := b.toNonWitness[nw]
-		step.ToNonWitnesses = append(step.ToNonWitnesses, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId()})
+		step.ToNonWitnesses = append(step.ToNonWitnesses, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId(), SendStore: b.originLeaderStoreID})
 	}
 	b.toNonWitness = newPeersMap()
 

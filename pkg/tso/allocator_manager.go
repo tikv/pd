@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -165,6 +166,7 @@ type AllocatorManager struct {
 	member Member
 	// TSO config
 	rootPath               string
+	storage                endpoint.TSOStorage
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
 	maxResetTSGap          func() time.Duration
@@ -180,6 +182,7 @@ type AllocatorManager struct {
 func NewAllocatorManager(
 	m Member,
 	rootPath string,
+	storage endpoint.TSOStorage,
 	enableLocalTSO bool,
 	saveInterval time.Duration,
 	updatePhysicalInterval time.Duration,
@@ -190,6 +193,7 @@ func NewAllocatorManager(
 		enableLocalTSO:         enableLocalTSO,
 		member:                 m,
 		rootPath:               rootPath,
+		storage:                storage,
 		saveInterval:           saveInterval,
 		updatePhysicalInterval: updatePhysicalInterval,
 		maxResetTSGap:          maxResetTSGap,

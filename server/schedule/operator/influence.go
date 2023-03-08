@@ -25,6 +25,13 @@ type OpInfluence struct {
 	StoresInfluence map[uint64]*StoreInfluence
 }
 
+// NewOpInfluence creates a OpInfluence.
+func NewOpInfluence() *OpInfluence {
+	return &OpInfluence{
+		StoresInfluence: make(map[uint64]*StoreInfluence),
+	}
+}
+
 // GetStoreInfluence get storeInfluence of specific store.
 func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
@@ -74,7 +81,8 @@ func (s StoreInfluence) GetStepCost(limitType storelimit.Type) int64 {
 	return s.StepCost[limitType]
 }
 
-func (s *StoreInfluence) addStepCost(limitType storelimit.Type, cost int64) {
+// AddStepCost add cost to the influence.
+func (s *StoreInfluence) AddStepCost(limitType storelimit.Type, cost int64) {
 	if s.StepCost == nil {
 		s.StepCost = make(map[storelimit.Type]int64)
 	}
@@ -84,8 +92,8 @@ func (s *StoreInfluence) addStepCost(limitType storelimit.Type, cost int64) {
 // AdjustStepCost adjusts the step cost of specific type store limit according to region size
 func (s *StoreInfluence) AdjustStepCost(limitType storelimit.Type, regionSize int64) {
 	if regionSize > storelimit.SmallRegionThreshold {
-		s.addStepCost(limitType, storelimit.RegionInfluence[limitType])
+		s.AddStepCost(limitType, storelimit.RegionInfluence[limitType])
 	} else if regionSize > core.EmptyRegionApproximateSize {
-		s.addStepCost(limitType, storelimit.SmallRegionInfluence[limitType])
+		s.AddStepCost(limitType, storelimit.SmallRegionInfluence[limitType])
 	}
 }
