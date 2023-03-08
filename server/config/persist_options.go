@@ -473,6 +473,9 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 		return limit.AddPeer
 	case storelimit.RemovePeer:
 		return limit.RemovePeer
+	// todo: impl it in store limit v2.
+	case storelimit.SendSnapshot:
+		return 0.0
 	default:
 		panic("no such limit type")
 	}

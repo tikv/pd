@@ -17,6 +17,7 @@ package configutil
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -160,5 +161,13 @@ func AdjustDuration(v *typeutil.Duration, defValue time.Duration) {
 func AdjustByteSize(v *typeutil.ByteSize, defValue typeutil.ByteSize) {
 	if *v == 0 {
 		*v = defValue
+	}
+}
+
+// AdjustPath adjusts the value of a path variable.
+func AdjustPath(p *string) {
+	absPath, err := filepath.Abs(*p)
+	if err == nil {
+		*p = absPath
 	}
 }

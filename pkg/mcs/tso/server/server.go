@@ -42,7 +42,10 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -61,7 +64,6 @@ import (
 )
 
 const (
-	leaderTickInterval = 50 * time.Millisecond
 	// tsoRootPath for all tso servers.
 	tsoRootPath      = "/tso"
 	tsoClusterIDPath = "/tso/cluster_id"
@@ -69,10 +71,6 @@ const (
 	// The entire key is in the format of "/pd/<cluster-id>/microservice/tso/keyspace-group-XXXXX/primary" in which
 	// XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
 	tsoKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/tso/keyspace-group-"
-	// defaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
-	defaultGRPCGracefulStopTimeout = 5 * time.Second
-	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
-	defaultHTTPGracefulShutdownTimeout = 5 * time.Second
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -95,6 +93,7 @@ type Server struct {
 	cfg         *Config
 	clusterID   uint64
 	rootPath    string
+	storage     endpoint.TSOStorage
 	backendUrls []url.URL
 
 	// for the primary election in the TSO cluster
@@ -250,7 +249,7 @@ func (s *Server) campaignLeader() {
 	// go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", s.participant.Member().Name))
 
-	leaderTicker := time.NewTicker(leaderTickInterval)
+	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -481,7 +480,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(defaultGRPCGracefulStopTimeout):
+	case <-time.After(utils.DefaultGRPCGracefulStopTimeout):
 		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now")
 		gs.Stop()
 	}
@@ -505,7 +504,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	serverr := hs.Serve(l)
 	log.Info("http server stopped serving")
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPGracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
 	defer cancel()
 	if err := hs.Shutdown(ctx); err != nil {
 		log.Error("http server shutdown encountered problem", errs.ZapError(err))
@@ -540,11 +539,11 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 }
 
 func (s *Server) startServer() (err error) {
-	// TODO: uncomment the following code to generate a unique cluster id from the given tsoClusterIDPath
-	// after we add rpc for the client to retrieve the clusgter id from the server then use it in every
+	// TODO: uncomment the following code to generate a unique cluster id from the given ClusterIDPath
+	// after we add rpc for the client to retrieve the cluster id from the server then use it in every
 	// request for verification.
-	// if s.clusterID, err = etcdutil.InitClusterID(s.etcdClient, tsoClusterIDPath); err != nil {
-	//	return err
+	// if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
+	// 	return err
 	// }
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 
@@ -567,8 +566,9 @@ func (s *Server) startServer() (err error) {
 	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
 	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
 
+	s.storage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.rootPath), nil)
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.participant, s.rootPath, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
+		s.participant, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
 		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
 	// Set up the Global TSO Allocator here, it will be initialized once this TSO participant campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(s.ctx, tso.GlobalDCLocation, s.participant.GetLeadership())
@@ -580,9 +580,9 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen("tcp", s.cfg.ListenAddr, tlsConfig)
+		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.cfg.ListenAddr, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen("tcp", s.cfg.ListenAddr)
+		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.cfg.ListenAddr)
 	}
 	if err != nil {
 		return err
