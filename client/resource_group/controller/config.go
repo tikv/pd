@@ -45,7 +45,7 @@ const (
 	consumptionsReportingThreshold = 100
 	extendedReportingPeriodFactor  = 4
 	// defaultGroupCleanupInterval is the interval to clean up the deleted resource groups in memory.
-	defaultGroupCleanupInterval = 10 * time.Minute
+	defaultGroupCleanupInterval = 5 * time.Minute
 	// defaultSlotStalePeriod is the interval to clean up the stale resource groups in memory.
 	defaultSlotStalePeriod = 5
 	// defaultGroupStateUpdateInterval is the interval to update the state of the resource groups.

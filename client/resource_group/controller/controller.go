@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	pd "github.com/tikv/pd/client"
@@ -39,7 +40,7 @@ const (
 
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
-	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
+	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) error
 	// OnResponse is used to consume tokens after receiving response
 	OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error
@@ -166,6 +167,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		stateUpdateTicker := time.NewTicker(defaultGroupStateUpdateInterval)
 		defer stateUpdateTicker.Stop()
 
+		failpoint.Inject("fastCleanup", func() {
+			cleanupTicker.Stop()
+			cleanupTicker = time.NewTicker(100 * time.Millisecond)
+		})
+
 		for {
 			select {
 			case <-c.loopCtx.Done():
@@ -258,6 +264,17 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 		resourceGroupName := key.(string)
 		if _, ok := latestGroups[resourceGroupName]; !ok {
 			c.groupsController.Delete(key)
+			return true
+		}
+
+		gc := value.(*groupCostController)
+		// Check stale resource group
+		if equalRU(gc.run.lastRequestConsumption, gc.run.consumption) {
+			if gc.checkStaleTimes > defaultSlotStalePeriod {
+				c.groupsController.Delete(resourceGroupName)
+				return true
+			}
+			gc.checkStaleTimes += 1
 		}
 		return true
 	})
@@ -324,14 +341,6 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 	requests := make([]*rmpb.TokenBucketRequest, 0)
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
-		// Check stale resource group
-		if equalRU(gc.run.lastRequestConsumption, gc.run.consumption) {
-			if gc.checkStaleTimes > defaultSlotStalePeriod {
-				c.groupsController.Delete(name)
-				return true
-			}
-			gc.checkStaleTimes += 1
-		}
 		request := gc.collectRequestAndConsumption(onlySelectLow)
 		if request != nil {
 			requests = append(requests, request)

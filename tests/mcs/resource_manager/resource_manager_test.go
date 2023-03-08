@@ -100,18 +100,6 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 				},
 			},
 		},
-		{
-			Name: "test3",
-			Mode: rmpb.GroupMode_RUMode,
-			RUSettings: &rmpb.GroupRequestUnitSettings{
-				RU: &rmpb.TokenBucket{
-					Settings: &rmpb.TokenLimitSettings{
-						FillRate: 20000,
-					},
-					Tokens: 100000,
-				},
-			},
-		},
 	}
 }
 
@@ -761,6 +749,7 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 		ReadBaseCost:    1,
 		ReadCostPerByte: 1,
 	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/fastCleanup", `return(true)`))
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig)
 	controller.Start(suite.ctx)
 
@@ -773,20 +762,19 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 		},
 		times: 100,
 	}
-	// Mock client binds different users sequentially
-	for _, group := range suite.initGroups {
-		rreq := testCases.tcs.makeReadRequest()
-		rres := testCases.tcs.makeReadResponse()
-		for j := 0; j < testCases.times; j++ {
-			controller.OnRequestWait(suite.ctx, group.Name, rreq)
-			controller.OnResponse(suite.ctx, group.Name, rreq, rres)
-			time.Sleep(100 * time.Microsecond)
-		}
+	// Mock client binds one resource group and then closed
+	rreq := testCases.tcs.makeReadRequest()
+	rres := testCases.tcs.makeReadResponse()
+	for j := 0; j < testCases.times; j++ {
+		controller.OnRequestWait(suite.ctx, suite.initGroups[0].Name, rreq)
+		controller.OnResponse(suite.ctx, suite.initGroups[0].Name, rreq, rres)
+		time.Sleep(100 * time.Microsecond)
 	}
+	time.Sleep(1 * time.Second)
 
 	re.False(controller.CheckResourceGroupExist(suite.initGroups[0].Name))
-	re.True(controller.CheckResourceGroupExist(suite.initGroups[2].Name))
 
-	suite.cleanupResourceGroups()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
 	controller.Stop()
+	suite.cleanupResourceGroups()
 }
