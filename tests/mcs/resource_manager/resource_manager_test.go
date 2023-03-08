@@ -230,7 +230,7 @@ func (ti *testRequestInfo) WriteBytes() uint64 {
 }
 
 type testResponseInfo struct {
-	cpuMs     uint64
+	cpu       time.Duration
 	readBytes uint64
 	succeed   bool
 }
@@ -239,8 +239,8 @@ func (tri *testResponseInfo) ReadBytes() uint64 {
 	return tri.readBytes
 }
 
-func (tri *testResponseInfo) KVCPUMs() uint64 {
-	return tri.cpuMs
+func (tri *testResponseInfo) KVCPU() time.Duration {
+	return tri.cpu
 }
 
 func (tri *testResponseInfo) Succeed() bool {
@@ -271,14 +271,14 @@ func (t tokenConsumptionPerSecond) makeWriteRequest() *testRequestInfo {
 func (t tokenConsumptionPerSecond) makeReadResponse() *testResponseInfo {
 	return &testResponseInfo{
 		readBytes: uint64((t.rruTokensAtATime - 1) / 2),
-		cpuMs:     uint64(t.rruTokensAtATime / 2),
+		cpu:       time.Duration(t.rruTokensAtATime/2) * time.Millisecond,
 	}
 }
 
 func (t tokenConsumptionPerSecond) makeWriteResponse() *testResponseInfo {
 	return &testResponseInfo{
 		readBytes: 0,
-		cpuMs:     0,
+		cpu:       time.Duration(0),
 		succeed:   true,
 	}
 }
@@ -439,7 +439,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		modifySettings func(*rmpb.ResourceGroup)
 	}{
 		{"test1", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test1","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":10000},"state":{"initialized":false}}}}`,
+			`{"name":"test1","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":10000},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -452,7 +452,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":20000},"state":{"initialized":false}}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":20000},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -464,7 +464,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{

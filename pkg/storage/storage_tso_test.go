@@ -42,11 +42,11 @@ func TestSaveLoadTimestamp(t *testing.T) {
 	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 	storage := NewStorageWithEtcdBackend(client, rootPath)
 
-	keyspaceGroupName := "test"
+	key := "timestamp"
 	expectedTS := time.Now().Round(0)
-	err = storage.SaveTimestamp(keyspaceGroupName, expectedTS)
+	err = storage.SaveTimestamp(key, expectedTS)
 	re.NoError(err)
-	ts, err := storage.LoadTimestamp(keyspaceGroupName)
+	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)
 	re.Equal(expectedTS, ts)
 }
@@ -67,23 +67,27 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 	storage := NewStorageWithEtcdBackend(client, rootPath)
 
-	keyspaceGroupName := "test"
+	ltaKey := "lta"
+	timestampKey := "timestamp"
 	dc1LocationKey, dc2LocationKey := "dc1", "dc2"
 	localTS1 := time.Now().Round(0)
-	err = storage.SaveTimestamp(keyspaceGroupName, localTS1, dc1LocationKey)
+	l1 := path.Join(ltaKey, dc1LocationKey, timestampKey)
+	l2 := path.Join(ltaKey, dc2LocationKey, timestampKey)
+
+	err = storage.SaveTimestamp(l1, localTS1)
 	re.NoError(err)
 	globalTS := time.Now().Round(0)
-	err = storage.SaveTimestamp(keyspaceGroupName, globalTS)
+	err = storage.SaveTimestamp(timestampKey, globalTS)
 	re.NoError(err)
 	localTS2 := time.Now().Round(0)
-	err = storage.SaveTimestamp(keyspaceGroupName, localTS2, dc2LocationKey)
+	err = storage.SaveTimestamp(l2, localTS2)
 	re.NoError(err)
 	// return the max ts between global and local
-	ts, err := storage.LoadTimestamp(keyspaceGroupName)
+	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)
 	re.Equal(localTS2, ts)
 	// return the local ts for a given dc location
-	ts, err = storage.LoadTimestamp(keyspaceGroupName, dc1LocationKey)
+	ts, err = storage.LoadTimestamp(l1)
 	re.NoError(err)
 	re.Equal(localTS1, ts)
 }

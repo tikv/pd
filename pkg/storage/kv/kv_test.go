@@ -16,22 +16,20 @@ package kv
 
 import (
 	"context"
-	"fmt"
-	"net/url"
 	"path"
 	"sort"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 )
 
 func TestEtcd(t *testing.T) {
 	re := require.New(t)
-	cfg := newTestSingleConfig(t)
+	cfg := etcdutil.NewTestSingleConfig(t)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
 	defer etcd.Close()
@@ -120,27 +118,6 @@ func testRange(re *require.Assertions, kv Base) {
 		re.Equal(testCase.expect, ks)
 		re.Equal(testCase.expect, vs)
 	}
-}
-
-func newTestSingleConfig(t *testing.T) *embed.Config {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd"
-	cfg.Dir = t.TempDir()
-	cfg.WalDir = ""
-	cfg.Logger = "zap"
-	cfg.LogOutputs = []string{"stdout"}
-
-	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-
-	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	return cfg
 }
 
 func testSaveMultiple(re *require.Assertions, kv Base, count int) {
