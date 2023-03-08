@@ -81,6 +81,8 @@ func NewGlobalTSOAllocator(
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
 			rootPath:               am.rootPath,
+			ltsPath:                "",
+			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,

@@ -332,7 +332,7 @@ func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.Regio
 		return
 	}
 	send := opInfluence.GetStoreInfluence(bn.SendStore)
-	send.SendCost += regionSize
+	send.AddStepCost(storelimit.SendSnapshot, regionSize)
 }
 
 // Timeout returns duration that current step may take.
@@ -512,7 +512,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 		return
 	}
 	send := opInfluence.GetStoreInfluence(al.SendStore)
-	send.SendCost += regionSize
+	send.AddStepCost(storelimit.SendSnapshot, regionSize)
 }
 
 // Timeout returns duration that current step may take.
