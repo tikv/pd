@@ -77,11 +77,17 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 	// As a result, when we try to scan from "foo/", it ends up scanning from "/pd/foo"
 	// internally, and returns unexpected keys such as "foo_bar/baz".
 	key = strings.Join([]string{kv.rootPath, key}, "/")
-	endKey = strings.Join([]string{kv.rootPath, endKey}, "/")
+	var OpOption []clientv3.OpOption
+	// If endKey is "\x00", it means to scan with prefix.
+	if endKey == "\x00" {
+		OpOption = append(OpOption, clientv3.WithPrefix())
+	} else {
+		endKey = strings.Join([]string{kv.rootPath, endKey}, "/")
+		OpOption = append(OpOption, clientv3.WithRange(endKey))
+	}
 
-	withRange := clientv3.WithRange(endKey)
-	withLimit := clientv3.WithLimit(int64(limit))
-	resp, err := etcdutil.EtcdKVGet(kv.client, key, withRange, withLimit)
+	OpOption = append(OpOption, clientv3.WithLimit(int64(limit)))
+	resp, err := etcdutil.EtcdKVGet(kv.client, key, OpOption...)
 	if err != nil {
 		return nil, nil, err
 	}
