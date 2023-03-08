@@ -17,7 +17,6 @@ package tso
 import (
 	"fmt"
 	"path"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -26,7 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -63,6 +62,9 @@ type tsoObject struct {
 type timestampOracle struct {
 	client   *clientv3.Client
 	rootPath string
+	// When ltsPath is empty, it means that it is a global timestampOracle.
+	ltsPath string
+	storage endpoint.TSOStorage
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
@@ -140,54 +142,7 @@ func (t *timestampOracle) differentiateLogical(rawLogical int64, suffixBits int)
 }
 
 func (t *timestampOracle) getTimestampPath() string {
-	return path.Join(t.rootPath, timestampKey)
-}
-
-// loadTimestamp will get all time windows of Local/Global TSOs from etcd and return the biggest one.
-// For the Global TSO, loadTimestamp will get all Local and Global TSO time windows persisted in etcd and choose the biggest one.
-// For the Local TSO, loadTimestamp will only get its own dc-location time window persisted before.
-func (t *timestampOracle) loadTimestamp() (time.Time, error) {
-	resp, err := etcdutil.EtcdKVGet(
-		t.client,
-		t.rootPath,
-		clientv3.WithPrefix())
-	if err != nil {
-		return typeutil.ZeroTime, err
-	}
-	maxTSWindow := typeutil.ZeroTime
-	for _, kv := range resp.Kvs {
-		key := strings.TrimSpace(string(kv.Key))
-		if !strings.HasSuffix(key, timestampKey) {
-			continue
-		}
-		tsWindow, err := typeutil.ParseTimestamp(kv.Value)
-		if err != nil {
-			log.Error("parse timestamp window that from etcd failed", zap.String("dc-location", t.dcLocation), zap.String("ts-window-key", key), zap.Time("max-ts-window", maxTSWindow), zap.Error(err))
-			continue
-		}
-		if typeutil.SubRealTimeByWallClock(tsWindow, maxTSWindow) > 0 {
-			maxTSWindow = tsWindow
-		}
-	}
-	return maxTSWindow, nil
-}
-
-// save timestamp, if lastTs is 0, we think the timestamp doesn't exist, so create it,
-// otherwise, update it.
-func (t *timestampOracle) saveTimestamp(leadership *election.Leadership, ts time.Time) error {
-	key := t.getTimestampPath()
-	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
-	resp, err := leadership.LeaderTxn().
-		Then(clientv3.OpPut(key, string(data))).
-		Commit()
-	if err != nil {
-		return errs.ErrEtcdKVPut.Wrap(err).GenWithStackByCause()
-	}
-	if !resp.Succeeded {
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	t.lastSavedTime.Store(ts)
-	return nil
+	return path.Join(t.ltsPath, timestampKey)
 }
 
 // SyncTimestamp is used to synchronize the timestamp.
@@ -198,7 +153,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 		time.Sleep(time.Second)
 	})
 
-	last, err := t.loadTimestamp()
+	last, err := t.storage.LoadTimestamp(t.ltsPath)
 	if err != nil {
 		return err
 	}
@@ -218,10 +173,11 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	}
 
 	save := next.Add(t.saveInterval)
-	if err = t.saveTimestamp(leadership, save); err != nil {
+	if err = t.storage.SaveTimestamp(t.getTimestampPath(), save); err != nil {
 		tsoCounter.WithLabelValues("err_save_sync_ts", t.dcLocation).Inc()
 		return err
 	}
+	t.lastSavedTime.Store(save)
 
 	tsoCounter.WithLabelValues("sync_ok", t.dcLocation).Inc()
 	log.Info("sync and save timestamp", zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
@@ -284,10 +240,11 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 	// save into etcd only if nextPhysical is close to lastSavedTime
 	if typeutil.SubRealTimeByWallClock(t.lastSavedTime.Load().(time.Time), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
-		if err := t.saveTimestamp(leadership, save); err != nil {
+		if err := t.storage.SaveTimestamp(t.getTimestampPath(), save); err != nil {
 			tsoCounter.WithLabelValues("err_save_reset_ts", t.dcLocation).Inc()
 			return err
 		}
+		t.lastSavedTime.Store(save)
 	}
 	// save into memory only if nextPhysical or nextLogical is greater.
 	t.tsoMux.physical = nextPhysical
@@ -355,10 +312,11 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	// The time window needs to be updated and saved to etcd.
 	if typeutil.SubRealTimeByWallClock(t.lastSavedTime.Load().(time.Time), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
-		if err := t.saveTimestamp(leadership, save); err != nil {
+		if err := t.storage.SaveTimestamp(t.getTimestampPath(), save); err != nil {
 			tsoCounter.WithLabelValues("err_save_update_ts", t.dcLocation).Inc()
 			return err
 		}
+		t.lastSavedTime.Store(save)
 	}
 	// save into memory
 	t.setTSOPhysical(next, false)

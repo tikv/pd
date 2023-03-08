@@ -16,6 +16,7 @@ package controller
 
 import (
 	"os"
+	"time"
 
 	"github.com/elastic/gosigar"
 	"github.com/pingcap/log"
@@ -40,7 +41,7 @@ type RequestInfo interface {
 // able to tell how many bytes it read and KV CPU cost in milliseconds.
 type ResponseInfo interface {
 	ReadBytes() uint64
-	KVCPUMs() uint64
+	KVCPU() time.Duration
 	// Succeed is used to tell whether the request is successfully returned.
 	// If not, we need to pay back the WRU cost of the request.
 	Succeed() bool
@@ -116,7 +117,7 @@ func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res Res
 }
 
 func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res ResponseInfo) {
-	kvCPUMs := float64(res.KVCPUMs())
+	kvCPUMs := float64(res.KVCPU().Nanoseconds()) / 1000000.0
 	consumption.TotalCpuTimeMs += kvCPUMs
 	consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
 }
