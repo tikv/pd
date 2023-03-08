@@ -46,7 +46,7 @@ type ResourceGroupKVInterceptor interface {
 	// IsInsufficientResource indicates whether resource group's resource is insufficient which decides whether request needs wait.
 	// Note: The semantic of IsInsufficientResource is different from `isLowTokens` in limiter.
 	IsInsufficientResource(resourceGroupName string) ([]bool, error)
-	// GetConsumption
+	// GetConsumption is used to get resource consumption
 	GetConsumption(resourceGroupName string) ([]float64, error)
 }
 
