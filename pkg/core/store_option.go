@@ -24,7 +24,7 @@ import (
 )
 
 // StoreCreateOption is used to create store.
-type StoreCreateOption func(region *StoreInfo)
+type StoreCreateOption func(store *StoreInfo)
 
 // SetStoreAddress sets the address for the store.
 func SetStoreAddress(address, statusAddress, peerAddress string) StoreCreateOption {

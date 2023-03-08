@@ -46,7 +46,10 @@ func NewSlidingWindows(cap float64) *SlidingWindows {
 
 // Reset resets the capacity of the sliding windows.
 // It doesn't clear all the used, only set the capacity.
-func (s *SlidingWindows) Reset(cap float64, _ Type) {
+func (s *SlidingWindows) Reset(cap float64, typ Type) {
+	if typ != SendSnapshot {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if cap < 0 {
@@ -71,7 +74,10 @@ func (s *SlidingWindows) GetUsed() int64 {
 // Available returns whether the token can be taken.
 // The order of checking windows is from low to high.
 // It checks the given window finally if the lower window has no free size.
-func (s *SlidingWindows) Available(_ int64, _ Type, level constant.PriorityLevel) bool {
+func (s *SlidingWindows) Available(_ int64, typ Type, level constant.PriorityLevel) bool {
+	if typ != SendSnapshot {
+		return true
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i := 0; i <= int(level); i++ {
@@ -84,7 +90,10 @@ func (s *SlidingWindows) Available(_ int64, _ Type, level constant.PriorityLevel
 
 // Take tries to take the token.
 // It will consume the given window finally if the lower window has no free size.
-func (s *SlidingWindows) Take(token int64, _ Type, level constant.PriorityLevel) bool {
+func (s *SlidingWindows) Take(token int64, typ Type, level constant.PriorityLevel) bool {
+	if typ != SendSnapshot {
+		return true
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := 0; i <= int(level); i++ {

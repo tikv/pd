@@ -50,13 +50,6 @@ type StoreInfluence struct {
 	LeaderCount  int64
 	WitnessCount int64
 	StepCost     map[storelimit.Type]int64
-	// records the cost of the sender.
-	SendCost int64
-}
-
-// GetSendCost returns the cost of sending snapshot.
-func (s *StoreInfluence) GetSendCost() int64 {
-	return s.SendCost
 }
 
 // ResourceProperty returns delta size of leader/region by influence.
@@ -88,7 +81,8 @@ func (s StoreInfluence) GetStepCost(limitType storelimit.Type) int64 {
 	return s.StepCost[limitType]
 }
 
-func (s *StoreInfluence) addStepCost(limitType storelimit.Type, cost int64) {
+// AddStepCost add cost to the influence.
+func (s *StoreInfluence) AddStepCost(limitType storelimit.Type, cost int64) {
 	if s.StepCost == nil {
 		s.StepCost = make(map[storelimit.Type]int64)
 	}
@@ -98,8 +92,8 @@ func (s *StoreInfluence) addStepCost(limitType storelimit.Type, cost int64) {
 // AdjustStepCost adjusts the step cost of specific type store limit according to region size
 func (s *StoreInfluence) AdjustStepCost(limitType storelimit.Type, regionSize int64) {
 	if regionSize > storelimit.SmallRegionThreshold {
-		s.addStepCost(limitType, storelimit.RegionInfluence[limitType])
+		s.AddStepCost(limitType, storelimit.RegionInfluence[limitType])
 	} else if regionSize > core.EmptyRegionApproximateSize {
-		s.addStepCost(limitType, storelimit.SmallRegionInfluence[limitType])
+		s.AddStepCost(limitType, storelimit.SmallRegionInfluence[limitType])
 	}
 }

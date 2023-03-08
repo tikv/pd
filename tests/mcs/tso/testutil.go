@@ -17,7 +17,6 @@ package tso
 import (
 	"context"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/pingcap/log"
@@ -70,7 +69,7 @@ func startSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	cfg, err := newTSOTestDefaultConfig()
 	re.NoError(err)
 	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = strings.TrimPrefix(tempurl.Alloc(), "http://")
+	cfg.ListenAddr = tempurl.Alloc()
 
 	s, cleanup, err := newTSOTestServer(ctx, re, cfg)
 	re.NoError(err)
