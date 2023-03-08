@@ -51,9 +51,9 @@ import (
 
 const (
 	// resourceManagerKeyspaceGroupPrimaryElectionPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/pd/<cluster-id>/microservice/resource-manager/keyspace-group-XXXXX/primary"
+	// The entire key is in the format of "/ms/<cluster-id>/resource-manager/keyspace-group-XXXXX/primary"
 	// in which XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	resourceManagerKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/resource-manager/keyspace-group-"
+	resourceManagerKeyspaceGroupPrimaryElectionPrefix = "/ms/0/resource-manager/keyspace-group-"
 )
 
 // Server is the resource manager server, and it implements bs.Server.

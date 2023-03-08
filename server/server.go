@@ -1665,6 +1665,22 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	return err
 }
 
+// GetServicePrimaryAddr returns the primary address for a given service.
+func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, error) {
+	// TODO: replace default group name after we make a decision.
+	key := path.Join("/ms/0", serviceName, "keyspace-group-"+fmt.Sprintf("%05d", 0), "primary")
+	leader := &pdpb.Member{}
+	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, key, leader)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+	// TODO: need to refactor after we redefine the member
+	return leader.GetName(), nil
+}
+
 // RecoverAllocID recover alloc id. set current base id to input id
 func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
 	return s.idAllocator.SetBase(id)
