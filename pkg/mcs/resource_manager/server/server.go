@@ -36,6 +36,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -49,17 +50,10 @@ import (
 )
 
 const (
-	tcpNetworkStr = "tcp"
 	// resourceManagerKeyspaceGroupPrimaryElectionPrefix defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/pd/<cluster-id>/microservice/resource-manager/keyspace-group-XXXXX/primary"
 	// in which XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
 	resourceManagerKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/resource-manager/keyspace-group-"
-	// defaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
-	defaultGRPCGracefulStopTimeout = 5 * time.Second
-	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
-	defaultHTTPGracefulShutdownTimeout = 5 * time.Second
-	defaultLeaseInSeconds              = 3
-	leaderTickInterval                 = 50 * time.Millisecond
 )
 
 // Server is the resource manager server, and it implements bs.Server.
@@ -73,6 +67,7 @@ type Server struct {
 	serverLoopWg     sync.WaitGroup
 
 	cfg       *Config
+	clusterID uint64
 	name      string
 	listenURL *url.URL
 
@@ -182,7 +177,7 @@ func (s *Server) campaignLeader() {
 	s.participant.EnableLeader()
 	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Member().Name))
 
-	leaderTicker := time.NewTicker(leaderTickInterval)
+	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -292,8 +287,8 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(defaultGRPCGracefulStopTimeout):
-		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", defaultGRPCGracefulStopTimeout))
+	case <-time.After(utils.DefaultGRPCGracefulStopTimeout):
+		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", utils.DefaultGRPCGracefulStopTimeout))
 		gs.Stop()
 	}
 	if s.IsClosed() {
@@ -315,7 +310,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	err := hs.Serve(l)
 	log.Info("http server stop serving")
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPGracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
 	defer cancel()
 	if err := hs.Shutdown(ctx); err != nil {
 		log.Error("http server shutdown encountered problem", errs.ZapError(err))
@@ -354,7 +349,14 @@ func (s *Server) GetPrimary() bs.MemberProvider {
 	return s.participant.GetLeader()
 }
 
-func (s *Server) startServer() error {
+func (s *Server) startServer() (err error) {
+	// TODO: uncomment the following code to generate a unique cluster id from the given ClusterIDPath
+	// after we add rpc for the client to retrieve the cluster id from the server then use it in every
+	// request for verification.
+	// if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
+	// 	return err
+	// }
+	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// The independent Resource Manager service still reuses PD version info since PD and Resource Manager are just
 	// different service modes provided by the same pd-server binary
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
@@ -382,9 +384,9 @@ func (s *Server) startServer() error {
 		return err
 	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(tcpNetworkStr, s.listenURL.Host, tlsConfig)
+		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(tcpNetworkStr, s.listenURL.Host)
+		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
 	}
 	if err != nil {
 		return err
@@ -401,7 +403,7 @@ func (s *Server) startServer() error {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.GetClient(), "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }

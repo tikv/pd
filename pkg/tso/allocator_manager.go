@@ -783,7 +783,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 	}
 	var maxSuffix int32
 	for curDCLocation, suffix := range dcLocationSuffix {
-		// If we already have the suffix persistted in etcd before,
+		// If we already have the suffix persisted in etcd before,
 		// just use it as the result directly.
 		if curDCLocation == dcLocation {
 			return suffix, nil

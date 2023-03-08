@@ -181,7 +181,6 @@ func (suite *operatorTestSuite) TestInfluence() {
 		RegionSize:  50,
 		RegionCount: 1,
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
-		SendCost:    0,
 	}, *storeOpInfluence[2])
 
 	suite.Equal(StoreInfluence{
@@ -189,8 +188,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 0,
 		RegionSize:  0,
 		RegionCount: 0,
-		StepCost:    nil,
-		SendCost:    50,
+		StepCost:    map[storelimit.Type]int64{storelimit.SendSnapshot: 50},
 	}, *storeOpInfluence[1])
 	resetInfluence()
 
@@ -202,7 +200,6 @@ func (suite *operatorTestSuite) TestInfluence() {
 		RegionCount:  0,
 		WitnessCount: -1,
 		StepCost:     map[storelimit.Type]int64{storelimit.AddPeer: 1000},
-		SendCost:     0,
 	}, *storeOpInfluence[1])
 
 	suite.Equal(StoreInfluence{
@@ -210,8 +207,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 0,
 		RegionSize:  0,
 		RegionCount: 0,
-		StepCost:    nil,
-		SendCost:    50,
+		StepCost:    map[storelimit.Type]int64{storelimit.SendSnapshot: 50},
 	}, *storeOpInfluence[2])
 	resetInfluence()
 
