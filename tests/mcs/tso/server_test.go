@@ -96,7 +96,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	cc, err := grpc.DialContext(suite.ctx, s.GetListenURL().Host, grpc.WithInsecure())
 	re.NoError(err)
 	cc.Close()
-	url := "http://" + s.GetConfig().ListenAddr + tsoapi.APIPathPrefix
+	url := s.GetConfig().ListenAddr + tsoapi.APIPathPrefix
 	{
 		resetJSON := `{"tso":"121312", "force-use-larger":true}`
 		re.NoError(err)

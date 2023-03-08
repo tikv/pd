@@ -580,7 +580,7 @@ func (s *Server) startServer() (err error) {
 
 	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
 	s.participant.InitInfo(uniqueName, tsoKeyspaceGroupPrimaryElectionPrefix+fmt.Sprintf("%05d", 0),
-		"primary", "keyspace group primary election", fmt.Sprintf("http://%s", s.cfg.ListenAddr))
+		"primary", "keyspace group primary election", s.cfg.ListenAddr)
 	s.participant.SetMemberDeployPath(s.participant.ID())
 	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
 	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
