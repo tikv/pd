@@ -301,14 +301,23 @@ func (s *testUnsafeRecoverySuite) TestFailed(c *C) {
 	req := newStoreHeartbeat(2, nil)
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	c.Assert(resp.RecoveryPlan, IsNil)
+	c.Assert(resp.RecoveryPlan, Equals, exitForceLeader)
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
 		req.StoreReport = report
 		resp := &pdpb.StoreHeartbeatResponse{}
 		recoveryController.HandleStoreHeartbeat(req, resp)
-		c.Assert(resp.RecoveryPlan, IsNil)
+		c.Assert(resp.RecoveryPlan, NotNil)
+		applyRecoveryPlan(c, storeID, reports, resp)
+	}
+
+	for storeID, report := range reports {
+		req := newStoreHeartbeat(storeID, report)
+		req.StoreReport = report
+		resp := &pdpb.StoreHeartbeatResponse{}
+		recoveryController.HandleStoreHeartbeat(req, resp)
+		applyRecoveryPlan(c, storeID, reports, resp)
 	}
 	c.Assert(recoveryController.GetStage(), Equals, failed)
 }
@@ -961,7 +970,7 @@ func (s *testUnsafeRecoverySuite) TestJointState(c *C) {
 	}
 }
 
-func (s *testUnsafeRecoverySuite) TestTimeout(c *C) {
+func (s *testUnsafeRecoverySuite) TestExecutionTimeout(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
@@ -977,10 +986,35 @@ func (s *testUnsafeRecoverySuite) TestTimeout(c *C) {
 
 	time.Sleep(time.Second)
 	req := newStoreHeartbeat(1, nil)
-	req.StoreReport = &pdpb.StoreReport{Step: 1}
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	c.Assert(recoveryController.GetStage(), Equals, failed)
+	c.Assert(exitForceLeader, Equals, recoveryController.GetStage())
+	req.StoreReport = &pdpb.StoreReport{Step: 2}
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	c.Assert(failed, Equals, recoveryController.GetStage())
+
+	output := recoveryController.Show()
+	c.Assert(len(output), Equals, 3)
+	c.Assert(output[1].Details[0], Matches, ".*triggered by error: Exceeds timeout.*")
+}
+
+func (s *testUnsafeRecoverySuite) TestNoHeartbeatTimeout(c *C) {
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(3, "6.0.0") {
+		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	c.Assert(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		3: {},
+	}, 1), IsNil)
+
+	time.Sleep(time.Second)
+	recoveryController.Show()
+	c.Assert(exitForceLeader, Equals, recoveryController.GetStage())
 }
 
 func (s *testUnsafeRecoverySuite) TestExitForceLeader(c *C) {
