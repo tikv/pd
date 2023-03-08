@@ -392,6 +392,10 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 						RequestRU: requests,
 					},
 				},
+				ConsumptionSinceLastRequest: &rmpb.Consumption{
+					RRU: float64(i * 100),
+					WRU: float64(i * 200),
+				},
 			}
 			reqs.Requests = append(reqs.Requests, req)
 		}
