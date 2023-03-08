@@ -29,6 +29,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
+	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -157,6 +158,8 @@ type Config struct {
 	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
+
+	RequestUnit rm.RequestUnitConfig `toml:"request-unit" json:"request-unit"`
 }
 
 // NewConfig creates a new config.
@@ -451,6 +454,10 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	} else if c.TSOUpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
 	}
+	if c.TSOUpdatePhysicalInterval.Duration != defaultTSOUpdatePhysicalInterval {
+		log.Warn("tso update physical interval is non-default",
+			zap.Duration("update-physical-interval", c.TSOUpdatePhysicalInterval.Duration))
+	}
 
 	if c.Labels == nil {
 		c.Labels = make(map[string]string)
@@ -501,6 +508,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	if len(c.Log.Format) == 0 {
 		c.Log.Format = defaultLogFormat
 	}
+
+	c.RequestUnit.Adjust()
 
 	return nil
 }
@@ -898,11 +907,6 @@ func (c *ScheduleConfig) Validate() error {
 	if c.LeaderSchedulePolicy != "count" && c.LeaderSchedulePolicy != "size" {
 		return errors.Errorf("leader-schedule-policy %v is invalid", c.LeaderSchedulePolicy)
 	}
-	for _, scheduleConfig := range c.Schedulers {
-		if !IsSchedulerRegistered(scheduleConfig.Type) {
-			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
-		}
-	}
 	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
 		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
 	}
@@ -1202,10 +1206,6 @@ type StoreLabel struct {
 	Key   string `toml:"key" json:"key"`
 	Value string `toml:"value" json:"value"`
 }
-
-// RejectLeader is the label property type that suggests a store should not
-// have any region leaders.
-const RejectLeader = "reject-leader"
 
 // LabelPropertyConfig is the config section to set properties to store labels.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.

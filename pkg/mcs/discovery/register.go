@@ -24,6 +24,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// DefaultLeaseInSeconds is the default lease time in seconds.
+const DefaultLeaseInSeconds = 3
+
 // ServiceRegister is used to register the service to etcd.
 type ServiceRegister struct {
 	ctx    context.Context
@@ -78,6 +81,13 @@ func (sr *ServiceRegister) Register() error {
 					// retry
 					t := time.NewTicker(time.Duration(sr.ttl) * time.Second / 2)
 					for {
+						select {
+						case <-sr.ctx.Done():
+							log.Info("exit register process", zap.String("key", sr.key))
+							return
+						default:
+						}
+
 						<-t.C
 						resp, err := sr.cli.Grant(sr.ctx, sr.ttl)
 						if err != nil {
@@ -101,7 +111,7 @@ func (sr *ServiceRegister) Register() error {
 // Deregister deregisters the service from etcd.
 func (sr *ServiceRegister) Deregister() error {
 	sr.cancel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(sr.ttl)*time.Second)
 	defer cancel()
 	_, err := sr.cli.Delete(ctx, sr.key)
 	return err

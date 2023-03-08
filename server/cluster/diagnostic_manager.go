@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"go.uber.org/zap"
 )
 

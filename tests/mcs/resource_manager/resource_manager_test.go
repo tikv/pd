@@ -17,6 +17,7 @@ package resourcemanager_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -103,15 +104,12 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 }
 
 func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAddr string) {
-	innerCli, ok := cli.(interface {
-		GetLeaderAddr() string
-		ScheduleCheckLeader()
-	})
+	innerCli, ok := cli.(interface{ GetBaseClient() pd.BaseClient })
 	suite.True(ok)
 	suite.NotNil(innerCli)
 	testutil.Eventually(suite.Require(), func() bool {
-		innerCli.ScheduleCheckLeader()
-		return innerCli.GetLeaderAddr() == leaderAddr
+		innerCli.GetBaseClient().ScheduleCheckMemberChanged()
+		return innerCli.GetBaseClient().GetServingAddr() == leaderAddr
 	})
 }
 
@@ -232,7 +230,7 @@ func (ti *testRequestInfo) WriteBytes() uint64 {
 }
 
 type testResponseInfo struct {
-	cpuMs     uint64
+	cpu       time.Duration
 	readBytes uint64
 	succeed   bool
 }
@@ -241,8 +239,8 @@ func (tri *testResponseInfo) ReadBytes() uint64 {
 	return tri.readBytes
 }
 
-func (tri *testResponseInfo) KVCPUMs() uint64 {
-	return tri.cpuMs
+func (tri *testResponseInfo) KVCPU() time.Duration {
+	return tri.cpu
 }
 
 func (tri *testResponseInfo) Succeed() bool {
@@ -273,14 +271,14 @@ func (t tokenConsumptionPerSecond) makeWriteRequest() *testRequestInfo {
 func (t tokenConsumptionPerSecond) makeReadResponse() *testResponseInfo {
 	return &testResponseInfo{
 		readBytes: uint64((t.rruTokensAtATime - 1) / 2),
-		cpuMs:     uint64(t.rruTokensAtATime / 2),
+		cpu:       time.Duration(t.rruTokensAtATime/2) * time.Millisecond,
 	}
 }
 
 func (t tokenConsumptionPerSecond) makeWriteResponse() *testResponseInfo {
 	return &testResponseInfo{
 		readBytes: 0,
-		cpuMs:     0,
+		cpu:       time.Duration(0),
 		succeed:   true,
 	}
 }
@@ -303,7 +301,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		CPUMsCost:        1,
 	}
 
-	controller, _ := controller.NewResourceGroupController(1, cli, cfg)
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
 	controller.Start(suite.ctx)
 
 	testCases := []struct {
@@ -432,10 +430,6 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re := suite.Require()
 	cli := suite.client
-
-	leaderName := suite.cluster.WaitLeader()
-	leader := suite.cluster.GetServer(leaderName)
-
 	testCasesSet1 := []struct {
 		name           string
 		mode           rmpb.GroupMode
@@ -560,12 +554,11 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
-				re.EqualError(err, "[PD:client:ErrClientGetResourceGroup]get resource group failed, rpc error: code = Unknown desc = resource group not found")
+				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", g.Name))
 			}
 
 			// to test the deletion of persistence
 			suite.resignAndWaitLeader()
-			leader = suite.cluster.GetServer(suite.cluster.GetLeader())
 			// List Resource Group
 			lresp, err = cli.ListResourceGroups(suite.ctx)
 			re.NoError(err)
@@ -575,6 +568,13 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 	// Test Resource Group CURD via HTTP
 	finalNum = 0
+	getAddr := func(i int) string {
+		server := suite.cluster.GetServer(suite.cluster.GetLeader())
+		if i%2 == 1 {
+			server = suite.cluster.GetServer(suite.cluster.GetFollower())
+		}
+		return server.GetAddr()
+	}
 	for i, tcase := range testCasesSet1 {
 		// Create Resource Group
 		group := &rmpb.ResourceGroup{
@@ -583,7 +583,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
-		resp, err := http.Post(leader.GetAddr()+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
+		resp, err := http.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
 		defer resp.Body.Close()
 		if tcase.addSuccess {
@@ -597,7 +597,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		tcase.modifySettings(group)
 		modifyJSON, err := json.Marshal(group)
 		re.NoError(err)
-		req, err := http.NewRequest(http.MethodPut, leader.GetAddr()+"/resource-manager/api/v1/config/group", strings.NewReader(string(modifyJSON)))
+		req, err := http.NewRequest(http.MethodPut, getAddr(i+1)+"/resource-manager/api/v1/config/group", strings.NewReader(string(modifyJSON)))
 		re.NoError(err)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err = http.DefaultClient.Do(req)
@@ -610,7 +610,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 
 		// Get Resource Group
-		resp, err = http.Get(leader.GetAddr() + "/resource-manager/api/v1/config/group/" + tcase.name)
+		resp, err = http.Get(getAddr(i) + "/resource-manager/api/v1/config/group/" + tcase.name)
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -623,7 +623,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 		// Last one, Check list and delete all resource groups
 		if i == len(testCasesSet1)-1 {
-			resp, err := http.Get(leader.GetAddr() + "/resource-manager/api/v1/config/groups")
+			resp, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
 			defer resp.Body.Close()
 			re.Equal(http.StatusOK, resp.StatusCode)
@@ -635,7 +635,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 			// Delete all resource groups
 			for _, g := range groups {
-				req, err := http.NewRequest(http.MethodDelete, leader.GetAddr()+"/resource-manager/api/v1/config/group/"+g.Name, nil)
+				req, err := http.NewRequest(http.MethodDelete, getAddr(i+1)+"/resource-manager/api/v1/config/group/"+g.Name, nil)
 				re.NoError(err)
 				resp, err := http.DefaultClient.Do(req)
 				re.NoError(err)
@@ -647,7 +647,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			}
 
 			// verify again
-			resp1, err := http.Get(leader.GetAddr() + "/resource-manager/api/v1/config/groups")
+			resp1, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
 			defer resp1.Body.Close()
 			re.Equal(http.StatusOK, resp1.StatusCode)
@@ -699,4 +699,38 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 
 	// Cleanup the resource group.
 	suite.cleanupResourceGroups()
+}
+
+func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
+	re := suite.Require()
+	cli := suite.client
+	// Test load from resource manager.
+	ctr, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	re.NoError(err)
+	config := ctr.GetConfig()
+	re.NotNil(config)
+	expectedConfig := controller.DefaultConfig()
+	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
+	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
+	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
+	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
+	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
+	// Test init from given config.
+	ruConfig := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  2,
+		WriteBaseCost:    3,
+		WriteCostPerByte: 4,
+		CPUMsCost:        5,
+	}
+	ctr, err = controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig)
+	re.NoError(err)
+	config = ctr.GetConfig()
+	re.NotNil(config)
+	expectedConfig = controller.GenerateConfig(ruConfig)
+	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
+	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
+	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
+	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
+	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
 }

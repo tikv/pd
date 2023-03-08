@@ -17,6 +17,7 @@ package tso
 import (
 	"context"
 	"fmt"
+	"path"
 	"sync/atomic"
 	"time"
 
@@ -58,7 +59,9 @@ func NewLocalTSOAllocator(
 		leadership:       leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
-			rootPath:               leadership.GetLeaderKey(),
+			rootPath:               am.rootPath,
+			ltsPath:                path.Join(localTSOAllocatorEtcdPrefix, dcLocation),
+			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
@@ -180,16 +183,16 @@ func (lta *LocalTSOAllocator) IsAllocatorLeader() bool {
 	return lta.leadership.Check() && lta.GetAllocatorLeader().GetMemberId() == lta.GetMember().GetMemberId()
 }
 
-// isSameLeader checks whether a server is the leader itself.
+// isSameAllocatorLeader checks whether a server is the leader itself.
 func (lta *LocalTSOAllocator) isSameAllocatorLeader(leader *pdpb.Member) bool {
 	return leader.GetMemberId() == lta.allocatorManager.member.Member().MemberId
 }
 
 // CheckAllocatorLeader checks who is the current Local TSO Allocator leader, and returns true if it is needed to check later.
 func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool) {
-	if lta.allocatorManager.member.GetEtcdLeader() == 0 {
+	if err := lta.allocatorManager.member.PrecheckLeader(); err != nil {
 		log.Error("no etcd leader, check local tso allocator leader later",
-			zap.String("dc-location", lta.timestampOracle.dcLocation), errs.ZapError(errs.ErrEtcdLeaderNotFound))
+			zap.String("dc-location", lta.timestampOracle.dcLocation), errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}

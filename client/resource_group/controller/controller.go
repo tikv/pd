@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -24,11 +25,13 @@ import (
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
 
 const (
+	requestUnitConfigPath  = "resource_group/ru_config"
 	defaultMaxWaitDuration = time.Second
 	maxRetry               = 3
 	maxNotificationChanLen = 200
@@ -50,6 +53,17 @@ type ResourceGroupProvider interface {
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
+	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]pd.GlobalConfigItem, int64, error)
+}
+
+// ResourceControlCreateOption create a ResourceGroupsController with the optional settings.
+type ResourceControlCreateOption func(controller *ResourceGroupsController)
+
+// EnableSingleGroupByKeyspace is the option to enable single group by keyspace feature.
+func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.config.isSingleGroupByKeyspace = true
+	}
 }
 
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
@@ -78,7 +92,7 @@ type ResourceGroupsController struct {
 		lastRequestTime time.Time
 
 		// requestInProgress is true if we are in the process of sending a request.
-		// It gets set to false when we receives the response in the main loop,
+		// It gets set to false when we receive the response in the main loop,
 		// even in error cases.
 		requestInProgress bool
 
@@ -91,22 +105,55 @@ type ResourceGroupsController struct {
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
-func NewResourceGroupController(clientUniqueID uint64, provider ResourceGroupProvider, requestUnitConfig *RequestUnitConfig) (*ResourceGroupsController, error) {
-	var config *Config
-	if requestUnitConfig != nil {
-		config = generateConfig(requestUnitConfig)
-	} else {
-		config = DefaultConfig()
+func NewResourceGroupController(
+	ctx context.Context,
+	clientUniqueID uint64,
+	provider ResourceGroupProvider,
+	requestUnitConfig *RequestUnitConfig,
+	opts ...ResourceControlCreateOption,
+) (*ResourceGroupsController, error) {
+	if requestUnitConfig == nil {
+		var err error
+		requestUnitConfig, err = loadRequestUnitConfig(ctx, provider)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return &ResourceGroupsController{
+	config := GenerateConfig(requestUnitConfig)
+	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
 		config:                config,
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
-		calculators:           []ResourceCalculator{newKVCalculator(config), newSQLCalculator(config)},
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(controller)
+	}
+	controller.calculators = []ResourceCalculator{newKVCalculator(controller.config), newSQLCalculator(controller.config)}
+	return controller, nil
+}
+
+func loadRequestUnitConfig(ctx context.Context, provider ResourceGroupProvider) (*RequestUnitConfig, error) {
+	items, _, err := provider.LoadGlobalConfig(ctx, nil, requestUnitConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, errors.Errorf("failed to load the ru config from remote server")
+	}
+	ruConfig := &RequestUnitConfig{}
+	err = json.Unmarshal(items[0].PayLoad, ruConfig)
+	if err != nil {
+		return nil, err
+	}
+	return ruConfig, nil
+}
+
+// GetConfig returns the config of controller. It's only used for test.
+func (c *ResourceGroupsController) GetConfig() *Config {
+	return c.config
 }
 
 // Start starts ResourceGroupController service.
@@ -126,7 +173,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case resp := <-c.tokenResponseChan:
 				c.run.requestInProgress = false
 				if resp != nil {
-					c.updateRunState(c.loopCtx)
+					c.updateRunState()
 					c.handleTokenBucketResponse(resp)
 				} else {
 					// A nil response indicates a failure (which would have been logged).
@@ -137,14 +184,14 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					log.Error("[resource group controller] clean up resource groups failed", zap.Error(err))
 				}
 			case <-stateUpdateTicker.C:
-				c.updateRunState(c.loopCtx)
+				c.updateRunState()
 				c.updateAvgRequestResourcePerSec()
 				if c.run.requestNeedsRetry || c.shouldReportConsumption() {
 					c.run.requestNeedsRetry = false
 					c.collectTokenBucketRequests(c.loopCtx, "report", false /* select all */)
 				}
 			case <-c.lowTokenNotifyChan:
-				c.updateRunState(c.loopCtx)
+				c.updateRunState()
 				c.updateAvgRequestResourcePerSec()
 				if !c.run.requestInProgress {
 					c.collectTokenBucketRequests(c.loopCtx, "low_ru", true /* only select low tokens resource group */)
@@ -224,11 +271,11 @@ func (c *ResourceGroupsController) initRunState() {
 	c.run.lastRequestTime = now
 }
 
-func (c *ResourceGroupsController) updateRunState(ctx context.Context) {
+func (c *ResourceGroupsController) updateRunState() {
 	c.run.now = time.Now()
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
-		gc.updateRunState(ctx)
+		gc.updateRunState()
 		return true
 	})
 }
@@ -445,7 +492,7 @@ func (gc *groupCostController) initRunState() {
 	gc.run.now = now
 	gc.run.targetPeriod = defaultTargetPeriod
 	gc.run.consumption = &rmpb.Consumption{}
-	gc.run.lastRequestConsumption = &rmpb.Consumption{}
+	gc.run.lastRequestConsumption = &rmpb.Consumption{SqlLayerCpuTimeMs: getSQLProcessCPUTime(gc.mainCfg.isSingleGroupByKeyspace)}
 
 	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
 		cfg := tokenBucketReconfigureArgs{
@@ -490,31 +537,14 @@ func (gc *groupCostController) initRunState() {
 	}
 }
 
-func (gc *groupCostController) updateRunState(ctx context.Context) {
+func (gc *groupCostController) updateRunState() {
 	newTime := time.Now()
-	deltaConsumption := &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.Trickle(ctx, deltaConsumption)
-	}
 	gc.mu.Lock()
-	add(gc.mu.consumption, deltaConsumption)
+	for _, calc := range gc.calculators {
+		calc.Trickle(gc.mu.consumption)
+	}
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
-	// remove tokens
-	switch gc.mode {
-	case rmpb.GroupMode_RUMode:
-		for typ, counter := range gc.run.requestUnitTokens {
-			if v := getRUValueFromConsumption(deltaConsumption, typ); v > 0 {
-				counter.limiter.RemoveTokens(newTime, v)
-			}
-		}
-	case rmpb.GroupMode_RawMode:
-		for typ, counter := range gc.run.resourceTokens {
-			if v := getRawResourceValueFromConsumption(deltaConsumption, typ); v > 0 {
-				counter.limiter.RemoveTokens(newTime, v)
-			}
-		}
-	}
 	log.Debug("[resource group controller] update run state", zap.Any("request unit consumption", gc.run.consumption))
 	gc.run.now = newTime
 }

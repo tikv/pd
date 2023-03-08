@@ -15,6 +15,7 @@
 package storelimit
 
 import (
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
 )
 
@@ -31,8 +32,9 @@ const (
 
 // RegionInfluence represents the influence of a operator step, which is used by store limit.
 var RegionInfluence = []int64{
-	AddPeer:    influence,
-	RemovePeer: influence,
+	AddPeer:      influence,
+	RemovePeer:   influence,
+	SendSnapshot: influence,
 }
 
 // SmallRegionInfluence represents the influence of a operator step
@@ -44,8 +46,9 @@ var SmallRegionInfluence = []int64{
 
 // TypeNameValue indicates the name of store limit type and the enum value
 var TypeNameValue = map[string]Type{
-	"add-peer":    AddPeer,
-	"remove-peer": RemovePeer,
+	"add-peer":      AddPeer,
+	"remove-peer":   RemovePeer,
+	"send-snapshot": SendSnapshot,
 }
 
 // String returns the representation of the Type
@@ -78,18 +81,29 @@ func NewStoreRateLimit(ratePerSec float64) StoreLimit {
 	}
 }
 
-// Available returns the number of available tokens
-func (l *StoreRateLimit) Available(cost int64, typ Type) bool {
+// Available returns the number of available tokens.
+// notice that the priority level is not used.
+func (l *StoreRateLimit) Available(cost int64, typ Type, _ constant.PriorityLevel) bool {
+	if typ == SendSnapshot {
+		return true
+	}
 	return l.limits[typ].Available(cost)
 }
 
 // Take takes count tokens from the bucket without blocking.
-func (l *StoreRateLimit) Take(cost int64, typ Type) bool {
+// notice that the priority level is not used.
+func (l *StoreRateLimit) Take(cost int64, typ Type, _ constant.PriorityLevel) bool {
+	if typ == SendSnapshot {
+		return true
+	}
 	return l.limits[typ].Take(cost)
 }
 
 // Reset resets the rate limit.
 func (l *StoreRateLimit) Reset(rate float64, typ Type) {
+	if typ == SendSnapshot {
+		return
+	}
 	l.limits[typ].Reset(rate)
 }
 

@@ -820,7 +820,6 @@ func TestLoadClusterInfo(t *testing.T) {
 
 	testStorage := rc.GetStorage()
 	basicCluster := rc.GetBasicCluster()
-	opt := rc.GetOpts()
 	// Save meta, stores and regions.
 	n := 10
 	meta := &metapb.Cluster{Id: 123}
@@ -852,7 +851,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	re.NoError(testStorage.Flush())
 
 	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	raftCluster.InitCluster(mockid.NewIDAllocator(), opt, testStorage, basicCluster)
+	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), testStorage, basicCluster)
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
 	re.NotNil(raftCluster)
@@ -1171,8 +1170,7 @@ func TestUpgradeStoreLimit(t *testing.T) {
 
 	// restart PD
 	// Here we use an empty storelimit to simulate the upgrade progress.
-	opt := rc.GetOpts()
-	scheduleCfg := opt.GetScheduleConfig().Clone()
+	scheduleCfg := rc.GetScheduleConfig().Clone()
 	scheduleCfg.StoreLimit = map[uint64]config.StoreLimitConfig{}
 	re.NoError(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg))
 	err = leaderServer.Stop()
@@ -1315,7 +1313,7 @@ func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftClust
 }
 
 func setMinResolvedTSPersistenceInterval(re *require.Assertions, rc *cluster.RaftCluster, svr *server.Server, interval time.Duration) {
-	cfg := rc.GetOpts().GetPDServerConfig().Clone()
+	cfg := rc.GetPDServerConfig().Clone()
 	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(interval)
 	err := svr.SetPDServerConfig(*cfg)
 	re.NoError(err)
@@ -1367,9 +1365,9 @@ func TestMinResolvedTS(t *testing.T) {
 	}
 
 	// default run job
-	re.NotEqual(rc.GetOpts().GetMinResolvedTSPersistenceInterval(), 0)
+	re.NotEqual(rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration, 0)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, 0)
-	re.Equal(time.Duration(0), rc.GetOpts().GetMinResolvedTSPersistenceInterval())
+	re.Equal(time.Duration(0), rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration)
 
 	// case1: cluster is no initialized
 	// min resolved ts should be not available

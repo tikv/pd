@@ -52,10 +52,11 @@ import (
 	"github.com/tikv/pd/server/replication"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/checker"
+	sc "github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/schedule/schedulers"
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/statistics/buckets"
 	"go.etcd.io/etcd/clientv3"
@@ -87,7 +88,7 @@ const (
 	defaultChangedRegionsLimit   = 10000
 	gcTombstoreInterval          = 30 * 24 * time.Hour
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
-	// since the once the store is add or remove, we shouldn't return an error even if the store limit is failed to persist.
+	// since the once the store is added or removed, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes  = 5
 	persistLimitWaitTime    = 100 * time.Millisecond
 	removingAction          = "removing"
@@ -178,7 +179,7 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.
 }
 
 // GetStoreConfig returns the store config.
-func (c *RaftCluster) GetStoreConfig() *config.StoreConfig {
+func (c *RaftCluster) GetStoreConfig() sc.StoreConfig {
 	return c.storeConfigManager.GetStoreConfig()
 }
 
@@ -737,8 +738,33 @@ func (c *RaftCluster) SetStorage(s storage.Storage) {
 
 // GetOpts returns cluster's configuration.
 // There is no need a lock since it won't changed.
-func (c *RaftCluster) GetOpts() *config.PersistOptions {
+func (c *RaftCluster) GetOpts() sc.Config {
 	return c.opt
+}
+
+// GetScheduleConfig returns scheduling configurations.
+func (c *RaftCluster) GetScheduleConfig() *config.ScheduleConfig {
+	return c.opt.GetScheduleConfig()
+}
+
+// SetScheduleConfig sets the PD scheduling configuration.
+func (c *RaftCluster) SetScheduleConfig(cfg *config.ScheduleConfig) {
+	c.opt.SetScheduleConfig(cfg)
+}
+
+// GetReplicationConfig returns replication configurations.
+func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
+	return c.opt.GetReplicationConfig()
+}
+
+// GetPDServerConfig returns pd server configurations.
+func (c *RaftCluster) GetPDServerConfig() *config.PDServerConfig {
+	return c.opt.GetPDServerConfig()
+}
+
+// SetPDServerConfig sets the PD configuration.
+func (c *RaftCluster) SetPDServerConfig(cfg *config.PDServerConfig) {
+	c.opt.SetPDServerConfig(cfg)
 }
 
 // AddSuspectRegions adds regions to suspect list.
@@ -867,6 +893,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
+
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	return nil

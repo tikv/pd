@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/schedule/plan"
 )
@@ -59,8 +59,8 @@ func TestDistinctScoreFilter(t *testing.T) {
 		}
 		ls := NewLocationSafeguard("", labels, stores, allStores[testCase.source-1])
 		li := NewLocationImprover("", labels, stores, allStores[testCase.source-1])
-		re.Equal(testCase.safeGuardRes, ls.Target(config.NewTestOptions(), allStores[testCase.target-1]).StatusCode)
-		re.Equal(testCase.improverRes, li.Target(config.NewTestOptions(), allStores[testCase.target-1]).StatusCode)
+		re.Equal(testCase.safeGuardRes, ls.Target(mockconfig.NewTestOptions(), allStores[testCase.target-1]).StatusCode)
+		re.Equal(testCase.improverRes, li.Target(mockconfig.NewTestOptions(), allStores[testCase.target-1]).StatusCode)
 	}
 }
 
@@ -69,7 +69,7 @@ func TestLabelConstraintsFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	store := core.NewStoreInfoWithLabel(1, map[string]string{"id": "1"})
 
@@ -100,7 +100,7 @@ func TestRuleFitFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone"})
@@ -156,7 +156,7 @@ func TestStoreStateFilter(t *testing.T) {
 		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
 	}
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, map[string]string{})
 
 	type testCase struct {
@@ -208,7 +208,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
 	}
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, map[string]string{})
 
 	type testCase struct {
@@ -260,7 +260,7 @@ func TestIsolationFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone", "rack", "host"})
 	allStores := []struct {
@@ -331,7 +331,7 @@ func TestPlacementGuard(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone"})
@@ -359,7 +359,7 @@ func TestSpecialUseFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	opt := config.NewTestOptions()
+	opt := mockconfig.NewTestOptions()
 	testCluster := mockcluster.NewCluster(ctx, opt)
 
 	testCases := []struct {

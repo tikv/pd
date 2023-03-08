@@ -31,13 +31,26 @@ import (
 )
 
 const (
-	defaultName              = "Resource Manager"
-	defaultBackendEndpoints  = "127.0.0.1:2379"
-	defaultListenAddr        = "127.0.0.1:3380"
+	defaultName = "Resource Manager"
+	// defaultBackendEndpoints is the default etcd endpoints for the resource manager.
+	defaultBackendEndpoints = "http://127.0.0.1:2379"
+	// defaultListenAddr is the default listening address for the resource manager.
+	defaultListenAddr        = "http://127.0.0.1:3379"
 	defaultEnableGRPCGateway = true
 
 	defaultLogFormat           = "text"
 	defaultDisableErrorVerbose = true
+
+	defaultLeaderLease = int64(3)
+
+	defaultReadBaseCost  = 0.25
+	defaultWriteBaseCost = 1
+	// 1 RU = 64 KiB read bytes
+	defaultReadCostPerByte = 1. / (64 * 1024)
+	// 1 RU = 1 KiB written bytes
+	defaultWriteCostPerByte = 1. / 1024
+	// 1 RU = 3 millisecond CPU time
+	defaultCPUMsCost = 1. / 3
 )
 
 // Config is the configuration for the resource manager.
@@ -51,11 +64,61 @@ type Config struct {
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
 	// Log related config.
-	Log log.Config `toml:"log" json:"log"`
-
+	Log      log.Config `toml:"log" json:"log"`
 	Logger   *zap.Logger
 	LogProps *log.ZapProperties
+
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
+
+	// LeaderLease defines the time within which a Resource Manager primary/leader must
+	// update its TTL in etcd, otherwise etcd will expire the leader key and other servers
+	// can campaign the primary/leader again. Etcd only supports seconds TTL, so here is
+	// second too.
+	LeaderLease int64 `toml:"lease" json:"lease"`
+
+	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
+	// This configuration should be modified carefully.
+	RequestUnit RequestUnitConfig
+}
+
+// RequestUnitConfig is the configuration of the request units, which determines the coefficients of
+// the RRU and WRU cost.
+type RequestUnitConfig struct {
+	// ReadBaseCost is the base cost for a read request. No matter how many bytes read/written or
+	// the CPU times taken for a request, this cost is inevitable.
+	ReadBaseCost float64 `toml:"read-base-cost" json:"read-base-cost"`
+	// ReadCostPerByte is the cost for each byte read. It's 1 RU = 64 KiB by default.
+	ReadCostPerByte float64 `toml:"read-cost-per-byte" json:"read-cost-per-byte"`
+	// WriteBaseCost is the base cost for a write request. No matter how many bytes read/written or
+	// the CPU times taken for a request, this cost is inevitable.
+	WriteBaseCost float64 `toml:"write-base-cost" json:"write-base-cost"`
+	// WriteCostPerByte is the cost for each byte written. It's 1 RU = 1 KiB by default.
+	WriteCostPerByte float64 `toml:"write-cost-per-byte" json:"write-cost-per-byte"`
+	// CPUMsCost is the cost for each millisecond of CPU time taken.
+	// It's 1 RU = 3 millisecond by default.
+	CPUMsCost float64 `toml:"read-cpu-ms-cost" json:"read-cpu-ms-cost"`
+}
+
+// Adjust adjusts the configuration and initializes it with the default value if necessary.
+func (ruc *RequestUnitConfig) Adjust() {
+	if ruc == nil {
+		return
+	}
+	if ruc.ReadBaseCost == 0 {
+		ruc.ReadBaseCost = defaultReadBaseCost
+	}
+	if ruc.ReadCostPerByte == 0 {
+		ruc.ReadCostPerByte = defaultReadCostPerByte
+	}
+	if ruc.WriteBaseCost == 0 {
+		ruc.WriteBaseCost = defaultWriteBaseCost
+	}
+	if ruc.WriteCostPerByte == 0 {
+		ruc.WriteCostPerByte = defaultWriteCostPerByte
+	}
+	if ruc.CPUMsCost == 0 {
+		ruc.CPUMsCost = defaultCPUMsCost
+	}
 }
 
 // NewConfig creates a new config.
@@ -90,7 +153,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	return c.Adjust(meta, false)
 }
 
-// Adjust is used to adjust the PD configurations.
+// Adjust is used to adjust the resource manager configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configMetaData := configutil.NewConfigMetadata(meta)
 	warningMsgs := make([]string, 0)
@@ -107,7 +170,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
 	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
-	adjustPath(&c.DataDir)
+	c.adjustPath()
 
 	if err := c.Validate(); err != nil {
 		return err
@@ -127,13 +190,17 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.Log.Format = defaultLogFormat
 	}
 
+	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
+
+	c.RequestUnit.Adjust()
+
 	return nil
 }
 
-func adjustPath(p *string) {
-	absPath, err := filepath.Abs(*p)
+func (c *Config) adjustPath() {
+	absPath, err := filepath.Abs(c.DataDir)
 	if err == nil {
-		*p = absPath
+		c.DataDir = absPath
 	}
 }
 

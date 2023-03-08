@@ -30,7 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
-	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -472,6 +472,9 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 		return limit.AddPeer
 	case storelimit.RemovePeer:
 		return limit.RemovePeer
+	// todo: impl it in store limit v2.
+	case storelimit.SendSnapshot:
+		return 0.0
 	default:
 		panic("no such limit type")
 	}
@@ -518,13 +521,13 @@ func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
 }
 
 // GetLeaderSchedulePolicy is to get leader schedule policy.
-func (o *PersistOptions) GetLeaderSchedulePolicy() core.SchedulePolicy {
-	return core.StringToSchedulePolicy(o.GetScheduleConfig().LeaderSchedulePolicy)
+func (o *PersistOptions) GetLeaderSchedulePolicy() constant.SchedulePolicy {
+	return constant.StringToSchedulePolicy(o.GetScheduleConfig().LeaderSchedulePolicy)
 }
 
 // GetKeyType is to get key type.
-func (o *PersistOptions) GetKeyType() core.KeyType {
-	return core.StringToKeyType(o.GetPDServerConfig().KeyType)
+func (o *PersistOptions) GetKeyType() constant.KeyType {
+	return constant.StringToKeyType(o.GetPDServerConfig().KeyType)
 }
 
 // GetMaxResetTSGap gets the max gap to reset the tso.
