@@ -38,7 +38,7 @@ const (
 
 	defaultName              = "TSO"
 	defaultBackendEndpoints  = "http://127.0.0.1:2379"
-	defaultListenAddr        = "127.0.0.1:3379"
+	defaultListenAddr        = "http://127.0.0.1:3379"
 	defaultEnableGRPCGateway = true
 
 	defaultTSOSaveInterval           = time.Duration(defaultLeaderLease) * time.Second

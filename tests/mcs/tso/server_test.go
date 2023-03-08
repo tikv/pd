@@ -90,7 +90,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(suite.ctx, s.GetConfig().ListenAddr, grpc.WithInsecure())
+	cc, err := grpc.DialContext(suite.ctx, s.GetListenURL().Host, grpc.WithInsecure())
 	re.NoError(err)
 	cc.Close()
 }

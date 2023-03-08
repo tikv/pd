@@ -98,6 +98,7 @@ type Server struct {
 	clusterID   uint64
 	rootPath    string
 	storage     endpoint.TSOStorage
+	listenURL   *url.URL
 	backendUrls []url.URL
 
 	// for the primary election in the TSO cluster
@@ -442,6 +443,11 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	<-done
 }
 
+// GetListenURL gets the listen URL.
+func (s *Server) GetListenURL() *url.URL {
+	return s.listenURL
+}
+
 // GetConfig gets the config.
 func (s *Server) GetConfig() *Config {
 	return s.cfg
@@ -583,10 +589,14 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
+	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
+	if err != nil {
+		return err
+	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen("tcp", s.cfg.ListenAddr, tlsConfig)
+		s.muxListener, err = tls.Listen("tcp", s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen("tcp", s.cfg.ListenAddr)
+		s.muxListener, err = net.Listen("tcp", s.listenURL.Host)
 	}
 	if err != nil {
 		return err
