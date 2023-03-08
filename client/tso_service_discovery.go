@@ -138,7 +138,7 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 			return
 		}
 		if err := c.updateMember(); err != nil {
-			log.Error("[pd(tso)] failed to update member", errs.ZapError(err))
+			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
 }
@@ -147,7 +147,7 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 func (c *tsoServiceDiscovery) Close() {
 	c.clientConns.Range(func(key, cc interface{}) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
-			log.Error("[pd(tso)] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
 		c.clientConns.Delete(key)
 		return true
@@ -256,7 +256,7 @@ func (c *tsoServiceDiscovery) switchPrimary(addrs []string) error {
 	}
 
 	if _, err := c.GetOrCreateGRPCConn(addr); err != nil {
-		log.Warn("[pd(tso)] failed to connect primary", zap.String("primary", addr), errs.ZapError(err))
+		log.Warn("[tso] failed to connect primary", zap.String("primary", addr), errs.ZapError(err))
 		return err
 	}
 	// Set PD primary and Global TSO Allocator (which is also the PD primary)
@@ -266,7 +266,7 @@ func (c *tsoServiceDiscovery) switchPrimary(addrs []string) error {
 	for _, cb := range c.primarySwitchedCbs {
 		cb()
 	}
-	log.Info("[pd(tso)] switch primary", zap.String("new-primary", addr), zap.String("old-primary", oldPrimary))
+	log.Info("[tso] switch primary", zap.String("new-primary", addr), zap.String("old-primary", oldPrimary))
 	return nil
 }
 
@@ -286,12 +286,12 @@ func (c *tsoServiceDiscovery) switchTSOAllocatorPrimary(dcLocation string, addr 
 func (c *tsoServiceDiscovery) updateMember() error {
 	resp, err := c.metacli.Get(c.ctx, []byte(c.primaryKey))
 	if err != nil {
-		log.Error("[pd(tso)] failed to get the keyspace serving endpoint", errs.ZapError(err))
+		log.Error("[tso] failed to get the keyspace serving endpoint", errs.ZapError(err))
 		return err
 	}
 
 	if resp == nil || len(resp.Kvs) == 0 {
-		log.Error("[pd(tso)] didn't find the keyspace serving endpoint")
+		log.Error("[tso] didn't find the keyspace serving endpoint")
 		return errs.ErrClientGetLeader
 	} else if resp.Count > 1 {
 		return errs.ErrClientGetMultiResponse.FastGenByArgs(resp.Kvs)

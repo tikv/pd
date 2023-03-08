@@ -32,7 +32,7 @@ import (
 // TSOClient defines basic interface of the TSO client
 // For test only
 type TSOClient interface {
-	// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
+	// GetTSOAllocators returns {dc-location -> TSO allocator serving URL} connection map
 	GetTSOAllocators() *sync.Map
 }
 
@@ -192,7 +192,7 @@ func (c *tsoClient) updateTSOAllocatorServingAddrs(allocatorMap map[string]strin
 			return err
 		}
 		c.tsoAllocators.Store(dcLocation, addr)
-		log.Info("[pd(tso)] switch dc tso allocatorimary",
+		log.Info("[tso] switch dc tso allocator serving address",
 			zap.String("dc-location", dcLocation),
 			zap.String("new-address", addr),
 			zap.String("old-address", oldAddr))
@@ -217,7 +217,7 @@ func (c *tsoClient) gcAllocatorServingAddr(curAllocatorMap map[string]string) {
 			return true
 		}
 		if _, exist := curAllocatorMap[dcLocation]; !exist {
-			log.Info("[pd(tso)] delete unused tso allocator", zap.String("dc-location", dcLocation))
+			log.Info("[tso] delete unused tso allocator", zap.String("dc-location", dcLocation))
 			c.tsoAllocators.Delete(dcLocation)
 		}
 		return true

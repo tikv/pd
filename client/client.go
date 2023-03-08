@@ -295,7 +295,7 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 // Merge NewClientWithContext with this API after we let client detect service mode provided on the server side.
 // Before that, internal tools call this function to use mcs service.
 func NewTSOClientWithContext(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd(tso)] create tso client with endpoints", zap.Strings("pd(api)-address", svrAddrs))
+	log.Info("[tso] create tso client with endpoints", zap.Strings("pd(api)-address", svrAddrs))
 	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, &security)
 	// Inject the client options.
 	for _, opt := range opts {
