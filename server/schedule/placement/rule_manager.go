@@ -81,17 +81,43 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 	}
 	if len(m.ruleConfig.rules) == 0 {
 		// migrate from old config.
-		defaultRule := &Rule{
-			GroupID:        "pd",
-			ID:             "default",
-			Role:           Voter,
-			Count:          maxReplica,
-			LocationLabels: locationLabels,
+		var defaultRules []*Rule
+		if m.conf.IsWitnessAllowed() {
+			defaultRules = append(defaultRules,
+				[]*Rule{
+					{
+						GroupID:        "pd",
+						ID:             "default",
+						Role:           Voter,
+						Count:          maxReplica - 1,
+						LocationLabels: locationLabels,
+					},
+					{
+						GroupID:        "pd",
+						ID:             "witness",
+						Role:           Voter,
+						Count:          1,
+						IsWitness:      true,
+						LocationLabels: locationLabels,
+					},
+				}...,
+			)
+		} else {
+			defaultRules = append(defaultRules, &Rule{
+				GroupID:        "pd",
+				ID:             "default",
+				Role:           Voter,
+				Count:          maxReplica,
+				LocationLabels: locationLabels,
+			})
 		}
-		if err := m.storage.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
-			return err
+		for _, defaultRule := range defaultRules {
+			if err := m.storage.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
+				// TODO: Need to delete the previously successfully saved Rules?
+				return err
+			}
+			m.ruleConfig.setRule(defaultRule)
 		}
-		m.ruleConfig.setRule(defaultRule)
 	}
 	m.ruleConfig.adjust()
 	ruleList, err := buildRuleList(m.ruleConfig)
