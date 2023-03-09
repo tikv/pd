@@ -83,8 +83,8 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 		// migrate from old config.
 		var defaultRules []*Rule
 		if m.conf != nil && m.conf.IsWitnessAllowed() && maxReplica >= 3 {
-			// rounded by 3
-			witnessCount := int(float64(maxReplica)/float64(3) + 0.5)
+			// Because maxReplica is actually always an odd number, so directly divided by 2
+			witnessCount := maxReplica / 2
 			defaultRules = append(defaultRules,
 				[]*Rule{
 					{
@@ -234,8 +234,8 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 	if r.Role == Leader && r.Count > 1 {
 		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple leaders by count %d", r.Count))
 	}
-	if r.IsWitness && r.Count > 1 {
-		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple witness by count %d", r.Count))
+	if r.IsWitness && r.Count > m.conf.GetMaxReplicas()/2 {
+		return errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define too many witness by count %d", r.Count))
 	}
 	for _, c := range r.LabelConstraints {
 		if !validateOp(c.Op) {
