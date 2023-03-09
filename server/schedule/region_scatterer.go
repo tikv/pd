@@ -383,9 +383,11 @@ func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
 		return false
 	}
-
-	rule := fit.GetRuleFit(peer.GetId()).Rule
-	switch rule.Role {
+	peerFit := fit.GetRuleFit(peer.GetId())
+	if peerFit == nil || peerFit.Rule == nil {
+		return false
+	}
+	switch peerFit.Rule.Role {
 	case placement.Voter, placement.Leader:
 		return true
 	}

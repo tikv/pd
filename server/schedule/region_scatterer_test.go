@@ -709,6 +709,11 @@ func TestBalanceRegion(t *testing.T) {
 		re.Equal(uint64(150), scatterer.ordinaryEngine.selectedPeer.Get(i, group))
 		re.Equal(uint64(50), scatterer.ordinaryEngine.selectedLeader.Get(i, group))
 	}
+	// Test for unhealthy region
+	// ref https://github.com/tikv/pd/issues/6099
+	region := tc.AddLeaderRegion(1500, 2, 3, 4, 6)
+	op := scatterer.scatterRegion(region, group)
+	re.False(isPeerCountChanged(op))
 }
 
 func isPeerCountChanged(op *operator.Operator) bool {
