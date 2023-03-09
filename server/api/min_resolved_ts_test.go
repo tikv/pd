@@ -65,7 +65,7 @@ func (suite *minResolvedTSTestSuite) TearDownSuite() {
 
 func (suite *minResolvedTSTestSuite) TestMinResolvedTS() {
 	// case1: default run job
-	interval := suite.svr.GetRaftCluster().GetOpts().GetPDServerConfig().MinResolvedTSPersistenceInterval
+	interval := suite.svr.GetRaftCluster().GetPDServerConfig().MinResolvedTSPersistenceInterval
 	suite.checkMinResolvedTS(&minResolvedTS{
 		MinResolvedTS:   0,
 		IsRealTime:      true,
@@ -83,7 +83,7 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTS() {
 	interval = typeutil.Duration{Duration: suite.defaultInterval}
 	suite.setMinResolvedTSPersistenceInterval(interval)
 	suite.Eventually(func() bool {
-		return interval == suite.svr.GetRaftCluster().GetOpts().GetPDServerConfig().MinResolvedTSPersistenceInterval
+		return interval == suite.svr.GetRaftCluster().GetPDServerConfig().MinResolvedTSPersistenceInterval
 	}, time.Second*10, time.Millisecond*20)
 	suite.checkMinResolvedTS(&minResolvedTS{
 		MinResolvedTS:   0,
@@ -116,9 +116,9 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTS() {
 }
 
 func (suite *minResolvedTSTestSuite) setMinResolvedTSPersistenceInterval(duration typeutil.Duration) {
-	cfg := suite.svr.GetRaftCluster().GetOpts().GetPDServerConfig().Clone()
+	cfg := suite.svr.GetRaftCluster().GetPDServerConfig().Clone()
 	cfg.MinResolvedTSPersistenceInterval = duration
-	suite.svr.GetRaftCluster().GetOpts().SetPDServerConfig(cfg)
+	suite.svr.GetRaftCluster().SetPDServerConfig(cfg)
 }
 
 func (suite *minResolvedTSTestSuite) checkMinResolvedTS(expect *minResolvedTS) {

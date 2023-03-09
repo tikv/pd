@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -139,7 +140,7 @@ func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
 func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType)
+	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType, constant.Low)
 }
 
 // IsTiFlash returns true if the store is tiflash.
@@ -309,11 +310,11 @@ const minWeight = 1e-6
 const maxScore = 1024 * 1024 * 1024
 
 // LeaderScore returns the store's leader score.
-func (s *StoreInfo) LeaderScore(policy SchedulePolicy, delta int64) float64 {
+func (s *StoreInfo) LeaderScore(policy constant.SchedulePolicy, delta int64) float64 {
 	switch policy {
-	case BySize:
+	case constant.BySize:
 		return float64(s.GetLeaderSize()+delta) / math.Max(s.GetLeaderWeight(), minWeight)
-	case ByCount:
+	case constant.ByCount:
 		return float64(int64(s.GetLeaderCount())+delta) / math.Max(s.GetLeaderWeight(), minWeight)
 	default:
 		return 0
@@ -447,11 +448,11 @@ func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 }
 
 // ResourceCount returns count of leader/region in the store.
-func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
+func (s *StoreInfo) ResourceCount(kind constant.ResourceKind) uint64 {
 	switch kind {
-	case LeaderKind:
+	case constant.LeaderKind:
 		return uint64(s.GetLeaderCount())
-	case RegionKind:
+	case constant.RegionKind:
 		return uint64(s.GetRegionCount())
 	default:
 		return 0
@@ -459,11 +460,11 @@ func (s *StoreInfo) ResourceCount(kind ResourceKind) uint64 {
 }
 
 // ResourceSize returns size of leader/region in the store
-func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
+func (s *StoreInfo) ResourceSize(kind constant.ResourceKind) int64 {
 	switch kind {
-	case LeaderKind:
+	case constant.LeaderKind:
 		return s.GetLeaderSize()
-	case RegionKind:
+	case constant.RegionKind:
 		return s.GetRegionSize()
 	default:
 		return 0
@@ -471,15 +472,15 @@ func (s *StoreInfo) ResourceSize(kind ResourceKind) int64 {
 }
 
 // ResourceWeight returns weight of leader/region in the score
-func (s *StoreInfo) ResourceWeight(kind ResourceKind) float64 {
+func (s *StoreInfo) ResourceWeight(kind constant.ResourceKind) float64 {
 	switch kind {
-	case LeaderKind:
+	case constant.LeaderKind:
 		leaderWeight := s.GetLeaderWeight()
 		if leaderWeight <= 0 {
 			return minWeight
 		}
 		return leaderWeight
-	case RegionKind:
+	case constant.RegionKind:
 		regionWeight := s.GetRegionWeight()
 		if regionWeight <= 0 {
 			return minWeight

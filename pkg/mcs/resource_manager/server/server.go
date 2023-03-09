@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -35,8 +36,11 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
@@ -46,30 +50,31 @@ import (
 )
 
 const (
-	tcp = "tcp"
-	// defaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
-	defaultGRPCGracefulStopTimeout = 5 * time.Second
-	// defaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
-	defaultHTTPGracefulShutdownTimeout = 5 * time.Second
-	defaultLeaseInSeconds              = 3
+	// resourceManagerKeyspaceGroupPrimaryElectionPrefix defines the key prefix for keyspace group primary election.
+	// The entire key is in the format of "/pd/<cluster-id>/microservice/resource-manager/keyspace-group-XXXXX/primary"
+	// in which XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
+	resourceManagerKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/resource-manager/keyspace-group-"
 )
 
 // Server is the resource manager server, and it implements bs.Server.
-// nolint
 type Server struct {
 	// Server state. 0 is not serving, 1 is serving.
 	isServing int64
 
-	ctx          context.Context
-	serverLoopWg sync.WaitGroup
+	ctx              context.Context
+	serverLoopCtx    context.Context
+	serverLoopCancel func()
+	serverLoopWg     sync.WaitGroup
 
-	cfg         *Config
-	name        string
-	backendURLs []url.URL
-	listenURL   *url.URL
+	cfg       *Config
+	clusterID uint64
+	name      string
+	listenURL *url.URL
 
-	etcdClient *clientv3.Client
-	httpClient *http.Client
+	// for the primary election of resource manager
+	participant *member.Participant
+	etcdClient  *clientv3.Client
+	httpClient  *http.Client
 
 	muxListener net.Listener
 	service     *Service
@@ -83,7 +88,7 @@ type Server struct {
 	serviceRegister *discovery.ServiceRegister
 }
 
-// Name returns the unique etcd Name for this server in etcd cluster.
+// Name returns the unique etcd name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.name
 }
@@ -93,12 +98,101 @@ func (s *Server) Context() context.Context {
 	return s.ctx
 }
 
-// Run runs the pd server.
-func (s *Server) Run() error {
-	if err := s.initClient(); err != nil {
+// Run runs the Resource Manager server.
+func (s *Server) Run() (err error) {
+	if err = s.initClient(); err != nil {
 		return err
 	}
-	return s.startServer()
+	if err = s.startServer(); err != nil {
+		return err
+	}
+
+	s.startServerLoop()
+
+	return nil
+}
+
+func (s *Server) startServerLoop() {
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	s.serverLoopWg.Add(1)
+	go s.primaryElectionLoop()
+}
+
+func (s *Server) primaryElectionLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	for {
+		if s.IsClosed() {
+			log.Info("server is closed, exit resource manager primary election loop")
+			return
+		}
+
+		primary, rev, checkAgain := s.participant.CheckLeader()
+		if checkAgain {
+			continue
+		}
+		if primary != nil {
+			log.Info("start to watch the primary/leader", zap.Stringer("resource-manager-primary", primary))
+			// WatchLeader will keep looping and never return unless the primary/leader has changed.
+			s.participant.WatchLeader(s.serverLoopCtx, primary, rev)
+			log.Info("the resource manager primary/leader has changed, try to re-campaign a primary/leader")
+		}
+
+		s.campaignLeader()
+	}
+}
+
+func (s *Server) campaignLeader() {
+	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Member().Name))
+	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
+		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
+			log.Info("campaign resource manager primary/leader meets error due to txn conflict, another resource manager server may campaign successfully",
+				zap.String("campaign-resource-manager-primary-name", s.participant.Member().Name))
+		} else {
+			log.Error("campaign resource manager primary/leader meets error due to etcd error",
+				zap.String("campaign-resource-manager-primary-name", s.participant.Member().Name),
+				errs.ZapError(err))
+		}
+		return
+	}
+
+	// Start keepalive the leadership and enable Resource Manager service.
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	var resetLeaderOnce sync.Once
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+		s.participant.ResetLeader()
+	})
+
+	// maintain the leadership, after this, Resource Manager could be ready to provide service.
+	s.participant.KeepLeader(ctx)
+	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Member().Name))
+
+	log.Info("triggering the primary callback functions")
+	for _, cb := range s.primaryCallbacks {
+		cb(ctx)
+	}
+
+	s.participant.EnableLeader()
+	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Member().Name))
+
+	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
+	defer leaderTicker.Stop()
+
+	for {
+		select {
+		case <-leaderTicker.C:
+			if !s.participant.IsLeader() {
+				log.Info("no longer a primary/leader because lease has expired, the resource manager primary/leader will step down")
+				return
+			}
+		case <-ctx.Done():
+			// Server is closed and it should return nil.
+			log.Info("server is closed")
+			return
+		}
+	}
 }
 
 // Close closes the server.
@@ -111,6 +205,7 @@ func (s *Server) Close() {
 	log.Info("closing resource manager server ...")
 	s.serviceRegister.Deregister()
 	s.muxListener.Close()
+	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
 	if s.etcdClient != nil {
@@ -148,8 +243,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	// TODO: implement this function with primary.
-	return atomic.LoadInt64(&s.isServing) == 1
+	return s.participant.IsLeader()
 }
 
 // IsClosed checks if the server loop is closed
@@ -171,8 +265,7 @@ func (s *Server) initClient() error {
 	if err != nil {
 		return err
 	}
-	s.backendURLs = []url.URL(u)
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendURLs)
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL(u))
 	return err
 }
 
@@ -194,8 +287,8 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(defaultGRPCGracefulStopTimeout):
-		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", defaultGRPCGracefulStopTimeout))
+	case <-time.After(utils.DefaultGRPCGracefulStopTimeout):
+		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", utils.DefaultGRPCGracefulStopTimeout))
 		gs.Stop()
 	}
 	if s.IsClosed() {
@@ -217,7 +310,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	err := hs.Serve(l)
 	log.Info("http server stop serving")
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultHTTPGracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
 	defer cancel()
 	if err := hs.Shutdown(ctx); err != nil {
 		log.Error("http server shutdown encountered problem", errs.ZapError(err))
@@ -253,15 +346,33 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 
 // GetPrimary returns the primary member.
 func (s *Server) GetPrimary() bs.MemberProvider {
-	// TODO: implement this function with primary.
-	return nil
+	return s.participant.GetLeader()
 }
 
-func (s *Server) startServer() error {
-	manager := NewManager[*Server](s)
+func (s *Server) startServer() (err error) {
+	// TODO: uncomment the following code to generate a unique cluster id from the given ClusterIDPath
+	// after we add rpc for the client to retrieve the cluster id from the server then use it in every
+	// request for verification.
+	// if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
+	// 	return err
+	// }
+	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
+	// The independent Resource Manager service still reuses PD version info since PD and Resource Manager are just
+	// different service modes provided by the same pd-server binary
+	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+
+	uniqueName := s.cfg.ListenAddr
+	uniqueID := memberutil.GenerateUniqueID(uniqueName)
+	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
+	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
+	s.participant.InitInfo(uniqueName, resourceManagerKeyspaceGroupPrimaryElectionPrefix+fmt.Sprintf("%05d", 0), "primary", "keyspace group primary election")
+	s.participant.SetMemberDeployPath(s.participant.ID())
+	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
+	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
+
 	s.service = &Service{
 		ctx:     s.ctx,
-		manager: manager,
+		manager: NewManager[*Server](s),
 	}
 
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
@@ -273,9 +384,9 @@ func (s *Server) startServer() error {
 		return err
 	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(tcp, s.listenURL.Host, tlsConfig)
+		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(tcp, s.listenURL.Host)
+		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
 	}
 	if err != nil {
 		return err
@@ -289,14 +400,10 @@ func (s *Server) startServer() error {
 	for _, cb := range s.startCallbacks {
 		cb()
 	}
-	// TODO: resolve callback for the primary
-	for _, cb := range s.primaryCallbacks {
-		cb(s.ctx)
-	}
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.GetClient(), "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }

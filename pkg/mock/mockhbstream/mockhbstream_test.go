@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule/hbstream"
 )
 
@@ -36,7 +36,7 @@ func TestActivity(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.AddRegionStore(1, 1)
 	cluster.AddRegionStore(2, 0)
 	cluster.AddLeaderRegion(1, 1)

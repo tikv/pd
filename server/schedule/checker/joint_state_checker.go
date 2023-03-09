@@ -17,6 +17,7 @@ package checker
 import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/operator"
@@ -66,7 +67,7 @@ func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 		if op.Len() > 1 {
 			jointCheckerTransferLeaderCounter.Inc()
 		}
-		op.SetPriorityLevel(core.High)
+		op.SetPriorityLevel(constant.High)
 	}
 	return op
 }

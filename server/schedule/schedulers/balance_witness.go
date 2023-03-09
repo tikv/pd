@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
@@ -230,7 +231,7 @@ func (b *balanceWitnessScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 	schedulerCounter.WithLabelValues(b.GetName(), "schedule").Inc()
 
 	opInfluence := b.opController.GetOpInfluence(cluster)
-	kind := core.NewScheduleKind(core.WitnessKind, core.ByCount)
+	kind := constant.NewScheduleKind(constant.WitnessKind, constant.ByCount)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()

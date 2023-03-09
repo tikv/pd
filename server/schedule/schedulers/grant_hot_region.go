@@ -23,7 +23,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -233,7 +233,7 @@ func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 }
 
 func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
-	stLoadInfos := s.stLoadInfos[buildResourceType(typ, core.RegionKind)]
+	stLoadInfos := s.stLoadInfos[buildResourceType(typ, constant.RegionKind)]
 	infos := make([]*statistics.StoreLoadDetail, len(stLoadInfos))
 	index := 0
 	for _, info := range stLoadInfos {
@@ -324,6 +324,6 @@ func (s *grantHotRegionScheduler) transfer(cluster schedule.Cluster, regionID ui
 	} else {
 		op, err = operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
-	op.SetPriorityLevel(core.High)
+	op.SetPriorityLevel(constant.High)
 	return
 }

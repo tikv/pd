@@ -273,7 +273,7 @@ func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUr
 	m.member = leader
 	m.memberValue = string(data)
 	m.rootPath = rootPath
-	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "pd leader election")
+	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "leader election")
 }
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all

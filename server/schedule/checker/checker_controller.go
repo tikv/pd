@@ -23,8 +23,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keyutil"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/config"
 	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -36,7 +36,7 @@ const DefaultCacheSize = 1000
 // Controller is used to manage all checkers.
 type Controller struct {
 	cluster           schedule.Cluster
-	opts              *config.PersistOptions
+	conf              config.Config
 	opController      *schedule.OperatorController
 	learnerChecker    *LearnerChecker
 	replicaChecker    *ReplicaChecker
@@ -51,19 +51,19 @@ type Controller struct {
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
+func NewController(ctx context.Context, cluster schedule.Cluster, conf config.Config, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &Controller{
 		cluster:           cluster,
-		opts:              cluster.GetOpts(),
+		conf:              conf,
 		opController:      opController,
 		learnerChecker:    NewLearnerChecker(cluster),
-		replicaChecker:    NewReplicaChecker(cluster, regionWaitingList),
+		replicaChecker:    NewReplicaChecker(cluster, conf, regionWaitingList),
 		ruleChecker:       NewRuleChecker(ctx, cluster, ruleManager, regionWaitingList),
 		splitChecker:      NewSplitChecker(cluster, ruleManager, labeler),
-		mergeChecker:      NewMergeChecker(ctx, cluster),
+		mergeChecker:      NewMergeChecker(ctx, cluster, conf),
 		jointStateChecker: NewJointStateChecker(cluster),
-		priorityInspector: NewPriorityInspector(cluster),
+		priorityInspector: NewPriorityInspector(cluster, conf),
 		regionWaitingList: regionWaitingList,
 		suspectRegions:    cache.NewIDTTL(ctx, time.Minute, 3*time.Minute),
 		suspectKeyRanges:  cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
@@ -91,7 +91,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return []*operator.Operator{op}
 	}
 
-	if c.opts.IsPlacementRulesEnabled() {
+	if c.conf.IsPlacementRulesEnabled() {
 		skipRuleCheck := c.cluster.GetOpts().IsPlacementRulesCacheEnabled() &&
 			c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
 		if skipRuleCheck {
@@ -106,7 +106,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			})
 			fit := c.priorityInspector.Inspect(region)
 			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
-				if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 					return []*operator.Operator{op}
 				}
 				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
@@ -118,7 +118,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			return []*operator.Operator{op}
 		}
 		if op := c.replicaChecker.Check(region); op != nil {
-			if opController.OperatorCount(operator.OpReplica) < c.opts.GetReplicaScheduleLimit() {
+			if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
 			}
 			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
@@ -127,7 +127,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	if c.mergeChecker != nil {
-		allowed := opController.OperatorCount(operator.OpMerge) < c.opts.GetMergeScheduleLimit()
+		allowed := opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit()
 		if !allowed {
 			operator.OperatorLimitCounter.WithLabelValues(c.mergeChecker.GetType(), operator.OpMerge.String()).Inc()
 		} else if ops := c.mergeChecker.Check(region); ops != nil {

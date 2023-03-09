@@ -41,6 +41,13 @@ const (
 	// defaultAutoSyncInterval is the interval to sync etcd cluster.
 	defaultAutoSyncInterval = 60 * time.Second
 
+	// defaultDialKeepAliveTime is the time after which client pings the server to see if transport is alive.
+	defaultDialKeepAliveTime = 10 * time.Second
+
+	// defaultDialKeepAliveTimeout is the time that the client waits for a response for the
+	// keep-alive probe. If the response is not received in this time, the connection is closed.
+	defaultDialKeepAliveTimeout = 3 * time.Second
+
 	// DefaultDialTimeout is the maximum amount of time a dial will wait for a
 	// connection to setup. 30s is long enough for most of the network conditions.
 	DefaultDialTimeout = 30 * time.Second
@@ -212,17 +219,26 @@ func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
 	autoSyncInterval := defaultAutoSyncInterval
+	dialKeepAliveTime := defaultDialKeepAliveTime
+	dialKeepAliveTimeout := defaultDialKeepAliveTimeout
 	failpoint.Inject("autoSyncInterval", func() {
 		autoSyncInterval = 10 * time.Millisecond
 	})
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:        endpoints,
-		DialTimeout:      defaultEtcdClientTimeout,
-		AutoSyncInterval: autoSyncInterval,
-		TLS:              tlsConfig,
-		LogConfig:        &lgc,
+	failpoint.Inject("closeKeepAliveCheck", func() {
+		autoSyncInterval = 0
+		dialKeepAliveTime = 0
+		dialKeepAliveTimeout = 0
 	})
-	if err != nil {
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:            endpoints,
+		DialTimeout:          defaultEtcdClientTimeout,
+		AutoSyncInterval:     autoSyncInterval,
+		TLS:                  tlsConfig,
+		LogConfig:            &lgc,
+		DialKeepAliveTime:    dialKeepAliveTime,
+		DialKeepAliveTimeout: dialKeepAliveTimeout,
+	})
+	if err == nil {
 		log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
 	}
 	return client, err
@@ -241,6 +257,20 @@ func InitClusterID(c *clientv3.Client, key string) (clusterID uint64, err error)
 	// If no key exist, generate a random cluster ID.
 	if len(resp.Kvs) == 0 {
 		return InitOrGetClusterID(c, key)
+	}
+	return typeutil.BytesToUint64(resp.Kvs[0].Value)
+}
+
+// GetClusterID gets the cluster ID for the given key.
+func GetClusterID(c *clientv3.Client, key string) (clusterID uint64, err error) {
+	// Get any cluster key to parse the cluster ID.
+	resp, err := EtcdKVGet(c, key)
+	if err != nil {
+		return 0, err
+	}
+	// If no key exist, generate a random cluster ID.
+	if len(resp.Kvs) == 0 {
+		return 0, nil
 	}
 	return typeutil.BytesToUint64(resp.Kvs[0].Value)
 }

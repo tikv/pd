@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -31,13 +32,9 @@ import (
 )
 
 const (
-	defaultName              = "Resource Manager"
-	defaultBackendEndpoints  = "127.0.0.1:2379"
-	defaultListenAddr        = "127.0.0.1:3380"
-	defaultEnableGRPCGateway = true
-
-	defaultLogFormat           = "text"
-	defaultDisableErrorVerbose = true
+	defaultName             = "Resource Manager"
+	defaultBackendEndpoints = "http://127.0.0.1:2379"
+	defaultListenAddr       = "http://127.0.0.1:3379"
 
 	defaultReadBaseCost  = 0.25
 	defaultWriteBaseCost = 1
@@ -65,6 +62,12 @@ type Config struct {
 	LogProps *log.ZapProperties
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
+
+	// LeaderLease defines the time within which a Resource Manager primary/leader must
+	// update its TTL in etcd, otherwise etcd will expire the leader key and other servers
+	// can campaign the primary/leader again. Etcd only supports seconds TTL, so here is
+	// second too.
+	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
@@ -160,7 +163,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
 	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
-	c.adjustPath()
+	configutil.AdjustPath(&c.DataDir)
 
 	if err := c.Validate(); err != nil {
 		return err
@@ -170,31 +173,26 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = defaultEnableGRPCGateway
+		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
 	c.Security.Encryption.Adjust()
 
 	if len(c.Log.Format) == 0 {
-		c.Log.Format = defaultLogFormat
+		c.Log.Format = utils.DefaultLogFormat
 	}
+
+	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
 
 	c.RequestUnit.Adjust()
 
 	return nil
 }
 
-func (c *Config) adjustPath() {
-	absPath, err := filepath.Abs(c.DataDir)
-	if err == nil {
-		c.DataDir = absPath
-	}
-}
-
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
-		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
+		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
 	}
 }
 

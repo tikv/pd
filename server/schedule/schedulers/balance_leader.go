@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
@@ -338,7 +339,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
 	opInfluence := l.opController.GetOpInfluence(cluster)
-	kind := core.NewScheduleKind(core.LeaderKind, leaderSchedulePolicy)
+	kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()
@@ -451,12 +452,12 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 	defer func() { solver.step-- }()
 	targets := solver.GetFollowerStores(solver.region)
 	finalFilters := l.filters
-	opts := solver.GetOpts()
-	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source, false /*allowMoveLeader*/); leaderFilter != nil {
+	conf := solver.GetOpts()
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
-	targets = filter.SelectTargetStores(targets, finalFilters, opts, collector, l.filterCounter)
-	leaderSchedulePolicy := opts.GetLeaderSchedulePolicy()
+	targets = filter.SelectTargetStores(targets, finalFilters, conf, collector, l.filterCounter)
+	leaderSchedulePolicy := conf.GetLeaderSchedulePolicy()
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := solver.GetOpInfluence(targets[i].GetID())
 		jOp := solver.GetOpInfluence(targets[j].GetID())
@@ -500,12 +501,12 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		return nil
 	}
 	finalFilters := l.filters
-	opts := solver.GetOpts()
-	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), opts, solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source, false /*allowMoveLeader*/); leaderFilter != nil {
+	conf := solver.GetOpts()
+	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
 	target := filter.NewCandidates([]*core.StoreInfo{solver.target}).
-		FilterTarget(opts, nil, l.filterCounter, finalFilters...).
+		FilterTarget(conf, nil, l.filterCounter, finalFilters...).
 		PickFirst()
 	if target == nil {
 		log.Debug("region has no target store", zap.String("scheduler", l.GetName()), zap.Uint64("region-id", solver.region.GetID()))

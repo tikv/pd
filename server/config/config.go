@@ -310,13 +310,6 @@ func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 	}
 }
 
-func adjustPath(p *string) {
-	absPath, err := filepath.Abs(*p)
-	if err == nil {
-		*p = absPath
-	}
-}
-
 // Parse parses flag definitions from the argument list.
 func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	// Load config file if specified.
@@ -410,7 +403,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
 	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
-	adjustPath(&c.DataDir)
+	configutil.AdjustPath(&c.DataDir)
 
 	if err := c.Validate(); err != nil {
 		return err
@@ -907,11 +900,6 @@ func (c *ScheduleConfig) Validate() error {
 	if c.LeaderSchedulePolicy != "count" && c.LeaderSchedulePolicy != "size" {
 		return errors.Errorf("leader-schedule-policy %v is invalid", c.LeaderSchedulePolicy)
 	}
-	for _, scheduleConfig := range c.Schedulers {
-		if !IsSchedulerRegistered(scheduleConfig.Type) {
-			return errors.Errorf("create func of %v is not registered, maybe misspelled", scheduleConfig.Type)
-		}
-	}
 	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
 		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
 	}
@@ -1211,10 +1199,6 @@ type StoreLabel struct {
 	Key   string `toml:"key" json:"key"`
 	Value string `toml:"value" json:"value"`
 }
-
-// RejectLeader is the label property type that suggests a store should not
-// have any region leaders.
-const RejectLeader = "reject-leader"
 
 // LabelPropertyConfig is the config section to set properties to store labels.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
