@@ -986,12 +986,12 @@ func TestRegionSizeChanged(t *testing.T) {
 	cluster.processRegionHeartbeat(region)
 	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 	// Test MaxMergeRegionSize and MaxMergeRegionKeys change.
-	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize + 2)))
-	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys + 2)))
+	cluster.opt.SetMaxMergeRegionSize(uint64(curMaxMergeSize + 2))
+	cluster.opt.SetMaxMergeRegionKeys(uint64(curMaxMergeKeys + 2))
 	cluster.processRegionHeartbeat(region)
 	re.True(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
-	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize)))
-	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys)))
+	cluster.opt.SetMaxMergeRegionSize(uint64(curMaxMergeSize))
+	cluster.opt.SetMaxMergeRegionKeys(uint64(curMaxMergeKeys))
 	cluster.processRegionHeartbeat(region)
 	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 }
@@ -1312,6 +1312,7 @@ func TestSyncConfig(t *testing.T) {
 		whiteList     []string
 		maxRegionSize uint64
 		updated       bool
+		switchRaftV2  bool
 	}{{
 		whiteList:     []string{},
 		maxRegionSize: uint64(144),
@@ -1325,7 +1326,12 @@ func TestSyncConfig(t *testing.T) {
 	for _, v := range testdata {
 		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
 		re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
-		re.Equal(v.updated, syncConfig(tc.storeConfigManager, tc.GetStores()))
+		success, switchRaftV2 := syncConfig(tc.storeConfigManager, tc.GetStores())
+		re.Equal(v.updated, success)
+		if success {
+			success, switchRaftV2 := syncConfig(tc.storeConfigManager, tc.GetStores())
+			re.Equal(v.updated, success)
+		}
 		re.Equal(v.maxRegionSize, tc.GetStoreConfig().GetRegionMaxSize())
 	}
 }

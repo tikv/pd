@@ -672,6 +672,8 @@ type ScheduleConfig struct {
 	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
 	// A store's slowness must affected more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
 	SlowStoreEvictingAffectedStoreRatioThreshold float64 `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
+
+	StoreConfigSynced bool `toml:"store-config-synced" json:"store-config-synced,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -726,6 +728,9 @@ const (
 	defaultMaxStorePreparingTime = 48 * time.Hour
 	// When a slow store affected more than 30% of total stores, it will trigger evicting.
 	defaultSlowStoreEvictingAffectedStoreRatioThreshold = 0.3
+
+	// It means that pd not synced the tikv config
+	defaultStoreConfigSynced = false
 )
 
 func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool) error {
@@ -790,6 +795,10 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 	configutil.AdjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	if !meta.IsDefined("enable-diagnostic") {
 		c.EnableDiagnostic = defaultEnableDiagnostic
+	}
+
+	if !meta.IsDefined("store-config-synced") {
+		c.EnableDiagnostic = defaultStoreConfigSynced
 	}
 
 	if !meta.IsDefined("enable-witness") {

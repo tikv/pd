@@ -67,6 +67,7 @@ func TestUpdateConfig(t *testing.T) {
 	re.Equal(uint64(144), manager.GetStoreConfig().GetRegionMaxSize())
 	manager.ObserveConfig("tidb.com")
 	re.Equal(uint64(10), manager.GetStoreConfig().GetRegionMaxSize())
+	re.Equal(raftStoreV2, manager.GetStoreConfig().Engine)
 
 	// case2: the config should not update if config is same expect some ignore field.
 	c, err := manager.source.GetConfig("tidb.com")

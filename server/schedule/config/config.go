@@ -85,6 +85,9 @@ type Config interface {
 	SetSplitMergeInterval(time.Duration)
 	SetMaxReplicas(int)
 	SetPlacementRulesCacheEnabled(bool)
+
+	// only for store configuration
+	UseRaftV2()
 }
 
 // StoreConfig is the interface that wraps the StoreConfig related methods.

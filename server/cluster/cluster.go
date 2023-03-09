@@ -380,11 +380,10 @@ func (c *RaftCluster) startGCTuner() {
 func (c *RaftCluster) runSyncConfig() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	stores := c.GetStores()
 
+	stores := c.GetStores()
 	syncConfig(c.storeConfigManager, stores)
 	for {
 		select {
@@ -392,18 +391,25 @@ func (c *RaftCluster) runSyncConfig() {
 			log.Info("sync store config job is stopped")
 			return
 		case <-ticker.C:
-			if !syncConfig(c.storeConfigManager, stores) {
+			success, switchRaftV2Config := syncConfig(c.storeConfigManager, stores)
+			if switchRaftV2Config {
+				c.GetOpts().UseRaftV2()
+				if err := c.opt.Persist(c.GetStorage()); err != nil {
+					log.Warn("store config persisted failed", zap.Error(err))
+				}
+			}
+			if !success {
 				stores = c.GetStores()
 			}
 		}
 	}
 }
 
-func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
+func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) (bool, bool) {
 	for index := 0; index < len(stores); index++ {
 		// filter out the stores that are tiflash
 		store := stores[index]
-		if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if store.IsTiFlash() {
 			continue
 		}
 
@@ -413,16 +419,19 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bo
 		}
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
-		if err := manager.ObserveConfig(address); err != nil {
+		switchRaftV2Config, err := manager.ObserveConfig(address)
+		if err != nil {
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
+		} else if switchRaftV2Config {
+			storeSyncConfigEvent.WithLabelValues(address, "raft-v2").Inc()
 		}
 		storeSyncConfigEvent.WithLabelValues(address, "succ").Inc()
 		// it will only try one store.
-		return true
+		return switchRaftV2Config, true
 	}
-	return false
+	return false, false
 }
 
 // LoadClusterInfo loads cluster related info.
