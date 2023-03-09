@@ -18,9 +18,9 @@ func TestPatchResourceGroup(t *testing.T) {
 		expectJSONString string
 	}{
 		{`{"name":"test", "mode":1, "r_u_settings": {"r_u":{"settings":{"fill_rate": 200000}}}}`,
-			`{"name":"test","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":200000},"state":{"initialized":false}}}}`},
+			`{"name":"test","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":200000},"state":{"initialized":false}}}}`},
 		{`{"name":"test", "mode":1, "r_u_settings": {"r_u":{"settings":{"fill_rate": 200000, "burst_limit": -1}}}}`,
-			`{"name":"test","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":200000,"burst_limit":-1},"state":{"initialized":false}}}}`},
+			`{"name":"test","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":200000,"burst_limit":-1},"state":{"initialized":false}}}}`},
 	}
 
 	for _, ca := range testCaseRU {
