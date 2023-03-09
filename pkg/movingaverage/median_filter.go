@@ -15,7 +15,6 @@
 package movingaverage
 
 import (
-	"errors"
 	"math"
 )
 
@@ -43,70 +42,98 @@ func NewMedianFilter(size int) *MedianFilter {
 	}
 }
 
-// err is used to avoid returning MaxFloat64 for concurrency
-func (r *MedianFilter) findTwoMinNumber(needSecond bool) (first, second float64, err error) {
+func (r *MedianFilter) getLength() uint64 {
 	len := r.size
 	if r.count < r.size {
 		len = r.count
 	}
-	first = math.MaxFloat64
+	return len
+}
+
+// findMin returns the minimum item which is larger number than the median, and its index.
+func (r *MedianFilter) findMin(len uint64) (min float64, pos uint64) {
+	min = math.MaxFloat64
+	for i := uint64(0); i < len; i++ {
+		if r.records[i] > r.result && r.records[i] < min {
+			min = r.records[i]
+			pos = i
+		}
+	}
+	return
+}
+
+// findMinNumber returns the minimum item which is larger number than the median.
+func (r *MedianFilter) findMinNumber() float64 {
+	len := r.getLength()
+	min, _ := r.findMin(len)
+	return min
+}
+
+// findTwoMinNumber returns the two minimum items which is larger than the median.
+func (r *MedianFilter) findTwoMinNumber() (first, second float64) {
+	len := r.getLength()
 	second = math.MaxFloat64
-	var pos uint64
+	first, pos := r.findMin(len)
 	for i := uint64(0); i < len; i++ {
-		if r.records[i] > r.result && r.records[i] < first {
-			first = r.records[i]
-			pos = i
-		}
-	}
-	if needSecond {
-		for i := uint64(0); i < len; i++ {
-			if i != pos && r.records[i] > r.result && r.records[i] < second {
-				second = r.records[i]
-			}
-		}
-		if !(second < math.MaxFloat64) {
-			return 0, 0, errors.New("invalid values")
+		if i != pos && r.records[i] > r.result && r.records[i] < second {
+			second = r.records[i]
 		}
 	}
 	return
 }
 
-func (r *MedianFilter) findTwoMaxNumber(needSecond bool) (first, second float64, err error) {
-	len := r.size
-	if r.count < r.size {
-		len = r.count
+// findMax returns the maximal item which is less than the median, and its index.
+func (r *MedianFilter) findMax(len uint64) (max float64, pos uint64) {
+	max = -math.MaxFloat64
+	for i := uint64(0); i < len; i++ {
+		if r.records[i] < r.result && r.records[i] > max {
+			max = r.records[i]
+			pos = i
+		}
 	}
-	first = -math.MaxFloat64
+	return
+}
+
+// findMaxNumber returns the maximal item which is less than the median.
+func (r *MedianFilter) findMaxNumber() float64 {
+	len := r.getLength()
+	max, _ := r.findMax(len)
+	return max
+}
+
+// findTwoMaxNumber returns the two maximal items which is less than the median.
+func (r *MedianFilter) findTwoMaxNumber() (first, second float64) {
+	len := r.getLength()
 	second = -math.MaxFloat64
-	var pos uint64
+	first, pos := r.findMax(len)
 	for i := uint64(0); i < len; i++ {
-		if r.records[i] < r.result && r.records[i] > first {
-			first = r.records[i]
-			pos = i
-		}
-	}
-	if needSecond {
-		for i := uint64(0); i < len; i++ {
-			if i != pos && r.records[i] < r.result && r.records[i] > second {
-				second = r.records[i]
-			}
-		}
-		if !(second > -math.MaxFloat64) {
-			return 0, 0, errors.New("invalid values")
+		if i != pos && r.records[i] < r.result && r.records[i] > second {
+			second = r.records[i]
 		}
 	}
 	return
 }
 
-// Add adds a data point.
+func (r *MedianFilter) updateStatus(len uint64) {
+	r.g = 0
+	r.l = 0
+	for i := uint64(0); i < len; i++ {
+		if r.records[i] > r.result {
+			r.g++
+		} else if r.records[i] < r.result {
+			r.l++
+		}
+	}
+}
+
 func (r *MedianFilter) Add(n float64) {
 	len := r.count + 1
 	if r.count >= r.size {
 		len = r.size
-		pos := r.records[r.count%r.size]
-		if pos > r.result {
+		posValue := r.records[r.count%r.size]
+		if posValue > r.result {
 			r.g--
-		} else if pos < r.result {
+		} else if posValue < r.result {
 			r.l--
 		}
 	}
@@ -118,79 +145,44 @@ func (r *MedianFilter) Add(n float64) {
 	r.records[r.count%r.size] = n
 	r.count++
 
-	updateStatus := func() {
-		r.g = 0
-		r.l = 0
-		for i := uint64(0); i < len; i++ {
-			if r.records[i] > r.result {
-				r.g++
-			} else if r.records[i] < r.result {
-				r.l++
-			}
-		}
-	}
 	// When the length is even
 	if len%2 == 0 {
 		if r.g > len/2 { // the example for this case is [1 3 5 6] -> [1 5 6 7]
-			g1, g2, err := r.findTwoMinNumber(true)
-			if err != nil {
-				return
-			}
+			g1, g2 := r.findTwoMinNumber()
 			r.result = (g1 + g2) / 2
-			updateStatus()
+			r.updateStatus(len)
 		} else if r.g == len/2 {
-			g1, _, err := r.findTwoMinNumber(false)
-			if err != nil {
-				return
-			}
+			g1 := r.findMinNumber()
 			if r.l < len/2 { // the example for this case is [1 3 5] -> [1 3 5 6]
 				r.result = (r.result + g1) / 2
 			} else { // the example for this case is [1 3 5 6] -> [1 3 6 6]
-				l1, _, err := r.findTwoMaxNumber(false)
-				if err != nil {
-					return
-				}
+				l1 := r.findMaxNumber()
 				r.result = (l1 + g1) / 2
 			}
-			updateStatus()
+			r.updateStatus(len)
 		} else if r.l == len/2 { // the example for this case is [1 3 5 6] -> [1 1 3 5]
-			l1, _, err := r.findTwoMaxNumber(false)
-			if err != nil {
-				return
-			}
+			l1 := r.findMaxNumber()
 			if r.g < len/2 { // the example for this case is [1 3 5] -> [1 2 3 5]
 				r.result = (r.result + l1) / 2
 			} else { // the example for this case is [1 3 5 6] -> [1 2 5 6]
-				g1, _, err := r.findTwoMinNumber(false)
-				if err != nil {
-					return
-				}
+				g1 := r.findMinNumber()
 				r.result = (l1 + g1) / 2
 			}
-			updateStatus()
+			r.updateStatus(len)
 		} else if r.l == len/2+1 { // the example for this case is [1 3 5 6] -> [1 2 3 5]
-			l1, l2, err := r.findTwoMaxNumber(true)
-			if err != nil {
-				return
-			}
+			l1, l2 := r.findTwoMaxNumber()
 			r.result = (l1 + l2) / 2
-			updateStatus()
+			r.updateStatus(len)
 		} // In the other case, the median didn't change
 	} else {
-		if r.l == len/2+1 {
-			l1, _, err := r.findTwoMaxNumber(false)
-			if err != nil {
-				return
-			}
+		if r.l == len/2+1 { // the example for this case is [1 2 3 4 5] -> [1 1 2 3 4]
+			l1 := r.findMaxNumber()
 			r.result = l1
-			updateStatus()
-		} else if r.g == len/2+1 {
-			g1, _, err := r.findTwoMinNumber(false)
-			if err != nil {
-				return
-			}
+			r.updateStatus(len)
+		} else if r.g == len/2+1 { // the example for this case is [1 2 3 4 5] -> [2 3 4 5 6]
+			g1 := r.findMinNumber()
 			r.result = g1
-			updateStatus()
+			r.updateStatus(len)
 		} // In the other case, the median didn't change
 	}
 }
