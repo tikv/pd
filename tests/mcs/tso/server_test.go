@@ -22,7 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
@@ -134,6 +136,49 @@ func (suite *tsoServerTestSuite) TestTSOServerRegister() {
 
 	cleanup()
 	endpoints, err = discovery.Discover(client, serviceName)
+	re.NoError(err)
+	re.Empty(endpoints)
+}
+
+func TestForwardTSO(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	pdLeader := cluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+
+	{ // cannot get ts from api server addr
+		pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
+		re.NoError(err)
+		_, _, err = pdClient.GetTS(ctx)
+		re.Error(err)
+	}
+
+	// add tso server
+	s, cleanup, err := startSingleTSOTestServer(ctx, re, backendEndpoints)
+	re.NoError(err)
+	etcdClient := pdLeader.GetEtcdClient()
+	endpoints, err := discovery.Discover(etcdClient, "tso")
+	re.NoError(err)
+	re.Equal(s.GetConfig().ListenAddr, endpoints[0])
+
+	{ // can get ts from api addr with pd client
+		pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
+		re.NoError(err)
+		_, _, err = pdClient.GetTS(ctx)
+		re.NoError(err)
+	}
+
+	cleanup()
+	endpoints, err = discovery.Discover(etcdClient, "tso")
 	re.NoError(err)
 	re.Empty(endpoints)
 }

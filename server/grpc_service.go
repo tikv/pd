@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -125,8 +126,11 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		}
 	}
 
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
+	if s.IsTSOEnabled() {
+		tsoAllocatorManager := s.GetTSOAllocatorManager()
+		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
+	}
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -153,8 +157,11 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	var (
-		doneCh chan struct{}
-		errCh  chan error
+		doneCh            chan struct{}
+		errCh             chan error
+		forwardStream     tsopb.TSO_TsoClient
+		lastForwardedHost string
+		server            = &tsoServer{stream: stream}
 	)
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
@@ -176,6 +183,49 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		streamCtx := stream.Context()
+		if !s.IsTSOEnabled() {
+			_, forwardedHost, err := s.GetServicePrimaryAddr(ctx, "tso")
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			if forwardStream == nil || lastForwardedHost != forwardedHost {
+				if cancel != nil {
+					cancel()
+				}
+				client, err := s.getDelegateClient(s.ctx, forwardedHost)
+				if err != nil {
+					return err
+				}
+				log.Info("create tso mcs client forward stream", zap.String("forwarded-host", forwardedHost))
+				forwardStream, cancel, err = s.createMCSTSOForwardStream(client)
+				if err != nil {
+					return err
+				}
+				lastForwardedHost = forwardedHost
+				errCh = make(chan error, 1)
+				go forwardMCSTSOClientToServer(forwardStream, server, errCh)
+			}
+			header := request.GetHeader()
+			forwardRequest := &tsopb.TsoRequest{
+				Header: &tsopb.RequestHeader{
+					ClusterId: s.clusterID,
+					SenderId:  header.GetSenderId(),
+					// TODO: whether set keyspace info to 0
+				},
+				Count:      request.GetCount(),
+				DcLocation: request.GetDcLocation(),
+			}
+			if err := forwardStream.Send(forwardRequest); err != nil {
+				return errors.WithStack(err)
+			}
+
+			select {
+			case err := <-errCh:
+				return err
+			default:
+			}
+			continue
+		}
 		forwardedHost := grpcutil.GetForwardedHost(streamCtx)
 		if !s.isLocalRequest(forwardedHost) {
 			if errCh == nil {
@@ -707,6 +757,45 @@ func (b *bucketHeartbeatServer) Recv() (*pdpb.ReportBucketsRequest, error) {
 	req, err := b.stream.Recv()
 	if err != nil {
 		atomic.StoreInt32(&b.closed, 1)
+		return nil, errors.WithStack(err)
+	}
+	return req, nil
+}
+
+// tsoServer wraps PD_TsoServer to ensure when any error
+// occurs on Send() or Recv(), both endpoints will be closed.
+type tsoServer struct {
+	stream pdpb.PD_TsoServer
+	closed int32
+}
+
+func (s *tsoServer) Send(resp *pdpb.TsoResponse) error {
+	if atomic.LoadInt32(&s.closed) == 1 {
+		return status.Errorf(codes.Canceled, "stream is closed")
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- s.stream.Send(resp)
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			atomic.StoreInt32(&s.closed, 1)
+		}
+		return err
+	case <-time.After(heartbeatSendTimeout):
+		atomic.StoreInt32(&s.closed, 1)
+		return ErrSendHeartbeatTimeout
+	}
+}
+
+func (s *tsoServer) Recv() (*pdpb.TsoRequest, error) {
+	if atomic.LoadInt32(&s.closed) == 1 {
+		return nil, io.EOF
+	}
+	req, err := s.stream.Recv()
+	if err != nil {
+		atomic.StoreInt32(&s.closed, 1)
 		return nil, errors.WithStack(err)
 	}
 	return req, nil
@@ -1836,6 +1925,37 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 		if err != nil {
 			errCh <- errors.WithStack(err)
 			return
+		}
+		if err := server.Send(resp); err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+	}
+}
+
+func (s *GrpcServer) createMCSTSOForwardStream(client *grpc.ClientConn) (tsopb.TSO_TsoClient, context.CancelFunc, error) {
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(s.ctx)
+	go checkStream(ctx, cancel, done)
+	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
+	done <- struct{}{}
+	return forwardStream, cancel, err
+}
+
+func forwardMCSTSOClientToServer(forwardStream tsopb.TSO_TsoClient, server *tsoServer, errCh chan error) {
+	defer close(errCh)
+	for {
+		respTSO, err := forwardStream.Recv()
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		resp := &pdpb.TsoResponse{
+			Header: &pdpb.ResponseHeader{
+				ClusterId: respTSO.GetHeader().GetClusterId(),
+			},
+			Timestamp: respTSO.GetTimestamp(),
+			Count:     respTSO.GetCount(),
 		}
 		if err := server.Send(resp); err != nil {
 			errCh <- errors.WithStack(err)
