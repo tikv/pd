@@ -73,17 +73,64 @@ func IsServiceAllowed(s *server.Server, group apiutil.APIServiceGroup) bool {
 
 type redirector struct {
 	s *server.Server
+
+	microserviceRedirectRules []*microserviceRedirectRule
+}
+
+type microserviceRedirectRule struct {
+	matchPath         string
+	targetPath        string
+	targetServiceName string
 }
 
 // NewRedirector redirects request to the leader if needs to be handled in the leader.
-func NewRedirector(s *server.Server) negroni.Handler {
-	return &redirector{s: s}
+func NewRedirector(s *server.Server, opts ...RedirectorOption) negroni.Handler {
+	r := &redirector{s: s}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+type RedirectorOption func(*redirector)
+
+func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string) RedirectorOption {
+	return func(s *redirector) {
+		s.microserviceRedirectRules = append(s.microserviceRedirectRules, &microserviceRedirectRule{
+			matchPath,
+			targetPath,
+			targetServiceName,
+		})
+	}
+}
+
+func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, string) {
+	if !h.s.IsAPIServiceMode() {
+		return false, ""
+	}
+	if len(h.microserviceRedirectRules) <= 0 {
+		return false, ""
+	}
+	for _, rule := range h.microserviceRedirectRules {
+		if rule.matchPath == r.URL.Path {
+			b, addr, err := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
+			if !b || err != nil {
+				log.Warn("bypass the matching rule because get service primary addr failed",
+					zap.String("path", r.URL.Path), zap.Bool("bool", b), zap.Error(err))
+				return false, ""
+			}
+			r.URL.Path = rule.targetPath
+			return true, addr
+		}
+	}
+	return false, ""
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	matchedFlag, targetAddr := h.matchMicroServiceRedirectRules(r)
 	allowFollowerHandle := len(r.Header.Get(PDAllowFollowerHandle)) > 0
 	isLeader := h.s.GetMember().IsLeader()
-	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) {
+	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !matchedFlag {
 		next(w, r)
 		return
 	}
@@ -97,12 +144,17 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 
 	r.Header.Set(PDRedirectorHeader, h.s.Name())
 
-	leader := h.s.GetMember().GetLeader()
-	if leader == nil {
-		http.Error(w, "no leader", http.StatusServiceUnavailable)
-		return
+	var clientUrls []string
+	if matchedFlag {
+		clientUrls = append(clientUrls, targetAddr)
+	} else {
+		leader := h.s.GetMember().GetLeader()
+		if leader == nil {
+			http.Error(w, "no leader", http.StatusServiceUnavailable)
+			return
+		}
+		clientUrls = leader.GetClientUrls()
 	}
-	clientUrls := leader.GetClientUrls()
 	urls := make([]url.URL, 0, len(clientUrls))
 	for _, item := range clientUrls {
 		u, err := url.Parse(item)
