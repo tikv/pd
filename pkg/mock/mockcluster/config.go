@@ -17,9 +17,9 @@ package mockcluster
 import (
 	"time"
 
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // SetMaxMergeRegionSize updates the MaxMergeRegionSize configuration.

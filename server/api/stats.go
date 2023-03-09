@@ -17,8 +17,8 @@ package api
 import (
 	"net/http"
 
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 )
 
