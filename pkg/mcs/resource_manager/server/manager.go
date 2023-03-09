@@ -29,6 +29,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
 
@@ -121,7 +122,10 @@ func (m *Manager) Init(ctx context.Context) {
 	m.storage.LoadResourceGroupStates(tokenHandler)
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
-	go m.persistLoop(ctx)
+	go func() {
+		defer logutil.LogPanic()
+		m.persistLoop(ctx)
+	}()
 	log.Info("resource group manager finishes initialization")
 }
 
@@ -249,6 +253,7 @@ func (m *Manager) persistResourceGroupRunningState() {
 
 // Receive the consumption and flush it to the metrics.
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+	defer logutil.LogPanic()
 	ticker := time.NewTicker(metricsCleanupInterval)
 	defer ticker.Stop()
 	for {
