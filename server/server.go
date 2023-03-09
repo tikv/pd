@@ -486,7 +486,6 @@ func (s *Server) IsClosed() bool {
 // Run runs the pd server.
 func (s *Server) Run() error {
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
-		defer logutil.LogPanic()
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
 	})
