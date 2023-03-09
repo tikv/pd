@@ -345,8 +345,8 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
 				controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
 				sum += time.Since(startTime)
-				controller.OnResponse(suite.ctx, cas.resourceGroupName, rreq, rres)
-				controller.OnResponse(suite.ctx, cas.resourceGroupName, wreq, wres)
+				controller.OnResponse(cas.resourceGroupName, rreq, rres)
+				controller.OnResponse(cas.resourceGroupName, wreq, wres)
 				time.Sleep(1000 * time.Microsecond)
 			}
 			re.LessOrEqual(sum, buffDuration+cas.tcs[i].waitDuration)

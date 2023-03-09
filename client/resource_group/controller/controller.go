@@ -41,9 +41,9 @@ const (
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
-	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) error
+	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, error)
 	// OnResponse is used to consume tokens after receiving response
-	OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error
+	OnResponse(resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, error)
 }
 
 // ResourceGroupProvider provides some api to interact with resource manager server。
@@ -402,24 +402,24 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 // OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
-) (err error) {
+) (*rmpb.Consumption, error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	return gc.onRequestWait(ctx, info)
 }
 
 // OnResponse is used to consume tokens after receiving response
-func (c *ResourceGroupsController) OnResponse(_ context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
-	if tmp, ok := c.groupsController.Load(resourceGroupName); ok {
-		gc := tmp.(*groupCostController)
-		gc.onResponse(req, resp)
-	} else {
+func (c *ResourceGroupsController) OnResponse(
+	resourceGroupName string, req RequestInfo, resp ResponseInfo,
+) (*rmpb.Consumption, error) {
+	tmp, ok := c.groupsController.Load(resourceGroupName)
+	if !ok {
 		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
+		return &rmpb.Consumption{}, nil
 	}
-
-	return nil
+	return tmp.(*groupCostController).onResponse(req, resp)
 }
 
 type groupCostController struct {
@@ -872,78 +872,77 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 
 func (gc *groupCostController) onRequestWait(
 	ctx context.Context, info RequestInfo,
-) (err error) {
+) (*rmpb.Consumption, error) {
+	var err error
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
 	now := time.Now()
-	if gc.burstable.Load() {
-		goto ret
-	}
-	// retry
-retryLoop:
-	for i := 0; i < maxRetry; i++ {
-		switch gc.mode {
-		case rmpb.GroupMode_RawMode:
-			res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
-			for typ, counter := range gc.run.resourceTokens {
-				if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
-					res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
+	if !gc.burstable.Load() {
+	retryLoop:
+		for i := 0; i < maxRetry; i++ {
+			switch gc.mode {
+			case rmpb.GroupMode_RawMode:
+				res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
+				for typ, counter := range gc.run.resourceTokens {
+					if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
+						res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
+					}
+				}
+				if err = WaitReservations(ctx, now, res); err == nil {
+					break retryLoop
+				}
+			case rmpb.GroupMode_RUMode:
+				res := make([]*Reservation, 0, len(requestUnitLimitTypeList))
+				for typ, counter := range gc.run.requestUnitTokens {
+					if v := getRUValueFromConsumption(delta, typ); v > 0 {
+						res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
+					}
+				}
+				if err = WaitReservations(ctx, now, res); err == nil {
+					break retryLoop
 				}
 			}
-			if err = WaitReservations(ctx, now, res); err == nil {
-				break retryLoop
-			}
-		case rmpb.GroupMode_RUMode:
-			res := make([]*Reservation, 0, len(requestUnitLimitTypeList))
-			for typ, counter := range gc.run.requestUnitTokens {
-				if v := getRUValueFromConsumption(delta, typ); v > 0 {
-					res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
-				}
-			}
-			if err = WaitReservations(ctx, now, res); err == nil {
-				break retryLoop
-			}
+			time.Sleep(100 * time.Millisecond)
 		}
-		time.Sleep(100 * time.Millisecond)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if err != nil {
-		return err
-	}
-ret:
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
-	return nil
+	return delta, nil
 }
 
-func (gc *groupCostController) onResponse(req RequestInfo, resp ResponseInfo) {
+func (gc *groupCostController) onResponse(
+	req RequestInfo, resp ResponseInfo,
+) (*rmpb.Consumption, error) {
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
-	if gc.burstable.Load() {
-		goto ret
-	}
-	switch gc.mode {
-	case rmpb.GroupMode_RawMode:
-		for typ, counter := range gc.run.resourceTokens {
-			if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
-				counter.limiter.RemoveTokens(time.Now(), v)
+	if !gc.burstable.Load() {
+		switch gc.mode {
+		case rmpb.GroupMode_RawMode:
+			for typ, counter := range gc.run.resourceTokens {
+				if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
+					counter.limiter.RemoveTokens(time.Now(), v)
+				}
+			}
+		case rmpb.GroupMode_RUMode:
+			for typ, counter := range gc.run.requestUnitTokens {
+				if v := getRUValueFromConsumption(delta, typ); v > 0 {
+					counter.limiter.RemoveTokens(time.Now(), v)
+				}
 			}
 		}
-	case rmpb.GroupMode_RUMode:
-		for typ, counter := range gc.run.requestUnitTokens {
-			if v := getRUValueFromConsumption(delta, typ); v > 0 {
-				counter.limiter.RemoveTokens(time.Now(), v)
-			}
-		}
 	}
-ret:
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
+	return delta, nil
 }
 
 // CheckResourceGroupExist checks if groupsController map {rg.name -> resource group controller}
