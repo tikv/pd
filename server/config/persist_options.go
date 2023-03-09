@@ -172,7 +172,7 @@ func (o *PersistOptions) SetPlacementRulesCacheEnabled(enabled bool) {
 	o.SetReplicationConfig(v)
 }
 
-// SetWitnessEnabled set PlacementRuleEnabled
+// SetWitnessEnabled set EanbleWitness
 func (o *PersistOptions) SetWitnessEnabled(enabled bool) {
 	v := o.GetScheduleConfig().Clone()
 	v.EnableWitness = enabled
