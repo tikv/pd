@@ -34,10 +34,10 @@ import (
 )
 
 const (
-	// tsoKeyspaceGroupPrimaryElectionPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/pd/<cluster-id>/microservice/tso/keyspace-group-XXXXX/primary" in which
-	// XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	tsoKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/tso/keyspace-group-"
+	// tsoPrimaryPrefix defines the key prefix for keyspace group primary election.
+	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary" in which
+	// <group-id> is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
+	tsoPrimaryPrefix = "/ms/0/tso"
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
@@ -88,7 +88,7 @@ func newTSOServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *
 		wg:                wg,
 		metacli:           metacli,
 		keyspaceID:        keyspaceID,
-		primaryKey:        path.Join(tsoKeyspaceGroupPrimaryElectionPrefix+fmt.Sprintf("%05d", 0), "primary"),
+		primaryKey:        path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0), "primary"),
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
