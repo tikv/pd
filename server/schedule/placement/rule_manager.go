@@ -82,21 +82,23 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 	if len(m.ruleConfig.rules) == 0 {
 		// migrate from old config.
 		var defaultRules []*Rule
-		if m.conf != nil && m.conf.IsWitnessAllowed() {
+		if m.conf != nil && m.conf.IsWitnessAllowed() && maxReplica >= 3 {
+			// rounded by 3
+			witnessCount := int(float64(maxReplica)/float64(3) + 0.5)
 			defaultRules = append(defaultRules,
 				[]*Rule{
 					{
 						GroupID:        "pd",
 						ID:             "default",
 						Role:           Voter,
-						Count:          maxReplica - 1,
+						Count:          maxReplica - witnessCount,
 						LocationLabels: locationLabels,
 					},
 					{
 						GroupID:        "pd",
 						ID:             "witness",
 						Role:           Voter,
-						Count:          1,
+						Count:          witnessCount,
 						IsWitness:      true,
 						LocationLabels: locationLabels,
 					},
