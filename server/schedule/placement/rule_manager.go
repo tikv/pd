@@ -82,7 +82,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 	if len(m.ruleConfig.rules) == 0 {
 		// migrate from old config.
 		var defaultRules []*Rule
-		if m.conf.IsWitnessAllowed() {
+		if m.conf != nil && m.conf.IsWitnessAllowed() {
 			defaultRules = append(defaultRules,
 				[]*Rule{
 					{

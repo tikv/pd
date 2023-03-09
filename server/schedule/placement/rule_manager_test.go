@@ -71,7 +71,7 @@ func TestDefault2(t *testing.T) {
 	re.Empty(rules[1].StartKey)
 	re.Empty(rules[1].EndKey)
 	re.Equal(Voter, rules[1].Role)
-	re.Equal(true, rules[1].IsWitness)
+	re.True(rules[1].IsWitness)
 	re.Equal([]string{"zone", "rack", "host"}, rules[1].LocationLabels)
 }
 
