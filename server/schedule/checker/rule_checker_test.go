@@ -435,7 +435,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {
 		},
 	})
 	suite.Error(err)
-	suite.Equal(errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define multiple witness by count %d", 2)).Error(), err.Error())
+	suite.Equal(errs.ErrRuleContent.FastGenByArgs(fmt.Sprintf("define too many witness by count %d", 2)).Error(), err.Error())
 }
 
 func (suite *ruleCheckerTestSuite) TestFixRuleWitness6() {
