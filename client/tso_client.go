@@ -185,7 +185,7 @@ func (c *tsoClient) updateTSOAllocatorServingAddrs(allocatorMap map[string]strin
 		}
 		updated = true
 		if _, err := c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
-			log.Warn("[pd[tso]] failed to connect dc tso allocator serving address",
+			log.Warn("[tso] failed to connect dc tso allocator serving address",
 				zap.String("dc-location", dcLocation),
 				zap.String("serving-address", addr),
 				errs.ZapError(err))
