@@ -67,10 +67,10 @@ const (
 	// tsoRootPath for all tso servers.
 	tsoRootPath      = "/tso"
 	tsoClusterIDPath = "/tso/cluster_id"
-	// tsoKeyspaceGroupPrimaryElectionPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/ms/<cluster-id>/tso/keyspace-group-XXXXX/primary" in which
-	// XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	tsoKeyspaceGroupPrimaryElectionPrefix = "/ms/0/tso/keyspace-group-"
+	// tsoPrimaryPrefix defines the key prefix for keyspace group primary election.
+	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary" in which
+	// <group-id> is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
+	tsoPrimaryPrefix = "/ms/0/tso"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -579,8 +579,7 @@ func (s *Server) startServer() (err error) {
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
 	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
-	s.participant.InitInfo(uniqueName, tsoKeyspaceGroupPrimaryElectionPrefix+fmt.Sprintf("%05d", 0),
-		"primary", "keyspace group primary election", s.cfg.ListenAddr)
+	s.participant.InitInfo(uniqueName, path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
 	s.participant.SetMemberDeployPath(s.participant.ID())
 	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
 	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)

@@ -127,8 +127,9 @@ func (suite *tsoServerTestSuite) TestTSOServerRegister() {
 	re.Equal(s.GetConfig().ListenAddr, endpoints[0])
 
 	// test API server discovery
-	addr, err := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
+	exist, addr, err := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.NoError(err)
+	re.True(exist)
 	re.Equal(s.GetConfig().ListenAddr, addr)
 
 	cleanup()
