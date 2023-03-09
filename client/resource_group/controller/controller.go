@@ -143,7 +143,7 @@ func (c *ResourceGroupsController) GetConfig() *Config {
 }
 
 // Source List
-var (
+const (
 	FromPeriodReport = "period_report"
 	FromLowRU        = "low_ru"
 )
