@@ -64,6 +64,9 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 		return
 	}
 	err = manager.store.SaveGCSafePoint(newSafePoint)
+	if err == nil {
+		gcSafePointGauge.WithLabelValues("gc_safepoint").Set(float64(newSafePoint))
+	}
 	return
 }
 
