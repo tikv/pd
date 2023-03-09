@@ -81,12 +81,16 @@ type ServiceDiscovery interface {
 	AddServiceAddrsSwitchedCallback(callbacks ...func())
 }
 
-type tsoServAddrsUpdatedFunc func(map[string]string) error
+type tsoLocalServAddrsUpdatedFunc func(map[string]string) error
+type tsoGlobalServAddrUpdatedFunc func(string) error
 
 type tsoAllocatorEventSource interface {
-	// AddTSOServAddrsUpdatedCallback adds callbacks which will be called
-	// when the global/local tso allocator leader list is updated.
-	AddTSOServAddrsUpdatedCallback(callbacks ...tsoServAddrsUpdatedFunc)
+	// SetTSOLocalServAddrsUpdatedCallback adds a callback which will be called when the local tso
+	// allocator leader list is updated.
+	SetTSOLocalServAddrsUpdatedCallback(callback tsoLocalServAddrsUpdatedFunc)
+	// SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
+	// allocator leader is updated.
+	SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc)
 }
 
 var _ ServiceDiscovery = (*pdServiceDiscovery)(nil)
@@ -111,9 +115,12 @@ type pdServiceDiscovery struct {
 	// membersChangedCbs will be called after there is any membership change in the
 	// leader and followers
 	membersChangedCbs []func()
-	// tsoAllocLeadersUpdatedCbs will be called when the global/local tso allocator
+	// tsoLocalAllocLeadersUpdatedCb will be called when the local tso allocator
 	// leader list is updated. The input is a map {DC Localtion -> Leader Addr}
-	tsoAllocLeadersUpdatedCbs []tsoServAddrsUpdatedFunc
+	tsoLocalAllocLeadersUpdatedCb tsoLocalServAddrsUpdatedFunc
+	// tsoGlobalAllocLeaderUpdatedCb will be called when the global tso allocator
+	// leader is updated.
+	tsoGlobalAllocLeaderUpdatedCb tsoGlobalServAddrUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
@@ -203,6 +210,7 @@ func (c *pdServiceDiscovery) memberLoop() {
 // Close releases all resources
 func (c *pdServiceDiscovery) Close() {
 	c.closeOnce.Do(func() {
+		log.Info("close pd service discovery")
 		c.clientConns.Range(func(key, cc interface{}) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
 				log.Error("[pd] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
@@ -277,10 +285,16 @@ func (c *pdServiceDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()
 	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
-// AddTSOServAddrsUpdatedCallback adds callbacks which will be called
-// when the global/local tso allocator leader list is updated.
-func (c *pdServiceDiscovery) AddTSOServAddrsUpdatedCallback(callbacks ...tsoServAddrsUpdatedFunc) {
-	c.tsoAllocLeadersUpdatedCbs = append(c.tsoAllocLeadersUpdatedCbs, callbacks...)
+// SetTSOLocalServAddrsUpdatedCallback adds a callback which will be called when the local tso
+// allocator leader list is updated.
+func (c *pdServiceDiscovery) SetTSOLocalServAddrsUpdatedCallback(callback tsoLocalServAddrsUpdatedFunc) {
+	c.tsoLocalAllocLeadersUpdatedCb = callback
+}
+
+// SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
+// allocator leader is updated.
+func (c *pdServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc) {
+	c.tsoGlobalAllocLeaderUpdatedCb = callback
 }
 
 // getLeaderAddr returns the leader address.
@@ -435,8 +449,12 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) error {
 	}
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
-	c.switchTSOAllocatorLeader(globalDCLocation, addr)
 	// Run callbacks
+	if c.tsoGlobalAllocLeaderUpdatedCb != nil {
+		if err := c.tsoGlobalAllocLeaderUpdatedCb(addr); err != nil {
+			return err
+		}
+	}
 	for _, cb := range c.leaderSwitchedCbs {
 		cb()
 	}
@@ -470,22 +488,9 @@ func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*
 		allocMap[dcLocation] = member.GetClientUrls()[0]
 	}
 
-	// Run callbacks to refelect any possible change in the local tso allocators.
-	for _, cb := range c.tsoAllocLeadersUpdatedCbs {
-		if err := cb(allocMap); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (c *pdServiceDiscovery) switchTSOAllocatorLeader(dcLocation string, addr string) error {
-	allocMap := map[string]string{dcLocation: addr}
-
-	// Run callbacks to refelect any possible change in the global/local tso allocator.
-	for _, cb := range c.tsoAllocLeadersUpdatedCbs {
-		if err := cb(allocMap); err != nil {
+	// Run the callback to refelect any possible change in the local tso allocators.
+	if c.tsoLocalAllocLeadersUpdatedCb != nil {
+		if err := c.tsoLocalAllocLeadersUpdatedCb(allocMap); err != nil {
 			return err
 		}
 	}

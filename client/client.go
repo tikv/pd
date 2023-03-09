@@ -354,6 +354,20 @@ func (c *client) setup() error {
 	return c.tsoClient.setup()
 }
 
+func (c *client) Close() {
+	c.cancel()
+	c.wg.Wait()
+
+	c.tsoClient.Close()
+	c.svcDiscovery.Close()
+
+	if c.tokenDispatcher != nil {
+		tokenErr := errors.WithStack(errClosing)
+		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
+		c.tokenDispatcher.dispatcherCancel()
+	}
+}
+
 func (c *client) scheduleUpdateTokenConnection() {
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
@@ -450,20 +464,6 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 		return nil, err
 	}
 	return resp.GetMembers(), nil
-}
-
-func (c *client) Close() {
-	c.cancel()
-	c.wg.Wait()
-
-	c.tsoClient.Close()
-	c.svcDiscovery.Close()
-
-	if c.tokenDispatcher != nil {
-		tokenErr := errors.WithStack(errClosing)
-		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
-		c.tokenDispatcher.dispatcherCancel()
-	}
 }
 
 // leaderClient gets the client of current PD leader.

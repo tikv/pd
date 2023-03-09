@@ -101,27 +101,28 @@ func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitG
 		updateTSOConnectionCtxsCh: make(chan struct{}, 1),
 	}
 
-	eventSrc.AddTSOServAddrsUpdatedCallback(c.updateTSOAllocatorServingAddrs)
+	eventSrc.SetTSOLocalServAddrsUpdatedCallback(c.updateTSOLocalServAddrs)
+	eventSrc.SetTSOGlobalServAddrUpdatedCallback(c.updateTSOGlobalServAddr)
 	c.svcDiscovery.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
 
 	return c
 }
 
 func (c *tsoClient) setup() error {
-	// Start the daemons.
-	c.wg.Add(2)
-	go c.tsLoop()
-	go c.tsCancelLoop()
-
 	if err := c.svcDiscovery.Init(); err != nil {
 		return err
 	}
-	c.updateTSODispatcher()
+
+	// Start the daemons.
+	c.wg.Add(2)
+	go c.tsoDispatcherCheckLoop()
+	go c.tsCancelLoop()
 	return nil
 }
 
 // Close closes the TSO client
 func (c *tsoClient) Close() {
+	log.Info("close tso client")
 	c.tsoDispatcher.Range(func(_, dispatcherInterface interface{}) bool {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
@@ -131,6 +132,7 @@ func (c *tsoClient) Close() {
 		}
 		return true
 	})
+	c.svcDiscovery.Close()
 }
 
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
@@ -167,7 +169,7 @@ func (c *tsoClient) AddTSOAllocatorServingAddrSwitchedCallback(callbacks ...func
 	c.tsoAllocServingAddrSwitchedCallback = append(c.tsoAllocServingAddrSwitchedCallback, callbacks...)
 }
 
-func (c *tsoClient) updateTSOAllocatorServingAddrs(allocatorMap map[string]string) error {
+func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) error {
 	if len(allocatorMap) == 0 {
 		return nil
 	}
@@ -205,6 +207,15 @@ func (c *tsoClient) updateTSOAllocatorServingAddrs(allocatorMap map[string]strin
 		c.scheduleCheckTSODispatcher()
 	}
 
+	return nil
+}
+
+func (c *tsoClient) updateTSOGlobalServAddr(addr string) error {
+	c.tsoAllocators.Store(globalDCLocation, addr)
+	log.Info("[tso] switch dc tso allocator serving address",
+		zap.String("dc-location", globalDCLocation),
+		zap.String("new-address", addr))
+	c.scheduleCheckTSODispatcher()
 	return nil
 }
 

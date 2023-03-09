@@ -198,7 +198,7 @@ func (c *tsoClient) scheduleCheckTSDeadline() {
 	}
 }
 
-func (c *tsoClient) tsLoop() {
+func (c *tsoClient) tsoDispatcherCheckLoop() {
 	defer c.wg.Done()
 
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
@@ -212,6 +212,7 @@ func (c *tsoClient) tsLoop() {
 		case <-ticker.C:
 		case <-c.checkTSODispatcherCh:
 		case <-loopCtx.Done():
+			log.Info("exit tso dispacther loop")
 			return
 		}
 	}
@@ -285,8 +286,11 @@ func (c *tsoClient) createTSODispatcher(dcLocation string) {
 		// The only case that will make the dispatcher goroutine exit
 		// is that the loopCtx is done, otherwise there is no circumstance
 		// this goroutine should exit.
+		c.wg.Add(1)
 		go c.handleDispatcher(dispatcherCtx, dcLocation, dispatcher.tsoBatchController)
 		log.Info("[tso] tso dispatcher created", zap.String("dc-location", dcLocation))
+	} else {
+		dispatcherCancel()
 	}
 }
 
@@ -311,6 +315,7 @@ func (c *tsoClient) handleDispatcher(
 			cc.(*tsoConnectionContext).cancel()
 			return true
 		})
+		c.wg.Done()
 	}()
 	// Call updateTSOConnectionCtxs once to init the connectionCtxs first.
 	c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
