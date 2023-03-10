@@ -17,12 +17,12 @@ package tso
 import (
 	"context"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/testutil"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -70,7 +70,7 @@ func startSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	cfg, err := newTSOTestDefaultConfig()
 	re.NoError(err)
 	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = strings.TrimPrefix(tempurl.Alloc(), "http://")
+	cfg.ListenAddr = tempurl.Alloc()
 
 	s, cleanup, err := newTSOTestServer(ctx, re, cfg)
 	re.NoError(err)
@@ -79,4 +79,11 @@ func startSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup, err
+}
+
+func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, opts ...pd.ClientOption) pd.Client {
+	// TODO: we use keyspace 0 as the default keyspace for now, which mightn't need change in the future
+	cli, err := pd.NewTSOClientWithContext(ctx, 0, endpoints, pd.SecurityOption{}, opts...)
+	re.NoError(err)
+	return cli
 }

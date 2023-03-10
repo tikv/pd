@@ -89,8 +89,9 @@ type ResourceGroupsController struct {
 	tokenBucketUpdateChan chan *groupCostController
 
 	run struct {
-		now             time.Time
-		lastRequestTime time.Time
+		now                  time.Time
+		lastRequestTimeLowRU time.Time
+		lastRequestTime      time.Time
 
 		// requestInProgress is true if we are in the process of sending a request.
 		// It gets set to false when we receive the response in the main loop,
@@ -157,6 +158,12 @@ func (c *ResourceGroupsController) GetConfig() *Config {
 	return c.config
 }
 
+// Source List
+const (
+	FromPeriodReport = "period_report"
+	FromLowRU        = "low_ru"
+)
+
 // Start starts ResourceGroupController service.
 func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.initRunState()
@@ -194,13 +201,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.updateAvgRequestResourcePerSec()
 				if c.run.requestNeedsRetry || c.shouldReportConsumption() {
 					c.run.requestNeedsRetry = false
-					c.collectTokenBucketRequests(c.loopCtx, "report", false /* select all */)
+					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, false /* select all */)
 				}
 			case <-c.lowTokenNotifyChan:
 				c.updateRunState()
 				c.updateAvgRequestResourcePerSec()
 				if !c.run.requestInProgress {
-					c.collectTokenBucketRequests(c.loopCtx, "low_ru", true /* only select low tokens resource group */)
+					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, true /* only select low tokens resource group */)
 				}
 			case gc := <-c.tokenBucketUpdateChan:
 				now := gc.run.now
@@ -290,6 +297,7 @@ func (c *ResourceGroupsController) initRunState() {
 	now := time.Now()
 	c.run.now = now
 	c.run.lastRequestTime = now
+	c.run.lastRequestTimeLowRU = now
 }
 
 func (c *ResourceGroupsController) updateRunState() {
@@ -305,7 +313,13 @@ func (c *ResourceGroupsController) shouldReportConsumption() bool {
 	if c.run.requestInProgress {
 		return false
 	}
-	timeSinceLastRequest := c.run.now.Sub(c.run.lastRequestTime)
+	maxDuration := func(a, b time.Duration) time.Duration {
+		if a > b {
+			return a
+		}
+		return b
+	}
+	timeSinceLastRequest := maxDuration(c.run.now.Sub(c.run.lastRequestTime), c.run.now.Sub(c.run.lastRequestTimeLowRU))
 	if timeSinceLastRequest >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
@@ -359,7 +373,12 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 
 func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, requests []*rmpb.TokenBucketRequest, source string) {
 	now := time.Now()
-	c.run.lastRequestTime = now
+	switch source {
+	case FromLowRU:
+		c.run.lastRequestTimeLowRU = now
+	case FromPeriodReport:
+		c.run.lastRequestTime = now
+	}
 	c.run.requestInProgress = true
 	req := &rmpb.TokenBucketsRequest{
 		Requests:              requests,

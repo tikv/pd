@@ -101,7 +101,7 @@ func TestResourceManagerServer(t *testing.T) {
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respString, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"ru\":{\"state\":{\"initialized\":false}}}}", string(respString))
+		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"r_u\":{\"state\":{\"initialized\":false}}}}", string(respString))
 	}
 }
 

@@ -38,7 +38,16 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/checker"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -50,15 +59,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/replication"
-	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/checker"
-	sc "github.com/tikv/pd/server/schedule/config"
-	"github.com/tikv/pd/server/schedule/hbstream"
-	"github.com/tikv/pd/server/schedule/labeler"
-	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedule/schedulers"
-	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/statistics/buckets"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -86,7 +86,7 @@ const (
 	updateStoreStatsInterval     = 9 * time.Millisecond
 	clientTimeout                = 3 * time.Second
 	defaultChangedRegionsLimit   = 10000
-	gcTombstoreInterval          = 30 * 24 * time.Hour
+	gcTombstoneInterval          = 30 * 24 * time.Hour
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
 	// since the once the store is added or removed, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes  = 5
@@ -1668,15 +1668,15 @@ func (c *RaftCluster) checkStores() {
 	for _, store := range stores {
 		// the store has already been tombstone
 		if store.IsRemoved() {
-			if store.DownTime() > gcTombstoreInterval {
+			if store.DownTime() > gcTombstoneInterval {
 				err := c.deleteStore(store)
 				if err != nil {
-					log.Error("auto gc the tombstore store failed",
+					log.Error("auto gc the tombstone store failed",
 						zap.Stringer("store", store.GetMeta()),
 						zap.Duration("down-time", store.DownTime()),
 						errs.ZapError(err))
 				} else {
-					log.Info("auto gc the tombstore store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
+					log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
 				}
 			}
 			continue

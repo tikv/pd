@@ -50,8 +50,12 @@ import (
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
+	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"              // init tso API group
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -70,9 +74,6 @@ import (
 	"github.com/tikv/pd/server/gc"
 	"github.com/tikv/pd/server/keyspace"
 	syncer "github.com/tikv/pd/server/region_syncer"
-	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/hbstream"
-	"github.com/tikv/pd/server/schedule/placement"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
@@ -1662,6 +1663,19 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	_, err := s.client.Delete(ctx, markPath)
 	// if other client already unmarked, return success too
 	return err
+}
+
+// GetServicePrimaryAddr returns the primary address for a given service.
+func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (bool, string, error) {
+	// TODO: replace default group name after we make a decision.
+	key := path.Join("/ms/0", serviceName, fmt.Sprintf("%05d", 0), "primary")
+	leader := &pdpb.Member{}
+	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, key, leader)
+	if err != nil || !ok {
+		return false, "", err
+	}
+	// TODO: need to refactor after we redefine the member
+	return true, leader.GetName(), nil
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id

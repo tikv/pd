@@ -38,7 +38,7 @@ const (
 
 	defaultName             = "TSO"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
-	defaultListenAddr       = "127.0.0.1:3379"
+	defaultListenAddr       = "http://127.0.0.1:3379"
 
 	defaultTSOSaveInterval           = time.Duration(utils.DefaultLeaderLease) * time.Second
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond

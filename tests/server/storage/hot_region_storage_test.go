@@ -23,10 +23,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 )
