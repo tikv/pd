@@ -419,15 +419,6 @@ func (s *Server) ValidateRequest(header *tsopb.RequestHeader) error {
 	return nil
 }
 
-// GetGlobalTS returns global tso.
-func (s *Server) GetGlobalTS() (uint64, error) {
-	ts, err := s.tsoAllocatorManager.GetGlobalTSO()
-	if err != nil {
-		return 0, err
-	}
-	return tsoutil.GenerateTS(ts), nil
-}
-
 // GetExternalTS returns external timestamp from the cache or the persistent storage.
 // TODO: Implement GetExternalTS
 func (s *Server) GetExternalTS() uint64 {

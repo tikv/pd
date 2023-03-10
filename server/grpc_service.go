@@ -128,7 +128,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
-	if s.IsTSOEnabled() {
+	if s.IsAPIServiceMode() {
 		tsoAllocatorManager := s.GetTSOAllocatorManager()
 		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
 	}
@@ -181,10 +181,10 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		streamCtx := stream.Context()
-		if !s.IsTSOEnabled() {
+		if !s.IsAPIServiceMode() {
 			ok, forwardedHost, err := s.GetServicePrimaryAddr(ctx, "tso")
 			if !ok {
-				return errors.WithStack(ErrNotFoundTSOADDR)
+				return ErrNotFoundTSOADDR
 			}
 			if err != nil {
 				return errors.WithStack(err)
@@ -1504,7 +1504,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 			return nil, err
 		}
 	}
-
+	// TODO: need to solve tso
 	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
 	if err != nil {
 		return nil, err
@@ -1619,6 +1619,7 @@ var mockLocalAllocatorLeaderChangeFlag = false
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
 // and write it into all Local TSO Allocators then if it's indeed the biggest one.
 func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
+	// TODO: support local tso forward in api service mode in the future.
 	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
@@ -1785,6 +1786,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
 func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
+	// TODO: support local tso forward in api service mode in the future.
 	var err error
 	if err = s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
@@ -1792,7 +1794,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 	if !s.member.IsLeader() {
 		return nil, ErrNotLeader
 	}
-	am := s.tsoAllocatorManager
+	am := s.GetTSOAllocatorManager()
 	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
 	if !ok {
 		am.ClusterDCLocationChecker()
@@ -2158,12 +2160,17 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 		return nil, err
 	}
 
-	timestamp := request.GetTimestamp()
-	if err := s.SetExternalTS(timestamp); err != nil {
+	// TODO: need to solve tso
+	globalTS, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	if err != nil {
+		return nil, err
+	}
+	externalTS := request.GetTimestamp()
+	if err := s.SetExternalTS(externalTS, tsoutil.GenerateTS(&globalTS)); err != nil {
 		return &pdpb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
 	}
 	log.Debug("set external timestamp",
-		zap.Uint64("timestamp", timestamp))
+		zap.Uint64("timestamp", externalTS))
 	return &pdpb.SetExternalTimestampResponse{
 		Header: s.header(),
 	}, nil

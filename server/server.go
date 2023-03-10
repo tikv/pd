@@ -375,7 +375,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
-	if s.IsTSOEnabled() {
+	if s.IsAPIServiceMode() {
 		s.tsoAllocatorManager = tso.NewAllocatorManager(
 			s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
 			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
@@ -529,7 +529,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsTSOEnabled() {
+	if s.IsAPIServiceMode() {
 		s.serverLoopWg.Add(1)
 		go s.tsoAllocatorLoop()
 	}
@@ -688,12 +688,6 @@ func (s *Server) stopRaftCluster() {
 // IsAPIServiceMode return whether the server is in API service mode.
 func (s *Server) IsAPIServiceMode() bool {
 	return s.mode == APIServiceMode
-}
-
-// IsTSOEnabled returns whether the TSO service is enabled.
-func (s *Server) IsTSOEnabled() bool {
-	// TODO: whether we support downgrade in api service mode, when tso service is not available.
-	return !s.IsAPIServiceMode()
 }
 
 // GetAddr returns the server urls for clients.
@@ -1393,7 +1387,7 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
-			if s.IsTSOEnabled() {
+			if s.IsAPIServiceMode() {
 				// Check the cluster dc-location after the PD leader is elected
 				go s.tsoAllocatorManager.ClusterDCLocationChecker()
 			}
@@ -1450,7 +1444,7 @@ func (s *Server) campaignLeader() {
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
-	if s.IsTSOEnabled() {
+	if s.IsAPIServiceMode() {
 		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 		if err != nil {
 			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
@@ -1502,7 +1496,7 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	if s.IsTSOEnabled() {
+	if s.IsAPIServiceMode() {
 		// Check the cluster dc-location after the PD leader is elected.
 		go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	}
@@ -1697,26 +1691,13 @@ func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
 	return s.idAllocator.SetBase(id)
 }
 
-// GetGlobalTS returns global tso.
-func (s *Server) GetGlobalTS() (uint64, error) {
-	ts, err := s.tsoAllocatorManager.GetGlobalTSO()
-	if err != nil {
-		return 0, err
-	}
-	return tsoutil.GenerateTS(ts), nil
-}
-
 // GetExternalTS returns external timestamp.
 func (s *Server) GetExternalTS() uint64 {
 	return s.GetRaftCluster().GetExternalTS()
 }
 
 // SetExternalTS returns external timestamp.
-func (s *Server) SetExternalTS(externalTS uint64) error {
-	globalTS, err := s.GetGlobalTS()
-	if err != nil {
-		return err
-	}
+func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	if tsoutil.CompareTimestampUint64(externalTS, globalTS) == 1 {
 		desc := "the external timestamp should not be larger than global ts"
 		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("global ts", globalTS))
