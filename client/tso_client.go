@@ -34,7 +34,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-// TSOClient manages TSO.
+// TSOClient manages resource group info and token request.
 type TSOClient interface {
 	// GetTSWithinKeyspace gets a timestamp within the given keyspace from the TSO service
 	GetTSWithinKeyspace(ctx context.Context, keyspaceID uint32) (int64, int64, error)

@@ -160,7 +160,7 @@ func TestForwardTSO(t *testing.T) {
 		re.NoError(err)
 		_, _, err = pdClient.GetTS(ctx)
 		re.Error(err)
-		re.Contains(err.Error(), "transport: Error while dialing dial tcp: missing address")
+		re.Contains(err.Error(), "not found tso address")
 	}
 
 	// add tso server
