@@ -92,8 +92,10 @@ func NewRedirector(s *server.Server, opts ...RedirectorOption) negroni.Handler {
 	return r
 }
 
+// RedirectorOption defines the option of redirector
 type RedirectorOption func(*redirector)
 
+// MicroserviceRedirectRule new a microservice redirect rule option
 func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string) RedirectorOption {
 	return func(s *redirector) {
 		s.microserviceRedirectRules = append(s.microserviceRedirectRules, &microserviceRedirectRule{
@@ -115,9 +117,10 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 		if rule.matchPath == r.URL.Path {
 			b, addr, err := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
 			if !b || err != nil {
-				log.Warn("bypass the matching rule because get service primary addr failed",
+				log.Warn("one rule was matched but failed to get the service primary addr",
 					zap.String("path", r.URL.Path), zap.Bool("bool", b), zap.Error(err))
-				return false, ""
+				// respect the matching and tell the caller the addr is unavailable
+				addr = ""
 			}
 			r.URL.Path = rule.targetPath
 			return true, addr
@@ -146,6 +149,10 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 
 	var clientUrls []string
 	if matchedFlag {
+		if len(targetAddr) == 0 {
+			http.Error(w, apiutil.ErrRedirectFailed, http.StatusInternalServerError)
+			return
+		}
 		clientUrls = append(clientUrls, targetAddr)
 	} else {
 		leader := h.s.GetMember().GetLeader()
