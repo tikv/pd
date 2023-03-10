@@ -82,6 +82,7 @@ func startSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 }
 
 func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, opts ...pd.ClientOption) pd.Client {
+	// TODO: we use keyspace 0 as the default keyspace for now, which mightn't need change in the future
 	cli, err := pd.NewTSOClientWithContext(ctx, 0, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
