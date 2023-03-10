@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	resource_manager "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -38,7 +39,6 @@ import (
 	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-	"github.com/tikv/pd/server/schedule/schedulers"
 	"go.uber.org/zap"
 )
 

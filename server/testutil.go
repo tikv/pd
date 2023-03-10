@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -32,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule/schedulers"
 	"go.etcd.io/etcd/embed"
 )
 
