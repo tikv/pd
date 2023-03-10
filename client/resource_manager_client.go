@@ -366,12 +366,11 @@ func (c *client) tryResourceManagerConnect(ctx context.Context, connection *reso
 		stream rmpb.ResourceManager_AcquireTokenBucketsClient
 	)
 	for i := 0; i < maxRetryTimes; i++ {
-		cctx, cancel := context.WithCancel(ctx)
 		cc, err := c.resourceManagerClient()
 		if err != nil {
-			cancel()
-			return err
+			continue
 		}
+		cctx, cancel := context.WithCancel(ctx)
 		stream, err = cc.AcquireTokenBuckets(cctx)
 		if err == nil && stream != nil {
 			connection.cancel = cancel
