@@ -132,6 +132,9 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	balanceRegionScheduleCounter.Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
+	sendFilter := &filter.StoreStateFilter{ActionScope: s.GetName(), SendSnapshot: true}
+	sendStores := filter.SelectSourceStores(stores, []filter.Filter{sendFilter}, opts, collector, s.filterCounter)
+	snapshotFilter := filter.NewSnapshotSendFilter(sendStores)
 	faultTargets := filter.SelectUnavailableTargetStores(stores, s.filters, opts, collector, s.filterCounter)
 	sourceStores := filter.SelectSourceStores(stores, s.filters, opts, collector, s.filterCounter)
 	opInfluence := s.opController.GetOpInfluence(cluster)
@@ -149,7 +152,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
-	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter}
+	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter}
 	switch cluster.(type) {
 	case *schedule.RangeCluster:
 		// allow empty region to be scheduled in range cluster

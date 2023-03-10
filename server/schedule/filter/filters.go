@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -325,6 +326,10 @@ type StoreStateFilter struct {
 	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
+	// Set true if the scheduler involves any send snapshot operator.
+	SendSnapshot bool
+	// set if operator should not low
+	Level constant.PriorityLevel
 	// Reason is used to distinguish the reason of store state filter
 	Reason filterType
 }
@@ -417,7 +422,7 @@ func (f *StoreStateFilter) isBusy(_ config.Config, store *core.StoreInfo) *plan.
 }
 
 func (f *StoreStateFilter) exceedRemoveLimit(_ config.Config, store *core.StoreInfo) *plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer) {
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer, f.Level) {
 		f.Reason = storeStateExceedRemoveLimit
 		return statusStoreRemoveLimit
 	}
@@ -426,9 +431,18 @@ func (f *StoreStateFilter) exceedRemoveLimit(_ config.Config, store *core.StoreI
 }
 
 func (f *StoreStateFilter) exceedAddLimit(_ config.Config, store *core.StoreInfo) *plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer) {
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer, f.Level) {
 		f.Reason = storeStateExceedAddLimit
 		return statusStoreAddLimit
+	}
+	f.Reason = storeStateOK
+	return statusOK
+}
+
+func (f *StoreStateFilter) exceedSendLimit(_ config.Config, store *core.StoreInfo) *plan.Status {
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.SendSnapshot, f.Level) {
+		f.Reason = storeStateSendSnapshotLimit
+		return statusStoreSendSnapshotLimit
 	}
 	f.Reason = storeStateOK
 	return statusOK
@@ -486,6 +500,7 @@ const (
 	witnessTarget
 	scatterRegionTarget
 	fastFailoverTarget
+	sendSnapshot
 )
 
 func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.Config, store *core.StoreInfo) *plan.Status {
@@ -509,6 +524,8 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.Config, store 
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	case fastFailoverTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
+	case sendSnapshot:
+		funcs = []conditionFunc{f.isBusy, f.exceedSendLimit, f.tooManySnapshots}
 	}
 	for _, cf := range funcs {
 		if status := cf(conf, store); !status.IsOK() {
@@ -531,6 +548,13 @@ func (f *StoreStateFilter) Source(conf config.Config, store *core.StoreInfo) (st
 			return
 		}
 	}
+
+	if f.SendSnapshot {
+		if status = f.anyConditionMatch(sendSnapshot, conf, store); !status.IsOK() {
+			return
+		}
+	}
+
 	return statusOK
 }
 

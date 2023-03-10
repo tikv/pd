@@ -23,6 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -148,6 +150,25 @@ func TestRuleFitFilter(t *testing.T) {
 	re.False(leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(6)).IsOK())
 }
 
+func TestSendStateFilter(t *testing.T) {
+	re := require.New(t)
+	opt := mockconfig.NewTestOptions()
+	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SetStoreLimit(storelimit.NewSlidingWindows(1000)))
+	storeStateFilter := &StoreStateFilter{SendSnapshot: true}
+	re.True(storeStateFilter.Source(opt, store).IsOK())
+	sendStores := SelectSourceStores([]*core.StoreInfo{store}, []Filter{storeStateFilter}, opt, nil, nil)
+	re.NotNil(sendStores)
+	re.True(store.GetStoreLimit().Take(1000, storelimit.SendSnapshot, constant.Low))
+	sendStores = SelectSourceStores([]*core.StoreInfo{store}, []Filter{storeStateFilter}, opt, nil, nil)
+	re.Nil(sendStores)
+	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
+
+	snapshotFilter := NewSnapshotSendFilter([]*core.StoreInfo{})
+	re.Nil(SelectOneRegion([]*core.RegionInfo{region}, nil, snapshotFilter))
+	snapshotFilter = NewSnapshotSendFilter([]*core.StoreInfo{store})
+	re.NotNil(SelectOneRegion([]*core.RegionInfo{region}, nil, snapshotFilter))
+}
+
 func TestStoreStateFilter(t *testing.T) {
 	re := require.New(t)
 	filters := []Filter{
@@ -155,6 +176,7 @@ func TestStoreStateFilter(t *testing.T) {
 		&StoreStateFilter{MoveRegion: true},
 		&StoreStateFilter{TransferLeader: true, MoveRegion: true},
 		&StoreStateFilter{MoveRegion: true, AllowTemporaryStates: true},
+		&StoreStateFilter{SendSnapshot: true, AllowTemporaryStates: true},
 	}
 	opt := mockconfig.NewTestOptions()
 	store := core.NewStoreInfoWithLabel(1, map[string]string{})
