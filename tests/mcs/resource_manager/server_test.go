@@ -25,12 +25,12 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"google.golang.org/grpc"
 )
 
 func TestResourceManagerServer(t *testing.T) {
@@ -48,20 +48,23 @@ func TestResourceManagerServer(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	cfg := rm.NewConfig()
+	cfg, err := rm.NewTestDefaultConfig()
+	re.NoError(err)
 	cfg.BackendEndpoints = leader.GetAddr()
 	cfg.ListenAddr = tempurl.Alloc()
-	svr := rm.NewServer(ctx, cfg)
-	go svr.Run()
+
+	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
+	re.NoError(err)
+	defer cleanup()
 	testutil.Eventually(re, func() bool {
-		return svr.IsServing()
+		return s.IsServing()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-	defer svr.Close()
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(cfg.ListenAddr, "http://"), grpc.WithInsecure())
+	cc, err := grpcutil.GetClientConn(ctx, cfg.ListenAddr, nil)
 	re.NoError(err)
 	defer cc.Close()
+
 	c := rmpb.NewResourceManagerClient(cc)
 	_, err = c.GetResourceGroup(context.Background(), &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: "pingcap",
@@ -98,7 +101,7 @@ func TestResourceManagerServer(t *testing.T) {
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respString, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"ru\":{\"state\":{\"initialized\":false}}}}", string(respString))
+		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"r_u\":{\"state\":{\"initialized\":false}}}}", string(respString))
 	}
 }
 
@@ -117,14 +120,16 @@ func TestResourceManagerRegister(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	cfg := rm.NewConfig()
+	cfg, err := rm.NewTestDefaultConfig()
+	re.NoError(err)
 	cfg.BackendEndpoints = leader.GetAddr()
 	cfg.ListenAddr = tempurl.Alloc()
 
-	svr := rm.NewServer(ctx, cfg)
-	go svr.Run()
+	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
+	re.NoError(err)
+	defer cleanup()
 	testutil.Eventually(re, func() bool {
-		return svr.IsServing()
+		return s.IsServing()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	client := leader.GetEtcdClient()
@@ -132,7 +137,7 @@ func TestResourceManagerRegister(t *testing.T) {
 	re.NoError(err)
 	re.Equal(cfg.ListenAddr, endpoints[0])
 
-	svr.Close()
+	s.Close()
 	endpoints, err = discovery.Discover(client, "resource_manager")
 	re.NoError(err)
 	re.Empty(endpoints)

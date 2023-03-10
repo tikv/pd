@@ -17,14 +17,21 @@ package tso
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
+	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )
@@ -90,9 +97,26 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(suite.ctx, s.GetConfig().ListenAddr, grpc.WithInsecure())
+	cc, err := grpc.DialContext(suite.ctx, s.GetListenURL().Host, grpc.WithInsecure())
 	re.NoError(err)
 	cc.Close()
+	url := s.GetConfig().ListenAddr + tsoapi.APIPathPrefix
+	{
+		resetJSON := `{"tso":"121312", "force-use-larger":true}`
+		re.NoError(err)
+		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJSON))
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
+	}
+	{
+		resetJSON := `{}`
+		re.NoError(err)
+		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJSON))
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusBadRequest, resp.StatusCode)
+	}
 }
 
 func (suite *tsoServerTestSuite) TestTSOServerRegister() {
@@ -100,13 +124,53 @@ func (suite *tsoServerTestSuite) TestTSOServerRegister() {
 	s, cleanup, err := startSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
 	re.NoError(err)
 
+	serviceName := "tso"
 	client := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(client, "tso")
+	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)
 	re.Equal(s.GetConfig().ListenAddr, endpoints[0])
 
+	// test API server discovery
+	exist, addr, err := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
+	re.NoError(err)
+	re.True(exist)
+	re.Equal(s.GetConfig().ListenAddr, addr)
+
 	cleanup()
-	endpoints, err = discovery.Discover(client, "tso")
+	endpoints, err = discovery.Discover(client, serviceName)
 	re.NoError(err)
 	re.Empty(endpoints)
+}
+
+func (suite *tsoServerTestSuite) TestTSOPath() {
+	re := suite.Require()
+
+	client := suite.pdLeader.GetEtcdClient()
+	re.Equal(1, getEtcdTimestampKeyNum(re, client))
+
+	_, cleanup, err := startSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
+	re.NoError(err)
+	defer cleanup()
+
+	cli := setupCli(re, suite.ctx, []string{suite.backendEndpoints})
+	physical, logical, err := cli.GetTS(suite.ctx)
+	re.NoError(err)
+	ts := tsoutil.ComposeTS(physical, logical)
+	re.NotEmpty(ts)
+	// After we request the tso server, etcd still has only one key related to the timestamp.
+	re.Equal(1, getEtcdTimestampKeyNum(re, client))
+}
+
+func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int {
+	resp, err := etcdutil.EtcdKVGet(client, "/", clientv3.WithPrefix())
+	re.NoError(err)
+	var count int
+	for _, kv := range resp.Kvs {
+		key := strings.TrimSpace(string(kv.Key))
+		if !strings.HasSuffix(key, "timestamp") {
+			continue
+		}
+		count++
+	}
+	return count
 }

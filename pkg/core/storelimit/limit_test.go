@@ -18,23 +18,24 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core/constant"
 )
 
 func TestStoreLimit(t *testing.T) {
 	re := require.New(t)
 	rate := int64(15)
 	limit := NewStoreRateLimit(float64(rate))
-	re.True(limit.Available(influence*rate, AddPeer, Low))
-	re.True(limit.Take(influence*rate, AddPeer, Low))
-	re.False(limit.Take(influence, AddPeer, Low))
+	re.True(limit.Available(influence*rate, AddPeer, constant.Low))
+	re.True(limit.Take(influence*rate, AddPeer, constant.Low))
+	re.False(limit.Take(influence, AddPeer, constant.Low))
 
 	limit.Reset(float64(rate), AddPeer)
-	re.False(limit.Available(influence, AddPeer, Low))
-	re.False(limit.Take(influence, AddPeer, Low))
+	re.False(limit.Available(influence, AddPeer, constant.Low))
+	re.False(limit.Take(influence, AddPeer, constant.Low))
 
 	limit.Reset(0, AddPeer)
-	re.True(limit.Available(influence, AddPeer, Low))
-	re.True(limit.Take(influence, AddPeer, Low))
+	re.True(limit.Available(influence, AddPeer, constant.Low))
+	re.True(limit.Take(influence, AddPeer, constant.Low))
 }
 
 func TestSlidingWindow(t *testing.T) {
@@ -42,7 +43,7 @@ func TestSlidingWindow(t *testing.T) {
 	re := require.New(t)
 	capacity := int64(10)
 	s := NewSlidingWindows(float64(capacity))
-	re.Len(s.windows, int(priorityLevelLen))
+	re.Len(s.windows, int(constant.PriorityLevelLen))
 	// capacity:[10, 10, 10, 10]
 	for i, v := range s.windows {
 		cap := capacity >> i
@@ -51,30 +52,37 @@ func TestSlidingWindow(t *testing.T) {
 		}
 		re.EqualValues(v.capacity, cap)
 	}
-	// case 0: test low level
-	re.True(s.Available(capacity, AddPeer, Low))
-	re.True(s.Take(capacity, AddPeer, Low))
-	re.False(s.Available(capacity, AddPeer, Low))
+	// case 0: test core.Low level
+	re.True(s.Available(capacity, SendSnapshot, constant.Low))
+	re.True(s.Take(capacity, SendSnapshot, constant.Low))
+	re.False(s.Available(capacity, SendSnapshot, constant.Low))
 	s.Ack(capacity)
-	re.True(s.Available(capacity, AddPeer, Low))
+	re.True(s.Available(capacity, SendSnapshot, constant.Low))
 
-	// case 1: it will occupy the normal window size not the high window.
-	re.True(s.Take(capacity, AddPeer, High))
+	// case 1: it will occupy the normal window size not the core.High window.
+	re.True(s.Take(capacity, SendSnapshot, constant.High))
 	re.EqualValues(capacity, s.GetUsed())
-	re.EqualValues(0, s.windows[High].getUsed())
+	re.EqualValues(0, s.windows[constant.High].getUsed())
 	s.Ack(capacity)
 	re.EqualValues(s.GetUsed(), 0)
 
-	// case 2: it will occupy the high window size if the normal window is full.
-	capacity = 1000
-	s.Reset(float64(capacity), AddPeer)
-	re.True(s.Take(capacity, AddPeer, Low))
-	re.False(s.Take(capacity, AddPeer, Low))
-	re.True(s.Take(capacity-100, AddPeer, Medium))
-	re.False(s.Take(capacity-100, AddPeer, Medium))
-	re.EqualValues(s.GetUsed(), capacity+capacity-100)
-	s.Ack(capacity)
-	re.Equal(s.GetUsed(), capacity-100)
+	// case 2: it will occupy the core.High window size if the normal window is full.
+	capacity = 2000
+	s.Reset(float64(capacity), SendSnapshot)
+	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Low))
+	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Low))
+	re.False(s.Take(capacity, SendSnapshot, constant.Low))
+	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
+	re.False(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
+	re.EqualValues(s.GetUsed(), capacity+capacity+capacity-minSnapSize*3)
+	s.Ack(capacity - minSnapSize)
+	s.Ack(capacity - minSnapSize)
+	re.Equal(s.GetUsed(), capacity-minSnapSize)
+
+	// case 3: skip the type is not the SendSnapshot
+	for i := 0; i < 10; i++ {
+		re.True(s.Take(capacity, AddPeer, constant.Low))
+	}
 }
 
 func TestWindow(t *testing.T) {

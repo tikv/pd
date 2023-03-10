@@ -15,8 +15,8 @@
 package mockconfig
 
 import (
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/server/config"
-	sc "github.com/tikv/pd/server/schedule/config"
 )
 
 // NewTestOptions creates default options for testing.

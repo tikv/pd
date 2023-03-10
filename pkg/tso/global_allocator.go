@@ -81,6 +81,8 @@ func NewGlobalTSOAllocator(
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
 			rootPath:               am.rootPath,
+			ltsPath:                "",
+			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
@@ -261,7 +263,7 @@ func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBit
 	if maxTSO.GetPhysical() == 0 {
 		return false
 	}
-	// Check if the logical part will reach the overflow condition after being differenitated.
+	// Check if the logical part will reach the overflow condition after being differentiated.
 	if differentiatedLogical := gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits); differentiatedLogical >= maxLogical {
 		log.Error("estimated logical part outside of max logical interval, please check ntp time",
 			zap.Reflect("max-tso", maxTSO), errs.ZapError(errs.ErrLogicOverflow))
