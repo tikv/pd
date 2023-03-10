@@ -126,6 +126,7 @@ func (r *MedianFilter) updateStatus(len uint64) {
 	}
 }
 
+// Add adds a data point.
 func (r *MedianFilter) Add(n float64) {
 	len := r.count + 1
 	if r.count >= r.size {
