@@ -2042,18 +2042,13 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 
 // ReportMinResolvedTS implements gRPC PDServer.
 func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.ReportMinResolvedTsRequest) (*pdpb.ReportMinResolvedTsResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ReportMinResolvedTS(ctx, request)
 	}
-
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
 		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.ReportMinResolvedTsResponse), nil
 	}
 
 	rc := s.GetRaftCluster()
@@ -2076,18 +2071,13 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 
 // SetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).SetExternalTimestamp(ctx, request)
 	}
-
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
 		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.SetExternalTimestampResponse), nil
 	}
 
 	timestamp := request.GetTimestamp()
@@ -2103,18 +2093,13 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 
 // GetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetExternalTimestamp(ctx, request)
 	}
-
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
 		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.GetExternalTimestampResponse), nil
 	}
 
 	timestamp := s.GetExternalTS()
