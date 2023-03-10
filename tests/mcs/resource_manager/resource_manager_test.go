@@ -104,12 +104,12 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 }
 
 func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAddr string) {
-	innerCli, ok := cli.(interface{ GetBaseClient() pd.BaseClient })
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	suite.True(ok)
 	suite.NotNil(innerCli)
 	testutil.Eventually(suite.Require(), func() bool {
-		innerCli.GetBaseClient().ScheduleCheckMemberChanged()
-		return innerCli.GetBaseClient().GetServingAddr() == leaderAddr
+		innerCli.GetServiceDiscovery().ScheduleCheckMemberChanged()
+		return innerCli.GetServiceDiscovery().GetServingAddr() == leaderAddr
 	})
 }
 
@@ -443,7 +443,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		modifySettings func(*rmpb.ResourceGroup)
 	}{
 		{"test1", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test1","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":10000},"state":{"initialized":false}}}}`,
+			`{"name":"test1","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":10000},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -456,7 +456,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":20000},"state":{"initialized":false}}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":20000},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -468,7 +468,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{

@@ -36,7 +36,7 @@ const (
 	defaultLoanCoefficient = 2
 	maxAssignTokens        = math.MaxFloat64 / 1024 // assume max client connect is 1024
 	// slotStalePeriod indicate how long that a slot is considered stale if it is not acquire token request.
-	defaultSlotStalePeriod = 1 * time.Minute
+	defaultSlotStalePeriod = 10 * time.Minute
 )
 
 // GroupTokenBucket is a token bucket for a resource group.
@@ -67,11 +67,13 @@ func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
 type TokenSlot struct {
 	// settings is the token limit settings for the slot.
 	settings *rmpb.TokenLimitSettings
-	// assignTokens is the number of tokens in the slot.
-	assignTokens     float64
-	lastAssignTokens float64
+	// requireTokensSum is the number of tokens required.
 	requireTokensSum float64
-	lastUpdate       *time.Time
+	// tokenCapacity is the number of tokens in the slot.
+	tokenCapacity     float64
+	lastTokenCapacity float64
+
+	lastUpdate *time.Time
 }
 
 // GroupTokenBucketState is the running state of TokenBucket.
@@ -115,23 +117,21 @@ func (gts *GroupTokenBucketState) cleanupAssignTokenSum() {
 	}
 }
 
-func (gts *GroupTokenBucketState) balanceSlotTokens(
+func (gts *GroupTokenBucketState) balanceSlotTokensLocked(
 	clientUniqueID uint64,
 	settings *rmpb.TokenLimitSettings,
 	consumptionToken float64) {
 	now := time.Now()
-	if slot, ok := gts.tokenSlots[clientUniqueID]; !ok {
+	slot, exist := gts.tokenSlots[clientUniqueID]
+	if !exist {
 		gts.cleanupAssignTokenSum()
-		gts.tokenSlots[clientUniqueID] = &TokenSlot{lastUpdate: &now}
-	} else {
-		slot.lastUpdate = &now
-		slot.requireTokensSum += consumptionToken
-		gts.clientConsumptionTokensSum += consumptionToken
-
-		if gts.clientConsumptionTokensSum >= maxAssignTokens {
-			gts.cleanupAssignTokenSum()
-		}
+		gts.tokenSlots[clientUniqueID] = &TokenSlot{}
+	} else if gts.clientConsumptionTokensSum >= maxAssignTokens {
+		gts.cleanupAssignTokenSum()
 	}
+	slot.lastUpdate = &now
+	slot.requireTokensSum += consumptionToken
+	gts.clientConsumptionTokensSum += consumptionToken
 
 	evenRatio := 1 / float64(len(gts.tokenSlots))
 	if settings.GetBurstLimit() < 0 {
@@ -151,7 +151,7 @@ retryLoop:
 			delete(gts.tokenSlots, clientID)
 			evenRatio = 1 / float64(len(gts.tokenSlots))
 			gts.cleanupAssignTokenSum()
-			continue retryLoop
+			goto retryLoop
 		}
 
 		var ratio float64
@@ -166,8 +166,8 @@ retryLoop:
 			assignToken = gts.Tokens * ratio
 		)
 
-		slot.assignTokens = assignToken
-		slot.lastAssignTokens = assignToken
+		slot.tokenCapacity = assignToken
+		slot.lastTokenCapacity = assignToken
 		slot.settings = &rmpb.TokenLimitSettings{
 			FillRate:   uint64(fillRate),
 			BurstLimit: int64(burstLimit),
@@ -245,7 +245,7 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 		gtb.Tokens = burst
 	}
 	// Balance each slots.
-	gtb.balanceSlotTokens(clientUniqueID, gtb.Settings, consumptionToken)
+	gtb.balanceSlotTokensLocked(clientUniqueID, gtb.Settings, consumptionToken)
 }
 
 // request requests tokens from the group token bucket.
@@ -263,7 +263,7 @@ func (gtb *GroupTokenBucket) request(now time.Time,
 	res, trickleDuration := slot.assignSlotTokens(neededTokens, targetPeriodMs)
 
 	gtb.mu.Lock()
-	gtb.Tokens -= slot.lastAssignTokens - slot.assignTokens
+	gtb.Tokens -= slot.lastTokenCapacity - slot.tokenCapacity
 	gtb.mu.Unlock()
 
 	return res, trickleDuration
@@ -283,8 +283,8 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 		return &res, 0
 	}
 	// If the current tokens can directly meet the requirement, returns the need token
-	if ts.assignTokens >= neededTokens {
-		ts.assignTokens -= neededTokens
+	if ts.tokenCapacity >= neededTokens {
+		ts.tokenCapacity -= neededTokens
 		// granted the total request tokens
 		res.Tokens = neededTokens
 		return &res, 0
@@ -293,10 +293,10 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 	// Firstly allocate the remaining tokens
 	var grantedTokens float64
 	hasRemaining := false
-	if ts.assignTokens > 0 {
-		grantedTokens = ts.assignTokens
+	if ts.tokenCapacity > 0 {
+		grantedTokens = ts.tokenCapacity
 		neededTokens -= grantedTokens
-		ts.assignTokens = 0
+		ts.tokenCapacity = 0
 		hasRemaining = true
 	}
 
@@ -333,14 +333,14 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 		p[i] = float64(loanCoefficient-i)*float64(fillRate)*targetPeriodTimeSec + p[i-1]
 	}
 	for i := 0; i < loanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTimeSec; i++ {
-		loan := -ts.assignTokens
+		loan := -ts.tokenCapacity
 		if loan > p[i] {
 			continue
 		}
 		roundReserveTokens := p[i] - loan
 		fillRate := float64(loanCoefficient-i) * float64(fillRate)
 		if roundReserveTokens > neededTokens {
-			ts.assignTokens -= neededTokens
+			ts.tokenCapacity -= neededTokens
 			grantedTokens += neededTokens
 			trickleTime += grantedTokens / fillRate
 			neededTokens = 0
@@ -349,19 +349,19 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 			if roundReserveTime+trickleTime >= targetPeriodTimeSec {
 				roundTokens := (targetPeriodTimeSec - trickleTime) * fillRate
 				neededTokens -= roundTokens
-				ts.assignTokens -= roundTokens
+				ts.tokenCapacity -= roundTokens
 				grantedTokens += roundTokens
 				trickleTime = targetPeriodTimeSec
 			} else {
 				grantedTokens += roundReserveTokens
 				neededTokens -= roundReserveTokens
-				ts.assignTokens -= roundReserveTokens
+				ts.tokenCapacity -= roundReserveTokens
 				trickleTime += roundReserveTime
 			}
 		}
 	}
 	if grantedTokens < defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec {
-		ts.assignTokens -= defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec - grantedTokens
+		ts.tokenCapacity -= defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec - grantedTokens
 		grantedTokens = defaultReserveRatio * float64(fillRate) * targetPeriodTimeSec
 	}
 	res.Tokens = grantedTokens

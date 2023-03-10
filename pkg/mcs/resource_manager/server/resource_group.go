@@ -36,7 +36,7 @@ type ResourceGroup struct {
 
 // RequestUnitSettings is the definition of the RU settings.
 type RequestUnitSettings struct {
-	RU *GroupTokenBucket `json:"ru,omitempty"`
+	RU *GroupTokenBucket `json:"r_u,omitempty"`
 }
 
 // NewRequestUnitSettings creates a new RequestUnitSettings with the given token bucket.

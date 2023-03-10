@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 // PersistOptions wraps all configurations that need to persist to storage and
@@ -169,6 +170,13 @@ func (o *PersistOptions) SetPlacementRulesCacheEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()
 	v.EnablePlacementRulesCache = enabled
 	o.SetReplicationConfig(v)
+}
+
+// SetWitnessEnabled set EanbleWitness
+func (o *PersistOptions) SetWitnessEnabled(enabled bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableWitness = enabled
+	o.SetScheduleConfig(v)
 }
 
 // GetStrictlyMatchLabel returns whether check label strict.
@@ -433,7 +441,7 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 	}
 	v, ok1, err := o.getTTLFloat("default-add-peer")
 	if err != nil {
-		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage")
+		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
 	}
 	canSetAddPeer := ok1 && err == nil
 	if canSetAddPeer {
@@ -442,7 +450,7 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 
 	v, ok2, err := o.getTTLFloat("default-remove-peer")
 	if err != nil {
-		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage")
+		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
 	}
 	canSetRemovePeer := ok2 && err == nil
 	if canSetRemovePeer {
@@ -472,6 +480,9 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 		return limit.AddPeer
 	case storelimit.RemovePeer:
 		return limit.RemovePeer
+	// todo: impl it in store limit v2.
+	case storelimit.SendSnapshot:
+		return 0.0
 	default:
 		panic("no such limit type")
 	}
@@ -799,7 +810,7 @@ func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
 		if err == nil {
 			return v
 		}
-		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+		log.Warn("failed to parse "+key+" from PersistOptions's ttl storage", zap.Error(err))
 	}
 	return defaultValue
 }
@@ -819,7 +830,7 @@ func (o *PersistOptions) getTTLBoolOr(key string, defaultValue bool) bool {
 		if err == nil {
 			return v
 		}
-		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+		log.Warn("failed to parse "+key+" from PersistOptions's ttl storage", zap.Error(err))
 	}
 	return defaultValue
 }
@@ -838,7 +849,7 @@ func (o *PersistOptions) getTTLFloatOr(key string, defaultValue float64) float64
 		if err == nil {
 			return v
 		}
-		log.Warn("failed to parse " + key + " from PersistOptions's ttl storage")
+		log.Warn("failed to parse "+key+" from PersistOptions's ttl storage", zap.Error(err))
 	}
 	return defaultValue
 }
