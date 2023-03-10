@@ -35,7 +35,7 @@ const (
 	defaultReserveRatio    = 0.05
 	defaultLoanCoefficient = 2
 	maxAssignTokens        = math.MaxFloat64 / 1024 // assume max client connect is 1024
-	// slotStalePeriod indicate how long that a slot is considered stale if it is not acquire token request.
+	// defaultSlotStalePeriod indicate how long that a slot is considered stale if it is not acquire token request.
 	defaultSlotStalePeriod = 10 * time.Minute
 )
 
@@ -125,7 +125,8 @@ func (gts *GroupTokenBucketState) balanceSlotTokensLocked(
 	slot, exist := gts.tokenSlots[clientUniqueID]
 	if !exist {
 		gts.cleanupAssignTokenSum()
-		gts.tokenSlots[clientUniqueID] = &TokenSlot{}
+		slot = &TokenSlot{}
+		gts.tokenSlots[clientUniqueID] = slot
 	} else if gts.clientConsumptionTokensSum >= maxAssignTokens {
 		gts.cleanupAssignTokenSum()
 	}
