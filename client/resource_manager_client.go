@@ -67,11 +67,11 @@ func (c *client) gRPCErrorHandler(err error) {
 
 // ListResourceGroups loads and returns all metadata of resource groups.
 func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error) {
-	req := &rmpb.ListResourceGroupsRequest{}
 	cc, err := c.resourceManagerClient()
 	if err != nil {
 		return nil, err
 	}
+	req := &rmpb.ListResourceGroupsRequest{}
 	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
 		c.gRPCErrorHandler(err)
@@ -85,12 +85,12 @@ func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 }
 
 func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error) {
-	req := &rmpb.GetResourceGroupRequest{
-		ResourceGroupName: resourceGroupName,
-	}
 	cc, err := c.resourceManagerClient()
 	if err != nil {
 		return nil, err
+	}
+	req := &rmpb.GetResourceGroupRequest{
+		ResourceGroupName: resourceGroupName,
 	}
 	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
@@ -113,14 +113,14 @@ func (c *client) ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.Resour
 }
 
 func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup, typ actionType) (string, error) {
-	req := &rmpb.PutResourceGroupRequest{
-		Group: metaGroup,
-	}
-	var resp *rmpb.PutResourceGroupResponse
 	cc, err := c.resourceManagerClient()
 	if err != nil {
 		return "", err
 	}
+	req := &rmpb.PutResourceGroupRequest{
+		Group: metaGroup,
+	}
+	var resp *rmpb.PutResourceGroupResponse
 	switch typ {
 	case add:
 		resp, err = cc.AddResourceGroup(ctx, req)
@@ -139,12 +139,12 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 }
 
 func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error) {
-	req := &rmpb.DeleteResourceGroupRequest{
-		ResourceGroupName: resourceGroupName,
-	}
 	cc, err := c.resourceManagerClient()
 	if err != nil {
 		return "", err
+	}
+	req := &rmpb.DeleteResourceGroupRequest{
+		ResourceGroupName: resourceGroupName,
 	}
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {
