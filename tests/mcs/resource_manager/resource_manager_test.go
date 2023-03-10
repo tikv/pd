@@ -753,7 +753,7 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig)
 	controller.Start(suite.ctx)
 
-	testCases := struct {
+	testConfig := struct {
 		tcs   tokenConsumptionPerSecond
 		times int
 	}{
@@ -763,9 +763,9 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 		times: 100,
 	}
 	// Mock client binds one resource group and then closed
-	rreq := testCases.tcs.makeReadRequest()
-	rres := testCases.tcs.makeReadResponse()
-	for j := 0; j < testCases.times; j++ {
+	rreq := testConfig.tcs.makeReadRequest()
+	rres := testConfig.tcs.makeReadResponse()
+	for j := 0; j < testConfig.times; j++ {
 		controller.OnRequestWait(suite.ctx, suite.initGroups[0].Name, rreq)
 		controller.OnResponse(suite.ctx, suite.initGroups[0].Name, rreq, rres)
 		time.Sleep(100 * time.Microsecond)

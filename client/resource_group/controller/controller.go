@@ -277,15 +277,15 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 		gc := value.(*groupCostController)
 		// Check for stale resource groups, which will be deleted when consumption is continuously unchanged.
 		gc.mu.Lock()
-		if equalRU(gc.mu.consumption, gc.run.consumption) {
-			gc.mu.Unlock()
+		latestConsumption := *gc.mu.consumption
+		gc.mu.Unlock()
+		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.tombstone {
 				c.groupsController.Delete(resourceGroupName)
 				return true
 			}
 			gc.tombstone = true
 		} else {
-			gc.mu.Unlock()
 			gc.tombstone = false
 		}
 		return true

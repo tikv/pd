@@ -214,7 +214,7 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
 }
 
-func equalRU(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) bool {
+func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
 	return custom1.RRU == custom2.RRU && custom1.WRU == custom2.WRU
 }
 
