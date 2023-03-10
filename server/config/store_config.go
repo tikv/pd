@@ -212,7 +212,7 @@ func NewTestStoreConfigManager(whiteList []string) *StoreConfigManager {
 }
 
 // ObserveConfig is used to observe the config change.
-func (m *StoreConfigManager) ObserveConfig(address string) (switchRaftV2Config bool, err error) {
+func (m *StoreConfigManager) ObserveConfig(address string) (useRaftV2Config bool, err error) {
 	cfg, err := m.source.GetConfig(address)
 	if err != nil {
 		return false, err
@@ -220,19 +220,19 @@ func (m *StoreConfigManager) ObserveConfig(address string) (switchRaftV2Config b
 	old := m.GetStoreConfig()
 	if cfg != nil && !old.Equal(cfg) {
 		log.Info("sync the store config successful", zap.String("store-address", address), zap.String("store-config", cfg.String()))
-		switchRaftV2Config = m.update(cfg)
+		useRaftV2Config = m.update(cfg)
 	}
-	return switchRaftV2Config, nil
+	return useRaftV2Config, nil
 }
 
 // update returns true if the new config's raft engine is v2 and the old is v1
-func (m *StoreConfigManager) update(cfg *StoreConfig) (switchRaftV2Config bool) {
+func (m *StoreConfigManager) update(cfg *StoreConfig) (useRaftV2Config bool) {
 	cfg.RegionMaxSizeMB = typeutil.ParseMBFromText(cfg.RegionMaxSize, defaultRegionMaxSize)
 	cfg.RegionSplitSizeMB = typeutil.ParseMBFromText(cfg.RegionSplitSize, defaultRegionSplitSize)
 	cfg.RegionBucketSizeMB = typeutil.ParseMBFromText(cfg.RegionBucketSize, defaultBucketSize)
 
 	config := m.config.Load().(*StoreConfig)
-	switchRaftV2Config = config.Storage.Engine != raftStoreV2 && cfg.Storage.Engine == raftStoreV2
+	useRaftV2Config = config.Storage.Engine != raftStoreV2 && cfg.Storage.Engine == raftStoreV2
 	m.config.Store(cfg)
 	return
 }
