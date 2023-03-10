@@ -557,12 +557,9 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 }
 
 func (s *Server) startServer() (err error) {
-	// TODO: uncomment the following code to generate a unique cluster id from the given ClusterIDPath
-	// after we add rpc for the client to retrieve the cluster id from the server then use it in every
-	// request for verification.
-	// if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
-	// 	return err
-	// }
+	if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
+		return err
+	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.

@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/testutil"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -78,4 +79,10 @@ func startSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup, err
+}
+
+func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, opts ...pd.ClientOption) pd.Client {
+	cli, err := pd.NewTSOClientWithContext(ctx, 0, endpoints, pd.SecurityOption{}, opts...)
+	re.NoError(err)
+	return cli
 }
