@@ -495,10 +495,6 @@ func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
 	return !store.IsPreparing() && !store.IsServing()
 }
 
-func (c *RuleChecker) isPendingVoter(region *core.RegionInfo, peer *metapb.Peer) bool {
-	return region.GetPendingVoter(peer.Id) != nil
-}
-
 func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.Peer) (*metapb.Peer, bool) {
 	witnesses := region.GetWitnesses()
 	if len(witnesses) == 0 {
