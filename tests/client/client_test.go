@@ -1437,12 +1437,10 @@ func TestWatch(t *testing.T) {
 	defer client.Close()
 
 	key := "test"
-	wg := sync.WaitGroup{}
 	ch, err := client.Watch(ctx, []byte(key))
 	re.NoError(err)
-	wg.Add(1)
+	exit := make(chan struct{})
 	go func() {
-		defer wg.Done()
 		var events []*meta_storagepb.Event
 		for e := range ch {
 			events = append(events, e...)
@@ -1455,6 +1453,7 @@ func TestWatch(t *testing.T) {
 		re.Equal(meta_storagepb.Event_PUT, events[1].GetType())
 		re.Equal("2", string(events[1].GetKv().GetValue()))
 		re.Equal(meta_storagepb.Event_DELETE, events[2].GetType())
+		exit <- struct{}{}
 	}()
 
 	cli, err := clientv3.NewFromURLs(endpoints)
@@ -1463,7 +1462,7 @@ func TestWatch(t *testing.T) {
 	cli.Put(context.Background(), key, "1")
 	cli.Put(context.Background(), key, "2")
 	cli.Delete(context.Background(), key)
-	wg.Wait()
+	<-exit
 }
 
 func TestPutGet(t *testing.T) {

@@ -67,10 +67,10 @@ const (
 	// tsoRootPath for all tso servers.
 	tsoRootPath      = "/tso"
 	tsoClusterIDPath = "/tso/cluster_id"
-	// tsoKeyspaceGroupPrimaryElectionPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/pd/<cluster-id>/microservice/tso/keyspace-group-XXXXX/primary" in which
-	// XXXXX is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	tsoKeyspaceGroupPrimaryElectionPrefix = "/pd/0/microservice/tso/keyspace-group-"
+	// tsoPrimaryPrefix defines the key prefix for keyspace group primary election.
+	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary" in which
+	// <group-id> is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
+	tsoPrimaryPrefix = "/ms/0/tso"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -89,6 +89,8 @@ type Server struct {
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
+
+	handler *Handler
 
 	cfg         *Config
 	clusterID   uint64
@@ -130,6 +132,16 @@ func (s *Server) Name() string {
 // Context returns the context of server.
 func (s *Server) Context() context.Context {
 	return s.ctx
+}
+
+// GetHandler returns the handler.
+func (s *Server) GetHandler() *Handler {
+	return s.handler
+}
+
+// GetBasicServer returns the basic server.
+func (s *Server) GetBasicServer() bs.Server {
+	return s
 }
 
 // Run runs the TSO server.
@@ -567,7 +579,7 @@ func (s *Server) startServer() (err error) {
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
 	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
-	s.participant.InitInfo(uniqueName, tsoKeyspaceGroupPrimaryElectionPrefix+fmt.Sprintf("%05d", 0), "primary", "keyspace group primary election")
+	s.participant.InitInfo(uniqueName, path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
 	s.participant.SetMemberDeployPath(s.participant.ID())
 	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
 	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
@@ -623,6 +635,7 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 		cfg:               cfg,
 		ctx:               ctx,
 	}
+	svr.handler = newHandler(svr)
 	return svr
 }
 

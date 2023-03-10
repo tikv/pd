@@ -201,6 +201,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 					if re.Type == rmpb.RequestUnitType_RU {
 						tokens = rg.RequestRU(now, re.Value, targetPeriodMs)
 					}
+					if tokens == nil {
+						continue
+					}
 					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}
 			case rmpb.GroupMode_RawMode:
