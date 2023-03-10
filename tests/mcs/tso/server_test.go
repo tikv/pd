@@ -22,12 +22,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )
@@ -136,4 +140,37 @@ func (suite *tsoServerTestSuite) TestTSOServerRegister() {
 	endpoints, err = discovery.Discover(client, serviceName)
 	re.NoError(err)
 	re.Empty(endpoints)
+}
+
+func (suite *tsoServerTestSuite) TestTSOPath() {
+	re := suite.Require()
+
+	client := suite.pdLeader.GetEtcdClient()
+	re.Equal(1, getEtcdTimestampKeyNum(re, client))
+
+	_, cleanup, err := startSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
+	re.NoError(err)
+	defer cleanup()
+
+	cli := setupCli(re, suite.ctx, []string{suite.backendEndpoints})
+	physical, logical, err := cli.GetTS(suite.ctx)
+	re.NoError(err)
+	ts := tsoutil.ComposeTS(physical, logical)
+	re.NotEmpty(ts)
+	// After we request the tso server, etcd still has only one key related to the timestamp.
+	re.Equal(1, getEtcdTimestampKeyNum(re, client))
+}
+
+func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int {
+	resp, err := etcdutil.EtcdKVGet(client, "/", clientv3.WithPrefix())
+	re.NoError(err)
+	var count int
+	for _, kv := range resp.Kvs {
+		key := strings.TrimSpace(string(kv.Key))
+		if !strings.HasSuffix(key, "timestamp") {
+			continue
+		}
+		count++
+	}
+	return count
 }

@@ -1163,7 +1163,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	physicallyDestroyedStoreID := store.GetId()
 
 	// Get a physically destroyed and offline store
-	// It should be Tombstone(become Tombstone automically) or Offline
+	// It should be Tombstone(become Tombstone automatically) or Offline
 	n, err = suite.client.GetStore(context.Background(), physicallyDestroyedStoreID)
 	suite.NoError(err)
 	if n != nil { // store is still offline and physically destroyed

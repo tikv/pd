@@ -427,7 +427,7 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 	c.urls.Store(urls)
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
 	if c.option.getEnableTSOFollowerProxy() {
-		// Run callbacks to refelect the membership changes in the leader and followers.
+		// Run callbacks to reflect the membership changes in the leader and followers.
 		for _, cb := range c.membersChangedCbs {
 			cb()
 		}
@@ -488,7 +488,7 @@ func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*
 		allocMap[dcLocation] = member.GetClientUrls()[0]
 	}
 
-	// Run the callback to refelect any possible change in the local tso allocators.
+	// Run the callback to reflect any possible change in the local tso allocators.
 	if c.tsoLocalAllocLeadersUpdatedCb != nil {
 		if err := c.tsoLocalAllocLeadersUpdatedCb(allocMap); err != nil {
 			return err
