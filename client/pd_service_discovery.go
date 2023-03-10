@@ -46,7 +46,7 @@ type ServiceDiscovery interface {
 	// Close releases all resources
 	Close()
 	// GetClusterID returns the ID of the cluster
-	GetClusterID(context.Context) uint64
+	GetClusterID() uint64
 	// GetURLs returns the URLs of the servers.
 	GetURLs() []string
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
@@ -222,7 +222,7 @@ func (c *pdServiceDiscovery) Close() {
 }
 
 // GetClusterID returns the ClusterID.
-func (c *pdServiceDiscovery) GetClusterID(context.Context) uint64 {
+func (c *pdServiceDiscovery) GetClusterID() uint64 {
 	return c.clusterID
 }
 
