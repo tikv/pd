@@ -16,7 +16,6 @@ package pd
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"sort"
 	"sync"
@@ -39,23 +38,25 @@ const (
 	memberUpdateInterval = time.Minute
 )
 
-// BaseClient defines the general interface for service discovery on a quorum-based cluster
-// or a primary/secondy configured cluster.
-type BaseClient interface {
+// ServiceDiscovery defines the general interface for service discovery on a quorum-based cluster
+// or a primary/secondary configured cluster.
+type ServiceDiscovery interface {
 	// Init initialize the concrete client underlying
 	Init() error
 	// Close releases all resources
 	Close()
 	// GetClusterID returns the ID of the cluster
-	GetClusterID(context.Context) uint64
+	GetClusterID() uint64
 	// GetURLs returns the URLs of the servers.
 	GetURLs() []string
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
-	// which is the leader in a quorum-based cluster or the primary in a primary/secondy
+	// which is the leader in a quorum-based cluster or the primary in a primary/secondary
 	// configured cluster.
 	GetServingEndpointClientConn() *grpc.ClientConn
+	// GetClientConns returns the mapping {addr -> a gRPC connection}
+	GetClientConns() *sync.Map
 	// GetServingAddr returns the serving endpoint which is the leader in a quorum-based cluster
-	// or the primary in a primary/secondy configured cluster.
+	// or the primary in a primary/secondary configured cluster.
 	GetServingAddr() string
 	// GetBackupAddrs gets the addresses of the current reachable and healthy backup service
 	// endpoints randomly. Backup service endpoints are followers in a quorum-based cluster or
@@ -65,10 +66,10 @@ type BaseClient interface {
 	GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error)
 	// ScheduleCheckMemberChanged is used to trigger a check to see if there is any membership change
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
-	// primary/secondy configured cluster.
+	// primary/secondary configured cluster.
 	ScheduleCheckMemberChanged()
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
-	// in a quorum-based cluster or among the primary/secondaries in a primary/secondy configured cluster.
+	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
 	// AddServingAddrSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
@@ -78,25 +79,27 @@ type BaseClient interface {
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
 	AddServiceAddrsSwitchedCallback(callbacks ...func())
-
-	// TODO: Separate the following TSO related service discovery methods from the above methods.
-
-	// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
-	GetTSOAllocators() *sync.Map
-	// GetTSOAllocatorServingAddrByDCLocation returns the tso allocator of the given dcLocation
-	GetTSOAllocatorServingAddrByDCLocation(dcLocation string) (string, bool)
-	// GetTSOAllocatorClientConnByDCLocation returns the tso allocator grpc client connection
-	// of the given dcLocation
-	GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string)
-	// AddTSOAllocatorServingAddrSwitchedCallback adds callbacks which will be called
-	// when any global/local tso allocator service endpoint is switched.
-	AddTSOAllocatorServingAddrSwitchedCallback(callbacks ...func())
 }
 
-var _ BaseClient = (*pdBaseClient)(nil)
+type tsoLocalServAddrsUpdatedFunc func(map[string]string) error
+type tsoGlobalServAddrUpdatedFunc func(string) error
 
-// pdBaseClient is the service discovery client of PD/API service which is quorum based
-type pdBaseClient struct {
+type tsoAllocatorEventSource interface {
+	// SetTSOLocalServAddrsUpdatedCallback adds a callback which will be called when the local tso
+	// allocator leader list is updated.
+	SetTSOLocalServAddrsUpdatedCallback(callback tsoLocalServAddrsUpdatedFunc)
+	// SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
+	// allocator leader is updated.
+	SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc)
+}
+
+var _ ServiceDiscovery = (*pdServiceDiscovery)(nil)
+var _ tsoAllocatorEventSource = (*pdServiceDiscovery)(nil)
+
+// pdServiceDiscovery is the service discovery client of PD/API service which is quorum based
+type pdServiceDiscovery struct {
+	isInitialized bool
+
 	urls atomic.Value // Store as []string
 	// PD leader URL
 	leader atomic.Value // Store as string
@@ -106,33 +109,35 @@ type pdBaseClient struct {
 	clusterID uint64
 	// addr -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
-	// dc-location -> TSO allocator leader URL
-	tsoAllocators sync.Map // Store as map[string]string
 
-	// leaderSwitchedCallbacks will be called after the leader swichted
-	leaderSwitchedCallbacks []func()
-	// membersChangedCallbacks will be called after there is any membership
-	// change in the leader and followers
-	membersChangedCallbacks []func()
-	// tsoAllocatorLeaderSwitchedCallback will be called when any global/local
-	// tso allocator leader is switched.
-	tsoAllocatorLeaderSwitchedCallback []func()
+	// leaderSwitchedCbs will be called after the leader swichted
+	leaderSwitchedCbs []func()
+	// membersChangedCbs will be called after there is any membership change in the
+	// leader and followers
+	membersChangedCbs []func()
+	// tsoLocalAllocLeadersUpdatedCb will be called when the local tso allocator
+	// leader list is updated. The input is a map {DC Localtion -> Leader Addr}
+	tsoLocalAllocLeadersUpdatedCb tsoLocalServAddrsUpdatedFunc
+	// tsoGlobalAllocLeaderUpdatedCb will be called when the global tso allocator
+	// leader is updated.
+	tsoGlobalAllocLeaderUpdatedCb tsoGlobalServAddrUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
-	wg     *sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
+	wg        *sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
+	closeOnce sync.Once
 
 	tlsCfg *tlsutil.TLSConfig
 	// Client option.
 	option *option
 }
 
-// newPDBaseClient returns a new baseClient.
-func newPDBaseClient(ctx context.Context, cancel context.CancelFunc,
-	wg *sync.WaitGroup, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) BaseClient {
-	bc := &pdBaseClient{
+// newPDServiceDiscovery returns a new baseClient.
+func newPDServiceDiscovery(ctx context.Context, cancel context.CancelFunc,
+	wg *sync.WaitGroup, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) *pdServiceDiscovery {
+	pdsd := &pdServiceDiscovery{
 		checkMembershipCh: make(chan struct{}, 1),
 		ctx:               ctx,
 		cancel:            cancel,
@@ -140,27 +145,32 @@ func newPDBaseClient(ctx context.Context, cancel context.CancelFunc,
 		tlsCfg:            tlsCfg,
 		option:            option,
 	}
-	bc.urls.Store(urls)
-	return bc
+	pdsd.urls.Store(urls)
+	return pdsd
 }
 
-func (c *pdBaseClient) Init() error {
-	if err := c.initRetry(c.initClusterID); err != nil {
-		c.cancel()
-		return err
-	}
-	if err := c.initRetry(c.updateMember); err != nil {
-		c.cancel()
-		return err
-	}
-	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
+func (c *pdServiceDiscovery) Init() error {
+	if !c.isInitialized {
+		if err := c.initRetry(c.initClusterID); err != nil {
+			c.cancel()
+			return err
+		}
+		if err := c.initRetry(c.updateMember); err != nil {
+			c.cancel()
+			return err
+		}
+		log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
-	c.wg.Add(1)
-	go c.memberLoop()
+		c.wg.Add(1)
+		go c.memberLoop()
+
+		c.isInitialized = true
+	}
+
 	return nil
 }
 
-func (c *pdBaseClient) initRetry(f func() error) error {
+func (c *pdServiceDiscovery) initRetry(f func() error) error {
 	var err error
 	for i := 0; i < c.option.maxRetryTimes; i++ {
 		if err = f(); err == nil {
@@ -175,7 +185,7 @@ func (c *pdBaseClient) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
-func (c *pdBaseClient) memberLoop() {
+func (c *pdServiceDiscovery) memberLoop() {
 	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -198,56 +208,59 @@ func (c *pdBaseClient) memberLoop() {
 }
 
 // Close releases all resources
-func (c *pdBaseClient) Close() {
-	c.clientConns.Range(func(key, cc interface{}) bool {
-		if err := cc.(*grpc.ClientConn).Close(); err != nil {
-			log.Error("[pd] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
-		}
-		c.clientConns.Delete(key)
-		return true
+func (c *pdServiceDiscovery) Close() {
+	c.closeOnce.Do(func() {
+		log.Info("close pd service discovery")
+		c.clientConns.Range(func(key, cc interface{}) bool {
+			if err := cc.(*grpc.ClientConn).Close(); err != nil {
+				log.Error("[pd] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+			}
+			c.clientConns.Delete(key)
+			return true
+		})
 	})
 }
 
 // GetClusterID returns the ClusterID.
-func (c *pdBaseClient) GetClusterID(context.Context) uint64 {
+func (c *pdServiceDiscovery) GetClusterID() uint64 {
 	return c.clusterID
 }
 
 // GetURLs returns the URLs of the servers.
 // For testing use. It should only be called when the client is closed.
-func (c *pdBaseClient) GetURLs() []string {
+func (c *pdServiceDiscovery) GetURLs() []string {
 	return c.urls.Load().([]string)
 }
 
-// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
-func (c *pdBaseClient) GetTSOAllocators() *sync.Map {
-	return &c.tsoAllocators
-}
-
 // GetServingAddr returns the grpc client connection of the serving endpoint
-// which is the leader in a quorum-based cluster or the primary in a primary/secondy
+// which is the leader in a quorum-based cluster or the primary in a primary/secondary
 // configured cluster.
-func (c *pdBaseClient) GetServingEndpointClientConn() *grpc.ClientConn {
+func (c *pdServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	if cc, ok := c.clientConns.Load(c.getLeaderAddr()); ok {
 		return cc.(*grpc.ClientConn)
 	}
 	return nil
 }
 
+// GetClientConns returns the mapping {addr -> a gRPC connection}
+func (c *pdServiceDiscovery) GetClientConns() *sync.Map {
+	return &c.clientConns
+}
+
 // GetServingAddr returns the leader address
-func (c *pdBaseClient) GetServingAddr() string {
+func (c *pdServiceDiscovery) GetServingAddr() string {
 	return c.getLeaderAddr()
 }
 
 // GetBackupAddrs gets the addresses of the current reachable and healthy followers
 // in a quorum-based cluster.
-func (c *pdBaseClient) GetBackupAddrs() []string {
+func (c *pdServiceDiscovery) GetBackupAddrs() []string {
 	return c.getFollowerAddrs()
 }
 
 // ScheduleCheckMemberChanged is used to check if there is any membership
 // change among the leader and the followers.
-func (c *pdBaseClient) ScheduleCheckMemberChanged() {
+func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
 	case c.checkMembershipCh <- struct{}{}:
 	default:
@@ -255,31 +268,37 @@ func (c *pdBaseClient) ScheduleCheckMemberChanged() {
 }
 
 // Immediately check if there is any membership change among the leader/followers in a
-// quorum-based cluster or among the primary/secondaries in a primary/secondy configured cluster.
-func (c *pdBaseClient) CheckMemberChanged() error {
+// quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
+func (c *pdServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
 // AddServingAddrSwitchedCallback adds callbacks which will be called
 // when the leader is switched.
-func (c *pdBaseClient) AddServingAddrSwitchedCallback(callbacks ...func()) {
-	c.leaderSwitchedCallbacks = append(c.leaderSwitchedCallbacks, callbacks...)
+func (c *pdServiceDiscovery) AddServingAddrSwitchedCallback(callbacks ...func()) {
+	c.leaderSwitchedCbs = append(c.leaderSwitchedCbs, callbacks...)
 }
 
 // AddServiceAddrsSwitchedCallback adds callbacks which will be called when
 // any leader/follower is changed.
-func (c *pdBaseClient) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
-	c.membersChangedCallbacks = append(c.membersChangedCallbacks, callbacks...)
+func (c *pdServiceDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
+	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
-// AddTSOAllocatorServingAddrSwitchedCallback adds callbacks which will be called
-// when any global/local tso allocator leader is switched.
-func (c *pdBaseClient) AddTSOAllocatorServingAddrSwitchedCallback(callbacks ...func()) {
-	c.tsoAllocatorLeaderSwitchedCallback = append(c.tsoAllocatorLeaderSwitchedCallback, callbacks...)
+// SetTSOLocalServAddrsUpdatedCallback adds a callback which will be called when the local tso
+// allocator leader list is updated.
+func (c *pdServiceDiscovery) SetTSOLocalServAddrsUpdatedCallback(callback tsoLocalServAddrsUpdatedFunc) {
+	c.tsoLocalAllocLeadersUpdatedCb = callback
+}
+
+// SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
+// allocator leader is updated.
+func (c *pdServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc) {
+	c.tsoGlobalAllocLeaderUpdatedCb = callback
 }
 
 // getLeaderAddr returns the leader address.
-func (c *pdBaseClient) getLeaderAddr() string {
+func (c *pdServiceDiscovery) getLeaderAddr() string {
 	leaderAddr := c.leader.Load()
 	if leaderAddr == nil {
 		return ""
@@ -288,7 +307,7 @@ func (c *pdBaseClient) getLeaderAddr() string {
 }
 
 // getFollowerAddrs returns the follower address.
-func (c *pdBaseClient) getFollowerAddrs() []string {
+func (c *pdServiceDiscovery) getFollowerAddrs() []string {
 	followerAddrs := c.followers.Load()
 	if followerAddrs == nil {
 		return []string{}
@@ -296,45 +315,7 @@ func (c *pdBaseClient) getFollowerAddrs() []string {
 	return followerAddrs.([]string)
 }
 
-// GetTSOAllocatorServingAddrByDCLocation returns the tso allocator of the given dcLocation
-func (c *pdBaseClient) GetTSOAllocatorServingAddrByDCLocation(dcLocation string) (string, bool) {
-	url, exist := c.tsoAllocators.Load(dcLocation)
-	if !exist {
-		return "", false
-	}
-	return url.(string), true
-}
-
-// GetTSOAllocatorClientConnByDCLocation returns the tso allocator grpc client connection of the given dcLocation
-func (c *pdBaseClient) GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string) {
-	url, ok := c.tsoAllocators.Load(dcLocation)
-	if !ok {
-		panic(fmt.Sprintf("the allocator leader in %s should exist", dcLocation))
-	}
-	cc, ok := c.clientConns.Load(url)
-	if !ok {
-		panic(fmt.Sprintf("the client connection of %s in %s should exist", url, dcLocation))
-	}
-	return cc.(*grpc.ClientConn), url.(string)
-}
-
-func (c *pdBaseClient) gcAllocatorLeaderAddr(curAllocatorMap map[string]*pdpb.Member) {
-	// Clean up the old TSO allocators
-	c.tsoAllocators.Range(func(dcLocationKey, _ interface{}) bool {
-		dcLocation := dcLocationKey.(string)
-		// Skip the Global TSO Allocator
-		if dcLocation == globalDCLocation {
-			return true
-		}
-		if _, exist := curAllocatorMap[dcLocation]; !exist {
-			log.Info("[pd] delete unused tso allocator", zap.String("dc-location", dcLocation))
-			c.tsoAllocators.Delete(dcLocation)
-		}
-		return true
-	})
-}
-
-func (c *pdBaseClient) initClusterID() error {
+func (c *pdServiceDiscovery) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	var clusterID uint64
@@ -364,7 +345,7 @@ func (c *pdBaseClient) initClusterID() error {
 	return nil
 }
 
-func (c *pdBaseClient) updateMember() error {
+func (c *pdServiceDiscovery) updateMember() error {
 	for i, u := range c.GetURLs() {
 		failpoint.Inject("skipFirstUpdateMember", func() {
 			if i == 0 {
@@ -383,7 +364,7 @@ func (c *pdBaseClient) updateMember() error {
 				err = errs.ErrClientGetLeader.FastGenByArgs("leader address don't exist")
 			}
 			// Still need to update TsoAllocatorLeaders, even if there is no PD leader
-			errTSO = c.switchTSOAllocatorLeader(members.GetTsoAllocatorLeaders())
+			errTSO = c.switchTSOAllocatorLeaders(members.GetTsoAllocatorLeaders())
 		}
 
 		// Failed to get members
@@ -404,10 +385,6 @@ func (c *pdBaseClient) updateMember() error {
 		if err := c.switchLeader(members.GetLeader().GetClientUrls()); err != nil {
 			return err
 		}
-		// Run callbacks to refelect any change in the local/global tso allocator.
-		for _, cb := range c.tsoAllocatorLeaderSwitchedCallback {
-			cb()
-		}
 
 		// If `switchLeader` succeeds but `switchTSOAllocatorLeader` has an error,
 		// the error of `switchTSOAllocatorLeader` will be returned.
@@ -416,7 +393,7 @@ func (c *pdBaseClient) updateMember() error {
 	return errs.ErrClientGetMember.FastGenByArgs(c.GetURLs())
 }
 
-func (c *pdBaseClient) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
+func (c *pdServiceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cc, err := c.GetOrCreateGRPCConn(url)
@@ -435,7 +412,7 @@ func (c *pdBaseClient) getMembers(ctx context.Context, url string, timeout time.
 	return members, nil
 }
 
-func (c *pdBaseClient) updateURLs(members []*pdpb.Member) {
+func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 	urls := make([]string, 0, len(members))
 	for _, m := range members {
 		urls = append(urls, m.GetClientUrls()...)
@@ -451,14 +428,14 @@ func (c *pdBaseClient) updateURLs(members []*pdpb.Member) {
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
 	if c.option.getEnableTSOFollowerProxy() {
 		// Run callbacks to refelect the membership changes in the leader and followers.
-		for _, cb := range c.membersChangedCallbacks {
+		for _, cb := range c.membersChangedCbs {
 			cb()
 		}
 	}
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
-func (c *pdBaseClient) switchLeader(addrs []string) error {
+func (c *pdServiceDiscovery) switchLeader(addrs []string) error {
 	// FIXME: How to safely compare leader urls? For now, only allows one client url.
 	addr := addrs[0]
 	oldLeader := c.getLeaderAddr()
@@ -472,16 +449,20 @@ func (c *pdBaseClient) switchLeader(addrs []string) error {
 	}
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
-	c.tsoAllocators.Store(globalDCLocation, addr)
 	// Run callbacks
-	for _, cb := range c.leaderSwitchedCallbacks {
+	if c.tsoGlobalAllocLeaderUpdatedCb != nil {
+		if err := c.tsoGlobalAllocLeaderUpdatedCb(addr); err != nil {
+			return err
+		}
+	}
+	for _, cb := range c.leaderSwitchedCbs {
 		cb()
 	}
 	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
 	return nil
 }
 
-func (c *pdBaseClient) updateFollowers(members []*pdpb.Member, leader *pdpb.Member) {
+func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leader *pdpb.Member) {
 	var addrs []string
 	for _, member := range members {
 		if member.GetMemberId() != leader.GetMemberId() {
@@ -493,39 +474,31 @@ func (c *pdBaseClient) updateFollowers(members []*pdpb.Member, leader *pdpb.Memb
 	c.followers.Store(addrs)
 }
 
-func (c *pdBaseClient) switchTSOAllocatorLeader(allocatorMap map[string]*pdpb.Member) error {
+func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*pdpb.Member) error {
 	if len(allocatorMap) == 0 {
 		return nil
 	}
+
+	allocMap := make(map[string]string)
 	// Switch to the new one
 	for dcLocation, member := range allocatorMap {
 		if len(member.GetClientUrls()) == 0 {
 			continue
 		}
-		addr := member.GetClientUrls()[0]
-		oldAddr, exist := c.GetTSOAllocatorServingAddrByDCLocation(dcLocation)
-		if exist && addr == oldAddr {
-			continue
-		}
-		if _, err := c.GetOrCreateGRPCConn(addr); err != nil {
-			log.Warn("[pd] failed to connect dc tso allocator leader",
-				zap.String("dc-location", dcLocation),
-				zap.String("leader", addr),
-				errs.ZapError(err))
+		allocMap[dcLocation] = member.GetClientUrls()[0]
+	}
+
+	// Run the callback to refelect any possible change in the local tso allocators.
+	if c.tsoLocalAllocLeadersUpdatedCb != nil {
+		if err := c.tsoLocalAllocLeadersUpdatedCb(allocMap); err != nil {
 			return err
 		}
-		c.tsoAllocators.Store(dcLocation, addr)
-		log.Info("[pd] switch dc tso allocator leader",
-			zap.String("dc-location", dcLocation),
-			zap.String("new-leader", addr),
-			zap.String("old-leader", oldAddr))
 	}
-	// Garbage collection of the old TSO allocator leaders
-	c.gcAllocatorLeaderAddr(allocatorMap)
+
 	return nil
 }
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
-func (c *pdBaseClient) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
+func (c *pdServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
 }
