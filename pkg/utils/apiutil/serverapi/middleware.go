@@ -110,7 +110,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	if !h.s.IsAPIServiceMode() {
 		return false, ""
 	}
-	if len(h.microserviceRedirectRules) <= 0 {
+	if len(h.microserviceRedirectRules) == 0 {
 		return false, ""
 	}
 	for _, rule := range h.microserviceRedirectRules {
