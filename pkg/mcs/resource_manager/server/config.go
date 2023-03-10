@@ -94,7 +94,6 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	rmc.RequestUnit.Adjust()
 
 	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
-
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of

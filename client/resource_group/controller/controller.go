@@ -212,7 +212,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.updateAvgRequestResourcePerSec()
 				if !c.run.requestInProgress {
 					c.collectTokenBucketRequests(c.loopCtx, "low_ru", true /* only select low tokens resource group */)
-				} else if c.run.inDegradedMode {
+				}
+				if c.run.inDegradedMode {
 					c.applyDegradedMode()
 				}
 			case gc := <-c.tokenBucketUpdateChan:
@@ -487,6 +488,8 @@ type tokenCounter struct {
 	lastRate     float64
 
 	limiter *Limiter
+
+	inDegradedMode bool
 }
 
 func newGroupCostController(
@@ -675,11 +678,6 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 		if counter.limiter.GetBurst() >= 0 {
 			isBurstable = false
 		}
-		log.Info("[resource group controller] update avg ru per sec",
-			zap.Float64("tokens", counter.limiter.AvailableTokens(time.Now())),
-			zap.Bool("low", counter.limiter.IsLowTokens()),
-		)
-
 		if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
@@ -762,6 +760,10 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		if !counter.limiter.IsLowTokens() {
 			continue
 		}
+		if counter.inDegradedMode {
+			continue
+		}
+		counter.inDegradedMode = true
 		initCounterNotify(counter)
 		var cfg tokenBucketReconfigureArgs
 		fillRate := getRUTokenBucketSetting(gc.ResourceGroup, typ)
@@ -771,6 +773,7 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 			cfg.NewRate = 99999999
 		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
+		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("resource group", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
 	}
 }
 
@@ -799,6 +802,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		}
 	}
 	initCounterNotify(counter)
+	counter.inDegradedMode = false
 	notifyThreshold := granted * notifyFraction
 	if notifyThreshold < bufferRUs {
 		notifyThreshold = bufferRUs
