@@ -268,13 +268,18 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 		}
 
 		gc := value.(*groupCostController)
-		// Check stale resource group
-		if equalRU(gc.run.lastRequestConsumption, gc.run.consumption) {
-			if gc.checkStaleTimes > defaultSlotStalePeriod {
+		// Check for stale resource groups, which will be deleted when consumption is continuously unchanged.
+		gc.mu.Lock()
+		if equalRU(gc.mu.consumption, gc.run.consumption) {
+			gc.mu.Unlock()
+			if gc.tombstone {
 				c.groupsController.Delete(resourceGroupName)
 				return true
 			}
-			gc.checkStaleTimes += 1
+			gc.tombstone = true
+		} else {
+			gc.mu.Unlock()
+			gc.tombstone = false
 		}
 		return true
 	})
@@ -442,7 +447,7 @@ type groupCostController struct {
 		requestUnitTokens map[rmpb.RequestUnitType]*tokenCounter
 	}
 
-	checkStaleTimes uint64
+	tombstone bool
 }
 
 type tokenCounter struct {
@@ -493,7 +498,6 @@ func newGroupCostController(
 		tokenBucketUpdateChan: tokenBucketUpdateChan,
 		lowRUNotifyChan:       lowRUNotifyChan,
 		burstable:             &atomic.Bool{},
-		checkStaleTimes:       0,
 	}
 
 	switch gc.mode {
