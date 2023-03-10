@@ -220,45 +220,39 @@ func (suite *APIServerForwardTestSuite) TearDownTest() {
 	suite.cancel()
 }
 
-func (suite *APIServerForwardTestSuite) TestForwardTSO() {
-	var err error
-	// cannot get ts on api server addr without tso server
-	_, _, err = suite.pdClient.GetTS(suite.ctx)
-	suite.Error(err)
-	suite.Contains(err.Error(), "not found tso address")
-	// can get ts on api server addr with tso server
-	suite.addTSOService()
-	_, _, err = suite.pdClient.GetTS(suite.ctx)
-	suite.NoError(err)
-}
-
-func (suite *APIServerForwardTestSuite) TestUpdateServiceGCSafePoint() {
-	var err error
-	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
-	suite.NoError(leader.BootstrapCluster())
-	// cannot update gc safe point on api server addr without tso server
-	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1)
-	suite.Contains(err.Error(), "not found tso address")
-	// can update gc safe point on api server addr with tso server
-	suite.addTSOService()
-	min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(),
-		"a", 1000, 1)
-	suite.NoError(err)
-	suite.Equal(uint64(0), min)
-}
-
-func (suite *APIServerForwardTestSuite) TestSetExternalTS() {
+func (suite *APIServerForwardTestSuite) TestForwardTSORelated() {
 	var err error
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	suite.NoError(leader.BootstrapCluster())
 	suite.addRegions()
-	// cannot set external-ts on api server addr without tso server
-	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
-	suite.Contains(err.Error(), "not found tso address")
-	// can set external-ts on api server addr with tso server
-	suite.addTSOService()
-	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
-	suite.NoError(err)
+	// Unable to use the tso-related interface without tso server
+	{
+		// try to get ts
+		_, _, err = suite.pdClient.GetTS(suite.ctx)
+		suite.Error(err)
+		suite.Contains(err.Error(), "not found tso address")
+		// try to update gc safe point
+		_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1)
+		suite.Contains(err.Error(), "not found tso address")
+		// try to set external ts
+		err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
+		suite.Contains(err.Error(), "not found tso address")
+	}
+	// can use the tso-related interface with tso server
+	{
+		suite.addTSOService()
+		// try to get ts
+		_, _, err = suite.pdClient.GetTS(suite.ctx)
+		suite.NoError(err)
+		// try to update gc safe point
+		min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(),
+			"a", 1000, 1)
+		suite.NoError(err)
+		suite.Equal(uint64(0), min)
+		// try to set external ts
+		err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
+		suite.NoError(err)
+	}
 }
 
 func (suite *APIServerForwardTestSuite) addTSOService() {
