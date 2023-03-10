@@ -128,7 +128,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
-	if s.IsAPIServiceMode() {
+	if !s.IsAPIServiceMode() {
 		tsoAllocatorManager := s.GetTSOAllocatorManager()
 		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
 	}
@@ -181,7 +181,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		streamCtx := stream.Context()
-		if !s.IsAPIServiceMode() {
+		if s.IsAPIServiceMode() {
 			ok, forwardedHost, err := s.GetServicePrimaryAddr(ctx, "tso")
 			if !ok {
 				return ErrNotFoundTSOADDR

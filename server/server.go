@@ -375,7 +375,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
-	if s.IsAPIServiceMode() {
+	if !s.IsAPIServiceMode() {
 		s.tsoAllocatorManager = tso.NewAllocatorManager(
 			s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
 			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
@@ -529,7 +529,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() {
+	if !s.IsAPIServiceMode() {
 		s.serverLoopWg.Add(1)
 		go s.tsoAllocatorLoop()
 	}
@@ -1387,7 +1387,7 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
-			if s.IsAPIServiceMode() {
+			if !s.IsAPIServiceMode() {
 				// Check the cluster dc-location after the PD leader is elected
 				go s.tsoAllocatorManager.ClusterDCLocationChecker()
 			}
@@ -1444,7 +1444,7 @@ func (s *Server) campaignLeader() {
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
-	if s.IsAPIServiceMode() {
+	if !s.IsAPIServiceMode() {
 		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 		if err != nil {
 			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
@@ -1496,7 +1496,7 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	if s.IsAPIServiceMode() {
+	if !s.IsAPIServiceMode() {
 		// Check the cluster dc-location after the PD leader is elected.
 		go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	}
