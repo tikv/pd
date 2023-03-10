@@ -2161,16 +2161,17 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 	}
 
 	// TODO: need to solve tso
-	globalTS, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	ts, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
 	if err != nil {
 		return nil, err
 	}
+	globalTS := tsoutil.GenerateTS(&ts)
 	externalTS := request.GetTimestamp()
-	if err := s.SetExternalTS(externalTS, tsoutil.GenerateTS(&globalTS)); err != nil {
+	if err := s.SetExternalTS(externalTS, globalTS); err != nil {
 		return &pdpb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
 	}
 	log.Debug("set external timestamp",
-		zap.Uint64("timestamp", externalTS))
+		zap.Uint64("external-ts", externalTS), zap.Uint64("global-ts", globalTS))
 	return &pdpb.SetExternalTimestampResponse{
 		Header: s.header(),
 	}, nil

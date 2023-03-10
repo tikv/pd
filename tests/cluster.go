@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -43,7 +44,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/server/keyspace"
-	"github.com/tikv/pd/server/schedule/schedulers"
 	"go.etcd.io/etcd/clientv3"
 )
 
