@@ -358,7 +358,7 @@ func (s *GrpcServer) processTSORequests(forwardStream pdpb.PD_TsoClient, forward
 			// TODO: support Local TSO proxy forwarding.
 			DcLocation: requests[0].request.GetDcLocation(),
 		}
-		// Send to the leader stream.
+		// Send to the tso server stream
 		if err := forwardStream.Send(req); err != nil {
 			return err
 		}
@@ -1504,8 +1504,15 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 			return nil, err
 		}
 	}
-	// TODO: need to solve tso
-	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	var (
+		nowTSO pdpb.Timestamp
+		err    error
+	)
+	if s.IsAPIServiceMode() {
+		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
+	} else {
+		nowTSO, err = s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1950,6 +1957,40 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	<-done
 }
 
+func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
+	ok, forwardedHost, err := s.GetServicePrimaryAddr(ctx, "tso")
+	if !ok {
+		return pdpb.Timestamp{}, ErrNotFoundTSOADDR
+	}
+	if err != nil {
+		return pdpb.Timestamp{}, errors.WithStack(err)
+	}
+	client, err := s.getDelegateClient(ctx, forwardedHost)
+	if err != nil {
+		return pdpb.Timestamp{}, err
+	}
+	done := make(chan struct{})
+	ctx, cancel := context.WithTimeout(s.ctx, defaultTSOProxyTimeout)
+	go checkStream(ctx, cancel, done)
+	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
+	if err != nil {
+		return pdpb.Timestamp{}, err
+	}
+	done <- struct{}{}
+	forwardStream.Send(&tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId: s.clusterID,
+			// TODO: set keyspace info
+		},
+		Count: 1,
+	})
+	ts, err := forwardStream.Recv()
+	if err != nil {
+		return pdpb.Timestamp{}, err
+	}
+	return *ts.GetTimestamp(), nil
+}
+
 // for CDC compatibility, we need to initialize config path to `globalConfigPath`
 const globalConfigPath = "/global/config/"
 
@@ -2160,18 +2201,25 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 		return nil, err
 	}
 
-	// TODO: need to solve tso
-	ts, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	var (
+		nowTSO pdpb.Timestamp
+		err    error
+	)
+	if s.IsAPIServiceMode() {
+		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
+	} else {
+		nowTSO, err = s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	}
 	if err != nil {
 		return nil, err
 	}
-	globalTS := tsoutil.GenerateTS(&ts)
+	globalTS := tsoutil.GenerateTS(&nowTSO)
 	externalTS := request.GetTimestamp()
+	log.Debug("try to set external timestamp",
+		zap.Uint64("external-ts", externalTS), zap.Uint64("global-ts", globalTS))
 	if err := s.SetExternalTS(externalTS, globalTS); err != nil {
 		return &pdpb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
 	}
-	log.Debug("set external timestamp",
-		zap.Uint64("external-ts", externalTS), zap.Uint64("global-ts", globalTS))
 	return &pdpb.SetExternalTimestampResponse{
 		Header: s.header(),
 	}, nil

@@ -1705,8 +1705,8 @@ func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	}
 	currentExternalTS := s.GetRaftCluster().GetExternalTS()
 	if tsoutil.CompareTimestampUint64(externalTS, currentExternalTS) != 1 {
-		desc := "the external timestamp should be larger than now"
-		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("current external timestamp", currentExternalTS))
+		desc := "the external timestamp should be larger than current external timestamp"
+		log.Error(desc, zap.Uint64("request", externalTS), zap.Uint64("current", currentExternalTS))
 		return errors.New(desc)
 	}
 	s.GetRaftCluster().SetExternalTS(externalTS)

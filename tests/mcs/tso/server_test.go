@@ -22,9 +22,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
@@ -48,7 +50,6 @@ type tsoServerTestSuite struct {
 	cluster          *tests.TestCluster
 	pdLeader         *tests.TestServer
 	backendEndpoints string
-	tsosvrs          map[string]*tsosvr.Server
 }
 
 func TestTSOServerTestSuite(t *testing.T) {
@@ -72,10 +73,6 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 }
 
 func (suite *tsoServerTestSuite) TearDownSuite() {
-	for _, s := range suite.tsosvrs {
-		s.Close()
-		testutil.CleanServer(s.GetConfig().DataDir)
-	}
 	suite.cluster.Destroy()
 	suite.cancel()
 }
@@ -176,46 +173,116 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 	return count
 }
 
-func TestForwardTSO(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestAPICluster(ctx, 1)
+type APIServerForwardTestSuite struct {
+	suite.Suite
+	ctx              context.Context
+	cancel           context.CancelFunc
+	cluster          *tests.TestCluster
+	pdLeader         *tests.TestServer
+	backendEndpoints string
+	pdClient         pd.Client
+	cleanup          CleanupFunc
+}
+
+func TestAPIServerForwardTestSuite(t *testing.T) {
+	suite.Run(t, new(APIServerForwardTestSuite))
+}
+
+func (suite *APIServerForwardTestSuite) SetupTest() {
+	var err error
+	re := suite.Require()
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
 	re.NoError(err)
-	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
+	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 
-	leaderName := cluster.WaitLeader()
-	pdLeader := cluster.GetServer(leaderName)
-	backendEndpoints := pdLeader.GetAddr()
+	leaderName := suite.cluster.WaitLeader()
+	suite.pdLeader = suite.cluster.GetServer(leaderName)
+	suite.backendEndpoints = suite.pdLeader.GetAddr()
 
-	{ // cannot get ts from api server addr
-		pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
-		re.NoError(err)
-		_, _, err = pdClient.GetTS(ctx)
-		re.Error(err)
-		re.Contains(err.Error(), "not found tso address")
-	}
-
-	// add tso server
-	s, cleanup, err := startSingleTSOTestServer(ctx, re, backendEndpoints)
+	suite.pdClient, err = pd.NewClientWithContext(suite.ctx, []string{suite.backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
-	etcdClient := pdLeader.GetEtcdClient()
+}
+
+func (suite *APIServerForwardTestSuite) TearDownTest() {
+	etcdClient := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(etcdClient, "tso")
-	re.NoError(err)
-	re.Equal(s.GetConfig().ListenAddr, endpoints[0])
-
-	{ // can get ts from api addr with pd client
-		pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
-		re.NoError(err)
-		_, _, err = pdClient.GetTS(ctx)
-		re.NoError(err)
+	suite.NoError(err)
+	if len(endpoints) != 0 {
+		suite.cleanup()
+		endpoints, err = discovery.Discover(etcdClient, "tso")
+		suite.NoError(err)
+		suite.Empty(endpoints)
 	}
+	suite.cluster.Destroy()
+	suite.cancel()
+}
 
-	cleanup()
-	endpoints, err = discovery.Discover(etcdClient, "tso")
-	re.NoError(err)
-	re.Empty(endpoints)
+func (suite *APIServerForwardTestSuite) TestForwardTSO() {
+	var err error
+	// cannot get ts on api server addr without tso server
+	_, _, err = suite.pdClient.GetTS(suite.ctx)
+	suite.Error(err)
+	suite.Contains(err.Error(), "not found tso address")
+	// can get ts on api server addr with tso server
+	suite.addTSOService()
+	_, _, err = suite.pdClient.GetTS(suite.ctx)
+	suite.NoError(err)
+}
+
+func (suite *APIServerForwardTestSuite) TestUpdateServiceGCSafePoint() {
+	var err error
+	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
+	suite.NoError(leader.BootstrapCluster())
+	// cannot update gc safe point on api server addr without tso server
+	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1)
+	suite.Contains(err.Error(), "not found tso address")
+	// can update gc safe point on api server addr with tso server
+	suite.addTSOService()
+	min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(),
+		"a", 1000, 1)
+	suite.NoError(err)
+	suite.Equal(uint64(0), min)
+}
+
+func (suite *APIServerForwardTestSuite) TestSetExternalTS() {
+	var err error
+	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
+	suite.NoError(leader.BootstrapCluster())
+	suite.addRegions()
+	// cannot set external-ts on api server addr without tso server
+	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
+	suite.Contains(err.Error(), "not found tso address")
+	// can set external-ts on api server addr with tso server
+	suite.addTSOService()
+	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
+	suite.NoError(err)
+}
+
+func (suite *APIServerForwardTestSuite) addTSOService() {
+	var s *tsosvr.Server
+	var err error
+	re := suite.Require()
+	s, suite.cleanup, err = startSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
+	suite.NoError(err)
+	etcdClient := suite.pdLeader.GetEtcdClient()
+	endpoints, err := discovery.Discover(etcdClient, "tso")
+	suite.NoError(err)
+	suite.Equal(s.GetConfig().ListenAddr, endpoints[0])
+}
+
+func (suite *APIServerForwardTestSuite) addRegions() {
+	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
+	rc := leader.GetServer().GetRaftCluster()
+	for i := 0; i < 3; i++ {
+		region := &metapb.Region{
+			Id:       uint64(i*4 + 1),
+			Peers:    []*metapb.Peer{{Id: uint64(i*4 + 2), StoreId: uint64(i*4 + 3)}},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+		}
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+	}
 }
