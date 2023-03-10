@@ -370,7 +370,7 @@ func (s *GrpcServer) processTSORequests(forwardStream pdpb.PD_TsoClient, forward
 	if forwardMCSStream != nil {
 		req := &tsopb.TsoRequest{
 			Header: &tsopb.RequestHeader{
-				ClusterId: 0, // TODO: set cluster id when tso server init cluster id
+				ClusterId: requests[0].request.GetHeader().GetClusterId(),
 				// TODO: set keyspace info
 			},
 			Count: count,
