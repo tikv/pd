@@ -124,9 +124,6 @@ func NewResourceGroupController(
 	if requestUnitConfig != nil {
 		controllerConfig.RequestUnit = *requestUnitConfig
 	}
-	if err != nil {
-		return nil, err
-	}
 	config := GenerateConfig(controllerConfig)
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
