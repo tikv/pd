@@ -700,7 +700,7 @@ func (c *tsoClient) processTSORequests(stream tsoStream, dcLocation string, tbc 
 
 	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
-	physical, logical, suffixBits, err := stream.processRequests(c.svcDiscovery.GetClusterID(c.ctx), dcLocation, requests, tbc.batchStartTime)
+	physical, logical, suffixBits, err := stream.processRequests(c.svcDiscovery.GetClusterID(), dcLocation, requests, tbc.batchStartTime)
 	if err != nil {
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err

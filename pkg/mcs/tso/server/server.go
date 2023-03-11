@@ -64,9 +64,8 @@ import (
 )
 
 const (
-	// tsoRootPath for all tso servers.
-	tsoRootPath      = "/tso"
-	tsoClusterIDPath = "/tso/cluster_id"
+	// pdRootPath is the old path for storing the tso related root path.
+	pdRootPath = "/pd"
 	// tsoPrimaryPrefix defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary" in which
 	// <group-id> is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
@@ -92,12 +91,12 @@ type Server struct {
 
 	handler *Handler
 
-	cfg         *Config
-	clusterID   uint64
-	rootPath    string
-	storage     endpoint.TSOStorage
-	listenURL   *url.URL
-	backendUrls []url.URL
+	cfg                  *Config
+	clusterID            uint64
+	defaultGroupRootPath string
+	defaultGroupStorage  endpoint.TSOStorage
+	listenURL            *url.URL
+	backendUrls          []url.URL
 
 	// for the primary election in the TSO cluster
 	participant *member.Participant
@@ -333,7 +332,7 @@ func (s *Server) GetPrimary() bs.MemberProvider {
 	return s.participant.GetLeader()
 }
 
-// AddServiceReadyCallback implments basicserver. It adds callbacks when the server becomes the primary.
+// AddServiceReadyCallback implements basicserver. It adds callbacks when the server becomes the primary.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
@@ -369,7 +368,7 @@ func (s *Server) IsLocalRequest(forwardedHost string) bool {
 	return forwardedHost == ""
 }
 
-// CreateTsoForwardStream creats the forward stream
+// CreateTsoForwardStream creates the forward stream
 func (s *Server) CreateTsoForwardStream(client *grpc.ClientConn) (tsopb.TSO_TsoClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
@@ -557,12 +556,9 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 }
 
 func (s *Server) startServer() (err error) {
-	// TODO: uncomment the following code to generate a unique cluster id from the given ClusterIDPath
-	// after we add rpc for the client to retrieve the cluster id from the server then use it in every
-	// request for verification.
-	// if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
-	// 	return err
-	// }
+	if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
+		return err
+	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
@@ -570,7 +566,7 @@ func (s *Server) startServer() (err error) {
 	// The independent TSO service still reuses PD version info since PD and TSO are just
 	// different service modes provided by the same pd-server binary
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
-	s.rootPath = path.Join(tsoRootPath, strconv.FormatUint(s.clusterID, 10))
+	s.defaultGroupRootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 
 	// TODO: Figure out how we should generated the unique id and name passed to Participant.
 	// For now, set the name to be listen address and generate the unique id from the name with sha256.
@@ -584,9 +580,9 @@ func (s *Server) startServer() (err error) {
 	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
 	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
 
-	s.storage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.rootPath), nil)
+	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.participant, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
+		s.participant, s.defaultGroupRootPath, s.defaultGroupStorage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
 		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
 	// Set up the Global TSO Allocator here, it will be initialized once this TSO participant campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(s.ctx, tso.GlobalDCLocation, s.participant.GetLeadership())

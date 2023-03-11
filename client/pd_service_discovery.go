@@ -46,7 +46,7 @@ type ServiceDiscovery interface {
 	// Close releases all resources
 	Close()
 	// GetClusterID returns the ID of the cluster
-	GetClusterID(context.Context) uint64
+	GetClusterID() uint64
 	// GetURLs returns the URLs of the servers.
 	GetURLs() []string
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
@@ -222,7 +222,7 @@ func (c *pdServiceDiscovery) Close() {
 }
 
 // GetClusterID returns the ClusterID.
-func (c *pdServiceDiscovery) GetClusterID(context.Context) uint64 {
+func (c *pdServiceDiscovery) GetClusterID() uint64 {
 	return c.clusterID
 }
 
@@ -427,7 +427,7 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 	c.urls.Store(urls)
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
 	if c.option.getEnableTSOFollowerProxy() {
-		// Run callbacks to refelect the membership changes in the leader and followers.
+		// Run callbacks to reflect the membership changes in the leader and followers.
 		for _, cb := range c.membersChangedCbs {
 			cb()
 		}
@@ -488,7 +488,7 @@ func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*
 		allocMap[dcLocation] = member.GetClientUrls()[0]
 	}
 
-	// Run the callback to refelect any possible change in the local tso allocators.
+	// Run the callback to reflect any possible change in the local tso allocators.
 	if c.tsoLocalAllocLeadersUpdatedCb != nil {
 		if err := c.tsoLocalAllocLeadersUpdatedCb(allocMap); err != nil {
 			return err

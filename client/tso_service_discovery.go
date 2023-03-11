@@ -45,6 +45,7 @@ var _ tsoAllocatorEventSource = (*tsoServiceDiscovery)(nil)
 
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
 type tsoServiceDiscovery struct {
+	clusterID  uint64
 	keyspaceID uint32
 	urls       atomic.Value // Store as []string
 	// primary key is the etcd path used for discoverying the serving endpoint of this keyspace
@@ -83,13 +84,14 @@ type tsoServiceDiscovery struct {
 
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func newTSOServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, metacli MetaStorageClient,
-	keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) ServiceDiscovery {
+	clusterID uint64, keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) ServiceDiscovery {
 	bc := &tsoServiceDiscovery{
 		ctx:               ctx,
 		cancel:            cancel,
 		wg:                wg,
 		metacli:           metacli,
 		keyspaceID:        keyspaceID,
+		clusterID:         clusterID,
 		primaryKey:        path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0), "primary"),
 		tlsCfg:            tlsCfg,
 		option:            option,
@@ -158,8 +160,8 @@ func (c *tsoServiceDiscovery) Close() {
 }
 
 // GetClusterID returns the ID of the cluster
-func (c *tsoServiceDiscovery) GetClusterID(context.Context) uint64 {
-	return 0
+func (c *tsoServiceDiscovery) GetClusterID() uint64 {
+	return c.clusterID
 }
 
 // GetURLs returns the URLs of the servers.

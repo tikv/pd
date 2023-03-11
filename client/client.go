@@ -275,7 +275,7 @@ func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption)
 // NewClientWithContext creates a PD client with context.
 func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", svrAddrs))
-	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, &security)
+	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, 0, &security)
 	// Inject the client options.
 	for _, opt := range opts {
 		opt(c)
@@ -284,6 +284,10 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 	c.svcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
 	c.tsoClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID, c.svcDiscovery, c.svcDiscovery.(tsoAllocatorEventSource), &pdTSOStreamBuilderFactory{})
 	if err := c.setup(); err != nil {
+		c.cancel()
+		return nil, err
+	}
+	if err := c.tsoClient.setup(); err != nil {
 		c.cancel()
 		return nil, err
 	}
@@ -296,24 +300,28 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 // Before that, internal tools call this function to use mcs service.
 func NewTSOClientWithContext(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[tso] create tso client with endpoints", zap.Strings("pd(api)-address", svrAddrs))
-	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, &security)
+	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, keyspaceID, &security)
 	// Inject the client options.
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	c.keyspaceID = keyspaceID
 	c.svcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	tsoSvcDiscovery := newTSOServiceDiscovery(clientCtx, clientCancel, &c.wg, MetaStorageClient(c), keyspaceID, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	c.tsoClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID, tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
 	if err := c.setup(); err != nil {
+		c.cancel()
+		return nil, err
+	}
+
+	tsoSvcDiscovery := newTSOServiceDiscovery(clientCtx, clientCancel, &c.wg, MetaStorageClient(c), c.GetClusterID(c.ctx), keyspaceID, addrsToUrls(svrAddrs), tlsCfg, c.option)
+	c.tsoClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID, tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
+	if err := c.tsoClient.setup(); err != nil {
 		c.cancel()
 		return nil, err
 	}
 	return c, nil
 }
 
-func createClient(ctx context.Context, security *SecurityOption) (*client, context.Context, context.CancelFunc, *tlsutil.TLSConfig) {
+func createClient(ctx context.Context, keyspaceID uint32, security *SecurityOption) (*client, context.Context, context.CancelFunc, *tlsutil.TLSConfig) {
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
@@ -329,6 +337,7 @@ func createClient(ctx context.Context, security *SecurityOption) (*client, conte
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
+		keyspaceID:              keyspaceID,
 		option:                  newOption(),
 	}
 
@@ -350,8 +359,7 @@ func (c *client) setup() error {
 	// Start the daemons.
 	c.wg.Add(1)
 	go c.leaderCheckLoop()
-
-	return c.tsoClient.setup()
+	return nil
 }
 
 func (c *client) Close() {
@@ -376,8 +384,8 @@ func (c *client) scheduleUpdateTokenConnection() {
 }
 
 // GetClusterID returns the ClusterID.
-func (c *client) GetClusterID(ctx context.Context) uint64 {
-	return c.svcDiscovery.GetClusterID(ctx)
+func (c *client) GetClusterID(context.Context) uint64 {
+	return c.svcDiscovery.GetClusterID()
 }
 
 // GetLeaderAddr returns the leader address.
@@ -971,7 +979,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 
 func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId: c.svcDiscovery.GetClusterID(c.ctx),
+		ClusterId: c.svcDiscovery.GetClusterID(),
 	}
 }
 

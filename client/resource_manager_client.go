@@ -50,11 +50,12 @@ type ResourceManagerClient interface {
 }
 
 // resourceManagerClient gets the ResourceManager client of current PD leader.
-func (c *client) resourceManagerClient() rmpb.ResourceManagerClient {
-	if cc, err := c.svcDiscovery.GetOrCreateGRPCConn(c.GetLeaderAddr()); err == nil {
-		return rmpb.NewResourceManagerClient(cc)
+func (c *client) resourceManagerClient() (rmpb.ResourceManagerClient, error) {
+	cc, err := c.svcDiscovery.GetOrCreateGRPCConn(c.GetLeaderAddr())
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return rmpb.NewResourceManagerClient(cc), nil
 }
 
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
@@ -66,8 +67,12 @@ func (c *client) gRPCErrorHandler(err error) {
 
 // ListResourceGroups loads and returns all metadata of resource groups.
 func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error) {
+	cc, err := c.resourceManagerClient()
+	if err != nil {
+		return nil, err
+	}
 	req := &rmpb.ListResourceGroupsRequest{}
-	resp, err := c.resourceManagerClient().ListResourceGroups(ctx, req)
+	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
 		c.gRPCErrorHandler(err)
 		return nil, errs.ErrClientListResourceGroup.FastGenByArgs(err.Error())
@@ -80,10 +85,14 @@ func (c *client) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 }
 
 func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error) {
+	cc, err := c.resourceManagerClient()
+	if err != nil {
+		return nil, err
+	}
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 	}
-	resp, err := c.resourceManagerClient().GetResourceGroup(ctx, req)
+	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
 		c.gRPCErrorHandler(err)
 		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
@@ -103,34 +112,41 @@ func (c *client) ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.Resour
 	return c.putResourceGroup(ctx, metaGroup, modify)
 }
 
-func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup, typ actionType) (str string, err error) {
+func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup, typ actionType) (string, error) {
+	cc, err := c.resourceManagerClient()
+	if err != nil {
+		return "", err
+	}
 	req := &rmpb.PutResourceGroupRequest{
 		Group: metaGroup,
 	}
 	var resp *rmpb.PutResourceGroupResponse
 	switch typ {
 	case add:
-		resp, err = c.resourceManagerClient().AddResourceGroup(ctx, req)
+		resp, err = cc.AddResourceGroup(ctx, req)
 	case modify:
-		resp, err = c.resourceManagerClient().ModifyResourceGroup(ctx, req)
+		resp, err = cc.ModifyResourceGroup(ctx, req)
 	}
 	if err != nil {
 		c.gRPCErrorHandler(err)
-		return str, err
+		return "", err
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
-		return str, errors.Errorf("[resource_manager] %s", resErr.Message)
+		return "", errors.Errorf("[resource_manager] %s", resErr.Message)
 	}
-	str = resp.GetBody()
-	return
+	return resp.GetBody(), nil
 }
 
 func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error) {
+	cc, err := c.resourceManagerClient()
+	if err != nil {
+		return "", err
+	}
 	req := &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 	}
-	resp, err := c.resourceManagerClient().DeleteResourceGroup(ctx, req)
+	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {
 		c.gRPCErrorHandler(err)
 		return "", err
@@ -350,8 +366,12 @@ func (c *client) tryResourceManagerConnect(ctx context.Context, connection *reso
 		stream rmpb.ResourceManager_AcquireTokenBucketsClient
 	)
 	for i := 0; i < maxRetryTimes; i++ {
+		cc, err := c.resourceManagerClient()
+		if err != nil {
+			continue
+		}
 		cctx, cancel := context.WithCancel(ctx)
-		stream, err = c.resourceManagerClient().AcquireTokenBuckets(cctx)
+		stream, err = cc.AcquireTokenBuckets(cctx)
 		if err == nil && stream != nil {
 			connection.cancel = cancel
 			connection.ctx = cctx

@@ -23,10 +23,10 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/schedule/labeler"
 )
 
 type regionLabelTestSuite struct {
