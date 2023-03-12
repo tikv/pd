@@ -1127,6 +1127,11 @@ func (c *RaftCluster) GetNonWitnessVoterStores(region *core.RegionInfo) []*core.
 	return c.core.GetNonWitnessVoterStores(region)
 }
 
+// GetOptionalStoresForRegion returns all stores that can be used to store the region's peer.
+func (c *RaftCluster) GetOptionalStoresForRegion(region *core.RegionInfo) []*core.StoreInfo {
+	return c.core.GetOptionalStoresForRegion(region)
+}
+
 // GetFollowerStores returns all stores that contains the region's follower peer.
 func (c *RaftCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
 	return c.core.GetFollowerStores(region)

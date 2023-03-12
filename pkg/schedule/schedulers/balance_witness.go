@@ -52,6 +52,16 @@ const (
 	MaxBalanceWitnessBatchSize = 10
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	balanceWitnessScheduleCounter        = schedulerCounter.WithLabelValues(BalanceWitnessName, "schedule")
+	balanceWitnessNoWitnessRegionCounter = schedulerCounter.WithLabelValues(BalanceWitnessName, "no-witness-region")
+	balanceWitnessRegionHotCounter       = schedulerCounter.WithLabelValues(BalanceWitnessName, "region-hot")
+	balanceWitnessNoTargetStoreCounter   = schedulerCounter.WithLabelValues(BalanceWitnessName, "no-target-store")
+	balanceWitnessSkipCounter            = schedulerCounter.WithLabelValues(BalanceWitnessName, "skip")
+	balanceWitnessNewOpCounter           = schedulerCounter.WithLabelValues(BalanceWitnessName, "new-operator")
+)
+
 type balanceWitnessSchedulerConfig struct {
 	mu      syncutil.RWMutex
 	storage endpoint.ConfigStorage
@@ -228,35 +238,40 @@ func (b *balanceWitnessScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 		collector = plan.NewCollector(basePlan)
 	}
 	batch := b.conf.Batch
-	schedulerCounter.WithLabelValues(b.GetName(), "schedule").Inc()
+	balanceWitnessScheduleCounter.Inc()
 
 	opInfluence := b.opController.GetOpInfluence(cluster)
 	kind := constant.NewScheduleKind(constant.WitnessKind, constant.ByCount)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()
+	opts := cluster.GetOpts()
+
 	scoreFunc := func(store *core.StoreInfo) float64 {
 		return store.WitnessScore(solver.GetOpInfluence(store.GetID()))
 	}
-	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, b.filters, cluster.GetOpts(), collector, b.filterCounter), false, scoreFunc)
+	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, b.filters, opts, collector, b.filterCounter), false, scoreFunc)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
-	if sourceCandidate.hasStore() {
-		op := createTransferWitnessOperator(sourceCandidate, b, solver, usedRegions, collector)
-		if op != nil {
-			result = append(result, op)
-			if len(result) >= batch {
-				return result, collector.GetPlans()
+	for sourceCandidate.hasStore() {
+		if sourceCandidate.hasStore() {
+			op := createBalanceWitnessOperator(sourceCandidate, b, solver, usedRegions, collector)
+			if op != nil {
+				result = append(result, op)
+				if len(result) >= batch {
+					return result, collector.GetPlans()
+				}
+				makeInfluence(op, solver, usedRegions, sourceCandidate)
 			}
-			makeInfluence(op, solver, usedRegions, sourceCandidate)
 		}
 	}
+	b.filterCounter.Flush()
 	b.retryQuota.GC(sourceCandidate.stores)
 	return result, collector.GetPlans()
 }
 
-func createTransferWitnessOperator(cs *candidateStores, b *balanceWitnessScheduler,
+func createBalanceWitnessOperator(cs *candidateStores, b *balanceWitnessScheduler,
 	ssolver *solver, usedRegions map[uint64]struct{}, collector *plan.Collector) *operator.Operator {
 	store := cs.getStore()
 	ssolver.step++
@@ -265,8 +280,7 @@ func createTransferWitnessOperator(cs *candidateStores, b *balanceWitnessSchedul
 	ssolver.source, ssolver.target = store, nil
 	var op *operator.Operator
 	for i := 0; i < retryLimit; i++ {
-		schedulerCounter.WithLabelValues(b.GetName(), "total").Inc()
-		if op = b.transferWitnessOut(ssolver, collector); op != nil {
+		if op = b.balanceWitness(ssolver, collector); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {
 				break
 			}
@@ -286,18 +300,47 @@ func createTransferWitnessOperator(cs *candidateStores, b *balanceWitnessSchedul
 // transferWitnessOut transfers witness from the source store.
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the witness.
-func (b *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *plan.Collector) *operator.Operator {
+func (b *balanceWitnessScheduler) balanceWitness(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.region = filter.SelectOneRegion(solver.RandWitnessRegions(solver.SourceStoreID(), b.conf.Ranges),
 		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.region == nil {
 		log.Debug("store has no witness", zap.String("scheduler", b.GetName()), zap.Uint64("store-id", solver.SourceStoreID()))
-		schedulerCounter.WithLabelValues(b.GetName(), "no-witness-region").Inc()
+		balanceWitnessNoWitnessRegionCounter.Inc()
+		return nil
+	}
+	if solver.IsRegionHot(solver.region) {
+		log.Debug("region is hot region, ignore it", zap.String("scheduler", b.GetName()), zap.Uint64("region-id", solver.region.GetID()))
+		if collector != nil {
+			collector.Collect(plan.SetResource(solver.region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
+		}
+		balanceWitnessRegionHotCounter.Inc()
 		return nil
 	}
 	solver.step++
 	defer func() { solver.step-- }()
-	targets := solver.GetNonWitnessVoterStores(solver.region)
+
 	finalFilters := b.filters
+	targets := solver.GetOptionalStoresForRegion(solver.region)
+	if targets != nil {
+		targets := filter.NewCandidates(targets).FilterTarget(solver.GetOpts(), collector, b.filterCounter, finalFilters...).Stores
+		if len(targets) != 0 {
+			sort.Slice(targets, func(i, j int) bool {
+				iOp := solver.GetOpInfluence(targets[i].GetID())
+				jOp := solver.GetOpInfluence(targets[j].GetID())
+				return targets[i].WitnessScore(iOp) < targets[j].WitnessScore(jOp)
+			})
+			for _, solver.target = range targets {
+				if op := b.createMoveWitnessOperator(solver, collector); op != nil {
+					return op
+				}
+			}
+			balanceWitnessNoTargetStoreCounter.Inc()
+			log.Debug("store has no witness", zap.String("scheduler", b.GetName()), zap.Uint64("store-id", solver.SourceStoreID()))
+			return nil
+		}
+	}
+
+	targets = solver.GetNonWitnessVoterStores(solver.region)
 	opts := solver.GetOpts()
 	if witnessFilter := filter.NewPlacementWitnessSafeguard(b.GetName(), opts, solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source, solver.fit); witnessFilter != nil {
 		finalFilters = append(b.filters, witnessFilter)
@@ -309,25 +352,21 @@ func (b *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 		return targets[i].WitnessScore(iOp) < targets[j].WitnessScore(jOp)
 	})
 	for _, solver.target = range targets {
-		if op := b.createOperator(solver, collector); op != nil {
+		if op := b.createTransferWitnessOperator(solver, collector); op != nil {
 			return op
 		}
 	}
 	log.Debug("region has no target store", zap.String("scheduler", b.GetName()), zap.Uint64("region-id", solver.region.GetID()))
-	schedulerCounter.WithLabelValues(b.GetName(), "no-target-store").Inc()
+	balanceWitnessNoTargetStoreCounter.Inc()
 	return nil
 }
 
-// createOperator creates the operator according to the source and target store.
-// If the region is hot or the difference between the two stores is tolerable, then
-// no new operator need to be created, otherwise create an operator that transfers
-// the witness from the source store to the target store for the region.
-func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan.Collector) *operator.Operator {
+func (b *balanceWitnessScheduler) createMoveWitnessOperator(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.step++
 	defer func() { solver.step-- }()
 	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(b.GetName()), solver.targetStoreScore(b.GetName())
 	if !solver.shouldBalance(b.GetName()) {
-		schedulerCounter.WithLabelValues(b.GetName(), "skip").Inc()
+		balanceWitnessSkipCounter.Inc()
 		if collector != nil {
 			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 		}
@@ -335,18 +374,59 @@ func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 	}
 	solver.step++
 	defer func() { solver.step-- }()
-	op, err := operator.CreateMoveWitnessOperator(BalanceWitnessType, solver, solver.region, solver.SourceStoreID(), solver.TargetStoreID())
+	op, err := operator.CreateMoveWitnessOperator("move-witness", solver, solver.region, solver.SourceStoreID(), solver.TargetStoreID())
 	if err != nil {
-		log.Debug("fail to create balance witness operator", errs.ZapError(err))
+		log.Debug("fail to create move witness operator", errs.ZapError(err))
+		if collector != nil {
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
+		}
 		return nil
 	}
 	op.Counters = append(op.Counters,
-		schedulerCounter.WithLabelValues(b.GetName(), "new-operator"),
+		balanceWitnessNewOpCounter,
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
 		balanceDirectionCounter.WithLabelValues(b.GetName(), solver.SourceMetricLabel(), solver.TargetMetricLabel()),
 		b.counter.WithLabelValues("move-witness", solver.SourceMetricLabel()+"-out"),
 		b.counter.WithLabelValues("move-witness", solver.TargetMetricLabel()+"-in"),
+	)
+	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
+	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)
+	return op
+}
+
+// createOperator creates the operator according to the source and target store.
+// If the region is hot or the difference between the two stores is tolerable, then
+// no new operator need to be created, otherwise create an operator that transfers
+// the witness from the source store to the target store for the region.
+func (b *balanceWitnessScheduler) createTransferWitnessOperator(solver *solver, collector *plan.Collector) *operator.Operator {
+	solver.step++
+	defer func() { solver.step-- }()
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(b.GetName()), solver.targetStoreScore(b.GetName())
+	if !solver.shouldBalance(b.GetName()) {
+		balanceWitnessSkipCounter.Inc()
+		if collector != nil {
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
+		}
+		return nil
+	}
+	solver.step++
+	defer func() { solver.step-- }()
+	op, err := operator.CreateTransferWitnessOperator("transfer-witness", solver, solver.region, solver.SourceStoreID(), solver.TargetStoreID())
+	if err != nil {
+		log.Debug("fail to create transfer witness operator", errs.ZapError(err))
+		if collector != nil {
+			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusCreateOperatorFailed)))
+		}
+		return nil
+	}
+	op.Counters = append(op.Counters,
+		balanceWitnessNewOpCounter,
+	)
+	op.FinishedCounters = append(op.FinishedCounters,
+		balanceDirectionCounter.WithLabelValues(b.GetName(), solver.SourceMetricLabel(), solver.TargetMetricLabel()),
+		b.counter.WithLabelValues("transfer-witness", solver.SourceMetricLabel()+"-out"),
+		b.counter.WithLabelValues("transfer-witness", solver.TargetMetricLabel()+"-in"),
 	)
 	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
 	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)

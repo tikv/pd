@@ -116,17 +116,61 @@ func (suite *balanceWitnessSchedulerTestSuite) TestTransferWitnessOut() {
 			continue
 		}
 		if op := suite.schedule()[0]; op != nil {
+			suite.NotNil(op)
 			if _, ok := regions[op.RegionID()]; !ok {
 				suite.oc.SetOperator(op)
 				regions[op.RegionID()] = struct{}{}
 				from := op.Step(0).(operator.ChangePeerV2Enter).DemoteVoters[0].ToStore
-				to := op.Step(1).(operator.BatchSwitchWitness).ToWitnesses[0].StoreID
+				to := op.Step(3).(operator.BatchSwitchWitness).ToWitnesses[0].StoreID
 				suite.Equal(from, uint64(4))
 				targets[to]--
 			}
 		}
 	}
 	suite.Equal(3, len(regions))
+	for _, count := range targets {
+		suite.Zero(count)
+	}
+}
+
+func (suite *balanceWitnessSchedulerTestSuite) TestMoveWitness() {
+	// Stores:     1    2    3    4
+	// Witnesses:  7    8    9   12
+	suite.tc.AddWitnessStore(1, 7)
+	suite.tc.AddWitnessStore(2, 8)
+	suite.tc.AddWitnessStore(3, 9)
+	suite.tc.AddWitnessStore(4, 12)
+	suite.tc.SetTolerantSizeRatio(1)
+	for i := uint64(1); i <= 3; i++ {
+		suite.tc.AddLeaderRegionWithWitness(i, 3, []uint64{2, 4}, 4)
+	}
+	for i := uint64(4); i <= 7; i++ {
+		suite.tc.AddLeaderRegionWithWitness(i, 3, []uint64{1, 4}, 4)
+	}
+
+	// balance witness: 4->1, 4->2
+	regions := make(map[uint64]struct{})
+	targets := map[uint64]uint64{
+		1: 1,
+		2: 1,
+	}
+	for i := 0; i < 20; i++ {
+		if len(suite.schedule()) == 0 {
+			continue
+		}
+		if op := suite.schedule()[0]; op != nil {
+			suite.NotNil(op)
+			if _, ok := regions[op.RegionID()]; !ok {
+				suite.oc.SetOperator(op)
+				regions[op.RegionID()] = struct{}{}
+				from := op.Step(3).(operator.RemovePeer).FromStore
+				to := op.Step(0).(operator.AddLearner).ToStore
+				suite.Equal(from, uint64(4))
+				targets[to]--
+			}
+		}
+	}
+	suite.Equal(2, len(regions))
 	for _, count := range targets {
 		suite.Zero(count)
 	}

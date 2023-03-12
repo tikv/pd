@@ -271,18 +271,20 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 				{Id: 6, StoreId: 3, Role: metapb.PeerRole_Voter, IsWitness: true},
 				{Id: 5, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
-			OpMerge | OpRegion,
+			OpMerge | OpRegion | OpWitness,
 			false,
 			[]OpStep{
 				ChangePeerV2Enter{
 					DemoteVoters: []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
 				},
 				BatchSwitchWitness{
-					ToWitnesses:    []BecomeWitness{{PeerID: 3, StoreID: 3}},
 					ToNonWitnesses: []BecomeNonWitness{{PeerID: 2, StoreID: 2}},
 				},
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{{PeerID: 2, ToStore: 2, IsWitness: false}},
+				},
+				BatchSwitchWitness{
+					ToWitnesses: []BecomeWitness{{PeerID: 3, StoreID: 3}},
 				},
 			},
 		},
@@ -1249,6 +1251,138 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 			case BecomeNonWitness:
 				suite.Equal(step.StoreID, expectedSteps[i].(BecomeNonWitness).StoreID)
 				suite.Equal(step.PeerID, expectedSteps[i].(BecomeNonWitness).PeerID)
+			}
+		}
+	}
+}
+
+func (suite *createOperatorTestSuite) TestCreateTransferWitnessPeerOperator() {
+	type testCase struct {
+		originPeers   []*metapb.Peer // first is leader
+		kind          OpKind
+		expectedError bool
+		prepareSteps  []OpStep
+	}
+	testCases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			OpRegion | OpWitness,
+			false,
+			[]OpStep{
+				ChangePeerV2Enter{
+					DemoteVoters: []DemoteVoter{{ToStore: 3, PeerID: 3, IsWitness: true}},
+				},
+				BatchSwitchWitness{
+					ToNonWitnesses: []BecomeNonWitness{{StoreID: 3, PeerID: 3}},
+				},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{ToStore: 3, PeerID: 3}},
+				},
+				BatchSwitchWitness{
+					ToWitnesses: []BecomeWitness{{StoreID: 2, PeerID: 2}},
+				},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		region := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.originPeers}, testCase.originPeers[0])
+		op, err := CreateTransferWitnessOperator("test", suite.cluster, region, testCase.originPeers[2].StoreId, testCase.originPeers[1].StoreId)
+		suite.NoError(err)
+		suite.NotNil(op)
+		suite.Equal(testCase.kind, op.kind)
+
+		expectedSteps := testCase.prepareSteps
+		for i := 0; i < op.Len(); i++ {
+			switch step := op.Step(i).(type) {
+			case ChangePeerV2Enter:
+				suite.Len(step.PromoteLearners, len(expectedSteps[i].(ChangePeerV2Enter).PromoteLearners))
+				suite.Len(step.DemoteVoters, len(expectedSteps[i].(ChangePeerV2Enter).DemoteVoters))
+				for j, p := range expectedSteps[i].(ChangePeerV2Enter).PromoteLearners {
+					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
+				}
+				for j, d := range expectedSteps[i].(ChangePeerV2Enter).DemoteVoters {
+					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
+				}
+			case BecomeNonWitness:
+				suite.Equal(step.StoreID, expectedSteps[i].(BecomeNonWitness).StoreID)
+				suite.Equal(step.PeerID, expectedSteps[i].(BecomeNonWitness).PeerID)
+			case BecomeWitness:
+				suite.Equal(step.StoreID, expectedSteps[i].(BecomeWitness).StoreID)
+				suite.Equal(step.PeerID, expectedSteps[i].(BecomeWitness).PeerID)
+			}
+		}
+	}
+}
+
+func (suite *createOperatorTestSuite) TestCreateMoveWitnessPeerOperator() {
+	type testCase struct {
+		originPeers   []*metapb.Peer // first is leader
+		kind          OpKind
+		expectedError bool
+		prepareSteps  []OpStep
+	}
+	testCases := []testCase{
+		{
+			[]*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter, IsWitness: true},
+			},
+			OpRegion | OpWitness,
+			false,
+			[]OpStep{
+				AddLearner{ToStore: 4, IsWitness: true},
+				ChangePeerV2Enter{
+					PromoteLearners: []PromoteLearner{{ToStore: 4, PeerID: 4, IsWitness: true}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 3, PeerID: 3, IsWitness: true}},
+				},
+				ChangePeerV2Leave{
+					PromoteLearners: []PromoteLearner{{ToStore: 4, PeerID: 4, IsWitness: true}},
+					DemoteVoters:    []DemoteVoter{{ToStore: 3, PeerID: 3, IsWitness: true}},
+				},
+				RemovePeer{FromStore: 3, PeerID: 3},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		region := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.originPeers}, testCase.originPeers[0])
+		op, err := CreateMoveWitnessOperator("test", suite.cluster, region, testCase.originPeers[2].StoreId, 4)
+		suite.NoError(err)
+		suite.NotNil(op)
+		suite.Equal(testCase.kind, op.kind)
+
+		expectedSteps := testCase.prepareSteps
+		for i := 0; i < op.Len(); i++ {
+			switch step := op.Step(i).(type) {
+			case AddLearner:
+				suite.Equal(step.ToStore, expectedSteps[i].(AddLearner).ToStore)
+			case ChangePeerV2Enter:
+				suite.Len(step.PromoteLearners, len(expectedSteps[i].(ChangePeerV2Enter).PromoteLearners))
+				suite.Len(step.DemoteVoters, len(expectedSteps[i].(ChangePeerV2Enter).DemoteVoters))
+				for j, p := range expectedSteps[i].(ChangePeerV2Enter).PromoteLearners {
+					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
+				}
+				for j, d := range expectedSteps[i].(ChangePeerV2Enter).DemoteVoters {
+					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
+				}
+			case ChangePeerV2Leave:
+				suite.Len(step.PromoteLearners, len(expectedSteps[i].(ChangePeerV2Leave).PromoteLearners))
+				suite.Len(step.DemoteVoters, len(expectedSteps[i].(ChangePeerV2Leave).DemoteVoters))
+				for j, p := range expectedSteps[i].(ChangePeerV2Leave).PromoteLearners {
+					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
+				}
+				for j, d := range expectedSteps[i].(ChangePeerV2Leave).DemoteVoters {
+					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
+				}
+			case RemovePeer:
+				suite.Equal(step.FromStore, expectedSteps[i].(RemovePeer).FromStore)
+				suite.Equal(step.PeerID, expectedSteps[i].(RemovePeer).PeerID)
 			}
 		}
 	}
