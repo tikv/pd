@@ -107,6 +107,7 @@ type RuleFit struct {
 	// IsolationScore indicates at which level of labeling these Peers are
 	// isolated. A larger value is better.
 	IsolationScore float64 `json:"isolation-score"`
+	WitnessScore   float64 `json:"witness-score"`
 	// stores is the stores that the peers are placed in.
 	stores []*core.StoreInfo
 }
@@ -138,6 +139,10 @@ func compareRuleFit(a, b *RuleFit) int {
 	case a.IsolationScore < b.IsolationScore:
 		return -1
 	case a.IsolationScore > b.IsolationScore:
+		return 1
+	case a.WitnessScore > b.WitnessScore:
+		return -1
+	case a.WitnessScore < b.WitnessScore:
 		return 1
 	default:
 		return 0
@@ -333,7 +338,7 @@ func (w *fitWorker) updateOrphanPeers(index int) {
 }
 
 func newRuleFit(rule *Rule, peers []*fitPeer, supportWitness bool) *RuleFit {
-	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels)}
+	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels), WitnessScore: witnessScore(peers, supportWitness && rule.IsWitness)}
 	for _, p := range peers {
 		rf.Peers = append(rf.Peers, p.Peer)
 		rf.stores = append(rf.stores, p.store)
@@ -428,4 +433,15 @@ func stateScore(region *core.RegionInfo, peerID uint64) int {
 	default:
 		return 2
 	}
+}
+
+func witnessScore(peers []*fitPeer, fitWitness bool) float64 {
+	var score float64
+	if !fitWitness || len(peers) == 0 {
+		return 0
+	}
+	for _, p := range peers {
+		score += float64(p.store.GetWitnessCount())
+	}
+	return score
 }
