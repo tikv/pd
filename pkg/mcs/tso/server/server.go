@@ -690,7 +690,6 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 
 	var sig os.Signal
 	go func() {
-		defer logutil.LogPanic()
 		sig = <-sc
 		cancel()
 	}()
