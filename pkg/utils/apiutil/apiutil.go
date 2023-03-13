@@ -184,7 +184,7 @@ func PostJSON(client *http.Client, url string, data []byte) (*http.Response, err
 	return client.Do(req)
 }
 
-// GetJSON is used to send GET requst to specific url
+// GetJSON is used to send GET request to specific url
 func GetJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
 	if err != nil {

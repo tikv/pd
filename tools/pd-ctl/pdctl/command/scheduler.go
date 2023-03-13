@@ -26,7 +26,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/server/statistics"
+	"github.com/tikv/pd/pkg/statistics"
 )
 
 var (
