@@ -873,13 +873,13 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 func (gc *groupCostController) onRequestWait(
 	ctx context.Context, info RequestInfo,
 ) (*rmpb.Consumption, error) {
-	var err error
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
-	now := time.Now()
 	if !gc.burstable.Load() {
+		var err error
+		now := time.Now()
 	retryLoop:
 		for i := 0; i < maxRetry; i++ {
 			switch gc.mode {
