@@ -216,37 +216,6 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 
 const buffDuration = time.Millisecond * 300
 
-type testRequestInfo struct {
-	isWrite    bool
-	writeBytes uint64
-}
-
-func (ti *testRequestInfo) IsWrite() bool {
-	return ti.isWrite
-}
-
-func (ti *testRequestInfo) WriteBytes() uint64 {
-	return ti.writeBytes
-}
-
-type testResponseInfo struct {
-	cpu       time.Duration
-	readBytes uint64
-	succeed   bool
-}
-
-func (tri *testResponseInfo) ReadBytes() uint64 {
-	return tri.readBytes
-}
-
-func (tri *testResponseInfo) KVCPU() time.Duration {
-	return tri.cpu
-}
-
-func (tri *testResponseInfo) Succeed() bool {
-	return tri.succeed
-}
-
 type tokenConsumptionPerSecond struct {
 	rruTokensAtATime float64
 	wruTokensAtATime float64
@@ -254,33 +223,28 @@ type tokenConsumptionPerSecond struct {
 	waitDuration     time.Duration
 }
 
-func (t tokenConsumptionPerSecond) makeReadRequest() *testRequestInfo {
-	return &testRequestInfo{
-		isWrite:    false,
-		writeBytes: 0,
-	}
+func (t tokenConsumptionPerSecond) makeReadRequest() *controller.TestRequestInfo {
+	return controller.NewTestRequestInfo(false, 0)
 }
 
-func (t tokenConsumptionPerSecond) makeWriteRequest() *testRequestInfo {
-	return &testRequestInfo{
-		isWrite:    true,
-		writeBytes: uint64(t.wruTokensAtATime - 1),
-	}
+func (t tokenConsumptionPerSecond) makeWriteRequest() *controller.TestRequestInfo {
+	return controller.NewTestRequestInfo(true, uint64(t.wruTokensAtATime-1))
 }
 
-func (t tokenConsumptionPerSecond) makeReadResponse() *testResponseInfo {
-	return &testResponseInfo{
-		readBytes: uint64((t.rruTokensAtATime - 1) / 2),
-		cpu:       time.Duration(t.rruTokensAtATime/2) * time.Millisecond,
-	}
+func (t tokenConsumptionPerSecond) makeReadResponse() *controller.TestResponseInfo {
+	return controller.NewTestResponseInfo(
+		uint64((t.rruTokensAtATime-1)/2),
+		time.Duration(t.rruTokensAtATime/2)*time.Millisecond,
+		false,
+	)
 }
 
-func (t tokenConsumptionPerSecond) makeWriteResponse() *testResponseInfo {
-	return &testResponseInfo{
-		readBytes: 0,
-		cpu:       time.Duration(0),
-		succeed:   true,
-	}
+func (t tokenConsumptionPerSecond) makeWriteResponse() *controller.TestResponseInfo {
+	return controller.NewTestResponseInfo(
+		0,
+		time.Duration(0),
+		true,
+	)
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
@@ -767,7 +731,7 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	rres := testConfig.tcs.makeReadResponse()
 	for j := 0; j < testConfig.times; j++ {
 		controller.OnRequestWait(suite.ctx, suite.initGroups[0].Name, rreq)
-		controller.OnResponse(suite.ctx, suite.initGroups[0].Name, rreq, rres)
+		controller.OnResponse(suite.initGroups[0].Name, rreq, rres)
 		time.Sleep(100 * time.Microsecond)
 	}
 	time.Sleep(1 * time.Second)

@@ -951,3 +951,13 @@ func (c *ResourceGroupsController) CheckResourceGroupExist(name string) bool {
 	_, ok := c.groupsController.Load(name)
 	return ok
 }
+
+// This is used for test only.
+func (gc *groupCostController) getKVCalculator() *KVCalculator {
+	for _, calc := range gc.calculators {
+		if kvCalc, ok := calc.(*KVCalculator); ok {
+			return kvCalc
+		}
+	}
+	return nil
+}
