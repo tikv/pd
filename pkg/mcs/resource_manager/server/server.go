@@ -271,6 +271,7 @@ func (s *Server) initClient() error {
 }
 
 func (s *Server) startGRPCServer(l net.Listener) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
 	gs := grpc.NewServer()
@@ -282,6 +283,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	// it doesn't happen in a reasonable amount of time.
 	done := make(chan struct{})
 	go func() {
+		defer logutil.LogPanic()
 		log.Info("try to gracefully stop the server now")
 		gs.GracefulStop()
 		close(done)
@@ -300,6 +302,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 }
 
 func (s *Server) startHTTPServer(l net.Listener) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
 	handler, _ := SetUpRestHandler(s.service)
@@ -326,6 +329,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 }
 
 func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
 	mux := cmux.New(l)
