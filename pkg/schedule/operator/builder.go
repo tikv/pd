@@ -935,10 +935,9 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 	// these peer roles are not allowed to become leader.
 	switch peer.GetRole() {
 	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
-		return false
-	}
-
-	if peer.IsWitness && !b.isWitnessPromoteToVoter(peer) {
+		if b.isWitnessPromoteToVoter(peer) {
+			return true
+		}
 		return false
 	}
 
