@@ -61,7 +61,7 @@ var (
 	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
 	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
 	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
-	ErrNotFoundTSOADDR      = status.Errorf(codes.NotFound, "not found tso address")
+	ErrNotFoundTSOAddr      = status.Errorf(codes.NotFound, "not found tso address")
 )
 
 // GrpcServer wraps Server to provide grpc service.
@@ -188,7 +188,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		if s.IsAPIServiceMode() {
 			ok, forwardedHost, err := s.GetServicePrimaryAddr(ctx, "tso")
 			if !ok {
-				return ErrNotFoundTSOADDR
+				return ErrNotFoundTSOAddr
 			}
 			if err != nil {
 				return errors.WithStack(err)
@@ -251,17 +251,17 @@ type tsoRequest struct {
 	stream        pdpb.PD_TsoServer
 }
 
-func (s *GrpcServer) dispatchTSORequest(ctx context.Context, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error, workingMCS bool) {
+func (s *GrpcServer) dispatchTSORequest(ctx context.Context, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error, withTSOProto bool) {
 	tsoRequestChInterface, loaded := s.tsoDispatcher.LoadOrStore(forwardedHost, make(chan *tsoRequest, maxMergeTSORequests))
 	if !loaded {
 		tsDeadlineCh := make(chan deadline, 1)
-		go s.handleDispatcher(ctx, forwardedHost, tsoRequestChInterface.(chan *tsoRequest), tsDeadlineCh, doneCh, errCh, workingMCS)
+		go s.handleDispatcher(ctx, forwardedHost, tsoRequestChInterface.(chan *tsoRequest), tsDeadlineCh, doneCh, errCh, withTSOProto)
 		go watchTSDeadline(ctx, tsDeadlineCh)
 	}
 	tsoRequestChInterface.(chan *tsoRequest) <- request
 }
 
-func (s *GrpcServer) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error, workingMCS bool) {
+func (s *GrpcServer) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error, withTSOProto bool) {
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
 	defer s.tsoDispatcher.Delete(forwardedHost)
@@ -276,13 +276,13 @@ func (s *GrpcServer) handleDispatcher(ctx context.Context, forwardedHost string,
 		goto errHandling
 	}
 	log.Info("create tso forward stream", zap.String("forwarded-host", forwardedHost))
-	if workingMCS {
+	if withTSOProto {
 		forwardMCSStream, cancel, err = s.createMCSTSOForwardStream(client)
 	} else {
 		forwardStream, cancel, err = s.createTsoForwardStream(client)
 	}
 errHandling:
-	if err != nil || (forwardStream == nil && !workingMCS) || (forwardMCSStream == nil && workingMCS) {
+	if err != nil || (forwardStream == nil && !withTSOProto) || (forwardMCSStream == nil && withTSOProto) {
 		log.Error("create tso forwarding stream error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCCreateStream, err))
 		select {
 		case <-dispatcherCtx.Done():
@@ -1964,7 +1964,7 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
 	ok, forwardedHost, err := s.GetServicePrimaryAddr(ctx, "tso")
 	if !ok {
-		return pdpb.Timestamp{}, ErrNotFoundTSOADDR
+		return pdpb.Timestamp{}, ErrNotFoundTSOAddr
 	}
 	if err != nil {
 		return pdpb.Timestamp{}, errors.WithStack(err)
