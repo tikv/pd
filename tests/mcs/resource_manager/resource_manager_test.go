@@ -734,3 +734,47 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
 	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
 }
+
+func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
+	re := suite.Require()
+	cli := suite.client
+
+	for _, group := range suite.initGroups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+
+	ruConfig := &controller.RequestUnitConfig{
+		ReadBaseCost:    1,
+		ReadCostPerByte: 1,
+	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/fastCleanup", `return(true)`))
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig)
+	controller.Start(suite.ctx)
+
+	testConfig := struct {
+		tcs   tokenConsumptionPerSecond
+		times int
+	}{
+		tcs: tokenConsumptionPerSecond{
+			rruTokensAtATime: 100,
+		},
+		times: 100,
+	}
+	// Mock client binds one resource group and then closed
+	rreq := testConfig.tcs.makeReadRequest()
+	rres := testConfig.tcs.makeReadResponse()
+	for j := 0; j < testConfig.times; j++ {
+		controller.OnRequestWait(suite.ctx, suite.initGroups[0].Name, rreq)
+		controller.OnResponse(suite.ctx, suite.initGroups[0].Name, rreq, rres)
+		time.Sleep(100 * time.Microsecond)
+	}
+	time.Sleep(1 * time.Second)
+
+	re.False(controller.CheckResourceGroupExist(suite.initGroups[0].Name))
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
+	controller.Stop()
+	suite.cleanupResourceGroups()
+}
