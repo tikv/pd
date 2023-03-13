@@ -376,7 +376,7 @@ func (s *GrpcServer) processTSORequests(forwardStream pdpb.PD_TsoClient, forward
 		req := &tsopb.TsoRequest{
 			Header: &tsopb.RequestHeader{
 				ClusterId:       requests[0].request.GetHeader().GetClusterId(),
-				KeyspaceId:      utils.DefaultKeySpaceGroupID,
+				KeyspaceId:      utils.DefaultKeySpaceID,
 				KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
 			},
 			Count: count,
@@ -1986,7 +1986,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	forwardStream.Send(&tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
-			KeyspaceId:      utils.DefaultKeySpaceGroupID,
+			KeyspaceId:      utils.DefaultKeySpaceID,
 			KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
 		},
 		Count: 1,
