@@ -928,41 +928,6 @@ func (b *Builder) execBatchSwitchWitnesses(kind *OpKind) {
 	b.toNonWitness = newPeersMap()
 	b.toPromoteNonWitness = newPeersMap()
 	b.toWitness = newPeersMap()
-
-	/*
-		if len(b.toNonWitness) > 0 {
-			step := BatchSwitchWitness{
-				ToNonWitnesses: make([]BecomeNonWitness, 0, len(b.toNonWitness)),
-			}
-			for _, nw := range b.toNonWitness.IDs() {
-				peer := b.toNonWitness[nw]
-				step.ToNonWitnesses = append(step.ToNonWitnesses, BecomeNonWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId(), SendStore: b.originLeaderStoreID})
-			}
-			b.steps = append(b.steps, step)
-			b.toNonWitness = newPeersMap()
-			*kind |= OpRegion
-
-			for _, promote := range b.toPromoteNonWitness.IDs() {
-				peer := b.toPromoteNonWitness[promote]
-				peer.IsWitness = false
-				b.toPromote.Set(peer)
-			}
-			b.toPromoteNonWitness = newPeersMap()
-			b.execChangePeerV2(true, false)
-		}
-		if len(b.toWitness) > 0 {
-			step := BatchSwitchWitness{
-				ToWitnesses: make([]BecomeWitness, 0, len(b.toWitness)),
-			}
-			for _, w := range b.toWitness.IDs() {
-				peer := b.toWitness[w]
-				step.ToWitnesses = append(step.ToWitnesses, BecomeWitness{StoreID: peer.GetStoreId(), PeerID: peer.GetId()})
-			}
-			b.steps = append(b.steps, step)
-			b.toWitness = newPeersMap()
-			*kind |= OpWitness
-		}
-	*/
 }
 
 // check if the peer is allowed to become the leader.
