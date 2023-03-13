@@ -143,6 +143,11 @@ func (s *Server) GetBasicServer() bs.Server {
 	return s
 }
 
+// GetAddr returns the address of the server.
+func (s *Server) GetAddr() string {
+	return s.cfg.ListenAddr
+}
+
 // Run runs the TSO server.
 func (s *Server) Run() error {
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
@@ -449,11 +454,6 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	case <-streamCtx.Done():
 	}
 	<-done
-}
-
-// GetListenURL gets the listen URL.
-func (s *Server) GetListenURL() *url.URL {
-	return s.listenURL
 }
 
 // GetConfig gets the config.

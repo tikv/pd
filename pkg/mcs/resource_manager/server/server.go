@@ -99,6 +99,11 @@ func (s *Server) Context() context.Context {
 	return s.ctx
 }
 
+// GetAddr returns the server address.
+func (s *Server) GetAddr() string {
+	return s.cfg.ListenAddr
+}
+
 // Run runs the Resource Manager server.
 func (s *Server) Run() (err error) {
 	if err = s.initClient(); err != nil {
@@ -405,7 +410,7 @@ func (s *Server) startServer() (err error) {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource-manager", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }
