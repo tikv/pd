@@ -62,7 +62,9 @@ const (
 	// 1 RU = 3 millisecond CPU time
 	defaultCPUMsCost = 1. / 3
 
-	defaultDegradedModeWaitDuration = "1s"
+	// Because the resource manager has not been deployed in microservice mode,
+	// do not enable this function.
+	defaultDegradedModeWaitDuration = "0s"
 )
 
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.

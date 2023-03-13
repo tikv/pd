@@ -790,5 +790,6 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
 	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
 	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
-	re.Equal(expectedConfig.DegradedModeWaitDuration, config.DegradedModeWaitDuration)
+	// refer github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode, check with 1s.
+	re.Equal(time.Second, config.DegradedModeWaitDuration)
 }
