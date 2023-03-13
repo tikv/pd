@@ -61,6 +61,8 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode", `return(true)`))
+
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
 	suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
@@ -114,9 +116,11 @@ func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAdd
 }
 
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
+	re := suite.Require()
 	suite.client.Close()
 	suite.cluster.Destroy()
 	suite.clean()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode"))
 }
 
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {

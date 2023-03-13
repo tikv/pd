@@ -23,6 +23,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -47,7 +48,9 @@ const (
 	// 1 RU = 3 millisecond CPU time
 	defaultCPUMsCost = 1. / 3
 
-	defaultDegradedModeWaitDuration = time.Second
+	// Because the resource manager has not been deployed in microservice mode,
+	// do not enable this function.
+	defaultDegradedModeWaitDuration = time.Second * 0
 )
 
 // Config is the configuration for the resource manager.
@@ -94,6 +97,10 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	rmc.RequestUnit.Adjust()
 
 	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
+	failpoint.Inject("enableDegradedMode", func() {
+		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
+
+	})
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
