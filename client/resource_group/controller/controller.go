@@ -946,6 +946,8 @@ ret:
 	gc.mu.Unlock()
 }
 
+// CheckResourceGroupExist checks if groupsController map {rg.name -> resource group controller}
+// contains name. Used for test only.
 func (c *ResourceGroupsController) CheckResourceGroupExist(name string) bool {
 	_, ok := c.groupsController.Load(name)
 	return ok
