@@ -75,8 +75,8 @@ func (rg *ResourceGroup) Copy() *ResourceGroup {
 // Only used to patch the resource group when updating.
 // Note: the tokens is the delta value to patch.
 func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
-	rg.RLock()
-	defer rg.RUnlock()
+	rg.Lock()
+	defer rg.Unlock()
 
 	if metaGroup.GetMode() != rg.Mode {
 		return errors.New("only support reconfigure in same mode, maybe you should delete and create a new one")
@@ -117,8 +117,8 @@ func (rg *ResourceGroup) RequestRU(
 	neededTokens float64,
 	targetPeriodMs, clientUniqueID uint64,
 ) *rmpb.GrantedRUTokenBucket {
-	rg.RLock()
-	defer rg.RUnlock()
+	rg.Lock()
+	defer rg.Unlock()
 
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
