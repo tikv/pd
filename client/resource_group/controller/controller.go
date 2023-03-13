@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	pd "github.com/tikv/pd/client"
@@ -39,7 +40,7 @@ const (
 
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
-	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
+	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) error
 	// OnResponse is used to consume tokens after receiving response
 	OnResponse(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error
@@ -173,6 +174,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		stateUpdateTicker := time.NewTicker(defaultGroupStateUpdateInterval)
 		defer stateUpdateTicker.Stop()
 
+		failpoint.Inject("fastCleanup", func() {
+			cleanupTicker.Stop()
+			cleanupTicker = time.NewTicker(100 * time.Millisecond)
+		})
+
 		for {
 			select {
 			case <-c.loopCtx.Done():
@@ -261,11 +267,26 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 	for _, group := range groups {
 		latestGroups[group.GetName()] = struct{}{}
 	}
-	// TODO: maybe we should also clean up those resource groups that have not been used for a long time.
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		if _, ok := latestGroups[resourceGroupName]; !ok {
 			c.groupsController.Delete(key)
+			return true
+		}
+
+		gc := value.(*groupCostController)
+		// Check for stale resource groups, which will be deleted when consumption is continuously unchanged.
+		gc.mu.Lock()
+		latestConsumption := *gc.mu.consumption
+		gc.mu.Unlock()
+		if equalRU(latestConsumption, *gc.run.consumption) {
+			if gc.tombstone {
+				c.groupsController.Delete(resourceGroupName)
+				return true
+			}
+			gc.tombstone = true
+		} else {
+			gc.tombstone = false
 		}
 		return true
 	})
@@ -392,12 +413,13 @@ func (c *ResourceGroupsController) OnRequestWait(
 
 // OnResponse is used to consume tokens after receiving response
 func (c *ResourceGroupsController) OnResponse(_ context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) error {
-	tmp, ok := c.groupsController.Load(resourceGroupName)
-	if !ok {
+	if tmp, ok := c.groupsController.Load(resourceGroupName); ok {
+		gc := tmp.(*groupCostController)
+		gc.onResponse(req, resp)
+	} else {
 		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
 	}
-	gc := tmp.(*groupCostController)
-	gc.onResponse(req, resp)
+
 	return nil
 }
 
@@ -444,6 +466,8 @@ type groupCostController struct {
 		resourceTokens    map[rmpb.RawResourceType]*tokenCounter
 		requestUnitTokens map[rmpb.RequestUnitType]*tokenCounter
 	}
+
+	tombstone bool
 }
 
 type tokenCounter struct {
@@ -921,4 +945,11 @@ ret:
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
+}
+
+// CheckResourceGroupExist checks if groupsController map {rg.name -> resource group controller}
+// contains name. Used for test only.
+func (c *ResourceGroupsController) CheckResourceGroupExist(name string) bool {
+	_, ok := c.groupsController.Load(name)
+	return ok
 }

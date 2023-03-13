@@ -407,10 +407,7 @@ func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 		return false
 	}
 	peerFit := fit.GetRuleFit(peer.GetId())
-	if peerFit == nil || peerFit.Rule == nil {
-		return false
-	}
-	if peerFit.Rule.IsWitness {
+	if peerFit == nil || peerFit.Rule == nil || peerFit.Rule.IsWitness {
 		return false
 	}
 	switch peerFit.Rule.Role {
