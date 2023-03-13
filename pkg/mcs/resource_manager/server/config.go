@@ -99,7 +99,6 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
 	failpoint.Inject("enableDegradedMode", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
-
 	})
 }
 
