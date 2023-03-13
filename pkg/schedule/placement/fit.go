@@ -107,7 +107,7 @@ type RuleFit struct {
 	// IsolationScore indicates at which level of labeling these Peers are
 	// isolated. A larger value is better.
 	IsolationScore float64 `json:"isolation-score"`
-	WitnessScore   int64   `json:"witness-score"`
+	WitnessScore   int     `json:"witness-score"`
 	// stores is the stores that the peers are placed in.
 	stores []*core.StoreInfo
 }
@@ -435,13 +435,13 @@ func stateScore(region *core.RegionInfo, peerID uint64) int {
 	}
 }
 
-func witnessScore(peers []*fitPeer, fitWitness bool) int64 {
-	var score int64
+func witnessScore(peers []*fitPeer, fitWitness bool) int {
+	var score int
 	if !fitWitness || len(peers) == 0 {
 		return 0
 	}
 	for _, p := range peers {
-		score += int64(p.store.GetWitnessCount())
+		score += p.store.GetWitnessCount()
 	}
 	return score
 }
