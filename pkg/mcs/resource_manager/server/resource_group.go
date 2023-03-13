@@ -17,6 +17,7 @@ package server
 
 import (
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -28,6 +29,7 @@ import (
 
 // ResourceGroup is the definition of a resource group, for REST API.
 type ResourceGroup struct {
+	sync.RWMutex
 	Name string         `json:"name"`
 	Mode rmpb.GroupMode `json:"mode"`
 	// RU settings
@@ -73,6 +75,9 @@ func (rg *ResourceGroup) Copy() *ResourceGroup {
 // Only used to patch the resource group when updating.
 // Note: the tokens is the delta value to patch.
 func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
+	rg.RLock()
+	defer rg.RUnlock()
+
 	if metaGroup.GetMode() != rg.Mode {
 		return errors.New("only support reconfigure in same mode, maybe you should delete and create a new one")
 	}
@@ -112,6 +117,9 @@ func (rg *ResourceGroup) RequestRU(
 	neededTokens float64,
 	targetPeriodMs, clientUniqueID uint64,
 ) *rmpb.GrantedRUTokenBucket {
+	rg.RLock()
+	defer rg.RUnlock()
+
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
@@ -121,6 +129,9 @@ func (rg *ResourceGroup) RequestRU(
 
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
 func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
+	rg.RLock()
+	defer rg.RUnlock()
+
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
 		tokenBucket := &rmpb.TokenBucket{}
@@ -161,6 +172,9 @@ type GroupStates struct {
 
 // GetGroupStates get the token set of ResourceGroup.
 func (rg *ResourceGroup) GetGroupStates() *GroupStates {
+	rg.RLock()
+	defer rg.RUnlock()
+
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
 		tokens := &GroupStates{
