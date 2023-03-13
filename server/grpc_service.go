@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/tso"
@@ -374,8 +375,9 @@ func (s *GrpcServer) processTSORequests(forwardStream pdpb.PD_TsoClient, forward
 	if forwardMCSStream != nil {
 		req := &tsopb.TsoRequest{
 			Header: &tsopb.RequestHeader{
-				ClusterId: requests[0].request.GetHeader().GetClusterId(),
-				// TODO: set keyspace info
+				ClusterId:       requests[0].request.GetHeader().GetClusterId(),
+				KeyspaceId:      utils.DefaultKeySpaceGroupID,
+				KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
 			},
 			Count: count,
 			// TODO: support Local TSO proxy forwarding.
@@ -1983,8 +1985,9 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	done <- struct{}{}
 	forwardStream.Send(&tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId: s.clusterID,
-			// TODO: set keyspace info
+			ClusterId:       s.clusterID,
+			KeyspaceId:      utils.DefaultKeySpaceGroupID,
+			KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
 		},
 		Count: 1,
 	})
