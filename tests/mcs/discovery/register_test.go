@@ -49,7 +49,7 @@ func (suite *serverRegisterTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1) // TODO: use API Server instead of PD Server
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -66,8 +66,13 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 }
 
 func (suite *serverRegisterTestSuite) TestServerRegister() {
-	suite.checkServerRegister("tso")
-	suite.checkServerRegister("resource_manager")
+	// test register, primary and unregister when start tso and resource-manager with only one server
+	for i := 0; i < 3; i++ {
+		suite.checkServerRegister("tso")
+	}
+	for i := 0; i < 3; i++ {
+		suite.checkServerRegister("resource_manager")
+	}
 }
 
 func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
@@ -86,16 +91,19 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 	addr := s.GetAddr()
 	client := suite.pdLeader.GetEtcdClient()
+
+	// test API server discovery
 	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)
 	re.Equal(addr, endpoints[0])
 
-	// test API server discovery
-	exist, primary, err := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
-	re.NoError(err)
+	// test primary when only one server
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
 	re.Equal(primary, addr)
+	re.Equal(primary, s.GetPrimary().GetName())
 
+	// test API server discovery after unregister
 	cleanup()
 	endpoints, err = discovery.Discover(client, serviceName)
 	re.NoError(err)
