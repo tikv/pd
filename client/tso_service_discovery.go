@@ -17,7 +17,6 @@ package pd
 import (
 	"context"
 	"fmt"
-	"path"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +30,15 @@ import (
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+)
+
+const (
+	msServiceRootPath = "/ms"
+	tsoServiceName    = "tso"
+	// tspSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
+	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary".
+	// The <group-id> is 5 digits integer with leading zeros.
+	tspSvcDiscoveryFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d/primary"
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
@@ -73,22 +81,23 @@ type tsoServiceDiscovery struct {
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func newTSOServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, metacli MetaStorageClient,
 	clusterID uint64, keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) ServiceDiscovery {
-	tsoPrimaryPrefix := fmt.Sprintf("/ms/%d/tso", clusterID)
-	bc := &tsoServiceDiscovery{
+	c := &tsoServiceDiscovery{
 		ctx:               ctx,
 		cancel:            cancel,
 		wg:                wg,
 		metacli:           metacli,
 		keyspaceID:        keyspaceID,
 		clusterID:         clusterID,
-		primaryKey:        path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0), "primary"),
+		primaryKey:        fmt.Sprintf(tspSvcDiscoveryFormat, clusterID, keyspaceID),
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
 	}
-	bc.urls.Store(urls)
+	c.urls.Store(urls)
 
-	return bc
+	log.Info("created tso service discovery", zap.String("discovery-key", c.primaryKey))
+
+	return c
 }
 
 // Init initialize the concrete client underlying

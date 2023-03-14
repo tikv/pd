@@ -375,11 +375,11 @@ func (c *pdServiceDiscovery) initClusterID() error {
 }
 
 func (c *pdServiceDiscovery) updateServiceMode() {
-	leaderAdrr := c.getLeaderAddr()
-	if len(leaderAdrr) > 0 {
-		clusterInfo, err := c.getClusterInfo(c.ctx, leaderAdrr, c.option.timeout)
+	leaderAddr := c.getLeaderAddr()
+	if len(leaderAddr) > 0 {
+		clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
 		if err != nil {
-			log.Warn("[pd] failed to get cluster info fror the leader", zap.String("leader-addr", leaderAdrr), errs.ZapError(err))
+			log.Warn("[pd] failed to get cluster info fror the leader", zap.String("leader-addr", leaderAddr), errs.ZapError(err))
 			return
 		}
 		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
@@ -447,11 +447,11 @@ func (c *pdServiceDiscovery) getClusterInfo(ctx context.Context, url string, tim
 	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
 	if err != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
 	if clusterInfo.GetHeader().GetError() != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
 	return clusterInfo, nil
 }
