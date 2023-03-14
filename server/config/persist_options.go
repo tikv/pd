@@ -172,6 +172,13 @@ func (o *PersistOptions) SetPlacementRulesCacheEnabled(enabled bool) {
 	o.SetReplicationConfig(v)
 }
 
+// SetWitnessEnabled set EanbleWitness
+func (o *PersistOptions) SetWitnessEnabled(enabled bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableWitness = enabled
+	o.SetScheduleConfig(v)
+}
+
 // GetStrictlyMatchLabel returns whether check label strict.
 func (o *PersistOptions) GetStrictlyMatchLabel() bool {
 	return o.GetReplicationConfig().StrictlyMatchLabel

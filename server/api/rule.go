@@ -25,10 +25,10 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/unrolled/render"
 )
 

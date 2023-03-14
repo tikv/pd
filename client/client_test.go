@@ -55,7 +55,7 @@ func TestUpdateURLs(t *testing.T) {
 		}
 		return
 	}
-	cli := &pdBaseClient{option: newOption()}
+	cli := &pdServiceDiscovery{option: newOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs())
@@ -90,7 +90,7 @@ func TestGRPCDialOption(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
-	cli := &pdBaseClient{
+	cli := &pdServiceDiscovery{
 		checkMembershipCh: make(chan struct{}, 1),
 		ctx:               ctx,
 		cancel:            cancel,
