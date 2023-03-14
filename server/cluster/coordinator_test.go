@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -202,10 +203,10 @@ func TestDispatch(t *testing.T) {
 
 	// Wait for schedule and turn off balance.
 	waitOperator(re, co, 1)
-	testutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
+	operatorutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	waitOperator(re, co, 2)
-	testutil.CheckTransferLeader(re, co.opController.GetOperator(2), operator.OpKind(0), 4, 2)
+	operatorutil.CheckTransferLeader(re, co.opController.GetOperator(2), operator.OpKind(0), 4, 2)
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -359,7 +360,7 @@ func TestCheckRegion(t *testing.T) {
 	re.NoError(tc.addRegionStore(1, 1))
 	re.NoError(tc.addLeaderRegion(1, 2, 3))
 	checkRegionAndOperator(re, tc, co, 1, 1)
-	testutil.CheckAddPeer(re, co.opController.GetOperator(1), operator.OpReplica, 1)
+	operatorutil.CheckAddPeer(re, co.opController.GetOperator(1), operator.OpReplica, 1)
 	checkRegionAndOperator(re, tc, co, 1, 0)
 
 	r := tc.GetRegion(1)
@@ -582,7 +583,7 @@ func TestPeerState(t *testing.T) {
 
 	// Wait for schedule.
 	waitOperator(re, co, 1)
-	testutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
+	operatorutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 
 	region := tc.GetRegion(1).Clone()
 
