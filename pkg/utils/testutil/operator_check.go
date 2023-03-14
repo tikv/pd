@@ -16,7 +16,7 @@ package testutil
 
 import (
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/operator"
 )
 
 // CheckTransferLeader checks if the operator is to transfer leader between the specified source and target stores.

@@ -22,9 +22,9 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/movingaverage"
-	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"go.uber.org/zap"
 )
 
