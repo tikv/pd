@@ -67,7 +67,7 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 
 func (suite *serverRegisterTestSuite) TestServerRegister() {
 	suite.checkServerRegister("tso")
-	suite.checkServerRegister("resource-manager")
+	suite.checkServerRegister("resource_manager")
 }
 
 func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
@@ -79,7 +79,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	switch serviceName {
 	case "tso":
 		s, cleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
-	case "resource-manager":
+	case "resource_manager":
 		s, cleanup = mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints)
 	default:
 	}
