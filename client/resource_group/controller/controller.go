@@ -94,9 +94,9 @@ type ResourceGroupsController struct {
 	// When the token bucket of a resource group is updated, it will be sent to the channel.
 	tokenBucketUpdateChan chan *groupCostController
 
-	run struct {
-		currentRequests []*rmpb.TokenBucketRequest
-	}
+	// currentRequests is used to record the request and resource group.
+	// Currently, we don't do multiple `AcquireTokenBuckets`` at the same time, so there are no concurrency problems with `currentRequests`.
+	currentRequests []*rmpb.TokenBucketRequest
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -175,7 +175,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					c.updateRunState()
 					c.handleTokenBucketResponse(resp)
 				}
-				c.run.currentRequests = nil
+				c.currentRequests = nil
 			case <-cleanupTicker.C:
 				if err := c.cleanUpResourceGroup(c.loopCtx); err != nil {
 					log.Error("[resource group controller] clean up resource groups failed", zap.Error(err))
@@ -183,13 +183,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case <-stateUpdateTicker.C:
 				c.updateRunState()
 				c.updateAvgRequestResourcePerSec()
-				if len(c.run.currentRequests) == 0 {
+				if len(c.currentRequests) == 0 {
 					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, periodicReport /* select resource groups which should be reported periodically */)
 				}
 			case <-c.lowTokenNotifyChan:
 				c.updateRunState()
 				c.updateAvgRequestResourcePerSec()
-				if len(c.run.currentRequests) == 0 {
+				if len(c.currentRequests) == 0 {
 					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */)
 				}
 			case gc := <-c.tokenBucketUpdateChan:
@@ -291,17 +291,17 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 }
 
 func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, typ selectType) {
-	c.run.currentRequests = make([]*rmpb.TokenBucketRequest, 0)
+	c.currentRequests = make([]*rmpb.TokenBucketRequest, 0)
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
-			c.run.currentRequests = append(c.run.currentRequests, request)
+			c.currentRequests = append(c.currentRequests, request)
 		}
 		return true
 	})
-	if len(c.run.currentRequests) > 0 {
-		c.sendTokenBucketRequests(ctx, c.run.currentRequests, source)
+	if len(c.currentRequests) > 0 {
+		c.sendTokenBucketRequests(ctx, c.currentRequests, source)
 	}
 }
 
@@ -372,10 +372,10 @@ type groupCostController struct {
 		now             time.Time
 		lastRequestTime time.Time
 
-		// requestFailed is set true when sending token bucket request.
+		// requestInProgress is set true when sending token bucket request.
 		// And it is set false when reciving token bucket response.
 		// This triggers a retry attempt on the next tick.
-		requestFailed bool
+		requestInProgress bool
 
 		// targetPeriod stores the value of the TargetPeriodSetting setting at the
 		// last update.
@@ -643,7 +643,7 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 }
 
 func (gc *groupCostController) handleTokenBucketResponse(resp *rmpb.TokenBucketResponse) {
-	gc.run.requestFailed = false
+	gc.run.requestInProgress = false
 	gc.handleRespFunc(resp)
 	if !gc.run.initialRequestCompleted {
 		gc.run.initialRequestCompleted = true
@@ -749,7 +749,7 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 		ResourceGroupName: gc.ResourceGroup.GetName(),
 	}
 	// collect request resource
-	selected := gc.run.requestFailed
+	selected := gc.run.requestInProgress
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		requests := make([]*rmpb.RawResourceItem, 0, len(requestResourceLimitTypeList))
@@ -809,7 +809,7 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 
 	*gc.run.lastRequestConsumption = *gc.run.consumption
 	gc.run.lastRequestTime = time.Now()
-	gc.run.requestFailed = true
+	gc.run.requestInProgress = true
 	return req
 }
 
