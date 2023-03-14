@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -32,7 +33,7 @@ import (
 type minResolvedTSTestSuite struct {
 	suite.Suite
 	svr             *server.Server
-	cleanup         cleanUpFunc
+	cleanup         testutil.CleanupFunc
 	url             string
 	defaultInterval time.Duration
 }
