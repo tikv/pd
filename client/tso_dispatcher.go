@@ -159,6 +159,7 @@ func (c *tsoClient) tsCancelLoop() {
 		case <-ticker.C:
 			continue
 		case <-tsCancelLoopCtx.Done():
+			log.Info("exit tso requests cancel loop")
 			return
 		}
 	}

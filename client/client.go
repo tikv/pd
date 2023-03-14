@@ -366,6 +366,9 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 		return
 	}
 
+	log.Info("changing service mode", zap.String("old-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]),
+		zap.String("new-mode", pdpb.ServiceMode_name[int32(newMode)]))
+
 	if c.serviceMode != pdpb.ServiceMode_UNKNOWN_SVC_MODE {
 		c.tsoClient.Close()
 	}
@@ -383,7 +386,7 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	} else {
 		tsoSvcDiscovery := newTSOServiceDiscovery(ctx, cancel, wg, MetaStorageClient(c),
 			c.GetClusterID(c.ctx), c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
-		tsoClient := newTSOClient(c.ctx, cancel, wg, c.option, c.keyspaceID,
+		tsoClient := newTSOClient(ctx, cancel, wg, c.option, c.keyspaceID,
 			tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
 		if err := tsoSvcDiscovery.Init(); err != nil {
 			cancel()

@@ -128,6 +128,7 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 		case <-c.checkMembershipCh:
 		case <-time.After(memberUpdateInterval):
 		case <-ctx.Done():
+			log.Info("[tso] exit check member loop")
 			return
 		}
 		if err := c.updateMember(); err != nil {
