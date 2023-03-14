@@ -49,7 +49,8 @@ const (
 	// defaultGroupStateUpdateInterval is the interval to update the state of the resource groups.
 	defaultGroupStateUpdateInterval = 1 * time.Second
 	// targetPeriod indicate how long it is expected to cost token when acquiring token.
-	defaultTargetPeriod = 10 * time.Second
+	// According to the resource control Grafana panel and Prometheus sampling period, the period should be the factor of 15.
+	defaultTargetPeriod = 5 * time.Second
 )
 
 const (

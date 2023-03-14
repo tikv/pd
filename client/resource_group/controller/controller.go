@@ -184,13 +184,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.updateRunState()
 				c.updateAvgRequestResourcePerSec()
 				if len(c.run.currentRequests) == 0 {
-					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, 0 /* select resource groups which should be reported periodically */)
+					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, periodicReport /* select resource groups which should be reported periodically */)
 				}
 			case <-c.lowTokenNotifyChan:
 				c.updateRunState()
 				c.updateAvgRequestResourcePerSec()
 				if len(c.run.currentRequests) == 0 {
-					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, 1 /* select low tokens resource group */)
+					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */)
 				}
 			case gc := <-c.tokenBucketUpdateChan:
 				now := gc.run.now
