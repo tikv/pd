@@ -86,8 +86,8 @@ type tsoClient struct {
 }
 
 // newTSOClient returns a new TSO client.
-func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, option *option,
-	keyspaceID uint32, svcDiscovery ServiceDiscovery, eventSrc tsoAllocatorEventSource, factory tsoStreamBuilderFactory) *tsoClient {
+func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, option *option, keyspaceID uint32,
+	svcDiscovery ServiceDiscovery, eventSrc tsoAllocatorEventSource, factory tsoStreamBuilderFactory) *tsoClient {
 	c := &tsoClient{
 		ctx:                       ctx,
 		cancel:                    cancel,
@@ -108,20 +108,21 @@ func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitG
 	return c
 }
 
-func (c *tsoClient) setup() error {
-	if err := c.svcDiscovery.Init(); err != nil {
-		return err
-	}
+func (c *tsoClient) Setup() {
+	c.svcDiscovery.CheckMemberChanged()
+	c.updateTSODispatcher()
 
 	// Start the daemons.
 	c.wg.Add(2)
 	go c.tsoDispatcherCheckLoop()
 	go c.tsCancelLoop()
-	return nil
 }
 
 // Close closes the TSO client
 func (c *tsoClient) Close() {
+	c.cancel()
+	c.wg.Wait()
+
 	log.Info("close tso client")
 	c.tsoDispatcher.Range(func(_, dispatcherInterface interface{}) bool {
 		if dispatcherInterface != nil {
@@ -132,7 +133,6 @@ func (c *tsoClient) Close() {
 		}
 		return true
 	})
-	c.svcDiscovery.Close()
 }
 
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map

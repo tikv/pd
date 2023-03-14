@@ -240,13 +240,16 @@ func WithMaxErrorRetry(count int) ClientOption {
 var _ Client = (*client)(nil)
 
 type client struct {
-	keyspaceID  uint32
-	serviceMode int32
-	// svcDiscovery is for pd service discovery
-	svcDiscovery    ServiceDiscovery
-	tsoPDClient     *tsoClient
-	tsoMcsClient    *tsoClient
+	keyspaceID      uint32
+	svrUrls         []string
+	pdSvcDiscovery  ServiceDiscovery
 	tokenDispatcher *tokenDispatcher
+
+	// For service mode switching
+	mutex           sync.RWMutex
+	serviceMode     pdpb.ServiceMode
+	tsoClient       *tsoClient
+	tsoSvcDiscovery ServiceDiscovery
 
 	// For internal usage.
 	updateTokenConnectionCh chan struct{}
@@ -255,6 +258,7 @@ type client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+	tlsCfg *tlsutil.TLSConfig
 	option *option
 }
 
@@ -283,38 +287,7 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
 func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", svrAddrs))
-	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, 0, &security)
-	// Inject the client options.
-	for _, opt := range opts {
-		opt(c)
-	}
 
-	atomic.StoreInt32(&c.serviceMode, int32(pdpb.ServiceMode_UNKNOWN_SVC_MODE))
-	c.svcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	c.tsoPDClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID,
-		c.svcDiscovery, c.svcDiscovery.(tsoAllocatorEventSource), &pdTSOStreamBuilderFactory{})
-	if err := c.setup(); err != nil {
-		c.cancel()
-		return nil, err
-	}
-	if err := c.tsoPDClient.setup(); err != nil {
-		c.cancel()
-		return nil, err
-	}
-
-	tsoSvcDiscovery := newTSOServiceDiscovery(clientCtx, clientCancel, &c.wg, MetaStorageClient(c),
-		c.GetClusterID(c.ctx), keyspaceID, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	c.tsoMcsClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID,
-		tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
-	if err := c.tsoMcsClient.setup(); err != nil {
-		c.cancel()
-		return nil, err
-	}
-
-	return c, nil
-}
-
-func createClient(ctx context.Context, keyspaceID uint32, security *SecurityOption) (*client, context.Context, context.CancelFunc, *tlsutil.TLSConfig) {
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
@@ -331,20 +304,33 @@ func createClient(ctx context.Context, keyspaceID uint32, security *SecurityOpti
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
 		keyspaceID:              keyspaceID,
+		svrUrls:                 addrsToUrls(svrAddrs),
+		tlsCfg:                  tlsCfg,
 		option:                  newOption(),
 	}
 
-	return c, clientCtx, clientCancel, tlsCfg
+	// Inject the client options.
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, c.svrUrls, c.tlsCfg, c.option)
+	if err := c.setup(); err != nil {
+		c.cancel()
+		return nil, err
+	}
+
+	return c, nil
 }
 
 func (c *client) setup() error {
 	// Init the client base.
-	if err := c.svcDiscovery.Init(); err != nil {
+	if err := c.pdSvcDiscovery.Init(); err != nil {
 		return err
 	}
 
 	// Register callbacks
-	c.svcDiscovery.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.pdSvcDiscovery.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
@@ -359,9 +345,11 @@ func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.tsoPDClient.Close()
-	c.tsoMcsClient.Close()
-	c.svcDiscovery.Close()
+	c.tsoClient.Close()
+	if c.tsoSvcDiscovery != nil {
+		c.tsoSvcDiscovery.Close()
+	}
+	c.pdSvcDiscovery.Close()
 
 	if c.tokenDispatcher != nil {
 		tokenErr := errors.WithStack(errClosing)
@@ -370,17 +358,53 @@ func (c *client) Close() {
 	}
 }
 
-func (c *client) setServiceMode(mode pdpb.ServiceMode) {
-	newMode := int32(mode)
-	oldMode := atomic.SwapInt32(&c.serviceMode, newMode)
-	if oldMode != newMode {
-		log.Info("service mode changed", zap.String("old-mode", pdpb.ServiceMode_name[oldMode]),
-			zap.String("new-mode", pdpb.ServiceMode_name[newMode]))
+func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if newMode == c.serviceMode {
+		return
 	}
+
+	if c.serviceMode != pdpb.ServiceMode_UNKNOWN_SVC_MODE {
+		c.tsoClient.Close()
+	}
+
+	if c.serviceMode == pdpb.ServiceMode_API_SVC_MODE {
+		c.tsoSvcDiscovery.Close()
+	}
+
+	ctx, cancel := context.WithCancel(c.ctx)
+	wg := &sync.WaitGroup{}
+	if newMode == pdpb.ServiceMode_PD_SVC_MODE {
+		c.tsoClient = newTSOClient(ctx, cancel, wg, c.option, c.keyspaceID,
+			c.pdSvcDiscovery, c.pdSvcDiscovery.(tsoAllocatorEventSource), &pdTSOStreamBuilderFactory{})
+		c.tsoClient.Setup()
+	} else {
+		tsoSvcDiscovery := newTSOServiceDiscovery(ctx, cancel, wg, MetaStorageClient(c),
+			c.GetClusterID(c.ctx), c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
+		tsoClient := newTSOClient(c.ctx, cancel, wg, c.option, c.keyspaceID,
+			tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
+		if err := tsoSvcDiscovery.Init(); err != nil {
+			cancel()
+			c.serviceMode = pdpb.ServiceMode_UNKNOWN_SVC_MODE
+			log.Error("can't initialize tso service discovery", zap.Strings("svr-urls", c.svrUrls))
+			return
+		}
+		tsoClient.Setup()
+		c.tsoSvcDiscovery = tsoSvcDiscovery
+		c.tsoClient = tsoClient
+	}
+
+	log.Info("service mode changed", zap.String("old-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]),
+		zap.String("new-mode", pdpb.ServiceMode_name[int32(newMode)]))
+	c.serviceMode = newMode
 }
 
-func (c *client) getServiceMode() pdpb.ServiceMode {
-	return pdpb.ServiceMode(atomic.LoadInt32(&c.serviceMode))
+func (c *client) getTSOClient() *tsoClient {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return c.tsoClient
 }
 
 func (c *client) scheduleUpdateTokenConnection() {
@@ -392,17 +416,17 @@ func (c *client) scheduleUpdateTokenConnection() {
 
 // GetClusterID returns the ClusterID.
 func (c *client) GetClusterID(context.Context) uint64 {
-	return c.svcDiscovery.GetClusterID()
+	return c.pdSvcDiscovery.GetClusterID()
 }
 
 // GetLeaderAddr returns the leader address.
 func (c *client) GetLeaderAddr() string {
-	return c.svcDiscovery.GetServingAddr()
+	return c.pdSvcDiscovery.GetServingAddr()
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
 func (c *client) GetServiceDiscovery() ServiceDiscovery {
-	return c.svcDiscovery
+	return c.pdSvcDiscovery
 }
 
 // UpdateOption updates the client option.
@@ -450,7 +474,7 @@ func (c *client) leaderCheckLoop() {
 func (c *client) checkLeaderHealth(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
-	if client := c.svcDiscovery.GetServingEndpointClientConn(); client != nil {
+	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
 		healthCli := healthpb.NewHealthClient(client)
 		resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
 		rpcErr, ok := status.FromError(err)
@@ -488,7 +512,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 
 // leaderClient gets the client of current PD leader.
 func (c *client) leaderClient() pdpb.PDClient {
-	if client := c.svcDiscovery.GetServingEndpointClientConn(); client != nil {
+	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
 		return pdpb.NewPDClient(client)
 	}
 	return nil
@@ -498,7 +522,7 @@ func (c *client) leaderClient() pdpb.PDClient {
 // backup service endpoints randomly. Backup service endpoints are followers in a
 // quorum-based cluster or secondaries in a primary/secondary configured cluster.
 func (c *client) backupClientConn() (*grpc.ClientConn, string) {
-	addrs := c.svcDiscovery.GetBackupAddrs()
+	addrs := c.pdSvcDiscovery.GetBackupAddrs()
 	if len(addrs) < 1 {
 		return nil, ""
 	}
@@ -508,7 +532,7 @@ func (c *client) backupClientConn() (*grpc.ClientConn, string) {
 	)
 	for i := 0; i < len(addrs); i++ {
 		addr := addrs[rand.Intn(len(addrs))]
-		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
+		if cc, err = c.pdSvcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
 		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
@@ -549,11 +573,10 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req.keyspaceID = c.keyspaceID
 	req.dcLocation = dcLocation
 
-	var tsoClient *tsoClient
-	if c.getServiceMode() == pdpb.ServiceMode_API_SVC_MODE {
-		tsoClient = c.tsoMcsClient
-	} else {
-		tsoClient = c.tsoPDClient
+	tsoClient := c.getTSOClient()
+	if tsoClient == nil {
+		req.done <- errs.ErrClientGetTSO
+		return req
 	}
 
 	if err := tsoClient.dispatchRequest(dcLocation, req); err != nil {
@@ -640,7 +663,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 	var resp *pdpb.GetRegionResponse
 	for _, url := range memberURLs {
-		conn, err := c.svcDiscovery.GetOrCreateGRPCConn(url)
+		conn, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(url)
 		if err != nil {
 			log.Error("[pd] can't get grpc connection", zap.String("member-URL", url), errs.ZapError(err))
 			continue
@@ -661,7 +684,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 	if resp == nil {
 		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
-		c.svcDiscovery.ScheduleCheckMemberChanged()
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
@@ -1058,7 +1081,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 
 func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId: c.svcDiscovery.GetClusterID(),
+		ClusterId: c.pdSvcDiscovery.GetClusterID(),
 	}
 }
 
@@ -1251,7 +1274,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.svcDiscovery.ScheduleCheckMemberChanged()
+			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))
@@ -1262,5 +1285,5 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 // For test only.
 func (c *client) GetTSOAllocators() *sync.Map {
-	return c.tsoPDClient.GetTSOAllocators()
+	return c.getTSOClient().GetTSOAllocators()
 }

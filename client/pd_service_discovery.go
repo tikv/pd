@@ -319,6 +319,10 @@ func (c *pdServiceDiscovery) SetTSOLocalServAddrsUpdatedCallback(callback tsoLoc
 // SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
 // allocator leader is updated.
 func (c *pdServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc) {
+	addr := c.getLeaderAddr()
+	if len(addr) > 0 {
+		callback(addr)
+	}
 	c.tsoGlobalAllocLeaderUpdatedCb = callback
 }
 
