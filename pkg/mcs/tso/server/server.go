@@ -143,6 +143,11 @@ func (s *Server) GetBasicServer() bs.Server {
 	return s
 }
 
+// GetAddr returns the address of the server.
+func (s *Server) GetAddr() string {
+	return s.cfg.ListenAddr
+}
+
 // Run runs the TSO server.
 func (s *Server) Run() error {
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
@@ -451,11 +456,6 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	<-done
 }
 
-// GetListenURL gets the listen URL.
-func (s *Server) GetListenURL() *url.URL {
-	return s.listenURL
-}
-
 // GetConfig gets the config.
 func (s *Server) GetConfig() *Config {
 	return s.cfg
@@ -561,7 +561,7 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
+	if s.clusterID, err = utils.InitClusterID(s.ctx, s.etcdClient); err != nil {
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
