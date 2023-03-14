@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	util "github.com/tikv/pd/pkg/gogc"
 	"github.com/tikv/pd/pkg/memory"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	atomicutil "go.uber.org/atomic"
 	"go.uber.org/zap"
 )
@@ -72,6 +73,7 @@ func (t *memoryLimitTuner) tuning() {
 	if float64(r.HeapInuse)*ratio > float64(setMemoryLimit(-1)) {
 		if t.nextGCTriggeredByMemoryLimit.Load() && t.waitingReset.CompareAndSwap(false, true) {
 			go func() {
+				defer logutil.LogPanic()
 				memory.MemoryLimitGCLast.Store(time.Now())
 				memory.MemoryLimitGCTotal.Add(1)
 				setMemoryLimit(t.calcMemoryLimit(fallbackPercentage))

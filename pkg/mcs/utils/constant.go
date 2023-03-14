@@ -20,9 +20,6 @@ const (
 	// TCPNetworkStr is the string of tcp network
 	TCPNetworkStr = "tcp"
 
-	// ClusterIDPath is the path to store cluster id
-	ClusterIDPath = "/pd/cluster_id"
-
 	// DefaultEnableGRPCGateway is the default value of EnableGRPCGateway
 	DefaultEnableGRPCGateway = true
 	// DefaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
