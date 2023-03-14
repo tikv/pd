@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
@@ -340,6 +341,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 			// Send SyncMaxTSRequest to all allocator leaders concurrently.
 			wg.Add(1)
 			go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *syncResp) {
+				defer logutil.LogPanic()
 				defer wg.Done()
 				syncMaxTSResp := &syncResp{}
 				syncCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
