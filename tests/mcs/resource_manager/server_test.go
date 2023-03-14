@@ -21,16 +21,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/grpcutil"
-	"github.com/tikv/pd/pkg/mcs/discovery"
-	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
-	"github.com/tikv/pd/pkg/utils/tempurl"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/mcs"
 )
 
 func TestResourceManagerServer(t *testing.T) {
@@ -48,20 +44,12 @@ func TestResourceManagerServer(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	cfg, err := rm.NewTestDefaultConfig()
-	re.NoError(err)
-	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = tempurl.Alloc()
-
-	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
-	re.NoError(err)
+	s, cleanup := mcs.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr())
+	addr := s.GetAddr()
 	defer cleanup()
-	testutil.Eventually(re, func() bool {
-		return s.IsServing()
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
-	cc, err := grpcutil.GetClientConn(ctx, cfg.ListenAddr, nil)
+	cc, err := grpcutil.GetClientConn(ctx, addr, nil)
 	re.NoError(err)
 	defer cc.Close()
 
@@ -72,7 +60,7 @@ func TestResourceManagerServer(t *testing.T) {
 	re.ErrorContains(err, "resource group not found")
 
 	// Test registered REST HTTP Handler
-	url := cfg.ListenAddr + "/resource-manager/api/v1/config"
+	url := addr + "/resource-manager/api/v1/config"
 	{
 		resp, err := http.Get(url + "/groups")
 		re.NoError(err)
@@ -103,42 +91,4 @@ func TestResourceManagerServer(t *testing.T) {
 		re.NoError(err)
 		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"r_u\":{\"state\":{\"initialized\":false}}}}", string(respString))
 	}
-}
-
-func TestResourceManagerRegister(t *testing.T) {
-	re := require.New(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
-	re.NoError(err)
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-
-	leaderName := cluster.WaitLeader()
-	leader := cluster.GetServer(leaderName)
-
-	cfg, err := rm.NewTestDefaultConfig()
-	re.NoError(err)
-	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = tempurl.Alloc()
-
-	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
-	re.NoError(err)
-	defer cleanup()
-	testutil.Eventually(re, func() bool {
-		return s.IsServing()
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-
-	client := leader.GetEtcdClient()
-	endpoints, err := discovery.Discover(client, "resource_manager")
-	re.NoError(err)
-	re.Equal(cfg.ListenAddr, endpoints[0])
-
-	s.Close()
-	endpoints, err = discovery.Discover(client, "resource_manager")
-	re.NoError(err)
-	re.Empty(endpoints)
 }

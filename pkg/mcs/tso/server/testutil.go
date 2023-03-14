@@ -24,11 +24,11 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-// CleanupFunc closes test resource manager server(s) and deletes any files left behind.
+// CleanupFunc closes test pd server(s) and deletes any files left behind.
 type CleanupFunc func()
 
-// NewTestServer creates a resource manager server for testing.
-func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, CleanupFunc, error) {
+// NewTSOTestServer creates a tso server for testing.
+func NewTSOTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, CleanupFunc, error) {
 	// New zap logger
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
@@ -36,7 +36,7 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*S
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	s := NewServer(ctx, cfg)
+	s := CreateServer(ctx, cfg)
 	if err = s.Run(); err != nil {
 		return nil, nil, err
 	}
@@ -48,11 +48,12 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*S
 	return s, cleanup, nil
 }
 
-// NewTestDefaultConfig creates a new default config for testing.
-func NewTestDefaultConfig() (*Config, error) {
+// NewTSOTestDefaultConfig is only for test to create one pd.
+// Because PD client also needs this, so export here.
+func NewTSOTestDefaultConfig() (*Config, error) {
 	cmd := &cobra.Command{
-		Use:   "resource-manager",
-		Short: "Run the resource manager service",
+		Use:   "tso",
+		Short: "Run the tso service",
 	}
 	cfg := NewConfig()
 	flagSet := cmd.Flags()
