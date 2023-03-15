@@ -18,11 +18,8 @@ import (
 	"math"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/gogo/protobuf/proto"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/pingcap/log"
 )
 
 const (
@@ -35,7 +32,7 @@ const (
 	defaultLoanCoefficient = 2
 	maxAssignTokens        = math.MaxFloat64 / 1024 // assume max client connect is 1024
 	// defaultSlotStalePeriod indicate how long that a slot is considered stale if it is not acquire token request.
-	defaultSlotStalePeriod = 10 * time.Minute
+	defaultSlotStalePeriod = 1 * time.Minute
 )
 
 // GroupTokenBucket is a token bucket for a resource group.
@@ -55,7 +52,6 @@ func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
 	gtb.Tokens = state.Tokens
 	gtb.LastUpdate = state.LastUpdate
 	gtb.Initialized = state.Initialized
-	log.Info("update group token bucket state", zap.Any("state", state))
 }
 
 // TokenSlot is used to split a token bucket into multiple slots to
@@ -105,32 +101,46 @@ func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 	}
 }
 
-func (gts *GroupTokenBucketState) cleanupAssignTokenSum() {
+func (gts *GroupTokenBucketState) cleanupAssignTokenSum(cleanToken bool) {
 	gts.clientConsumptionTokensSum = 0
 	for _, slot := range gts.tokenSlots {
 		slot.requireTokensSum = 0
+		if cleanToken {
+			slot.tokenCapacity = 0
+			slot.lastTokenCapacity = 0
+		}
 	}
 }
 
 func (gts *GroupTokenBucketState) balanceSlotTokens(
 	clientUniqueID uint64,
 	settings *rmpb.TokenLimitSettings,
-	consumptionToken float64) {
+	consumptionToken, elapseTokens float64) {
 	now := time.Now()
+
 	slot, exist := gts.tokenSlots[clientUniqueID]
 	if !exist {
-		gts.cleanupAssignTokenSum()
+		if consumptionToken == 0 {
+			return
+		}
+		gts.cleanupAssignTokenSum(false)
 		slot = &TokenSlot{}
 		gts.tokenSlots[clientUniqueID] = slot
 	} else if gts.clientConsumptionTokensSum >= maxAssignTokens {
-		gts.cleanupAssignTokenSum()
+		gts.cleanupAssignTokenSum(false)
 	}
-	slot.lastUpdate = &now
-	slot.requireTokensSum += consumptionToken
-	gts.clientConsumptionTokensSum += consumptionToken
+
+	// Clean up slot that have not been used for a long time.
+	if consumptionToken == 0 && now.Sub(*slot.lastUpdate) >= defaultSlotStalePeriod {
+		delete(gts.tokenSlots, clientUniqueID)
+		gts.cleanupAssignTokenSum(false)
+		if len(gts.tokenSlots) == 0 {
+			return
+		}
+	}
 
 	evenRatio := 1 / float64(len(gts.tokenSlots))
-	if settings.GetBurstLimit() < 0 {
+	if settings.GetBurstLimit() <= 0 {
 		for _, slot := range gts.tokenSlots {
 			slot.settings = &rmpb.TokenLimitSettings{
 				FillRate:   uint64(float64(settings.GetFillRate()) * evenRatio),
@@ -140,35 +150,40 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		return
 	}
 
-retryLoop:
-	for clientID, slot := range gts.tokenSlots {
-		// Clean up those slots that have not been used for a long time.
-		if clientID != clientUniqueID && now.Sub(*slot.lastUpdate) >= defaultSlotStalePeriod {
-			delete(gts.tokenSlots, clientID)
-			evenRatio = 1 / float64(len(gts.tokenSlots))
-			gts.cleanupAssignTokenSum()
-			goto retryLoop
-		}
-
+	for _, slot := range gts.tokenSlots {
 		var ratio float64
 		if gts.clientConsumptionTokensSum == 0 || len(gts.tokenSlots) == 1 {
 			ratio = evenRatio
 		} else {
+			// In order to have fewer tokens available to clients that are currently consuming more.
+			// We have the following formula:
+			// client1: (1 - a/M + 1/M) * 1/M
+			// client2: (1 - b/M + 1/M) * 1/M
+			// ...
+			// clientN: (1 - n/M + 1/M) * 1/M
+			// Sum is:
+			// (M - (a+b+...+n)*M +1) * 1/M => (M - 1 + 1) * 1/M => 1
 			ratio = (1 - slot.requireTokensSum/gts.clientConsumptionTokensSum + evenRatio) * evenRatio
 		}
+
 		var (
 			fillRate    = float64(settings.GetFillRate()) * ratio
 			burstLimit  = float64(settings.GetBurstLimit()) * ratio
-			assignToken = gts.Tokens * ratio
+			assignToken = elapseTokens * ratio
 		)
 
-		slot.tokenCapacity = assignToken
-		slot.lastTokenCapacity = assignToken
+		slot.tokenCapacity += assignToken
+		slot.lastTokenCapacity += assignToken
 		slot.settings = &rmpb.TokenLimitSettings{
 			FillRate:   uint64(fillRate),
 			BurstLimit: int64(burstLimit),
 		}
 	}
+	if consumptionToken != 0 {
+		slot.lastUpdate = &now
+	}
+	slot.requireTokensSum += consumptionToken
+	gts.clientConsumptionTokensSum += consumptionToken
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
@@ -211,12 +226,19 @@ func (gtb *GroupTokenBucket) patch(tb *rmpb.TokenBucket) {
 }
 
 // init initializes the group token bucket.
-func (gtb *GroupTokenBucket) init(now time.Time) {
+func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
 	if gtb.Settings.FillRate == 0 {
 		gtb.Settings.FillRate = defaultRefillRate
 	}
 	if gtb.Tokens < defaultInitialTokens {
 		gtb.Tokens = defaultInitialTokens
+	}
+	// init slot
+	gtb.tokenSlots[clientID] = &TokenSlot{
+		settings:          gtb.Settings,
+		tokenCapacity:     gtb.Tokens,
+		lastTokenCapacity: gtb.Tokens,
+		lastUpdate:        &now,
 	}
 	gtb.LastUpdate = &now
 	gtb.Initialized = true
@@ -224,21 +246,26 @@ func (gtb *GroupTokenBucket) init(now time.Time) {
 
 // updateTokens updates the tokens and settings.
 func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clientUniqueID uint64, consumptionToken float64) {
+	var elapseTokens float64
 	if !gtb.Initialized {
-		gtb.init(now)
+		gtb.init(now, clientUniqueID)
 	} else if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
-		gtb.Tokens += float64(gtb.Settings.GetFillRate()) * delta.Seconds()
+		elapseTokens = float64(gtb.Settings.GetFillRate()) * delta.Seconds()
+		gtb.Tokens += elapseTokens
 		gtb.LastUpdate = &now
 	}
 	// Reloan when setting changed
 	if gtb.settingChanged && gtb.Tokens <= 0 {
 		gtb.Tokens = 0
+		elapseTokens = 0
+		gtb.cleanupAssignTokenSum(true)
 	}
 	if burst := float64(burstLimit); burst != 0 && gtb.Tokens > burst {
+		elapseTokens -= gtb.Tokens - burst
 		gtb.Tokens = burst
 	}
 	// Balance each slots.
-	gtb.balanceSlotTokens(clientUniqueID, gtb.Settings, consumptionToken)
+	gtb.balanceSlotTokens(clientUniqueID, gtb.Settings, consumptionToken, elapseTokens)
 }
 
 // request requests tokens from the group token bucket.
@@ -246,14 +273,15 @@ func (gtb *GroupTokenBucket) request(now time.Time,
 	neededTokens float64,
 	targetPeriodMs, clientUniqueID uint64,
 ) (*rmpb.TokenBucket, int64) {
-	gtb.updateTokens(now, gtb.Settings.GetBurstLimit(), clientUniqueID, neededTokens)
+	burstLimit := gtb.Settings.GetBurstLimit()
+	gtb.updateTokens(now, burstLimit, clientUniqueID, neededTokens)
 	// Serve by specific client.
 	slot, ok := gtb.tokenSlots[clientUniqueID]
 	if !ok {
-		return nil, 0
+		return &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{BurstLimit: burstLimit}}, 0
 	}
 	res, trickleDuration := slot.assignSlotTokens(neededTokens, targetPeriodMs)
-
+	// Update bucket tokens.
 	gtb.Tokens -= slot.lastTokenCapacity - slot.tokenCapacity
 
 	return res, trickleDuration

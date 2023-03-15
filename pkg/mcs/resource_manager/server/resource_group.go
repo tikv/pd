@@ -59,6 +59,9 @@ func (rg *ResourceGroup) String() string {
 
 // Copy copies the resource group.
 func (rg *ResourceGroup) Copy() *ResourceGroup {
+	rg.Lock()
+	defer rg.Unlock()
+
 	return &ResourceGroup{
 		Name: rg.Name,
 		Mode: rg.Mode,
@@ -104,7 +107,11 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	}
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
-		rg.RUSettings = NewRequestUnitSettings(group.GetRUSettings().GetRU())
+		if group.GetRUSettings() == nil {
+			rg.RUSettings = NewRequestUnitSettings(nil)
+		} else {
+			rg.RUSettings = NewRequestUnitSettings(group.GetRUSettings().GetRU())
+		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
 	}
@@ -134,11 +141,6 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
-		tokenBucket := &rmpb.TokenBucket{}
-		if rg.RUSettings != nil && rg.RUSettings.RU != nil {
-			tokenBucket.Settings = rg.RUSettings.RU.Settings
-			tokenBucket.Tokens = rg.RUSettings.RU.Tokens
-		}
 		group := &rmpb.ResourceGroup{
 			Name: rg.Name,
 			Mode: rmpb.GroupMode_RUMode,
@@ -189,11 +191,14 @@ func (rg *ResourceGroup) GetGroupStates() *GroupStates {
 
 // SetStatesIntoResourceGroup updates the state of resource group.
 func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
+	rg.Lock()
+	defer rg.Unlock()
+
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
 		if state := states.RU; state != nil {
-			rg.RUSettings.RU.setState(states.RU)
-			rg.RUSettings.RU.GroupTokenBucketState.tokenSlots = make(map[uint64]*TokenSlot)
+			rg.RUSettings.RU.setState(state)
+			log.Info("update group token bucket state", zap.String("name", rg.Name), zap.Any("state", state))
 		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
