@@ -673,7 +673,8 @@ type ScheduleConfig struct {
 	// A store's slowness must affected more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
 	SlowStoreEvictingAffectedStoreRatioThreshold float64 `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
 
-	StoreConfigSynced bool `toml:"store-config-synced" json:"store-config-synced,omitempty"`
+	// StoreConfigSynced is true if pd has synced store config to tikv.
+	StoreConfigSynced bool `toml:"store-config-synced" json:"store-config-synced,string,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -798,7 +799,7 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 
 	if !meta.IsDefined("store-config-synced") {
-		c.EnableDiagnostic = defaultStoreConfigSynced
+		c.StoreConfigSynced = defaultStoreConfigSynced
 	}
 
 	if !meta.IsDefined("enable-witness") {
