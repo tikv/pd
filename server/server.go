@@ -1678,8 +1678,8 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 }
 
 // GetServicePrimaryAddr returns the primary address for a given service.
+// Note: This function will only return primary address without judging it is alive.
 func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
-	// TODO: add ping to check if the primary is alive.
 	for i := 0; i < maxRetryTimes; i++ {
 		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
 			return v.(string), true
