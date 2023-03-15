@@ -203,12 +203,8 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 // disable split buckets
 func (o *PersistOptions) UseRaftV2() {
 	v := o.GetScheduleConfig().Clone()
-	if v.StoreConfigSynced {
-		return
-	}
 	v.MaxMergeRegionSize = 0
 	v.MaxMovableHotPeerSize = math.MaxInt64
-	v.StoreConfigSynced = true
 	o.SetScheduleConfig(v)
 }
 

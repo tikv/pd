@@ -1294,34 +1294,6 @@ func TestOfflineAndMerge(t *testing.T) {
 	}
 }
 
-func TestSwitchRaftKv2(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	tc := newTestCluster(ctx, opt)
-	stores := newTestStores(5, "2.0.0")
-	for _, s := range stores {
-		re.NoError(tc.putStoreLocked(s))
-	}
-	tc.storeConfigManager = config.NewTestStoreConfigManager([]string{"127.0.0.1:5"})
-
-	// case 1: switch from raft to kv
-	re.EqualValues(20, tc.opt.GetScheduleConfig().MaxMergeRegionSize)
-	go tc.runSyncConfig()
-	time.Sleep(time.Second)
-	re.True(tc.opt.GetScheduleConfig().StoreConfigSynced)
-	re.EqualValues(0, tc.opt.GetScheduleConfig().MaxMergeRegionSize)
-	re.EqualValues(math.MaxInt64, tc.opt.GetScheduleConfig().MaxMovableHotPeerSize)
-
-	// case 2: edit config will not rewrite again.
-	tc.opt.GetScheduleConfig().MaxMergeRegionSize = 20
-	time.Sleep(time.Second)
-	re.EqualValues(20, tc.opt.GetScheduleConfig().MaxMergeRegionSize)
-}
-
 func TestSyncConfig(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1359,6 +1331,9 @@ func TestSyncConfig(t *testing.T) {
 		re.Equal(v.updated, success)
 		if v.updated {
 			re.True(switchRaftV2)
+			tc.opt.UseRaftV2()
+			re.EqualValues(0, tc.opt.GetScheduleConfig().MaxMergeRegionSize)
+			re.EqualValues(math.MaxInt64, tc.opt.GetScheduleConfig().MaxMovableHotPeerSize)
 			success, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
 			re.True(success)
 			re.False(switchRaftV2)
