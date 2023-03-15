@@ -1971,18 +1971,10 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	if err != nil {
 		return pdpb.Timestamp{}, errors.WithStack(err)
 	}
-	client, err := s.getDelegateClient(ctx, forwardedHost)
+	forwardStream, err := s.getTSOForwardStream(ctx, forwardedHost)
 	if err != nil {
 		return pdpb.Timestamp{}, err
 	}
-	done := make(chan struct{})
-	ctx, cancel := context.WithTimeout(s.ctx, defaultTSOProxyTimeout)
-	go checkStream(ctx, cancel, done)
-	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
-	if err != nil {
-		return pdpb.Timestamp{}, err
-	}
-	done <- struct{}{}
 	forwardStream.Send(&tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
@@ -1996,6 +1988,27 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		return pdpb.Timestamp{}, err
 	}
 	return *ts.GetTimestamp(), nil
+}
+
+func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost string) (tsopb.TSO_TsoClient, error) {
+	v, ok := s.tsoClients.Load(forwardedHost)
+	if ok {
+		return v.(tsopb.TSO_TsoClient), nil
+	}
+	client, err := s.getDelegateClient(ctx, forwardedHost)
+	if err != nil {
+		return nil, err
+	}
+	done := make(chan struct{})
+	ctx, cancel := context.WithTimeout(s.ctx, defaultTSOProxyTimeout)
+	go checkStream(ctx, cancel, done)
+	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
+	if err != nil {
+		return nil, err
+	}
+	done <- struct{}{}
+	s.tsoClients.Store(forwardedHost, forwardStream)
+	return forwardStream, nil
 }
 
 // for CDC compatibility, we need to initialize config path to `globalConfigPath`
