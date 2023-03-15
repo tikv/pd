@@ -197,7 +197,7 @@ EXIT:
 	}
 
 	driver.Stop()
-	if len(clean) != 0 {
+	if len(clean) != 0 && clean[0] != nil {
 		clean[0]()
 	}
 
