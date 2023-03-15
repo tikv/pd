@@ -66,10 +66,6 @@ import (
 const (
 	// pdRootPath is the old path for storing the tso related root path.
 	pdRootPath = "/pd"
-	// tsoPrimaryPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary" in which
-	// <group-id> is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	tsoPrimaryPrefix = "/ms/0/tso"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -579,6 +575,7 @@ func (s *Server) startServer() (err error) {
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
+	tsoPrimaryPrefix := fmt.Sprintf("/ms/%d/tso", s.clusterID)
 	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
 	s.participant.InitInfo(uniqueName, path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
 	s.participant.SetMemberDeployPath(s.participant.ID())
