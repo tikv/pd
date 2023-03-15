@@ -67,11 +67,11 @@ const (
 	pdRootPath        = "/pd"
 	msServiceRootPath = "/ms"
 	tsoServiceName    = "tso"
-	// tspSvcDiscoveryPrefixFormat defines the key prefix for keyspace group primary election.
+	// tsoSvcDiscoveryPrefixFormat defines the key prefix for keyspace group primary election.
 	// This key prefix is in the format of "/ms/<cluster-id>/tso/<group-id>", and the entire key
 	// is in the format of "/ms/<cluster-id>/tso/<group-id>/primary". The <group-id> is 5 digits
 	// integer with leading zeros.
-	tspSvcDiscoveryPrefixFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d"
+	tsoSvcDiscoveryPrefixFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -576,7 +576,7 @@ func (s *Server) startServer() (err error) {
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
 	s.participant = member.NewParticipant(s.etcdClient)
-	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tspSvcDiscoveryPrefixFormat, s.clusterID, utils.DefaultKeyspaceID),
+	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tsoSvcDiscoveryPrefixFormat, s.clusterID, utils.DefaultKeyspaceID),
 		"primary", "keyspace group primary election", s.cfg.ListenAddr)
 
 	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)

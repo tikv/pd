@@ -363,17 +363,9 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.ListenAddr
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
-<<<<<<< HEAD
 	resourceManagerPrimaryPrefix := fmt.Sprintf("/ms/%d/resource_manager", s.clusterID)
-	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
-	s.participant.InitInfo(uniqueName, path.Join(resourceManagerPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
-	s.participant.SetMemberDeployPath(s.participant.ID())
-	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
-	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
-=======
 	s.participant = member.NewParticipant(s.etcdClient)
 	s.participant.InitInfo(uniqueName, uniqueID, path.Join(resourceManagerPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
->>>>>>> 1c1fc071 (Support service mode switching for tso service; use tsopb.Participant as the value type of tso primary)
 
 	s.service = &Service{
 		ctx:     s.ctx,
