@@ -16,6 +16,8 @@ package filter
 
 import (
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/slice"
@@ -171,12 +173,14 @@ type SnapshotSenderFilter struct {
 }
 
 // NewSnapshotSendFilter returns creates a RegionFilter that filters regions with witness peer on the specific store.
-func NewSnapshotSendFilter(stores []*core.StoreInfo) RegionFilter {
-	excludeStores := make(map[uint64]struct{}, 0)
+func NewSnapshotSendFilter(stores []*core.StoreInfo, level constant.PriorityLevel) RegionFilter {
+	senders := make(map[uint64]struct{}, 0)
 	for _, store := range stores {
-		excludeStores[store.GetID()] = struct{}{}
+		if store.IsAvailable(storelimit.SendSnapshot, level) && !store.IsBusy() {
+			senders[store.GetID()] = struct{}{}
+		}
 	}
-	return &SnapshotSenderFilter{senders: excludeStores}
+	return &SnapshotSenderFilter{senders: senders}
 }
 
 // Select returns ok if the region leader in the senders.

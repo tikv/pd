@@ -326,8 +326,6 @@ type StoreStateFilter struct {
 	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
-	// Set true if the scheduler involves any send snapshot operator.
-	SendSnapshot bool
 	// set if operator should not low
 	Level constant.PriorityLevel
 	// Reason is used to distinguish the reason of store state filter
@@ -500,7 +498,6 @@ const (
 	witnessTarget
 	scatterRegionTarget
 	fastFailoverTarget
-	sendSnapshot
 )
 
 func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.Config, store *core.StoreInfo) *plan.Status {
@@ -524,8 +521,6 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.Config, store 
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
 	case fastFailoverTarget:
 		funcs = []conditionFunc{f.isRemoved, f.isRemoving, f.isDown, f.isDisconnected, f.isBusy}
-	case sendSnapshot:
-		funcs = []conditionFunc{f.isBusy, f.exceedSendLimit, f.tooManySnapshots}
 	}
 	for _, cf := range funcs {
 		if status := cf(conf, store); !status.IsOK() {
@@ -545,12 +540,6 @@ func (f *StoreStateFilter) Source(conf config.Config, store *core.StoreInfo) (st
 	}
 	if f.MoveRegion {
 		if status = f.anyConditionMatch(regionSource, conf, store); !status.IsOK() {
-			return
-		}
-	}
-
-	if f.SendSnapshot {
-		if status = f.anyConditionMatch(sendSnapshot, conf, store); !status.IsOK() {
 			return
 		}
 	}

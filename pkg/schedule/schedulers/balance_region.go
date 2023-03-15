@@ -80,7 +80,7 @@ func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *
 		setOption(scheduler)
 	}
 	scheduler.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true},
+		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true, Level: constant.Medium},
 		filter.NewSpecialUseFilter(scheduler.GetName()),
 	}
 	return scheduler
@@ -132,9 +132,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	balanceRegionScheduleCounter.Inc()
 	stores := cluster.GetStores()
 	opts := cluster.GetOpts()
-	sendFilter := &filter.StoreStateFilter{ActionScope: s.GetName(), SendSnapshot: true}
-	sendStores := filter.SelectSourceStores(stores, []filter.Filter{sendFilter}, opts, collector, s.filterCounter)
-	snapshotFilter := filter.NewSnapshotSendFilter(sendStores)
+	snapshotFilter := filter.NewSnapshotSendFilter(stores, constant.Medium)
 	faultTargets := filter.SelectUnavailableTargetStores(stores, s.filters, opts, collector, s.filterCounter)
 	sourceStores := filter.SelectSourceStores(stores, s.filters, opts, collector, s.filterCounter)
 	opInfluence := s.opController.GetOpInfluence(cluster)
