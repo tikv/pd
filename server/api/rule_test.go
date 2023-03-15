@@ -35,7 +35,7 @@ import (
 type ruleTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -850,7 +850,7 @@ type regionRuleTestSuite struct {
 	suite.Suite
 	svr       *server.Server
 	grpcSvr   *server.GrpcServer
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 	stores    []*metapb.Store
 	regions   []*core.RegionInfo

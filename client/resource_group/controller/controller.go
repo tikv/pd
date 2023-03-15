@@ -33,7 +33,6 @@ import (
 
 const (
 	requestUnitConfigPath  = "resource_group/ru_config"
-	defaultMaxWaitDuration = time.Second
 	maxRetry               = 3
 	maxNotificationChanLen = 200
 )
@@ -71,6 +70,13 @@ type ResourceControlCreateOption func(controller *ResourceGroupsController)
 func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
 		controller.config.isSingleGroupByKeyspace = true
+	}
+}
+
+// WithMaxWaitDuration is the option to set the max wait duration for acquiring token buckets.
+func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.config.maxWaitDuration = d
 	}
 }
 
@@ -863,7 +869,7 @@ func (gc *groupCostController) onRequestWait(
 				res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
 				for typ, counter := range gc.run.resourceTokens {
 					if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
-						res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
+						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.maxWaitDuration, now, v))
 					}
 				}
 				if err = WaitReservations(ctx, now, res); err == nil {
@@ -873,7 +879,7 @@ func (gc *groupCostController) onRequestWait(
 				res := make([]*Reservation, 0, len(requestUnitLimitTypeList))
 				for typ, counter := range gc.run.requestUnitTokens {
 					if v := getRUValueFromConsumption(delta, typ); v > 0 {
-						res = append(res, counter.limiter.Reserve(ctx, defaultMaxWaitDuration, now, v))
+						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.maxWaitDuration, now, v))
 					}
 				}
 				if err = WaitReservations(ctx, now, res); err == nil {

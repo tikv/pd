@@ -33,7 +33,7 @@ import (
 type scheduleTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
