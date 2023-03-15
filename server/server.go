@@ -1666,6 +1666,7 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 }
 
 // GetServicePrimaryAddr returns the primary address for a given service.
+// TODO: use cache to protect the etcd
 func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (bool, string, error) {
 	// TODO: replace default group name after we make a decision.
 	key := path.Join("/ms/0", serviceName, fmt.Sprintf("%05d", 0), "primary")

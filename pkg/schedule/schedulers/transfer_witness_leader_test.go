@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 )
 
 func TestTransferWitnessLeader(t *testing.T) {
@@ -44,7 +44,7 @@ func TestTransferWitnessLeader(t *testing.T) {
 	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	re.True(sl.IsScheduleAllowed(tc))
 	ops, _ := sl.Schedule(tc, false)
-	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
 	re.False(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 1, []uint64{2, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 	re.True(ops[0].Step(0).(operator.TransferLeader).IsFinish(tc.MockRegionInfo(1, 2, []uint64{1, 3}, []uint64{}, &metapb.RegionEpoch{ConfVer: 0, Version: 0})))
 }
@@ -74,14 +74,14 @@ func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	tc.PutRegion(region.Clone(withPendingPeer))
 	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	ops, _ := sl.Schedule(tc, false)
-	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
 	ops, _ = sl.Schedule(tc, false)
 	re.Nil(ops)
 	// only down
 	tc.PutRegion(region.Clone(withDownPeer))
 	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	ops, _ = sl.Schedule(tc, false)
-	testutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 	// pending + down
 	tc.PutRegion(region.Clone(withPendingPeer, withDownPeer))
 	ops, _ = sl.Schedule(tc, false)
