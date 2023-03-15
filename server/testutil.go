@@ -36,11 +36,8 @@ import (
 	"go.etcd.io/etcd/embed"
 )
 
-// CleanupFunc closes test pd server(s) and deletes any files left behind.
-type CleanupFunc func()
-
 // NewTestServer creates a pd server for testing.
-func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, CleanupFunc, error) {
+func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, testutil.CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
