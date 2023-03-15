@@ -45,11 +45,14 @@ const (
 	consumptionsReportingThreshold = 100
 	extendedReportingPeriodFactor  = 4
 	// defaultGroupCleanupInterval is the interval to clean up the deleted resource groups in memory.
-	defaultGroupCleanupInterval = 10 * time.Minute
+	defaultGroupCleanupInterval = 5 * time.Minute
 	// defaultGroupStateUpdateInterval is the interval to update the state of the resource groups.
 	defaultGroupStateUpdateInterval = 1 * time.Second
 	// targetPeriod indicate how long it is expected to cost token when acquiring token.
-	defaultTargetPeriod = 10 * time.Second
+	// According to the resource control Grafana panel and Prometheus sampling period, the period should be the factor of 15.
+	defaultTargetPeriod = 5 * time.Second
+	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
+	defaultMaxWaitDuration = time.Second
 )
 
 const (
@@ -104,6 +107,7 @@ type Config struct {
 	CPUMsCost      RequestUnit
 	// The CPU statistics need to distinguish between different environments.
 	isSingleGroupByKeyspace bool
+	maxWaitDuration         time.Duration
 }
 
 // DefaultConfig returns the default configuration.
@@ -116,11 +120,12 @@ func DefaultConfig() *Config {
 // GenerateConfig generates the configuration by the given request unit configuration.
 func GenerateConfig(ruConfig *RequestUnitConfig) *Config {
 	cfg := &Config{
-		ReadBaseCost:   RequestUnit(ruConfig.ReadBaseCost),
-		ReadBytesCost:  RequestUnit(ruConfig.ReadCostPerByte),
-		WriteBaseCost:  RequestUnit(ruConfig.WriteBaseCost),
-		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
-		CPUMsCost:      RequestUnit(ruConfig.CPUMsCost),
+		ReadBaseCost:    RequestUnit(ruConfig.ReadBaseCost),
+		ReadBytesCost:   RequestUnit(ruConfig.ReadCostPerByte),
+		WriteBaseCost:   RequestUnit(ruConfig.WriteBaseCost),
+		WriteBytesCost:  RequestUnit(ruConfig.WriteCostPerByte),
+		CPUMsCost:       RequestUnit(ruConfig.CPUMsCost),
+		maxWaitDuration: defaultMaxWaitDuration,
 	}
 	return cfg
 }

@@ -33,15 +33,15 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/filter"
-	"github.com/tikv/pd/server/schedule/labeler"
-	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedule/schedulers"
-	"github.com/tikv/pd/server/statistics"
 )
 
 func TestStoreHeartbeat(t *testing.T) {
@@ -1294,6 +1294,34 @@ func TestOfflineAndMerge(t *testing.T) {
 	}
 }
 
+func TestSwitchRaftKv2(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(ctx, opt)
+	stores := newTestStores(5, "2.0.0")
+	for _, s := range stores {
+		re.NoError(tc.putStoreLocked(s))
+	}
+	tc.storeConfigManager = config.NewTestStoreConfigManager([]string{"127.0.0.1:5"})
+
+	// case 1: switch from raft to kv
+	re.EqualValues(20, tc.opt.GetScheduleConfig().MaxMergeRegionSize)
+	go tc.runSyncConfig()
+	time.Sleep(time.Second)
+	re.True(tc.opt.GetScheduleConfig().StoreConfigSynced)
+	re.EqualValues(0, tc.opt.GetScheduleConfig().MaxMergeRegionSize)
+	re.EqualValues(math.MaxInt64, tc.opt.GetScheduleConfig().MaxMovableHotPeerSize)
+
+	// case 2: edit config will not rewrite again.
+	tc.opt.GetScheduleConfig().MaxMergeRegionSize = 20
+	time.Sleep(time.Second)
+	re.EqualValues(20, tc.opt.GetScheduleConfig().MaxMergeRegionSize)
+}
+
 func TestSyncConfig(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1312,25 +1340,28 @@ func TestSyncConfig(t *testing.T) {
 		whiteList     []string
 		maxRegionSize uint64
 		updated       bool
-		switchRaftV2  bool
-	}{{
-		whiteList:     []string{},
-		maxRegionSize: uint64(144),
-		updated:       false,
-	}, {
-		whiteList:     []string{"127.0.0.1:5"},
-		maxRegionSize: uint64(10),
-		updated:       true,
-	}}
+	}{
+		{
+			whiteList:     []string{},
+			maxRegionSize: uint64(144),
+			updated:       false,
+		}, {
+			whiteList:     []string{"127.0.0.1:5"},
+			maxRegionSize: uint64(10),
+			updated:       true,
+		},
+	}
 
 	for _, v := range testdata {
 		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
 		re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
 		success, switchRaftV2 := syncConfig(tc.storeConfigManager, tc.GetStores())
 		re.Equal(v.updated, success)
-		if success {
-			success, switchRaftV2 := syncConfig(tc.storeConfigManager, tc.GetStores())
-			re.Equal(v.updated, success)
+		if v.updated {
+			re.True(switchRaftV2)
+			success, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
+			re.True(success)
+			re.False(switchRaftV2)
 		}
 		re.Equal(v.maxRegionSize, tc.GetStoreConfig().GetRegionMaxSize())
 	}

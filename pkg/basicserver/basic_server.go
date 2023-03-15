@@ -31,6 +31,8 @@ type MemberProvider interface {
 type Server interface {
 	// Name returns the unique Name for this server in the cluster.
 	Name() string
+	// GetAddr returns the address of the server.
+	GetAddr() string
 	// Context returns the context of server.
 	Context() context.Context
 	// Run runs the server.

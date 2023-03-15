@@ -52,9 +52,9 @@ import (
 
 const (
 	// resourceManagerPrimaryPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/ms/<cluster-id>/resource-manager/<group-id>/primary"
+	// The entire key is in the format of "/ms/<cluster-id>/resource_manager/<group-id>/primary"
 	// in which <group-id> is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	resourceManagerPrimaryPrefix = "/ms/0/resource-manager"
+	resourceManagerPrimaryPrefix = "/ms/0/resource_manager"
 )
 
 // Server is the resource manager server, and it implements bs.Server.
@@ -97,6 +97,11 @@ func (s *Server) Name() string {
 // Context returns the context.
 func (s *Server) Context() context.Context {
 	return s.ctx
+}
+
+// GetAddr returns the server address.
+func (s *Server) GetAddr() string {
+	return s.cfg.ListenAddr
 }
 
 // Run runs the Resource Manager server.
@@ -271,6 +276,7 @@ func (s *Server) initClient() error {
 }
 
 func (s *Server) startGRPCServer(l net.Listener) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
 	gs := grpc.NewServer()
@@ -282,6 +288,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	// it doesn't happen in a reasonable amount of time.
 	done := make(chan struct{})
 	go func() {
+		defer logutil.LogPanic()
 		log.Info("try to gracefully stop the server now")
 		gs.GracefulStop()
 		close(done)
@@ -300,6 +307,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 }
 
 func (s *Server) startHTTPServer(l net.Listener) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
 	handler, _ := SetUpRestHandler(s.service)
@@ -326,6 +334,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 }
 
 func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
+	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
 	mux := cmux.New(l)
@@ -351,12 +360,9 @@ func (s *Server) GetPrimary() bs.MemberProvider {
 }
 
 func (s *Server) startServer() (err error) {
-	// TODO: uncomment the following code to generate a unique cluster id from the given ClusterIDPath
-	// after we add rpc for the client to retrieve the cluster id from the server then use it in every
-	// request for verification.
-	// if s.clusterID, err = etcdutil.GetClusterID(s.etcdClient, utils.ClusterIDPath); err != nil {
-	// 	return err
-	// }
+	if s.clusterID, err = utils.InitClusterID(s.ctx, s.etcdClient); err != nil {
+		return err
+	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// The independent Resource Manager service still reuses PD version info since PD and Resource Manager are just
 	// different service modes provided by the same pd-server binary

@@ -51,7 +51,7 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*S
 // NewTestDefaultConfig creates a new default config for testing.
 func NewTestDefaultConfig() (*Config, error) {
 	cmd := &cobra.Command{
-		Use:   "resource_manager",
+		Use:   "resource-manager",
 		Short: "Run the resource manager service",
 	}
 	cfg := NewConfig()

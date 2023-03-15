@@ -173,6 +173,13 @@ func (o *PersistOptions) SetPlacementRulesCacheEnabled(enabled bool) {
 	o.SetReplicationConfig(v)
 }
 
+// SetWitnessEnabled set EanbleWitness
+func (o *PersistOptions) SetWitnessEnabled(enabled bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableWitness = enabled
+	o.SetScheduleConfig(v)
+}
+
 // GetStrictlyMatchLabel returns whether check label strict.
 func (o *PersistOptions) GetStrictlyMatchLabel() bool {
 	return o.GetReplicationConfig().StrictlyMatchLabel
@@ -192,14 +199,14 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 
 // UseRaftV2 set some config for raft store v2 by default temporary.
 // todo: remove this after raft store support this.
+// disable merge check
+// disable split buckets
 func (o *PersistOptions) UseRaftV2() {
 	v := o.GetScheduleConfig().Clone()
 	if v.StoreConfigSynced {
 		return
 	}
-	// disable merge check
 	v.MaxMergeRegionSize = 0
-	// disable split buckets
 	v.MaxMovableHotPeerSize = math.MaxInt64
 	v.StoreConfigSynced = true
 	o.SetScheduleConfig(v)

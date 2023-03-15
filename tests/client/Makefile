@@ -27,7 +27,7 @@ tidy:
 	git diff --quiet go.mod go.sum
 
 test: enable-codegen
-	CGO_ENABLED=1 go test -tags deadlock -race -cover || { $(MAKE) disable-codegen && exit 1; }
+	CGO_ENABLED=1 go test -v -tags deadlock -race -cover || { $(MAKE) disable-codegen && exit 1; }
 	$(MAKE) disable-codegen
 
 basic-test:

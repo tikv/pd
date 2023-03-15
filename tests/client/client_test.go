@@ -102,7 +102,7 @@ func TestClientLeaderChange(t *testing.T) {
 
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints)
-	innerCli, ok := cli.(interface{ GetBaseClient() pd.BaseClient })
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	re.True(ok)
 
 	var ts1, ts2 uint64
@@ -118,14 +118,14 @@ func TestClientLeaderChange(t *testing.T) {
 	re.True(cluster.CheckTSOUnique(ts1))
 
 	leader := cluster.GetLeader()
-	waitLeader(re, innerCli.GetBaseClient(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	err = cluster.GetServer(leader).Stop()
 	re.NoError(err)
 	leader = cluster.WaitLeader()
 	re.NotEmpty(leader)
 
-	waitLeader(re, innerCli.GetBaseClient(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
 
 	// Check TS won't fall back after leader changed.
 	testutil.Eventually(re, func() bool {
@@ -142,7 +142,7 @@ func TestClientLeaderChange(t *testing.T) {
 
 	// Check URL list.
 	cli.Close()
-	urls := innerCli.GetBaseClient().GetURLs()
+	urls := innerCli.GetServiceDiscovery().GetURLs()
 	sort.Strings(urls)
 	sort.Strings(endpoints)
 	re.Equal(endpoints, urls)
@@ -288,14 +288,14 @@ func TestTSOAllocatorLeader(t *testing.T) {
 		allocatorLeaderMap[dcLocation] = pdName
 	}
 	cli := setupCli(re, ctx, endpoints)
-	innerCli, ok := cli.(interface{ GetBaseClient() pd.BaseClient })
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	re.True(ok)
 
 	// Check allocator leaders URL map.
 	cli.Close()
-	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(innerCli.GetBaseClient()) {
+	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(cli.(pd.TSOClient)) {
 		if dcLocation == tso.GlobalDCLocation {
-			urls := innerCli.GetBaseClient().GetURLs()
+			urls := innerCli.GetServiceDiscovery().GetURLs()
 			sort.Strings(urls)
 			sort.Strings(endpoints)
 			re.Equal(endpoints, urls)
@@ -512,7 +512,7 @@ func requestGlobalAndLocalTSO(
 	wg.Wait()
 }
 
-func getTSOAllocatorServingEndpointURLs(c pd.BaseClient) map[string]string {
+func getTSOAllocatorServingEndpointURLs(c pd.TSOClient) map[string]string {
 	allocatorLeaders := make(map[string]string)
 	c.GetTSOAllocators().Range(func(dcLocation, url interface{}) bool {
 		allocatorLeaders[dcLocation.(string)] = url.(string)
@@ -666,7 +666,7 @@ func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, o
 	return cli
 }
 
-func waitLeader(re *require.Assertions, cli pd.BaseClient, leader string) {
+func waitLeader(re *require.Assertions, cli pd.ServiceDiscovery, leader string) {
 	testutil.Eventually(re, func() bool {
 		cli.ScheduleCheckMemberChanged()
 		return cli.GetServingAddr() == leader
@@ -1163,7 +1163,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	physicallyDestroyedStoreID := store.GetId()
 
 	// Get a physically destroyed and offline store
-	// It should be Tombstone(become Tombstone automically) or Offline
+	// It should be Tombstone(become Tombstone automatically) or Offline
 	n, err = suite.client.GetStore(context.Background(), physicallyDestroyedStoreID)
 	suite.NoError(err)
 	if n != nil { // store is still offline and physically destroyed
