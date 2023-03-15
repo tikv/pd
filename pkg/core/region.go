@@ -919,7 +919,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			if idx >= 0 {
 				ol = append(ol[:idx], ol[idx+1:]...)
 			}
-			r.tree.remove(origin)
+			r.tree.remove(origin, false)
 			// Update the RegionInfo in the regionItem.
 			item.RegionInfo = region
 		} else {
@@ -937,7 +937,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 
 	var overlaps []*RegionInfo
 	if rangeChanged {
-		overlaps = r.tree.update(item, withOverlaps, ol...)
+		overlaps = r.tree.update(item, false, withOverlaps, ol...)
 		for _, old := range overlaps {
 			delete(r.regions, old.GetID())
 		}
@@ -971,13 +971,13 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 	r.subRegions[region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, isWitness bool) {
 		store, ok := peersMap[storeID]
 		if !ok {
 			store = newRegionTree()
 			peersMap[storeID] = store
 		}
-		store.update(item, false)
+		store.update(item, isWitness, false)
 	}
 
 	// Add to leaders and followers.
@@ -985,17 +985,17 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
 			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item)
+			setPeer(r.leaders, storeID, item, peer.GetIsWitness())
 		} else {
 			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item)
+			setPeer(r.followers, storeID, item, peer.GetIsWitness())
 		}
 	}
 
 	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
 			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item)
+			setPeer(peersMap, storeID, item, peer.GetIsWitness())
 		}
 	}
 	// Add to learners.
@@ -1050,7 +1050,7 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	r.t.Lock()
 	defer r.t.Unlock()
 	// Remove from tree and regions.
-	r.tree.remove(region)
+	r.tree.remove(region, false)
 	delete(r.regions, region.GetID())
 }
 
@@ -1082,11 +1082,11 @@ func (r *RegionsInfo) removeRegionFromSubTreeLocked(region *RegionInfo) {
 	// Remove from leaders and followers.
 	for _, peer := range region.GetMeta().GetPeers() {
 		storeID := peer.GetStoreId()
-		r.leaders[storeID].remove(region)
-		r.followers[storeID].remove(region)
-		r.learners[storeID].remove(region)
-		r.witnesses[storeID].remove(region)
-		r.pendingPeers[storeID].remove(region)
+		r.leaders[storeID].remove(region, peer.GetIsWitness())
+		r.followers[storeID].remove(region, peer.GetIsWitness())
+		r.learners[storeID].remove(region, peer.GetIsWitness())
+		r.witnesses[storeID].remove(region, peer.GetIsWitness())
+		r.pendingPeers[storeID].remove(region, peer.GetIsWitness())
 	}
 	delete(r.subRegions, region.GetMeta().GetId())
 }

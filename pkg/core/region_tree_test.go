@@ -129,9 +129,9 @@ func TestRegionTreeStat(t *testing.T) {
 	re.Equal(int64(4), tree.totalSize)
 	updateNewItem(tree, newRegionWithStat("b", "e", 5, 6))
 	re.Equal(int64(6), tree.totalSize)
-	tree.remove(newRegionWithStat("a", "b", 2, 2))
+	tree.remove(newRegionWithStat("a", "b", 2, 2), false)
 	re.Equal(int64(5), tree.totalSize)
-	tree.remove(newRegionWithStat("f", "g", 1, 2))
+	tree.remove(newRegionWithStat("f", "g", 1, 2), false)
 	re.Equal(int64(5), tree.totalSize)
 }
 
@@ -174,7 +174,7 @@ func TestRegionTree(t *testing.T) {
 	re.Equal(regionB, tree.searchPrev([]byte("c")))
 	re.Equal(regionA, tree.searchPrev([]byte("b")))
 
-	tree.remove(regionC)
+	tree.remove(regionC, false)
 	updateNewItem(tree, regionD)
 	re.Nil(tree.search([]byte{}))
 	re.Equal(regionA, tree.search([]byte("a")))
@@ -202,7 +202,7 @@ func TestRegionTree(t *testing.T) {
 	re.Equal(region0, tree.search([]byte{}))
 	anotherRegion0 := newRegionItem([]byte{}, []byte("a")).RegionInfo
 	anotherRegion0.meta.Id = 123
-	tree.remove(anotherRegion0)
+	tree.remove(anotherRegion0, false)
 	re.Equal(region0, tree.search([]byte{}))
 
 	// overlaps with 0, A, B, C.
@@ -356,7 +356,7 @@ func TestRandomRegionDiscontinuous(t *testing.T) {
 
 func updateNewItem(tree *regionTree, region *RegionInfo) {
 	item := &regionItem{RegionInfo: region}
-	tree.update(item, false)
+	tree.update(item, false, false)
 }
 
 func checkRandomRegion(re *require.Assertions, tree *regionTree, regions []*RegionInfo, ranges []KeyRange) {

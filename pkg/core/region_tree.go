@@ -107,12 +107,14 @@ func (t *regionTree) overlaps(item *regionItem) []*regionItem {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo {
+func (t *regionTree) update(item *regionItem, witness_based_stats bool, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo {
 	region := item.RegionInfo
-	t.totalSize += region.approximateSize
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
-	t.totalWriteBytesRate += regionWriteBytesRate
-	t.totalWriteKeysRate += regionWriteKeysRate
+	if !witness_based_stats {
+		t.totalSize += region.approximateSize
+		t.totalWriteBytesRate += regionWriteBytesRate
+		t.totalWriteKeysRate += regionWriteKeysRate
+	}
 
 	if !withOverlaps {
 		overlaps = t.overlaps(item)
@@ -130,10 +132,12 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 			zap.Uint64("region-id", old.GetID()),
 			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(old.GetMeta())),
 			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
-		t.totalSize -= old.approximateSize
-		regionWriteBytesRate, regionWriteKeysRate = old.GetWriteRate()
-		t.totalWriteBytesRate -= regionWriteBytesRate
-		t.totalWriteKeysRate -= regionWriteKeysRate
+		if !witness_based_stats {
+			t.totalSize -= old.approximateSize
+			regionWriteBytesRate, regionWriteKeysRate = old.GetWriteRate()
+			t.totalWriteBytesRate -= regionWriteBytesRate
+			t.totalWriteKeysRate -= regionWriteKeysRate
+		}
 	}
 
 	return result
@@ -155,7 +159,7 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 // remove removes a region if the region is in the tree.
 // It will do nothing if it cannot find the region or the found region
 // is not the same with the region.
-func (t *regionTree) remove(region *RegionInfo) {
+func (t *regionTree) remove(region *RegionInfo, witness_based_stats bool) {
 	if t.length() == 0 {
 		return
 	}
@@ -165,10 +169,12 @@ func (t *regionTree) remove(region *RegionInfo) {
 		return
 	}
 
-	t.totalSize -= result.GetApproximateSize()
-	regionWriteBytesRate, regionWriteKeysRate := result.GetWriteRate()
-	t.totalWriteBytesRate -= regionWriteBytesRate
-	t.totalWriteKeysRate -= regionWriteKeysRate
+	if !witness_based_stats {
+		t.totalSize -= result.GetApproximateSize()
+		regionWriteBytesRate, regionWriteKeysRate := result.GetWriteRate()
+		t.totalWriteBytesRate -= regionWriteBytesRate
+		t.totalWriteKeysRate -= regionWriteKeysRate
+	}
 	t.tree.Delete(item)
 }
 
