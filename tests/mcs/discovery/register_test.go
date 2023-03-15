@@ -90,7 +90,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	re.Equal(addr, endpoints[0])
 
 	// test primary when only one server
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(serviceName)
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
 	re.Equal(primary, addr)
 	re.Equal(primary, s.GetPrimary().GetName())
@@ -109,7 +109,7 @@ func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
 
 func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName string, serverNum int) {
 	re := suite.Require()
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(serviceName)
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx,serviceName)
 	re.False(exist)
 	re.Empty(primary)
 
@@ -117,14 +117,14 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	for i := 0; i < serverNum; i++ {
 		s, cleanup := suite.addServer(serviceName)
 		defer cleanup()
-		primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(serviceName)
+		primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx,serviceName)
 		re.True(exist)
 		re.Equal(primary, s.GetPrimary().GetName())
 		serverMap[s.GetAddr()] = s
 	}
 
 	// close old primary
-	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(serviceName)
+	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx,serviceName)
 	re.True(exist)
 	serverMap[oldPrimary].Close()
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
@@ -136,7 +136,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	re.Len(endpoints, serverNum-1)
 
 	// test primary changed
-	newPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(serviceName)
+	newPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx,serviceName)
 	re.True(exist)
 	re.NotEqual(oldPrimary, newPrimary)
 }
