@@ -43,7 +43,7 @@ import (
 type operatorTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -166,7 +166,7 @@ func (suite *operatorTestSuite) TestMergeRegionOperator() {
 type transferRegionOperatorTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
