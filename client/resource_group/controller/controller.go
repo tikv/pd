@@ -516,7 +516,7 @@ func newGroupCostController(
 	gc := &groupCostController{
 		ResourceGroup:             group,
 		mainCfg:                   mainCfg,
-		successfulRequestDuration: successfulTokenRequestDuration,
+		successfulRequestDuration: successfulRequestDuration,
 		failedRequestCounter:      failedRequestCounter,
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
