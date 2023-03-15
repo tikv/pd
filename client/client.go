@@ -369,15 +369,13 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	log.Info("changing service mode", zap.String("old-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]),
 		zap.String("new-mode", pdpb.ServiceMode_name[int32(newMode)]))
 
-	if oldTSOCli := c.getTSOClient(); oldTSOCli != nil {
-		oldTSOCli.Close()
-	}
-
-	if c.serviceMode == pdpb.ServiceMode_API_SVC_MODE {
-		c.tsoSvcDiscovery.Close()
+	if newMode == pdpb.ServiceMode_UNKNOWN_SVC_MODE {
+		log.Warn("intend to switch to unknown service mode. do nothing")
+		return
 	}
 
 	var newTSOCli *tsoClient
+	tsoSvcDiscovery := c.tsoSvcDiscovery
 	ctx, cancel := context.WithCancel(c.ctx)
 	wg := &sync.WaitGroup{}
 
@@ -386,19 +384,28 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 			c.pdSvcDiscovery, c.pdSvcDiscovery.(tsoAllocatorEventSource), &pdTSOStreamBuilderFactory{})
 		newTSOCli.Setup()
 	} else {
-		tsoSvcDiscovery := newTSOServiceDiscovery(ctx, cancel, wg, MetaStorageClient(c),
+		tsoSvcDiscovery = newTSOServiceDiscovery(ctx, cancel, wg, MetaStorageClient(c),
 			c.GetClusterID(c.ctx), c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 		newTSOCli = newTSOClient(ctx, cancel, wg, c.option, c.keyspaceID,
 			tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
 		if err := tsoSvcDiscovery.Init(); err != nil {
 			cancel()
-			c.serviceMode = pdpb.ServiceMode_UNKNOWN_SVC_MODE
-			log.Error("can't initialize tso service discovery", zap.Strings("svr-urls", c.svrUrls))
+			log.Error("failed to initialize tso service discovery. keep the current service mode",
+				zap.Strings("svr-urls", c.svrUrls), zap.String("current-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]), zap.Error(err))
 			return
 		}
 		newTSOCli.Setup()
-		c.tsoSvcDiscovery = tsoSvcDiscovery
 	}
+
+	// cleanup the old tso client
+	if oldTSOCli := c.getTSOClient(); oldTSOCli != nil {
+		oldTSOCli.Close()
+	}
+	if c.serviceMode == pdpb.ServiceMode_API_SVC_MODE {
+		c.tsoSvcDiscovery.Close()
+	}
+
+	c.tsoSvcDiscovery = tsoSvcDiscovery
 	c.tsoClient.Store(newTSOCli)
 
 	log.Info("service mode changed", zap.String("old-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]),
