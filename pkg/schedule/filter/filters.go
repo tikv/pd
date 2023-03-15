@@ -437,15 +437,6 @@ func (f *StoreStateFilter) exceedAddLimit(_ config.Config, store *core.StoreInfo
 	return statusOK
 }
 
-func (f *StoreStateFilter) exceedSendLimit(_ config.Config, store *core.StoreInfo) *plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.SendSnapshot, f.Level) {
-		f.Reason = storeStateSendSnapshotLimit
-		return statusStoreSendSnapshotLimit
-	}
-	f.Reason = storeStateOK
-	return statusOK
-}
-
 func (f *StoreStateFilter) tooManySnapshots(conf config.Config, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && (uint64(store.GetSendingSnapCount()) > conf.GetMaxSnapshotCount() ||
 		uint64(store.GetReceivingSnapCount()) > conf.GetMaxSnapshotCount()) {

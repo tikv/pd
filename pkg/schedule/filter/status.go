@@ -35,7 +35,6 @@ var (
 	statusStorePendingPeerThrottled = plan.NewStatus(plan.StatusStorePendingPeerThrottled)
 	statusStoreAddLimit             = plan.NewStatus(plan.StatusStoreAddLimitThrottled)
 	statusStoreRemoveLimit          = plan.NewStatus(plan.StatusStoreRemoveLimitThrottled)
-	statusStoreSendSnapshotLimit    = plan.NewStatus(plan.StatusStoreSendSnapshotLimitThrottled)
 
 	// store config limitation
 	statusStoreRejectLeader = plan.NewStatus(plan.StatusStoreRejectLeader)

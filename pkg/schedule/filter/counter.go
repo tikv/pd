@@ -123,7 +123,6 @@ const (
 	storeStateBusy
 	storeStateExceedRemoveLimit
 	storeStateExceedAddLimit
-	storeStateSendSnapshotLimit
 	storeStateTooManySnapshot
 	storeStateTooManyPendingPeer
 	storeStateRejectLeader
@@ -153,7 +152,6 @@ var filters = [filtersLen]string{
 	"store-state-busy-filter",
 	"store-state-exceed-remove-limit-filter",
 	"store-state-exceed-add-limit-filter",
-	"store-state-send-snapshot-limit-filter",
 	"store-state-too-many-snapshots-filter",
 	"store-state-too-many-pending-peers-filter",
 	"store-state-reject-leader-filter",

@@ -52,6 +52,7 @@ var (
 	hotSchedulerAbnormalReplicaCounter         = schedulerCounter.WithLabelValues(HotRegionName, "abnormal_replica")
 	hotSchedulerCreateOperatorFailedCounter    = schedulerCounter.WithLabelValues(HotRegionName, "create_operator_failed")
 	hotSchedulerNewOperatorCounter             = schedulerCounter.WithLabelValues(HotRegionName, "new_operator")
+	hotSchedulerSnapshotSenderLimit            = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
 
 	hotSchedulerMoveLeaderCounter     = schedulerCounter.WithLabelValues(HotRegionName, moveLeader.String())
 	hotSchedulerMovePeerCounter       = schedulerCounter.WithLabelValues(HotRegionName, movePeer.String())
@@ -625,16 +626,21 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			return region.GetStorePeer(srcStoreID) == nil
 		}
 	}
-
+	snapshotFilter := filter.NewSnapshotSendFilter(bs.GetStores(), constant.Medium)
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
 		for _, mainPeerStat := range bs.filterHotPeers(srcStore) {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
-			} else if bs.opTy == movePeer && bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
-				hotSchedulerNeedSplitBeforeScheduleCounter.Inc()
-				continue
+			} else if bs.opTy == movePeer {
+				if bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
+					hotSchedulerNeedSplitBeforeScheduleCounter.Inc()
+					continue
+				} else if !snapshotFilter.Select(bs.cur.region).IsOK() {
+					hotSchedulerSnapshotSenderLimit.Inc()
+					continue
+				}
 			}
 			bs.cur.mainPeerStat = mainPeerStat
 
