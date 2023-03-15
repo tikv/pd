@@ -30,6 +30,7 @@ const (
 
 // client errors
 var (
+	ErrClientGetProtoClient   = errors.Normalize("failed to get proto client, %s", errors.RFCCodeText("PD:client:ErrClientGetProtoClient"))
 	ErrClientCreateTSOStream  = errors.Normalize("create TSO stream failed, %s", errors.RFCCodeText("PD:client:ErrClientCreateTSOStream"))
 	ErrClientGetTSOTimeout    = errors.Normalize("get TSO timeout", errors.RFCCodeText("PD:client:ErrClientGetTSOTimeout"))
 	ErrClientGetTSO           = errors.Normalize("get TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
