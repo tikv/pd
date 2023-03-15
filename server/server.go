@@ -99,6 +99,11 @@ const (
 	PDMode = "PD"
 	// APIServiceMode represents that server is in API service mode.
 	APIServiceMode = "API service"
+
+	// maxRetryTimes is the max retry times for getting primary addr.
+	maxRetryTimes = 50
+	// retryInterval is the interval to retry.
+	retryInterval = 100 * time.Millisecond
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1674,9 +1679,16 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 
 // GetServicePrimaryAddr returns the primary address for a given service.
 func (s *Server) GetServicePrimaryAddr(serviceName string) (string, bool) {
-	// TODO: add ping to check if the primary is alive and retry.
-	if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
-		return v.(string), true
+	// TODO: add ping to check if the primary is alive.
+	for i := 0; i < maxRetryTimes; i++ {
+		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
+			return v.(string), true
+		}
+		select {
+		case <-s.ctx.Done():
+			return "", false
+		case <-time.After(retryInterval):
+		}
 	}
 	return "", false
 }
