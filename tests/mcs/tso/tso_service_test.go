@@ -24,6 +24,7 @@ import (
 	tsosvr "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/mcs"
 )
 
 const (
@@ -39,7 +40,7 @@ type tsoServiceTestSuite struct {
 	pdLeader         *tests.TestServer
 	backendEndpoints string
 	tsoSvr1          *tsosvr.Server
-	tsoSvrCleanup1   CleanupFunc
+	tsoSvrCleanup1   func()
 }
 
 func TestTSOServiceTestSuite(t *testing.T) {
@@ -61,8 +62,7 @@ func (suite *tsoServiceTestSuite) SetupSuite() {
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 
-	suite.tsoSvr1, suite.tsoSvrCleanup1, err = startSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
-	re.NoError(err)
+	suite.tsoSvr1, suite.tsoSvrCleanup1 = mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
 }
 
 func (suite *tsoServiceTestSuite) TearDownSuite() {
@@ -75,8 +75,8 @@ func (suite *tsoServiceTestSuite) TestTSOServerRegister() {
 	re := suite.Require()
 
 	endpoints := strings.Split(suite.backendEndpoints, ",")
-	cli1 := setupCli(re, suite.ctx, endpoints)
-	cli2 := setupCli(re, suite.ctx, endpoints)
+	cli1 := mcs.SetupTSOClient(suite.ctx, re, endpoints)
+	cli2 := mcs.SetupTSOClient(suite.ctx, re, endpoints)
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)

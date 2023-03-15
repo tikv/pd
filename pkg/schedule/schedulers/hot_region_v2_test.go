@@ -23,7 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -72,8 +72,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	ops, _ = hb.Schedule(tc, false)
 	/* The revert region is currently disabled for the -1 case.
 	re.Len(ops, 2)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	testutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 	*/
 	re.Empty(ops)
 	re.True(hb.searchRevertRegions[writePeer])
@@ -84,7 +84,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	})
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	re.False(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
 }
@@ -123,7 +123,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	// One operator can be generated when RankFormulaVersion == "v1".
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	re.False(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
 
@@ -136,8 +136,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	// Two operators can be generated when RankFormulaVersion == "v2".
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 2)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	testutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 	re.True(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
 }
@@ -176,7 +176,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	// One operator can be generated when RankFormulaVersion == "v1".
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	re.False(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
 
@@ -189,7 +189,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	// There is still the solution with one operator after that.
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	re.True(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
 	// Two operators can be generated when there is a better solution
@@ -198,8 +198,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	})
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 2)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-	testutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 	re.True(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
 }
@@ -249,8 +249,8 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	ops, _ = hb.Schedule(tc, false)
 	/* The revert region is currently disabled for the -1 case.
 	re.Len(ops, 2)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 5)
-	testutil.CheckTransferLeader(re, ops[1], operator.OpHotRegion, 5, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferLeader(re, ops[1], operator.OpHotRegion, 5, 2)
 	*/
 	re.Empty(ops)
 	re.True(hb.searchRevertRegions[readLeader])
@@ -261,7 +261,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	})
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 5)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 5)
 	re.False(hb.searchRevertRegions[readLeader])
 	clearPendingInfluence(hb)
 }
@@ -296,7 +296,7 @@ func TestSkipUniformStore(t *testing.T) {
 	stddevThreshold = 0.0
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
 	// when there is uniform store filter, not schedule
 	stddevThreshold = 0.1
@@ -316,13 +316,13 @@ func TestSkipUniformStore(t *testing.T) {
 	stddevThreshold = 0.0
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
 	// when there is uniform store filter, schedule the second dim, which is no uniform
 	stddevThreshold = 0.1
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	// Case3: the second dim is enough uniform, we should schedule the first dim, although its rank is higher than the second dim
@@ -337,12 +337,12 @@ func TestSkipUniformStore(t *testing.T) {
 	stddevThreshold = 0.0
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
 	// when there is uniform store filter, schedule the first dim, which is no uniform
 	stddevThreshold = 0.1
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
 }
