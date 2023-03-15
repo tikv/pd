@@ -1698,9 +1698,7 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 	defer s.serverLoopWg.Done()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-
-	// TODO: replace default group name after we make a decision.
-	serviceKey := path.Join("/ms/0", serviceName, fmt.Sprintf("%05d", 0), "primary")
+	serviceKey := fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
 	// TODO: need to refactor after we redefine the member
 	leader := &pdpb.Member{}
 	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, leader)
