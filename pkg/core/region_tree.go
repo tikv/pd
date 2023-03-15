@@ -107,10 +107,10 @@ func (t *regionTree) overlaps(item *regionItem) []*regionItem {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *regionTree) update(item *regionItem, witness_based_stats bool, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo {
+func (t *regionTree) update(item *regionItem, witnessBasedStats bool, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo {
 	region := item.RegionInfo
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
-	if !witness_based_stats {
+	if !witnessBasedStats {
 		t.totalSize += region.approximateSize
 		t.totalWriteBytesRate += regionWriteBytesRate
 		t.totalWriteKeysRate += regionWriteKeysRate
@@ -132,7 +132,7 @@ func (t *regionTree) update(item *regionItem, witness_based_stats bool, withOver
 			zap.Uint64("region-id", old.GetID()),
 			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(old.GetMeta())),
 			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
-		if !witness_based_stats {
+		if !witnessBasedStats {
 			t.totalSize -= old.approximateSize
 			regionWriteBytesRate, regionWriteKeysRate = old.GetWriteRate()
 			t.totalWriteBytesRate -= regionWriteBytesRate
@@ -159,7 +159,7 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 // remove removes a region if the region is in the tree.
 // It will do nothing if it cannot find the region or the found region
 // is not the same with the region.
-func (t *regionTree) remove(region *RegionInfo, witness_based_stats bool) {
+func (t *regionTree) remove(region *RegionInfo, witnessBasedStats bool) {
 	if t.length() == 0 {
 		return
 	}
@@ -169,7 +169,7 @@ func (t *regionTree) remove(region *RegionInfo, witness_based_stats bool) {
 		return
 	}
 
-	if !witness_based_stats {
+	if !witnessBasedStats {
 		t.totalSize -= result.GetApproximateSize()
 		regionWriteBytesRate, regionWriteKeysRate := result.GetWriteRate()
 		t.totalWriteBytesRate -= regionWriteBytesRate
