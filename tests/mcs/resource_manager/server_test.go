@@ -44,6 +44,19 @@ func TestResourceManagerServer(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
+	// Cannot access resource manager service in api mode.
+	{
+		cc, err := grpcutil.GetClientConn(ctx, leader.GetAddr(), nil)
+		re.NoError(err)
+		defer cc.Close()
+
+		c := rmpb.NewResourceManagerClient(cc)
+		_, err = c.GetResourceGroup(context.Background(), &rmpb.GetResourceGroupRequest{
+			ResourceGroupName: "pingcap",
+		})
+		re.ErrorContains(err, "unknown service")
+	}
+
 	s, cleanup := mcs.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr())
 	addr := s.GetAddr()
 	defer cleanup()
