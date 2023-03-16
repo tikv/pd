@@ -29,6 +29,9 @@ const (
 	defaultTickInterval = time.Millisecond * 100
 )
 
+// CleanupFunc closes test pd server(s) and deletes any files left behind.
+type CleanupFunc func()
+
 // WaitOp represents available options when execute Eventually.
 type WaitOp struct {
 	waitFor      time.Duration

@@ -50,13 +50,6 @@ import (
 	"google.golang.org/grpc"
 )
 
-const (
-	// resourceManagerPrimaryPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/ms/<cluster-id>/resource_manager/<group-id>/primary"
-	// in which <group-id> is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	resourceManagerPrimaryPrefix = "/ms/0/resource_manager"
-)
-
 // Server is the resource manager server, and it implements bs.Server.
 type Server struct {
 	// Server state. 0 is not serving, 1 is serving.
@@ -371,6 +364,7 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.ListenAddr
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
+	resourceManagerPrimaryPrefix := fmt.Sprintf("/ms/%d/resource_manager", s.clusterID)
 	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
 	s.participant.InitInfo(uniqueName, path.Join(resourceManagerPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
 	s.participant.SetMemberDeployPath(s.participant.ID())

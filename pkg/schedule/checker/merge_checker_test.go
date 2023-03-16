@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/goleak"
@@ -251,7 +252,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	// partial store overlap not including leader
 	ops := suite.mc.Check(suite.regions[2])
 	suite.NotNil(ops)
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
@@ -265,7 +266,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -285,7 +286,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	suite.regions[2] = newRegion
 	suite.cluster.PutRegion(suite.regions[2])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 4},
 		operator.PromoteLearner{ToStore: 4},
 		operator.RemovePeer{FromStore: 6},
@@ -295,7 +296,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -311,14 +312,14 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	}))
 	suite.cluster.PutRegion(suite.regions[2])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -334,7 +335,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	}), core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}))
 	suite.cluster.PutRegion(suite.regions[2])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 3},
@@ -351,7 +352,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -370,7 +371,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	)
 	suite.cluster.PutRegion(suite.regions[1])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 3},
@@ -390,7 +391,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -417,7 +418,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	)
 	suite.cluster.PutRegion(suite.regions[1])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 3},
@@ -431,7 +432,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),

@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -420,16 +420,16 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceFilter() {
 	suite.tc.AddLeaderStore(4, 16)
 	suite.tc.AddLeaderRegion(1, 4, 1, 2, 3)
 
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 1)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 1)
 	// Test stateFilter.
 	// if store 4 is offline, we should consider it
 	// because it still provides services
 	suite.tc.SetStoreOffline(4)
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 1)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 1)
 	// If store 1 is down, it will be filtered,
 	// store 2 becomes the store with least leaders.
 	suite.tc.SetStoreDown(1)
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 2)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 2)
 	plans := suite.dryRun()
 	suite.NotEmpty(plans)
 	suite.Equal(0, plans[0].GetStep())
@@ -440,7 +440,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceFilter() {
 	// If store 2 is busy, it will be filtered,
 	// store 3 becomes the store with least leaders.
 	suite.tc.SetStoreBusy(2, true)
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 3)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 3)
 
 	// Test disconnectFilter.
 	// If store 3 is disconnected, no operator can be created.
@@ -462,9 +462,9 @@ func (suite *balanceLeaderSchedulerTestSuite) TestLeaderWeight() {
 	suite.tc.UpdateStoreLeaderWeight(3, 1)
 	suite.tc.UpdateStoreLeaderWeight(4, 2)
 	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 1, 4)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 1, 4)
 	suite.tc.UpdateLeaderCount(4, 30)
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 1, 3)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 1, 3)
 }
 
 func (suite *balanceLeaderSchedulerTestSuite) TestBalancePolicy() {
@@ -478,9 +478,9 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalancePolicy() {
 	suite.tc.AddLeaderRegion(1, 2, 1, 3, 4)
 	suite.tc.AddLeaderRegion(2, 1, 2, 3, 4)
 	suite.tc.SetLeaderSchedulePolicy("count")
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 2, 3)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 2, 3)
 	suite.tc.SetLeaderSchedulePolicy("size")
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 1, 4)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 1, 4)
 }
 
 func (suite *balanceLeaderSchedulerTestSuite) TestBalanceSelector() {
@@ -496,7 +496,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceSelector() {
 	suite.tc.AddLeaderRegion(2, 3, 1, 2)
 	// store4 has max leader score, store1 has min leader score.
 	// The scheduler try to move a leader out of 16 first.
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 2)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 2)
 
 	// Stores:     1    2    3    4
 	// Leaders:    1    14   15   16
@@ -505,7 +505,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceSelector() {
 	suite.tc.UpdateLeaderCount(2, 14)
 	suite.tc.UpdateLeaderCount(3, 15)
 	// Cannot move leader out of store4, move a leader into store1.
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 3, 1)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 3, 1)
 
 	// Stores:     1    2    3    4
 	// Leaders:    1    2    15   16
@@ -515,7 +515,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceSelector() {
 	suite.tc.AddLeaderRegion(1, 3, 2, 4)
 	suite.tc.AddLeaderRegion(2, 1, 2, 3)
 	// No leader in store16, no follower in store1. Now source and target are store3 and store2.
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 3, 2)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 3, 2)
 
 	// Stores:     1    2    3    4
 	// Leaders:    9    10   10   11
@@ -538,7 +538,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceSelector() {
 	suite.tc.AddLeaderStore(2, 13)
 	suite.tc.AddLeaderStore(3, 0)
 	suite.tc.AddLeaderStore(4, 16)
-	testutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 3)
+	operatorutil.CheckTransferLeader(suite.Require(), suite.schedule()[0], operator.OpKind(0), 4, 3)
 }
 
 type balanceLeaderRangeSchedulerTestSuite struct {
@@ -759,7 +759,7 @@ func checkBalanceRegionSchedule1(re *require.Assertions, enablePlacementRules bo
 	tc.AddLeaderRegion(1, 4)
 	ops, _ := sb.Schedule(tc, false)
 	op := ops[0]
-	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 1)
+	operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 1)
 
 	// Test stateFilter.
 	tc.SetStoreOffline(1)
@@ -769,7 +769,7 @@ func checkBalanceRegionSchedule1(re *require.Assertions, enablePlacementRules bo
 	// store 2 becomes the store with least regions.
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 2)
+	operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 2)
 	tc.SetStoreUp(1)
 	// test region replicate not match
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
@@ -819,37 +819,37 @@ func checkReplica3(re *require.Assertions, enablePlacementRules bool) {
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
 	ops, _ = sb.Schedule(tc, false)
 	op := ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 2, 4)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 2, 4)
 
 	// Store 5 has smaller region score than store 1.
 	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 5)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 5)
 
 	// Store 6 has smaller region score than store 5.
 	tc.AddLabelsStore(6, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 6)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 6)
 
 	// Store 7 has smaller region score with store 6.
 	tc.AddLabelsStore(7, 0, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 7)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 7)
 
 	// If store 7 is not available, will choose store 6.
 	tc.SetStoreDown(7)
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 6)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 6)
 
 	// Store 8 has smaller region score than store 7, but the distinct score decrease.
 	tc.AddLabelsStore(8, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h3"})
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 6)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 6)
 
 	// Take down 4,5,6,7
 	tc.SetStoreDown(4)
@@ -891,19 +891,19 @@ func checkReplica5(re *require.Assertions, enablePlacementRules bool) {
 	tc.AddLabelsStore(6, 1, map[string]string{"zone": "z5", "rack": "r2", "host": "h1"})
 	ops, _ := sb.Schedule(tc, false)
 	op := ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 5, 6)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 5, 6)
 
 	// Store 7 has larger region score and same distinct score with store 6.
 	tc.AddLabelsStore(7, 5, map[string]string{"zone": "z6", "rack": "r1", "host": "h1"})
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 5, 6)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 5, 6)
 
 	// Store 1 has smaller region score and higher distinct score.
 	tc.AddLeaderRegion(1, 2, 3, 4, 5, 6)
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 5, 1)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 5, 1)
 
 	// Store 6 has smaller region score and higher distinct score.
 	tc.AddLabelsStore(11, 29, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
@@ -912,7 +912,7 @@ func checkReplica5(re *require.Assertions, enablePlacementRules bool) {
 	tc.AddLeaderRegion(1, 2, 3, 11, 12, 13)
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 11, 6)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 11, 6)
 }
 
 // TestBalanceRegionSchedule2 for corner case 1:
@@ -1001,7 +1001,7 @@ func checkBalanceRegionSchedule2(re *require.Assertions, enablePlacementRules bo
 	// if the space of store 5 is normal, we can balance region to store 5
 	ops1, _ = sb.Schedule(tc, false)
 	op = ops1[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 5)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 5)
 
 	// the used size of store 5 reach (highSpace, lowSpace)
 	origin := tc.GetStore(5)
@@ -1019,7 +1019,7 @@ func checkBalanceRegionSchedule2(re *require.Assertions, enablePlacementRules bo
 	// Then it will try store 4.
 	ops1, _ = sb.Schedule(tc, false)
 	op = ops1[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 4)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 4)
 }
 
 func TestBalanceRegionStoreWeight(t *testing.T) {
@@ -1049,12 +1049,12 @@ func checkBalanceRegionStoreWeight(re *require.Assertions, enablePlacementRules 
 	tc.AddLeaderRegion(1, 1)
 	ops, _ := sb.Schedule(tc, false)
 	op := ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 4)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 4)
 
 	tc.UpdateRegionCount(4, 30)
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 3)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 3)
 }
 
 func TestBalanceRegionOpInfluence(t *testing.T) {
@@ -1090,7 +1090,7 @@ func checkBalanceRegionOpInfluence(re *require.Assertions, enablePlacementRules 
 	}
 	ops, _ := sb.Schedule(tc, false)
 	op := ops[0]
-	testutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 2, 1)
+	operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 2, 1)
 }
 
 func TestBalanceRegionReplacePendingRegion(t *testing.T) {
@@ -1127,7 +1127,7 @@ func checkReplacePendingRegion(re *require.Assertions, enablePlacementRules bool
 	re.Equal(uint64(3), op.RegionID())
 	ops, _ = sb.Schedule(tc, false)
 	op = ops[0]
-	testutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 4)
+	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 1, 4)
 }
 
 func TestBalanceRegionShouldNotBalance(t *testing.T) {

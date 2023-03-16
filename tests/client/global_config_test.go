@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -51,7 +52,7 @@ type globalConfigTestSuite struct {
 	suite.Suite
 	server  *server.GrpcServer
 	client  pd.Client
-	cleanup server.CleanupFunc
+	cleanup testutil.CleanupFunc
 }
 
 func TestGlobalConfigTestSuite(t *testing.T) {

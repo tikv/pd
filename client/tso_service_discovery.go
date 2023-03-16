@@ -33,13 +33,6 @@ import (
 	"google.golang.org/grpc"
 )
 
-const (
-	// tsoPrimaryPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary" in which
-	// <group-id> is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	tsoPrimaryPrefix = "/ms/0/tso"
-)
-
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
 var _ tsoAllocatorEventSource = (*tsoServiceDiscovery)(nil)
 
@@ -85,6 +78,7 @@ type tsoServiceDiscovery struct {
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func newTSOServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, metacli MetaStorageClient,
 	clusterID uint64, keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) ServiceDiscovery {
+	tsoPrimaryPrefix := fmt.Sprintf("/ms/%d/tso", clusterID)
 	bc := &tsoServiceDiscovery{
 		ctx:               ctx,
 		cancel:            cancel,

@@ -51,6 +51,8 @@ const (
 	// targetPeriod indicate how long it is expected to cost token when acquiring token.
 	// According to the resource control Grafana panel and Prometheus sampling period, the period should be the factor of 15.
 	defaultTargetPeriod = 5 * time.Second
+	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
+	defaultMaxWaitDuration = time.Second
 )
 
 const (
@@ -127,6 +129,7 @@ type Config struct {
 	CPUMsCost      RequestUnit
 	// The CPU statistics need to distinguish between different environments.
 	isSingleGroupByKeyspace  bool
+	maxWaitDuration          time.Duration
 	DegradedModeWaitDuration time.Duration
 }
 
@@ -140,11 +143,12 @@ func DefaultConfig() *Config {
 // GenerateConfig generates the configuration by the given request unit configuration.
 func GenerateConfig(config *ControllerConfig) *Config {
 	cfg := &Config{
-		ReadBaseCost:   RequestUnit(config.RequestUnit.ReadBaseCost),
-		ReadBytesCost:  RequestUnit(config.RequestUnit.ReadCostPerByte),
-		WriteBaseCost:  RequestUnit(config.RequestUnit.WriteBaseCost),
-		WriteBytesCost: RequestUnit(config.RequestUnit.WriteCostPerByte),
-		CPUMsCost:      RequestUnit(config.RequestUnit.CPUMsCost),
+		ReadBaseCost:    RequestUnit(config.RequestUnit.ReadBaseCost),
+		ReadBytesCost:   RequestUnit(config.RequestUnit.ReadCostPerByte),
+		WriteBaseCost:   RequestUnit(config.RequestUnit.WriteBaseCost),
+		WriteBytesCost:  RequestUnit(config.RequestUnit.WriteCostPerByte),
+		CPUMsCost:       RequestUnit(config.RequestUnit.CPUMsCost),
+		maxWaitDuration: defaultMaxWaitDuration,
 	}
 	duration, err := time.ParseDuration(config.DegradedModeWaitDuration)
 	if err != nil {
