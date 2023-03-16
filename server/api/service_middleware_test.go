@@ -31,7 +31,7 @@ import (
 type auditMiddlewareTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -114,7 +114,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 type rateLimitConfigTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
