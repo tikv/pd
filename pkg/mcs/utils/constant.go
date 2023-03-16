@@ -35,10 +35,10 @@ const (
 	// LeaderTickInterval is the interval to check leader
 	LeaderTickInterval = 50 * time.Millisecond
 
-	// DefaultKeySpaceID is the default key space id.
+	// DefaultKeyspaceID is the default key space id.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
 	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap and reserved for users who haven't been assigned keyspace.
-	DefaultKeySpaceID = uint32(0)
+	DefaultKeyspaceID = uint32(0)
 
 	// DefaultKeySpaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.

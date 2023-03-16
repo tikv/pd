@@ -95,7 +95,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
 	re.Equal(primary, addr)
-	re.Equal(primary, s.GetPrimary().GetName())
+	re.Equal(primary, s.GetLeaderListenUrls()[0])
 
 	// test API server discovery after unregister
 	cleanup()
@@ -121,7 +121,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 		defer cleanup()
 		primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 		re.True(exist)
-		re.Equal(primary, s.GetPrimary().GetName())
+		re.Equal(primary, s.GetLeaderListenUrls()[0])
 		serverMap[s.GetAddr()] = s
 	}
 

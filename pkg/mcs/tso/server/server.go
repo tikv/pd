@@ -42,7 +42,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -66,12 +66,11 @@ const (
 	// pdRootPath is the old path for storing the tso related root path.
 	pdRootPath        = "/pd"
 	msServiceRootPath = "/ms"
-	tsoServiceName    = "tso"
 	// tsoSvcDiscoveryPrefixFormat defines the key prefix for keyspace group primary election.
 	// This key prefix is in the format of "/ms/<cluster-id>/tso/<group-id>", and the entire key
 	// is in the format of "/ms/<cluster-id>/tso/<group-id>/primary". The <group-id> is 5 digits
 	// integer with leading zeros.
-	tsoSvcDiscoveryPrefixFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d"
+	tsoSvcDiscoveryPrefixFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName + "/%05d"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -268,7 +267,7 @@ func (s *Server) campaignLeader() {
 	// go s.tsoAllocatorManager.ClusterDCLocationChecker()
 	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", s.participant.Name()))
 
-	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
+	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -493,7 +492,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(utils.DefaultGRPCGracefulStopTimeout):
+	case <-time.After(mcsutils.DefaultGRPCGracefulStopTimeout):
 		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now")
 		gs.Stop()
 	}
@@ -518,7 +517,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	serverr := hs.Serve(l)
 	log.Info("http server stopped serving")
 
-	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), mcsutils.DefaultHTTPGracefulShutdownTimeout)
 	defer cancel()
 	if err := hs.Shutdown(ctx); err != nil {
 		log.Error("http server shutdown encountered problem", errs.ZapError(err))
@@ -554,7 +553,7 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = utils.InitClusterID(s.ctx, s.etcdClient); err != nil {
+	if s.clusterID, err = mcsutils.InitClusterID(s.ctx, s.etcdClient); err != nil {
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
@@ -576,7 +575,7 @@ func (s *Server) startServer() (err error) {
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
 	s.participant = member.NewParticipant(s.etcdClient)
-	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tsoSvcDiscoveryPrefixFormat, s.clusterID, utils.DefaultKeyspaceID),
+	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tsoSvcDiscoveryPrefixFormat, s.clusterID, mcsutils.DefaultKeyspaceID),
 		"primary", "keyspace group primary election", s.cfg.ListenAddr)
 
 	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
@@ -594,9 +593,9 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
+		s.muxListener, err = tls.Listen(mcsutils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
+		s.muxListener, err = net.Listen(mcsutils.TCPNetworkStr, s.listenURL.Host)
 	}
 	if err != nil {
 		return err
@@ -618,7 +617,7 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.TSOServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, mcsutils.TSOServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }

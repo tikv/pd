@@ -1744,7 +1744,6 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 						} else {
 							log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))
 						}
-
 					}
 				case clientv3.EventTypeDelete:
 					s.servicePrimaryMap.Delete(serviceName)
