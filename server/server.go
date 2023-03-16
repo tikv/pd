@@ -100,10 +100,10 @@ const (
 	// APIServiceMode represents that server is in API service mode.
 	APIServiceMode = "API service"
 
-	// maxRetryTimes is the max retry times for getting primary addr.
-	maxRetryTimes = 30
-	// retryInterval is the interval to retry.
-	retryInterval = 100 * time.Millisecond
+	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
+	maxRetryTimesGetServicePrimary = 30
+	// retryIntervalGetServicePrimary is the retry interval for getting primary addr.
+	retryIntervalGetServicePrimary = 100 * time.Millisecond
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1678,9 +1678,9 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 }
 
 // GetServicePrimaryAddr returns the primary address for a given service.
-// Note: This function will only return primary address without judging it is alive.
+// Note: This function will only return primary address without judging if it's alive.
 func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
-	for i := 0; i < maxRetryTimes; i++ {
+	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
 		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
 			return v.(string), true
 		}
@@ -1689,7 +1689,7 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 			return "", false
 		case <-ctx.Done():
 			return "", false
-		case <-time.After(retryInterval):
+		case <-time.After(retryIntervalGetServicePrimary):
 		}
 	}
 	return "", false
@@ -1705,7 +1705,7 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 	leader := &pdpb.Member{}
 	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, leader)
 	if err != nil {
-		log.Error("get service primary addr failed", zap.String("service", serviceName), zap.Error(err))
+		log.Error("get service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
 	}
 	if err == nil && ok {
 		s.servicePrimaryMap.Store(serviceName, leader.GetName())
@@ -1722,7 +1722,7 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 				switch event.Type {
 				case clientv3.EventTypePut:
 					if err := proto.Unmarshal(event.Kv.Value, leader); err != nil {
-						log.Error("watch service primary addr failed", zap.String("service", serviceName), zap.Error(err))
+						log.Error("watch service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
 					} else {
 						s.servicePrimaryMap.Store(serviceName, leader.GetName())
 					}
