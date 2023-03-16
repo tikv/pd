@@ -61,7 +61,7 @@ func (se *StorageEndpoint) LoadResourceGroupStates(f func(k, v string)) error {
 	return se.loadRangeByPrefix(resourceGroupStatesPath+"/", f)
 }
 
-// SaveControllerConfig stores the request unit config to storage.
+// SaveControllerConfig stores the resource controller config to storage.
 func (se *StorageEndpoint) SaveControllerConfig(config interface{}) error {
-	return se.saveJSON(requestUnitConfigPath, config)
+	return se.saveJSON(controllerConfigPath, config)
 }

@@ -45,7 +45,7 @@ const (
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
 	resourceGroupStatesPath   = "states"
-	requestUnitConfigPath     = "controller"
+	controllerConfigPath      = "controller"
 	// tso storage endpoint has prefix `tso`
 	microserviceKey = "microservice"
 	tsoServiceKey   = "tso"
