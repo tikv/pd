@@ -118,17 +118,43 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}
 }
 
-func (suite *tsoServerTestSuite) TestTSOPath() {
-	re := suite.Require()
+func TestTSOPath(t *testing.T) {
+	re := require.New(t)
+	checkTSOPath(re, true /*isAPIServiceMode*/)
+	checkTSOPath(re, false /*isAPIServiceMode*/)
+}
 
-	client := suite.pdLeader.GetEtcdClient()
-	re.Equal(1, getEtcdTimestampKeyNum(re, client))
+func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
+	var (
+		cluster *tests.TestCluster
+		err     error
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if isAPIServiceMode {
+		cluster, err = tests.NewTestAPICluster(ctx, 1)
+	} else {
+		cluster, err = tests.NewTestCluster(ctx, 1)
+	}
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := cluster.WaitLeader()
+	pdLeader := cluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	client := pdLeader.GetEtcdClient()
+	if isAPIServiceMode {
+		re.Equal(0, getEtcdTimestampKeyNum(re, client))
+	} else {
+		re.Equal(1, getEtcdTimestampKeyNum(re, client))
+	}
 
-	_, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
+	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
 	defer cleanup()
 
-	cli := mcs.SetupTSOClient(suite.ctx, re, []string{suite.backendEndpoints})
-	physical, logical, err := cli.GetTS(suite.ctx)
+	cli := mcs.SetupTSOClient(ctx, re, []string{backendEndpoints})
+	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
 	ts := tsoutil.ComposeTS(physical, logical)
 	re.NotEmpty(ts)
