@@ -115,12 +115,12 @@ func (gts *GroupTokenBucketState) cleanupAssignTokenSum(cleanToken bool) {
 func (gts *GroupTokenBucketState) balanceSlotTokens(
 	clientUniqueID uint64,
 	settings *rmpb.TokenLimitSettings,
-	consumptionToken, elapseTokens float64) {
+	requiredToken, elapseTokens float64) {
 	now := time.Now()
 
 	slot, exist := gts.tokenSlots[clientUniqueID]
 	if !exist {
-		if consumptionToken == 0 {
+		if requiredToken == 0 {
 			return
 		}
 		gts.cleanupAssignTokenSum(false)
@@ -130,8 +130,8 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		gts.cleanupAssignTokenSum(false)
 	}
 
-	// Clean up slot that have not been used for a long time.
-	if consumptionToken == 0 && now.Sub(*slot.lastUpdate) >= defaultSlotStalePeriod {
+	// Clean up slot that have not been used for defaultSlotStalePeriod.
+	if requiredToken == 0 && now.Sub(*slot.lastUpdate) >= defaultSlotStalePeriod {
 		delete(gts.tokenSlots, clientUniqueID)
 		gts.cleanupAssignTokenSum(false)
 		if len(gts.tokenSlots) == 0 {
@@ -157,12 +157,12 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		} else {
 			// In order to have fewer tokens available to clients that are currently consuming more.
 			// We have the following formula:
-			// client1: (1 - a/M + 1/M) * 1/M
-			// client2: (1 - b/M + 1/M) * 1/M
-			// ...
-			// clientN: (1 - n/M + 1/M) * 1/M
+			// 		client1: (1 - a/N + 1/N) * 1/N
+			// 		client2: (1 - b/N + 1/N) * 1/N
+			// 		...
+			// 		clientN: (1 - n/N + 1/N) * 1/N
 			// Sum is:
-			// (M - (a+b+...+n)*M +1) * 1/M => (M - 1 + 1) * 1/M => 1
+			// 		(N - (a+b+...+n)/N +1) * 1/N => (N - 1 + 1) * 1/N => 1
 			ratio = (1 - slot.requireTokensSum/gts.clientConsumptionTokensSum + evenRatio) * evenRatio
 		}
 
@@ -179,11 +179,12 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			BurstLimit: int64(burstLimit),
 		}
 	}
-	if consumptionToken != 0 {
+	if requiredToken != 0 {
+		// Only slots that require a positive number will be considered alive.
 		slot.lastUpdate = &now
 	}
-	slot.requireTokensSum += consumptionToken
-	gts.clientConsumptionTokensSum += consumptionToken
+	slot.requireTokensSum += requiredToken
+	gts.clientConsumptionTokensSum += requiredToken
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
@@ -268,20 +269,19 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	gtb.balanceSlotTokens(clientUniqueID, gtb.Settings, consumptionToken, elapseTokens)
 }
 
-// request requests tokens from the group token bucket.
+// request requests tokens from the corresponding slot.
 func (gtb *GroupTokenBucket) request(now time.Time,
 	neededTokens float64,
 	targetPeriodMs, clientUniqueID uint64,
 ) (*rmpb.TokenBucket, int64) {
 	burstLimit := gtb.Settings.GetBurstLimit()
 	gtb.updateTokens(now, burstLimit, clientUniqueID, neededTokens)
-	// Serve by specific client.
 	slot, ok := gtb.tokenSlots[clientUniqueID]
 	if !ok {
 		return &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{BurstLimit: burstLimit}}, 0
 	}
 	res, trickleDuration := slot.assignSlotTokens(neededTokens, targetPeriodMs)
-	// Update bucket tokens.
+	// Update bucket to record all tokens.
 	gtb.Tokens -= slot.lastTokenCapacity - slot.tokenCapacity
 
 	return res, trickleDuration
