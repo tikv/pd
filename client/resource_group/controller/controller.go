@@ -121,7 +121,8 @@ func NewResourceGroupController(
 ) (*ResourceGroupsController, error) {
 	controllerConfig, err := loadServerConfig(ctx, provider)
 	if err != nil {
-		return nil, err
+		log.Warn("[resource group controller]  load config from server", zap.Error(err))
+		controllerConfig = DefaultControllerConfig()
 	}
 	if requestUnitConfig != nil {
 		controllerConfig.RequestUnit = *requestUnitConfig
