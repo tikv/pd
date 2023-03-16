@@ -121,8 +121,7 @@ func NewResourceGroupController(
 ) (*ResourceGroupsController, error) {
 	controllerConfig, err := loadServerConfig(ctx, provider)
 	if err != nil {
-		log.Warn("[resource group controller]  load config from server", zap.Error(err))
-		controllerConfig = DefaultControllerConfig()
+		return nil, err
 	}
 	if requestUnitConfig != nil {
 		controllerConfig.RequestUnit = *requestUnitConfig
@@ -149,7 +148,8 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 		return nil, err
 	}
 	if len(items) == 0 {
-		return nil, errors.Errorf("failed to load the server config from remote server")
+		log.Warn("[resource group controller] server does not save config, load config failed")
+		return DefaultControllerConfig(), nil
 	}
 	controllerConfig := &ControllerConfig{}
 	err = json.Unmarshal(items[0].PayLoad, controllerConfig)
