@@ -261,8 +261,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	failpoint.Inject("useGlobalRegistry", func() {
 		s.registry = registry.ServerServiceRegistry
 	})
+	if !s.IsAPIServiceMode() {
+		s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
+	}
 	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
-	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
