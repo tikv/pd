@@ -70,9 +70,12 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	if members.GetHeader().GetError() != nil {
 		return nil, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
 	}
-	dclocationDistribution, err := svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
-	if err != nil {
-		return nil, errors.WithStack(err)
+	dclocationDistribution := make(map[string][]uint64)
+	if !svr.IsAPIServiceMode() {
+		dclocationDistribution, err = svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
 	}
 	for _, m := range members.GetMembers() {
 		var e error
