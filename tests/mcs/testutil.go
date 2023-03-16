@@ -45,7 +45,7 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		return s.IsServing()
+		return !s.IsClosed()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup
@@ -61,7 +61,7 @@ func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	s, cleanup, err := tso.NewTSOTestServer(ctx, re, cfg)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		return s.IsServing()
+		return !s.IsClosed()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup

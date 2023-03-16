@@ -32,10 +32,9 @@ import (
 )
 
 const (
-	requestUnitConfigPath   = "resource_group/ru_config"
-	defaultMaxWaitDuration  = time.Second
-	maxRetry                = 3
-	maxNotificationChanLen  = 200
+	requestUnitConfigPath  = "resource_group/ru_config"
+	maxRetry               = 3
+	maxNotificationChanLen = 200
 	needTokensAmplification = 1.1
 )
 
@@ -72,6 +71,13 @@ type ResourceControlCreateOption func(controller *ResourceGroupsController)
 func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
 		controller.config.isSingleGroupByKeyspace = true
+	}
+}
+
+// WithMaxWaitDuration is the option to set the max wait duration for acquiring token buckets.
+func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.config.maxWaitDuration = d
 	}
 }
 

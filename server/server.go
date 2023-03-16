@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -98,6 +99,11 @@ const (
 	PDMode = "PD"
 	// APIServiceMode represents that server is in API service mode.
 	APIServiceMode = "API service"
+
+	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
+	maxRetryTimesGetServicePrimary = 30
+	// retryIntervalGetServicePrimary is the retry interval for getting primary addr.
+	retryIntervalGetServicePrimary = 100 * time.Millisecond
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -192,8 +198,9 @@ type Server struct {
 
 	auditBackends []audit.Backend
 
-	registry *registry.ServiceRegistry
-	mode     string
+	registry          *registry.ServiceRegistry
+	mode              string
+	servicePrimaryMap sync.Map /* Store as map[string]string */
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -529,6 +536,11 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.serverMetricsLoop()
 	go s.tsoAllocatorLoop()
 	go s.encryptionKeyManagerLoop()
+	if s.IsAPIServiceMode() {
+		s.serverLoopWg.Add(2)
+		go s.watchServicePrimaryAddrLoop("tso")
+		go s.watchServicePrimaryAddrLoop("resource_manager")
+	}
 }
 
 func (s *Server) stopServerLoop() {
@@ -1666,16 +1678,60 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 }
 
 // GetServicePrimaryAddr returns the primary address for a given service.
-func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (bool, string, error) {
-	// TODO: replace default group name after we make a decision.
-	key := path.Join("/ms/0", serviceName, fmt.Sprintf("%05d", 0), "primary")
-	leader := &pdpb.Member{}
-	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, key, leader)
-	if err != nil || !ok {
-		return false, "", err
+// Note: This function will only return primary address without judging if it's alive.
+func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
+	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
+		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
+			return v.(string), true
+		}
+		select {
+		case <-s.ctx.Done():
+			return "", false
+		case <-ctx.Done():
+			return "", false
+		case <-time.After(retryIntervalGetServicePrimary):
+		}
 	}
+	return "", false
+}
+
+func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	serviceKey := fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
 	// TODO: need to refactor after we redefine the member
-	return true, leader.GetName(), nil
+	leader := &pdpb.Member{}
+	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, leader)
+	if err != nil {
+		log.Error("get service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
+	}
+	if err == nil && ok {
+		s.servicePrimaryMap.Store(serviceName, leader.GetName())
+	}
+
+	watchChan := s.client.Watch(ctx, serviceKey, clientv3.WithPrefix())
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("server is closed, exist watch service primary addr loop", zap.String("service", serviceName))
+			return
+		case res := <-watchChan:
+			for _, event := range res.Events {
+				switch event.Type {
+				case clientv3.EventTypePut:
+					if err := proto.Unmarshal(event.Kv.Value, leader); err != nil {
+						log.Error("watch service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
+					} else {
+						s.servicePrimaryMap.Store(serviceName, leader.GetName())
+					}
+				case clientv3.EventTypeDelete:
+					s.servicePrimaryMap.Delete(serviceName)
+				}
+			}
+		}
+	}
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id

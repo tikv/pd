@@ -778,7 +778,7 @@ var (
 
 type clientTestSuite struct {
 	suite.Suite
-	cleanup         server.CleanupFunc
+	cleanup         testutil.CleanupFunc
 	ctx             context.Context
 	clean           context.CancelFunc
 	srv             *server.Server

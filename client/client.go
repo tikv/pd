@@ -466,7 +466,12 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetMembersRequest{Header: c.requestHeader()}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().GetMembers(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetMembers(ctx, req)
 	cancel()
 	if err = c.respForErr(cmdFailDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -593,7 +598,12 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 		NeedBuckets: options.needBuckets,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().GetRegion(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetRegion(ctx, req)
 	cancel()
 
 	if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
@@ -663,7 +673,12 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 		NeedBuckets: options.needBuckets,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().GetPrevRegion(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetPrevRegion(ctx, req)
 	cancel()
 
 	if err = c.respForErr(cmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
@@ -691,7 +706,12 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 		NeedBuckets: options.needBuckets,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().GetRegionByID(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetRegionByID(ctx, req)
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
@@ -721,7 +741,12 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 		Limit:    int32(limit),
 	}
 	scanCtx = grpcutil.BuildForwardContext(scanCtx, c.GetLeaderAddr())
-	resp, err := c.getClient().ScanRegions(scanCtx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.ScanRegions(scanCtx, req)
 
 	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -772,7 +797,12 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		StoreId: storeID,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().GetStore(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetStore(ctx, req)
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
@@ -812,7 +842,12 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 		ExcludeTombstoneStores: options.excludeTombstone,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().GetAllStores(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetAllStores(ctx, req)
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
@@ -835,7 +870,12 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		SafePoint: safePoint,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().UpdateGCSafePoint(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.UpdateGCSafePoint(ctx, req)
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
@@ -865,7 +905,12 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 		SafePoint: safePoint,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().UpdateServiceGCSafePoint(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.UpdateServiceGCSafePoint(ctx, req)
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
@@ -893,7 +938,12 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 		Group:    group,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().ScatterRegion(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.ScatterRegion(ctx, req)
 	cancel()
 	if err != nil {
 		return err
@@ -933,7 +983,12 @@ func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte,
 	}
 
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	return c.getClient().SplitAndScatterRegions(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	return protoClient.SplitAndScatterRegions(ctx, req)
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
@@ -951,7 +1006,12 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 		RegionId: regionID,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	return c.getClient().GetOperator(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	return protoClient.GetOperator(ctx, req)
 }
 
 // SplitRegions split regions by given split keys
@@ -974,7 +1034,12 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 		RetryLimit: options.retryLimit,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	return c.getClient().SplitRegions(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	return protoClient.SplitRegions(ctx, req)
 }
 
 func (c *client) requestHeader() *pdpb.RequestHeader {
@@ -999,7 +1064,12 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	}
 
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().ScatterRegion(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.ScatterRegion(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -1037,7 +1107,11 @@ func trimHTTPPrefix(str string) string {
 }
 
 func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error) {
-	resp, err := c.getClient().LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names, ConfigPath: configPath})
+	protoClient := c.getClient()
+	if protoClient == nil {
+		return nil, 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names, ConfigPath: configPath})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1062,7 +1136,11 @@ func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items
 	for i, it := range items {
 		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType, Payload: it.PayLoad}
 	}
-	_, err := c.getClient().StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr, ConfigPath: configPath})
+	protoClient := c.getClient()
+	if protoClient == nil {
+		return errs.ErrClientGetProtoClient
+	}
+	_, err := protoClient.StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr, ConfigPath: configPath})
 	if err != nil {
 		return err
 	}
@@ -1073,7 +1151,11 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 	// TODO: Add retry mechanism
 	// register watch components there
 	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
-	res, err := c.getClient().WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{
+	protoClient := c.getClient()
+	if protoClient == nil {
+		return nil, errs.ErrClientGetProtoClient
+	}
+	res, err := protoClient.WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{
 		ConfigPath: configPath,
 		Revision:   revision,
 	})
@@ -1115,7 +1197,11 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 }
 
 func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
-	resp, err := c.getClient().GetExternalTimestamp(ctx, &pdpb.GetExternalTimestampRequest{
+	protoClient := c.getClient()
+	if protoClient == nil {
+		return 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetExternalTimestamp(ctx, &pdpb.GetExternalTimestampRequest{
 		Header: c.requestHeader(),
 	})
 	if err != nil {
@@ -1129,7 +1215,11 @@ func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
 }
 
 func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) error {
-	resp, err := c.getClient().SetExternalTimestamp(ctx, &pdpb.SetExternalTimestampRequest{
+	protoClient := c.getClient()
+	if protoClient == nil {
+		return errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.SetExternalTimestamp(ctx, &pdpb.SetExternalTimestampRequest{
 		Header:    c.requestHeader(),
 		Timestamp: timestamp,
 	})
