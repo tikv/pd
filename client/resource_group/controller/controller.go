@@ -32,10 +32,11 @@ import (
 )
 
 const (
-	requestUnitConfigPath  = "resource_group/ru_config"
-	defaultMaxWaitDuration = time.Second
-	maxRetry               = 3
-	maxNotificationChanLen = 200
+	requestUnitConfigPath   = "resource_group/ru_config"
+	defaultMaxWaitDuration  = time.Second
+	maxRetry                = 3
+	maxNotificationChanLen  = 200
+	needTokensAmplification = 1.1
 )
 
 type selectType int
@@ -839,7 +840,10 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 }
 
 func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
-	value := counter.avgRUPerSec*gc.run.targetPeriod.Seconds() + bufferRUs
+	// When the requirement tokens is smaller than the availability of ru,
+	// it is difficult for the server side to balance client consumption.
+	// Therefore, the number of amplification requirement tokens to achieve balance.
+	value := counter.avgRUPerSec*gc.run.targetPeriod.Seconds()*needTokensAmplification + bufferRUs
 	value -= counter.limiter.AvailableTokens(gc.run.now)
 	if value < 0 {
 		value = 0

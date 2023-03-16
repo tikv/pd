@@ -257,6 +257,7 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	}
 	// Reloan when setting changed
 	if gtb.settingChanged && gtb.Tokens <= 0 {
+		gtb.settingChanged = false
 		gtb.Tokens = 0
 		elapseTokens = 0
 		gtb.cleanupAssignTokenSum(true)
