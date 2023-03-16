@@ -385,14 +385,14 @@ func (c *RaftCluster) runSyncConfig() {
 
 	stores := c.GetStores()
 	syncFunc := func() {
-		success, switchRaftV2Config := syncConfig(c.storeConfigManager, stores)
+		synced, switchRaftV2Config := syncConfig(c.storeConfigManager, stores)
 		if switchRaftV2Config {
 			c.GetOpts().UseRaftV2()
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
 		}
-		if !success {
+		if !synced {
 			stores = c.GetStores()
 		}
 	}
