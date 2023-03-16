@@ -220,9 +220,9 @@ func (s *Server) Close() {
 	log.Info("resource manager server is closed")
 }
 
-// GetRequestUnitConfig returns the RU config.
-func (s *Server) GetRequestUnitConfig() *RequestUnitConfig {
-	return &s.cfg.RequestUnit
+// GetControllerConfig returns the controller config.
+func (s *Server) GetControllerConfig() *ControllerConfig {
+	return &s.cfg.Controller
 }
 
 // GetClient returns builtin etcd client.

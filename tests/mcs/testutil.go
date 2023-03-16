@@ -52,11 +52,15 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 }
 
 // StartSingleTSOTestServer creates and starts a tso server with default config for testing.
-func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints string) (*tso.Server, func()) {
+func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints string, listenAddrs ...string) (*tso.Server, func()) {
 	cfg, err := tso.NewTSOTestDefaultConfig()
 	re.NoError(err)
 	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = tempurl.Alloc()
+	if len(listenAddrs) > 0 {
+		cfg.ListenAddr = listenAddrs[0]
+	} else {
+		cfg.ListenAddr = tempurl.Alloc()
+	}
 
 	s, cleanup, err := tso.NewTSOTestServer(ctx, re, cfg)
 	re.NoError(err)

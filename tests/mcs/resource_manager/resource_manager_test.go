@@ -61,6 +61,8 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode", `return(true)`))
+
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
 	suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
@@ -114,9 +116,11 @@ func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAdd
 }
 
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
+	re := suite.Require()
 	suite.client.Close()
 	suite.cluster.Destroy()
 	suite.clean()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode"))
 }
 
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
@@ -645,6 +649,57 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 	suite.cleanupResourceGroups()
 }
 
+func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMode() {
+	re := suite.Require()
+	cli := suite.client
+
+	group := &rmpb.ResourceGroup{
+		Name: "modetest",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   10,
+					BurstLimit: 10,
+				},
+				Tokens: 10,
+			},
+		},
+	}
+	addResp, err := cli.AddResourceGroup(suite.ctx, group)
+	re.NoError(err)
+	re.Contains(addResp, "Success!")
+
+	cfg := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+		CPUMsCost:        1,
+	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU", "return(true)"))
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
+	controller.Start(suite.ctx)
+	tc := tokenConsumptionPerSecond{
+		rruTokensAtATime: 0,
+		wruTokensAtATime: 10000,
+	}
+	controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
+	time.Sleep(time.Second * 2)
+	beginTime := time.Now()
+	for i := 0; i < 100; i++ {
+		controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
+	}
+	endTime := time.Now()
+	// we can not check `inDegradedMode` because of data race.
+	re.True(endTime.Before(beginTime.Add(time.Second)))
+	controller.Stop()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU"))
+	suite.cleanupResourceGroups()
+}
+
 func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re := suite.Require()
 	cli := suite.client
@@ -671,12 +726,16 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.NoError(err)
 	config = ctr.GetConfig()
 	re.NotNil(config)
-	expectedConfig = controller.GenerateConfig(ruConfig)
+	controllerConfig := controller.DefaultControllerConfig()
+	controllerConfig.RequestUnit = *ruConfig
+	expectedConfig = controller.GenerateConfig(controllerConfig)
 	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
 	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
 	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
 	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
 	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
+	// refer github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode, check with 1s.
+	re.Equal(time.Second, config.DegradedModeWaitDuration)
 }
 
 func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
