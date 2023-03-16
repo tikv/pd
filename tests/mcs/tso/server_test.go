@@ -210,10 +210,10 @@ func (suite *APIServerForwardTestSuite) SetupTest() {
 
 func (suite *APIServerForwardTestSuite) TearDownTest() {
 	etcdClient := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(etcdClient, "tso")
+	endpoints, err := discovery.Discover(etcdClient, utils.TSOServiceName)
 	suite.NoError(err)
 	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, "tso")
+		endpoints, err = discovery.Discover(etcdClient, utils.TSOServiceName)
 		suite.NoError(err)
 		suite.Empty(endpoints)
 	}
@@ -245,11 +245,11 @@ func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 	}
 
 	// can use the tso-related interface with new primary
-	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, "tso")
+	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
 	suite.True(exist)
 	serverMap[oldPrimary].Close()
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, "tso")
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
 	suite.True(exist)
 	suite.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO()
@@ -264,7 +264,7 @@ func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 		}
 	}
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
-	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, "tso")
+	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
 	suite.True(exist)
 	suite.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO()

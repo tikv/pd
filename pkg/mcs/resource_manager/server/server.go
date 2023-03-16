@@ -409,7 +409,7 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.ResourceManagerServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }

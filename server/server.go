@@ -52,6 +52,7 @@ import (
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
 	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"              // init tso API group
+	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/schedule"
@@ -539,10 +540,10 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() { // disable tso service
+	if s.IsAPIServiceMode() { // disable tso service and resource manager service in api server
 		s.serverLoopWg.Add(2)
-		go s.watchServicePrimaryAddrLoop("tso")
-		go s.watchServicePrimaryAddrLoop("resource_manager")
+		go s.watchServicePrimaryAddrLoop(mcs.TSOServiceName)
+		go s.watchServicePrimaryAddrLoop(mcs.ResourceManagerServiceName)
 	} else { // enable tso service
 		s.serverLoopWg.Add(1)
 		go s.tsoAllocatorLoop()

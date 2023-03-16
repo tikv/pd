@@ -43,4 +43,11 @@ const (
 	// DefaultKeySpaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
 	DefaultKeySpaceGroupID = 0
+
+	// APIServiceName is the name of api server.
+	APIServiceName = "api"
+	// TSOServiceName is the name of tso server.
+	TSOServiceName = "tso"
+	// ResourceManagerServiceName is the name of resource manager server.
+	ResourceManagerServiceName = "resource_manager"
 )

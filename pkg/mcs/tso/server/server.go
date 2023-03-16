@@ -614,7 +614,7 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "tso", s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.TSOServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }
