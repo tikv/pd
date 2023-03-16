@@ -32,9 +32,9 @@ import (
 )
 
 const (
-	requestUnitConfigPath  = "resource_group/ru_config"
-	maxRetry               = 3
-	maxNotificationChanLen = 200
+	requestUnitConfigPath   = "resource_group/ru_config"
+	maxRetry                = 3
+	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
 )
 
