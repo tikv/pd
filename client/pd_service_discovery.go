@@ -379,7 +379,7 @@ func (c *pdServiceDiscovery) updateServiceMode() {
 	if len(leaderAddr) > 0 {
 		clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
 		if err != nil {
-			log.Warn("[pd] failed to get cluster info fror the leader", zap.String("leader-addr", leaderAddr), errs.ZapError(err))
+			log.Warn("[pd] failed to get cluster info for the leader", zap.String("leader-addr", leaderAddr), errs.ZapError(err))
 			return
 		}
 		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])

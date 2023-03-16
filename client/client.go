@@ -1298,5 +1298,9 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 // For test only.
 func (c *client) GetTSOAllocators() *sync.Map {
-	return c.getTSOClient().GetTSOAllocators()
+	tsoClient := c.getTSOClient()
+	if tsoClient == nil {
+		return nil
+	}
+	return tsoClient.GetTSOAllocators()
 }
