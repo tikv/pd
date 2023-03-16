@@ -86,6 +86,8 @@ type Config interface {
 	SetMaxReplicas(int)
 	SetPlacementRulesCacheEnabled(bool)
 	SetWitnessEnabled(bool)
+	// only for store configuration
+	UseRaftV2()
 }
 
 // StoreConfig is the interface that wraps the StoreConfig related methods.

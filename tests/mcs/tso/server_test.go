@@ -63,7 +63,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -219,10 +219,12 @@ func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 	}
 
 	// can use the tso-related interface with new primary
-	_, oldPrimary, _ := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, "tso")
+	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, "tso")
+	suite.True(exist)
 	serverMap[oldPrimary].Close()
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
-	_, primary, _ := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, "tso")
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, "tso")
+	suite.True(exist)
 	suite.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO()
 
@@ -236,7 +238,8 @@ func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 		}
 	}
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
-	_, primary, _ = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, "tso")
+	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, "tso")
+	suite.True(exist)
 	suite.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO()
 }

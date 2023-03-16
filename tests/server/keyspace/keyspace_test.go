@@ -36,7 +36,7 @@ import (
 
 type keyspaceTestSuite struct {
 	suite.Suite
-	cleanup func()
+	cancel  context.CancelFunc
 	cluster *tests.TestCluster
 	server  *tests.TestServer
 	manager *keyspace.Manager
@@ -51,7 +51,7 @@ func TestKeyspaceTestSuite(t *testing.T) {
 
 func (suite *keyspaceTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
-	suite.cleanup = cancel
+	suite.cancel = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
 		conf.Keyspace.PreAlloc = preAllocKeyspace
 	})
@@ -65,7 +65,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
-	suite.cleanup()
+	suite.cancel()
 	suite.cluster.Destroy()
 }
 
