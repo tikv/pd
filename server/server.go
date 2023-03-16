@@ -1719,13 +1719,15 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 			return
 		case res := <-watchChan:
 			for _, event := range res.Events {
-				if event.Type != clientv3.EventTypePut {
-					continue
-				}
-				if err := proto.Unmarshal(event.Kv.Value, leader); err != nil {
-					log.Error("watch service primary addr failed", zap.String("service", serviceName), zap.Error(err))
-				} else {
-					s.servicePrimaryMap.Store(serviceName, leader.GetName())
+				switch event.Type {
+				case clientv3.EventTypePut:
+					if err := proto.Unmarshal(event.Kv.Value, leader); err != nil {
+						log.Error("watch service primary addr failed", zap.String("service", serviceName), zap.Error(err))
+					} else {
+						s.servicePrimaryMap.Store(serviceName, leader.GetName())
+					}
+				case clientv3.EventTypeDelete:
+					s.servicePrimaryMap.Delete(serviceName)
 				}
 			}
 		}
