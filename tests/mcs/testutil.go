@@ -73,6 +73,7 @@ func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	return s, cleanup
 }
 
+// WaitForPrimaryServing waits for one of servers being elected to be the primary/leader
 func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Server) string {
 	var primary string
 	testutil.Eventually(re, func() bool {
@@ -88,6 +89,7 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 	return primary
 }
 
+// WaitForTSOServiceAvailable waits for the pd client being served by the tso server side
 func WaitForTSOServiceAvailable(ctx context.Context, pdClient pd.Client) error {
 	var err error
 	for i := 0; i < 30; i++ {
@@ -97,7 +99,7 @@ func WaitForTSOServiceAvailable(ctx context.Context, pdClient pd.Client) error {
 		select {
 		case <-ctx.Done():
 			return err
-		case <-time.After(100*time.Millisecond):
+		case <-time.After(100 * time.Millisecond):
 		}
 	}
 	return errors.WithStack(err)

@@ -40,6 +40,13 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const (
+	// defaultKeyspaceID is the default key space id.
+	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
+	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap and reserved for users who haven't been assigned keyspace.
+	defaultKeyspaceID = uint32(0)
+)
+
 // Region contains information of a region's meta and its peers.
 type Region struct {
 	Meta         *metapb.Region
@@ -239,17 +246,20 @@ func WithMaxErrorRetry(count int) ClientOption {
 
 var _ Client = (*client)(nil)
 
+// serviceModeKeeper is for service mode switching
+type serviceModeKeeper struct {
+	svcModeMutex    sync.RWMutex
+	serviceMode     pdpb.ServiceMode
+	tsoClient       atomic.Value
+	tsoSvcDiscovery ServiceDiscovery
+}
+
 type client struct {
 	keyspaceID      uint32
 	svrUrls         []string
 	pdSvcDiscovery  ServiceDiscovery
 	tokenDispatcher *tokenDispatcher
-
-	// For service mode switching
-	mutex           sync.RWMutex
-	serviceMode     pdpb.ServiceMode
-	tsoClient       atomic.Value
-	tsoSvcDiscovery ServiceDiscovery
+	serviceModeKeeper
 
 	// For internal usage.
 	updateTokenConnectionCh chan struct{}
@@ -280,13 +290,12 @@ func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption)
 
 // NewClientWithContext creates a PD client with context. This API uses the default keyspace id 0.
 func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	// pass 0 as the default keyspace id
-	return NewClientWithKeyspace(ctx, 0, svrAddrs, security, opts...)
+	return NewClientWithKeyspace(ctx, defaultKeyspaceID, svrAddrs, security, opts...)
 }
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
 func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", svrAddrs))
+	log.Info("[pd] create pd client with endpoints and keyspace", zap.Strings("pd-address", svrAddrs), zap.Uint32("keyspace-id", keyspaceID))
 
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
@@ -345,7 +354,9 @@ func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.getTSOClient().Close()
+	if tsoClient := c.getTSOClient(); tsoClient != nil {
+		tsoClient.Close()
+	}
 	if c.tsoSvcDiscovery != nil {
 		c.tsoSvcDiscovery.Close()
 	}
@@ -359,8 +370,8 @@ func (c *client) Close() {
 }
 
 func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	c.svcModeMutex.Lock()
+	defer c.svcModeMutex.Unlock()
 
 	if newMode == c.serviceMode {
 		return
@@ -377,16 +388,15 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	var newTSOCli *tsoClient
 	tsoSvcDiscovery := c.tsoSvcDiscovery
 	ctx, cancel := context.WithCancel(c.ctx)
-	wg := &sync.WaitGroup{}
 
 	if newMode == pdpb.ServiceMode_PD_SVC_MODE {
-		newTSOCli = newTSOClient(ctx, cancel, wg, c.option, c.keyspaceID,
+		newTSOCli = newTSOClient(ctx, cancel, c.option, c.keyspaceID,
 			c.pdSvcDiscovery, c.pdSvcDiscovery.(tsoAllocatorEventSource), &pdTSOStreamBuilderFactory{})
 		newTSOCli.Setup()
 	} else {
-		tsoSvcDiscovery = newTSOServiceDiscovery(ctx, cancel, wg, MetaStorageClient(c),
+		tsoSvcDiscovery = newTSOServiceDiscovery(ctx, cancel, MetaStorageClient(c),
 			c.GetClusterID(c.ctx), c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
-		newTSOCli = newTSOClient(ctx, cancel, wg, c.option, c.keyspaceID,
+		newTSOCli = newTSOClient(ctx, cancel, c.option, c.keyspaceID,
 			tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
 		if err := tsoSvcDiscovery.Init(); err != nil {
 			cancel()
@@ -582,11 +592,11 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
+	tsoClient := c.getTSOClient()
 	req.start = time.Now()
 	req.keyspaceID = c.keyspaceID
 	req.dcLocation = dcLocation
 
-	tsoClient := c.getTSOClient()
 	if tsoClient == nil {
 		req.done <- errs.ErrClientGetTSO
 		return req

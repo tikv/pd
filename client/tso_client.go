@@ -60,7 +60,7 @@ var tsoReqPool = sync.Pool{
 type tsoClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     *sync.WaitGroup
+	wg     sync.WaitGroup
 	option *option
 
 	keyspaceID   uint32
@@ -86,12 +86,11 @@ type tsoClient struct {
 }
 
 // newTSOClient returns a new TSO client.
-func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, option *option, keyspaceID uint32,
+func newTSOClient(ctx context.Context, cancel context.CancelFunc, option *option, keyspaceID uint32,
 	svcDiscovery ServiceDiscovery, eventSrc tsoAllocatorEventSource, factory tsoStreamBuilderFactory) *tsoClient {
 	c := &tsoClient{
 		ctx:                       ctx,
 		cancel:                    cancel,
-		wg:                        wg,
 		option:                    option,
 		keyspaceID:                keyspaceID,
 		svcDiscovery:              svcDiscovery,
@@ -120,6 +119,8 @@ func (c *tsoClient) Setup() {
 
 // Close closes the TSO client
 func (c *tsoClient) Close() {
+	log.Info("closing tso client")
+
 	c.cancel()
 	c.wg.Wait()
 
@@ -133,6 +134,8 @@ func (c *tsoClient) Close() {
 		}
 		return true
 	})
+
+	log.Info("tso client is closed")
 }
 
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map

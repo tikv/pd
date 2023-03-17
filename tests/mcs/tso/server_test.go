@@ -32,7 +32,6 @@ import (
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
@@ -207,7 +206,8 @@ func (suite *APIServerForwardTestSuite) SetupSuite() {
 	suite.NoError(suite.pdLeader.BootstrapCluster())
 	suite.addRegions()
 
-	suite.pdClient, err = pd.NewClientWithContext(context.Background(), []string{suite.backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+	suite.pdClient, err = pd.NewClientWithContext(context.Background(),
+		[]string{suite.backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 	suite.NoError(err)
 }
 
@@ -260,13 +260,12 @@ func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 	suite.checkAvailableTSO()
 
 	// can use the tso-related interface with old primary again
-	newPrimary := tempurl.Alloc()
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, newPrimary)
+	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, oldPrimary)
 	defer cleanup()
-	serverMap[newPrimary] = s
+	serverMap[oldPrimary] = s
 	suite.checkAvailableTSO()
 	for addr, s := range serverMap {
-		if addr != newPrimary {
+		if addr != oldPrimary {
 			s.Close()
 			delete(serverMap, addr)
 		}
@@ -275,7 +274,7 @@ func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
 	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
 	suite.True(exist)
-	suite.Equal(newPrimary, primary)
+	suite.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO()
 }
 

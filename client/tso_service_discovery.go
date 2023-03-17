@@ -68,9 +68,9 @@ type tsoServiceDiscovery struct {
 
 	checkMembershipCh chan struct{}
 
-	wg     *sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	tlsCfg *tlsutil.TLSConfig
 
@@ -79,12 +79,11 @@ type tsoServiceDiscovery struct {
 }
 
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
-func newTSOServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, metacli MetaStorageClient,
+func newTSOServiceDiscovery(ctx context.Context, cancel context.CancelFunc, metacli MetaStorageClient,
 	clusterID uint64, keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) ServiceDiscovery {
 	c := &tsoServiceDiscovery{
 		ctx:               ctx,
 		cancel:            cancel,
-		wg:                wg,
 		metacli:           metacli,
 		keyspaceID:        keyspaceID,
 		clusterID:         clusterID,
@@ -126,6 +125,24 @@ func (c *tsoServiceDiscovery) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
+// Close releases all resources
+func (c *tsoServiceDiscovery) Close() {
+	log.Info("closing tso service discovery")
+
+	c.cancel()
+	c.wg.Wait()
+
+	c.clientConns.Range(func(key, cc interface{}) bool {
+		if err := cc.(*grpc.ClientConn).Close(); err != nil {
+			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+		}
+		c.clientConns.Delete(key)
+		return true
+	})
+
+	log.Info("tso service discovery is closed")
+}
+
 func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 	defer c.wg.Done()
 
@@ -144,18 +161,6 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
-}
-
-// Close releases all resources
-func (c *tsoServiceDiscovery) Close() {
-	log.Info("close tso service discovery")
-	c.clientConns.Range(func(key, cc interface{}) bool {
-		if err := cc.(*grpc.ClientConn).Close(); err != nil {
-			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
-		}
-		c.clientConns.Delete(key)
-		return true
-	})
 }
 
 // GetClusterID returns the ID of the cluster
