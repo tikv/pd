@@ -747,7 +747,7 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
-	if deltaDuration <= 500*time.Millisecond {
+	if deltaDuration <= 500*time.Millisecond && gc.run.initialRequestCompleted {
 		return false
 	}
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
@@ -993,7 +993,11 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 
 func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 	value := counter.avgRUPerSec * gc.run.targetPeriod.Seconds() * needTokensAmplification
-	value -= counter.limiter.AvailableTokens(gc.run.now)
+	if gc.run.initialRequestCompleted {
+		value -= counter.limiter.AvailableTokens(gc.run.now)
+	} else {
+		value += initialRequestUnits - counter.limiter.AvailableTokens(gc.run.now)
+	}
 	if value < 0 {
 		value = 0
 	}
