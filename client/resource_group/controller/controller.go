@@ -417,6 +417,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 	req := &rmpb.TokenBucketsRequest{
 		Requests:              requests,
 		TargetRequestPeriodMs: uint64(defaultTargetPeriod / time.Millisecond),
+		ClientUniqueId:        c.clientUniqueID,
 	}
 	if c.config.DegradedModeWaitDuration > 0 && c.responseDeadlineCh == nil {
 		c.run.responseDeadline.Reset(c.config.DegradedModeWaitDuration)
