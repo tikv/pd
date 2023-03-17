@@ -115,12 +115,10 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	}
 	for _, rule := range h.microserviceRedirectRules {
 		if rule.matchPath == r.URL.Path {
-			b, addr, err := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
-			if !b || err != nil {
-				log.Warn("one rule was matched but failed to get the service primary addr",
-					zap.String("path", r.URL.Path), zap.Bool("bool", b), zap.Error(err))
-				// respect the matching and tell the caller the addr is unavailable
-				addr = ""
+			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
+			if !ok || addr == "" {
+				log.Warn("failed to get the service primary addr when try match redirect rules",
+					zap.String("path", r.URL.Path))
 			}
 			r.URL.Path = rule.targetPath
 			return true, addr

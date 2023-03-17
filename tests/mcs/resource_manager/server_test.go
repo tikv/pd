@@ -34,7 +34,7 @@ func TestResourceManagerServer(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
 
