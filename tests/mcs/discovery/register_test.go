@@ -70,10 +70,10 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 func (suite *serverRegisterTestSuite) TestServerRegister() {
 	// test register, primary and unregister when start tso and resource-manager with only one server
 	for i := 0; i < 3; i++ {
-		suite.checkServerRegister("tso")
+		suite.checkServerRegister(utils.TSOServiceName)
 	}
 	for i := 0; i < 3; i++ {
-		suite.checkServerRegister("resource_manager")
+		suite.checkServerRegister(utils.ResourceManagerServiceName)
 	}
 }
 
@@ -105,8 +105,8 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 }
 
 func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
-	suite.checkServerPrimaryChange("tso", 3)
-	suite.checkServerPrimaryChange("resource_manager", 3)
+	suite.checkServerPrimaryChange(utils.TSOServiceName, 3)
+	suite.checkServerPrimaryChange(utils.ResourceManagerServiceName, 3)
 }
 
 func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName string, serverNum int) {
@@ -146,9 +146,9 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, func()) {
 	re := suite.Require()
 	switch serviceName {
-	case "tso":
+	case utils.TSOServiceName:
 		return mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
-	case "resource_manager":
+	case utils.ResourceManagerServiceName:
 		return mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints)
 	default:
 		return nil, nil

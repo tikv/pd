@@ -187,7 +187,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 		streamCtx := stream.Context()
 		if s.IsAPIServiceMode() {
-			forwardedHost, ok := s.GetServicePrimaryAddr(ctx, "tso")
+			forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
 			if !ok || forwardedHost == "" {
 				return ErrNotFoundTSOAddr
 			}
@@ -1964,7 +1964,7 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 }
 
 func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
-	forwardedHost, ok := s.GetServicePrimaryAddr(ctx, "tso")
+	forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
 	if !ok || forwardedHost == "" {
 		return pdpb.Timestamp{}, ErrNotFoundTSOAddr
 	}

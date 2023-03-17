@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/tso"
@@ -79,7 +80,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 
 // NewTestAPIServer creates a new TestServer.
 func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
-	return createTestServer(ctx, cfg, []string{"api"})
+	return createTestServer(ctx, cfg, []string{utils.APIServiceName})
 }
 
 func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
