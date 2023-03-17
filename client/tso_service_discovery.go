@@ -286,13 +286,13 @@ func (c *tsoServiceDiscovery) switchPrimary(addrs []string) error {
 func (c *tsoServiceDiscovery) updateMember() error {
 	resp, err := c.metacli.Get(c.ctx, []byte(c.primaryKey))
 	if err != nil {
-		log.Error("[tso] failed to get the keyspace serving endpoint", errs.ZapError(err))
+		log.Error("[tso] failed to get the keyspace serving endpoint", zap.String("primary-key", c.primaryKey), errs.ZapError(err))
 		return err
 	}
 
 	if resp == nil || len(resp.Kvs) == 0 {
-		log.Error("[tso] didn't find the keyspace serving endpoint")
-		return errs.ErrClientGetLeader
+		log.Error("[tso] didn't find the keyspace serving endpoint", zap.String("primary-key", c.primaryKey))
+		return errs.ErrClientGetServingEndpoint
 	} else if resp.Count > 1 {
 		return errs.ErrClientGetMultiResponse.FastGenByArgs(resp.Kvs)
 	}
@@ -304,8 +304,8 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	}
 	listenUrls := primary.GetListenUrls()
 	if len(listenUrls) == 0 {
-		log.Error("[tso] didn't find the keyspace serving endpoint")
-		return errs.ErrClientGetLeader
+		log.Error("[tso] the keyspace serving endpoint list is empty", zap.String("primary-key", c.primaryKey))
+		return errs.ErrClientGetServingEndpoint
 	}
 	return c.switchPrimary(listenUrls)
 }

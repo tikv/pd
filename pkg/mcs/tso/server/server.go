@@ -294,8 +294,6 @@ func (s *Server) Close() {
 
 	log.Info("closing tso server ...")
 	s.serviceRegister.Deregister()
-	// TODO: double check when muxListener is closed, grpc.Server.serve() and http.Server.serve()
-	// will also close with error cmux.ErrListenerClosed.
 	s.muxListener.Close()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
@@ -330,7 +328,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.participant.IsLeader() && atomic.LoadInt64(&s.isServing) == 1
+	return atomic.LoadInt64(&s.isServing) == 1 && s.participant.IsLeader()
 }
 
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
@@ -611,7 +609,6 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	atomic.StoreInt64(&s.isServing, 1)
 	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.ListenAddr}
 	serializedEntry, err := entry.Serialize()
 	if err != nil {
@@ -619,6 +616,7 @@ func (s *Server) startServer() (err error) {
 	}
 	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, mcsutils.TSOServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
+	atomic.StoreInt64(&s.isServing, 1)
 	return nil
 }
 

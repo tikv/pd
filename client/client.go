@@ -1146,6 +1146,9 @@ func addrsToUrls(addrs []string) []string {
 
 // IsLeaderChange will determine whether there is a leader change.
 func IsLeaderChange(err error) bool {
+	if err == errs.ErrClientTSOStreamClosed {
+		return true
+	}
 	errMsg := err.Error()
 	return strings.Contains(errMsg, errs.NotLeaderErr) || strings.Contains(errMsg, errs.MismatchLeaderErr)
 }

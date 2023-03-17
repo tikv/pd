@@ -241,7 +241,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.participant.IsLeader()
+	return !s.IsClosed() && s.participant.IsLeader()
 }
 
 // IsClosed checks if the server loop is closed
@@ -399,7 +399,6 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	atomic.StoreInt64(&s.isServing, 1)
 	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.ListenAddr}
 	serializedEntry, err := entry.Serialize()
 	if err != nil {
@@ -407,6 +406,7 @@ func (s *Server) startServer() (err error) {
 	}
 	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.ResourceManagerServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
+	atomic.StoreInt64(&s.isServing, 1)
 	return nil
 }
 

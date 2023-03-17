@@ -1710,7 +1710,9 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 	defer s.serverLoopWg.Done()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
+
 	serviceKey := fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
+	log.Info("start to watch", zap.String("service-key", serviceKey))
 
 	primary := &tsopb.Participant{}
 	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)

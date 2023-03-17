@@ -101,7 +101,6 @@ require (
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d // indirect
 	github.com/pingcap/tidb-dashboard v0.0.0-20230209052558-a58fc2a7e924 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_golang v1.11.1 // indirect

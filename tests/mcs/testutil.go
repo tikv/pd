@@ -18,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/pkg/errors"
 	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
+	bs "github.com/tikv/pd/pkg/basicserver"
 )
 
 // SetupTSOClient creates a TSO client for test.
@@ -69,4 +71,34 @@ func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup
+}
+
+func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Server) string {
+	var primary string
+	testutil.Eventually(re, func() bool {
+		for name, s := range serverMap {
+			if s.IsServing() {
+				primary = name
+				return true
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	return primary
+}
+
+func WaitForTSOServiceAvailable(ctx context.Context, pdClient pd.Client) error {
+	var err error
+	for i := 0; i < 30; i++ {
+		if _, _, err := pdClient.GetTS(ctx); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(100*time.Millisecond):
+		}
+	}
+	return errors.WithStack(err)
 }
