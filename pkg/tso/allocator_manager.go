@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -165,6 +166,7 @@ type AllocatorManager struct {
 		syncutil.RWMutex
 		clientConns map[string]*grpc.ClientConn
 	}
+	isServing atomic.Bool
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
@@ -640,6 +642,9 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 
 // Update the Local TSO Allocator leaders TSO in memory concurrently.
 func (am *AllocatorManager) allocatorUpdater() {
+	if !am.isServing.Load() {
+		return
+	}
 	// Filter out allocators without leadership and uninitialized
 	allocatorGroups := am.getAllocatorGroups(FilterUninitialized(), FilterUnavailableLeadership())
 	// Update each allocator concurrently
@@ -676,6 +681,9 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 // Check if we have any new dc-location configured, if yes,
 // then set up the corresponding local allocator.
 func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
+	if !am.isServing.Load() {
+		return
+	}
 	// Collect all dc-locations
 	dcLocations := am.GetClusterDCLocations()
 	// Get all Local TSO Allocators
@@ -703,6 +711,9 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 // ClusterDCLocationChecker collects all dc-locations of a cluster, computes some related info
 // and stores them into the DCLocationInfo, then finally writes them into am.mu.clusterDCLocations.
 func (am *AllocatorManager) ClusterDCLocationChecker() {
+	if !am.isServing.Load() {
+		return
+	}
 	defer logutil.LogPanic()
 	// Wait for the group leader to be elected out.
 	if !am.member.IsLeaderElected() {
@@ -860,6 +871,9 @@ func (am *AllocatorManager) GetLocalTSOSuffixPath(dcLocation string) string {
 // 2. If all PD servers with dc-location="dc-1" are down, then the other PD servers
 // of DC could be elected.
 func (am *AllocatorManager) PriorityChecker() {
+	if !am.isServing.Load() {
+		return
+	}
 	serverID := am.member.ID()
 	myServerDCLocation := am.getServerDCLocation(serverID)
 	// Check all Local TSO Allocator followers to see if their priorities is higher than the leaders

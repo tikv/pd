@@ -79,6 +79,9 @@ func (lta *LocalTSOAllocator) GetDCLocation() string {
 
 // Initialize will initialize the created local TSO allocator.
 func (lta *LocalTSOAllocator) Initialize(suffix int) error {
+	if !lta.allocatorManager.isServing.Load() {
+		return nil
+	}
 	tsoAllocatorRole.WithLabelValues(lta.timestampOracle.dcLocation).Set(1)
 	lta.timestampOracle.suffix = suffix
 	return lta.timestampOracle.SyncTimestamp(lta.leadership)

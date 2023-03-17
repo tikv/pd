@@ -127,6 +127,9 @@ func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32, suffixBits int) (*pdp
 
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize(int) error {
+	if !gta.allocatorManager.isServing.Load() {
+		return nil
+	}
 	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(1)
 	// The suffix of a Global TSO should always be 0.
 	gta.timestampOracle.suffix = 0

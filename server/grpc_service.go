@@ -160,11 +160,9 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		}
 	}
 
-	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
-	if !s.IsAPIServiceMode() {
-		tsoAllocatorManager := s.GetTSOAllocatorManager()
-		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
-	}
+	tsoAllocatorManager := s.GetTSOAllocatorManager()
+	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),

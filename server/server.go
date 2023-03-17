@@ -386,24 +386,23 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
-	if !s.IsAPIServiceMode() {
-		s.tsoAllocatorManager = tso.NewAllocatorManager(
-			s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
-			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
-		// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
-		s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
-		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
-		if !s.cfg.EnableLocalTSO {
-			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
-				return err
-			}
-		}
-		if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
-			if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
-				return err
-			}
+	s.tsoAllocatorManager = tso.NewAllocatorManager(
+		s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
+		func() time.Duration { return s.persistOptions.GetMaxResetTSGap() }, !s.IsAPIServiceMode())
+	// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
+	s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
+	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
+	if !s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
+			return err
 		}
 	}
+	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
+			return err
+		}
+	}
+
 	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
@@ -535,19 +534,13 @@ func (s *Server) LoopContext() context.Context {
 
 func (s *Server) startServerLoop(ctx context.Context) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(ctx)
-	s.serverLoopWg.Add(4)
+	s.serverLoopWg.Add(6)
 	go s.leaderLoop()
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() { // disable tso service and resource manager service in api server
-		s.serverLoopWg.Add(2)
-		go s.watchServicePrimaryAddrLoop(mcs.TSOServiceName)
-		go s.watchServicePrimaryAddrLoop(mcs.ResourceManagerServiceName)
-	} else { // enable tso service
-		s.serverLoopWg.Add(1)
-		go s.tsoAllocatorLoop()
-	}
+	go s.tsoAllocatorLoop()
+	go s.watchServicePrimaryAddrLoop(mcs.TSOServiceName)
 }
 
 func (s *Server) stopServerLoop() {
@@ -1401,10 +1394,9 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
-			if !s.IsAPIServiceMode() {
-				// Check the cluster dc-location after the PD leader is elected
-				go s.tsoAllocatorManager.ClusterDCLocationChecker()
-			}
+			// Check the cluster dc-location after the PD leader is elected
+			go s.tsoAllocatorManager.ClusterDCLocationChecker()
+
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
@@ -1458,26 +1450,26 @@ func (s *Server) campaignLeader() {
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
-	if !s.IsAPIServiceMode() {
-		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-		if err != nil {
-			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		log.Info("initializing the global TSO allocator")
-		if err := allocator.Initialize(0); err != nil {
-			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		defer func() {
-			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-			failpoint.Inject("updateAfterResetTSO", func() {
-				if err = allocator.UpdateTSO(); err != nil {
-					panic(err)
-				}
-			})
-		}()
+
+	allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		log.Error("failed to get the global TSO allocator", errs.ZapError(err))
+		return
 	}
+	log.Info("initializing the global TSO allocator")
+	if err := allocator.Initialize(0); err != nil {
+		log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+		return
+	}
+	defer func() {
+		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+		failpoint.Inject("updateAfterResetTSO", func() {
+			if err = allocator.UpdateTSO(); err != nil {
+				panic(err)
+			}
+		})
+	}()
+
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
@@ -1510,10 +1502,9 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	if !s.IsAPIServiceMode() {
-		// Check the cluster dc-location after the PD leader is elected.
-		go s.tsoAllocatorManager.ClusterDCLocationChecker()
-	}
+	// Check the cluster dc-location after the PD leader is elected.
+	go s.tsoAllocatorManager.ClusterDCLocationChecker()
+
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
@@ -1715,7 +1706,7 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 	log.Info("start to watch", zap.String("service-key", serviceKey))
 
 	primary := &tsopb.Participant{}
-	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
+	ok, rev, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
 	if err != nil {
 		log.Error("get service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
 	}
@@ -1727,7 +1718,7 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 		log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))
 	}
 
-	watchChan := s.client.Watch(ctx, serviceKey, clientv3.WithPrefix())
+	watchChan := s.client.Watch(ctx, serviceKey, clientv3.WithPrefix(), clientv3.WithRev(rev))
 	for {
 		select {
 		case <-ctx.Done():
