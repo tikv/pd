@@ -52,6 +52,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/types"
@@ -110,8 +111,12 @@ type Server struct {
 	tsoAllocatorManager *tso.AllocatorManager
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
-	// Store as map[string]chan *tsoRequest
-	tsoDispatcher sync.Map
+	// tsoDispatcher is used to dispatch different TSO requests to
+	// the corresponding forwarding TSO channel.
+	tsoDispatcher *tsoutil.TSODispatcher
+	// TSOProtoFactory is the abstract factory for creating tso
+	// related data structures defined in pd protocol
+	TSOProtoFactory *tsoutil.TSOProtoFactory
 
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
@@ -358,11 +363,6 @@ func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.tsoAllocatorManager
 }
 
-// GetTSODispatcher gets the TSO Dispatcher
-func (s *Server) GetTSODispatcher() *sync.Map {
-	return &s.tsoDispatcher
-}
-
 // IsLocalRequest checks if the forwarded host is the current host
 func (s *Server) IsLocalRequest(forwardedHost string) bool {
 	// TODO: Check if the forwarded host is the current host.
@@ -370,16 +370,6 @@ func (s *Server) IsLocalRequest(forwardedHost string) bool {
 	// uses the embedded etcd, check against ClientUrls; otherwise check
 	// against the cluster membership.
 	return forwardedHost == ""
-}
-
-// CreateTsoForwardStream creates the forward stream
-func (s *Server) CreateTsoForwardStream(client *grpc.ClientConn) (tsopb.TSO_TsoClient, context.CancelFunc, error) {
-	done := make(chan struct{})
-	ctx, cancel := context.WithCancel(s.ctx)
-	go checkStream(ctx, cancel, done)
-	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
-	done <- struct{}{}
-	return forwardStream, cancel, err
 }
 
 // GetDelegateClient returns grpc client connection talking to the forwarded host
@@ -432,18 +422,6 @@ func (s *Server) GetExternalTS() uint64 {
 // TODO: Implement SetExternalTS
 func (s *Server) SetExternalTS(externalTS uint64) error {
 	return nil
-}
-
-func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
-	defer logutil.LogPanic()
-	select {
-	case <-done:
-		return
-	case <-time.After(3 * time.Second):
-		cancel()
-	case <-streamCtx.Done():
-	}
-	<-done
 }
 
 // GetConfig gets the config.
@@ -583,6 +561,8 @@ func (s *Server) startServer() (err error) {
 		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
 	// Set up the Global TSO Allocator here, it will be initialized once this TSO participant campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(s.ctx, tso.GlobalDCLocation, s.participant.GetLeadership())
+	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
+	s.TSOProtoFactory = &tsoutil.TSOProtoFactory{}
 
 	s.service = &Service{Server: s}
 
