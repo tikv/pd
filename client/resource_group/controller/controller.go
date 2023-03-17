@@ -32,9 +32,9 @@ import (
 )
 
 const (
-	controllerConfigPath   = "resource_group/controller"
-	maxRetry               = 3
-	maxNotificationChanLen = 200
+	controllerConfigPath    = "resource_group/controller"
+	maxRetry                = 3
+	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
 )
 

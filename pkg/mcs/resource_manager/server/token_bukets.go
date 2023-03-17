@@ -15,6 +15,8 @@
 package server
 
 import (
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 	"math"
 	"time"
 
@@ -103,12 +105,20 @@ func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 
 func (gts *GroupTokenBucketState) cleanupAssignTokenSum(cleanToken bool) {
 	gts.clientConsumptionTokensSum = 0
+	evenRatio := 1.0
+	if l := len(gts.tokenSlots); l > 0 {
+		evenRatio = 1 / float64(l)
+	}
+
+	if cleanToken {
+		gts.Tokens = 0
+	}
+
+	evenTokens := gts.Tokens * evenRatio
 	for _, slot := range gts.tokenSlots {
 		slot.requireTokensSum = 0
-		if cleanToken {
-			slot.tokenCapacity = 0
-			slot.lastTokenCapacity = 0
-		}
+		slot.tokenCapacity = evenTokens
+		slot.lastTokenCapacity = evenTokens
 	}
 }
 
@@ -123,7 +133,8 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		if requiredToken == 0 {
 			return
 		}
-		gts.cleanupAssignTokenSum(false)
+		gts.cleanupAssignTokenSum(true)
+		gts.Tokens += elapseTokens
 		slot = &TokenSlot{}
 		gts.tokenSlots[clientUniqueID] = slot
 	} else if gts.clientConsumptionTokensSum >= maxAssignTokens {
@@ -150,7 +161,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		return
 	}
 
-	for _, slot := range gts.tokenSlots {
+	for clientID, slot := range gts.tokenSlots {
 		var ratio float64
 		if gts.clientConsumptionTokensSum == 0 || len(gts.tokenSlots) == 1 {
 			ratio = evenRatio
@@ -178,6 +189,9 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			FillRate:   uint64(fillRate),
 			BurstLimit: int64(burstLimit),
 		}
+
+		log.Info("balanceSlotTokens", zap.Uint64("clientID", clientID), zap.Float64("ratio", ratio), zap.Float64("fillRate", fillRate),
+			zap.Float64("assignToken", assignToken), zap.Float64("requireTokensSum", slot.requireTokensSum))
 	}
 	if requiredToken != 0 {
 		// Only slots that require a positive number will be considered alive.
@@ -258,7 +272,6 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	// Reloan when setting changed
 	if gtb.settingChanged && gtb.Tokens <= 0 {
 		gtb.settingChanged = false
-		gtb.Tokens = 0
 		elapseTokens = 0
 		gtb.cleanupAssignTokenSum(true)
 	}
@@ -284,6 +297,7 @@ func (gtb *GroupTokenBucket) request(now time.Time,
 	res, trickleDuration := slot.assignSlotTokens(neededTokens, targetPeriodMs)
 	// Update bucket to record all tokens.
 	gtb.Tokens -= slot.lastTokenCapacity - slot.tokenCapacity
+	slot.lastTokenCapacity = slot.tokenCapacity
 
 	return res, trickleDuration
 }

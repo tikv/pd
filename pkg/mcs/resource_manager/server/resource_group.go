@@ -130,7 +130,9 @@ func (rg *ResourceGroup) RequestRU(
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
+	log.Info("RequestRU start", zap.Uint64("clientUniqueID", clientUniqueID), zap.Float64("need Tokens", neededTokens), zap.Uint64("targetPeriodMs", targetPeriodMs))
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs, clientUniqueID)
+	log.Info("RequestRU end", zap.Uint64("clientUniqueID", clientUniqueID), zap.Float64("tb.Tokens", tb.Tokens), zap.Int64("trickleTimeMs", trickleTimeMs))
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
