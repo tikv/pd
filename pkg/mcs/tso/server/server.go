@@ -53,7 +53,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
-	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/types"
@@ -419,15 +418,6 @@ func (s *Server) ValidateRequest(header *tsopb.RequestHeader) error {
 	return nil
 }
 
-// GetGlobalTS returns global tso.
-func (s *Server) GetGlobalTS() (uint64, error) {
-	ts, err := s.tsoAllocatorManager.GetGlobalTSO()
-	if err != nil {
-		return 0, err
-	}
-	return tsoutil.GenerateTS(ts), nil
-}
-
 // GetExternalTS returns external timestamp from the cache or the persistent storage.
 // TODO: Implement GetExternalTS
 func (s *Server) GetExternalTS() uint64 {
@@ -619,7 +609,12 @@ func (s *Server) startServer() (err error) {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "tso", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
+	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.ListenAddr}
+	serializedEntry, err := entry.Serialize()
+	if err != nil {
+		return err
+	}
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.TSOServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }

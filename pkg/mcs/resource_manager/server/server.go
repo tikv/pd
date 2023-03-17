@@ -220,9 +220,9 @@ func (s *Server) Close() {
 	log.Info("resource manager server is closed")
 }
 
-// GetRequestUnitConfig returns the RU config.
-func (s *Server) GetRequestUnitConfig() *RequestUnitConfig {
-	return &s.cfg.RequestUnit
+// GetControllerConfig returns the controller config.
+func (s *Server) GetControllerConfig() *ControllerConfig {
+	return &s.cfg.Controller
 }
 
 // GetClient returns builtin etcd client.
@@ -404,7 +404,12 @@ func (s *Server) startServer() (err error) {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isServing, 1)
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, "resource_manager", s.cfg.ListenAddr, s.cfg.ListenAddr, discovery.DefaultLeaseInSeconds)
+	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.ListenAddr}
+	serializedEntry, err := entry.Serialize()
+	if err != nil {
+		return err
+	}
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.ResourceManagerServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	s.serviceRegister.Register()
 	return nil
 }
