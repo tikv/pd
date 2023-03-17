@@ -33,7 +33,6 @@ var (
 
 const (
 	initialRequestUnits = 10000
-	bufferRUs           = 2000
 	// movingAvgFactor is the weight applied to a new "sample" of RU usage (with one
 	// sample per mainLoopUpdateInterval).
 	//

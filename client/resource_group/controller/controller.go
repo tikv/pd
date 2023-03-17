@@ -32,9 +32,10 @@ import (
 )
 
 const (
-	requestUnitConfigPath  = "resource_group/ru_config"
-	maxRetry               = 3
-	maxNotificationChanLen = 200
+	requestUnitConfigPath   = "resource_group/ru_config"
+	maxRetry                = 3
+	maxNotificationChanLen  = 200
+	needTokensAmplification = 1.1
 )
 
 type selectType int
@@ -729,10 +730,6 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		counter.notify.setupNotificationCh = nil
 	}
 	counter.notify.mu.Unlock()
-	notifyThreshold := granted * notifyFraction
-	if notifyThreshold < bufferRUs {
-		notifyThreshold = bufferRUs
-	}
 
 	var cfg tokenBucketReconfigureArgs
 	cfg.NewBurst = bucket.GetSettings().GetBurstLimit()
@@ -741,10 +738,13 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 	if trickleTimeMs == 0 {
 		cfg.NewTokens = granted
 		cfg.NewRate = float64(bucket.GetSettings().FillRate)
-		cfg.NotifyThreshold = notifyThreshold
 		counter.lastDeadline = time.Time{}
+		cfg.NotifyThreshold = granted * notifyFraction
 		// In the non-trickle case, clients can be allowed to accumulate more tokens.
 		if cfg.NewBurst >= 0 {
+			if cfg.NotifyThreshold < float64(cfg.NewBurst) {
+				cfg.NotifyThreshold = float64(cfg.NewBurst)
+			}
 			cfg.NewBurst = 0
 		}
 	} else {
@@ -761,7 +761,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		counter.notify.mu.Lock()
 		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
 		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
-		counter.notify.setupNotificationThreshold = notifyThreshold
+		counter.notify.setupNotificationThreshold = 1
 		counter.notify.mu.Unlock()
 		counter.lastDeadline = deadline
 		select {
@@ -844,7 +844,7 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 }
 
 func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
-	value := counter.avgRUPerSec*gc.run.targetPeriod.Seconds() + bufferRUs
+	value := counter.avgRUPerSec * gc.run.targetPeriod.Seconds() * needTokensAmplification
 	value -= counter.limiter.AvailableTokens(gc.run.now)
 	if value < 0 {
 		value = 0
