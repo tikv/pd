@@ -17,9 +17,9 @@ package mockcluster
 import (
 	"time"
 
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule/placement"
 )
 
 // SetMaxMergeRegionSize updates the MaxMergeRegionSize configuration.
@@ -168,4 +168,20 @@ func (mc *Cluster) SetMaxReplicasWithLabel(enablePlacementRules bool, num int, l
 		mc.SetMaxReplicas(num)
 		mc.SetLocationLabels(labels)
 	}
+}
+
+// SetRegionMaxSize sets the region max size.
+func (mc *Cluster) SetRegionMaxSize(v string) {
+	mc.updateStoreConfig(func(r *config.StoreConfig) { r.RegionMaxSize = v })
+}
+
+// SetRegionSizeMB sets the region max size.
+func (mc *Cluster) SetRegionSizeMB(v uint64) {
+	mc.updateStoreConfig(func(r *config.StoreConfig) { r.RegionMaxSizeMB = v })
+}
+
+func (mc *Cluster) updateStoreConfig(f func(*config.StoreConfig)) {
+	r := mc.StoreConfigManager.GetStoreConfig().Clone()
+	f(r)
+	mc.SetStoreConfig(r)
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/testutil"
+	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )
@@ -54,7 +55,7 @@ func TestUpdateURLs(t *testing.T) {
 		}
 		return
 	}
-	cli := &baseClient{option: newOption()}
+	cli := &pdServiceDiscovery{option: newOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs())
@@ -89,13 +90,12 @@ func TestGRPCDialOption(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
-	cli := &baseClient{
-		checkLeaderCh:        make(chan struct{}, 1),
-		checkTSODispatcherCh: make(chan struct{}, 1),
-		ctx:                  ctx,
-		cancel:               cancel,
-		security:             SecurityOption{},
-		option:               newOption(),
+	cli := &pdServiceDiscovery{
+		checkMembershipCh: make(chan struct{}, 1),
+		ctx:               ctx,
+		cancel:            cancel,
+		tlsCfg:            &tlsutil.TLSConfig{},
+		option:            newOption(),
 	}
 	cli.urls.Store([]string{testClientURL})
 	cli.option.gRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}

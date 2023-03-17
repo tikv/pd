@@ -17,21 +17,18 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"math/rand"
 	"net/http"
 	"net/url"
-	"testing"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
@@ -40,6 +37,16 @@ import (
 const (
 	// defaultEtcdClientTimeout is the default timeout for etcd client.
 	defaultEtcdClientTimeout = 3 * time.Second
+
+	// defaultAutoSyncInterval is the interval to sync etcd cluster.
+	defaultAutoSyncInterval = 60 * time.Second
+
+	// defaultDialKeepAliveTime is the time after which client pings the server to see if transport is alive.
+	defaultDialKeepAliveTime = 10 * time.Second
+
+	// defaultDialKeepAliveTimeout is the time that the client waits for a response for the
+	// keep-alive probe. If the response is not received in this time, the connection is closed.
+	defaultDialKeepAliveTimeout = 3 * time.Second
 
 	// DefaultDialTimeout is the maximum amount of time a dial will wait for a
 	// connection to setup. 30s is long enough for most of the network conditions.
@@ -186,51 +193,55 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
 }
 
-// NewTestSingleConfig is used to create a etcd config for the unit test purpose.
-func NewTestSingleConfig(t *testing.T) *embed.Config {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd"
-	cfg.Dir = t.TempDir()
-	cfg.WalDir = ""
-	cfg.Logger = "zap"
-	cfg.LogOutputs = []string{"stdout"}
-
-	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-
-	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	return cfg
-}
-
 // CreateClients creates etcd v3 client and http client.
 func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
-	endpoints := []string{acUrls[0].String()}
-	lgc := zap.NewProductionConfig()
-	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
-		DialTimeout: defaultEtcdClientTimeout,
-		TLS:         tlsConfig,
-		LogConfig:   &lgc,
-	})
+	client, err := createEtcdClient(tlsConfig, acUrls)
 	if err != nil {
 		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
-
 	httpClient := &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
 			TLSClientConfig:   tlsConfig,
 		},
 	}
-	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
 	return client, httpClient, nil
+}
+
+func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, error) {
+	if len(acUrls) == 0 {
+		return nil, errs.ErrNewEtcdClient.FastGenByArgs("no available etcd address")
+	}
+	endpoints := make([]string, 0, len(acUrls))
+	for _, u := range acUrls {
+		endpoints = append(endpoints, u.String())
+	}
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
+	autoSyncInterval := defaultAutoSyncInterval
+	dialKeepAliveTime := defaultDialKeepAliveTime
+	dialKeepAliveTimeout := defaultDialKeepAliveTimeout
+	failpoint.Inject("autoSyncInterval", func() {
+		autoSyncInterval = 10 * time.Millisecond
+	})
+	failpoint.Inject("closeKeepAliveCheck", func() {
+		autoSyncInterval = 0
+		dialKeepAliveTime = 0
+		dialKeepAliveTimeout = 0
+	})
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:            endpoints,
+		DialTimeout:          defaultEtcdClientTimeout,
+		AutoSyncInterval:     autoSyncInterval,
+		TLS:                  tlsConfig,
+		LogConfig:            &lgc,
+		DialKeepAliveTime:    dialKeepAliveTime,
+		DialKeepAliveTimeout: dialKeepAliveTimeout,
+	})
+	if err == nil {
+		log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
+	}
+	return client, err
 }
 
 // InitClusterID creates a cluster ID for the given key if it hasn't existed.
@@ -246,6 +257,20 @@ func InitClusterID(c *clientv3.Client, key string) (clusterID uint64, err error)
 	// If no key exist, generate a random cluster ID.
 	if len(resp.Kvs) == 0 {
 		return InitOrGetClusterID(c, key)
+	}
+	return typeutil.BytesToUint64(resp.Kvs[0].Value)
+}
+
+// GetClusterID gets the cluster ID for the given key.
+func GetClusterID(c *clientv3.Client, key string) (clusterID uint64, err error) {
+	// Get any cluster key to parse the cluster ID.
+	resp, err := EtcdKVGet(c, key)
+	if err != nil {
+		return 0, err
+	}
+	// If no key exist, generate a random cluster ID.
+	if len(resp.Kvs) == 0 {
+		return 0, nil
 	}
 	return typeutil.BytesToUint64(resp.Kvs[0].Value)
 }

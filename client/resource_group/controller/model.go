@@ -15,7 +15,12 @@
 package controller
 
 import (
-	"context"
+	"os"
+	"time"
+
+	"github.com/elastic/gosigar"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
@@ -26,17 +31,17 @@ import (
 type RequestUnit float64
 
 // RequestInfo is the interface of the request information provider. A request should be
-// able tell whether it's a write request and if so, the written bytes would also be provided.
+// able to tell whether it's a write request and if so, the written bytes would also be provided.
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
-// able tell how many bytes it read and KV CPU cost in milliseconds.
+// able to tell how many bytes it read and KV CPU cost in milliseconds.
 type ResponseInfo interface {
 	ReadBytes() uint64
-	KVCPUMs() uint64
+	KVCPU() time.Duration
 	// Succeed is used to tell whether the request is successfully returned.
 	// If not, we need to pay back the WRU cost of the request.
 	Succeed() bool
@@ -46,7 +51,8 @@ type ResponseInfo interface {
 type ResourceCalculator interface {
 	// Trickle is used to calculate the resource consumption periodically rather than on the request path.
 	// It's mainly used to calculate like the SQL CPU cost.
-	Trickle(context.Context, *rmpb.Consumption)
+	// Need to check if it is a serverless environment
+	Trickle(*rmpb.Consumption)
 	// BeforeKVRequest is used to calculate the resource consumption before the KV request.
 	// It's mainly used to calculate the base and write request cost.
 	BeforeKVRequest(*rmpb.Consumption, RequestInfo)
@@ -67,7 +73,7 @@ func newKVCalculator(cfg *Config) *KVCalculator {
 }
 
 // Trickle ...
-func (kc *KVCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumption) {
+func (kc *KVCalculator) Trickle(*rmpb.Consumption) {
 }
 
 // BeforeKVRequest ...
@@ -111,7 +117,7 @@ func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res Res
 }
 
 func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res ResponseInfo) {
-	kvCPUMs := float64(res.KVCPUMs())
+	kvCPUMs := float64(res.KVCPU().Nanoseconds()) / 1000000.0
 	consumption.TotalCpuTimeMs += kvCPUMs
 	consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
 }
@@ -133,9 +139,11 @@ func newSQLCalculator(cfg *Config) *SQLCalculator {
 	return &SQLCalculator{Config: cfg}
 }
 
-// Trickle ...
-// TODO: calculate the SQL CPU cost and related resource consumption.
-func (dsc *SQLCalculator) Trickle(ctx context.Context, consumption *rmpb.Consumption) {
+// Trickle update sql layer CPU consumption.
+func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption) {
+	delta := getSQLProcessCPUTime(dsc.isSingleGroupByKeyspace) - consumption.SqlLayerCpuTimeMs
+	consumption.TotalCpuTimeMs += delta
+	consumption.SqlLayerCpuTimeMs += delta
 }
 
 // BeforeKVRequest ...
@@ -204,4 +212,31 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.SqlLayerCpuTimeMs -= custom2.SqlLayerCpuTimeMs
 	custom1.KvReadRpcCount -= custom2.KvReadRpcCount
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
+}
+
+func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
+	return custom1.RRU == custom2.RRU && custom1.WRU == custom2.WRU
+}
+
+// getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.
+func getSQLProcessCPUTime(isSingleGroupByKeyspace bool) float64 {
+	if isSingleGroupByKeyspace {
+		return getSysProcessCPUTime()
+	}
+	return getGroupProcessCPUTime()
+}
+
+func getSysProcessCPUTime() float64 {
+	pid := os.Getpid()
+	cpuTime := gosigar.ProcTime{}
+	if err := cpuTime.Get(pid); err != nil {
+		log.Error("getCPUTime get pid failed", zap.Error(err))
+	}
+
+	return float64(cpuTime.User + cpuTime.Sys)
+}
+
+// TODO: Need a way to calculate in the case of multiple groups.
+func getGroupProcessCPUTime() float64 {
+	return 0
 }

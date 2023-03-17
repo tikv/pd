@@ -1748,6 +1748,14 @@
               "legendFormat": "{{job}}-{{instance}}",
               "refId": "A",
               "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "{{job}}-{{instance}}-limit",
+              "refId": "B"
             }
           ],
           "thresholds": [],
@@ -3252,6 +3260,14 @@
               "intervalFactor": 2,
               "legendFormat": "{{type}}-{{name}}",
               "refId": "A"
+            },
+            {
+              "exemplar": true,
+              "expr": "sum(delta(pd_schedule_operator_exceeded_store_limit{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[1m])) by (desc)",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "{{desc}}-exceed-store-limit",
+              "refId": "B"
             }
           ],
           "thresholds": [],
@@ -7842,7 +7858,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-source\"}[1m])) by (source, type, scope)",
+              "expr": "sum(delta(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-source\", type!=\"store-state-tombstone-filter\"}[1m])) by (source, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{scope}}-store-{{source}}-{{type}}",
@@ -7938,7 +7954,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-target\"}[1m])) by (target, type, scope)",
+              "expr": "sum(delta(pd_schedule_filter{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", action=\"filter-target\", type!=\"store-state-tombstone-filter\"}[1m])) by (target, type, scope)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{scope}}-store-{{target}}-{{type}}",

@@ -27,37 +27,52 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
 
-const defaultConsumptionChanSize = 1024
+const (
+	defaultConsumptionChanSize = 1024
+	metricsCleanupInterval     = time.Minute
+	metricsCleanupTimeout      = 20 * time.Minute
+)
 
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	member  *member.Member
-	groups  map[string]*ResourceGroup
-	storage endpoint.ResourceGroupStorage
+	srv              bs.Server
+	controllerConfig *ControllerConfig
+	groups           map[string]*ResourceGroup
+	storage          endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
 		resourceGroupName string
 		*rmpb.Consumption
 	}
+	// record update time of each resource group
+	consumptionRecord map[string]time.Time
 }
 
-// NewManager returns a new Manager.
-func NewManager(srv bs.Server) *Manager {
+// ResourceManagerConfigProvider is used to get resource manager config from the given
+// `bs.server` without modifying its interface.
+type ResourceManagerConfigProvider interface {
+	GetControllerConfig() *ControllerConfig
+}
+
+// NewManager returns a new manager base on the given server,
+// which should implement the `ResourceManagerConfigProvider` interface.
+func NewManager[T ResourceManagerConfigProvider](srv bs.Server) *Manager {
 	m := &Manager{
-		member: &member.Member{},
-		groups: make(map[string]*ResourceGroup),
+		controllerConfig: srv.(T).GetControllerConfig(),
+		groups:           make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
 		}, defaultConsumptionChanSize),
+		consumptionRecord: make(map[string]time.Time),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -66,16 +81,24 @@ func NewManager(srv bs.Server) *Manager {
 			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
 			nil,
 		)
-		m.member = srv.GetMember()
+		m.srv = srv
 	})
-	// The second initialization after the leader is elected.
-	srv.AddLeaderCallback(m.Init)
+	// The second initialization after becoming serving.
+	srv.AddServiceReadyCallback(m.Init)
 	return m
+}
+
+// GetBasicServer returns the basic server.
+func (m *Manager) GetBasicServer() bs.Server {
+	return m.srv
 }
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
-	// Reset the resource groups first.
+	// Todo: If we can modify following configs in the future, we should reload these configs.
+	// Store the controller config into the storage.
+	m.storage.SaveControllerConfig(m.controllerConfig)
+	// Load resource group meta info from storage.
 	m.groups = make(map[string]*ResourceGroup)
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
@@ -86,6 +109,7 @@ func (m *Manager) Init(ctx context.Context) {
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
 	m.storage.LoadResourceGroupSettings(handler)
+	// Load resource group states from storage.
 	tokenHandler := func(k, v string) {
 		tokens := &GroupStates{}
 		if err := json.Unmarshal([]byte(v), tokens); err != nil {
@@ -99,7 +123,10 @@ func (m *Manager) Init(ctx context.Context) {
 	m.storage.LoadResourceGroupStates(tokenHandler)
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
-	go m.persistLoop(ctx)
+	go func() {
+		defer logutil.LogPanic()
+		m.persistLoop(ctx)
+	}()
 	log.Info("resource group manager finishes initialization")
 }
 
@@ -227,6 +254,9 @@ func (m *Manager) persistResourceGroupRunningState() {
 
 // Receive the consumption and flush it to the metrics.
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+	defer logutil.LogPanic()
+	ticker := time.NewTicker(metricsCleanupInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -240,6 +270,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				name                     = consumptionInfo.resourceGroupName
 				rruMetrics               = readRequestUnitCost.WithLabelValues(name)
 				wruMetrics               = writeRequestUnitCost.WithLabelValues(name)
+				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name)
 				readByteMetrics          = readByteCost.WithLabelValues(name)
 				writeByteMetrics         = writeByteCost.WithLabelValues(name)
 				kvCPUMetrics             = kvCPUCost.WithLabelValues(name)
@@ -264,6 +295,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			// CPU time info.
 			if consumption.TotalCpuTimeMs > 0 {
 				if consumption.SqlLayerCpuTimeMs > 0 {
+					sqlLayerRuMetrics.Add(consumption.SqlLayerCpuTimeMs * m.controllerConfig.RequestUnit.CPUMsCost)
 					sqlCPUMetrics.Observe(consumption.SqlLayerCpuTimeMs)
 				}
 				kvCPUMetrics.Observe(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
@@ -274,6 +306,25 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			if consumption.KvWriteRpcCount != 0 {
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
+			}
+
+			m.consumptionRecord[name] = time.Now()
+
+		case <-ticker.C:
+			// Clean up the metrics that have not been updated for a long time.
+			for name, lastTime := range m.consumptionRecord {
+				if time.Since(lastTime) > metricsCleanupTimeout {
+					readRequestUnitCost.DeleteLabelValues(name)
+					writeRequestUnitCost.DeleteLabelValues(name)
+					sqlLayerRequestUnitCost.DeleteLabelValues(name)
+					readByteCost.DeleteLabelValues(name)
+					writeByteCost.DeleteLabelValues(name)
+					kvCPUCost.DeleteLabelValues(name)
+					sqlCPUCost.DeleteLabelValues(name)
+					requestCount.DeleteLabelValues(name, readTypeLabel)
+					requestCount.DeleteLabelValues(name, writeTypeLabel)
+					delete(m.consumptionRecord, name)
+				}
 			}
 		}
 	}

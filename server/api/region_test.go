@@ -32,9 +32,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/schedule/placement"
 )
 
 func TestPeer(t *testing.T) {
@@ -86,7 +86,7 @@ func TestPeerStats(t *testing.T) {
 type regionTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -423,7 +423,7 @@ func (suite *regionTestSuite) TestTopN() {
 type getRegionTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -531,7 +531,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 type getRegionRangeHolesTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -580,7 +580,7 @@ func (suite *getRegionRangeHolesTestSuite) TestRegionRangeHoles() {
 type regionsReplicatedTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 

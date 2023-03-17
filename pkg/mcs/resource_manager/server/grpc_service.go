@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -59,8 +60,8 @@ type Service struct {
 }
 
 // NewService creates a new resource manager service.
-func NewService(svr bs.Server) registry.RegistrableService {
-	manager := NewManager(svr)
+func NewService[T ResourceManagerConfigProvider](svr bs.Server) registry.RegistrableService {
+	manager := NewManager[T](svr)
 
 	return &Service{
 		ctx:     svr.Context(),
@@ -84,8 +85,8 @@ func (s *Service) GetManager() *Manager {
 	return s.manager
 }
 
-func (s *Service) checkLeader() error {
-	if !s.manager.member.IsLeader() {
+func (s *Service) checkServing() error {
+	if !s.manager.srv.IsServing() {
 		return errNotLeader
 	}
 	return nil
@@ -93,7 +94,7 @@ func (s *Service) checkLeader() error {
 
 // GetResourceGroup implements ResourceManagerServer.GetResourceGroup.
 func (s *Service) GetResourceGroup(ctx context.Context, req *rmpb.GetResourceGroupRequest) (*rmpb.GetResourceGroupResponse, error) {
-	if err := s.checkLeader(); err != nil {
+	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
 	rg := s.manager.GetResourceGroup(req.ResourceGroupName)
@@ -107,7 +108,7 @@ func (s *Service) GetResourceGroup(ctx context.Context, req *rmpb.GetResourceGro
 
 // ListResourceGroups implements ResourceManagerServer.ListResourceGroups.
 func (s *Service) ListResourceGroups(ctx context.Context, req *rmpb.ListResourceGroupsRequest) (*rmpb.ListResourceGroupsResponse, error) {
-	if err := s.checkLeader(); err != nil {
+	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
 	groups := s.manager.GetResourceGroupList()
@@ -122,7 +123,7 @@ func (s *Service) ListResourceGroups(ctx context.Context, req *rmpb.ListResource
 
 // AddResourceGroup implements ResourceManagerServer.AddResourceGroup.
 func (s *Service) AddResourceGroup(ctx context.Context, req *rmpb.PutResourceGroupRequest) (*rmpb.PutResourceGroupResponse, error) {
-	if err := s.checkLeader(); err != nil {
+	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
 	rg := FromProtoResourceGroup(req.GetGroup())
@@ -135,7 +136,7 @@ func (s *Service) AddResourceGroup(ctx context.Context, req *rmpb.PutResourceGro
 
 // DeleteResourceGroup implements ResourceManagerServer.DeleteResourceGroup.
 func (s *Service) DeleteResourceGroup(ctx context.Context, req *rmpb.DeleteResourceGroupRequest) (*rmpb.DeleteResourceGroupResponse, error) {
-	if err := s.checkLeader(); err != nil {
+	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
 	err := s.manager.DeleteResourceGroup(req.ResourceGroupName)
@@ -147,7 +148,7 @@ func (s *Service) DeleteResourceGroup(ctx context.Context, req *rmpb.DeleteResou
 
 // ModifyResourceGroup implements ResourceManagerServer.ModifyResourceGroup.
 func (s *Service) ModifyResourceGroup(ctx context.Context, req *rmpb.PutResourceGroupRequest) (*rmpb.PutResourceGroupResponse, error) {
-	if err := s.checkLeader(); err != nil {
+	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
 	err := s.manager.ModifyResourceGroup(req.GetGroup())
@@ -169,10 +170,13 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		if err == io.EOF {
 			return nil
 		}
+		failpoint.Inject("acquireFailed", func() {
+			err = errors.New("error")
+		})
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		if err := s.checkLeader(); err != nil {
+		if err := s.checkServing(); err != nil {
 			return err
 		}
 		targetPeriodMs := request.GetTargetRequestPeriodMs()
@@ -200,6 +204,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
 						tokens = rg.RequestRU(now, re.Value, targetPeriodMs)
+					}
+					if tokens == nil {
+						continue
 					}
 					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
 				}

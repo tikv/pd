@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -43,9 +44,6 @@ const (
 
 // gRPC errors
 var (
-	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
-	// TODO: work as proxy.
-	ErrNotLeader  = status.Errorf(codes.Unavailable, "not leader")
 	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
 )
 
@@ -194,6 +192,7 @@ func (s *Service) dispatchTSORequest(ctx context.Context, request *tsoRequest, f
 }
 
 func (s *Service) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error) {
+	defer logutil.LogPanic()
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
 	defer s.tsoDispatcher.Delete(forwardedHost)
@@ -333,6 +332,7 @@ type deadline struct {
 }
 
 func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
+	defer logutil.LogPanic()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	for {

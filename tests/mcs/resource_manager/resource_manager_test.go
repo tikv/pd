@@ -17,6 +17,7 @@ package resourcemanager_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -59,6 +60,8 @@ func TestResourceManagerClientTestSuite(t *testing.T) {
 func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode", `return(true)`))
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
@@ -103,22 +106,21 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 }
 
 func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAddr string) {
-	innerCli, ok := cli.(interface {
-		GetLeaderAddr() string
-		ScheduleCheckLeader()
-	})
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	suite.True(ok)
 	suite.NotNil(innerCli)
 	testutil.Eventually(suite.Require(), func() bool {
-		innerCli.ScheduleCheckLeader()
-		return innerCli.GetLeaderAddr() == leaderAddr
+		innerCli.GetServiceDiscovery().ScheduleCheckMemberChanged()
+		return innerCli.GetServiceDiscovery().GetServingAddr() == leaderAddr
 	})
 }
 
 func (suite *resourceManagerClientTestSuite) TearDownSuite() {
+	re := suite.Require()
 	suite.client.Close()
 	suite.cluster.Destroy()
 	suite.clean()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode"))
 }
 
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
@@ -218,37 +220,6 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 
 const buffDuration = time.Millisecond * 300
 
-type testRequestInfo struct {
-	isWrite    bool
-	writeBytes uint64
-}
-
-func (ti *testRequestInfo) IsWrite() bool {
-	return ti.isWrite
-}
-
-func (ti *testRequestInfo) WriteBytes() uint64 {
-	return ti.writeBytes
-}
-
-type testResponseInfo struct {
-	cpuMs     uint64
-	readBytes uint64
-	succeed   bool
-}
-
-func (tri *testResponseInfo) ReadBytes() uint64 {
-	return tri.readBytes
-}
-
-func (tri *testResponseInfo) KVCPUMs() uint64 {
-	return tri.cpuMs
-}
-
-func (tri *testResponseInfo) Succeed() bool {
-	return tri.succeed
-}
-
 type tokenConsumptionPerSecond struct {
 	rruTokensAtATime float64
 	wruTokensAtATime float64
@@ -256,33 +227,28 @@ type tokenConsumptionPerSecond struct {
 	waitDuration     time.Duration
 }
 
-func (t tokenConsumptionPerSecond) makeReadRequest() *testRequestInfo {
-	return &testRequestInfo{
-		isWrite:    false,
-		writeBytes: 0,
-	}
+func (t tokenConsumptionPerSecond) makeReadRequest() *controller.TestRequestInfo {
+	return controller.NewTestRequestInfo(false, 0)
 }
 
-func (t tokenConsumptionPerSecond) makeWriteRequest() *testRequestInfo {
-	return &testRequestInfo{
-		isWrite:    true,
-		writeBytes: uint64(t.wruTokensAtATime - 1),
-	}
+func (t tokenConsumptionPerSecond) makeWriteRequest() *controller.TestRequestInfo {
+	return controller.NewTestRequestInfo(true, uint64(t.wruTokensAtATime-1))
 }
 
-func (t tokenConsumptionPerSecond) makeReadResponse() *testResponseInfo {
-	return &testResponseInfo{
-		readBytes: uint64((t.rruTokensAtATime - 1) / 2),
-		cpuMs:     uint64(t.rruTokensAtATime / 2),
-	}
+func (t tokenConsumptionPerSecond) makeReadResponse() *controller.TestResponseInfo {
+	return controller.NewTestResponseInfo(
+		uint64((t.rruTokensAtATime-1)/2),
+		time.Duration(t.rruTokensAtATime/2)*time.Millisecond,
+		false,
+	)
 }
 
-func (t tokenConsumptionPerSecond) makeWriteResponse() *testResponseInfo {
-	return &testResponseInfo{
-		readBytes: 0,
-		cpuMs:     0,
-		succeed:   true,
-	}
+func (t tokenConsumptionPerSecond) makeWriteResponse() *controller.TestResponseInfo {
+	return controller.NewTestResponseInfo(
+		0,
+		time.Duration(0),
+		true,
+	)
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
@@ -303,7 +269,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		CPUMsCost:        1,
 	}
 
-	controller, _ := controller.NewResourceGroupController(1, cli, cfg)
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
 	controller.Start(suite.ctx)
 
 	testCases := []struct {
@@ -347,8 +313,8 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
 				controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
 				sum += time.Since(startTime)
-				controller.OnResponse(suite.ctx, cas.resourceGroupName, rreq, rres)
-				controller.OnResponse(suite.ctx, cas.resourceGroupName, wreq, wres)
+				controller.OnResponse(cas.resourceGroupName, rreq, rres)
+				controller.OnResponse(cas.resourceGroupName, wreq, wres)
 				time.Sleep(1000 * time.Microsecond)
 			}
 			re.LessOrEqual(sum, buffDuration+cas.tcs[i].waitDuration)
@@ -432,10 +398,6 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re := suite.Require()
 	cli := suite.client
-
-	leaderName := suite.cluster.WaitLeader()
-	leader := suite.cluster.GetServer(leaderName)
-
 	testCasesSet1 := []struct {
 		name           string
 		mode           rmpb.GroupMode
@@ -445,7 +407,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		modifySettings func(*rmpb.ResourceGroup)
 	}{
 		{"test1", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test1","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":10000},"state":{"initialized":false}}}}`,
+			`{"name":"test1","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":10000},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -458,7 +420,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":20000},"state":{"initialized":false}}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":20000},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -470,7 +432,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"ru":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -560,12 +522,11 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
-				re.EqualError(err, "rpc error: code = Unknown desc = resource group not found")
+				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", g.Name))
 			}
 
 			// to test the deletion of persistence
 			suite.resignAndWaitLeader()
-			leader = suite.cluster.GetServer(suite.cluster.GetLeader())
 			// List Resource Group
 			lresp, err = cli.ListResourceGroups(suite.ctx)
 			re.NoError(err)
@@ -575,6 +536,13 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 	// Test Resource Group CURD via HTTP
 	finalNum = 0
+	getAddr := func(i int) string {
+		server := suite.cluster.GetServer(suite.cluster.GetLeader())
+		if i%2 == 1 {
+			server = suite.cluster.GetServer(suite.cluster.GetFollower())
+		}
+		return server.GetAddr()
+	}
 	for i, tcase := range testCasesSet1 {
 		// Create Resource Group
 		group := &rmpb.ResourceGroup{
@@ -583,7 +551,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
-		resp, err := http.Post(leader.GetAddr()+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
+		resp, err := http.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
 		defer resp.Body.Close()
 		if tcase.addSuccess {
@@ -597,7 +565,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		tcase.modifySettings(group)
 		modifyJSON, err := json.Marshal(group)
 		re.NoError(err)
-		req, err := http.NewRequest(http.MethodPut, leader.GetAddr()+"/resource-manager/api/v1/config/group", strings.NewReader(string(modifyJSON)))
+		req, err := http.NewRequest(http.MethodPut, getAddr(i+1)+"/resource-manager/api/v1/config/group", strings.NewReader(string(modifyJSON)))
 		re.NoError(err)
 		req.Header.Set("Content-Type", "application/json")
 		resp, err = http.DefaultClient.Do(req)
@@ -610,7 +578,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 
 		// Get Resource Group
-		resp, err = http.Get(leader.GetAddr() + "/resource-manager/api/v1/config/group/" + tcase.name)
+		resp, err = http.Get(getAddr(i) + "/resource-manager/api/v1/config/group/" + tcase.name)
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -623,7 +591,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 		// Last one, Check list and delete all resource groups
 		if i == len(testCasesSet1)-1 {
-			resp, err := http.Get(leader.GetAddr() + "/resource-manager/api/v1/config/groups")
+			resp, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
 			defer resp.Body.Close()
 			re.Equal(http.StatusOK, resp.StatusCode)
@@ -635,7 +603,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 			// Delete all resource groups
 			for _, g := range groups {
-				req, err := http.NewRequest(http.MethodDelete, leader.GetAddr()+"/resource-manager/api/v1/config/group/"+g.Name, nil)
+				req, err := http.NewRequest(http.MethodDelete, getAddr(i+1)+"/resource-manager/api/v1/config/group/"+g.Name, nil)
 				re.NoError(err)
 				resp, err := http.DefaultClient.Do(req)
 				re.NoError(err)
@@ -647,7 +615,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			}
 
 			// verify again
-			resp1, err := http.Get(leader.GetAddr() + "/resource-manager/api/v1/config/groups")
+			resp1, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
 			defer resp1.Body.Close()
 			re.Equal(http.StatusOK, resp1.StatusCode)
@@ -698,5 +666,138 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 	}
 
 	// Cleanup the resource group.
+	suite.cleanupResourceGroups()
+}
+
+func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMode() {
+	re := suite.Require()
+	cli := suite.client
+
+	group := &rmpb.ResourceGroup{
+		Name: "modetest",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   10,
+					BurstLimit: 10,
+				},
+				Tokens: 10,
+			},
+		},
+	}
+	addResp, err := cli.AddResourceGroup(suite.ctx, group)
+	re.NoError(err)
+	re.Contains(addResp, "Success!")
+
+	cfg := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+		CPUMsCost:        1,
+	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU", "return(true)"))
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
+	controller.Start(suite.ctx)
+	tc := tokenConsumptionPerSecond{
+		rruTokensAtATime: 0,
+		wruTokensAtATime: 10000,
+	}
+	controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
+	time.Sleep(time.Second * 2)
+	beginTime := time.Now()
+	for i := 0; i < 100; i++ {
+		controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
+	}
+	endTime := time.Now()
+	// we can not check `inDegradedMode` because of data race.
+	re.True(endTime.Before(beginTime.Add(time.Second)))
+	controller.Stop()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU"))
+	suite.cleanupResourceGroups()
+}
+
+func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
+	re := suite.Require()
+	cli := suite.client
+	// Test load from resource manager.
+	ctr, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	re.NoError(err)
+	config := ctr.GetConfig()
+	re.NotNil(config)
+	expectedConfig := controller.DefaultConfig()
+	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
+	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
+	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
+	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
+	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
+	// Test init from given config.
+	ruConfig := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  2,
+		WriteBaseCost:    3,
+		WriteCostPerByte: 4,
+		CPUMsCost:        5,
+	}
+	ctr, err = controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig)
+	re.NoError(err)
+	config = ctr.GetConfig()
+	re.NotNil(config)
+	controllerConfig := controller.DefaultControllerConfig()
+	controllerConfig.RequestUnit = *ruConfig
+	expectedConfig = controller.GenerateConfig(controllerConfig)
+	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
+	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
+	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
+	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
+	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
+	// refer github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode, check with 1s.
+	re.Equal(time.Second, config.DegradedModeWaitDuration)
+}
+
+func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
+	re := suite.Require()
+	cli := suite.client
+
+	for _, group := range suite.initGroups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+
+	ruConfig := &controller.RequestUnitConfig{
+		ReadBaseCost:    1,
+		ReadCostPerByte: 1,
+	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/fastCleanup", `return(true)`))
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig)
+	controller.Start(suite.ctx)
+
+	testConfig := struct {
+		tcs   tokenConsumptionPerSecond
+		times int
+	}{
+		tcs: tokenConsumptionPerSecond{
+			rruTokensAtATime: 100,
+		},
+		times: 100,
+	}
+	// Mock client binds one resource group and then closed
+	rreq := testConfig.tcs.makeReadRequest()
+	rres := testConfig.tcs.makeReadResponse()
+	for j := 0; j < testConfig.times; j++ {
+		controller.OnRequestWait(suite.ctx, suite.initGroups[0].Name, rreq)
+		controller.OnResponse(suite.initGroups[0].Name, rreq, rres)
+		time.Sleep(100 * time.Microsecond)
+	}
+	time.Sleep(1 * time.Second)
+
+	re.False(controller.CheckResourceGroupExist(suite.initGroups[0].Name))
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
+	controller.Stop()
 	suite.cleanupResourceGroups()
 }

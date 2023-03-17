@@ -26,6 +26,7 @@ type ResourceGroupStorage interface {
 	LoadResourceGroupStates(f func(k, v string)) error
 	SaveResourceGroupStates(name string, obj interface{}) error
 	DeleteResourceGroupStates(name string) error
+	SaveControllerConfig(config interface{}) error
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
@@ -58,4 +59,9 @@ func (se *StorageEndpoint) DeleteResourceGroupStates(name string) error {
 // LoadResourceGroupStates loads all resource groups from storage.
 func (se *StorageEndpoint) LoadResourceGroupStates(f func(k, v string)) error {
 	return se.loadRangeByPrefix(resourceGroupStatesPath+"/", f)
+}
+
+// SaveControllerConfig stores the resource controller config to storage.
+func (se *StorageEndpoint) SaveControllerConfig(config interface{}) error {
+	return se.saveJSON(controllerConfigPath, config)
 }

@@ -24,6 +24,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	rmserver "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 )
 
 // APIPathPrefix is the prefix of the API path.
@@ -59,9 +60,14 @@ func NewService(srv *rmserver.Service) *Service {
 	apiHandlerEngine.Use(gin.Recovery())
 	apiHandlerEngine.Use(cors.Default())
 	apiHandlerEngine.Use(gzip.Gzip(gzip.DefaultCompression))
-	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	manager := srv.GetManager()
-
+	apiHandlerEngine.Use(func(c *gin.Context) {
+		// manager implements the interface of basicserver.Service.
+		c.Set("service", manager.GetBasicServer())
+		c.Next()
+	})
+	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
+	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
 		manager:          manager,
 		apiHandlerEngine: apiHandlerEngine,
@@ -87,12 +93,15 @@ func (s *Service) handler() http.Handler {
 	})
 }
 
-// @Summary add a resource group
-// @Param group body of "ResourceGroup", json format.
-// @Success 200 "added successfully"
-// @Failure 400 {object} error
-// @Failure 500 {object} error
-// @Router /config/group/ [POST]
+// postResourceGroup
+//
+//	@Tags		ResourceManager
+//	@Summary	Add a resource group
+//	@Param		groupInfo	body		object	true	"json params, rmpb.ResourceGroup"
+//	@Success	200			{string}	string	"Success"
+//	@Failure	400			{string}	error
+//	@Failure	500			{string}	error
+//	@Router		/config/group [POST]
 func (s *Service) postResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
 	if err := c.ShouldBindJSON(&group); err != nil {
@@ -107,12 +116,15 @@ func (s *Service) postResourceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, "Success!")
 }
 
-// @Summary updates an exists resource group
-// @Param group body of "resource", json format.
-// @Success 200 "added successfully"
-// @Failure 400 {object} error
-// @Failure 500 {object} error
-// @Router /config/group/ [PUT]
+// putResourceGroup
+//
+//	@Tags		ResourceManager
+//	@Summary	updates an exists resource group
+//	@Param		groupInfo	body	object	true	"json params, rmpb.ResourceGroup"
+//	@Success	200			"Success"
+//	@Failure	400			{string}	error
+//	@Failure	500			{string}	error
+//	@Router		/config/group [PUT]
 func (s *Service) putResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
 	if err := c.ShouldBindJSON(&group); err != nil {
@@ -126,12 +138,14 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, "Success!")
 }
 
-// @ID getResourceGroup
-// @Summary Get resource group by name.
-// @Success 200 {object} int
-// @Param name string true "groupName"
-// @Router /config/group/{name} [GET]
-// @Failure 404 {object} error
+// getResourceGroup
+//
+//	@Tags		ResourceManager
+//	@Summary	Get resource group by name.
+//	@Success	200		{string}	json	format	of	rmpb.ResourceGroup
+//	@Failure	404		{string}	error
+//	@Param		name	path		string	true	"groupName"
+//	@Router		/config/group/{name} [GET]
 func (s *Service) getResourceGroup(c *gin.Context) {
 	group := s.manager.GetResourceGroup(c.Param("name"))
 	if group == nil {
@@ -140,21 +154,26 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, group)
 }
 
-// @ID getResourceGroupList
-// @Summary get all resource group with a list.
-// @Success 200 {array} ResourceGroup
-// @Router /config/groups [GET]
+// getResourceGroupList
+//
+//	@Tags		ResourceManager
+//	@Summary	get all resource group with a list.
+//	@Success	200	{string}	json	format	of	[]rmpb.ResourceGroup
+//	@Failure	404	{string}	error
+//	@Router		/config/groups [GET]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	groups := s.manager.GetResourceGroupList()
 	c.JSON(http.StatusOK, groups)
 }
 
-// @ID getResourceGroup
-// @Summary delete resource group by name.
-// @Success 200 "deleted successfully"
-// @Param name string true "groupName"
-// @Router /config/group/{name} [DELETE]
-// @Failure 404 {object} error
+// deleteResourceGroup
+//
+//	@Tags		ResourceManager
+//	@Summary	delete resource group by name.
+//	@Param		name	path		string	true	"Name of the resource group to be deleted"
+//	@Success	200		{string}	string	"Success!"
+//	@Failure	404		{string}	error
+//	@Router		/config/group/{name} [DELETE]
 func (s *Service) deleteResourceGroup(c *gin.Context) {
 	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())

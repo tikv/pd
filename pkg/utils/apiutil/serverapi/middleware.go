@@ -15,13 +15,11 @@
 package serverapi
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/urfave/negroni"
@@ -30,13 +28,8 @@ import (
 
 // HTTP headers.
 const (
-	RedirectorHeader    = "PD-Redirector"
-	AllowFollowerHandle = "PD-Allow-follower-handle"
-)
-
-const (
-	errRedirectFailed      = "redirect failed"
-	errRedirectToNotLeader = "redirect to not leader"
+	PDRedirectorHeader    = "PD-Redirector"
+	PDAllowFollowerHandle = "PD-Allow-follower-handle"
 )
 
 type runtimeServiceValidator struct {
@@ -80,36 +73,93 @@ func IsServiceAllowed(s *server.Server, group apiutil.APIServiceGroup) bool {
 
 type redirector struct {
 	s *server.Server
+
+	microserviceRedirectRules []*microserviceRedirectRule
+}
+
+type microserviceRedirectRule struct {
+	matchPath         string
+	targetPath        string
+	targetServiceName string
 }
 
 // NewRedirector redirects request to the leader if needs to be handled in the leader.
-func NewRedirector(s *server.Server) negroni.Handler {
-	return &redirector{s: s}
+func NewRedirector(s *server.Server, opts ...RedirectorOption) negroni.Handler {
+	r := &redirector{s: s}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+// RedirectorOption defines the option of redirector
+type RedirectorOption func(*redirector)
+
+// MicroserviceRedirectRule new a microservice redirect rule option
+func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string) RedirectorOption {
+	return func(s *redirector) {
+		s.microserviceRedirectRules = append(s.microserviceRedirectRules, &microserviceRedirectRule{
+			matchPath,
+			targetPath,
+			targetServiceName,
+		})
+	}
+}
+
+func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, string) {
+	if !h.s.IsAPIServiceMode() {
+		return false, ""
+	}
+	if len(h.microserviceRedirectRules) == 0 {
+		return false, ""
+	}
+	for _, rule := range h.microserviceRedirectRules {
+		if rule.matchPath == r.URL.Path {
+			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
+			if !ok || addr == "" {
+				log.Warn("failed to get the service primary addr when try match redirect rules",
+					zap.String("path", r.URL.Path))
+			}
+			r.URL.Path = rule.targetPath
+			return true, addr
+		}
+	}
+	return false, ""
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	allowFollowerHandle := len(r.Header.Get(AllowFollowerHandle)) > 0
+	matchedFlag, targetAddr := h.matchMicroServiceRedirectRules(r)
+	allowFollowerHandle := len(r.Header.Get(PDAllowFollowerHandle)) > 0
 	isLeader := h.s.GetMember().IsLeader()
-	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) {
+	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !matchedFlag {
 		next(w, r)
 		return
 	}
 
 	// Prevent more than one redirection.
-	if name := r.Header.Get(RedirectorHeader); len(name) != 0 {
+	if name := r.Header.Get(PDRedirectorHeader); len(name) != 0 {
 		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
-		http.Error(w, errRedirectToNotLeader, http.StatusInternalServerError)
+		http.Error(w, apiutil.ErrRedirectToNotLeader, http.StatusInternalServerError)
 		return
 	}
 
-	r.Header.Set(RedirectorHeader, h.s.Name())
+	r.Header.Set(PDRedirectorHeader, h.s.Name())
 
-	leader := h.s.GetMember().GetLeader()
-	if leader == nil {
-		http.Error(w, "no leader", http.StatusServiceUnavailable)
-		return
+	var clientUrls []string
+	if matchedFlag {
+		if len(targetAddr) == 0 {
+			http.Error(w, apiutil.ErrRedirectFailed, http.StatusInternalServerError)
+			return
+		}
+		clientUrls = append(clientUrls, targetAddr)
+	} else {
+		leader := h.s.GetMember().GetLeader()
+		if leader == nil {
+			http.Error(w, "no leader", http.StatusServiceUnavailable)
+			return
+		}
+		clientUrls = leader.GetClientUrls()
 	}
-	clientUrls := leader.GetClientUrls()
 	urls := make([]url.URL, 0, len(clientUrls))
 	for _, item := range clientUrls {
 		u, err := url.Parse(item)
@@ -121,63 +171,5 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		urls = append(urls, *u)
 	}
 	client := h.s.GetHTTPClient()
-	NewCustomReverseProxies(client, urls).ServeHTTP(w, r)
-}
-
-type customReverseProxies struct {
-	urls   []url.URL
-	client *http.Client
-}
-
-// NewCustomReverseProxies returns the custom reverse proxies.
-func NewCustomReverseProxies(dialClient *http.Client, urls []url.URL) http.Handler {
-	p := &customReverseProxies{
-		client: dialClient,
-	}
-
-	p.urls = append(p.urls, urls...)
-
-	return p
-}
-
-func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	for _, url := range p.urls {
-		r.RequestURI = ""
-		r.URL.Host = url.Host
-		r.URL.Scheme = url.Scheme
-
-		resp, err := p.client.Do(r)
-		if err != nil {
-			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
-			continue
-		}
-
-		b, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			log.Error("read failed", errs.ZapError(errs.ErrIORead, err))
-			continue
-		}
-
-		copyHeader(w.Header(), resp.Header)
-		w.WriteHeader(resp.StatusCode)
-		if _, err := w.Write(b); err != nil {
-			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err))
-			continue
-		}
-
-		return
-	}
-	http.Error(w, errRedirectFailed, http.StatusInternalServerError)
-}
-
-func copyHeader(dst, src http.Header) {
-	for k, vv := range src {
-		values := dst[k]
-		for _, v := range vv {
-			if !slice.Contains(values, v) {
-				dst.Add(k, v)
-			}
-		}
-	}
+	apiutil.NewCustomReverseProxies(client, urls).ServeHTTP(w, r)
 }

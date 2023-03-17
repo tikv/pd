@@ -30,11 +30,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -94,6 +95,55 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 	return copiedInfo
 }
 
+// Member defines the interface for the election related logic.
+type Member interface {
+	// ID returns the unique ID for this participant in the group. For example, it can be
+	// unique server id of a cluster or the unique keyspace group replica id of the election
+	// group comprised of the replicas of a keyspace group.
+	ID() uint64
+	// MemberValue returns the member value.
+	MemberValue() string
+	// Member returns the member.
+	Member() *pdpb.Member
+	// Client returns the etcd client.
+	Client() *clientv3.Client
+	// IsLeader returns whether the participant is the leader or not by checking its
+	// leadership's lease and leader info.
+	IsLeader() bool
+	// GetLeaderID returns current leader's member ID.
+	GetLeaderID() uint64
+	// GetLeader returns current leader of the election group.
+	GetLeader() *pdpb.Member
+	// EnableLeader declares the member itself to be the leader.
+	EnableLeader()
+	// GetLeaderPath returns the path of the leader.
+	GetLeaderPath() string
+	// GetLeadership returns the leadership of the PD member.
+	GetLeadership() *election.Leadership
+	// CampaignLeader is used to campaign a PD member's leadership
+	// and make it become a PD leader.
+	CampaignLeader(leaseTimeout int64) error
+	// KeepLeader is used to keep the PD leader's leadership.
+	KeepLeader(ctx context.Context)
+	// CheckLeader checks returns true if it is needed to check later.
+	CheckLeader() (*pdpb.Member, int64, bool)
+	// WatchLeader is used to watch the changes of the leader.
+	WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64)
+	// ResetLeader is used to reset the PD member's current leadership.
+	// Basically it will reset the leader lease and unset leader info.
+	ResetLeader()
+	// IsSameLeader checks whether a server is the leader itself.
+	IsSameLeader(leader *pdpb.Member) bool
+	// CheckPriority checks whether there is another participant has higher priority and resign it as the leader if so.
+	CheckPriority(ctx context.Context)
+	// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
+	GetDCLocationPathPrefix() string
+	// GetDCLocationPath returns the dc-location path of a member with the given member ID.
+	GetDCLocationPath(id uint64) string
+	// PrecheckLeader does some pre-check before checking whether it's the leader.
+	PrecheckLeader() error
+}
+
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
@@ -114,9 +164,10 @@ type AllocatorManager struct {
 	}
 	wg sync.WaitGroup
 	// for election use
-	member *member.Member
+	member Member
 	// TSO config
 	rootPath               string
+	storage                endpoint.TSOStorage
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
 	maxResetTSGap          func() time.Duration
@@ -130,8 +181,9 @@ type AllocatorManager struct {
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
 func NewAllocatorManager(
-	m *member.Member,
+	m Member,
 	rootPath string,
+	storage endpoint.TSOStorage,
 	enableLocalTSO bool,
 	saveInterval time.Duration,
 	updatePhysicalInterval time.Duration,
@@ -142,6 +194,7 @@ func NewAllocatorManager(
 		enableLocalTSO:         enableLocalTSO,
 		member:                 m,
 		rootPath:               rootPath,
+		storage:                storage,
 		saveInterval:           saveInterval,
 		updatePhysicalInterval: updatePhysicalInterval,
 		maxResetTSGap:          maxResetTSGap,
@@ -314,10 +367,6 @@ func CalSuffixBits(maxSuffix int32) int {
 func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation string, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	if am.updatePhysicalInterval != defaultTSOUpdatePhysicalInterval {
-		log.Warn("tso update physical interval is non-default",
-			zap.Duration("update-physical-interval", am.updatePhysicalInterval))
-	}
 	if _, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		return
 	}
@@ -363,6 +412,7 @@ func (am *AllocatorManager) getLocalTSOAllocatorPath() string {
 
 // similar logic with leaderLoop in server/server.go
 func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *LocalTSOAllocator) {
+	defer logutil.LogPanic()
 	defer log.Info("server is closed, return local tso allocator leader loop",
 		zap.String("dc-location", allocator.GetDCLocation()),
 		zap.String("local-tso-allocator-name", am.member.Member().Name))
@@ -614,6 +664,7 @@ func (am *AllocatorManager) allocatorUpdater() {
 
 // updateAllocator is used to update the allocator in the group.
 func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
+	defer logutil.LogPanic()
 	defer am.wg.Done()
 	select {
 	case <-ag.ctx.Done():
@@ -664,6 +715,7 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 // ClusterDCLocationChecker collects all dc-locations of a cluster, computes some related info
 // and stores them into the DCLocationInfo, then finally writes them into am.mu.clusterDCLocations.
 func (am *AllocatorManager) ClusterDCLocationChecker() {
+	defer logutil.LogPanic()
 	// Wait for the PD leader to be elected out.
 	if am.member.GetLeader() == nil {
 		return
@@ -735,7 +787,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 	}
 	var maxSuffix int32
 	for curDCLocation, suffix := range dcLocationSuffix {
-		// If we already have the suffix persistted in etcd before,
+		// If we already have the suffix persisted in etcd before,
 		// just use it as the result directly.
 		if curDCLocation == dcLocation {
 			return suffix, nil
@@ -1125,15 +1177,6 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 		return nil, err
 	}
 	return maxTSO, nil
-}
-
-// GetGlobalTSO returns global tso.
-func (am *AllocatorManager) GetGlobalTSO() (*pdpb.Timestamp, error) {
-	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
-	if err != nil {
-		return nil, err
-	}
-	return globalAllocator.(*GlobalTSOAllocator).getCurrentTSO()
 }
 
 func (am *AllocatorManager) getGRPCConn(addr string) (*grpc.ClientConn, bool) {

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
 
@@ -280,8 +281,19 @@ type tokenBucketReconfigureArgs struct {
 	NotifyThreshold float64
 }
 
+type LimiterOption func(*Limiter)
+
+func resetLowProcess() func(*Limiter) {
+	return func(limiter *Limiter) {
+		limiter.isLowProcess = false
+	}
+}
+
 // Reconfigure modifies all setting for limiter
-func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) {
+func (lim *Limiter) Reconfigure(now time.Time,
+	args tokenBucketReconfigureArgs,
+	opts ...LimiterOption,
+) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	log.Debug("[resource group controller] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
@@ -291,7 +303,9 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	lim.limit = Limit(args.NewRate)
 	lim.burst = args.NewBurst
 	lim.notifyThreshold = args.NotifyThreshold
-	lim.isLowProcess = false
+	for _, opt := range opts {
+		opt(lim)
+	}
 	lim.maybeNotify()
 	log.Debug("[resource group controller] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 }
@@ -408,7 +422,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
-			return fmt.Errorf("[resource group controller] limiter has no enough token or needs wait too long")
+			return errs.ErrClientResourceGroupThrottled
 		}
 		delay := res.DelayFrom(now)
 		if delay > longestDelayDuration {

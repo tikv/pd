@@ -33,15 +33,15 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/filter"
-	"github.com/tikv/pd/server/schedule/labeler"
-	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedulers"
-	"github.com/tikv/pd/server/statistics"
 )
 
 func TestStoreHeartbeat(t *testing.T) {
@@ -986,12 +986,12 @@ func TestRegionSizeChanged(t *testing.T) {
 	cluster.processRegionHeartbeat(region)
 	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 	// Test MaxMergeRegionSize and MaxMergeRegionKeys change.
-	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize + 2)))
-	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys + 2)))
+	cluster.opt.SetMaxMergeRegionSize(uint64(curMaxMergeSize + 2))
+	cluster.opt.SetMaxMergeRegionKeys(uint64(curMaxMergeKeys + 2))
 	cluster.processRegionHeartbeat(region)
 	re.True(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
-	cluster.opt.SetMaxMergeRegionSize((uint64(curMaxMergeSize)))
-	cluster.opt.SetMaxMergeRegionKeys((uint64(curMaxMergeKeys)))
+	cluster.opt.SetMaxMergeRegionSize(uint64(curMaxMergeSize))
+	cluster.opt.SetMaxMergeRegionKeys(uint64(curMaxMergeKeys))
 	cluster.processRegionHeartbeat(region)
 	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 }
@@ -1312,20 +1312,32 @@ func TestSyncConfig(t *testing.T) {
 		whiteList     []string
 		maxRegionSize uint64
 		updated       bool
-	}{{
-		whiteList:     []string{},
-		maxRegionSize: uint64(144),
-		updated:       false,
-	}, {
-		whiteList:     []string{"127.0.0.1:5"},
-		maxRegionSize: uint64(10),
-		updated:       true,
-	}}
+	}{
+		{
+			whiteList:     []string{},
+			maxRegionSize: uint64(144),
+			updated:       false,
+		}, {
+			whiteList:     []string{"127.0.0.1:5"},
+			maxRegionSize: uint64(10),
+			updated:       true,
+		},
+	}
 
 	for _, v := range testdata {
 		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
 		re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
-		re.Equal(v.updated, syncConfig(tc.storeConfigManager, tc.GetStores()))
+		success, switchRaftV2 := syncConfig(tc.storeConfigManager, tc.GetStores())
+		re.Equal(v.updated, success)
+		if v.updated {
+			re.True(switchRaftV2)
+			tc.opt.UseRaftV2()
+			re.EqualValues(0, tc.opt.GetScheduleConfig().MaxMergeRegionSize)
+			re.EqualValues(math.MaxInt64, tc.opt.GetScheduleConfig().MaxMovableHotPeerSize)
+			success, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
+			re.True(success)
+			re.False(switchRaftV2)
+		}
 		re.Equal(v.maxRegionSize, tc.GetStoreConfig().GetRegionMaxSize())
 	}
 }
@@ -1790,12 +1802,13 @@ func TestAwakenStore(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	n := uint64(3)
-	stores := newTestStores(n, "6.0.0")
+	stores := newTestStores(n, "6.5.0")
 	re.True(stores[0].NeedAwakenStore())
 	for _, store := range stores {
 		re.NoError(cluster.PutStore(store.GetMeta()))
 	}
 	for i := uint64(1); i <= n; i++ {
+		re.False(cluster.slowStat.ExistsSlowStores())
 		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(i)
 		re.False(needAwaken)
 	}
@@ -1805,6 +1818,33 @@ func TestAwakenStore(t *testing.T) {
 	re.NoError(cluster.putStoreLocked(store4))
 	store1 := cluster.GetStore(1)
 	re.True(store1.NeedAwakenStore())
+
+	// Test slowStore heartbeat by marking Store-1 already slow.
+	slowStoreReq := &pdpb.StoreHeartbeatRequest{}
+	slowStoreResp := &pdpb.StoreHeartbeatResponse{}
+	slowStoreReq.Stats = &pdpb.StoreStats{
+		StoreId:     1,
+		RegionCount: 1,
+		Interval: &pdpb.TimeInterval{
+			StartTimestamp: 0,
+			EndTimestamp:   10,
+		},
+		PeerStats: []*pdpb.PeerStat{},
+		SlowScore: 80,
+	}
+	re.NoError(cluster.HandleStoreHeartbeat(slowStoreReq, slowStoreResp))
+	time.Sleep(20 * time.Millisecond)
+	re.True(cluster.slowStat.ExistsSlowStores())
+	{
+		// Store 1 cannot be awaken.
+		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(1)
+		re.False(needAwaken)
+	}
+	{
+		// Other stores can be awaken.
+		needAwaken, _ := cluster.NeedAwakenAllRegionsInStore(2)
+		re.True(needAwaken)
+	}
 }
 
 type testCluster struct {

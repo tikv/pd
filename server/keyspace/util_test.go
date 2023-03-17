@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/server/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 )
 
 func TestValidateID(t *testing.T) {

@@ -28,12 +28,13 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	flag "github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedulers"
-	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"github.com/tikv/pd/tools/pd-simulator/simulator"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
@@ -132,7 +133,7 @@ func runHTTPServer() {
 }
 
 // NewSingleServer creates a pd server for simulator.
-func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*server.Server, server.CleanupFunc) {
+func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*server.Server, testutil.CleanupFunc) {
 	err := logutil.SetupLogger(simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps)
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.Logger, simConfig.ServerConfig.LogProps)
@@ -140,7 +141,7 @@ func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*serv
 		log.Fatal("setup logger error", zap.Error(err))
 	}
 
-	s, err := server.CreateServer(ctx, simConfig.ServerConfig, api.NewHandler)
+	s, err := server.CreateServer(ctx, simConfig.ServerConfig, nil, api.NewHandler)
 	if err != nil {
 		panic("create server failed")
 	}
@@ -157,7 +158,7 @@ func cleanServer(cfg *config.Config) {
 	os.RemoveAll(cfg.DataDir)
 }
 
-func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, clean ...server.CleanupFunc) {
+func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, clean ...testutil.CleanupFunc) {
 	start := time.Now()
 	driver, err := simulator.NewDriver(pdAddr, simCase, simConfig)
 	if err != nil {
@@ -196,7 +197,7 @@ EXIT:
 	}
 
 	driver.Stop()
-	if len(clean) != 0 {
+	if len(clean) != 0 && clean[0] != nil {
 		clean[0]()
 	}
 

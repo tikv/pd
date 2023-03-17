@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
@@ -81,6 +82,8 @@ func NewGlobalTSOAllocator(
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
 			rootPath:               am.rootPath,
+			ltsPath:                "",
+			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
 			maxResetTSGap:          am.maxResetTSGap,
@@ -261,7 +264,7 @@ func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBit
 	if maxTSO.GetPhysical() == 0 {
 		return false
 	}
-	// Check if the logical part will reach the overflow condition after being differenitated.
+	// Check if the logical part will reach the overflow condition after being differentiated.
 	if differentiatedLogical := gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits); differentiatedLogical >= maxLogical {
 		log.Error("estimated logical part outside of max logical interval, please check ntp time",
 			zap.Reflect("max-tso", maxTSO), errs.ZapError(errs.ErrLogicOverflow))
@@ -338,6 +341,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 			// Send SyncMaxTSRequest to all allocator leaders concurrently.
 			wg.Add(1)
 			go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *syncResp) {
+				defer logutil.LogPanic()
 				defer wg.Done()
 				syncMaxTSResp := &syncResp{}
 				syncCtx, cancel := context.WithTimeout(ctx, rpcTimeout)

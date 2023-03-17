@@ -27,9 +27,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/tso"
@@ -60,6 +62,7 @@ var (
 	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
 	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
 	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
+	ErrNotFoundTSOAddr      = status.Errorf(codes.NotFound, "not found tso address")
 )
 
 // GrpcServer wraps Server to provide grpc service.
@@ -67,9 +70,13 @@ type GrpcServer struct {
 	*Server
 }
 
+type request interface {
+	GetHeader() *pdpb.RequestHeader
+}
+
 type forwardFn func(ctx context.Context, client *grpc.ClientConn) (interface{}, error)
 
-func (s *GrpcServer) unaryMiddleware(ctx context.Context, header *pdpb.RequestHeader, fn forwardFn) (rsp interface{}, err error) {
+func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, fn forwardFn) (rsp interface{}, err error) {
 	failpoint.Inject("customTimeout", func() {
 		time.Sleep(5 * time.Second)
 	})
@@ -82,7 +89,7 @@ func (s *GrpcServer) unaryMiddleware(ctx context.Context, header *pdpb.RequestHe
 		ctx = grpcutil.ResetForwardContext(ctx)
 		return fn(ctx, client)
 	}
-	if err := s.validateRequest(header); err != nil {
+	if err := s.validateRequest(req.GetHeader()); err != nil {
 		return nil, err
 	}
 	return nil, nil
@@ -99,7 +106,17 @@ func (s *GrpcServer) wrapErrorToHeader(errorType pdpb.ErrorType, message string)
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
-	members, err := s.Server.GetMembers()
+	if s.IsClosed() {
+		return &pdpb.GetMembersResponse{
+			Header: &pdpb.ResponseHeader{
+				Error: &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
+				},
+			},
+		}, nil
+	}
+	members, err := cluster.GetMembers(s.GetClient())
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -115,8 +132,11 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		}
 	}
 
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	tsoAllocatorLeaders, err := tsoAllocatorManager.GetLocalAllocatorLeaders()
+	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
+	if !s.IsAPIServiceMode() {
+		tsoAllocatorManager := s.GetTSOAllocatorManager()
+		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
+	}
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -166,6 +186,26 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		streamCtx := stream.Context()
+		if s.IsAPIServiceMode() {
+			forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
+			if !ok || forwardedHost == "" {
+				return ErrNotFoundTSOAddr
+			}
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			if errCh == nil {
+				doneCh = make(chan struct{})
+				defer close(doneCh)
+				errCh = make(chan error)
+			}
+			s.dispatchTSORequest(ctx, &tsoRequest{
+				forwardedHost,
+				request,
+				stream,
+			}, forwardedHost, doneCh, errCh, true)
+			continue
+		}
 		forwardedHost := grpcutil.GetForwardedHost(streamCtx)
 		if !s.isLocalRequest(forwardedHost) {
 			if errCh == nil {
@@ -177,7 +217,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				forwardedHost,
 				request,
 				stream,
-			}, forwardedHost, doneCh, errCh)
+			}, forwardedHost, doneCh, errCh, false)
 			continue
 		}
 
@@ -212,33 +252,38 @@ type tsoRequest struct {
 	stream        pdpb.PD_TsoServer
 }
 
-func (s *GrpcServer) dispatchTSORequest(ctx context.Context, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error) {
+func (s *GrpcServer) dispatchTSORequest(ctx context.Context, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error, withTSOProto bool) {
 	tsoRequestChInterface, loaded := s.tsoDispatcher.LoadOrStore(forwardedHost, make(chan *tsoRequest, maxMergeTSORequests))
 	if !loaded {
 		tsDeadlineCh := make(chan deadline, 1)
-		go s.handleDispatcher(ctx, forwardedHost, tsoRequestChInterface.(chan *tsoRequest), tsDeadlineCh, doneCh, errCh)
+		go s.handleDispatcher(ctx, forwardedHost, tsoRequestChInterface.(chan *tsoRequest), tsDeadlineCh, doneCh, errCh, withTSOProto)
 		go watchTSDeadline(ctx, tsDeadlineCh)
 	}
 	tsoRequestChInterface.(chan *tsoRequest) <- request
 }
 
-func (s *GrpcServer) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error) {
+func (s *GrpcServer) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error, withTSOProto bool) {
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
 	defer s.tsoDispatcher.Delete(forwardedHost)
 
 	var (
-		forwardStream pdpb.PD_TsoClient
-		cancel        context.CancelFunc
+		forwardStream    pdpb.PD_TsoClient
+		forwardMCSStream tsopb.TSO_TsoClient
+		cancel           context.CancelFunc
 	)
 	client, err := s.getDelegateClient(ctx, forwardedHost)
 	if err != nil {
 		goto errHandling
 	}
 	log.Info("create tso forward stream", zap.String("forwarded-host", forwardedHost))
-	forwardStream, cancel, err = s.createTsoForwardStream(client)
+	if withTSOProto {
+		forwardMCSStream, cancel, err = s.createMCSTSOForwardStream(client)
+	} else {
+		forwardStream, cancel, err = s.createTsoForwardStream(client)
+	}
 errHandling:
-	if err != nil || forwardStream == nil {
+	if err != nil || (forwardStream == nil && !withTSOProto) || (forwardMCSStream == nil && withTSOProto) {
 		log.Error("create tso forwarding stream error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCCreateStream, err))
 		select {
 		case <-dispatcherCtx.Done():
@@ -274,7 +319,7 @@ errHandling:
 			case <-dispatcherCtx.Done():
 				return
 			}
-			err = s.processTSORequests(forwardStream, requests[:pendingTSOReqCount])
+			err = s.processTSORequests(forwardStream, forwardMCSStream, requests[:pendingTSOReqCount])
 			close(done)
 			if err != nil {
 				log.Error("proxy forward tso error", zap.String("forwarded-host", forwardedHost), errs.ZapError(errs.ErrGRPCSend, err))
@@ -296,26 +341,56 @@ errHandling:
 	}
 }
 
-func (s *GrpcServer) processTSORequests(forwardStream pdpb.PD_TsoClient, requests []*tsoRequest) error {
+type tsoResp interface {
+	GetTimestamp() *pdpb.Timestamp
+}
+
+func (s *GrpcServer) processTSORequests(forwardStream pdpb.PD_TsoClient, forwardMCSStream tsopb.TSO_TsoClient, requests []*tsoRequest) error {
 	start := time.Now()
 	// Merge the requests
 	count := uint32(0)
 	for _, request := range requests {
 		count += request.request.GetCount()
 	}
-	req := &pdpb.TsoRequest{
-		Header: requests[0].request.GetHeader(),
-		Count:  count,
-		// TODO: support Local TSO proxy forwarding.
-		DcLocation: requests[0].request.GetDcLocation(),
+	var (
+		resp tsoResp
+		err  error
+	)
+	if forwardStream != nil {
+		req := &pdpb.TsoRequest{
+			Header: requests[0].request.GetHeader(),
+			Count:  count,
+			// TODO: support Local TSO proxy forwarding.
+			DcLocation: requests[0].request.GetDcLocation(),
+		}
+		// Send to the tso server stream
+		if err := forwardStream.Send(req); err != nil {
+			return err
+		}
+		resp, err = forwardStream.Recv()
+		if err != nil {
+			return err
+		}
 	}
-	// Send to the leader stream.
-	if err := forwardStream.Send(req); err != nil {
-		return err
-	}
-	resp, err := forwardStream.Recv()
-	if err != nil {
-		return err
+	if forwardMCSStream != nil {
+		req := &tsopb.TsoRequest{
+			Header: &tsopb.RequestHeader{
+				ClusterId:       requests[0].request.GetHeader().GetClusterId(),
+				KeyspaceId:      utils.DefaultKeySpaceID,
+				KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
+			},
+			Count: count,
+			// TODO: support Local TSO proxy forwarding.
+			DcLocation: requests[0].request.GetDcLocation(),
+		}
+		// Send to the tso server stream.
+		if err := forwardMCSStream.Send(req); err != nil {
+			return err
+		}
+		resp, err = forwardMCSStream.Recv()
+		if err != nil {
+			return err
+		}
 	}
 	tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
 	tsoProxyBatchSize.Observe(float64(count))
@@ -387,7 +462,7 @@ func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapReque
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).Bootstrap(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.BootstrapResponse), nil
@@ -420,7 +495,7 @@ func (s *GrpcServer) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstr
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).IsBootstrapped(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.IsBootstrappedResponse), err
@@ -438,7 +513,7 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).AllocID(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.AllocIDResponse), err
@@ -478,7 +553,7 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetStore(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetStoreResponse), err
@@ -524,7 +599,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).PutStore(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.PutStoreResponse), err
@@ -570,7 +645,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetAllStores(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetAllStoresResponse), err
@@ -604,7 +679,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).StoreHeartbeat(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.StoreHeartbeatResponse), err
@@ -966,7 +1041,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetRegion(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), nil
@@ -999,7 +1074,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetPrevRegion(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
@@ -1033,7 +1108,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetRegionByID(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
@@ -1066,7 +1141,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ScanRegionsResponse), nil
@@ -1101,7 +1176,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).AskSplit(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.AskSplitResponse), err
@@ -1139,7 +1214,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.AskBatchSplitResponse), err
@@ -1181,7 +1256,7 @@ func (s *GrpcServer) ReportSplit(ctx context.Context, request *pdpb.ReportSplitR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ReportSplit(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ReportSplitResponse), err
@@ -1208,7 +1283,7 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ReportBatchSplit(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ReportBatchSplitResponse), err
@@ -1237,7 +1312,7 @@ func (s *GrpcServer) GetClusterConfig(ctx context.Context, request *pdpb.GetClus
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetClusterConfig(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetClusterConfigResponse), err
@@ -1258,7 +1333,7 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).PutClusterConfig(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.PutClusterConfigResponse), err
@@ -1288,7 +1363,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ScatterRegion(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ScatterRegionResponse), err
@@ -1342,7 +1417,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetGCSafePoint(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetGCSafePointResponse), err
@@ -1381,7 +1456,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.UpdateGCSafePointResponse), err
@@ -1419,7 +1494,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateServiceGCSafePoint(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.UpdateServiceGCSafePointResponse), err
@@ -1435,8 +1510,15 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 			return nil, err
 		}
 	}
-
-	nowTSO, err := s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	var (
+		nowTSO pdpb.Timestamp
+		err    error
+	)
+	if s.IsAPIServiceMode() {
+		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
+	} else {
+		nowTSO, err = s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1465,7 +1547,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetOperator(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetOperatorResponse), err
@@ -1550,6 +1632,7 @@ var mockLocalAllocatorLeaderChangeFlag = false
 // SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
 // and write it into all Local TSO Allocators then if it's indeed the biggest one.
 func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
+	// TODO: support local tso forward in api service mode in the future.
 	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
 		return nil, err
 	}
@@ -1650,7 +1733,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).SplitRegions(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.SplitRegionsResponse), err
@@ -1675,7 +1758,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).SplitAndScatterRegions(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request.GetHeader(), fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.SplitAndScatterRegionsResponse), err
@@ -1716,6 +1799,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 
 // GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
 func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
+	// TODO: support local tso forward in api service mode in the future.
 	var err error
 	if err = s.validateInternalRequest(request.GetHeader(), false); err != nil {
 		return nil, err
@@ -1723,7 +1807,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 	if !s.member.IsLeader() {
 		return nil, ErrNotLeader
 	}
-	am := s.tsoAllocatorManager
+	am := s.GetTSOAllocatorManager()
 	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
 	if !ok {
 		am.ClusterDCLocationChecker()
@@ -1810,6 +1894,15 @@ func (s *GrpcServer) createTsoForwardStream(client *grpc.ClientConn) (pdpb.PD_Ts
 	return forwardStream, cancel, err
 }
 
+func (s *GrpcServer) createMCSTSOForwardStream(client *grpc.ClientConn) (tsopb.TSO_TsoClient, context.CancelFunc, error) {
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(s.ctx)
+	go checkStream(ctx, cancel, done)
+	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
+	done <- struct{}{}
+	return forwardStream, cancel, err
+}
+
 func (s *GrpcServer) createHeartbeatForwardStream(client *grpc.ClientConn) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
@@ -1868,6 +1961,51 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 	case <-streamCtx.Done():
 	}
 	<-done
+}
+
+func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
+	forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
+	if !ok || forwardedHost == "" {
+		return pdpb.Timestamp{}, ErrNotFoundTSOAddr
+	}
+	forwardStream, err := s.getTSOForwardStream(ctx, forwardedHost)
+	if err != nil {
+		return pdpb.Timestamp{}, err
+	}
+	forwardStream.Send(&tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId:       s.clusterID,
+			KeyspaceId:      utils.DefaultKeySpaceID,
+			KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
+		},
+		Count: 1,
+	})
+	ts, err := forwardStream.Recv()
+	if err != nil {
+		return pdpb.Timestamp{}, err
+	}
+	return *ts.GetTimestamp(), nil
+}
+
+func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost string) (tsopb.TSO_TsoClient, error) {
+	v, ok := s.tsoClients.Load(forwardedHost)
+	if ok {
+		return v.(tsopb.TSO_TsoClient), nil
+	}
+	client, err := s.getDelegateClient(ctx, forwardedHost)
+	if err != nil {
+		return nil, err
+	}
+	done := make(chan struct{})
+	ctx, cancel := context.WithTimeout(s.ctx, defaultTSOProxyTimeout)
+	go checkStream(ctx, cancel, done)
+	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
+	if err != nil {
+		return nil, err
+	}
+	done <- struct{}{}
+	s.tsoClients.Store(forwardedHost, forwardStream)
+	return forwardStream, nil
 }
 
 // for CDC compatibility, we need to initialize config path to `globalConfigPath`
@@ -2032,18 +2170,13 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 
 // ReportMinResolvedTS implements gRPC PDServer.
 func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.ReportMinResolvedTsRequest) (*pdpb.ReportMinResolvedTsResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ReportMinResolvedTS(ctx, request)
 	}
-
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.ReportMinResolvedTsResponse), nil
 	}
 
 	rc := s.GetRaftCluster()
@@ -2066,26 +2199,34 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 
 // SetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.SetExternalTimestampRequest) (*pdpb.SetExternalTimestampResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).SetExternalTimestamp(ctx, request)
 	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.SetExternalTimestampResponse), nil
+	}
 
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	var (
+		nowTSO pdpb.Timestamp
+		err    error
+	)
+	if s.IsAPIServiceMode() {
+		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
+	} else {
+		nowTSO, err = s.tsoAllocatorManager.HandleTSORequest(tso.GlobalDCLocation, 1)
+	}
+	if err != nil {
 		return nil, err
 	}
-
-	timestamp := request.GetTimestamp()
-	if err := s.SetExternalTS(timestamp); err != nil {
+	globalTS := tsoutil.GenerateTS(&nowTSO)
+	externalTS := request.GetTimestamp()
+	log.Debug("try to set external timestamp",
+		zap.Uint64("external-ts", externalTS), zap.Uint64("global-ts", globalTS))
+	if err := s.SetExternalTS(externalTS, globalTS); err != nil {
 		return &pdpb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
 	}
-	log.Debug("set external timestamp",
-		zap.Uint64("timestamp", timestamp))
 	return &pdpb.SetExternalTimestampResponse{
 		Header: s.header(),
 	}, nil
@@ -2093,18 +2234,13 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 
 // GetExternalTimestamp implements gRPC PDServer.
 func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.GetExternalTimestampRequest) (*pdpb.GetExternalTimestampResponse, error) {
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetExternalTimestamp(ctx, request)
 	}
-
-	if err := s.validateRequest(request.GetHeader()); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.GetExternalTimestampResponse), nil
 	}
 
 	timestamp := s.GetExternalTS()

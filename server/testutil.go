@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -32,19 +33,15 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedulers"
 	"go.etcd.io/etcd/embed"
 )
 
-// CleanupFunc closes test pd server(s) and deletes any files left behind.
-type CleanupFunc func()
-
 // NewTestServer creates a pd server for testing.
-func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, CleanupFunc, error) {
+func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, testutil.CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	s, err := CreateServer(ctx, cfg, mockHandler)
+	s, err := CreateServer(ctx, cfg, nil, mockHandler)
 	if err != nil {
 		cancel()
 		return nil, nil, err

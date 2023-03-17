@@ -31,19 +31,19 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
+	pdoperator "github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-	pdoperator "github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/placement"
 )
 
 type operatorTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -53,7 +53,7 @@ func TestOperatorTestSuite(t *testing.T) {
 
 func (suite *operatorTestSuite) SetupSuite() {
 	re := suite.Require()
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/unexpectedOperator", "return(true)"))
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 1 })
 	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
@@ -166,7 +166,7 @@ func (suite *operatorTestSuite) TestMergeRegionOperator() {
 type transferRegionOperatorTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -176,7 +176,7 @@ func TestTransferRegionOperatorTestSuite(t *testing.T) {
 
 func (suite *transferRegionOperatorTestSuite) SetupSuite() {
 	re := suite.Require()
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/unexpectedOperator", "return(true)"))
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 3 })
 	server.MustWaitLeader(re, []*server.Server{suite.svr})
 

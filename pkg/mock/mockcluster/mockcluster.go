@@ -29,14 +29,15 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule/labeler"
-	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/statistics/buckets"
 )
 
 const (
@@ -81,12 +82,12 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 }
 
 // GetStoreConfig returns the store config.
-func (mc *Cluster) GetStoreConfig() *config.StoreConfig {
+func (mc *Cluster) GetStoreConfig() sc.StoreConfig {
 	return mc.StoreConfigManager.GetStoreConfig()
 }
 
 // GetOpts returns the cluster configuration.
-func (mc *Cluster) GetOpts() *config.PersistOptions {
+func (mc *Cluster) GetOpts() sc.Config {
 	return mc.PersistOptions
 }
 

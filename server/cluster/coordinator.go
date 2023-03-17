@@ -29,17 +29,17 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/checker"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/checker"
-	"github.com/tikv/pd/server/schedule/hbstream"
-	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/plan"
-	"github.com/tikv/pd/server/schedulers"
-	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -93,7 +93,7 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		cancel:            cancel,
 		cluster:           cluster,
 		prepareChecker:    newPrepareChecker(),
-		checkers:          checker.NewController(ctx, cluster, cluster.ruleManager, cluster.regionLabeler, opController),
+		checkers:          checker.NewController(ctx, cluster, cluster.opt, cluster.ruleManager, cluster.regionLabeler, opController),
 		regionScatterer:   schedule.NewRegionScatterer(ctx, cluster, opController),
 		regionSplitter:    schedule.NewRegionSplitter(cluster, schedule.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:        schedulers,
@@ -768,7 +768,7 @@ func (c *coordinator) isSchedulerDisabled(name string) (bool, error) {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	t := s.GetType()
-	scheduleConfig := c.cluster.GetOpts().GetScheduleConfig()
+	scheduleConfig := c.cluster.GetScheduleConfig()
 	for _, s := range scheduleConfig.Schedulers {
 		if t == s.Type {
 			return s.Disable, nil

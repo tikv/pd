@@ -20,6 +20,7 @@ import (
 
 const (
 	namespace              = "resource_manager"
+	serverSubsystem        = "server"
 	ruSubsystem            = "resource_unit"
 	resourceSubsystem      = "resource"
 	resourceGroupNameLabel = "name"
@@ -29,6 +30,14 @@ const (
 )
 
 var (
+	// Meta & Server info.
+	serverInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "info",
+			Help:      "Indicate the resource manager server info, and the value is the start timestamp (s).",
+		}, []string{"version", "hash"})
 	// RU cost metrics.
 	readRequestUnitCost = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -45,6 +54,13 @@ var (
 			Name:      "write_request_unit",
 			Help:      "Bucketed histogram of the write request unit cost for all resource groups.",
 			Buckets:   prometheus.ExponentialBuckets(3, 10, 5), // 3 ~ 300000
+		}, []string{resourceGroupNameLabel})
+	sqlLayerRequestUnitCost = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "sql_layer_request_unit",
+			Help:      "The number of the sql layer request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
 
 	// Resource cost metrics.
@@ -90,8 +106,10 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(serverInfo)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
+	prometheus.MustRegister(sqlLayerRequestUnitCost)
 	prometheus.MustRegister(readByteCost)
 	prometheus.MustRegister(writeByteCost)
 	prometheus.MustRegister(kvCPUCost)

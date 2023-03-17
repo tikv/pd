@@ -33,18 +33,18 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/filter"
-	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedulers"
-	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -52,8 +52,6 @@ var (
 	// SchedulerConfigHandlerPath is the api router path of the schedule config handler.
 	SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
 
-	// ErrServerNotStarted is error info for server not started.
-	ErrServerNotStarted = errors.New("The server has not been started")
 	// ErrOperatorNotFound is error info for operator not found.
 	ErrOperatorNotFound = errors.New("operator not found")
 	// ErrAddOperator is error info for already have an operator when adding operator.
@@ -938,7 +936,7 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) er
 		return err
 	}
 	if tsoAllocator == nil {
-		return ErrServerNotStarted
+		return errs.ErrServerNotStarted
 	}
 	return tsoAllocator.SetTSO(ts, ignoreSmaller, skipUpperBoundCheck)
 }

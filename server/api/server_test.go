@@ -68,16 +68,14 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-type cleanUpFunc func()
-
-func mustNewServer(re *require.Assertions, opts ...func(cfg *config.Config)) (*server.Server, cleanUpFunc) {
+func mustNewServer(re *require.Assertions, opts ...func(cfg *config.Config)) (*server.Server, testutil.CleanupFunc) {
 	_, svrs, cleanup := mustNewCluster(re, 1, opts...)
 	return svrs[0], cleanup
 }
 
 var zapLogOnce sync.Once
 
-func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, cleanUpFunc) {
+func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, testutil.CleanupFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svrs := make([]*server.Server, 0, num)
 	cfgs := server.NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), num)
@@ -93,7 +91,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 			for _, opt := range opts {
 				opt(cfg)
 			}
-			s, err := server.CreateServer(ctx, cfg, NewHandler)
+			s, err := server.CreateServer(ctx, cfg, nil, NewHandler)
 			re.NoError(err)
 			err = s.Run()
 			re.NoError(err)
@@ -138,7 +136,7 @@ func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
 type serviceTestSuite struct {
 	suite.Suite
 	svr     *server.Server
-	cleanup cleanUpFunc
+	cleanup testutil.CleanupFunc
 }
 
 func TestServiceTestSuite(t *testing.T) {
