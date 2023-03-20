@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
@@ -33,7 +34,6 @@ import (
 
 const (
 	controllerConfigPath    = "resource_group/controller"
-	defaultMaxWaitDuration  = time.Second
 	maxRetry                = 3
 	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
@@ -194,6 +194,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		for {
 			select {
 			case <-c.loopCtx.Done():
+				c.resetMetrics()
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode = true
@@ -241,6 +242,10 @@ func (c *ResourceGroupsController) Stop() error {
 	return nil
 }
 
+func (c *ResourceGroupsController) resetMetrics() {
+	resourceGroupStatusGauge.Reset()
+}
+
 // tryGetResourceGroup will try to get the resource group controller from local cache first,
 // if the local cache misses, it will then call gRPC to fetch the resource group info from server.
 func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name string) (*groupCostController, error) {
@@ -259,7 +264,8 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan,
+		successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name), resourceGroupTokenRequestCounter.WithLabelValues(group.Name))
 	if err != nil {
 		return nil, err
 	}
@@ -363,6 +369,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		if request != nil {
 			c.run.currentRequests = append(c.run.currentRequests, request)
 		}
+		gc.tokenRequestCounter.Inc()
 		return true
 	})
 	if len(c.run.currentRequests) > 0 {
@@ -384,12 +391,16 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 	go func() {
 		log.Debug("[resource group controller] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
 		resp, err := c.provider.AcquireTokenBuckets(ctx, req)
+		latency := time.Since(now)
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
 			if !errors.ErrorEqual(err, context.Canceled) {
 				log.L().Sugar().Infof("[resource group controller] token bucket rpc error: %v", err)
 			}
 			resp = nil
+			failedTokenRequestDuration.Observe(latency.Seconds())
+		} else {
+			successfultokenRequestDuration.Observe(latency.Seconds())
 		}
 		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", time.Since(now)))
 		c.tokenResponseChan <- resp
@@ -426,6 +437,10 @@ type groupCostController struct {
 	mode        rmpb.GroupMode
 
 	handleRespFunc func(*rmpb.TokenBucketResponse)
+
+	successfulRequestDuration prometheus.Observer
+	failedRequestCounter      prometheus.Counter
+	tokenRequestCounter       prometheus.Counter
 
 	mu struct {
 		sync.Mutex
@@ -501,6 +516,8 @@ func newGroupCostController(
 	mainCfg *Config,
 	lowRUNotifyChan chan struct{},
 	tokenBucketUpdateChan chan *groupCostController,
+	successfulRequestDuration prometheus.Observer,
+	failedRequestCounter, tokenRequestCounter prometheus.Counter,
 ) (*groupCostController, error) {
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -512,8 +529,11 @@ func newGroupCostController(
 	}
 
 	gc := &groupCostController{
-		ResourceGroup: group,
-		mainCfg:       mainCfg,
+		ResourceGroup:             group,
+		mainCfg:                   mainCfg,
+		successfulRequestDuration: successfulRequestDuration,
+		failedRequestCounter:      failedRequestCounter,
+		tokenRequestCounter:       tokenRequestCounter,
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
