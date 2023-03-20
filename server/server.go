@@ -1721,6 +1721,7 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 	}
 	listenUrls := primary.GetListenUrls()
 	if ok && len(listenUrls) > 0 {
+		// listenUrls[0] is the primary service endpoint of the keyspace group
 		s.servicePrimaryMap.Store(serviceName, listenUrls[0])
 	} else {
 		log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))

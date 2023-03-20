@@ -405,7 +405,10 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.ResourceManagerServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
-	s.serviceRegister.Register()
+	if err := s.serviceRegister.Register(); err != nil {
+		log.Error("failed to regiser the service", zap.String("service-name", utils.TSOServiceName), errs.ZapError(err))
+		return err
+	}
 	atomic.StoreInt64(&s.isServing, 1)
 	return nil
 }
