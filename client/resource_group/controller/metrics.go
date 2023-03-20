@@ -19,7 +19,6 @@ import "github.com/prometheus/client_golang/prometheus"
 const (
 	namespace             = "resource_manager_client"
 	requestSubsystem      = "request"
-	ruSubsystem           = "resource_unit"
 	tokenRequestSubsystem = "token_request"
 
 	resourceGroupNameLabel = "name"
@@ -40,7 +39,7 @@ var (
 			Subsystem: requestSubsystem,
 			Name:      "success",
 			Buckets:   prometheus.ExponentialBuckets(0.001, 4, 8), // 0.001 ~ 40.96
-			Help:      "",
+			Help:      "Bucketed histogram of wait duration of successfult request.",
 		}, []string{resourceGroupNameLabel})
 
 	failedRequestCounter = prometheus.NewCounterVec(
@@ -48,39 +47,36 @@ var (
 			Namespace: namespace,
 			Subsystem: requestSubsystem,
 			Name:      "fail",
-			Help:      "",
+			Help:      "Counter of failed request.",
 		}, []string{resourceGroupNameLabel})
 
-	successfulTokenRequestDuration = prometheus.NewHistogram(
+	tokenRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: tokenRequestSubsystem,
-			Name:      "success",
-			Help:      "",
-		})
-
-	failedTokenRequestCounter = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Namespace: namespace,
-			Subsystem: tokenRequestSubsystem,
-			Name:      "fail",
-			Help:      "",
-		})
+			Name:      "duration",
+			Help:      "Bucketed histogram of latency(s) of token request.",
+		}, []string{"type"})
 
 	resourceGroupTokenRequestCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: tokenRequestSubsystem,
 			Name:      "resource_group",
-			Help:      "",
+			Help:      "Counter of token request by every resource group.",
 		}, []string{resourceGroupNameLabel})
+)
+
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	failedTokenRequestDuration     = tokenRequestDuration.WithLabelValues("fail")
+	successfultokenRequestDuration = tokenRequestDuration.WithLabelValues("success")
 )
 
 func init() {
 	prometheus.MustRegister(resourceGroupStatusGauge)
 	prometheus.MustRegister(successfulRequestDuration)
 	prometheus.MustRegister(failedRequestCounter)
-	prometheus.MustRegister(successfulTokenRequestDuration)
-	prometheus.MustRegister(failedTokenRequestCounter)
+	prometheus.MustRegister(tokenRequestDuration)
 	prometheus.MustRegister(resourceGroupTokenRequestCounter)
 }

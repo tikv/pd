@@ -33,10 +33,9 @@ import (
 )
 
 const (
-	controllerConfigPath         = "resource_group/controller"
-	maxRetry                     = 3
-	maxNotificationChanLen       = 200
-	maxConsumptionMetricsChanLen = 200
+	controllerConfigPath   = "resource_group/controller"
+	maxRetry               = 3
+	maxNotificationChanLen = 200
 )
 
 type selectType int
@@ -111,8 +110,6 @@ type ResourceGroupsController struct {
 		// Currently, we don't do multiple `AcquireTokenBuckets`` at the same time, so there are no concurrency problems with `currentRequests`.
 		currentRequests []*rmpb.TokenBucketRequest
 	}
-
-	consumptionDispatcher chan *rmpb.TokenBucketRequest
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -138,7 +135,6 @@ func NewResourceGroupController(
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
-		consumptionDispatcher: make(chan *rmpb.TokenBucketRequest, maxConsumptionMetricsChanLen),
 	}
 	for _, opt := range opts {
 		opt(controller)
@@ -403,9 +399,9 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 				log.L().Sugar().Infof("[resource group controller] token bucket rpc error: %v", err)
 			}
 			resp = nil
-			failedTokenRequestCounter.Inc()
+			failedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
-			successfulTokenRequestDuration.Observe(latency.Seconds())
+			successfultokenRequestDuration.Observe(latency.Seconds())
 		}
 		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", latency))
 		c.tokenResponseChan <- resp
