@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package tso_client_test
+package tso
 
 import (
 	"context"
@@ -21,23 +21,15 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/testutil"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/mcs"
 )
-
-const (
-	tsoRequestConcurrencyNumber = 5
-	tsoRequestRound             = 30
-)
-
-type tsoClient interface {
-	GetTS(ctx context.Context) (int64, int64, error)
-	GetTSAsync(ctx context.Context) pd.TSFuture
-}
 
 type tsoClientTestSuite struct {
 	suite.Suite
@@ -45,13 +37,13 @@ type tsoClientTestSuite struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	// The PD cluster
+	// The PD cluster.
 	cluster *tests.TestCluster
-	// The TSO service in microservice mode
+	// The TSO service in microservice mode.
 	tsoServer        *tso.Server
 	tsoServerCleanup func()
 
-	client tsoClient
+	client pd.TSOClient
 }
 
 func TestLegacyTSOClient(t *testing.T) {
@@ -73,7 +65,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	switch suite.legacy {
 	case true:
-		suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
+		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 		re.NoError(err)
 		err = suite.cluster.RunInitialServers()
 		re.NoError(err)
@@ -83,7 +75,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 		suite.client, err = pd.NewClientWithContext(suite.ctx, strings.Split(backendEndpoints, ","), pd.SecurityOption{})
 		re.NoError(err)
 	case false:
-		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount)
 		re.NoError(err)
 		err = suite.cluster.RunInitialServers()
 		re.NoError(err)
@@ -143,4 +135,39 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 		}()
 	}
 	wg.Wait()
+}
+
+// More details can be found in this issue: https://github.com/tikv/pd/issues/4884
+func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	testutil.Eventually(re, func() bool {
+		_, _, err := suite.client.GetTS(ctx)
+		return err == nil
+	})
+	// Transfer leader to trigger the TSO resetting.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/updateAfterResetTSO", "return(true)"))
+	oldLeaderName := suite.cluster.WaitLeader()
+	err := suite.cluster.GetServer(oldLeaderName).ResignLeader()
+	re.NoError(err)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/updateAfterResetTSO"))
+	newLeaderName := suite.cluster.WaitLeader()
+	re.NotEqual(oldLeaderName, newLeaderName)
+	// Request a new TSO.
+	testutil.Eventually(re, func() bool {
+		_, _, err := suite.client.GetTS(ctx)
+		return err == nil
+	})
+	// Transfer leader back.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
+	err = suite.cluster.GetServer(newLeaderName).ResignLeader()
+	re.NoError(err)
+	// Should NOT panic here.
+	testutil.Eventually(re, func() bool {
+		_, _, err := suite.client.GetTS(ctx)
+		return err == nil
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp"))
 }

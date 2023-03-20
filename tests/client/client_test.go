@@ -207,47 +207,6 @@ func TestLeaderTransfer(t *testing.T) {
 	wg.Wait()
 }
 
-// More details can be found in this issue: https://github.com/tikv/pd/issues/4884
-func TestUpdateAfterResetTSO(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2)
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
-
-	testutil.Eventually(re, func() bool {
-		_, _, err := cli.GetTS(context.TODO())
-		return err == nil
-	})
-	// Transfer leader to trigger the TSO resetting.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/updateAfterResetTSO", "return(true)"))
-	oldLeaderName := cluster.WaitLeader()
-	err = cluster.GetServer(oldLeaderName).ResignLeader()
-	re.NoError(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/updateAfterResetTSO"))
-	newLeaderName := cluster.WaitLeader()
-	re.NotEqual(oldLeaderName, newLeaderName)
-	// Request a new TSO.
-	testutil.Eventually(re, func() bool {
-		_, _, err := cli.GetTS(context.TODO())
-		return err == nil
-	})
-	// Transfer leader back.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
-	err = cluster.GetServer(newLeaderName).ResignLeader()
-	re.NoError(err)
-	// Should NOT panic here.
-	testutil.Eventually(re, func() bool {
-		_, _, err := cli.GetTS(context.TODO())
-		return err == nil
-	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp"))
-}
-
 func TestTSOAllocatorLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -293,7 +252,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 
 	// Check allocator leaders URL map.
 	cli.Close()
-	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(cli.(pd.TSOClient)) {
+	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(cli.(TSOAllocatorsGetter)) {
 		if dcLocation == tso.GlobalDCLocation {
 			urls := innerCli.GetServiceDiscovery().GetURLs()
 			sort.Strings(urls)
@@ -411,6 +370,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
 }
 
+// TODO: migrate the Local/Global TSO tests to TSO integration test folder.
 func TestGlobalAndLocalTSO(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -512,7 +472,10 @@ func requestGlobalAndLocalTSO(
 	wg.Wait()
 }
 
-func getTSOAllocatorServingEndpointURLs(c pd.TSOClient) map[string]string {
+// GetTSOAllocators defines the TSO allocators getter.
+type TSOAllocatorsGetter interface{ GetTSOAllocators() *sync.Map }
+
+func getTSOAllocatorServingEndpointURLs(c TSOAllocatorsGetter) map[string]string {
 	allocatorLeaders := make(map[string]string)
 	c.GetTSOAllocators().Range(func(dcLocation, url interface{}) bool {
 		allocatorLeaders[dcLocation.(string)] = url.(string)
@@ -798,7 +761,7 @@ func (suite *clientTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.srv, suite.cleanup, err = server.NewTestServer(re, assertutil.CheckerWithNilAssert(re))
 	suite.NoError(err)
-	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
+	suite.grpcPDClient = testutil.MustNewPDGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	server.MustWaitLeader(re, []*server.Server{suite.srv})
