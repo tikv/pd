@@ -17,7 +17,6 @@ package register_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/suite"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -95,7 +94,6 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
 	re.Equal(primary, addr)
-	re.Equal(primary, s.GetPrimary().GetName())
 
 	// test API server discovery after unregister
 	cleanup()
@@ -119,18 +117,18 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	for i := 0; i < serverNum; i++ {
 		s, cleanup := suite.addServer(serviceName)
 		defer cleanup()
-		primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
-		re.True(exist)
-		re.Equal(primary, s.GetPrimary().GetName())
 		serverMap[s.GetAddr()] = s
 	}
 
-	// close old primary
-	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
+	expectedPrimary := mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
-	serverMap[oldPrimary].Close()
-	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
+	re.Equal(expectedPrimary, primary)
+	// close old primary
+	serverMap[primary].Close()
+	delete(serverMap, primary)
 
+	expectedPrimary = mcs.WaitForPrimaryServing(suite.Require(), serverMap)
 	// test API server discovery
 	client := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(client, serviceName)
@@ -138,9 +136,9 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	re.Len(endpoints, serverNum-1)
 
 	// test primary changed
-	newPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
+	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
-	re.NotEqual(oldPrimary, newPrimary)
+	re.Equal(expectedPrimary, primary)
 }
 
 func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, func()) {

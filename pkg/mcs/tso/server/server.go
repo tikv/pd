@@ -42,7 +42,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -64,7 +64,13 @@ import (
 
 const (
 	// pdRootPath is the old path for storing the tso related root path.
-	pdRootPath = "/pd"
+	pdRootPath        = "/pd"
+	msServiceRootPath = "/ms"
+	// tsoSvcDiscoveryPrefixFormat defines the key prefix for keyspace group primary election.
+	// This key prefix is in the format of "/ms/<cluster-id>/tso/<group-id>", and the entire key
+	// is in the format of "/ms/<cluster-id>/tso/<group-id>/primary". The <group-id> is 5 digits
+	// integer with leading zeros.
+	tsoSvcDiscoveryPrefixFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName + "/%05d"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -209,14 +215,14 @@ func (s *Server) primaryElectionLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign the primary/leader", zap.String("campaign-tso-primary-name", s.participant.Member().Name))
+	log.Info("start to campaign the primary/leader", zap.String("campaign-tso-primary-name", s.participant.Name()))
 	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign tso primary/leader meets error due to txn conflict, another tso server may campaign successfully",
-				zap.String("campaign-tso-primary-name", s.participant.Member().Name))
+				zap.String("campaign-tso-primary-name", s.participant.Name()))
 		} else {
 			log.Error("campaign tso primary/leader meets error due to etcd error",
-				zap.String("campaign-tso-primary-name", s.participant.Member().Name),
+				zap.String("campaign-tso-primary-name", s.participant.Name()),
 				errs.ZapError(err))
 		}
 		return
@@ -235,7 +241,7 @@ func (s *Server) campaignLeader() {
 
 	// maintain the the leadership, after this, TSO can be service.
 	s.participant.KeepLeader(ctx)
-	log.Info("campaign tso primary ok", zap.String("campaign-tso-primary-name", s.participant.Member().Name))
+	log.Info("campaign tso primary ok", zap.String("campaign-tso-primary-name", s.participant.Name()))
 
 	allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
@@ -259,9 +265,9 @@ func (s *Server) campaignLeader() {
 	s.participant.EnableLeader()
 	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary/leader is elected
 	// go s.tsoAllocatorManager.ClusterDCLocationChecker()
-	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", s.participant.Member().Name))
+	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", s.participant.Name()))
 
-	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
+	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -288,8 +294,6 @@ func (s *Server) Close() {
 
 	log.Info("closing tso server ...")
 	s.serviceRegister.Deregister()
-	// TODO: double check when muxListener is closed, grpc.Server.serve() and http.Server.serve()
-	// will also close with error cmux.ErrListenerClosed.
 	s.muxListener.Close()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
@@ -324,12 +328,13 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.participant.IsLeader() && atomic.LoadInt64(&s.isServing) == 1
+	return atomic.LoadInt64(&s.isServing) == 1 && s.participant.IsLeader()
 }
 
-// GetPrimary returns the primary provider of this tso server.
-func (s *Server) GetPrimary() bs.MemberProvider {
-	return s.participant.GetLeader()
+// GetLeaderListenUrls gets service endpoints from the leader in election group.
+// The entry at the index 0 is the primary's service endpoint.
+func (s *Server) GetLeaderListenUrls() []string {
+	return s.participant.GetLeaderListenUrls()
 }
 
 // AddServiceReadyCallback implements basicserver. It adds callbacks when the server becomes the primary.
@@ -486,7 +491,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(utils.DefaultGRPCGracefulStopTimeout):
+	case <-time.After(mcsutils.DefaultGRPCGracefulStopTimeout):
 		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now")
 		gs.Stop()
 	}
@@ -511,7 +516,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	serverr := hs.Serve(l)
 	log.Info("http server stopped serving")
 
-	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), mcsutils.DefaultHTTPGracefulShutdownTimeout)
 	defer cancel()
 	if err := hs.Shutdown(ctx); err != nil {
 		log.Error("http server shutdown encountered problem", errs.ZapError(err))
@@ -547,7 +552,7 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = utils.InitClusterID(s.ctx, s.etcdClient); err != nil {
+	if s.clusterID, err = mcsutils.InitClusterID(s.ctx, s.etcdClient); err != nil {
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
@@ -559,22 +564,23 @@ func (s *Server) startServer() (err error) {
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 	s.defaultGroupRootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 
-	// TODO: Figure out how we should generated the unique id and name passed to Participant.
-	// For now, set the name to be listen address and generate the unique id from the name with sha256.
-	uniqueName := s.cfg.ListenAddr
+	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
+	if err != nil {
+		return err
+	}
+
+	uniqueName := s.listenURL.Host // in the host:port format
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
-	tsoPrimaryPrefix := fmt.Sprintf("/ms/%d/tso", s.clusterID)
-	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
-	s.participant.InitInfo(uniqueName, path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
-	s.participant.SetMemberDeployPath(s.participant.ID())
-	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
-	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
+	s.participant = member.NewParticipant(s.etcdClient)
+	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tsoSvcDiscoveryPrefixFormat, s.clusterID, mcsutils.DefaultKeyspaceID),
+		"primary", "keyspace group primary election", s.cfg.ListenAddr)
 
 	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.participant, s.defaultGroupRootPath, s.defaultGroupStorage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
+		s.participant, s.defaultGroupRootPath, s.defaultGroupStorage, s.cfg.IsLocalTSOEnabled(),
+		s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
 		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
 	// Set up the Global TSO Allocator here, it will be initialized once this TSO participant campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(s.ctx, tso.GlobalDCLocation, s.participant.GetLeadership())
@@ -585,14 +591,10 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
-	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
-	if err != nil {
-		return err
-	}
 	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
+		s.muxListener, err = tls.Listen(mcsutils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
+		s.muxListener, err = net.Listen(mcsutils.TCPNetworkStr, s.listenURL.Host)
 	}
 	if err != nil {
 		return err
@@ -608,14 +610,18 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	atomic.StoreInt64(&s.isServing, 1)
 	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.ListenAddr}
 	serializedEntry, err := entry.Serialize()
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.TSOServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
-	s.serviceRegister.Register()
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, mcsutils.TSOServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	if err := s.serviceRegister.Register(); err != nil {
+		log.Error("failed to regiser the service", zap.String("service-name", mcsutils.TSOServiceName), errs.ZapError(err))
+		return err
+	}
+
+	atomic.StoreInt64(&s.isServing, 1)
 	return nil
 }
 

@@ -411,6 +411,9 @@ func TestPlacementRuleGroups(t *testing.T) {
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "group2", "100", "false")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "group3", "200", "false")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 
 	// show all
 	var groups []placement.RuleGroup
@@ -420,15 +423,24 @@ func TestPlacementRuleGroups(t *testing.T) {
 	re.Equal([]placement.RuleGroup{
 		{ID: "pd", Index: 42, Override: true},
 		{ID: "group2", Index: 100, Override: false},
+		{ID: "group3", Index: 200, Override: false},
 	}, groups)
 
 	// delete
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "delete", "group2")
 	re.NoError(err)
-	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "Delete group and rules successfully.")
 
 	// show again
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group2")
+	re.NoError(err)
+	re.Contains(string(output), "404")
+
+	// delete using regex
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "delete", "--regexp", ".*3")
+	re.NoError(err)
+
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group3")
 	re.NoError(err)
 	re.Contains(string(output), "404")
 }

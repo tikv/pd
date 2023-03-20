@@ -194,7 +194,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		for {
 			select {
 			case <-c.loopCtx.Done():
-				c.resetMetrics()
+				resourceGroupStatusGauge.Reset()
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode = true
@@ -274,6 +274,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	// Check again to prevent initializing the same resource group concurrently.
 	tmp, loaded := c.groupsController.LoadOrStore(group.GetName(), gc)
 	if !loaded {
+		resourceGroupStatusGauge.WithLabelValues(name).Set(1)
 		log.Info("[resource group controller] create resource group cost controller", zap.String("name", group.GetName()))
 	}
 	return tmp.(*groupCostController), nil
@@ -292,6 +293,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 		resourceGroupName := key.(string)
 		if _, ok := latestGroups[resourceGroupName]; !ok {
 			c.groupsController.Delete(key)
+			resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName)
 			return true
 		}
 
@@ -303,6 +305,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.tombstone {
 				c.groupsController.Delete(resourceGroupName)
+				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName)
 				return true
 			}
 			gc.tombstone = true
@@ -400,9 +403,9 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			resp = nil
 			failedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
-			successfultokenRequestDuration.Observe(latency.Seconds())
+			successfulTokenRequestDuration.Observe(latency.Seconds())
 		}
-		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", time.Since(now)))
+		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", latency))
 		c.tokenResponseChan <- resp
 	}()
 }
@@ -413,6 +416,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 ) (*rmpb.Consumption, error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
+		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
 		return nil, err
 	}
 	return gc.onRequestWait(ctx, info)
@@ -980,8 +984,10 @@ func (gc *groupCostController) onRequestWait(
 	if !gc.burstable.Load() {
 		var err error
 		now := time.Now()
+		var i int
+		var d time.Duration
 	retryLoop:
-		for i := 0; i < maxRetry; i++ {
+		for i = 0; i < maxRetry; i++ {
 			switch gc.mode {
 			case rmpb.GroupMode_RawMode:
 				res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
@@ -990,7 +996,7 @@ func (gc *groupCostController) onRequestWait(
 						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.maxWaitDuration, now, v))
 					}
 				}
-				if err = WaitReservations(ctx, now, res); err == nil {
+				if d, err = WaitReservations(ctx, now, res); err == nil {
 					break retryLoop
 				}
 			case rmpb.GroupMode_RUMode:
@@ -1000,14 +1006,17 @@ func (gc *groupCostController) onRequestWait(
 						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.maxWaitDuration, now, v))
 					}
 				}
-				if err = WaitReservations(ctx, now, res); err == nil {
+				if d, err = WaitReservations(ctx, now, res); err == nil {
 					break retryLoop
 				}
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
 		if err != nil {
+			gc.failedRequestCounter.Inc()
 			return nil, err
+		} else {
+			gc.successfulRequestDuration.Observe(d.Seconds())
 		}
 	}
 	gc.mu.Lock()
