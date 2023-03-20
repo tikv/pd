@@ -113,7 +113,7 @@ func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensN
 		notifyThreshold:     cfg.NotifyThreshold,
 		lowTokensNotifyChan: lowTokensNotifyChan,
 	}
-	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
+	log.Info("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim
 }
 

@@ -242,10 +242,6 @@ func (c *ResourceGroupsController) Stop() error {
 	return nil
 }
 
-func (c *ResourceGroupsController) resetMetrics() {
-	resourceGroupStatusGauge.Reset()
-}
-
 // tryGetResourceGroup will try to get the resource group controller from local cache first,
 // if the local cache misses, it will then call gRPC to fetch the resource group info from server.
 func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name string) (*groupCostController, error) {
@@ -371,8 +367,8 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
 			c.run.currentRequests = append(c.run.currentRequests, request)
+			gc.tokenRequestCounter.Inc()
 		}
-		gc.tokenRequestCounter.Inc()
 		return true
 	})
 	if len(c.run.currentRequests) > 0 {
@@ -492,6 +488,7 @@ type groupCostController struct {
 }
 
 type tokenCounter struct {
+	initialToken float64
 	// avgRUPerSec is an exponentially-weighted moving average of the RU
 	// consumption per second; used to estimate the RU requirements for the next
 	// request.
@@ -562,22 +559,27 @@ func newGroupCostController(
 func (gc *groupCostController) initRunState() {
 	now := time.Now()
 	gc.run.now = now
-	gc.run.lastRequestTime = now
+	gc.run.lastRequestTime = now.Add(-defaultTargetPeriod)
 	gc.run.targetPeriod = defaultTargetPeriod
 	gc.run.consumption = &rmpb.Consumption{}
 	gc.run.lastRequestConsumption = &rmpb.Consumption{SqlLayerCpuTimeMs: getSQLProcessCPUTime(gc.mainCfg.isSingleGroupByKeyspace)}
 
-	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
+	isBurstable := true
+	cfgFunc := func(tb *rmpb.TokenBucket) (tokenBucketReconfigureArgs, float64) {
+		initialToken := float64(tb.Settings.FillRate)
 		cfg := tokenBucketReconfigureArgs{
-			NewTokens: initialRequestUnits,
+			NewTokens: initialToken,
 			NewBurst:  tb.Settings.BurstLimit,
 			// This is to trigger token requests as soon as resource group start consuming tokens.
-			NotifyThreshold: math.Max(initialRequestUnits-float64(tb.Settings.FillRate)*0.2, 1),
+			NotifyThreshold: math.Max(initialToken*tokenReserveFraction, 1),
 		}
 		if cfg.NewBurst >= 0 {
 			cfg.NewBurst = 0
 		}
-		return cfg
+		if tb.Settings.BurstLimit >= 0 {
+			isBurstable = false
+		}
+		return cfg, initialToken
 	}
 
 	switch gc.mode {
@@ -585,12 +587,13 @@ func (gc *groupCostController) initRunState() {
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitLimitTypeList {
 			tb := getRUTokenBucketSetting(gc.ResourceGroup, typ)
-			cfg := cfgFunc(tb)
+			cfg, initToken := cfgFunc(tb)
 			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
 			counter := &tokenCounter{
-				limiter:     limiter,
-				avgRUPerSec: 0,
-				avgLastTime: now,
+				limiter:      limiter,
+				avgRUPerSec:  0,
+				avgLastTime:  now,
+				initialToken: initToken,
 			}
 			gc.run.requestUnitTokens[typ] = counter
 		}
@@ -598,16 +601,18 @@ func (gc *groupCostController) initRunState() {
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceLimitTypeList {
 			tb := getRawResourceTokenBucketSetting(gc.ResourceGroup, typ)
-			cfg := cfgFunc(tb)
+			cfg, initToken := cfgFunc(tb)
 			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
 			counter := &tokenCounter{
-				limiter:     limiter,
-				avgRUPerSec: 0,
-				avgLastTime: now,
+				limiter:      limiter,
+				avgRUPerSec:  0,
+				avgLastTime:  now,
+				initialToken: initToken,
 			}
 			gc.run.resourceTokens[typ] = counter
 		}
 	}
+	gc.burstable.Store(isBurstable)
 }
 
 // applyDegradedMode is used to apply degraded mode for resource group which is in low-process.
@@ -717,9 +722,6 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
-	if deltaDuration <= 500*time.Millisecond && gc.run.initialRequestCompleted {
-		return false
-	}
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
 	counter.avgLastTime = gc.run.now
@@ -729,6 +731,9 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 
 func (gc *groupCostController) shouldReportConsumption() bool {
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
+	if !gc.run.initialRequestCompleted {
+		return true
+	}
 	if timeSinceLastRequest >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
@@ -754,17 +759,7 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 func (gc *groupCostController) handleTokenBucketResponse(resp *rmpb.TokenBucketResponse) {
 	gc.run.requestInProgress = false
 	gc.handleRespFunc(resp)
-	if !gc.run.initialRequestCompleted {
-		gc.run.initialRequestCompleted = true
-		// This is the first successful request. Take back the initial RUs that we
-		// used to pre-fill the bucket.
-		for _, counter := range gc.run.resourceTokens {
-			counter.limiter.RemoveTokens(gc.run.now, initialRequestUnits)
-		}
-		for _, counter := range gc.run.requestUnitTokens {
-			counter.limiter.RemoveTokens(gc.run.now, initialRequestUnits)
-		}
-	}
+	gc.run.initialRequestCompleted = true
 }
 
 func (gc *groupCostController) handleRawResourceTokenResponse(resp *rmpb.TokenBucketResponse) {
@@ -847,12 +842,9 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		cfg.NewTokens = granted
 		cfg.NewRate = float64(bucket.GetSettings().FillRate)
 		counter.lastDeadline = time.Time{}
-		cfg.NotifyThreshold = granted * notifyFraction
+		cfg.NotifyThreshold = math.Min((granted+counter.limiter.AvailableTokens(gc.run.now)), counter.avgRUPerSec*float64(defaultTargetPeriod)) * notifyFraction
 		// In the non-trickle case, clients can be allowed to accumulate more tokens.
 		if cfg.NewBurst >= 0 {
-			if cfg.NotifyThreshold < float64(cfg.NewBurst) {
-				cfg.NotifyThreshold = float64(cfg.NewBurst)
-			}
 			cfg.NewBurst = 0
 		}
 	} else {
@@ -966,7 +958,7 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 	if gc.run.initialRequestCompleted {
 		value -= counter.limiter.AvailableTokens(gc.run.now)
 	} else {
-		value += initialRequestUnits - counter.limiter.AvailableTokens(gc.run.now)
+		value += counter.initialToken - counter.limiter.AvailableTokens(gc.run.now)
 	}
 	if value < 0 {
 		value = 0
