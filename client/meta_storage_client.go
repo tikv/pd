@@ -39,7 +39,7 @@ type MetaStorageClient interface {
 
 // metaStorageClient gets the meta storage client from current PD leader.
 func (c *client) metaStorageClient() meta_storagepb.MetaStorageClient {
-	if client := c.svcDiscovery.GetServingEndpointClientConn(); client != nil {
+	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
 		return meta_storagepb.NewMetaStorageClient(client)
 	}
 	return nil
@@ -214,7 +214,7 @@ func (c *client) respForMetaStorageErr(observer prometheus.Observer, start time.
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.svcDiscovery.ScheduleCheckMemberChanged()
+			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))

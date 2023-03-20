@@ -4,7 +4,8 @@ go 1.20
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230228041042-1e9aca94bab6
+	github.com/pingcap/kvproto v0.0.0-20230317010544-b47a4830141f
+	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.8.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
@@ -101,7 +102,6 @@ require (
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d // indirect
 	github.com/pingcap/tidb-dashboard v0.0.0-20230209052558-a58fc2a7e924 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_golang v1.11.1 // indirect

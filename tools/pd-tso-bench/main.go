@@ -37,7 +37,6 @@ import (
 
 var (
 	pdAddrs                = flag.String("pd", "127.0.0.1:2379", "pd address")
-	microservice           = flag.Bool("m", false, "talks to the tso microservice")
 	clientNumber           = flag.Int("client", 1, "the number of pd clients involved in each benchmark")
 	concurrency            = flag.Int("c", 1000, "concurrency")
 	count                  = flag.Int("count", 1, "the count number that the test will run")
@@ -96,19 +95,11 @@ func bench(mainCtx context.Context) {
 			err   error
 		)
 
-		if *microservice {
-			pdCli, err = pd.NewTSOClientWithContext(mainCtx, 0, []string{*pdAddrs}, pd.SecurityOption{
-				CAPath:   *caPath,
-				CertPath: *certPath,
-				KeyPath:  *keyPath,
-			})
-		} else {
-			pdCli, err = pd.NewClientWithContext(mainCtx, []string{*pdAddrs}, pd.SecurityOption{
-				CAPath:   *caPath,
-				CertPath: *certPath,
-				KeyPath:  *keyPath,
-			})
-		}
+		pdCli, err = pd.NewClientWithContext(mainCtx, []string{*pdAddrs}, pd.SecurityOption{
+			CAPath:   *caPath,
+			CertPath: *certPath,
+			KeyPath:  *keyPath,
+		})
 
 		pdCli.UpdateOption(pd.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
 		pdCli.UpdateOption(pd.EnableTSOFollowerProxy, *enableTSOFollowerProxy)
