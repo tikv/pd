@@ -99,6 +99,9 @@ func (rg *ResourceGroup) CheckAndInit() error {
 	if len(rg.Name) == 0 || len(rg.Name) > 32 {
 		return errors.New("invalid resource group name, the length should be in [1,32]")
 	}
+	if rg.Priority > 16 {
+		return errors.New("invalid resource group priority, the value should be in [0,16]")
+	}
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
 		if rg.RUSettings == nil {
@@ -129,6 +132,9 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 	if metaGroup.GetMode() != rg.Mode {
 		return errors.New("only support reconfigure in same mode, maybe you should delete and create a new one")
 	}
+	if metaGroup.GetPriority() > 16 {
+		return errors.New("invalid resource group priority, the value should be in [0,16]")
+	}	
 	rg.Priority = metaGroup.Priority
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
