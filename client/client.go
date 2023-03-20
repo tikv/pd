@@ -240,10 +240,12 @@ func WithMaxErrorRetry(count int) ClientOption {
 var _ Client = (*client)(nil)
 
 type client struct {
-	keyspaceID uint32
+	keyspaceID  uint32
+	serviceMode int32
 	// svcDiscovery is for pd service discovery
 	svcDiscovery    ServiceDiscovery
-	tsoClient       *tsoClient
+	tsoPDClient     *tsoClient
+	tsoMcsClient    *tsoClient
 	tokenDispatcher *tokenDispatcher
 
 	// For internal usage.
@@ -272,8 +274,14 @@ func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption)
 	return NewClientWithContext(context.Background(), svrAddrs, security, opts...)
 }
 
-// NewClientWithContext creates a PD client with context.
+// NewClientWithContext creates a PD client with context. This API uses the default keyspace id 0.
 func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+	// pass 0 as the default keyspace id
+	return NewClientWithKeyspace(ctx, 0, svrAddrs, security, opts...)
+}
+
+// NewClientWithKeyspace creates a client with context and the specified keyspace id.
+func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
 	log.Info("[pd] create pd client with endpoints", zap.Strings("pd-address", svrAddrs))
 	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, 0, &security)
 	// Inject the client options.
@@ -281,43 +289,28 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 		opt(c)
 	}
 
-	c.svcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	c.tsoClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID, c.svcDiscovery, c.svcDiscovery.(tsoAllocatorEventSource), &pdTSOStreamBuilderFactory{})
+	atomic.StoreInt32(&c.serviceMode, int32(pdpb.ServiceMode_UNKNOWN_SVC_MODE))
+	c.svcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, addrsToUrls(svrAddrs), tlsCfg, c.option)
+	c.tsoPDClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID,
+		c.svcDiscovery, c.svcDiscovery.(tsoAllocatorEventSource), &pdTSOStreamBuilderFactory{})
 	if err := c.setup(); err != nil {
 		c.cancel()
 		return nil, err
 	}
-	if err := c.tsoClient.setup(); err != nil {
-		c.cancel()
-		return nil, err
-	}
-	return c, nil
-}
-
-// NewTSOClientWithContext creates a TSO client with context.
-// TODO:
-// Merge NewClientWithContext with this API after we let client detect service mode provided on the server side.
-// Before that, internal tools call this function to use mcs service.
-func NewTSOClientWithContext(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[tso] create tso client with endpoints", zap.Strings("pd(api)-address", svrAddrs))
-	c, clientCtx, clientCancel, tlsCfg := createClient(ctx, keyspaceID, &security)
-	// Inject the client options.
-	for _, opt := range opts {
-		opt(c)
-	}
-
-	c.svcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	if err := c.setup(); err != nil {
+	if err := c.tsoPDClient.setup(); err != nil {
 		c.cancel()
 		return nil, err
 	}
 
-	tsoSvcDiscovery := newTSOServiceDiscovery(clientCtx, clientCancel, &c.wg, MetaStorageClient(c), c.GetClusterID(c.ctx), keyspaceID, addrsToUrls(svrAddrs), tlsCfg, c.option)
-	c.tsoClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID, tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
-	if err := c.tsoClient.setup(); err != nil {
+	tsoSvcDiscovery := newTSOServiceDiscovery(clientCtx, clientCancel, &c.wg, MetaStorageClient(c),
+		c.GetClusterID(c.ctx), keyspaceID, addrsToUrls(svrAddrs), tlsCfg, c.option)
+	c.tsoMcsClient = newTSOClient(clientCtx, clientCancel, &c.wg, c.option, c.keyspaceID,
+		tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
+	if err := c.tsoMcsClient.setup(); err != nil {
 		c.cancel()
 		return nil, err
 	}
+
 	return c, nil
 }
 
@@ -366,7 +359,8 @@ func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.tsoClient.Close()
+	c.tsoPDClient.Close()
+	c.tsoMcsClient.Close()
 	c.svcDiscovery.Close()
 
 	if c.tokenDispatcher != nil {
@@ -374,6 +368,19 @@ func (c *client) Close() {
 		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
 		c.tokenDispatcher.dispatcherCancel()
 	}
+}
+
+func (c *client) setServiceMode(mode pdpb.ServiceMode) {
+	newMode := int32(mode)
+	oldMode := atomic.SwapInt32(&c.serviceMode, newMode)
+	if oldMode != newMode {
+		log.Info("service mode changed", zap.String("old-mode", pdpb.ServiceMode_name[oldMode]),
+			zap.String("new-mode", pdpb.ServiceMode_name[newMode]))
+	}
+}
+
+func (c *client) getServiceMode() pdpb.ServiceMode {
+	return pdpb.ServiceMode(atomic.LoadInt32(&c.serviceMode))
 }
 
 func (c *client) scheduleUpdateTokenConnection() {
@@ -542,10 +549,17 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req.keyspaceID = c.keyspaceID
 	req.dcLocation = dcLocation
 
-	if err := c.tsoClient.dispatchRequest(dcLocation, req); err != nil {
+	var tsoClient *tsoClient
+	if c.getServiceMode() == pdpb.ServiceMode_API_SVC_MODE {
+		tsoClient = c.tsoMcsClient
+	} else {
+		tsoClient = c.tsoPDClient
+	}
+
+	if err := tsoClient.dispatchRequest(dcLocation, req); err != nil {
 		// Wait for a while and try again
 		time.Sleep(50 * time.Millisecond)
-		if err = c.tsoClient.dispatchRequest(dcLocation, req); err != nil {
+		if err = tsoClient.dispatchRequest(dcLocation, req); err != nil {
 			req.done <- err
 		}
 	}
@@ -1248,5 +1262,5 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 // For test only.
 func (c *client) GetTSOAllocators() *sync.Map {
-	return c.tsoClient.GetTSOAllocators()
+	return c.tsoPDClient.GetTSOAllocators()
 }

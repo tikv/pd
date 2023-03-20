@@ -34,7 +34,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -143,14 +142,14 @@ func (s *Server) primaryElectionLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Member().Name))
+	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign resource manager primary/leader meets error due to txn conflict, another resource manager server may campaign successfully",
-				zap.String("campaign-resource-manager-primary-name", s.participant.Member().Name))
+				zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 		} else {
 			log.Error("campaign resource manager primary/leader meets error due to etcd error",
-				zap.String("campaign-resource-manager-primary-name", s.participant.Member().Name),
+				zap.String("campaign-resource-manager-primary-name", s.participant.Name()),
 				errs.ZapError(err))
 		}
 		return
@@ -166,7 +165,7 @@ func (s *Server) campaignLeader() {
 
 	// maintain the leadership, after this, Resource Manager could be ready to provide service.
 	s.participant.KeepLeader(ctx)
-	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Member().Name))
+	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
@@ -174,7 +173,7 @@ func (s *Server) campaignLeader() {
 	}
 
 	s.participant.EnableLeader()
-	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Member().Name))
+	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Name()))
 
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -247,7 +246,7 @@ func (s *Server) IsServing() bool {
 
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
-	return atomic.LoadInt64(&s.isServing) == 0
+	return s != nil && atomic.LoadInt64(&s.isServing) == 0
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
@@ -347,9 +346,9 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 	}
 }
 
-// GetPrimary returns the primary member.
-func (s *Server) GetPrimary() bs.MemberProvider {
-	return s.participant.GetLeader()
+// GetLeaderListenUrls gets service endpoints from the leader in election group.
+func (s *Server) GetLeaderListenUrls() []string {
+	return s.participant.GetLeaderListenUrls()
 }
 
 func (s *Server) startServer() (err error) {
@@ -364,12 +363,17 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.ListenAddr
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
+<<<<<<< HEAD
 	resourceManagerPrimaryPrefix := fmt.Sprintf("/ms/%d/resource_manager", s.clusterID)
 	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
 	s.participant.InitInfo(uniqueName, path.Join(resourceManagerPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
 	s.participant.SetMemberDeployPath(s.participant.ID())
 	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
 	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
+=======
+	s.participant = member.NewParticipant(s.etcdClient)
+	s.participant.InitInfo(uniqueName, uniqueID, path.Join(resourceManagerPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
+>>>>>>> 1c1fc071 (Support service mode switching for tso service; use tsopb.Participant as the value type of tso primary)
 
 	s.service = &Service{
 		ctx:     s.ctx,

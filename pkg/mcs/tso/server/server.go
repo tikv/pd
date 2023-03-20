@@ -65,6 +65,10 @@ import (
 const (
 	// pdRootPath is the old path for storing the tso related root path.
 	pdRootPath = "/pd"
+	// tsoPrimaryPrefix defines the key prefix for keyspace group primary election.
+	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary" in which
+	// <group-id> is 5 digits integer with leading zeros. 0 is the default cluster id.
+	tsoPrimaryPrefix = "/ms/0/tso"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -209,14 +213,14 @@ func (s *Server) primaryElectionLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info("start to campaign the primary/leader", zap.String("campaign-tso-primary-name", s.participant.Member().Name))
+	log.Info("start to campaign the primary/leader", zap.String("campaign-tso-primary-name", s.participant.Name()))
 	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign tso primary/leader meets error due to txn conflict, another tso server may campaign successfully",
-				zap.String("campaign-tso-primary-name", s.participant.Member().Name))
+				zap.String("campaign-tso-primary-name", s.participant.Name()))
 		} else {
 			log.Error("campaign tso primary/leader meets error due to etcd error",
-				zap.String("campaign-tso-primary-name", s.participant.Member().Name),
+				zap.String("campaign-tso-primary-name", s.participant.Name()),
 				errs.ZapError(err))
 		}
 		return
@@ -235,7 +239,7 @@ func (s *Server) campaignLeader() {
 
 	// maintain the the leadership, after this, TSO can be service.
 	s.participant.KeepLeader(ctx)
-	log.Info("campaign tso primary ok", zap.String("campaign-tso-primary-name", s.participant.Member().Name))
+	log.Info("campaign tso primary ok", zap.String("campaign-tso-primary-name", s.participant.Name()))
 
 	allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
@@ -259,7 +263,7 @@ func (s *Server) campaignLeader() {
 	s.participant.EnableLeader()
 	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary/leader is elected
 	// go s.tsoAllocatorManager.ClusterDCLocationChecker()
-	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", s.participant.Member().Name))
+	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", s.participant.Name()))
 
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -327,9 +331,9 @@ func (s *Server) IsServing() bool {
 	return s.participant.IsLeader() && atomic.LoadInt64(&s.isServing) == 1
 }
 
-// GetPrimary returns the primary provider of this tso server.
-func (s *Server) GetPrimary() bs.MemberProvider {
-	return s.participant.GetLeader()
+// GetLeaderListenUrls gets service endpoints from the leader in election group.
+func (s *Server) GetLeaderListenUrls() []string {
+	return s.participant.GetLeaderListenUrls()
 }
 
 // AddServiceReadyCallback implements basicserver. It adds callbacks when the server becomes the primary.
@@ -559,18 +563,17 @@ func (s *Server) startServer() (err error) {
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 	s.defaultGroupRootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 
-	// TODO: Figure out how we should generated the unique id and name passed to Participant.
-	// For now, set the name to be listen address and generate the unique id from the name with sha256.
-	uniqueName := s.cfg.ListenAddr
+	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
+	if err != nil {
+		return err
+	}
+
+	uniqueName := s.listenURL.Host // in the host:port format
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
-	tsoPrimaryPrefix := fmt.Sprintf("/ms/%d/tso", s.clusterID)
-	s.participant = member.NewParticipant(s.etcdClient, uniqueID)
-	s.participant.InitInfo(uniqueName, path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
-	s.participant.SetMemberDeployPath(s.participant.ID())
-	s.participant.SetMemberBinaryVersion(s.participant.ID(), versioninfo.PDReleaseVersion)
-	s.participant.SetMemberGitHash(s.participant.ID(), versioninfo.PDGitHash)
+	s.participant = member.NewParticipant(s.etcdClient)
+	s.participant.InitInfo(uniqueName, uniqueID, path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0)), "primary", "keyspace group primary election", s.cfg.ListenAddr)
 
 	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
@@ -582,10 +585,6 @@ func (s *Server) startServer() (err error) {
 	s.service = &Service{Server: s}
 
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
-	if err != nil {
-		return err
-	}
-	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
 	if err != nil {
 		return err
 	}

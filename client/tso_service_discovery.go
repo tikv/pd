@@ -24,7 +24,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
@@ -52,11 +52,6 @@ type tsoServiceDiscovery struct {
 	// addr -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
-	// primarySwitchedCbs will be called after the primary swichted
-	primarySwitchedCbs []func()
-	// membersChangedCbs will be called after there is any membership
-	// change in the primary and followers
-	membersChangedCbs []func()
 	// localAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
 	// The input is a map {DC Localtion -> Leader Addr}
 	localAllocPrimariesUpdatedCb tsoLocalServAddrsUpdatedFunc
@@ -213,13 +208,11 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 // AddServingAddrSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
 func (c *tsoServiceDiscovery) AddServingAddrSwitchedCallback(callbacks ...func()) {
-	c.primarySwitchedCbs = append(c.primarySwitchedCbs, callbacks...)
 }
 
 // AddServiceAddrsSwitchedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.
 func (c *tsoServiceDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
-	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
 // SetTSOLocalServAddrsUpdatedCallback adds a callback which will be called when the local tso
@@ -272,9 +265,6 @@ func (c *tsoServiceDiscovery) switchPrimary(addrs []string) error {
 			return err
 		}
 	}
-	for _, cb := range c.primarySwitchedCbs {
-		cb()
-	}
 	log.Info("[tso] switch primary", zap.String("new-primary", addr), zap.String("old-primary", oldPrimary))
 	return nil
 }
@@ -294,9 +284,14 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	}
 
 	value := resp.Kvs[0].Value
-	member := &pdpb.Member{}
-	if err := proto.Unmarshal(value, member); err != nil {
+	primary := &tsopb.Participant{}
+	if err := proto.Unmarshal(value, primary); err != nil {
 		return errs.ErrClientProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
-	return c.switchPrimary(addrsToUrls([]string{member.Name}))
+	listenUrls := primary.GetListenUrls()
+	if len(listenUrls) == 0 {
+		log.Error("[tso] didn't find the keyspace serving endpoint")
+		return errs.ErrClientGetLeader
+	}
+	return c.switchPrimary(listenUrls)
 }

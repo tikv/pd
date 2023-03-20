@@ -86,7 +86,7 @@ func (s *Service) GetManager() *Manager {
 }
 
 func (s *Service) checkServing() error {
-	if !s.manager.srv.IsServing() {
+	if s == nil || s.manager == nil || !s.manager.srv.IsServing() {
 		return errNotLeader
 	}
 	return nil

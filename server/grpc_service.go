@@ -102,6 +102,34 @@ func (s *GrpcServer) wrapErrorToHeader(errorType pdpb.ErrorType, message string)
 	})
 }
 
+// GetClusterInfo implements gRPC PDServer.
+func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoRequest) (*pdpb.GetClusterInfoResponse, error) {
+	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
+	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
+	if s.IsClosed() {
+		return &pdpb.GetClusterInfoResponse{
+			Header: &pdpb.ResponseHeader{
+				Error: &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
+				},
+			},
+		}, nil
+	}
+
+	svcModes := make([]pdpb.ServiceMode, 0)
+	if s.IsAPIServiceMode() {
+		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
+	} else {
+		svcModes = append(svcModes, pdpb.ServiceMode_PD_SVC_MODE)
+	}
+
+	return &pdpb.GetClusterInfoResponse{
+		Header:       s.header(),
+		ServiceModes: svcModes,
+	}, nil
+}
+
 // GetMembers implements gRPC PDServer.
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID

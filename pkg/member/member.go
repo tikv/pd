@@ -74,6 +74,16 @@ func (m *EmbeddedEtcdMember) ID() uint64 {
 	return m.id
 }
 
+// Name returns the unique etcd Name for this server in etcd cluster.
+func (m *EmbeddedEtcdMember) Name() string {
+	return m.member.Name
+}
+
+// GetMember returns the member.
+func (m *EmbeddedEtcdMember) GetMember() interface{} {
+	return m.member
+}
+
 // MemberValue returns the member value.
 func (m *EmbeddedEtcdMember) MemberValue() string {
 	return m.memberValue
@@ -97,6 +107,16 @@ func (m *EmbeddedEtcdMember) Client() *clientv3.Client {
 // IsLeader returns whether the server is PD leader or not by checking its leadership's lease and leader info.
 func (m *EmbeddedEtcdMember) IsLeader() bool {
 	return m.leadership.Check() && m.GetLeader().GetMemberId() == m.member.GetMemberId()
+}
+
+// IsLeaderElected returns true if the leader exists; otherwise false
+func (m *EmbeddedEtcdMember) IsLeaderElected() bool {
+	return m.GetLeader() != nil
+}
+
+// GetLeaderListenUrls returns current leader's listen urls
+func (m *EmbeddedEtcdMember) GetLeaderListenUrls() []string {
+	return m.GetLeader().GetClientUrls()
 }
 
 // GetLeaderID returns current PD leader's member ID.
@@ -161,6 +181,20 @@ func (m *EmbeddedEtcdMember) PrecheckLeader() error {
 	return nil
 }
 
+// getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
+func (m *EmbeddedEtcdMember) getPersistentLeader() (*pdpb.Member, int64, error) {
+	leader := &pdpb.Member{}
+	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !ok {
+		return nil, 0, nil
+	}
+
+	return leader, rev, nil
+}
+
 // CheckLeader checks returns true if it is needed to check later.
 func (m *EmbeddedEtcdMember) CheckLeader() (*pdpb.Member, int64, bool) {
 	if err := m.PrecheckLeader(); err != nil {
@@ -169,7 +203,7 @@ func (m *EmbeddedEtcdMember) CheckLeader() (*pdpb.Member, int64, bool) {
 		return nil, 0, true
 	}
 
-	leader, rev, err := election.GetLeader(m.client, m.GetLeaderPath())
+	leader, rev, err := m.getPersistentLeader()
 	if err != nil {
 		log.Error("getting pd leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
