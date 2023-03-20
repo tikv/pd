@@ -36,7 +36,7 @@ type ResourceGroup struct {
 	RUSettings *RequestUnitSettings `json:"r_u_settings,omitempty"`
 	// raw resource settings
 	RawResourceSettings *RawResourceSettings `json:"raw_resource_settings,omitempty"`
-	Priority  uint32          `json:"priority"` 
+	Priority            uint32               `json:"priority"`
 }
 
 // RequestUnitSettings is the definition of the RU settings.
@@ -151,8 +151,8 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 // FromProtoResourceGroup converts a rmpb.ResourceGroup to a ResourceGroup.
 func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	rg := &ResourceGroup{
-		Name: group.Name,
-		Mode: group.Mode,
+		Name:     group.Name,
+		Mode:     group.Mode,
 		Priority: group.Priority,
 	}
 	switch group.GetMode() {
@@ -194,8 +194,8 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
 		group := &rmpb.ResourceGroup{
-			Name: rg.Name,
-			Mode: rmpb.GroupMode_RUMode,
+			Name:     rg.Name,
+			Mode:     rmpb.GroupMode_RUMode,
 			Priority: rg.Priority,
 			RUSettings: &rmpb.GroupRequestUnitSettings{
 				RU: rg.RUSettings.RU.GetTokenBucket(),
@@ -204,8 +204,8 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 		return group
 	case rmpb.GroupMode_RawMode: // Raw mode
 		group := &rmpb.ResourceGroup{
-			Name: rg.Name,
-			Mode: rmpb.GroupMode_RawMode,
+			Name:     rg.Name,
+			Mode:     rmpb.GroupMode_RawMode,
 			Priority: rg.Priority,
 			RawResourceSettings: &rmpb.GroupRawResourceSettings{
 				Cpu:     rg.RawResourceSettings.CPU.GetTokenBucket(),
