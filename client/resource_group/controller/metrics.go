@@ -39,7 +39,7 @@ var (
 			Subsystem: requestSubsystem,
 			Name:      "success",
 			Buckets:   prometheus.ExponentialBuckets(0.001, 4, 8), // 0.001 ~ 40.96
-			Help:      "Bucketed histogram of wait duration of successfult request.",
+			Help:      "Bucketed histogram of wait duration of successful request.",
 		}, []string{resourceGroupNameLabel})
 
 	failedRequestCounter = prometheus.NewCounterVec(
@@ -70,7 +70,7 @@ var (
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	failedTokenRequestDuration     = tokenRequestDuration.WithLabelValues("fail")
-	successfultokenRequestDuration = tokenRequestDuration.WithLabelValues("success")
+	successfulTokenRequestDuration = tokenRequestDuration.WithLabelValues("success")
 )
 
 func init() {

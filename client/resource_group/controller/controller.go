@@ -193,7 +193,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		for {
 			select {
 			case <-c.loopCtx.Done():
-				c.resetMetrics()
+				resourceGroupStatusGauge.Reset()
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode = true
@@ -239,10 +239,6 @@ func (c *ResourceGroupsController) Stop() error {
 	}
 	c.loopCancel()
 	return nil
-}
-
-func (c *ResourceGroupsController) resetMetrics() {
-	resourceGroupStatusGauge.Reset()
 }
 
 // tryGetResourceGroup will try to get the resource group controller from local cache first,
@@ -401,7 +397,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			resp = nil
 			failedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
-			successfultokenRequestDuration.Observe(latency.Seconds())
+			successfulTokenRequestDuration.Observe(latency.Seconds())
 		}
 		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", latency))
 		c.tokenResponseChan <- resp
