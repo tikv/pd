@@ -114,14 +114,14 @@ func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string, now time.Time
 		}
 	}
 	// failpoint for immediate removal
-	failpoint.Inject("removeExpiredKeys", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("removeExpiredKeys")); _err_ == nil {
 		for _, key := range expiredKeys {
 			if err = se.Remove(key); err != nil {
 				log.Error("remove expired key meet error", zap.String("key", key), errs.ZapError(err))
 			}
 		}
 		expiredKeys = []string{}
-	})
+	}
 	// remove expired keys asynchronously
 	go func() {
 		for _, key := range expiredKeys {

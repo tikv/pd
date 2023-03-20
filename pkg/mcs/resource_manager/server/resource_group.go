@@ -34,6 +34,7 @@ type ResourceGroup struct {
 	Mode rmpb.GroupMode `json:"mode"`
 	// RU settings
 	RUSettings *RequestUnitSettings `json:"r_u_settings,omitempty"`
+	Priority            uint32               `json:"priority"`
 }
 
 // RequestUnitSettings is the definition of the RU settings.
@@ -84,6 +85,10 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 	if metaGroup.GetMode() != rg.Mode {
 		return errors.New("only support reconfigure in same mode, maybe you should delete and create a new one")
 	}
+	if metaGroup.GetPriority() > 16 {
+		return errors.New("invalid resource group priority, the value should be in [0,16]")
+	}
+	rg.Priority = metaGroup.Priority
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
 		settings := metaGroup.GetRUSettings()
@@ -102,8 +107,9 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 // FromProtoResourceGroup converts a rmpb.ResourceGroup to a ResourceGroup.
 func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	rg := &ResourceGroup{
-		Name: group.Name,
-		Mode: group.Mode,
+		Name:     group.Name,
+		Mode:     group.Mode,
+		Priority: group.Priority,
 	}
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
@@ -142,8 +148,9 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
 		group := &rmpb.ResourceGroup{
-			Name: rg.Name,
-			Mode: rmpb.GroupMode_RUMode,
+			Name:     rg.Name,
+			Mode:     rmpb.GroupMode_RUMode,
+			Priority: rg.Priority,
 			RUSettings: &rmpb.GroupRequestUnitSettings{
 				RU: rg.RUSettings.RU.GetTokenBucket(),
 			},
@@ -191,9 +198,6 @@ func (rg *ResourceGroup) GetGroupStates() *GroupStates {
 
 // SetStatesIntoResourceGroup updates the state of resource group.
 func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
-	rg.Lock()
-	defer rg.Unlock()
-
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
 		if state := states.RU; state != nil {

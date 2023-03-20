@@ -21,12 +21,6 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
-// MemberProvider defines the common basic behaviors of a member
-type MemberProvider interface {
-	GetName() string
-	GetClientUrls() []string
-}
-
 // Server defines the common basic behaviors of a server
 type Server interface {
 	// Name returns the unique Name for this server in the cluster.
@@ -39,8 +33,8 @@ type Server interface {
 	Run() error
 	// Close closes the server.
 	Close()
-	// GetPrimary returns the primary of the server.
-	GetPrimary() MemberProvider
+	// GetLeaderListenUrls gets service endpoints from the leader in election group.
+	GetLeaderListenUrls() []string
 	// GetClient returns builtin etcd client.
 	GetClient() *clientv3.Client
 	// GetHTTPClient returns builtin http client.

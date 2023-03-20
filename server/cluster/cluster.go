@@ -485,9 +485,9 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
-	failpoint.Inject("highFrequencyClusterJobs", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("highFrequencyClusterJobs")); _err_ == nil {
 		ticker = time.NewTicker(time.Microsecond)
-	})
+	}
 
 	defer ticker.Stop()
 
@@ -509,9 +509,9 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
-	failpoint.Inject("highFrequencyClusterJobs", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("highFrequencyClusterJobs")); _err_ == nil {
 		ticker = time.NewTicker(2 * time.Second)
-	})
+	}
 	defer ticker.Stop()
 
 	for {
@@ -933,9 +933,9 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 			versionNotMatchCounter.Inc()
 			return nil
 		}
-		failpoint.Inject("concurrentBucketHeartbeat", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("concurrentBucketHeartbeat")); _err_ == nil {
 			time.Sleep(500 * time.Millisecond)
-		})
+		}
 		if ok := region.UpdateBuckets(buckets, old); ok {
 			return nil
 		}
@@ -983,15 +983,15 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		return nil
 	}
 
-	failpoint.Inject("concurrentRegionHeartbeat", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("concurrentRegionHeartbeat")); _err_ == nil {
 		time.Sleep(500 * time.Millisecond)
-	})
+	}
 
 	var overlaps []*core.RegionInfo
 	if saveCache {
-		failpoint.Inject("decEpoch", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("decEpoch")); _err_ == nil {
 			region = region.Clone(core.SetRegionConfVer(2), core.SetRegionVersion(2))
-		})
+		}
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
@@ -2159,9 +2159,9 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	failpoint.Inject("versionChangeConcurrency", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("versionChangeConcurrency")); _err_ == nil {
 		time.Sleep(500 * time.Millisecond)
-	})
+	}
 	if minVersion == nil || clusterVersion.Equal(*minVersion) {
 		return
 	}

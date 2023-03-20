@@ -131,8 +131,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		// Only slots that require a positive number will be considered alive,
 		// but still need to allocate the elapsed tokens as well.
 		if requiredToken != 0 {
-			slot = &TokenSlot{tokenCapacity: defaultInitialTokens, lastTokenCapacity: defaultInitialTokens}
-			gts.Tokens += defaultInitialTokens
+			slot = &TokenSlot{}
 			gts.tokenSlots[clientUniqueID] = slot
 			gts.cleanupAssignTokenSum(false)
 		}
@@ -271,7 +270,7 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 		elapseTokens = 0
 		gtb.cleanupAssignTokenSum(true)
 	}
-	if burst := float64(burstLimit); burst != 0 && gtb.Tokens >= burst {
+	if burst := float64(burstLimit); burst > 0 && gtb.Tokens > burst {
 		elapseTokens -= gtb.Tokens - burst
 		gtb.Tokens = burst
 	}
@@ -396,8 +395,8 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 	res.Tokens = grantedTokens
 
 	var trickleDuration time.Duration
-	// can't directly treat targetPeriodTime as trickleTime when there is a token remaining.
-	// If treat, client consumption will be slowed down (actually cloud be increased).
+	// Can't directly treat targetPeriodTime as trickleTime when there is a token remaining.
+	// If treated, client consumption will be slowed down (actually could be increased).
 	if hasRemaining {
 		trickleDuration = time.Duration(math.Min(trickleTime, targetPeriodTime.Seconds()) * float64(time.Second))
 	} else {

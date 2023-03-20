@@ -77,9 +77,9 @@ type request interface {
 type forwardFn func(ctx context.Context, client *grpc.ClientConn) (interface{}, error)
 
 func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, fn forwardFn) (rsp interface{}, err error) {
-	failpoint.Inject("customTimeout", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("customTimeout")); _err_ == nil {
 		time.Sleep(5 * time.Second)
-	})
+	}
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
@@ -100,6 +100,34 @@ func (s *GrpcServer) wrapErrorToHeader(errorType pdpb.ErrorType, message string)
 		Type:    errorType,
 		Message: message,
 	})
+}
+
+// GetClusterInfo implements gRPC PDServer.
+func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoRequest) (*pdpb.GetClusterInfoResponse, error) {
+	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
+	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
+	if s.IsClosed() {
+		return &pdpb.GetClusterInfoResponse{
+			Header: &pdpb.ResponseHeader{
+				Error: &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
+				},
+			},
+		}, nil
+	}
+
+	svcModes := make([]pdpb.ServiceMode, 0)
+	if s.IsAPIServiceMode() {
+		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
+	} else {
+		svcModes = append(svcModes, pdpb.ServiceMode_PD_SVC_MODE)
+	}
+
+	return &pdpb.GetClusterInfoResponse{
+		Header:       s.header(),
+		ServiceModes: svcModes,
+	}, nil
 }
 
 // GetMembers implements gRPC PDServer.
@@ -376,7 +404,7 @@ func (s *GrpcServer) processTSORequests(forwardStream pdpb.PD_TsoClient, forward
 		req := &tsopb.TsoRequest{
 			Header: &tsopb.RequestHeader{
 				ClusterId:       requests[0].request.GetHeader().GetClusterId(),
-				KeyspaceId:      utils.DefaultKeySpaceID,
+				KeyspaceId:      utils.DefaultKeyspaceID,
 				KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
 			},
 			Count: count,
@@ -830,10 +858,10 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	}()
 	for {
 		request, err := server.Recv()
-		failpoint.Inject("grpcClientClosed", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("grpcClientClosed")); _err_ == nil {
 			err = status.Error(codes.Canceled, "grpc client closed")
 			request = nil
-		})
+		}
 		if err == io.EOF {
 			return nil
 		}
@@ -841,9 +869,9 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			return errors.WithStack(err)
 		}
 		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
-		failpoint.Inject("grpcClientClosed", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("grpcClientClosed")); _err_ == nil {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
-		})
+		}
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -1672,13 +1700,13 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 		}
 
-		failpoint.Inject("mockLocalAllocatorLeaderChange", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("mockLocalAllocatorLeaderChange")); _err_ == nil {
 			if !mockLocalAllocatorLeaderChangeFlag {
 				maxLocalTS = nil
 				request.MaxTs = nil
 				mockLocalAllocatorLeaderChangeFlag = true
 			}
-		})
+		}
 
 		if maxLocalTS == nil {
 			return &pdpb.SyncMaxTSResponse{
@@ -1870,9 +1898,9 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 }
 
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
-	failpoint.Inject("useForwardRequest", func() {
-		failpoint.Return(false)
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("useForwardRequest")); _err_ == nil {
+		return false
+	}
 	if forwardedHost == "" {
 		return true
 	}
@@ -1975,7 +2003,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	forwardStream.Send(&tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
-			KeyspaceId:      utils.DefaultKeySpaceID,
+			KeyspaceId:      utils.DefaultKeyspaceID,
 			KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
 		},
 		Count: 1,

@@ -142,6 +142,9 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
 		return errors.New("invalid resource group name, the length should be in [1,32]")
 	}
+	if grouppb.GetPriority() > 16 {
+		return errors.New("invalid resource group priority, the value should be in [0,16]")
+	}
 	group := FromProtoResourceGroup(grouppb)
 	m.Lock()
 	defer m.Unlock()
@@ -221,10 +224,10 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 
 func (m *Manager) persistLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
-	failpoint.Inject("fastPersist", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fastPersist")); _err_ == nil {
 		ticker.Stop()
 		ticker = time.NewTicker(100 * time.Millisecond)
-	})
+	}
 	defer ticker.Stop()
 	for {
 		select {

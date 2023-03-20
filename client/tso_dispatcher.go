@@ -45,8 +45,6 @@ type lastTSO struct {
 }
 
 const (
-	dialTimeout            = 3 * time.Second
-	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
 	retryInterval          = 500 * time.Millisecond
@@ -161,6 +159,7 @@ func (c *tsoClient) tsCancelLoop() {
 		case <-ticker.C:
 			continue
 		case <-tsCancelLoopCtx.Done():
+			log.Info("exit tso requests cancel loop")
 			return
 		}
 	}
@@ -238,9 +237,9 @@ func (c *tsoClient) checkAllocator(
 		}
 		healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
 		resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
-		failpoint.Inject("unreachableNetwork", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork")); _err_ == nil {
 			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
-		})
+		}
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 			// create a stream of the original allocator
@@ -555,10 +554,10 @@ func (c *tsoClient) tryConnectToTSO(
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
-		failpoint.Inject("unreachableNetwork", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork")); _err_ == nil {
 			stream = nil
 			err = status.New(codes.Unavailable, "unavailable").Err()
-		})
+		}
 		if stream != nil && err == nil {
 			updateAndClear(url, &tsoConnectionContext{url, stream, cctx, cancel})
 			return nil

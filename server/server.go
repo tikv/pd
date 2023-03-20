@@ -39,10 +39,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -259,9 +259,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
-	failpoint.Inject("useGlobalRegistry", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("useGlobalRegistry")); _err_ == nil {
 		s.registry = registry.ServerServiceRegistry
-	})
+	}
 	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the micro services REST path.
@@ -333,9 +333,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 			}
 		}
 	}
-	failpoint.Inject("memberNil", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("memberNil")); _err_ == nil {
 		time.Sleep(1500 * time.Millisecond)
-	})
+	}
 	s.member = member.NewMember(etcd, s.client, etcdServerID)
 	return nil
 }
@@ -696,7 +696,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
-	failpoint.Inject("raftclusterIsBusy", func() {})
+	failpoint.Eval(_curpkg_("raftclusterIsBusy"))
 	s.cluster.Stop()
 }
 
@@ -748,10 +748,9 @@ func (s *Server) GetLeader() *pdpb.Member {
 	return s.member.GetLeader()
 }
 
-// GetPrimary returns the primary member provider of the api server.
-// api service's leader is equal to the primary member.
-func (s *Server) GetPrimary() bs.MemberProvider {
-	return s.member.GetLeader()
+// GetLeaderListenUrls gets service endpoints from the leader in election group.
+func (s *Server) GetLeaderListenUrls() []string {
+	return s.member.GetLeaderListenUrls()
 }
 
 // GetMember returns the member of server.
@@ -1472,11 +1471,11 @@ func (s *Server) campaignLeader() {
 		}
 		defer func() {
 			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-			failpoint.Inject("updateAfterResetTSO", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("updateAfterResetTSO")); _err_ == nil {
 				if err = allocator.UpdateTSO(); err != nil {
 					panic(err)
 				}
-			})
+			}
 		}()
 	}
 	if err := s.reloadConfigFromKV(); err != nil {
@@ -1711,15 +1710,21 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 	defer s.serverLoopWg.Done()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
+
 	serviceKey := fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
-	// TODO: need to refactor after we redefine the member
-	leader := &pdpb.Member{}
-	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, leader)
+	log.Info("start to watch", zap.String("service-key", serviceKey))
+
+	primary := &tsopb.Participant{}
+	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
 	if err != nil {
 		log.Error("get service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
 	}
-	if err == nil && ok {
-		s.servicePrimaryMap.Store(serviceName, leader.GetName())
+	listenUrls := primary.GetListenUrls()
+	if ok && len(listenUrls) > 0 {
+		// listenUrls[0] is the primary service endpoint of the keyspace group
+		s.servicePrimaryMap.Store(serviceName, listenUrls[0])
+	} else {
+		log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))
 	}
 
 	watchChan := s.client.Watch(ctx, serviceKey, clientv3.WithPrefix())
@@ -1732,10 +1737,17 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 			for _, event := range res.Events {
 				switch event.Type {
 				case clientv3.EventTypePut:
-					if err := proto.Unmarshal(event.Kv.Value, leader); err != nil {
+					primary.ListenUrls = nil // reset the field
+					if err := proto.Unmarshal(event.Kv.Value, primary); err != nil {
 						log.Error("watch service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
 					} else {
-						s.servicePrimaryMap.Store(serviceName, leader.GetName())
+						listenUrls = primary.GetListenUrls()
+						if len(listenUrls) > 0 {
+							// listenUrls[0] is the primary service endpoint of the keyspace group
+							s.servicePrimaryMap.Store(serviceName, listenUrls[0])
+						} else {
+							log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))
+						}
 					}
 				case clientv3.EventTypeDelete:
 					s.servicePrimaryMap.Delete(serviceName)
