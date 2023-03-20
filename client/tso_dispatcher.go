@@ -237,9 +237,9 @@ func (c *tsoClient) checkAllocator(
 		}
 		healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
 		resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
-		if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork")); _err_ == nil {
+		failpoint.Inject("unreachableNetwork", func() {
 			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
-		}
+		})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 			// create a stream of the original allocator
@@ -554,10 +554,10 @@ func (c *tsoClient) tryConnectToTSO(
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
-		if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork")); _err_ == nil {
+		failpoint.Inject("unreachableNetwork", func() {
 			stream = nil
 			err = status.New(codes.Unavailable, "unavailable").Err()
-		}
+		})
 		if stream != nil && err == nil {
 			updateAndClear(url, &tsoConnectionContext{url, stream, cctx, cancel})
 			return nil

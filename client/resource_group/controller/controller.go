@@ -186,10 +186,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		stateUpdateTicker := time.NewTicker(defaultGroupStateUpdateInterval)
 		defer stateUpdateTicker.Stop()
 
-		if _, _err_ := failpoint.Eval(_curpkg_("fastCleanup")); _err_ == nil {
+		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Stop()
 			cleanupTicker = time.NewTicker(100 * time.Millisecond)
-		}
+		})
 
 		for {
 			select {
@@ -801,9 +801,9 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		fillRate := getRUTokenBucketSetting(gc.ResourceGroup, typ)
 		cfg.NewBurst = int64(fillRate.Settings.FillRate)
 		cfg.NewRate = float64(fillRate.Settings.FillRate)
-		if _, _err_ := failpoint.Eval(_curpkg_("degradedModeRU")); _err_ == nil {
+		failpoint.Inject("degradedModeRU", func() {
 			cfg.NewRate = 99999999
-		}
+		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("resource group", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
 	}

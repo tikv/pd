@@ -206,9 +206,9 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 		case <-ctx.Done():
 			return
 		}
-		if _, _err_ := failpoint.Eval(_curpkg_("skipUpdateMember")); _err_ == nil {
-			continue
-		}
+		failpoint.Inject("skipUpdateMember", func() {
+			failpoint.Continue()
+		})
 		if err := c.updateMember(); err != nil {
 			log.Error("[pd] failed to update member", errs.ZapError(err))
 		}
@@ -358,9 +358,9 @@ func (c *pdServiceDiscovery) initClusterID() error {
 			clusterID = clusterInfo.GetHeader().GetClusterId()
 			continue
 		}
-		if _, _err_ := failpoint.Eval(_curpkg_("skipClusterIDCheck")); _err_ == nil {
-			continue
-		}
+		failpoint.Inject("skipClusterIDCheck", func() {
+			failpoint.Continue()
+		})
 		// All URLs passed in should have the same cluster ID.
 		if clusterInfo.GetHeader().GetClusterId() != clusterID {
 			return errors.WithStack(errUnmatchedClusterID)
@@ -390,11 +390,11 @@ func (c *pdServiceDiscovery) updateServiceMode() {
 
 func (c *pdServiceDiscovery) updateMember() error {
 	for i, url := range c.GetURLs() {
-		if _, _err_ := failpoint.Eval(_curpkg_("skipFirstUpdateMember")); _err_ == nil {
+		failpoint.Inject("skipFirstUpdateMember", func() {
 			if i == 0 {
-				continue
+				failpoint.Continue()
 			}
-		}
+		})
 
 		members, err := c.getMembers(c.ctx, url, updateMemberTimeout)
 		// Check the cluster ID.

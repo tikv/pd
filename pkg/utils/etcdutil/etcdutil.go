@@ -221,14 +221,14 @@ func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client
 	autoSyncInterval := defaultAutoSyncInterval
 	dialKeepAliveTime := defaultDialKeepAliveTime
 	dialKeepAliveTimeout := defaultDialKeepAliveTimeout
-	if _, _err_ := failpoint.Eval(_curpkg_("autoSyncInterval")); _err_ == nil {
+	failpoint.Inject("autoSyncInterval", func() {
 		autoSyncInterval = 10 * time.Millisecond
-	}
-	if _, _err_ := failpoint.Eval(_curpkg_("closeKeepAliveCheck")); _err_ == nil {
+	})
+	failpoint.Inject("closeKeepAliveCheck", func() {
 		autoSyncInterval = 0
 		dialKeepAliveTime = 0
 		dialKeepAliveTimeout = 0
-	}
+	})
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:            endpoints,
 		DialTimeout:          defaultEtcdClientTimeout,

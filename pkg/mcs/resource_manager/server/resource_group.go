@@ -34,7 +34,7 @@ type ResourceGroup struct {
 	Mode rmpb.GroupMode `json:"mode"`
 	// RU settings
 	RUSettings *RequestUnitSettings `json:"r_u_settings,omitempty"`
-	Priority            uint32               `json:"priority"`
+	Priority   uint32               `json:"priority"`
 }
 
 // RequestUnitSettings is the definition of the RU settings.

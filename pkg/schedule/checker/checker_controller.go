@@ -96,14 +96,14 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
 		if skipRuleCheck {
 			// If the fit is fetched from cache, it seems that the region doesn't need check
-			if _, _err_ := failpoint.Eval(_curpkg_("assertShouldNotCache")); _err_ == nil {
+			failpoint.Inject("assertShouldNotCache", func() {
 				panic("cached shouldn't be used")
-			}
+			})
 			ruleCheckerGetCacheCounter.Inc()
 		} else {
-			if _, _err_ := failpoint.Eval(_curpkg_("assertShouldCache")); _err_ == nil {
+			failpoint.Inject("assertShouldCache", func() {
 				panic("cached should be used")
-			}
+			})
 			fit := c.priorityInspector.Inspect(region)
 			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
 				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
