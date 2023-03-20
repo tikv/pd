@@ -189,6 +189,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Stop()
 			cleanupTicker = time.NewTicker(100 * time.Millisecond)
+			// because of checking `gc.run.consumption` in cleanupTicker,
+			// so should also change the stateUpdateTicker.
+			stateUpdateTicker.Stop()
+			stateUpdateTicker = time.NewTicker(200 * time.Millisecond)
 		})
 
 		for {
@@ -488,7 +492,6 @@ type groupCostController struct {
 }
 
 type tokenCounter struct {
-	initialToken float64
 	// avgRUPerSec is an exponentially-weighted moving average of the RU
 	// consumption per second; used to estimate the RU requirements for the next
 	// request.
@@ -565,7 +568,7 @@ func (gc *groupCostController) initRunState() {
 	gc.run.lastRequestConsumption = &rmpb.Consumption{SqlLayerCpuTimeMs: getSQLProcessCPUTime(gc.mainCfg.isSingleGroupByKeyspace)}
 
 	isBurstable := true
-	cfgFunc := func(tb *rmpb.TokenBucket) (tokenBucketReconfigureArgs, float64) {
+	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
 		initialToken := float64(tb.Settings.FillRate)
 		cfg := tokenBucketReconfigureArgs{
 			NewTokens: initialToken,
@@ -579,7 +582,7 @@ func (gc *groupCostController) initRunState() {
 		if tb.Settings.BurstLimit >= 0 {
 			isBurstable = false
 		}
-		return cfg, initialToken
+		return cfg
 	}
 
 	switch gc.mode {
@@ -587,13 +590,12 @@ func (gc *groupCostController) initRunState() {
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitLimitTypeList {
 			tb := getRUTokenBucketSetting(gc.ResourceGroup, typ)
-			cfg, initToken := cfgFunc(tb)
+			cfg := cfgFunc(tb)
 			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
 			counter := &tokenCounter{
-				limiter:      limiter,
-				avgRUPerSec:  0,
-				avgLastTime:  now,
-				initialToken: initToken,
+				limiter:     limiter,
+				avgRUPerSec: 0,
+				avgLastTime: now,
 			}
 			gc.run.requestUnitTokens[typ] = counter
 		}
@@ -601,13 +603,12 @@ func (gc *groupCostController) initRunState() {
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceLimitTypeList {
 			tb := getRawResourceTokenBucketSetting(gc.ResourceGroup, typ)
-			cfg, initToken := cfgFunc(tb)
+			cfg := cfgFunc(tb)
 			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
 			counter := &tokenCounter{
-				limiter:      limiter,
-				avgRUPerSec:  0,
-				avgLastTime:  now,
-				initialToken: initToken,
+				limiter:     limiter,
+				avgRUPerSec: 0,
+				avgLastTime: now,
 			}
 			gc.run.resourceTokens[typ] = counter
 		}
@@ -730,10 +731,10 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 }
 
 func (gc *groupCostController) shouldReportConsumption() bool {
-	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
 	if !gc.run.initialRequestCompleted {
 		return true
 	}
+	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
 	if timeSinceLastRequest >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
@@ -954,12 +955,11 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 }
 
 func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
+	// `needTokensAmplification` is used to properly amplify a need. The reason is that in the current implementation,
+	// the token returned from the server determines the average consumption speed.
+	// Therefore, when the fillrate of resource group increases, `needTokensAmplification` can enable the client to obtain more tokens.
 	value := counter.avgRUPerSec * gc.run.targetPeriod.Seconds() * needTokensAmplification
-	if gc.run.initialRequestCompleted {
-		value -= counter.limiter.AvailableTokens(gc.run.now)
-	} else {
-		value += counter.initialToken - counter.limiter.AvailableTokens(gc.run.now)
-	}
+	value -= counter.limiter.AvailableTokens(gc.run.now)
 	if value < 0 {
 		value = 0
 	}
