@@ -51,24 +51,6 @@ var (
 			Help:      "",
 		}, []string{resourceGroupNameLabel})
 
-	readRequestUnitCost = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: ruSubsystem,
-			Name:      "read_request_unit",
-			Help:      "Bucketed histogram of the read request unit cost for all resource groups.",
-			Buckets:   prometheus.ExponentialBuckets(1, 10, 5), // 1 ~ 100000
-		}, []string{resourceGroupNameLabel})
-
-	writeRequestUnitCost = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: ruSubsystem,
-			Name:      "write_request_unit",
-			Help:      "Bucketed histogram of the write request unit cost for all resource groups.",
-			Buckets:   prometheus.ExponentialBuckets(3, 10, 5), // 3 ~ 300000
-		}, []string{resourceGroupNameLabel})
-
 	successfulTokenRequestDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -98,8 +80,6 @@ func init() {
 	prometheus.MustRegister(resourceGroupStatusGauge)
 	prometheus.MustRegister(successfulRequestDuration)
 	prometheus.MustRegister(failedRequestCounter)
-	prometheus.MustRegister(readRequestUnitCost)
-	prometheus.MustRegister(writeRequestUnitCost)
 	prometheus.MustRegister(successfulTokenRequestDuration)
 	prometheus.MustRegister(failedTokenRequestCounter)
 	prometheus.MustRegister(resourceGroupTokenRequestCounter)

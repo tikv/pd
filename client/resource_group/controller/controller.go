@@ -234,7 +234,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			}
 		}
 	}()
-	go c.backgroundMetricsFlush(ctx)
 }
 
 // Stop stops ResourceGroupController service.
@@ -244,34 +243,6 @@ func (c *ResourceGroupsController) Stop() error {
 	}
 	c.loopCancel()
 	return nil
-}
-
-// Receive the consumption and flush it to the metrics.
-func (c *ResourceGroupsController) backgroundMetricsFlush(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case req := <-c.consumptionDispatcher:
-			consumption := req.GetConsumptionSinceLastRequest()
-			if consumption == nil {
-				continue
-			}
-			var (
-				name       = req.GetResourceGroupName()
-				rruMetrics = readRequestUnitCost.WithLabelValues(name)
-				wruMetrics = writeRequestUnitCost.WithLabelValues(name)
-			)
-			resourceGroupTokenRequestCounter.WithLabelValues(name).Inc()
-			// RU info.
-			if consumption.RRU != 0 {
-				rruMetrics.Observe(consumption.RRU)
-			}
-			if consumption.WRU != 0 {
-				wruMetrics.Observe(consumption.WRU)
-			}
-		}
-	}
 }
 
 func (c *ResourceGroupsController) resetMetrics() {
@@ -296,7 +267,8 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan, successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name))
+	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan,
+		successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name), resourceGroupTokenRequestCounter.WithLabelValues(group.Name))
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +375,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		if request != nil {
 			c.run.currentRequests = append(c.run.currentRequests, request)
 		}
-		c.consumptionDispatcher <- request
+		gc.tokenRequestCounter.Inc()
 		return true
 	})
 	if len(c.run.currentRequests) > 0 {
@@ -474,6 +446,7 @@ type groupCostController struct {
 
 	successfulRequestDuration prometheus.Observer
 	failedRequestCounter      prometheus.Counter
+	tokenRequestCounter       prometheus.Counter
 
 	mu struct {
 		sync.Mutex
@@ -550,7 +523,7 @@ func newGroupCostController(
 	lowRUNotifyChan chan struct{},
 	tokenBucketUpdateChan chan *groupCostController,
 	successfulRequestDuration prometheus.Observer,
-	failedRequestCounter prometheus.Counter,
+	failedRequestCounter, tokenRequestCounter prometheus.Counter,
 ) (*groupCostController, error) {
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -566,6 +539,7 @@ func newGroupCostController(
 		mainCfg:                   mainCfg,
 		successfulRequestDuration: successfulRequestDuration,
 		failedRequestCounter:      failedRequestCounter,
+		tokenRequestCounter:       tokenRequestCounter,
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
