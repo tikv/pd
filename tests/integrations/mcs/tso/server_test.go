@@ -154,7 +154,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	cli := mcs.SetupTSOClient(ctx, re, []string{backendEndpoints})
+	cli := mcs.SetupClientWithKeyspace(ctx, re, []string{backendEndpoints})
 	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
 	ts := tsoutil.ComposeTS(physical, logical)

@@ -17,11 +17,14 @@ package tso
 import (
 	"context"
 	"math"
+	"math/rand"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/testutil"
@@ -167,4 +170,200 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 		return err == nil
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp"))
+}
+
+func TestRandomTransferAPILeader(t *testing.T) {
+	re := require.New(t)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	ctx, cancel := context.WithCancel(context.Background())
+	cluster, err := tests.NewTestAPICluster(ctx, 3)
+	re.NoError(err)
+	defer cancel()
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderServer := cluster.GetServer(cluster.WaitLeader())
+	backendEndpoints := leaderServer.GetAddr()
+
+	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
+	defer cleanup()
+
+	cli1 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
+	cli2 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
+
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber + 1)
+	go func() {
+		defer wg.Done()
+		n := r.Intn(3) + 1
+		time.Sleep(time.Duration(n) * time.Second)
+		leaderServer.ResignLeader()
+		leaderServer = cluster.GetServer(cluster.WaitLeader())
+	}()
+
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		go func() {
+			defer wg.Done()
+			var lastTS uint64
+			for i := 0; i < tsoRequestRound; i++ {
+				time.Sleep(time.Millisecond * 30)
+				physical, logical, err := cli1.GetTS(context.Background())
+				re.NoError(err)
+				ts := tsoutil.ComposeTS(physical, logical)
+				re.Less(lastTS, ts)
+				lastTS = ts
+				physical, logical, err = cli2.GetTS(context.Background())
+				re.NoError(err)
+				ts = tsoutil.ComposeTS(physical, logical)
+				re.Less(lastTS, ts)
+				lastTS = ts
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
+func TestMixedTSODeployment(t *testing.T) {
+	re := require.New(t)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
+	defer re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	ctx, cancel := context.WithCancel(context.Background())
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cancel()
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderServer := cluster.GetServer(cluster.WaitLeader())
+	backendEndpoints := leaderServer.GetAddr()
+
+	apiSvr, err := cluster.JoinAPIServer(ctx)
+	re.NoError(err)
+	err = apiSvr.Run()
+	re.NoError(err)
+
+	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
+	defer cleanup()
+
+	cli1 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
+	cli2 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
+
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber + 1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 2; i++ {
+			n := r.Intn(3) + 1
+			time.Sleep(time.Duration(n) * time.Second)
+			leaderServer.ResignLeader()
+			leaderServer = cluster.GetServer(cluster.WaitLeader())
+		}
+	}()
+
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		go func() {
+			defer wg.Done()
+			var ts, lastTS uint64
+			for i := 0; i < tsoRequestRound; i++ {
+				time.Sleep(time.Millisecond * 30)
+				physical, logical, err := cli1.GetTS(context.Background())
+				if err != nil {
+					re.ErrorContains(err, "not leader")
+				} else {
+					ts = tsoutil.ComposeTS(physical, logical)
+					re.Less(lastTS, ts)
+					lastTS = ts
+				}
+				physical, logical, _ = cli2.GetTS(context.Background())
+				if err != nil {
+					re.ErrorContains(err, "not leader")
+				} else {
+					ts = tsoutil.ComposeTS(physical, logical)
+					re.Less(lastTS, ts)
+					lastTS = ts
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestRandomShutdown(t *testing.T) {
+	re := require.New(t)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	ctx, cancel := context.WithCancel(context.Background())
+	cluster, err := tests.NewTestAPICluster(ctx, 3)
+	re.NoError(err)
+	defer cancel()
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderServer := cluster.GetServer(cluster.WaitLeader())
+	backendEndpoints := leaderServer.GetAddr()
+
+	tsoSvr1, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
+	defer cleanup()
+	tsoSvr2, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
+	defer cleanup()
+
+	cli1 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
+	cli2 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
+
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber + 1)
+	go func() {
+		defer wg.Done()
+		n := r.Intn(3) + 1
+		time.Sleep(time.Duration(n) * time.Second)
+		if r.Intn(2) == 0 {
+			tsoSvr1.Close()
+		} else {
+			tsoSvr2.Close()
+		}
+	}()
+
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		go func() {
+			defer wg.Done()
+			var ts, lastTS uint64
+			for i := 0; i < tsoRequestRound; i++ {
+				time.Sleep(time.Millisecond * 30)
+				physical, logical, err := cli1.GetTS(context.Background())
+				if err != nil {
+					re.ErrorContains(err, "server not started")
+				} else {
+					ts = tsoutil.ComposeTS(physical, logical)
+					re.Less(lastTS, ts)
+					lastTS = ts
+				}
+				physical, logical, err = cli2.GetTS(context.Background())
+				if err != nil {
+					re.ErrorContains(err, "server not started")
+				} else {
+					ts = tsoutil.ComposeTS(physical, logical)
+					re.Less(lastTS, ts)
+					lastTS = ts
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
