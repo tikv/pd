@@ -102,6 +102,34 @@ func (s *GrpcServer) wrapErrorToHeader(errorType pdpb.ErrorType, message string)
 	})
 }
 
+// GetClusterInfo implements gRPC PDServer.
+func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoRequest) (*pdpb.GetClusterInfoResponse, error) {
+	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
+	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
+	if s.IsClosed() {
+		return &pdpb.GetClusterInfoResponse{
+			Header: &pdpb.ResponseHeader{
+				Error: &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
+				},
+			},
+		}, nil
+	}
+
+	svcModes := make([]pdpb.ServiceMode, 0)
+	if s.IsAPIServiceMode() {
+		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
+	} else {
+		svcModes = append(svcModes, pdpb.ServiceMode_PD_SVC_MODE)
+	}
+
+	return &pdpb.GetClusterInfoResponse{
+		Header:       s.header(),
+		ServiceModes: svcModes,
+	}, nil
+}
+
 // GetMembers implements gRPC PDServer.
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
@@ -376,7 +404,7 @@ func (s *GrpcServer) processTSORequests(forwardStream pdpb.PD_TsoClient, forward
 		req := &tsopb.TsoRequest{
 			Header: &tsopb.RequestHeader{
 				ClusterId:       requests[0].request.GetHeader().GetClusterId(),
-				KeyspaceId:      utils.DefaultKeySpaceID,
+				KeyspaceId:      utils.DefaultKeyspaceID,
 				KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
 			},
 			Count: count,
@@ -1975,7 +2003,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	forwardStream.Send(&tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
-			KeyspaceId:      utils.DefaultKeySpaceID,
+			KeyspaceId:      utils.DefaultKeyspaceID,
 			KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
 		},
 		Count: 1,

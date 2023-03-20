@@ -38,7 +38,7 @@ type KeyspaceClient interface {
 
 // keyspaceClient returns the KeyspaceClient from current PD leader.
 func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
-	if client := c.svcDiscovery.GetServingEndpointClientConn(); client != nil {
+	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
 		return keyspacepb.NewKeyspaceClient(client)
 	}
 	return nil
@@ -63,7 +63,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 
 	if err != nil {
 		cmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
-		c.svcDiscovery.ScheduleCheckMemberChanged()
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
@@ -142,7 +142,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 
 	if err != nil {
 		cmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
-		c.svcDiscovery.ScheduleCheckMemberChanged()
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 

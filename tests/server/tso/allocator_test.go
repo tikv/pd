@@ -85,7 +85,7 @@ func TestAllocatorLeader(t *testing.T) {
 	allocatorLeaderMemberIDs := make([]uint64, 0, dcLocationNum)
 	for _, allocator := range allAllocatorLeaders {
 		allocatorLeader, _ := allocator.(*tso.LocalTSOAllocator)
-		allocatorLeaderMemberIDs = append(allocatorLeaderMemberIDs, allocatorLeader.GetMember().GetMemberId())
+		allocatorLeaderMemberIDs = append(allocatorLeaderMemberIDs, allocatorLeader.GetMember().ID())
 	}
 	for _, server := range cluster.GetServers() {
 		// Filter out Global TSO Allocator
