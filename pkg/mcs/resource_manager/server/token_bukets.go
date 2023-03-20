@@ -15,8 +15,6 @@
 package server
 
 import (
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 	"math"
 	"time"
 
@@ -130,26 +128,28 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 
 	slot, exist := gts.tokenSlots[clientUniqueID]
 	if !exist {
-		if requiredToken == 0 {
-			return
+		// Only slots that require a positive number will be considered alive,
+		// but still need to allocate the elapsed tokens as well.
+		if requiredToken != 0 {
+			slot = &TokenSlot{tokenCapacity: defaultInitialTokens, lastTokenCapacity: defaultInitialTokens}
+			gts.Tokens += defaultInitialTokens
+			gts.tokenSlots[clientUniqueID] = slot
+			gts.cleanupAssignTokenSum(false)
 		}
-		gts.cleanupAssignTokenSum(true)
-		gts.Tokens += elapseTokens
-		slot = &TokenSlot{}
-		gts.tokenSlots[clientUniqueID] = slot
-	} else if gts.clientConsumptionTokensSum >= maxAssignTokens {
-		gts.cleanupAssignTokenSum(false)
+	} else {
+		if gts.clientConsumptionTokensSum >= maxAssignTokens {
+			gts.cleanupAssignTokenSum(false)
+		}
+		// Clean up slot that have not been used for defaultSlotStalePeriod.
+		if requiredToken == 0 && now.Sub(*slot.lastUpdate) >= defaultSlotStalePeriod {
+			delete(gts.tokenSlots, clientUniqueID)
+			gts.cleanupAssignTokenSum(false)
+		}
 	}
 
-	// Clean up slot that have not been used for defaultSlotStalePeriod.
-	if requiredToken == 0 && now.Sub(*slot.lastUpdate) >= defaultSlotStalePeriod {
-		delete(gts.tokenSlots, clientUniqueID)
-		gts.cleanupAssignTokenSum(false)
-		if len(gts.tokenSlots) == 0 {
-			return
-		}
+	if len(gts.tokenSlots) == 0 {
+		return
 	}
-
 	evenRatio := 1 / float64(len(gts.tokenSlots))
 	if settings.GetBurstLimit() <= 0 {
 		for _, slot := range gts.tokenSlots {
@@ -161,7 +161,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		return
 	}
 
-	for clientID, slot := range gts.tokenSlots {
+	for _, slot := range gts.tokenSlots {
 		var ratio float64
 		if gts.clientConsumptionTokensSum == 0 || len(gts.tokenSlots) == 1 {
 			ratio = evenRatio
@@ -182,23 +182,19 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			burstLimit  = float64(settings.GetBurstLimit()) * ratio
 			assignToken = elapseTokens * ratio
 		)
-
 		slot.tokenCapacity += assignToken
 		slot.lastTokenCapacity += assignToken
 		slot.settings = &rmpb.TokenLimitSettings{
 			FillRate:   uint64(fillRate),
 			BurstLimit: int64(burstLimit),
 		}
-
-		log.Info("balanceSlotTokens", zap.Uint64("clientID", clientID), zap.Float64("ratio", ratio), zap.Float64("fillRate", fillRate),
-			zap.Float64("assignToken", assignToken), zap.Float64("requireTokensSum", slot.requireTokensSum))
 	}
 	if requiredToken != 0 {
 		// Only slots that require a positive number will be considered alive.
 		slot.lastUpdate = &now
+		slot.requireTokensSum += requiredToken
+		gts.clientConsumptionTokensSum += requiredToken
 	}
-	slot.requireTokensSum += requiredToken
-	gts.clientConsumptionTokensSum += requiredToken
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
@@ -275,7 +271,7 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 		elapseTokens = 0
 		gtb.cleanupAssignTokenSum(true)
 	}
-	if burst := float64(burstLimit); burst != 0 && gtb.Tokens > burst {
+	if burst := float64(burstLimit); burst != 0 && gtb.Tokens >= burst {
 		elapseTokens -= gtb.Tokens - burst
 		gtb.Tokens = burst
 	}
@@ -367,7 +363,7 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 	}
 	for i := 0; i < loanCoefficient && neededTokens > 0 && trickleTime < targetPeriodTimeSec; i++ {
 		loan := -ts.tokenCapacity
-		if loan > p[i] {
+		if loan >= p[i] {
 			continue
 		}
 		roundReserveTokens := p[i] - loan
@@ -400,10 +396,10 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 	res.Tokens = grantedTokens
 
 	var trickleDuration time.Duration
-	// Can't directly treat targetPeriodTime as trickleTime when there is a token remaining.
-	// If treated, client consumption will be slowed down (actually could be increased).
+	// can't directly treat targetPeriodTime as trickleTime when there is a token remaining.
+	// If treat, client consumption will be slowed down (actually cloud be increased).
 	if hasRemaining {
-		trickleDuration = time.Duration(math.Min(trickleTime, targetPeriodTimeSec) * float64(time.Second))
+		trickleDuration = time.Duration(math.Min(trickleTime, targetPeriodTime.Seconds()) * float64(time.Second))
 	} else {
 		trickleDuration = targetPeriodTime
 	}

@@ -248,7 +248,9 @@ func (m *Manager) persistResourceGroupRunningState() {
 		group, ok := m.groups[keys[idx]]
 		m.RUnlock()
 		if ok {
+			m.Lock()
 			group.persistStates(m.storage)
+			m.Unlock()
 		}
 	}
 }

@@ -59,19 +59,19 @@ func (rg *ResourceGroup) String() string {
 
 // Copy copies the resource group.
 func (rg *ResourceGroup) Copy() *ResourceGroup {
+	// TODO: use a better way to copy
 	rg.RLock()
 	defer rg.RUnlock()
-
-	return &ResourceGroup{
-		Name: rg.Name,
-		Mode: rg.Mode,
-		RUSettings: &RequestUnitSettings{
-			RU: &GroupTokenBucket{
-				Settings:              rg.RUSettings.RU.Settings,
-				GroupTokenBucketState: *rg.RUSettings.RU.Clone(),
-			},
-		},
+	res, err := json.Marshal(rg)
+	if err != nil {
+		panic(err)
 	}
+	var newRG ResourceGroup
+	err = json.Unmarshal(res, &newRG)
+	if err != nil {
+		panic(err)
+	}
+	return &newRG
 }
 
 // PatchSettings patches the resource group settings.
@@ -130,9 +130,7 @@ func (rg *ResourceGroup) RequestRU(
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
-	log.Info("RequestRU start", zap.Uint64("clientUniqueID", clientUniqueID), zap.Float64("need Tokens", neededTokens), zap.Uint64("targetPeriodMs", targetPeriodMs))
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs, clientUniqueID)
-	log.Info("RequestRU end", zap.Uint64("clientUniqueID", clientUniqueID), zap.Float64("tb.Tokens", tb.Tokens), zap.Int64("trickleTimeMs", trickleTimeMs))
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
