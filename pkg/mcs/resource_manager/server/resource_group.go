@@ -134,7 +134,7 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 	}
 	if metaGroup.GetPriority() > 16 {
 		return errors.New("invalid resource group priority, the value should be in [0,16]")
-	}	
+	}
 	rg.Priority = metaGroup.Priority
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
