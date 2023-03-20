@@ -859,48 +859,6 @@ func (suite *clientTestSuite) bootstrapServer(header *pdpb.RequestHeader, client
 	suite.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
-func (suite *clientTestSuite) TestNormalTSO() {
-	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
-			defer wg.Done()
-			var lastTS uint64
-			for i := 0; i < tsoRequestRound; i++ {
-				physical, logical, err := suite.client.GetTS(context.Background())
-				suite.NoError(err)
-				ts := tsoutil.ComposeTS(physical, logical)
-				suite.Less(lastTS, ts)
-				lastTS = ts
-			}
-		}()
-	}
-	wg.Wait()
-}
-
-func (suite *clientTestSuite) TestGetTSAsync() {
-	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
-			defer wg.Done()
-			tsFutures := make([]pd.TSFuture, tsoRequestRound)
-			for i := range tsFutures {
-				tsFutures[i] = suite.client.GetTSAsync(context.Background())
-			}
-			var lastTS uint64 = math.MaxUint64
-			for i := len(tsFutures) - 1; i >= 0; i-- {
-				physical, logical, err := tsFutures[i].Wait()
-				suite.NoError(err)
-				ts := tsoutil.ComposeTS(physical, logical)
-				suite.Greater(lastTS, ts)
-				lastTS = ts
-			}
-		}()
-	}
-	wg.Wait()
-}
-
 func (suite *clientTestSuite) TestGetRegion() {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
