@@ -199,7 +199,7 @@ func CreateClientsWithMultiEndpoint(tlsConfig *tls.Config, acUrls []url.URL) (*c
 	if err != nil {
 		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
-	httpClient := createHttpClient(tlsConfig)
+	httpClient := createHTTPClient(tlsConfig)
 	return client, httpClient, nil
 }
 
@@ -209,7 +209,7 @@ func CreateClients(tlsConfig *tls.Config, acUrls url.URL) (*clientv3.Client, *ht
 	if err != nil {
 		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
-	httpClient := createHttpClient(tlsConfig)
+	httpClient := createHTTPClient(tlsConfig)
 	return client, httpClient, nil
 }
 
@@ -254,22 +254,22 @@ func createEtcdClientWithMultiEndpoint(tlsConfig *tls.Config, acUrls []url.URL) 
 
 // createEtcdClient creates etcd v3 client.
 // Note: it will be used by legacy pd-server, and only connect to leader only.
-func createEtcdClient(tlsConfig *tls.Config, acUrl url.URL) (*clientv3.Client, error) {
+func createEtcdClient(tlsConfig *tls.Config, acURL url.URL) (*clientv3.Client, error) {
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{acUrl.String()},
+		Endpoints:   []string{acURL.String()},
 		DialTimeout: defaultEtcdClientTimeout,
 		TLS:         tlsConfig,
 		LogConfig:   &lgc,
 	})
 	if err == nil {
-		log.Info("create etcd v3 client", zap.String("endpoints", acUrl.String()))
+		log.Info("create etcd v3 client", zap.String("endpoints", acURL.String()))
 	}
 	return client, err
 }
 
-func createHttpClient(tlsConfig *tls.Config) *http.Client {
+func createHTTPClient(tlsConfig *tls.Config) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
