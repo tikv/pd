@@ -220,7 +220,7 @@ func TestEtcdClientSync(t *testing.T) {
 	ep1 := cfg1.LCUrls[0].String()
 	urls, err := types.NewURLs([]string{ep1})
 	re.NoError(err)
-	client1, err := createEtcdClient(nil, urls)
+	client1, err := createEtcdClientWithMultiEndpoint(nil, urls)
 	re.NoError(err)
 	<-etcd1.Server.ReadyNotify()
 
@@ -277,7 +277,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	// Create a etcd client with etcd1 as endpoint.
 	urls, err := types.NewURLs([]string{proxyAddr})
 	re.NoError(err)
-	client1, err := createEtcdClient(nil, urls)
+	client1, err := createEtcdClientWithMultiEndpoint(nil, urls)
 	re.NoError(err)
 
 	// Add a new member and set the client endpoints to etcd1 and etcd2.
