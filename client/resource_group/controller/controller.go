@@ -32,10 +32,11 @@ import (
 )
 
 const (
-	requestUnitConfigPath  = "resource_group/ru_config"
-	defaultMaxWaitDuration = time.Second
-	maxRetry               = 3
-	maxNotificationChanLen = 200
+	controllerConfigPath    = "resource_group/controller"
+	defaultMaxWaitDuration  = time.Second
+	maxRetry                = 3
+	maxNotificationChanLen  = 200
+	needTokensAmplification = 1.1
 )
 
 type selectType int
