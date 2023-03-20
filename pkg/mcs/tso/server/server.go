@@ -332,6 +332,7 @@ func (s *Server) IsServing() bool {
 }
 
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
+// The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
 	return s.participant.GetLeaderListenUrls()
 }

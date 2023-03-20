@@ -406,7 +406,7 @@ func (s *Server) startServer() (err error) {
 	}
 	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.ResourceManagerServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
-		log.Error("failed to regiser the service", zap.String("service-name", utils.TSOServiceName), errs.ZapError(err))
+		log.Error("failed to regiser the service", zap.String("service-name", utils.ResourceManagerServiceName), errs.ZapError(err))
 		return err
 	}
 	atomic.StoreInt64(&s.isServing, 1)
