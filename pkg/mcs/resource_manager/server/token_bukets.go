@@ -31,8 +31,6 @@ const (
 	defaultReserveRatio    = 0.05
 	defaultLoanCoefficient = 2
 	maxAssignTokens        = math.MaxFloat64 / 1024 // assume max client connect is 1024
-	// defaultSlotStalePeriod indicate how long that a slot is considered stale if it is not acquire token request.
-	defaultSlotStalePeriod = 1 * time.Minute
 )
 
 // GroupTokenBucket is a token bucket for a resource group.
@@ -64,8 +62,6 @@ type TokenSlot struct {
 	// tokenCapacity is the number of tokens in the slot.
 	tokenCapacity     float64
 	lastTokenCapacity float64
-
-	lastUpdate *time.Time
 }
 
 // GroupTokenBucketState is the running state of TokenBucket.
@@ -102,15 +98,13 @@ func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 	}
 }
 
-func (gts *GroupTokenBucketState) cleanupAssignTokenSum(cleanToken bool) {
+func (gts *GroupTokenBucketState) resetLoan() {
+	gts.settingChanged = false
+	gts.Tokens = 0
 	gts.clientConsumptionTokensSum = 0
 	evenRatio := 1.0
 	if l := len(gts.tokenSlots); l > 0 {
 		evenRatio = 1 / float64(l)
-	}
-
-	if cleanToken {
-		gts.Tokens = 0
 	}
 
 	evenTokens := gts.Tokens * evenRatio
@@ -125,8 +119,6 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 	clientUniqueID uint64,
 	settings *rmpb.TokenLimitSettings,
 	requiredToken, elapseTokens float64) {
-	now := time.Now()
-
 	slot, exist := gts.tokenSlots[clientUniqueID]
 	if !exist {
 		// Only slots that require a positive number will be considered alive,
@@ -134,16 +126,16 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		if requiredToken != 0 {
 			slot = &TokenSlot{}
 			gts.tokenSlots[clientUniqueID] = slot
-			gts.cleanupAssignTokenSum(false)
+			gts.clientConsumptionTokensSum = 0
 		}
 	} else {
 		if gts.clientConsumptionTokensSum >= maxAssignTokens {
-			gts.cleanupAssignTokenSum(false)
+			gts.clientConsumptionTokensSum = 0
 		}
-		// Clean up slot that have not been used for defaultSlotStalePeriod.
-		if requiredToken == 0 && now.Sub(*slot.lastUpdate) >= defaultSlotStalePeriod {
+		// Clean up slot that required 0.
+		if requiredToken == 0 {
 			delete(gts.tokenSlots, clientUniqueID)
-			gts.cleanupAssignTokenSum(false)
+			gts.clientConsumptionTokensSum = 0
 		}
 	}
 
@@ -165,6 +157,10 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		var ratio float64
 		if gts.clientConsumptionTokensSum == 0 || len(gts.tokenSlots) == 1 {
 			ratio = evenRatio
+			// Need to reset every slot.
+			slot.tokenCapacity = evenRatio * gts.Tokens
+			slot.lastTokenCapacity = evenRatio * gts.Tokens
+			slot.requireTokensSum = 0
 		} else {
 			// In order to have fewer tokens available to clients that are currently consuming more.
 			// We have the following formula:
@@ -200,7 +196,6 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 	}
 	if requiredToken != 0 {
 		// Only slots that require a positive number will be considered alive.
-		slot.lastUpdate = &now
 		slot.requireTokensSum += requiredToken
 		gts.clientConsumptionTokensSum += requiredToken
 	}
@@ -258,7 +253,6 @@ func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
 		settings:          gtb.Settings,
 		tokenCapacity:     gtb.Tokens,
 		lastTokenCapacity: gtb.Tokens,
-		lastUpdate:        &now,
 	}
 	gtb.LastUpdate = &now
 	gtb.Initialized = true
@@ -277,9 +271,8 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	}
 	// Reloan when setting changed
 	if gtb.settingChanged && gtb.Tokens <= 0 {
-		gtb.settingChanged = false
 		elapseTokens = 0
-		gtb.cleanupAssignTokenSum(true)
+		gtb.resetLoan()
 	}
 	if burst := float64(burstLimit); burst > 0 && gtb.Tokens > burst {
 		elapseTokens -= gtb.Tokens - burst
