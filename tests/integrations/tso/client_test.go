@@ -29,7 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/mcs"
+	"github.com/tikv/pd/tests/integrations/mcs"
 )
 
 type tsoClientTestSuite struct {

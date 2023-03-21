@@ -1,10 +1,17 @@
 #!/bin/bash
 
-# ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX>
+# ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX> <IS_INTEGRATION_TEST>
 
-packages=(`go list ./...`)
-dirs=(`find . -iname "*_test.go" -exec dirname {} \; | sort -u | sed -e "s/^\./github.com\/tikv\/pd/"`)
-tasks=($(comm -12 <(printf "%s\n" "${packages[@]}") <(printf "%s\n" "${dirs[@]}")))
+tasks=()
+if [[ $3 ]]; then
+    makefile_dirs=(`find . -iname "Makefile" -exec dirname {} \; | sort -u`)
+    submod_dirs=(`find . -iname "go.mod" -exec dirname {} \; | sort -u`)
+    tasks=$(comm -12 <(printf "%s\n" "${makefile_dirs[@]}") <(printf "%s\n" "${submod_dirs[@]}") | grep "./tests/integrations/*")
+else
+    packages=(`go list ./...`)
+    dirs=(`find . -iname "*_test.go" -exec dirname {} \; | sort -u | sed -e "s/^\./github.com\/tikv\/pd/"`)
+    tasks=($(comm -12 <(printf "%s\n" "${packages[@]}") <(printf "%s\n" "${dirs[@]}")))
+fi
 
 weight () {
     [[ $1 == "github.com/tikv/pd/server/api" ]] && return 30

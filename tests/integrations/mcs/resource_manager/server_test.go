@@ -27,7 +27,7 @@ import (
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/mcs"
+	"github.com/tikv/pd/tests/integrations/mcs"
 )
 
 func TestResourceManagerServer(t *testing.T) {

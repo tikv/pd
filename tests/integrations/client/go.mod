@@ -1,6 +1,14 @@
-module github.com/tikv/pd/tests/client
+module github.com/tikv/pd/tests/integrations/client
 
 go 1.20
+
+replace (
+	github.com/tikv/pd => ../../../
+	github.com/tikv/pd/client => ../../../client
+)
+
+// reset grpc and protobuf deps in order to import client and server at the same time
+replace google.golang.org/grpc v1.51.0 => google.golang.org/grpc v1.26.0
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
@@ -163,11 +171,3 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
-
-replace (
-	github.com/tikv/pd => ../../
-	github.com/tikv/pd/client => ../../client
-)
-
-// reset grpc and protobuf deps in order to import client and server at the same time
-replace google.golang.org/grpc v1.51.0 => google.golang.org/grpc v1.26.0
