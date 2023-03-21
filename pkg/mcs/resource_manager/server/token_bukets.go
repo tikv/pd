@@ -154,13 +154,21 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 	}
 
 	for _, slot := range gts.tokenSlots {
-		var ratio float64
 		if gts.clientConsumptionTokensSum == 0 || len(gts.tokenSlots) == 1 {
-			ratio = evenRatio
-			// Need to reset every slot.
+			// Need to make each slot even.
 			slot.tokenCapacity = evenRatio * gts.Tokens
 			slot.lastTokenCapacity = evenRatio * gts.Tokens
 			slot.requireTokensSum = 0
+
+			var (
+				fillRate   = float64(settings.GetFillRate()) * evenRatio
+				burstLimit = float64(settings.GetBurstLimit()) * evenRatio
+			)
+
+			slot.settings = &rmpb.TokenLimitSettings{
+				FillRate:   uint64(fillRate),
+				BurstLimit: int64(burstLimit),
+			}
 		} else {
 			// In order to have fewer tokens available to clients that are currently consuming more.
 			// We have the following formula:
@@ -170,28 +178,28 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			// 		clientN: (1 - n/N + 1/N) * 1/N
 			// Sum is:
 			// 		(N - (a+b+...+n)/N +1) * 1/N => (N - 1 + 1) * 1/N => 1
-			ratio = (1 - slot.requireTokensSum/gts.clientConsumptionTokensSum + evenRatio) * evenRatio
-		}
+			ratio := (1 - slot.requireTokensSum/gts.clientConsumptionTokensSum + evenRatio) * evenRatio
 
-		var (
-			fillRate    = float64(settings.GetFillRate()) * ratio
-			burstLimit  = float64(settings.GetBurstLimit()) * ratio
-			assignToken = elapseTokens * ratio
-		)
+			var (
+				fillRate    = float64(settings.GetFillRate()) * ratio
+				burstLimit  = float64(settings.GetBurstLimit()) * ratio
+				assignToken = elapseTokens * ratio
+			)
 
-		// Need to reserve burst limit to next balance.
-		if burstLimit > 0 && slot.tokenCapacity > burstLimit {
-			reservedTokens := slot.tokenCapacity - burstLimit
-			gts.lastBurstTokens += reservedTokens
-			gts.Tokens -= reservedTokens
-			assignToken -= reservedTokens
-		}
+			// Need to reserve burst limit to next balance.
+			if burstLimit > 0 && slot.tokenCapacity > burstLimit {
+				reservedTokens := slot.tokenCapacity - burstLimit
+				gts.lastBurstTokens += reservedTokens
+				gts.Tokens -= reservedTokens
+				assignToken -= reservedTokens
+			}
 
-		slot.tokenCapacity += assignToken
-		slot.lastTokenCapacity += assignToken
-		slot.settings = &rmpb.TokenLimitSettings{
-			FillRate:   uint64(fillRate),
-			BurstLimit: int64(burstLimit),
+			slot.tokenCapacity += assignToken
+			slot.lastTokenCapacity += assignToken
+			slot.settings = &rmpb.TokenLimitSettings{
+				FillRate:   uint64(fillRate),
+				BurstLimit: int64(burstLimit),
+			}
 		}
 	}
 	if requiredToken != 0 {

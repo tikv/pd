@@ -33,9 +33,10 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 		},
 	}
 
+	clientUniqueID := uint64(0)
 	tb := NewGroupTokenBucket(tbSetting)
 	time1 := time.Now()
-	tb.request(time1, 0, 0, 0)
+	tb.request(time1, 0, 0, clientUniqueID)
 	re.LessOrEqual(math.Abs(tbSetting.Tokens-tb.Tokens), 1e-7)
 	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
 
@@ -49,7 +50,7 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	tb.patch(tbSetting)
 
 	time2 := time.Now()
-	tb.request(time2, 0, 0, 0)
+	tb.request(time2, 0, 0, clientUniqueID)
 	re.LessOrEqual(math.Abs(100000-tb.Tokens), time2.Sub(time1).Seconds()*float64(tbSetting.Settings.FillRate)+1e7)
 	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
 }
