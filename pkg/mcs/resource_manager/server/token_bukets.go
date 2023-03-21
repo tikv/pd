@@ -74,6 +74,7 @@ type GroupTokenBucketState struct {
 	// ClientUniqueID -> TokenSlot
 	tokenSlots                 map[uint64]*TokenSlot
 	clientConsumptionTokensSum float64
+	lastBurstTokens            float64
 
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
@@ -181,6 +182,13 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			burstLimit  = float64(settings.GetBurstLimit()) * ratio
 			assignToken = elapseTokens * ratio
 		)
+
+		// Need to reserve burst limit to next balance.
+		if burstLimit > 0 && slot.tokenCapacity > burstLimit {
+			gts.lastBurstTokens += slot.tokenCapacity - burstLimit
+			assignToken -= slot.tokenCapacity - burstLimit
+		}
+
 		slot.tokenCapacity += assignToken
 		slot.lastTokenCapacity += assignToken
 		slot.settings = &rmpb.TokenLimitSettings{
@@ -260,7 +268,8 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	if !gtb.Initialized {
 		gtb.init(now, clientUniqueID)
 	} else if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
-		elapseTokens = float64(gtb.Settings.GetFillRate()) * delta.Seconds()
+		elapseTokens = float64(gtb.Settings.GetFillRate())*delta.Seconds() + gtb.lastBurstTokens
+		gtb.lastBurstTokens = 0
 		gtb.Tokens += elapseTokens
 		gtb.LastUpdate = &now
 	}
