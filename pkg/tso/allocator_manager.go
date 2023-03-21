@@ -97,45 +97,33 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 
 // Member defines the interface for the election related logic.
 type Member interface {
-	// ID returns the unique ID for this participant in the group. For example, it can be
-	// unique server id of a cluster or the unique keyspace group replica id of the election
+	// ID returns the unique ID in the election group. For example, it can be unique
+	// server id of a cluster or the unique keyspace group replica id of the election
 	// group comprised of the replicas of a keyspace group.
 	ID() uint64
+	// ID returns the unique Name in the election group.
+	Name() string
 	// MemberValue returns the member value.
 	MemberValue() string
-	// Member returns the member.
-	Member() *pdpb.Member
+	// GetMember() returns the current member
+	GetMember() interface{}
 	// Client returns the etcd client.
 	Client() *clientv3.Client
 	// IsLeader returns whether the participant is the leader or not by checking its
 	// leadership's lease and leader info.
 	IsLeader() bool
+	// IsLeaderElected returns true if the leader exists; otherwise false
+	IsLeaderElected() bool
+	// GetLeaderListenUrls returns current leader's listen urls
+	GetLeaderListenUrls() []string
 	// GetLeaderID returns current leader's member ID.
 	GetLeaderID() uint64
-	// GetLeader returns current leader of the election group.
-	GetLeader() *pdpb.Member
 	// EnableLeader declares the member itself to be the leader.
 	EnableLeader()
 	// GetLeaderPath returns the path of the leader.
 	GetLeaderPath() string
 	// GetLeadership returns the leadership of the PD member.
 	GetLeadership() *election.Leadership
-	// CampaignLeader is used to campaign a PD member's leadership
-	// and make it become a PD leader.
-	CampaignLeader(leaseTimeout int64) error
-	// KeepLeader is used to keep the PD leader's leadership.
-	KeepLeader(ctx context.Context)
-	// CheckLeader checks returns true if it is needed to check later.
-	CheckLeader() (*pdpb.Member, int64, bool)
-	// WatchLeader is used to watch the changes of the leader.
-	WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64)
-	// ResetLeader is used to reset the PD member's current leadership.
-	// Basically it will reset the leader lease and unset leader info.
-	ResetLeader()
-	// IsSameLeader checks whether a server is the leader itself.
-	IsSameLeader(leader *pdpb.Member) bool
-	// CheckPriority checks whether there is another participant has higher priority and resign it as the leader if so.
-	CheckPriority(ctx context.Context)
 	// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 	GetDCLocationPathPrefix() string
 	// GetDCLocationPath returns the dc-location path of a member with the given member ID.
@@ -209,7 +197,7 @@ func NewAllocatorManager(
 // SetLocalTSOConfig receives the zone label of this PD server and write it into etcd as dc-location
 // to make the whole cluster know the DC-level topology for later Local TSO Allocator campaign.
 func (am *AllocatorManager) SetLocalTSOConfig(dcLocation string) error {
-	serverName := am.member.Member().Name
+	serverName := am.member.Name()
 	serverID := am.member.ID()
 	if err := am.checkDCLocationUpperLimit(dcLocation); err != nil {
 		log.Error("check dc-location upper limit failed",
@@ -415,7 +403,7 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 	defer logutil.LogPanic()
 	defer log.Info("server is closed, return local tso allocator leader loop",
 		zap.String("dc-location", allocator.GetDCLocation()),
-		zap.String("local-tso-allocator-name", am.member.Member().Name))
+		zap.String("local-tso-allocator-name", am.member.Name()))
 	for {
 		select {
 		case <-ctx.Done():
@@ -431,7 +419,7 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 		if allocatorLeader != nil {
 			log.Info("start to watch allocator leader",
 				zap.Stringer(fmt.Sprintf("%s-allocator-leader", allocator.GetDCLocation()), allocatorLeader),
-				zap.String("local-tso-allocator-name", am.member.Member().Name))
+				zap.String("local-tso-allocator-name", am.member.Name()))
 			// WatchAllocatorLeader will keep looping and never return unless the Local TSO Allocator leader has changed.
 			allocator.WatchAllocatorLeader(ctx, allocatorLeader, rev)
 			log.Info("local tso allocator leader has changed, try to re-campaign a local tso allocator leader",
@@ -451,7 +439,7 @@ func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *
 		if nextLeader != 0 {
 			if nextLeader != am.member.ID() {
 				log.Info("skip campaigning of the local tso allocator leader and check later",
-					zap.String("server-name", am.member.Member().Name),
+					zap.String("server-name", am.member.Name()),
 					zap.Uint64("server-id", am.member.ID()),
 					zap.Uint64("next-leader-id", nextLeader))
 				time.Sleep(200 * time.Millisecond)
@@ -513,7 +501,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 	log.Info("start to campaign local tso allocator leader",
 		zap.String("dc-location", allocator.GetDCLocation()),
 		zap.Any("dc-location-info", dcLocationInfo),
-		zap.String("name", am.member.Member().Name))
+		zap.String("name", am.member.Name()))
 	cmps := make([]clientv3.Cmp, 0)
 	nextLeaderKey := am.nextLeaderKey(allocator.GetDCLocation())
 	if !isNextLeader {
@@ -536,12 +524,12 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 			log.Info("failed to campaign local tso allocator leader due to txn conflict, another allocator may campaign successfully",
 				zap.String("dc-location", allocator.GetDCLocation()),
 				zap.Any("dc-location-info", dcLocationInfo),
-				zap.String("name", am.member.Member().Name))
+				zap.String("name", am.member.Name()))
 		} else {
 			log.Error("failed to campaign local tso allocator leader due to etcd error",
 				zap.String("dc-location", allocator.GetDCLocation()),
 				zap.Any("dc-location-info", dcLocationInfo),
-				zap.String("name", am.member.Member().Name),
+				zap.String("name", am.member.Name()),
 				errs.ZapError(err))
 		}
 		return
@@ -556,12 +544,12 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 	log.Info("campaign local tso allocator leader ok",
 		zap.String("dc-location", allocator.GetDCLocation()),
 		zap.Any("dc-location-info", dcLocationInfo),
-		zap.String("name", am.member.Member().Name))
+		zap.String("name", am.member.Name()))
 
 	log.Info("initialize the local TSO allocator",
 		zap.String("dc-location", allocator.GetDCLocation()),
 		zap.Any("dc-location-info", dcLocationInfo),
-		zap.String("name", am.member.Member().Name))
+		zap.String("name", am.member.Name()))
 	if err := allocator.Initialize(int(dcLocationInfo.Suffix)); err != nil {
 		log.Error("failed to initialize the local TSO allocator",
 			zap.String("dc-location", allocator.GetDCLocation()),
@@ -585,7 +573,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 	log.Info("local tso allocator leader is ready to serve",
 		zap.String("dc-location", allocator.GetDCLocation()),
 		zap.Any("dc-location-info", dcLocationInfo),
-		zap.String("name", am.member.Member().Name))
+		zap.String("name", am.member.Name()))
 
 	leaderTicker := time.NewTicker(leaderTickInterval)
 	defer leaderTicker.Stop()
@@ -597,7 +585,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 				log.Info("no longer a local tso allocator leader because lease has expired, local tso allocator leader will step down",
 					zap.String("dc-location", allocator.GetDCLocation()),
 					zap.Any("dc-location-info", dcLocationInfo),
-					zap.String("name", am.member.Member().Name))
+					zap.String("name", am.member.Name()))
 				return
 			}
 		case <-ctx.Done():
@@ -605,7 +593,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 			log.Info("server is closed, reset the local tso allocator",
 				zap.String("dc-location", allocator.GetDCLocation()),
 				zap.Any("dc-location-info", dcLocationInfo),
-				zap.String("name", am.member.Member().Name))
+				zap.String("name", am.member.Name()))
 			return
 		}
 	}
@@ -716,8 +704,8 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 // and stores them into the DCLocationInfo, then finally writes them into am.mu.clusterDCLocations.
 func (am *AllocatorManager) ClusterDCLocationChecker() {
 	defer logutil.LogPanic()
-	// Wait for the PD leader to be elected out.
-	if am.member.GetLeader() == nil {
+	// Wait for the group leader to be elected out.
+	if !am.member.IsLeaderElected() {
 		return
 	}
 	newClusterDCLocations, err := am.GetClusterDCLocationsFromEtcd()
@@ -811,7 +799,7 @@ func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32,
 		log.Warn("write local tso suffix into etcd failed",
 			zap.String("dc-location", dcLocation),
 			zap.String("local-tso-suffix", localTSOSuffixValue),
-			zap.String("server-name", am.member.Member().Name),
+			zap.String("server-name", am.member.Name()),
 			zap.Uint64("server-id", am.member.ID()))
 		return -1, errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
@@ -1129,7 +1117,7 @@ func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcL
 		return ok, dcLocationInfo, nil
 	}
 
-	leaderAddrs := am.member.GetLeader().GetClientUrls()
+	leaderAddrs := am.member.GetLeaderListenUrls()
 	if leaderAddrs == nil || len(leaderAddrs) < 1 {
 		return false, &pdpb.GetDCLocationInfoResponse{}, fmt.Errorf("failed to get leader client url")
 	}
@@ -1141,7 +1129,7 @@ func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcL
 	defer cancel()
 	resp, err := pdpb.NewPDClient(conn).GetDCLocationInfo(getCtx, &pdpb.GetDCLocationInfoRequest{
 		Header: &pdpb.RequestHeader{
-			SenderId: am.member.Member().GetMemberId(),
+			SenderId: am.member.ID(),
 		},
 		DcLocation: dcLocation,
 	})
@@ -1177,15 +1165,6 @@ func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp
 		return nil, err
 	}
 	return maxTSO, nil
-}
-
-// GetGlobalTSO returns global tso.
-func (am *AllocatorManager) GetGlobalTSO() (*pdpb.Timestamp, error) {
-	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
-	if err != nil {
-		return nil, err
-	}
-	return globalAllocator.(*GlobalTSOAllocator).getCurrentTSO()
 }
 
 func (am *AllocatorManager) getGRPCConn(addr string) (*grpc.ClientConn, bool) {

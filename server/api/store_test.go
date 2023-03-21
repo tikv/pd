@@ -40,7 +40,7 @@ type storeTestSuite struct {
 	suite.Suite
 	svr       *server.Server
 	grpcSvr   *server.GrpcServer
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 	stores    []*metapb.Store
 }

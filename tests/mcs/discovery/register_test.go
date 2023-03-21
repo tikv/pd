@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/mcs"
@@ -49,7 +50,7 @@ func (suite *serverRegisterTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1) // TODO: use API Server instead of PD Server
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -66,38 +67,90 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 }
 
 func (suite *serverRegisterTestSuite) TestServerRegister() {
-	suite.checkServerRegister("tso")
-	suite.checkServerRegister("resource_manager")
+	// test register, primary and unregister when start tso and resource-manager with only one server
+	for i := 0; i < 3; i++ {
+		suite.checkServerRegister(utils.TSOServiceName)
+	}
+	// TODO: uncomment after resource-manager is ready
+	// for i := 0; i < 3; i++ {
+	// suite.checkServerRegister(utils.ResourceManagerServiceName)
+	// }
 }
 
 func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
-	var (
-		s       bs.Server
-		cleanup func()
-	)
 	re := suite.Require()
-	switch serviceName {
-	case "tso":
-		s, cleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
-	case "resource_manager":
-		s, cleanup = mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints)
-	default:
-	}
+	s, cleanup := suite.addServer(serviceName)
 
 	addr := s.GetAddr()
 	client := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(client, serviceName)
-	re.NoError(err)
-	re.Equal(addr, endpoints[0])
 
 	// test API server discovery
-	exist, primary, err := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
+	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)
+	returnedEntry := &discovery.ServiceRegistryEntry{}
+	returnedEntry.Deserialize([]byte(endpoints[0]))
+	re.Equal(addr, returnedEntry.ServiceAddr)
+
+	// test primary when only one server
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
 	re.Equal(primary, addr)
 
+	// test API server discovery after unregister
 	cleanup()
 	endpoints, err = discovery.Discover(client, serviceName)
 	re.NoError(err)
 	re.Empty(endpoints)
+}
+
+func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
+	suite.checkServerPrimaryChange(utils.TSOServiceName, 3)
+	// TODO: uncomment after resource-manager is ready
+	// suite.checkServerPrimaryChange(utils.ResourceManagerServiceName, 3)
+}
+
+func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName string, serverNum int) {
+	re := suite.Require()
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
+	re.False(exist)
+	re.Empty(primary)
+
+	serverMap := make(map[string]bs.Server)
+	for i := 0; i < serverNum; i++ {
+		s, cleanup := suite.addServer(serviceName)
+		defer cleanup()
+		serverMap[s.GetAddr()] = s
+	}
+
+	expectedPrimary := mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
+	re.True(exist)
+	re.Equal(expectedPrimary, primary)
+	// close old primary
+	serverMap[primary].Close()
+	delete(serverMap, primary)
+
+	expectedPrimary = mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	// test API server discovery
+	client := suite.pdLeader.GetEtcdClient()
+	endpoints, err := discovery.Discover(client, serviceName)
+	re.NoError(err)
+	re.Len(endpoints, serverNum-1)
+
+	// test primary changed
+	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
+	re.True(exist)
+	re.Equal(expectedPrimary, primary)
+}
+
+func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, func()) {
+	re := suite.Require()
+	switch serviceName {
+	case utils.TSOServiceName:
+		return mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
+	case utils.ResourceManagerServiceName:
+		return mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints)
+	default:
+		return nil, nil
+	}
 }

@@ -19,6 +19,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/tikv/pd/pkg/mcs/utils"
 )
 
 const (
@@ -45,10 +47,10 @@ const (
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
 	resourceGroupStatesPath   = "states"
-	requestUnitConfigPath     = "ru_config"
+	controllerConfigPath      = "controller"
 	// tso storage endpoint has prefix `tso`
 	microserviceKey = "microservice"
-	tsoServiceKey   = "tso"
+	tsoServiceKey   = utils.TSOServiceName
 	timestampKey    = "timestamp"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.

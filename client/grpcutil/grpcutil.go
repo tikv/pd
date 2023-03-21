@@ -90,11 +90,12 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string
 	if err != nil {
 		return nil, err
 	}
-	if old, ok := clientConns.Load(addr); ok {
-		cc.Close()
-		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
-		return old.(*grpc.ClientConn), nil
+	old, ok := clientConns.LoadOrStore(addr, cc)
+	if !ok {
+		// Successfully stored the connection.
+		return cc, nil
 	}
-	clientConns.Store(addr, cc)
-	return cc, nil
+	cc.Close()
+	log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
+	return old.(*grpc.ClientConn), nil
 }

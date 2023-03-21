@@ -281,8 +281,19 @@ type tokenBucketReconfigureArgs struct {
 	NotifyThreshold float64
 }
 
+type LimiterOption func(*Limiter)
+
+func resetLowProcess() func(*Limiter) {
+	return func(limiter *Limiter) {
+		limiter.isLowProcess = false
+	}
+}
+
 // Reconfigure modifies all setting for limiter
-func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) {
+func (lim *Limiter) Reconfigure(now time.Time,
+	args tokenBucketReconfigureArgs,
+	opts ...LimiterOption,
+) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	log.Debug("[resource group controller] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
@@ -292,7 +303,9 @@ func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) 
 	lim.limit = Limit(args.NewRate)
 	lim.burst = args.NewBurst
 	lim.notifyThreshold = args.NotifyThreshold
-	lim.isLowProcess = false
+	for _, opt := range opts {
+		opt(lim)
+	}
 	lim.maybeNotify()
 	log.Debug("[resource group controller] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
 }
@@ -396,9 +409,9 @@ func (limit Limit) tokensFromDuration(d time.Duration) float64 {
 
 // WaitReservations is used to process a series of reservations
 // so that all limiter tokens are returned if one reservation fails
-func WaitReservations(ctx context.Context, now time.Time, reservations []*Reservation) error {
+func WaitReservations(ctx context.Context, now time.Time, reservations []*Reservation) (time.Duration, error) {
 	if len(reservations) == 0 {
-		return nil
+		return 0, nil
 	}
 	cancel := func() {
 		for _, res := range reservations {
@@ -409,7 +422,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
-			return errs.ErrClientResourceGroupThrottled
+			return 0, errs.ErrClientResourceGroupThrottled
 		}
 		delay := res.DelayFrom(now)
 		if delay > longestDelayDuration {
@@ -417,7 +430,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 		}
 	}
 	if longestDelayDuration <= 0 {
-		return nil
+		return 0, nil
 	}
 	t := time.NewTimer(longestDelayDuration)
 	defer t.Stop()
@@ -425,11 +438,11 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	select {
 	case <-t.C:
 		// We can proceed.
-		return nil
+		return longestDelayDuration, nil
 	case <-ctx.Done():
 		// Context was canceled before we could proceed.  Cancel the
 		// reservation, which may permit other events to proceed sooner.
 		cancel()
-		return ctx.Err()
+		return 0, ctx.Err()
 	}
 }

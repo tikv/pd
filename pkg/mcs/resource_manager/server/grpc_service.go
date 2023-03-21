@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -59,7 +60,7 @@ type Service struct {
 }
 
 // NewService creates a new resource manager service.
-func NewService[T RUConfigProvider](svr bs.Server) registry.RegistrableService {
+func NewService[T ResourceManagerConfigProvider](svr bs.Server) registry.RegistrableService {
 	manager := NewManager[T](svr)
 
 	return &Service{
@@ -85,7 +86,7 @@ func (s *Service) GetManager() *Manager {
 }
 
 func (s *Service) checkServing() error {
-	if !s.manager.srv.IsServing() {
+	if s.manager == nil || s.manager.srv == nil || !s.manager.srv.IsServing() {
 		return errNotLeader
 	}
 	return nil
@@ -169,6 +170,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		if err == io.EOF {
 			return nil
 		}
+		failpoint.Inject("acquireFailed", func() {
+			err = errors.New("error")
+		})
 		if err != nil {
 			return errors.WithStack(err)
 		}

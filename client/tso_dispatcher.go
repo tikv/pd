@@ -45,8 +45,6 @@ type lastTSO struct {
 }
 
 const (
-	dialTimeout            = 3 * time.Second
-	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
 	retryInterval          = 500 * time.Millisecond
@@ -161,6 +159,7 @@ func (c *tsoClient) tsCancelLoop() {
 		case <-ticker.C:
 			continue
 		case <-tsCancelLoopCtx.Done():
+			log.Info("exit tso requests cancel loop")
 			return
 		}
 	}

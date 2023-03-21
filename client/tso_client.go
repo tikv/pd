@@ -29,11 +29,16 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// TSOClient defines basic interface of the TSO client
-// For test only
+// TSOClient is the client used to get timestamps.
 type TSOClient interface {
-	// GetTSOAllocators returns {dc-location -> TSO allocator serving URL} connection map
-	GetTSOAllocators() *sync.Map
+	// GetTS gets a timestamp from PD.
+	GetTS(ctx context.Context) (int64, int64, error)
+	// GetTSAsync gets a timestamp from PD, without block the caller.
+	GetTSAsync(ctx context.Context) TSFuture
+	// GetLocalTS gets a local timestamp from PD.
+	GetLocalTS(ctx context.Context, dcLocation string) (int64, int64, error)
+	// GetLocalTSAsync gets a local timestamp from PD, without block the caller.
+	GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture
 }
 
 type tsoRequest struct {
@@ -60,7 +65,7 @@ var tsoReqPool = sync.Pool{
 type tsoClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     *sync.WaitGroup
+	wg     sync.WaitGroup
 	option *option
 
 	keyspaceID   uint32
@@ -86,12 +91,11 @@ type tsoClient struct {
 }
 
 // newTSOClient returns a new TSO client.
-func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, option *option,
-	keyspaceID uint32, svcDiscovery ServiceDiscovery, eventSrc tsoAllocatorEventSource, factory tsoStreamBuilderFactory) *tsoClient {
+func newTSOClient(ctx context.Context, cancel context.CancelFunc, option *option, keyspaceID uint32,
+	svcDiscovery ServiceDiscovery, eventSrc tsoAllocatorEventSource, factory tsoStreamBuilderFactory) *tsoClient {
 	c := &tsoClient{
 		ctx:                       ctx,
 		cancel:                    cancel,
-		wg:                        wg,
 		option:                    option,
 		keyspaceID:                keyspaceID,
 		svcDiscovery:              svcDiscovery,
@@ -108,20 +112,23 @@ func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitG
 	return c
 }
 
-func (c *tsoClient) setup() error {
-	if err := c.svcDiscovery.Init(); err != nil {
-		return err
-	}
+func (c *tsoClient) Setup() {
+	c.svcDiscovery.CheckMemberChanged()
+	c.updateTSODispatcher()
 
 	// Start the daemons.
 	c.wg.Add(2)
 	go c.tsoDispatcherCheckLoop()
 	go c.tsCancelLoop()
-	return nil
 }
 
 // Close closes the TSO client
 func (c *tsoClient) Close() {
+	log.Info("closing tso client")
+
+	c.cancel()
+	c.wg.Wait()
+
 	log.Info("close tso client")
 	c.tsoDispatcher.Range(func(_, dispatcherInterface interface{}) bool {
 		if dispatcherInterface != nil {
@@ -132,7 +139,8 @@ func (c *tsoClient) Close() {
 		}
 		return true
 	})
-	c.svcDiscovery.Close()
+
+	log.Info("tso client is closed")
 }
 
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map

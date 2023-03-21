@@ -34,8 +34,10 @@ import (
 )
 
 const (
-	globalDCLocation     = "global"
-	memberUpdateInterval = time.Minute
+	globalDCLocation          = "global"
+	memberUpdateInterval      = time.Minute
+	serviceModeUpdateInterval = 3 * time.Second
+	updateMemberTimeout       = time.Second // Use a shorter timeout to recover faster from network isolation.
 )
 
 // ServiceDiscovery defines the general interface for service discovery on a quorum-based cluster
@@ -110,6 +112,8 @@ type pdServiceDiscovery struct {
 	// addr -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
+	// serviceModeUpdateCb will be called when the service mode gets updated
+	serviceModeUpdateCb func(pdpb.ServiceMode)
 	// leaderSwitchedCbs will be called after the leader swichted
 	leaderSwitchedCbs []func()
 	// membersChangedCbs will be called after there is any membership change in the
@@ -135,15 +139,16 @@ type pdServiceDiscovery struct {
 }
 
 // newPDServiceDiscovery returns a new baseClient.
-func newPDServiceDiscovery(ctx context.Context, cancel context.CancelFunc,
-	wg *sync.WaitGroup, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) *pdServiceDiscovery {
+func newPDServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup,
+	serviceModeUpdateCb func(pdpb.ServiceMode), urls []string, tlsCfg *tlsutil.TLSConfig, option *option) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
-		checkMembershipCh: make(chan struct{}, 1),
-		ctx:               ctx,
-		cancel:            cancel,
-		wg:                wg,
-		tlsCfg:            tlsCfg,
-		option:            option,
+		checkMembershipCh:   make(chan struct{}, 1),
+		ctx:                 ctx,
+		cancel:              cancel,
+		wg:                  wg,
+		serviceModeUpdateCb: serviceModeUpdateCb,
+		tlsCfg:              tlsCfg,
+		option:              option,
 	}
 	pdsd.urls.Store(urls)
 	return pdsd
@@ -161,8 +166,11 @@ func (c *pdServiceDiscovery) Init() error {
 		}
 		log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
-		c.wg.Add(1)
-		go c.memberLoop()
+		c.updateServiceMode()
+
+		c.wg.Add(2)
+		go c.updateMemberLoop()
+		go c.updateServiceModeLoop()
 
 		c.isInitialized = true
 	}
@@ -185,7 +193,7 @@ func (c *pdServiceDiscovery) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
-func (c *pdServiceDiscovery) memberLoop() {
+func (c *pdServiceDiscovery) updateMemberLoop() {
 	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -204,6 +212,23 @@ func (c *pdServiceDiscovery) memberLoop() {
 		if err := c.updateMember(); err != nil {
 			log.Error("[pd] failed to update member", errs.ZapError(err))
 		}
+	}
+}
+
+func (c *pdServiceDiscovery) updateServiceModeLoop() {
+	defer c.wg.Done()
+
+	ctx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
+
+	for {
+		select {
+		case <-time.After(serviceModeUpdateInterval):
+		case <-ctx.Done():
+			return
+		}
+
+		c.updateServiceMode()
 	}
 }
 
@@ -294,6 +319,10 @@ func (c *pdServiceDiscovery) SetTSOLocalServAddrsUpdatedCallback(callback tsoLoc
 // SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
 // allocator leader is updated.
 func (c *pdServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc) {
+	addr := c.getLeaderAddr()
+	if len(addr) > 0 {
+		callback(addr)
+	}
 	c.tsoGlobalAllocLeaderUpdatedCb = callback
 }
 
@@ -318,22 +347,22 @@ func (c *pdServiceDiscovery) getFollowerAddrs() []string {
 func (c *pdServiceDiscovery) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
-	var clusterID uint64
-	for _, u := range c.GetURLs() {
-		members, err := c.getMembers(ctx, u, c.option.timeout)
-		if err != nil || members.GetHeader() == nil {
-			log.Warn("[pd] failed to get cluster id", zap.String("url", u), errs.ZapError(err))
+	clusterID := uint64(0)
+	for _, url := range c.GetURLs() {
+		clusterInfo, err := c.getClusterInfo(ctx, url, c.option.timeout)
+		if err != nil || clusterInfo.GetHeader() == nil {
+			log.Warn("[pd] failed to get cluster id", zap.String("url", url), errs.ZapError(err))
 			continue
 		}
 		if clusterID == 0 {
-			clusterID = members.GetHeader().GetClusterId()
+			clusterID = clusterInfo.GetHeader().GetClusterId()
 			continue
 		}
 		failpoint.Inject("skipClusterIDCheck", func() {
 			failpoint.Continue()
 		})
 		// All URLs passed in should have the same cluster ID.
-		if members.GetHeader().GetClusterId() != clusterID {
+		if clusterInfo.GetHeader().GetClusterId() != clusterID {
 			return errors.WithStack(errUnmatchedClusterID)
 		}
 	}
@@ -345,14 +374,29 @@ func (c *pdServiceDiscovery) initClusterID() error {
 	return nil
 }
 
+func (c *pdServiceDiscovery) updateServiceMode() {
+	leaderAddr := c.getLeaderAddr()
+	if len(leaderAddr) > 0 {
+		clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
+		if err != nil {
+			log.Warn("[pd] failed to get cluster info for the leader", zap.String("leader-addr", leaderAddr), errs.ZapError(err))
+			return
+		}
+		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
+	} else {
+		log.Warn("[pd] no leader found")
+	}
+}
+
 func (c *pdServiceDiscovery) updateMember() error {
-	for i, u := range c.GetURLs() {
+	for i, url := range c.GetURLs() {
 		failpoint.Inject("skipFirstUpdateMember", func() {
 			if i == 0 {
 				failpoint.Continue()
 			}
 		})
-		members, err := c.getMembers(c.ctx, u, updateMemberTimeout)
+
+		members, err := c.getMembers(c.ctx, url, updateMemberTimeout)
 		// Check the cluster ID.
 		if err == nil && members.GetHeader().GetClusterId() != c.clusterID {
 			err = errs.ErrClientUpdateMember.FastGenByArgs("cluster id does not match")
@@ -370,7 +414,7 @@ func (c *pdServiceDiscovery) updateMember() error {
 		// Failed to get members
 		if err != nil {
 			log.Info("[pd] cannot update member from this address",
-				zap.String("address", u),
+				zap.String("address", url),
 				errs.ZapError(err))
 			select {
 			case <-c.ctx.Done():
@@ -391,6 +435,25 @@ func (c *pdServiceDiscovery) updateMember() error {
 		return errTSO
 	}
 	return errs.ErrClientGetMember.FastGenByArgs(c.GetURLs())
+}
+
+func (c *pdServiceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cc, err := c.GetOrCreateGRPCConn(url)
+	if err != nil {
+		return nil, err
+	}
+	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
+	if err != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+	}
+	if clusterInfo.GetHeader().GetError() != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+	}
+	return clusterInfo, nil
 }
 
 func (c *pdServiceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {

@@ -17,18 +17,19 @@ package server
 import (
 	"context"
 	"os"
+	"strings"
 
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"google.golang.org/grpc"
 )
 
-// CleanupFunc closes test pd server(s) and deletes any files left behind.
-type CleanupFunc func()
-
 // NewTSOTestServer creates a tso server for testing.
-func NewTSOTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, CleanupFunc, error) {
+func NewTSOTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, testutil.CleanupFunc, error) {
 	// New zap logger
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
@@ -58,4 +59,11 @@ func NewTSOTestDefaultConfig() (*Config, error) {
 	cfg := NewConfig()
 	flagSet := cmd.Flags()
 	return cfg, cfg.Parse(flagSet)
+}
+
+// MustNewGrpcClient must create a new TSO grpc client.
+func MustNewGrpcClient(re *require.Assertions, addr string) (*grpc.ClientConn, tsopb.TSOClient) {
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+	re.NoError(err)
+	return conn, tsopb.NewTSOClient(conn)
 }

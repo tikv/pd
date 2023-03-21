@@ -19,15 +19,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -44,6 +47,10 @@ const (
 	defaultWriteCostPerByte = 1. / 1024
 	// 1 RU = 3 millisecond CPU time
 	defaultCPUMsCost = 1. / 3
+
+	// Because the resource manager has not been deployed in microservice mode,
+	// do not enable this function.
+	defaultDegradedModeWaitDuration = time.Second * 0
 )
 
 // Config is the configuration for the resource manager.
@@ -69,9 +76,30 @@ type Config struct {
 	// second too.
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
+	Controller ControllerConfig `toml:"controller" json:"controller"`
+}
+
+// ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
+type ControllerConfig struct {
+	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
+	DegradedModeWaitDuration typeutil.Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
+
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
-	RequestUnit RequestUnitConfig
+	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
+}
+
+// Adjust adjusts the configuration and initializes it with the default value if necessary.
+func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
+	if rmc == nil {
+		return
+	}
+	rmc.RequestUnit.Adjust()
+
+	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
+	failpoint.Inject("enableDegradedMode", func() {
+		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
+	})
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
@@ -183,9 +211,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.Log.Format = utils.DefaultLogFormat
 	}
 
+	c.Controller.Adjust(configMetaData.Child("controller"))
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
-
-	c.RequestUnit.Adjust()
 
 	return nil
 }

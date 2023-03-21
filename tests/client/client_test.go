@@ -207,47 +207,6 @@ func TestLeaderTransfer(t *testing.T) {
 	wg.Wait()
 }
 
-// More details can be found in this issue: https://github.com/tikv/pd/issues/4884
-func TestUpdateAfterResetTSO(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2)
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
-
-	testutil.Eventually(re, func() bool {
-		_, _, err := cli.GetTS(context.TODO())
-		return err == nil
-	})
-	// Transfer leader to trigger the TSO resetting.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/updateAfterResetTSO", "return(true)"))
-	oldLeaderName := cluster.WaitLeader()
-	err = cluster.GetServer(oldLeaderName).ResignLeader()
-	re.NoError(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/updateAfterResetTSO"))
-	newLeaderName := cluster.WaitLeader()
-	re.NotEqual(oldLeaderName, newLeaderName)
-	// Request a new TSO.
-	testutil.Eventually(re, func() bool {
-		_, _, err := cli.GetTS(context.TODO())
-		return err == nil
-	})
-	// Transfer leader back.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
-	err = cluster.GetServer(newLeaderName).ResignLeader()
-	re.NoError(err)
-	// Should NOT panic here.
-	testutil.Eventually(re, func() bool {
-		_, _, err := cli.GetTS(context.TODO())
-		return err == nil
-	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp"))
-}
-
 func TestTSOAllocatorLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -293,7 +252,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 
 	// Check allocator leaders URL map.
 	cli.Close()
-	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(cli.(pd.TSOClient)) {
+	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(cli.(TSOAllocatorsGetter)) {
 		if dcLocation == tso.GlobalDCLocation {
 			urls := innerCli.GetServiceDiscovery().GetURLs()
 			sort.Strings(urls)
@@ -411,6 +370,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
 }
 
+// TODO: migrate the Local/Global TSO tests to TSO integration test folder.
 func TestGlobalAndLocalTSO(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -512,7 +472,10 @@ func requestGlobalAndLocalTSO(
 	wg.Wait()
 }
 
-func getTSOAllocatorServingEndpointURLs(c pd.TSOClient) map[string]string {
+// GetTSOAllocators defines the TSO allocators getter.
+type TSOAllocatorsGetter interface{ GetTSOAllocators() *sync.Map }
+
+func getTSOAllocatorServingEndpointURLs(c TSOAllocatorsGetter) map[string]string {
 	allocatorLeaders := make(map[string]string)
 	c.GetTSOAllocators().Range(func(dcLocation, url interface{}) bool {
 		allocatorLeaders[dcLocation.(string)] = url.(string)
@@ -778,7 +741,7 @@ var (
 
 type clientTestSuite struct {
 	suite.Suite
-	cleanup         server.CleanupFunc
+	cleanup         testutil.CleanupFunc
 	ctx             context.Context
 	clean           context.CancelFunc
 	srv             *server.Server
@@ -857,48 +820,6 @@ func (suite *clientTestSuite) bootstrapServer(header *pdpb.RequestHeader, client
 	resp, err := client.Bootstrap(context.Background(), req)
 	suite.NoError(err)
 	suite.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
-}
-
-func (suite *clientTestSuite) TestNormalTSO() {
-	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
-			defer wg.Done()
-			var lastTS uint64
-			for i := 0; i < tsoRequestRound; i++ {
-				physical, logical, err := suite.client.GetTS(context.Background())
-				suite.NoError(err)
-				ts := tsoutil.ComposeTS(physical, logical)
-				suite.Less(lastTS, ts)
-				lastTS = ts
-			}
-		}()
-	}
-	wg.Wait()
-}
-
-func (suite *clientTestSuite) TestGetTSAsync() {
-	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
-			defer wg.Done()
-			tsFutures := make([]pd.TSFuture, tsoRequestRound)
-			for i := range tsFutures {
-				tsFutures[i] = suite.client.GetTSAsync(context.Background())
-			}
-			var lastTS uint64 = math.MaxUint64
-			for i := len(tsFutures) - 1; i >= 0; i-- {
-				physical, logical, err := tsFutures[i].Wait()
-				suite.NoError(err)
-				ts := tsoutil.ComposeTS(physical, logical)
-				suite.Greater(lastTS, ts)
-				lastTS = ts
-			}
-		}()
-	}
-	wg.Wait()
 }
 
 func (suite *clientTestSuite) TestGetRegion() {
