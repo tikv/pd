@@ -39,13 +39,25 @@ type RegionFit struct {
 func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
 	fit := f.getRuleFitByStoreID(srcStoreID)
 	// check the target store is fit all constraints.
-	if fit == nil || !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
+	if fit == nil {
 		return false
 	}
-
 	// the members of the rule are same, it shouldn't check the score.
+	// it is used to transfer role like transfer leader.
 	if fit.contain(dstStore.GetID()) {
 		return true
+	}
+
+	// it should be allowed to exchange role if both the source and target's rule role is same.
+	// e.g. transfer leader from store 1 to store 2, and store-1 and store-2 are both voter.
+	targetFit := f.getRuleFitByStoreID(dstStore.GetID())
+	if targetFit != nil && targetFit.Rule.Role == fit.Rule.Role {
+		return true
+	}
+
+	// the target store should be fit all constraints.
+	if !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
+		return false
 	}
 
 	score := isolationStoreScore(srcStoreID, dstStore, fit.stores, fit.Rule.LocationLabels)
