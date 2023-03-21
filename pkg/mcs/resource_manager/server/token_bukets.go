@@ -185,8 +185,10 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 
 		// Need to reserve burst limit to next balance.
 		if burstLimit > 0 && slot.tokenCapacity > burstLimit {
-			gts.lastBurstTokens += slot.tokenCapacity - burstLimit
-			assignToken -= slot.tokenCapacity - burstLimit
+			reservedTokens := slot.tokenCapacity - burstLimit
+			gts.lastBurstTokens += reservedTokens
+			gts.Tokens -= reservedTokens
+			assignToken -= reservedTokens
 		}
 
 		slot.tokenCapacity += assignToken
