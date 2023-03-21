@@ -88,7 +88,7 @@ func (se *StorageEndpoint) SaveTimestamp(prefix string, key string, ts time.Time
 				previousTS = tsWindow
 			}
 		}
-		if typeutil.SubRealTimeByWallClock(ts, previousTS) <= 0 {
+		if previousTS != typeutil.ZeroTime && typeutil.SubRealTimeByWallClock(ts, previousTS) <= 0 {
 			log.Warn("save timestamp failed, the timestamp is not bigger than the previous one", zap.Time("previous", previousTS), zap.Time("current", ts))
 			return nil
 		}
