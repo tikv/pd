@@ -79,8 +79,11 @@ type tsoServiceDiscovery struct {
 }
 
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
-func newTSOServiceDiscovery(ctx context.Context, cancel context.CancelFunc, metacli MetaStorageClient,
-	clusterID uint64, keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) ServiceDiscovery {
+func newTSOServiceDiscovery(
+	ctx context.Context, metacli MetaStorageClient,
+	clusterID uint64, keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option,
+) ServiceDiscovery {
+	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
 		ctx:               ctx,
 		cancel:            cancel,
