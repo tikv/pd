@@ -169,8 +169,6 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 
 func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 	re := suite.Require()
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
 
 	// Re-create the cluster to enable the failpoints.
 	suite.TearDownSuite()
@@ -180,6 +178,8 @@ func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackSync"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackUpdate"))
 
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
