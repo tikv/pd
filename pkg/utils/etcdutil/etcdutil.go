@@ -193,22 +193,30 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
 }
 
+// CreateClientsWithMultiEndpoint creates etcd v3 client and http client.
+func CreateClientsWithMultiEndpoint(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
+	client, err := createEtcdClientWithMultiEndpoint(tlsConfig, acUrls)
+	if err != nil {
+		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+	httpClient := createHTTPClient(tlsConfig)
+	return client, httpClient, nil
+}
+
 // CreateClients creates etcd v3 client and http client.
-func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
+func CreateClients(tlsConfig *tls.Config, acUrls url.URL) (*clientv3.Client, *http.Client, error) {
 	client, err := createEtcdClient(tlsConfig, acUrls)
 	if err != nil {
 		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   tlsConfig,
-		},
-	}
+	httpClient := createHTTPClient(tlsConfig)
 	return client, httpClient, nil
 }
 
-func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, error) {
+// createEtcdClientWithMultiEndpoint creates etcd v3 client.
+// Note: it will be used by micro service server and support multi etcd endpoints.
+// FIXME: But it cannot switch etcd endpoints as soon as possible when one of endpoints is with io hang.
+func createEtcdClientWithMultiEndpoint(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, error) {
 	if len(acUrls) == 0 {
 		return nil, errs.ErrNewEtcdClient.FastGenByArgs("no available etcd address")
 	}
@@ -242,6 +250,32 @@ func createEtcdClient(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client
 		log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
 	}
 	return client, err
+}
+
+// createEtcdClient creates etcd v3 client.
+// Note: it will be used by legacy pd-server, and only connect to leader only.
+func createEtcdClient(tlsConfig *tls.Config, acURL url.URL) (*clientv3.Client, error) {
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:   []string{acURL.String()},
+		DialTimeout: defaultEtcdClientTimeout,
+		TLS:         tlsConfig,
+		LogConfig:   &lgc,
+	})
+	if err == nil {
+		log.Info("create etcd v3 client", zap.String("endpoints", acURL.String()))
+	}
+	return client, err
+}
+
+func createHTTPClient(tlsConfig *tls.Config) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+			TLSClientConfig:   tlsConfig,
+		},
+	}
 }
 
 // InitClusterID creates a cluster ID for the given key if it hasn't existed.
