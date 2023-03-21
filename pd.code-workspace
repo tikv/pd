@@ -17,6 +17,10 @@
 			"path": "tests/mcs"
 		},
 		{
+			"name": "tso-tests",
+			"path": "tests/tso"
+		},
+		{
 			"name": "pd-tso-bench",
 			"path": "tools/pd-tso-bench"
 		}

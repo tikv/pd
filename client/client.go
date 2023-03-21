@@ -74,14 +74,6 @@ type Client interface {
 	// GetLeaderAddr returns current leader's address. It returns "" before
 	// syncing leader from server.
 	GetLeaderAddr() string
-	// GetTS gets a timestamp from PD.
-	GetTS(ctx context.Context) (int64, int64, error)
-	// GetTSAsync gets a timestamp from PD, without block the caller.
-	GetTSAsync(ctx context.Context) TSFuture
-	// GetLocalTS gets a local timestamp from PD.
-	GetLocalTS(ctx context.Context, dcLocation string) (int64, int64, error)
-	// GetLocalTSAsync gets a local timestamp from PD, without block the caller.
-	GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -144,7 +136,9 @@ type Client interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// MetaStorageClient returns the meta storage client.
+	// TSOClient is the TSO client.
+	TSOClient
+	// MetaStorageClient is the meta storage client.
 	MetaStorageClient
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient

@@ -404,6 +404,7 @@ func (s *Server) startServer(ctx context.Context) error {
 			}
 		}
 	}
+
 	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
@@ -540,10 +541,9 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() { // disable tso service and resource manager service in api server
-		s.serverLoopWg.Add(2)
+	if s.IsAPIServiceMode() { // disable tso service in api server
+		s.serverLoopWg.Add(1)
 		go s.watchServicePrimaryAddrLoop(mcs.TSOServiceName)
-		go s.watchServicePrimaryAddrLoop(mcs.ResourceManagerServiceName)
 	} else { // enable tso service
 		s.serverLoopWg.Add(1)
 		go s.tsoAllocatorLoop()
@@ -1458,6 +1458,7 @@ func (s *Server) campaignLeader() {
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
+
 	if !s.IsAPIServiceMode() {
 		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 		if err != nil {
@@ -1715,7 +1716,7 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 	log.Info("start to watch", zap.String("service-key", serviceKey))
 
 	primary := &tsopb.Participant{}
-	ok, _, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
+	ok, rev, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
 	if err != nil {
 		log.Error("get service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
 	}
@@ -1727,7 +1728,7 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 		log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))
 	}
 
-	watchChan := s.client.Watch(ctx, serviceKey, clientv3.WithPrefix())
+	watchChan := s.client.Watch(ctx, serviceKey, clientv3.WithPrefix(), clientv3.WithRev(rev))
 	for {
 		select {
 		case <-ctx.Done():

@@ -29,11 +29,16 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// TSOClient defines basic interface of the TSO client
-// For test only
+// TSOClient is the client used to get timestamps.
 type TSOClient interface {
-	// GetTSOAllocators returns {dc-location -> TSO allocator serving URL} connection map
-	GetTSOAllocators() *sync.Map
+	// GetTS gets a timestamp from PD.
+	GetTS(ctx context.Context) (int64, int64, error)
+	// GetTSAsync gets a timestamp from PD, without block the caller.
+	GetTSAsync(ctx context.Context) TSFuture
+	// GetLocalTS gets a local timestamp from PD.
+	GetLocalTS(ctx context.Context, dcLocation string) (int64, int64, error)
+	// GetLocalTSAsync gets a local timestamp from PD, without block the caller.
+	GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture
 }
 
 type tsoRequest struct {
