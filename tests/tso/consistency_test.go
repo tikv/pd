@@ -68,23 +68,20 @@ func (suite *tsoConsistencyTestSuite) SetupSuite() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	switch suite.legacy {
-	case true:
+	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
-		re.NoError(err)
-		err = suite.cluster.RunInitialServers()
-		re.NoError(err)
-		leaderName := suite.cluster.WaitLeader()
-		suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
-		suite.pdClient = testutil.MustNewPDGrpcClient(re, suite.pdLeaderServer.GetAddr())
-	case false:
+	} else {
 		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount)
-		re.NoError(err)
-		err = suite.cluster.RunInitialServers()
-		re.NoError(err)
-		leaderName := suite.cluster.WaitLeader()
-		suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
-		backendEndpoints := suite.pdLeaderServer.GetAddr()
+	}
+	re.NoError(err)
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := suite.cluster.WaitLeader()
+	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
+	backendEndpoints := suite.pdLeaderServer.GetAddr()
+	if suite.legacy {
+		suite.pdClient = testutil.MustNewPDGrpcClient(re, backendEndpoints)
+	} else {
 		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints)
 		suite.tsoClient = testutil.MustNewTSOGrpcClient(re, suite.tsoServer.GetAddr())
 	}
@@ -99,20 +96,16 @@ func (suite *tsoConsistencyTestSuite) TearDownSuite() {
 }
 
 func (suite *tsoConsistencyTestSuite) getClusterID() uint64 {
-	switch suite.legacy {
-	case true:
+	if suite.legacy {
 		return suite.pdLeaderServer.GetServer().ClusterID()
-	case false:
-		return suite.tsoServer.ClusterID()
 	}
-	panic("unreachable")
+	return suite.tsoServer.ClusterID()
 }
 
 func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32) *pdpb.Timestamp {
 	re := suite.Require()
 	clusterID := suite.getClusterID()
-	switch suite.legacy {
-	case true:
+	if suite.legacy {
 		req := &pdpb.TsoRequest{
 			Header:     &pdpb.RequestHeader{ClusterId: clusterID},
 			DcLocation: tsopkg.GlobalDCLocation,
@@ -125,21 +118,19 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
 		return checkAndReturnTimestampResponse(re, resp)
-	case false:
-		req := &tsopb.TsoRequest{
-			Header:     &tsopb.RequestHeader{ClusterId: clusterID},
-			DcLocation: tsopkg.GlobalDCLocation,
-			Count:      count,
-		}
-		tsoClient, err := suite.tsoClient.Tso(ctx)
-		re.NoError(err)
-		defer tsoClient.CloseSend()
-		re.NoError(tsoClient.Send(req))
-		resp, err := tsoClient.Recv()
-		re.NoError(err)
-		return checkAndReturnTimestampResponse(re, resp)
 	}
-	panic("unreachable")
+	req := &tsopb.TsoRequest{
+		Header:     &tsopb.RequestHeader{ClusterId: clusterID},
+		DcLocation: tsopkg.GlobalDCLocation,
+		Count:      count,
+	}
+	tsoClient, err := suite.tsoClient.Tso(ctx)
+	re.NoError(err)
+	defer tsoClient.CloseSend()
+	re.NoError(tsoClient.Send(req))
+	resp, err := tsoClient.Recv()
+	re.NoError(err)
+	return checkAndReturnTimestampResponse(re, resp)
 }
 
 func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
@@ -181,6 +172,8 @@ func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
+	// Re-create the cluster to enable the failpoints.
+	suite.TearDownSuite()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackUpdate", `return(true)`))
 	suite.SetupSuite()

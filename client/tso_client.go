@@ -29,7 +29,7 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// TSOClient is the client used to get TSO.
+// TSOClient is the client used to get timestamps.
 type TSOClient interface {
 	// GetTS gets a timestamp from PD.
 	GetTS(ctx context.Context) (int64, int64, error)

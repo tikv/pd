@@ -1,4 +1,4 @@
-module github.com/JmPotato/pd/tests/tso
+module github.com/tikv/pd/tests/tso
 
 go 1.20
 

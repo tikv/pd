@@ -63,25 +63,21 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	switch suite.legacy {
-	case true:
+	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
-		re.NoError(err)
-		err = suite.cluster.RunInitialServers()
-		re.NoError(err)
-		leaderName := suite.cluster.WaitLeader()
-		pdLeader := suite.cluster.GetServer(leaderName)
-		backendEndpoints := pdLeader.GetAddr()
+	} else {
+		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount)
+	}
+	re.NoError(err)
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := suite.cluster.WaitLeader()
+	pdLeader := suite.cluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	if suite.legacy {
 		suite.client, err = pd.NewClientWithContext(suite.ctx, strings.Split(backendEndpoints, ","), pd.SecurityOption{})
 		re.NoError(err)
-	case false:
-		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount)
-		re.NoError(err)
-		err = suite.cluster.RunInitialServers()
-		re.NoError(err)
-		leaderName := suite.cluster.WaitLeader()
-		pdLeader := suite.cluster.GetServer(leaderName)
-		backendEndpoints := pdLeader.GetAddr()
+	} else {
 		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints)
 		suite.client = mcs.SetupTSOClient(suite.ctx, re, strings.Split(backendEndpoints, ","))
 	}
