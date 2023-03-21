@@ -129,8 +129,7 @@ func (suite *tsoServerTestSuite) request(ctx context.Context, count uint32) (err
 		re.NoError(err)
 		defer tsoClient.CloseSend()
 		re.NoError(tsoClient.Send(req))
-		resp, err := tsoClient.Recv()
-		re.NotNil(resp)
+		_, err = tsoClient.Recv()
 		return err
 	}
 	req := &tsopb.TsoRequest{
@@ -142,8 +141,7 @@ func (suite *tsoServerTestSuite) request(ctx context.Context, count uint32) (err
 	re.NoError(err)
 	defer tsoClient.CloseSend()
 	re.NoError(tsoClient.Send(req))
-	resp, err := tsoClient.Recv()
-	re.NotNil(resp)
+	_, err = tsoClient.Recv()
 	return err
 }
 
@@ -165,8 +163,9 @@ func (suite *tsoServerTestSuite) TestConcurrentlyReset() {
 }
 
 func (suite *tsoServerTestSuite) TestZeroTSOCount() {
+	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	suite.Require().NoError(suite.request(ctx, 0))
+	re.ErrorContains(suite.request(ctx, 0), "tso count should be positive")
 }
