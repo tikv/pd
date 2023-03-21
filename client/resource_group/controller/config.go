@@ -32,8 +32,6 @@ var (
 )
 
 const (
-	initialRequestUnits = 10000
-	bufferRUs           = 2000
 	// movingAvgFactor is the weight applied to a new "sample" of RU usage (with one
 	// sample per mainLoopUpdateInterval).
 	//
@@ -42,6 +40,7 @@ const (
 	//	0.5^(1 second / mainLoopUpdateInterval)
 	movingAvgFactor                = 0.5
 	notifyFraction                 = 0.1
+	tokenReserveFraction           = 0.8
 	consumptionsReportingThreshold = 100
 	extendedReportingPeriodFactor  = 4
 	// defaultGroupCleanupInterval is the interval to clean up the deleted resource groups in memory.
