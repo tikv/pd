@@ -81,10 +81,10 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
 
 	suite.leaderServer = cluster.GetServer(cluster.GetLeader())
 	suite.NotNil(suite.leaderServer)
-	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewPDGrpcClient(re, suite.leaderServer.GetAddr())
+	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(re, suite.leaderServer.GetAddr())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		suite.dcClientMap[dcLocation] = testutil.MustNewPDGrpcClient(re, cluster.GetServer(pdName).GetAddr())
+		suite.dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -156,10 +156,10 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSOOverflow() {
 
 	suite.leaderServer = cluster.GetServer(cluster.GetLeader())
 	suite.NotNil(suite.leaderServer)
-	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewPDGrpcClient(re, suite.leaderServer.GetAddr())
+	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(re, suite.leaderServer.GetAddr())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		suite.dcClientMap[dcLocation] = testutil.MustNewPDGrpcClient(re, cluster.GetServer(pdName).GetAddr())
+		suite.dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -188,10 +188,10 @@ func (suite *tsoConsistencyTestSuite) TestLocalAllocatorLeaderChange() {
 
 	suite.leaderServer = cluster.GetServer(cluster.GetLeader())
 	suite.NotNil(suite.leaderServer)
-	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewPDGrpcClient(re, suite.leaderServer.GetAddr())
+	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(re, suite.leaderServer.GetAddr())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		suite.dcClientMap[dcLocation] = testutil.MustNewPDGrpcClient(re, cluster.GetServer(pdName).GetAddr())
+		suite.dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -249,7 +249,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	leaderCli := testutil.MustNewPDGrpcClient(re, leaderServer.GetAddr())
+	leaderCli := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(cluster.GetCluster().GetId()),
 		Count:      tsoCount,
@@ -290,7 +290,7 @@ func (suite *tsoConsistencyTestSuite) testTSO(cluster *tests.TestCluster, dcLoca
 	dcClientMap := make(map[string]pdpb.PDClient)
 	for _, dcLocation := range dcLocationConfig {
 		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
-		dcClientMap[dcLocation] = testutil.MustNewPDGrpcClient(re, cluster.GetServer(pdName).GetAddr())
+		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
 	}
 
 	var wg sync.WaitGroup

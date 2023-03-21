@@ -26,10 +26,11 @@ import (
 	"github.com/stretchr/testify/suite"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsopkg "github.com/tikv/pd/pkg/tso"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	pd "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/mcs"
+	"google.golang.org/grpc"
 )
 
 type tsoConsistencyTestSuite struct {
@@ -46,6 +47,7 @@ type tsoConsistencyTestSuite struct {
 	// tsoServer is the TSO service provider.
 	tsoServer        *tso.Server
 	tsoServerCleanup func()
+	tsoClientConn    *grpc.ClientConn
 
 	pdClient  pdpb.PDClient
 	tsoClient tsopb.TSOClient
@@ -80,16 +82,17 @@ func (suite *tsoConsistencyTestSuite) SetupSuite() {
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
-		suite.pdClient = testutil.MustNewPDGrpcClient(re, backendEndpoints)
+		suite.pdClient = pd.MustNewGrpcClient(re, backendEndpoints)
 	} else {
 		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints)
-		suite.tsoClient = testutil.MustNewTSOGrpcClient(re, suite.tsoServer.GetAddr())
+		suite.tsoClientConn, suite.tsoClient = tso.MustNewGrpcClient(re, suite.tsoServer.GetAddr())
 	}
 }
 
 func (suite *tsoConsistencyTestSuite) TearDownSuite() {
 	suite.cancel()
 	if !suite.legacy {
+		suite.tsoClientConn.Close()
 		suite.tsoServerCleanup()
 	}
 	suite.cluster.Destroy()

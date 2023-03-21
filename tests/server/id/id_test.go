@@ -93,7 +93,7 @@ func TestCommand(t *testing.T) {
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(leaderServer.GetClusterID())}
 
-	grpcPDClient := testutil.MustNewPDGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	var last uint64
 	for i := uint64(0); i < 2*allocStep; i++ {
 		resp, err := grpcPDClient.AllocID(context.Background(), req)

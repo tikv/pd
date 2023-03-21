@@ -17,12 +17,15 @@ package server
 import (
 	"context"
 	"os"
+	"strings"
 
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"google.golang.org/grpc"
 )
 
 // NewTSOTestServer creates a tso server for testing.
@@ -56,4 +59,11 @@ func NewTSOTestDefaultConfig() (*Config, error) {
 	cfg := NewConfig()
 	flagSet := cmd.Flags()
 	return cfg, cfg.Parse(flagSet)
+}
+
+// MustNewGrpcClient must create a new TSO grpc client.
+func MustNewGrpcClient(re *require.Assertions, addr string) (*grpc.ClientConn, tsopb.TSOClient) {
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+	re.NoError(err)
+	return conn, tsopb.NewTSOClient(conn)
 }

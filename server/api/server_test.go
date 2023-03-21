@@ -122,7 +122,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 }
 
 func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
-	grpcPDClient := testutil.MustNewPDGrpcClient(re, s.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, s.GetAddr())
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(s.ClusterID()),
 		Store:  store,

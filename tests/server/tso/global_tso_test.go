@@ -61,7 +61,7 @@ func TestRequestFollower(t *testing.T) {
 	}
 	re.NotNil(followerServer)
 
-	grpcPDClient := testutil.MustNewPDGrpcClient(re, followerServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
 	clusterID := followerServer.GetClusterID()
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(clusterID),
@@ -106,7 +106,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	}
 	re.NotNil(nextLeaderServer)
 
-	grpcPDClient := testutil.MustNewPDGrpcClient(re, nextLeaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
 	clusterID := nextLeaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(clusterID),
@@ -146,7 +146,7 @@ func TestLogicalOverflow(t *testing.T) {
 		cluster.WaitLeader()
 
 		leaderServer := cluster.GetServer(cluster.GetLeader())
-		grpcPDClient := testutil.MustNewPDGrpcClient(re, leaderServer.GetAddr())
+		grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 		clusterID := leaderServer.GetClusterID()
 
 		tsoClient, err := grpcPDClient.Tso(ctx)

@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 )
@@ -75,18 +74,11 @@ func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 	}
 }
 
-// MustNewPDGrpcClient must create a new PD grpc client.
-func MustNewPDGrpcClient(re *require.Assertions, addr string) pdpb.PDClient {
+// MustNewGrpcClient must create a new PD grpc client.
+func MustNewGrpcClient(re *require.Assertions, addr string) pdpb.PDClient {
 	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
 	re.NoError(err)
 	return pdpb.NewPDClient(conn)
-}
-
-// MustNewTSOGrpcClient must create a new TSO grpc client.
-func MustNewTSOGrpcClient(re *require.Assertions, addr string) tsopb.TSOClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
-	re.NoError(err)
-	return tsopb.NewTSOClient(conn)
 }
 
 // CleanServer is used to clean data directory.
