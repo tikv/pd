@@ -15,10 +15,12 @@
 package endpoint
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -27,7 +29,7 @@ import (
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
 	LoadTimestamp(prefix string) (time.Time, error)
-	SaveTimestamp(key string, ts time.Time) error
+	SaveTimestamp(prefix string, key string, ts time.Time) error
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
@@ -64,7 +66,33 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 }
 
 // SaveTimestamp saves the timestamp to the storage.
-func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
-	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
-	return se.Save(key, string(data))
+func (se *StorageEndpoint) SaveTimestamp(prefix string, key string, ts time.Time) error {
+	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+		keys, values, err := txn.LoadRange(prefix, prefixEnd, 0)
+		if err != nil {
+			return err
+		}
+
+		previousTS := typeutil.ZeroTime
+		for i, key := range keys {
+			key := strings.TrimSpace(key)
+			if !strings.HasSuffix(key, timestampKey) {
+				continue
+			}
+			tsWindow, err := typeutil.ParseTimestamp([]byte(values[i]))
+			if err != nil {
+				continue
+			}
+			if typeutil.SubRealTimeByWallClock(tsWindow, previousTS) > 0 {
+				previousTS = tsWindow
+			}
+		}
+		if typeutil.SubRealTimeByWallClock(ts, previousTS) <= 0 {
+			log.Warn("save timestamp failed, the timestamp is not bigger than the previous one", zap.Time("previous", previousTS), zap.Time("current", ts))
+			return nil
+		}
+		data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
+		return txn.Save(key, string(data))
+	})
 }
