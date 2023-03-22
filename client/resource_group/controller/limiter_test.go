@@ -152,7 +152,8 @@ func TestCancel(t *testing.T) {
 	r2 := lim2.Reserve(ctx1, InfDuration, t1, 5)
 	checkTokens(re, lim1, t2, 7)
 	checkTokens(re, lim2, t2, 2)
-	err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
+	d, err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
+	re.Equal(d, time.Duration(0))
 	re.Error(err)
 	checkTokens(re, lim1, t3, 13)
 	checkTokens(re, lim2, t3, 3)
@@ -166,7 +167,7 @@ func TestCancel(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		err := WaitReservations(ctx2, t3, []*Reservation{r1, r2})
+		_, err := WaitReservations(ctx2, t3, []*Reservation{r1, r2})
 		re.Error(err)
 		wg.Done()
 	}()
