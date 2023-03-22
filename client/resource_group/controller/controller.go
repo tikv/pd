@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
@@ -192,6 +193,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		for {
 			select {
 			case <-c.loopCtx.Done():
+				resourceGroupStatusGauge.Reset()
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode = true
@@ -257,7 +259,8 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan,
+		successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name), resourceGroupTokenRequestCounter.WithLabelValues(group.Name))
 	if err != nil {
 		return nil, err
 	}
@@ -266,6 +269,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	// Check again to prevent initializing the same resource group concurrently.
 	tmp, loaded := c.groupsController.LoadOrStore(group.GetName(), gc)
 	if !loaded {
+		resourceGroupStatusGauge.WithLabelValues(name).Set(1)
 		log.Info("[resource group controller] create resource group cost controller", zap.String("name", group.GetName()))
 	}
 	return tmp.(*groupCostController), nil
@@ -284,6 +288,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 		resourceGroupName := key.(string)
 		if _, ok := latestGroups[resourceGroupName]; !ok {
 			c.groupsController.Delete(key)
+			resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName)
 			return true
 		}
 
@@ -295,6 +300,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.tombstone {
 				c.groupsController.Delete(resourceGroupName)
+				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName)
 				return true
 			}
 			gc.tombstone = true
@@ -361,6 +367,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		if request != nil {
 			c.run.currentRequests = append(c.run.currentRequests, request)
 		}
+		gc.tokenRequestCounter.Inc()
 		return true
 	})
 	if len(c.run.currentRequests) > 0 {
@@ -381,14 +388,18 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 	go func() {
 		log.Debug("[resource group controller] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
 		resp, err := c.provider.AcquireTokenBuckets(ctx, req)
+		latency := time.Since(now)
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
 			if !errors.ErrorEqual(err, context.Canceled) {
 				log.L().Sugar().Infof("[resource group controller] token bucket rpc error: %v", err)
 			}
 			resp = nil
+			failedTokenRequestDuration.Observe(latency.Seconds())
+		} else {
+			successfulTokenRequestDuration.Observe(latency.Seconds())
 		}
-		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", time.Since(now)))
+		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", latency))
 		c.tokenResponseChan <- resp
 	}()
 }
@@ -399,6 +410,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 ) (*rmpb.Consumption, error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
+		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
 		return nil, err
 	}
 	return gc.onRequestWait(ctx, info)
@@ -423,6 +435,10 @@ type groupCostController struct {
 	mode        rmpb.GroupMode
 
 	handleRespFunc func(*rmpb.TokenBucketResponse)
+
+	successfulRequestDuration prometheus.Observer
+	failedRequestCounter      prometheus.Counter
+	tokenRequestCounter       prometheus.Counter
 
 	mu struct {
 		sync.Mutex
@@ -498,6 +514,8 @@ func newGroupCostController(
 	mainCfg *Config,
 	lowRUNotifyChan chan struct{},
 	tokenBucketUpdateChan chan *groupCostController,
+	successfulRequestDuration prometheus.Observer,
+	failedRequestCounter, tokenRequestCounter prometheus.Counter,
 ) (*groupCostController, error) {
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -509,8 +527,11 @@ func newGroupCostController(
 	}
 
 	gc := &groupCostController{
-		ResourceGroup: group,
-		mainCfg:       mainCfg,
+		ResourceGroup:             group,
+		mainCfg:                   mainCfg,
+		successfulRequestDuration: successfulRequestDuration,
+		failedRequestCounter:      failedRequestCounter,
+		tokenRequestCounter:       tokenRequestCounter,
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
@@ -955,8 +976,10 @@ func (gc *groupCostController) onRequestWait(
 	if !gc.burstable.Load() {
 		var err error
 		now := time.Now()
+		var i int
+		var d time.Duration
 	retryLoop:
-		for i := 0; i < maxRetry; i++ {
+		for i = 0; i < maxRetry; i++ {
 			switch gc.mode {
 			case rmpb.GroupMode_RawMode:
 				res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
@@ -965,7 +988,7 @@ func (gc *groupCostController) onRequestWait(
 						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.maxWaitDuration, now, v))
 					}
 				}
-				if err = WaitReservations(ctx, now, res); err == nil {
+				if d, err = WaitReservations(ctx, now, res); err == nil {
 					break retryLoop
 				}
 			case rmpb.GroupMode_RUMode:
@@ -975,14 +998,17 @@ func (gc *groupCostController) onRequestWait(
 						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.maxWaitDuration, now, v))
 					}
 				}
-				if err = WaitReservations(ctx, now, res); err == nil {
+				if d, err = WaitReservations(ctx, now, res); err == nil {
 					break retryLoop
 				}
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
 		if err != nil {
+			gc.failedRequestCounter.Inc()
 			return nil, err
+		} else {
+			gc.successfulRequestDuration.Observe(d.Seconds())
 		}
 	}
 	gc.mu.Lock()
