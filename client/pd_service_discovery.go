@@ -114,13 +114,13 @@ type pdServiceDiscovery struct {
 
 	// serviceModeUpdateCb will be called when the service mode gets updated
 	serviceModeUpdateCb func(pdpb.ServiceMode)
-	// leaderSwitchedCbs will be called after the leader swichted
+	// leaderSwitchedCbs will be called after the leader switched
 	leaderSwitchedCbs []func()
 	// membersChangedCbs will be called after there is any membership change in the
 	// leader and followers
 	membersChangedCbs []func()
 	// tsoLocalAllocLeadersUpdatedCb will be called when the local tso allocator
-	// leader list is updated. The input is a map {DC Localtion -> Leader Addr}
+	// leader list is updated. The input is a map {DC Location -> Leader Addr}
 	tsoLocalAllocLeadersUpdatedCb tsoLocalServAddrsUpdatedFunc
 	// tsoGlobalAllocLeaderUpdatedCb will be called when the global tso allocator
 	// leader is updated.
@@ -138,9 +138,13 @@ type pdServiceDiscovery struct {
 	option *option
 }
 
-// newPDServiceDiscovery returns a new baseClient.
-func newPDServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup,
-	serviceModeUpdateCb func(pdpb.ServiceMode), urls []string, tlsCfg *tlsutil.TLSConfig, option *option) *pdServiceDiscovery {
+// newPDServiceDiscovery returns a new PD service discovery-based client.
+func newPDServiceDiscovery(
+	ctx context.Context, cancel context.CancelFunc,
+	wg *sync.WaitGroup,
+	serviceModeUpdateCb func(pdpb.ServiceMode),
+	urls []string, tlsCfg *tlsutil.TLSConfig, option *option,
+) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
 		checkMembershipCh:   make(chan struct{}, 1),
 		ctx:                 ctx,
@@ -155,26 +159,27 @@ func newPDServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *s
 }
 
 func (c *pdServiceDiscovery) Init() error {
-	if !c.isInitialized {
-		if err := c.initRetry(c.initClusterID); err != nil {
-			c.cancel()
-			return err
-		}
-		if err := c.initRetry(c.updateMember); err != nil {
-			c.cancel()
-			return err
-		}
-		log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
-
-		c.updateServiceMode()
-
-		c.wg.Add(2)
-		go c.updateMemberLoop()
-		go c.updateServiceModeLoop()
-
-		c.isInitialized = true
+	if c.isInitialized {
+		return nil
 	}
 
+	if err := c.initRetry(c.initClusterID); err != nil {
+		c.cancel()
+		return err
+	}
+	if err := c.initRetry(c.updateMember); err != nil {
+		c.cancel()
+		return err
+	}
+	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
+
+	c.updateServiceMode()
+
+	c.wg.Add(2)
+	go c.updateMemberLoop()
+	go c.updateServiceModeLoop()
+
+	c.isInitialized = true
 	return nil
 }
 
@@ -198,13 +203,15 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
+	ticker := time.NewTicker(memberUpdateInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-c.checkMembershipCh:
-		case <-time.After(memberUpdateInterval):
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+		case <-c.checkMembershipCh:
 		}
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
@@ -220,25 +227,26 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
+	ticker := time.NewTicker(serviceModeUpdateInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-time.After(serviceModeUpdateInterval):
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
 		}
-
 		c.updateServiceMode()
 	}
 }
 
-// Close releases all resources
+// Close releases all resources.
 func (c *pdServiceDiscovery) Close() {
 	c.closeOnce.Do(func() {
-		log.Info("close pd service discovery")
+		log.Info("[pd] close pd service discovery client")
 		c.clientConns.Range(func(key, cc interface{}) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
-				log.Error("[pd] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+				log.Error("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 			}
 			c.clientConns.Delete(key)
 			return true
