@@ -44,7 +44,7 @@ func TestSaveLoadTimestamp(t *testing.T) {
 
 	key := "timestamp"
 	expectedTS := time.Now().Round(0)
-	err = storage.SaveTimestamp("", key, expectedTS)
+	err = storage.SaveTimestamp(key, expectedTS)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)
@@ -74,13 +74,13 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 	l1 := path.Join(ltaKey, dc1LocationKey, timestampKey)
 	l2 := path.Join(ltaKey, dc2LocationKey, timestampKey)
 
-	err = storage.SaveTimestamp(l1, l1, localTS1)
+	err = storage.SaveTimestamp(l1, localTS1)
 	re.NoError(err)
 	globalTS := time.Now().Round(0)
-	err = storage.SaveTimestamp("", timestampKey, globalTS)
+	err = storage.SaveTimestamp(timestampKey, globalTS)
 	re.NoError(err)
 	localTS2 := time.Now().Round(0)
-	err = storage.SaveTimestamp(l2, l2, localTS2)
+	err = storage.SaveTimestamp(l2, localTS2)
 	re.NoError(err)
 	// return the max ts between global and local
 	ts, err := storage.LoadTimestamp("")
@@ -111,11 +111,11 @@ func TestTimestampTxn(t *testing.T) {
 	timestampKey := "timestamp"
 
 	globalTS1 := time.Now().Round(0)
-	err = storage.SaveTimestamp("", timestampKey, globalTS1)
+	err = storage.SaveTimestamp(timestampKey, globalTS1)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
-	err = storage.SaveTimestamp("", timestampKey, globalTS2)
+	err = storage.SaveTimestamp(timestampKey, globalTS2)
 	re.NoError(err)
 
 	ts, err := storage.LoadTimestamp("")

@@ -29,7 +29,7 @@ import (
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
 	LoadTimestamp(prefix string) (time.Time, error)
-	SaveTimestamp(prefix string, key string, ts time.Time) error
+	SaveTimestamp(key string, ts time.Time) error
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
@@ -66,26 +66,18 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 }
 
 // SaveTimestamp saves the timestamp to the storage.
-func (se *StorageEndpoint) SaveTimestamp(prefix string, key string, ts time.Time) error {
+func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
-		prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-		keys, values, err := txn.LoadRange(prefix, prefixEnd, 0)
+		value, err := txn.Load(key)
 		if err != nil {
 			return err
 		}
 
 		previousTS := typeutil.ZeroTime
-		for i, key := range keys {
-			key := strings.TrimSpace(key)
-			if !strings.HasSuffix(key, timestampKey) {
-				continue
-			}
-			tsWindow, err := typeutil.ParseTimestamp([]byte(values[i]))
+		if value != "" {
+			previousTS, err = typeutil.ParseTimestamp([]byte(value))
 			if err != nil {
-				continue
-			}
-			if typeutil.SubRealTimeByWallClock(tsWindow, previousTS) > 0 {
-				previousTS = tsWindow
+				log.Warn("parse timestamp failed", zap.String("key", key), zap.String("value", value), zap.Error(err))
 			}
 		}
 		if previousTS != typeutil.ZeroTime && typeutil.SubRealTimeByWallClock(ts, previousTS) <= 0 {
