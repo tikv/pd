@@ -401,9 +401,10 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 			}
 		}
 	}
-	if grantedTokens < defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec {
-		ts.tokenCapacity -= defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec - grantedTokens
-		grantedTokens = defaultReserveRatio * float64(fillRate) * targetPeriodTimeSec
+	if neededTokens > 0 && grantedTokens < defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec {
+		reservedTokens := math.Min(neededTokens, defaultReserveRatio*float64(fillRate)*targetPeriodTimeSec)
+		ts.tokenCapacity -= reservedTokens - grantedTokens
+		grantedTokens = reservedTokens
 	}
 	res.Tokens = grantedTokens
 
