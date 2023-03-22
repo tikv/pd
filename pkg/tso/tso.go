@@ -198,7 +198,7 @@ func (t *timestampOracle) isInitialized() bool {
 
 // resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
 // When ignoreSmaller is true, resetUserTimestamp will ignore the smaller tso resetting error and do nothing.
-// It's used to write MaxTS during the Global TSO synchronization whitout failing the writing as much as possible.
+// It's used to write MaxTS during the Global TSO synchronization without failing the writing as much as possible.
 // cannot set timestamp to one which >= current + maxResetTSGap
 func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller bool) error {
 	return t.resetUserTimestampInner(leadership, tso, ignoreSmaller, false)
