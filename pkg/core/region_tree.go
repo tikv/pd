@@ -16,7 +16,6 @@ package core
 import (
 	"bytes"
 	"math/rand"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -342,8 +341,4 @@ func (t *regionTree) TotalWriteRate() (bytesRate, keysRate float64) {
 		return 0, 0
 	}
 	return t.totalWriteBytesRate, t.totalWriteKeysRate
-}
-
-func init() {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
 }

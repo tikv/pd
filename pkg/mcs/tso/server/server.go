@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -627,7 +626,6 @@ func (s *Server) startServer() (err error) {
 
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *Config) *Server {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
 	svr := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		startTimestamp:    time.Now().Unix(),

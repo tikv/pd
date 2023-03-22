@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"os"
 	"path"
@@ -219,7 +218,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		mode = APIServiceMode
 	}
 	log.Info(fmt.Sprintf("%s config", mode), zap.Reflect("config", cfg))
-	rand.New(rand.NewSource(time.Now().UnixNano()))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
