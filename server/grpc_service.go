@@ -2032,8 +2032,12 @@ func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost stri
 		return nil, err
 	}
 	done <- struct{}{}
-	s.tsoClients.Store(forwardedHost, forwardStream)
-	return forwardStream, nil
+	v, loaded := s.tsoClients.LoadOrStore(forwardedHost, forwardStream)
+	if !loaded {
+		return forwardStream, nil
+	}
+	forwardStream.CloseSend()
+	return v.(tsopb.TSO_TsoClient), nil
 }
 
 // for CDC compatibility, we need to initialize config path to `globalConfigPath`
