@@ -114,13 +114,13 @@ type pdServiceDiscovery struct {
 
 	// serviceModeUpdateCb will be called when the service mode gets updated
 	serviceModeUpdateCb func(pdpb.ServiceMode)
-	// leaderSwitchedCbs will be called after the leader swichted
+	// leaderSwitchedCbs will be called after the leader switched
 	leaderSwitchedCbs []func()
 	// membersChangedCbs will be called after there is any membership change in the
 	// leader and followers
 	membersChangedCbs []func()
 	// tsoLocalAllocLeadersUpdatedCb will be called when the local tso allocator
-	// leader list is updated. The input is a map {DC Localtion -> Leader Addr}
+	// leader list is updated. The input is a map {DC Location -> Leader Addr}
 	tsoLocalAllocLeadersUpdatedCb tsoLocalServAddrsUpdatedFunc
 	// tsoGlobalAllocLeaderUpdatedCb will be called when the global tso allocator
 	// leader is updated.
