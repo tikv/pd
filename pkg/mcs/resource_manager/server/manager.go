@@ -132,18 +132,19 @@ func (m *Manager) Init(ctx context.Context) {
 
 // AddResourceGroup puts a resource group.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	// Check the name.
+	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
+		return errors.New("invalid resource group name, the length should be in [1,32]")
+	}
+	// Check the Priority.
+	if grouppb.GetPriority() > 16 {
+		return errors.New("invalid resource group priority, the value should be in [0,16]")
+	}
 	m.RLock()
 	_, ok := m.groups[grouppb.Name]
 	m.RUnlock()
 	if ok {
 		return errors.New("this group already exists")
-	}
-	// Check the name.
-	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
-		return errors.New("invalid resource group name, the length should be in [1,32]")
-	}
-	if grouppb.GetPriority() > 16 {
-		return errors.New("invalid resource group priority, the value should be in [0,16]")
 	}
 	group := FromProtoResourceGroup(grouppb)
 	m.Lock()

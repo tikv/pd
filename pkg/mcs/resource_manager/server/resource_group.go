@@ -202,7 +202,7 @@ func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 	case rmpb.GroupMode_RUMode:
 		if state := states.RU; state != nil {
 			rg.RUSettings.RU.setState(state)
-			log.Info("update group token bucket state", zap.String("name", rg.Name), zap.Any("state", state))
+			log.Debug("update group token bucket state", zap.String("name", rg.Name), zap.Any("state", state))
 		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
