@@ -77,11 +77,11 @@ func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 		if value != "" {
 			previousTS, err = typeutil.ParseTimestamp([]byte(value))
 			if err != nil {
-				log.Warn("parse timestamp failed", zap.String("key", key), zap.String("value", value), zap.Error(err))
+				log.Error("parse timestamp failed", zap.String("key", key), zap.String("value", value), zap.Error(err))
+				return err
 			}
 		}
 		if previousTS != typeutil.ZeroTime && typeutil.SubRealTimeByWallClock(ts, previousTS) <= 0 {
-			log.Warn("save timestamp failed, the timestamp is not bigger than the previous one", zap.Time("previous", previousTS), zap.Time("current", ts))
 			return nil
 		}
 		data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
