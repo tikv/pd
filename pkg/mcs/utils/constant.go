@@ -42,7 +42,7 @@ const (
 
 	// DefaultKeySpaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
-	DefaultKeySpaceGroupID = 0
+	DefaultKeySpaceGroupID = uint32(0)
 
 	// APIServiceName is the name of api server.
 	APIServiceName = "api"

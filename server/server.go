@@ -84,7 +84,6 @@ import (
 
 const (
 	serverMetricsInterval = time.Minute
-	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
@@ -405,10 +404,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	if !s.IsAPIServiceMode() {
 		s.tsoAllocatorManager = tso.NewAllocatorManager(
-			s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
+			s.ctx, false, mcs.DefaultKeySpaceGroupID, s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(),
+			s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.LeaderLease, s.cfg.GetTLSConfig(),
 			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
-		// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
-		s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
 		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 		if !s.cfg.EnableLocalTSO {
 			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
@@ -1408,29 +1406,32 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-		leader, rev, checkAgain := s.member.CheckLeader()
+		leader, revision, checkAgain := s.member.CheckLeader()
 		if checkAgain {
 			continue
 		}
 		if leader != nil {
-			err := s.reloadConfigFromKV()
-			if err != nil {
-				log.Error("reload config failed", errs.ZapError(err))
-				continue
+			if pdLeader, ok := leader.(*pdpb.Member); ok {
+				err := s.reloadConfigFromKV()
+				if err != nil {
+					log.Error("reload config failed", errs.ZapError(err))
+					continue
+				}
+				if !s.IsAPIServiceMode() {
+					// Check the cluster dc-location after the PD leader is elected
+					go s.tsoAllocatorManager.ClusterDCLocationChecker()
+				}
+				syncer := s.cluster.GetRegionSyncer()
+				if s.persistOptions.IsUseRegionStorage() {
+					syncer.StartSyncWithLeader(pdLeader.GetClientUrls()[0])
+				}
+				log.Info("start to watch pd leader", zap.Stringer("pd-leader", pdLeader))
+				// WatchLeader will keep looping and never return unless the PD leader has changed.
+				s.member.WatchLeader(s.serverLoopCtx, pdLeader, revision)
+				syncer.StopSyncWithLeader()
+				log.Info("pd leader has changed, try to re-campaign a pd leader")
 			}
-			if !s.IsAPIServiceMode() {
-				// Check the cluster dc-location after the PD leader is elected
-				go s.tsoAllocatorManager.ClusterDCLocationChecker()
-			}
-			syncer := s.cluster.GetRegionSyncer()
-			if s.persistOptions.IsUseRegionStorage() {
-				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
-			}
-			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
-			// WatchLeader will keep looping and never return unless the PD leader has changed.
-			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
-			syncer.StopSyncWithLeader()
-			log.Info("pd leader has changed, try to re-campaign a pd leader")
+
 		}
 
 		// To make sure the etcd leader and PD leader are on the same server.
@@ -1542,7 +1543,7 @@ func (s *Server) campaignLeader() {
 	CheckPDVersion(s.persistOptions)
 	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
 
-	leaderTicker := time.NewTicker(leaderTickInterval)
+	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {

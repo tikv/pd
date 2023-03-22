@@ -136,7 +136,7 @@ func (m *Participant) GetLeader() *tsopb.Participant {
 }
 
 // setLeader sets the member's leader.
-func (m *Participant) setLeader(member *tsopb.Participant) {
+func (m *Participant) setLeader(member interface{}) {
 	m.leader.Store(member)
 }
 
@@ -192,14 +192,14 @@ func (m *Participant) getPersistentLeader() (*tsopb.Participant, int64, error) {
 }
 
 // CheckLeader checks returns true if it is needed to check later.
-func (m *Participant) CheckLeader() (*tsopb.Participant, int64, bool) {
+func (m *Participant) CheckLeader() (interface{}, int64, bool) {
 	if err := m.PrecheckLeader(); err != nil {
 		log.Error("failed to pass pre-check, check the leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
 
-	leader, rev, err := m.getPersistentLeader()
+	leader, revision, err := m.getPersistentLeader()
 	if err != nil {
 		log.Error("getting the leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
@@ -220,11 +220,11 @@ func (m *Participant) CheckLeader() (*tsopb.Participant, int64, bool) {
 			return nil, 0, false
 		}
 	}
-	return leader, rev, false
+	return leader, revision, false
 }
 
 // WatchLeader is used to watch the changes of the leader.
-func (m *Participant) WatchLeader(serverCtx context.Context, leader *tsopb.Participant, revision int64) {
+func (m *Participant) WatchLeader(serverCtx context.Context, leader interface{}, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(serverCtx, revision)
 	m.unsetLeader()

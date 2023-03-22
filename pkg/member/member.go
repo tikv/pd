@@ -138,7 +138,7 @@ func (m *EmbeddedEtcdMember) GetLeader() *pdpb.Member {
 }
 
 // setLeader sets the member's PD leader.
-func (m *EmbeddedEtcdMember) setLeader(member *pdpb.Member) {
+func (m *EmbeddedEtcdMember) setLeader(member interface{}) {
 	m.leader.Store(member)
 }
 
@@ -196,14 +196,14 @@ func (m *EmbeddedEtcdMember) getPersistentLeader() (*pdpb.Member, int64, error) 
 }
 
 // CheckLeader checks returns true if it is needed to check later.
-func (m *EmbeddedEtcdMember) CheckLeader() (*pdpb.Member, int64, bool) {
+func (m *EmbeddedEtcdMember) CheckLeader() (interface{}, int64, bool) {
 	if err := m.PrecheckLeader(); err != nil {
 		log.Error("failed to pass pre-check, check pd leader later", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, 0, true
 	}
 
-	leader, rev, err := m.getPersistentLeader()
+	leader, revision, err := m.getPersistentLeader()
 	if err != nil {
 		log.Error("getting pd leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
@@ -224,11 +224,11 @@ func (m *EmbeddedEtcdMember) CheckLeader() (*pdpb.Member, int64, bool) {
 			return nil, 0, false
 		}
 	}
-	return leader, rev, false
+	return leader, revision, false
 }
 
 // WatchLeader is used to watch the changes of the leader.
-func (m *EmbeddedEtcdMember) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
+func (m *EmbeddedEtcdMember) WatchLeader(serverCtx context.Context, leader interface{}, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(serverCtx, revision)
 	m.unsetLeader()

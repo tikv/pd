@@ -120,10 +120,8 @@ type Server struct {
 
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
-	startCallbacks []func()
-	// primaryCallbacks will be called after the server becomes the primary.
-	primaryCallbacks []func(context.Context)
-	serviceRegister  *discovery.ServiceRegister
+	startCallbacks  []func()
+	serviceRegister *discovery.ServiceRegister
 }
 
 // Implement the following methods defined in bs.Server
@@ -190,105 +188,6 @@ func (s *Server) tsoAllocatorLoop() {
 	log.Info("tso server is closed, exit allocator loop")
 }
 
-func (s *Server) primaryElectionLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	for {
-		if s.IsClosed() {
-			log.Info("server is closed, exit tso primary election loop")
-			return
-		}
-
-		primary, rev, checkAgain := s.participant.CheckLeader()
-		if checkAgain {
-			continue
-		}
-		if primary != nil {
-			// TODO: if enable-local-tso is true, check the cluster dc-location after the primary/leader is elected
-			// go s.tsoAllocatorManager.ClusterDCLocationChecker()
-
-			log.Info("start to watch the primary/leader", zap.Stringer("tso-primary", primary))
-			// WatchLeader will keep looping and never return unless the primary/leader has changed.
-			s.participant.WatchLeader(s.serverLoopCtx, primary, rev)
-			log.Info("the tso primary/leader has changed, try to re-campaign a primary/leader")
-		}
-
-		s.campaignLeader()
-	}
-}
-
-func (s *Server) campaignLeader() {
-	log.Info("start to campaign the primary/leader", zap.String("campaign-tso-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
-		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info("campaign tso primary/leader meets error due to txn conflict, another tso server may campaign successfully",
-				zap.String("campaign-tso-primary-name", s.participant.Name()))
-		} else {
-			log.Error("campaign tso primary/leader meets error due to etcd error",
-				zap.String("campaign-tso-primary-name", s.participant.Name()),
-				errs.ZapError(err))
-		}
-		return
-	}
-
-	// Start keepalive the leadership and enable TSO service.
-	// TSO service is strictly enabled/disabled by the leader lease for 2 reasons:
-	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
-	//   2. load region could be slow. Based on lease we can recover TSO service faster.
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	var resetLeaderOnce sync.Once
-	defer resetLeaderOnce.Do(func() {
-		cancel()
-		s.participant.ResetLeader()
-	})
-
-	// maintain the the leadership, after this, TSO can be service.
-	s.participant.KeepLeader(ctx)
-	log.Info("campaign tso primary ok", zap.String("campaign-tso-primary-name", s.participant.Name()))
-
-	allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get the global tso allocator", errs.ZapError(err))
-		return
-	}
-	log.Info("initializing the global tso allocator")
-	if err := allocator.Initialize(0); err != nil {
-		log.Error("failed to initialize the global tso allocator", errs.ZapError(err))
-		return
-	}
-	defer func() {
-		s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-	}()
-
-	log.Info("triggering the primary callback functions")
-	for _, cb := range s.primaryCallbacks {
-		cb(ctx)
-	}
-
-	s.participant.EnableLeader()
-	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary/leader is elected
-	// go s.tsoAllocatorManager.ClusterDCLocationChecker()
-	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", s.participant.Name()))
-
-	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
-	defer leaderTicker.Stop()
-
-	for {
-		select {
-		case <-leaderTicker.C:
-			if !s.participant.IsLeader() {
-				log.Info("no longer a primary/leader because lease has expired, the tso primary/leader will step down")
-				return
-			}
-		case <-ctx.Done():
-			// Server is closed and it should return nil.
-			log.Info("server is closed")
-			return
-		}
-	}
-}
-
 // Close closes the server.
 func (s *Server) Close() {
 	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
@@ -341,9 +240,11 @@ func (s *Server) GetLeaderListenUrls() []string {
 	return s.participant.GetLeaderListenUrls()
 }
 
-// AddServiceReadyCallback implements basicserver. It adds callbacks when the server becomes the primary.
+// AddServiceReadyCallback implements basicserver.
+// It adds callbacks when it's ready for providing tso service.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
-	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
+	// Do nothing here. The primary of each keyspace group assigned to this host
+	// will respond to the requests accordingly.
 }
 
 // Implement the other methods
@@ -556,12 +457,9 @@ func (s *Server) startServer() (err error) {
 
 	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.participant, s.defaultGroupRootPath, s.defaultGroupStorage, s.cfg.IsLocalTSOEnabled(),
-		s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(),
+		s.ctx, true, mcsutils.DefaultKeySpaceGroupID, s.participant, s.defaultGroupRootPath, s.defaultGroupStorage,
+		s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.LeaderLease,
 		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
-	// Set up the Global TSO Allocator here, it will be initialized once this TSO participant campaigns leader successfully.
-	s.tsoAllocatorManager.SetUpAllocator(s.ctx, tso.GlobalDCLocation, s.participant.GetLeadership())
-	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 
 	s.service = &Service{Server: s}

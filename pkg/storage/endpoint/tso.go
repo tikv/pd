@@ -50,6 +50,7 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 	maxTSWindow := typeutil.ZeroTime
 	for i, key := range keys {
 		key := strings.TrimSpace(key)
+		log.Info("LoadTimestamp", zap.String("ts-window-key", key))
 		if !strings.HasSuffix(key, timestampKey) {
 			continue
 		}
@@ -62,6 +63,7 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 			maxTSWindow = tsWindow
 		}
 	}
+	log.Info("LoadTimestamp", zap.Time("max-ts-window", maxTSWindow))
 	return maxTSWindow, nil
 }
 
