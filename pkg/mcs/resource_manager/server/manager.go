@@ -38,8 +38,8 @@ const (
 	metricsCleanupInterval     = time.Minute
 	metricsCleanupTimeout      = 20 * time.Minute
 
-	defaultGroupName = "default"
-	middlePriority   = 8
+	reservedDefaultGroupName = "default"
+	middlePriority           = 8
 )
 
 // Manager is the manager of resource group.
@@ -126,9 +126,9 @@ func (m *Manager) Init(ctx context.Context) {
 	m.storage.LoadResourceGroupStates(tokenHandler)
 
 	// add default group
-	if _, ok := m.groups[defaultGroupName]; !ok {
-		m.groups[defaultGroupName] = &ResourceGroup{
-			Name: defaultGroupName,
+	if _, ok := m.groups[reservedDefaultGroupName]; !ok {
+		m.groups[reservedDefaultGroupName] = &ResourceGroup{
+			Name: reservedDefaultGroupName,
 			Mode: rmpb.GroupMode_RUMode,
 			RUSettings: &RequestUnitSettings{
 				RU: GroupTokenBucket{
