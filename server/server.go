@@ -187,8 +187,13 @@ type Server struct {
 	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
-	// Store as map[string]*tsopb.TSOClient
-	tsoClients sync.Map
+
+	tsoClientPool struct {
+		mux sync.Mutex
+		// Store as map[string]*tsopb.TSOClient
+		clients sync.Map
+	}
+
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */

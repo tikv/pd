@@ -2016,10 +2016,22 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 }
 
 func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost string) (tsopb.TSO_TsoClient, error) {
-	v, ok := s.tsoClients.Load(forwardedHost)
+	v, ok := s.tsoClientPool.clients.Load(forwardedHost)
+	if ok {
+		// This is the common case to return here
+		return v.(tsopb.TSO_TsoClient), nil
+	}
+
+	s.tsoClientPool.mux.Lock()
+	defer s.tsoClientPool.mux.Unlock()
+
+	// Double check after entering the critical section
+	v, ok = s.tsoClientPool.clients.Load(forwardedHost)
 	if ok {
 		return v.(tsopb.TSO_TsoClient), nil
 	}
+
+	// Now let's create the client connection and the forward stream
 	client, err := s.getDelegateClient(ctx, forwardedHost)
 	if err != nil {
 		return nil, err
@@ -2032,12 +2044,8 @@ func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost stri
 		return nil, err
 	}
 	done <- struct{}{}
-	v, loaded := s.tsoClients.LoadOrStore(forwardedHost, forwardStream)
-	if !loaded {
-		return forwardStream, nil
-	}
-	forwardStream.CloseSend()
-	return v.(tsopb.TSO_TsoClient), nil
+	s.tsoClientPool.clients.Store(forwardedHost, forwardStream)
+	return forwardStream, nil
 }
 
 // for CDC compatibility, we need to initialize config path to `globalConfigPath`
