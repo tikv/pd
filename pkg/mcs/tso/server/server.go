@@ -111,12 +111,12 @@ type Server struct {
 	tsoAllocatorManager *tso.AllocatorManager
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
-	// tsoDispatcher is used to dispatch different TSO requests to
-	// the corresponding forwarding TSO channel.
+	// tsoDispatcher is used to dispatch the TSO requests to
+	// the corresponding forwarding TSO channels.
 	tsoDispatcher *tsoutil.TSODispatcher
-	// TSOProtoFactory is the abstract factory for creating tso
-	// related data structures defined in pd protocol
-	TSOProtoFactory *tsoutil.TSOProtoFactory
+	// tsoProtoFactory is the abstract factory for creating tso
+	// related data structures defined in the tso grpc protocol
+	tsoProtoFactory *tsoutil.TSOProtoFactory
 
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
@@ -562,7 +562,7 @@ func (s *Server) startServer() (err error) {
 	// Set up the Global TSO Allocator here, it will be initialized once this TSO participant campaigns leader successfully.
 	s.tsoAllocatorManager.SetUpAllocator(s.ctx, tso.GlobalDCLocation, s.participant.GetLeadership())
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
-	s.TSOProtoFactory = &tsoutil.TSOProtoFactory{}
+	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 
 	s.service = &Service{Server: s}
 

@@ -21,9 +21,9 @@ import (
 	"google.golang.org/grpc"
 )
 
-// TSORequest is an interface wrapping tsopb.TsoRequest and pdpb.TsoRequest so
+// Request is an interface wrapping tsopb.TsoRequest and pdpb.TsoRequest so
 // they can be generally handled by the TSO dispatcher
-type TSORequest interface {
+type Request interface {
 	// getForwardedHost returns the forwarded host
 	getForwardedHost() string
 	// getClientConn returns the grpc client connection
@@ -32,26 +32,27 @@ type TSORequest interface {
 	getCount() uint32
 	// process sends request and receive response via stream.
 	// count defins the count of timestamps to retrieve.
-	process(forwardStream tsoStream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error)
+	process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error)
 	// postProcess sends the response back to the sender of the request
 	postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error)
 }
 
-type tsoResponse interface {
+// response is an interface wrapping tsopb.TsoResponse and pdpb.TsoResponse
+type response interface {
 	GetTimestamp() *pdpb.Timestamp
 }
 
-// TSOProtoTSORequest wraps the request and stream channel in the TSO grpc service
-type TSOProtoTSORequest struct {
+// TSOProtoRequest wraps the request and stream channel in the TSO grpc service
+type TSOProtoRequest struct {
 	forwardedHost string
 	clientConn    *grpc.ClientConn
 	request       *tsopb.TsoRequest
 	stream        tsopb.TSO_TsoServer
 }
 
-// NewTSOProtoTSORequest creats a TSOProtoTSORequest and returns as a TSORequest
-func NewTSOProtoTSORequest(forwardedHost string, clientConn *grpc.ClientConn, request *tsopb.TsoRequest, stream tsopb.TSO_TsoServer) TSORequest {
-	tsoRequest := &TSOProtoTSORequest{
+// NewTSOProtoRequest creats a TSOProtoRequest and returns as a Request
+func NewTSOProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *tsopb.TsoRequest, stream tsopb.TSO_TsoServer) Request {
+	tsoRequest := &TSOProtoRequest{
 		forwardedHost: forwardedHost,
 		clientConn:    clientConn,
 		request:       request,
@@ -61,29 +62,29 @@ func NewTSOProtoTSORequest(forwardedHost string, clientConn *grpc.ClientConn, re
 }
 
 // getForwardedHost returns the forwarded host
-func (r *TSOProtoTSORequest) getForwardedHost() string {
+func (r *TSOProtoRequest) getForwardedHost() string {
 	return r.forwardedHost
 }
 
 // getClientConn returns the grpc client connection
-func (r *TSOProtoTSORequest) getClientConn() *grpc.ClientConn {
+func (r *TSOProtoRequest) getClientConn() *grpc.ClientConn {
 	return r.clientConn
 }
 
 // getCount returns the count of timestamps to retrieve
-func (r *TSOProtoTSORequest) getCount() uint32 {
+func (r *TSOProtoRequest) getCount() uint32 {
 	return r.request.GetCount()
 }
 
 // process sends request and receive response via stream.
 // count defins the count of timestamps to retrieve.
-func (r *TSOProtoTSORequest) process(forwardStream tsoStream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
+func (r *TSOProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
 		r.request.GetHeader().GetKeyspaceId(), r.request.GetHeader().GetKeyspaceGroupId(), r.request.GetDcLocation())
 }
 
 // postProcess sends the response back to the sender of the request
-func (r *TSOProtoTSORequest) postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error) {
+func (r *TSOProtoRequest) postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error) {
 	count := r.request.GetCount()
 	countSum += int64(count)
 	response := &tsopb.TsoResponse{
@@ -102,17 +103,17 @@ func (r *TSOProtoTSORequest) postProcess(countSum, physical, firstLogical int64,
 	return countSum, nil
 }
 
-// PDProtoTSORequest wraps the request and stream channel in the PD grpc service
-type PDProtoTSORequest struct {
+// PDProtoRequest wraps the request and stream channel in the PD grpc service
+type PDProtoRequest struct {
 	forwardedHost string
 	clientConn    *grpc.ClientConn
 	request       *pdpb.TsoRequest
 	stream        pdpb.PD_TsoServer
 }
 
-// NewPDProtoTSORequest creats a PDProtoTSORequest and returns as a TSORequest
-func NewPDProtoTSORequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, stream pdpb.PD_TsoServer) TSORequest {
-	tsoRequest := &PDProtoTSORequest{
+// NewPDProtoRequest creats a PDProtoRequest and returns as a Request
+func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, stream pdpb.PD_TsoServer) Request {
+	tsoRequest := &PDProtoRequest{
 		forwardedHost: forwardedHost,
 		clientConn:    clientConn,
 		request:       request,
@@ -122,29 +123,29 @@ func NewPDProtoTSORequest(forwardedHost string, clientConn *grpc.ClientConn, req
 }
 
 // getForwardedHost returns the forwarded host
-func (r *PDProtoTSORequest) getForwardedHost() string {
+func (r *PDProtoRequest) getForwardedHost() string {
 	return r.forwardedHost
 }
 
 // getClientConn returns the grpc client connection
-func (r *PDProtoTSORequest) getClientConn() *grpc.ClientConn {
+func (r *PDProtoRequest) getClientConn() *grpc.ClientConn {
 	return r.clientConn
 }
 
 // getCount returns the count of timestamps to retrieve
-func (r *PDProtoTSORequest) getCount() uint32 {
+func (r *PDProtoRequest) getCount() uint32 {
 	return r.request.GetCount()
 }
 
 // process sends request and receive response via stream.
 // count defins the count of timestamps to retrieve.
-func (r *PDProtoTSORequest) process(forwardStream tsoStream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
+func (r *PDProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
 		utils.DefaultKeyspaceID, utils.DefaultKeySpaceGroupID, r.request.GetDcLocation())
 }
 
 // postProcess sends the response back to the sender of the request
-func (r *PDProtoTSORequest) postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error) {
+func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error) {
 	count := r.request.GetCount()
 	countSum += int64(count)
 	response := &pdpb.TsoResponse{

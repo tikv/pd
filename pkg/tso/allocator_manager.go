@@ -983,8 +983,8 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 	}
 }
 
-// HandleTSORequest forwards TSO allocation requests to correct TSO Allocators.
-func (am *AllocatorManager) HandleTSORequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
+// HandleRequest forwards TSO allocation requests to correct TSO Allocators.
+func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
 	if dcLocation == "" {
 		dcLocation = GlobalDCLocation
 	}

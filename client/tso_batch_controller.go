@@ -44,16 +44,16 @@ func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int) *tso
 // fetchPendingRequests will start a new round of the batch collecting from the channel.
 // It returns true if everything goes well, otherwise false which means we should stop the service.
 func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, maxBatchWaitInterval time.Duration) error {
-	var firstTSORequest *tsoRequest
+	var firstRequest *tsoRequest
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case firstTSORequest = <-tbc.tsoRequestCh:
+	case firstRequest = <-tbc.tsoRequestCh:
 	}
 	// Start to batch when the first TSO request arrives.
 	tbc.batchStartTime = time.Now()
 	tbc.collectedRequestCount = 0
-	tbc.pushRequest(firstTSORequest)
+	tbc.pushRequest(firstRequest)
 
 	// This loop is for trying best to collect more requests, so we use `tbc.maxBatchSize` here.
 fetchPendingRequestsLoop:
@@ -130,7 +130,7 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
-func (tbc *tsoBatchController) revokePendingTSORequest(err error) {
+func (tbc *tsoBatchController) revokePendingRequest(err error) {
 	for i := 0; i < len(tbc.tsoRequestCh); i++ {
 		req := <-tbc.tsoRequestCh
 		req.done <- err

@@ -22,60 +22,57 @@ import (
 	"google.golang.org/grpc"
 )
 
-// ProtoFactory is the abstract factory for creating tso related data structures defined in the gPRC service
+// ProtoFactory is the abstract factory for creating tso related data structures defined in the grpc service
 type ProtoFactory interface {
-	createForwardStream(ctx context.Context, client *grpc.ClientConn) (tsoStream, context.CancelFunc, error)
+	createForwardStream(ctx context.Context, client *grpc.ClientConn) (stream, context.CancelFunc, error)
 }
 
-// TSOProtoFactory is the abstract factory for creating tso related data structures defined in the TSO gPRC service
+// TSOProtoFactory is the abstract factory for creating tso related data structures defined in the TSO grpc service
 type TSOProtoFactory struct {
 }
 
-// PDProtoFactory is the abstract factory for creating tso related data structures defined in the PD gPRC service
+// PDProtoFactory is the abstract factory for creating tso related data structures defined in the PD grpc service
 type PDProtoFactory struct {
 }
 
-func (s *TSOProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc.ClientConn) (tsoStream, context.CancelFunc, error) {
+func (s *TSOProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc.ClientConn) (stream, context.CancelFunc, error) {
 	done := make(chan struct{})
 	cctx, cancel := context.WithCancel(ctx)
 	go checkStream(cctx, cancel, done)
 	forwardStream, err := tsopb.NewTSOClient(clientConn).Tso(cctx)
 	done <- struct{}{}
-	return &tsoTSOStream{forwardStream}, cancel, err
+	return &tsoStream{forwardStream}, cancel, err
 }
 
-func (s *PDProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc.ClientConn) (tsoStream, context.CancelFunc, error) {
+func (s *PDProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc.ClientConn) (stream, context.CancelFunc, error) {
 	done := make(chan struct{})
 	cctx, cancel := context.WithCancel(ctx)
 	go checkStream(cctx, cancel, done)
 	forwardStream, err := pdpb.NewPDClient(clientConn).Tso(cctx)
 	done <- struct{}{}
-	return &pdTSOStream{forwardStream}, cancel, err
+	return &pdStream{forwardStream}, cancel, err
 }
 
-type tsoStream interface {
+type stream interface {
 	// process sends a request and receives the response through the stream
-	process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32, dcLocation string) (tsoResponse, error)
+	process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32, dcLocation string) (response, error)
 }
 
-type tsoTSOStream struct {
+type tsoStream struct {
 	stream tsopb.TSO_TsoClient
 }
 
 // process sends a request and receives the response through the stream
-func (s *tsoTSOStream) process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32, dcLocation string) (tsoResponse, error) {
+func (s *tsoStream) process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32, dcLocation string) (response, error) {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       clusterID,
 			KeyspaceId:      keyspaceID,
 			KeyspaceGroupId: keyspaceGroupID,
 		},
-		Count: count,
-		// TODO: support Local TSO proxy forwarding.
+		Count:      count,
 		DcLocation: dcLocation,
 	}
-
-	// Send to the tso server stream
 	if err := s.stream.Send(req); err != nil {
 		return nil, err
 	}
@@ -86,21 +83,19 @@ func (s *tsoTSOStream) process(clusterID uint64, count, keyspaceID, keyspaceGrou
 	return resp, nil
 }
 
-type pdTSOStream struct {
+type pdStream struct {
 	stream pdpb.PD_TsoClient
 }
 
 // process sends a request and receives the response through the stream
-func (s *pdTSOStream) process(clusterID uint64, count, _, _ uint32, dcLocation string) (tsoResponse, error) {
+func (s *pdStream) process(clusterID uint64, count, _, _ uint32, dcLocation string) (response, error) {
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
 		},
-		Count: count,
-		// TODO: support Local TSO proxy forwarding.
+		Count:      count,
 		DcLocation: dcLocation,
 	}
-	// Send to the tso server stream
 	if err := s.stream.Send(req); err != nil {
 		return nil, err
 	}

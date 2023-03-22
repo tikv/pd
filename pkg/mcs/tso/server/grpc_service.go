@@ -118,8 +118,8 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 				errCh = make(chan error)
 			}
 
-			tsoProtoFactory := s.TSOProtoFactory
-			tsoRequest := tsoutil.NewTSOProtoTSORequest(forwardedHost, clientConn, request, stream)
+			tsoProtoFactory := s.tsoProtoFactory
+			tsoRequest := tsoutil.NewTSOProtoRequest(forwardedHost, clientConn, request, stream)
 			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory, doneCh, errCh)
 			continue
 		}
@@ -133,7 +133,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.tsoAllocatorManager.HandleTSORequest(request.GetDcLocation(), count)
+		ts, err := s.tsoAllocatorManager.HandleRequest(request.GetDcLocation(), count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
