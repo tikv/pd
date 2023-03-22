@@ -37,6 +37,9 @@ const (
 	defaultConsumptionChanSize = 1024
 	metricsCleanupInterval     = time.Minute
 	metricsCleanupTimeout      = 20 * time.Minute
+
+	defaultGroupName = "default"
+	middlePriority   = 8
 )
 
 // Manager is the manager of resource group.
@@ -121,6 +124,23 @@ func (m *Manager) Init(ctx context.Context) {
 		}
 	}
 	m.storage.LoadResourceGroupStates(tokenHandler)
+
+	// add default group
+	if _, ok := m.groups[defaultGroupName]; !ok {
+		m.groups[defaultGroupName] = &ResourceGroup{
+			Name: defaultGroupName,
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &RequestUnitSettings{
+				RU: GroupTokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   1000000,
+						BurstLimit: -1,
+					},
+				},
+			},
+			Priority: middlePriority,
+		}
+	}
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
 	go func() {
