@@ -83,7 +83,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 		re.NoError(err)
 	} else {
 		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
-		suite.client = mcs.SetupTSOClient(suite.ctx, re, strings.Split(backendEndpoints, ","))
+		suite.client = mcs.SetupClientWithKeyspace(suite.ctx, re, strings.Split(backendEndpoints, ","))
 	}
 }
 
