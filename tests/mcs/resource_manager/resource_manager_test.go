@@ -17,7 +17,6 @@ package resourcemanager_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +30,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/resource_group/controller"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -131,7 +129,8 @@ func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
 	suite.NoError(err)
 	for _, group := range groups {
 		deleteResp, err := cli.DeleteResourceGroup(suite.ctx, group.GetName())
-		if errors.Is(err, errs.ErrDeleteReservedGroup) {
+		if group.Name == "default" {
+			suite.Contains(err.Error(), "cannot delete reserved group")
 			continue
 		}
 		suite.NoError(err)
