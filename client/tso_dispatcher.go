@@ -211,7 +211,7 @@ func (c *tsoClient) tsoDispatcherCheckLoop() {
 		case <-ticker.C:
 		case <-c.checkTSODispatcherCh:
 		case <-loopCtx.Done():
-			log.Info("exit tso dispacther loop")
+			log.Info("exit tso dispatcher loop")
 			return
 		}
 	}
