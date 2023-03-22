@@ -28,7 +28,7 @@ const (
 )
 
 const (
-	defaultReserveRatio    = 0.05
+	defaultReserveRatio    = 0.5
 	defaultLoanCoefficient = 2
 	maxAssignTokens        = math.MaxFloat64 / 1024 // assume max client connect is 1024
 )
@@ -159,6 +159,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			slot.tokenCapacity = evenRatio * gts.Tokens
 			slot.lastTokenCapacity = evenRatio * gts.Tokens
 			slot.requireTokensSum = 0
+			gts.clientConsumptionTokensSum = 0
 
 			var (
 				fillRate   = float64(settings.GetFillRate()) * evenRatio
