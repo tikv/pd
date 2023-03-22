@@ -33,9 +33,10 @@ import (
 )
 
 const (
-	controllerConfigPath   = "resource_group/controller"
-	maxRetry               = 3
-	maxNotificationChanLen = 200
+	controllerConfigPath    = "resource_group/controller"
+	maxRetry                = 3
+	maxNotificationChanLen  = 200
+	needTokensAmplification = 1.1
 )
 
 type selectType int
@@ -188,6 +189,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Stop()
 			cleanupTicker = time.NewTicker(100 * time.Millisecond)
+			// because of checking `gc.run.consumption` in cleanupTicker,
+			// so should also change the stateUpdateTicker.
+			stateUpdateTicker.Stop()
+			stateUpdateTicker = time.NewTicker(200 * time.Millisecond)
 		})
 
 		for {
@@ -366,6 +371,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
 			c.run.currentRequests = append(c.run.currentRequests, request)
+			gc.tokenRequestCounter.Inc()
 		}
 		gc.tokenRequestCounter.Inc()
 		return true
@@ -380,6 +386,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 	req := &rmpb.TokenBucketsRequest{
 		Requests:              requests,
 		TargetRequestPeriodMs: uint64(defaultTargetPeriod / time.Millisecond),
+		ClientUniqueId:        c.clientUniqueID,
 	}
 	if c.config.DegradedModeWaitDuration > 0 && c.responseDeadlineCh == nil {
 		c.run.responseDeadline.Reset(c.config.DegradedModeWaitDuration)
@@ -556,20 +563,25 @@ func newGroupCostController(
 func (gc *groupCostController) initRunState() {
 	now := time.Now()
 	gc.run.now = now
-	gc.run.lastRequestTime = now
+	gc.run.lastRequestTime = now.Add(-defaultTargetPeriod)
 	gc.run.targetPeriod = defaultTargetPeriod
 	gc.run.consumption = &rmpb.Consumption{}
 	gc.run.lastRequestConsumption = &rmpb.Consumption{SqlLayerCpuTimeMs: getSQLProcessCPUTime(gc.mainCfg.isSingleGroupByKeyspace)}
 
+	isBurstable := true
 	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
+		initialToken := float64(tb.Settings.FillRate)
 		cfg := tokenBucketReconfigureArgs{
-			NewTokens: initialRequestUnits,
+			NewTokens: initialToken,
 			NewBurst:  tb.Settings.BurstLimit,
 			// This is to trigger token requests as soon as resource group start consuming tokens.
-			NotifyThreshold: math.Max(initialRequestUnits-float64(tb.Settings.FillRate)*0.2, 1),
+			NotifyThreshold: math.Max(initialToken*tokenReserveFraction, 1),
 		}
 		if cfg.NewBurst >= 0 {
 			cfg.NewBurst = 0
+		}
+		if tb.Settings.BurstLimit >= 0 {
+			isBurstable = false
 		}
 		return cfg
 	}
@@ -602,6 +614,7 @@ func (gc *groupCostController) initRunState() {
 			gc.run.resourceTokens[typ] = counter
 		}
 	}
+	gc.burstable.Store(isBurstable)
 }
 
 // applyDegradedMode is used to apply degraded mode for resource group which is in low-process.
@@ -711,9 +724,6 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
-	if deltaDuration <= 500*time.Millisecond {
-		return false
-	}
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
 	counter.avgLastTime = gc.run.now
@@ -722,6 +732,9 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 }
 
 func (gc *groupCostController) shouldReportConsumption() bool {
+	if !gc.run.initialRequestCompleted {
+		return true
+	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
 	if timeSinceLastRequest >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
@@ -748,17 +761,7 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 func (gc *groupCostController) handleTokenBucketResponse(resp *rmpb.TokenBucketResponse) {
 	gc.run.requestInProgress = false
 	gc.handleRespFunc(resp)
-	if !gc.run.initialRequestCompleted {
-		gc.run.initialRequestCompleted = true
-		// This is the first successful request. Take back the initial RUs that we
-		// used to pre-fill the bucket.
-		for _, counter := range gc.run.resourceTokens {
-			counter.limiter.RemoveTokens(gc.run.now, initialRequestUnits)
-		}
-		for _, counter := range gc.run.requestUnitTokens {
-			counter.limiter.RemoveTokens(gc.run.now, initialRequestUnits)
-		}
-	}
+	gc.run.initialRequestCompleted = true
 }
 
 func (gc *groupCostController) handleRawResourceTokenResponse(resp *rmpb.TokenBucketResponse) {
@@ -833,11 +836,6 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 	}
 	initCounterNotify(counter)
 	counter.inDegradedMode = false
-	notifyThreshold := granted * notifyFraction
-	if notifyThreshold < bufferRUs {
-		notifyThreshold = bufferRUs
-	}
-
 	var cfg tokenBucketReconfigureArgs
 	cfg.NewBurst = bucket.GetSettings().GetBurstLimit()
 	// when trickleTimeMs equals zero, server has enough tokens and does not need to
@@ -845,8 +843,8 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 	if trickleTimeMs == 0 {
 		cfg.NewTokens = granted
 		cfg.NewRate = float64(bucket.GetSettings().FillRate)
-		cfg.NotifyThreshold = notifyThreshold
 		counter.lastDeadline = time.Time{}
+		cfg.NotifyThreshold = math.Min((granted+counter.limiter.AvailableTokens(gc.run.now)), counter.avgRUPerSec*float64(defaultTargetPeriod)) * notifyFraction
 		// In the non-trickle case, clients can be allowed to accumulate more tokens.
 		if cfg.NewBurst >= 0 {
 			cfg.NewBurst = 0
@@ -865,7 +863,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		counter.notify.mu.Lock()
 		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
 		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
-		counter.notify.setupNotificationThreshold = notifyThreshold
+		counter.notify.setupNotificationThreshold = 1
 		counter.notify.mu.Unlock()
 		counter.lastDeadline = deadline
 		select {
@@ -958,7 +956,10 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 }
 
 func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
-	value := counter.avgRUPerSec*gc.run.targetPeriod.Seconds() + bufferRUs
+	// `needTokensAmplification` is used to properly amplify a need. The reason is that in the current implementation,
+	// the token returned from the server determines the average consumption speed.
+	// Therefore, when the fillrate of resource group increases, `needTokensAmplification` can enable the client to obtain more tokens.
+	value := counter.avgRUPerSec * gc.run.targetPeriod.Seconds() * needTokensAmplification
 	value -= counter.limiter.AvailableTokens(gc.run.now)
 	if value < 0 {
 		value = 0

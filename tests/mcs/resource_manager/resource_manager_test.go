@@ -310,8 +310,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
 				startTime := time.Now()
-				controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
-				controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
+				_, err := controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
+				re.NoError(err)
+				_, err = controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
+				re.NoError(err)
 				sum += time.Since(startTime)
 				controller.OnResponse(cas.resourceGroupName, rreq, rres)
 				controller.OnResponse(cas.resourceGroupName, wreq, wres)
@@ -706,9 +708,17 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 		rruTokensAtATime: 0,
 		wruTokensAtATime: 10000,
 	}
+	tc2 := tokenConsumptionPerSecond{
+		rruTokensAtATime: 0,
+		wruTokensAtATime: 2,
+	}
 	controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
 	time.Sleep(time.Second * 2)
 	beginTime := time.Now()
+	// This is used to make sure resource group in lowRU.
+	for i := 0; i < 100; i++ {
+		controller.OnRequestWait(suite.ctx, "modetest", tc2.makeWriteRequest())
+	}
 	for i := 0; i < 100; i++ {
 		controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
 	}
