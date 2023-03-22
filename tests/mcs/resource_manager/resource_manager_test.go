@@ -17,6 +17,7 @@ package resourcemanager_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -30,6 +31,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/resource_group/controller"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -128,10 +130,10 @@ func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
 	groups, err := cli.ListResourceGroups(suite.ctx)
 	suite.NoError(err)
 	for _, group := range groups {
-		if group.Name == "default" {
+		deleteResp, err := cli.DeleteResourceGroup(suite.ctx, group.GetName())
+		if errors.Is(err, errs.ErrDeleteReservedGroup) {
 			continue
 		}
-		deleteResp, err := cli.DeleteResourceGroup(suite.ctx, group.GetName())
 		suite.NoError(err)
 		suite.Contains(deleteResp, "Success!")
 	}
@@ -525,6 +527,10 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			for _, g := range lresp {
 				// Delete Resource Group
 				dresp, err := cli.DeleteResourceGroup(suite.ctx, g.Name)
+				if g.Name == "default" {
+					re.Contains(err.Error(), "cannot delete reserved group")
+					continue
+				}
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
@@ -609,17 +615,18 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 			// Delete all resource groups
 			for _, g := range groups {
-				if g.Name == "default" {
-					continue
-				}
 				req, err := http.NewRequest(http.MethodDelete, getAddr(i+1)+"/resource-manager/api/v1/config/group/"+g.Name, nil)
 				re.NoError(err)
 				resp, err := http.DefaultClient.Do(req)
 				re.NoError(err)
 				defer resp.Body.Close()
-				re.Equal(http.StatusOK, resp.StatusCode)
 				respString, err := io.ReadAll(resp.Body)
 				re.NoError(err)
+				if g.Name == "default" {
+					re.Contains(string(respString), "cannot delete reserved group")
+					continue
+				}
+				re.Equal(http.StatusOK, resp.StatusCode)
 				re.Contains(string(respString), "Success!")
 			}
 

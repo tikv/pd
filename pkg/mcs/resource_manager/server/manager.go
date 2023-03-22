@@ -17,16 +17,17 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -125,21 +126,23 @@ func (m *Manager) Init(ctx context.Context) {
 	}
 	m.storage.LoadResourceGroupStates(tokenHandler)
 
-	// add default group
-	if _, ok := m.groups[reservedDefaultGroupName]; !ok {
-		m.groups[reservedDefaultGroupName] = &ResourceGroup{
-			Name: reservedDefaultGroupName,
-			Mode: rmpb.GroupMode_RUMode,
-			RUSettings: &RequestUnitSettings{
-				RU: GroupTokenBucket{
-					Settings: &rmpb.TokenLimitSettings{
-						FillRate:   1000000,
-						BurstLimit: -1,
-					},
+	// Add default group
+	defaultGroup := &ResourceGroup{
+		Name: reservedDefaultGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &RequestUnitSettings{
+			RU: GroupTokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   1000000,
+					BurstLimit: -1,
 				},
 			},
-			Priority: middlePriority,
-		}
+		},
+		Priority: middlePriority,
+	}
+	err := m.AddResourceGroup(defaultGroup)
+	if err != nil && !errors.Is(err, errs.ErrResourceGroupAlreadyExists) {
+		log.Fatal("init default group failed", zap.Error(err))
 	}
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
@@ -156,7 +159,7 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 	_, ok := m.groups[group.Name]
 	m.RUnlock()
 	if ok {
-		return errors.New("this group already exists")
+		return errs.ErrResourceGroupAlreadyExists.FastGenByArgs(group.Name)
 	}
 	err := group.CheckAndInit()
 	if err != nil {
@@ -177,13 +180,13 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 // ModifyResourceGroup modifies an existing resource group.
 func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if group == nil || group.Name == "" {
-		return errors.New("invalid group name")
+		return errs.ErrInvalidGroup
 	}
 	m.Lock()
 	curGroup, ok := m.groups[group.Name]
 	m.Unlock()
 	if !ok {
-		return errors.New("not exists the group")
+		return errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
 	}
 
 	err := curGroup.PatchSettings(group)
@@ -195,6 +198,9 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(name string) error {
+	if name == reservedDefaultGroupName {
+		return errs.ErrDeleteReservedGroup
+	}
 	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
 		return err
 	}
