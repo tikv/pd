@@ -299,7 +299,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	log.Debug("[resource group controller] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
-	if args.NewRate < 0 {
+	if args.NewBurst < 0 {
 		lim.tokens = args.NewTokens
 	} else {
 		now, _, tokens := lim.advance(now)
