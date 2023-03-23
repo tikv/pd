@@ -87,7 +87,7 @@ type Server struct {
 
 	handler *Handler
 
-	cfg         *tso.Config
+	cfg         *Config
 	clusterID   uint64
 	listenURL   *url.URL
 	backendUrls []url.URL
@@ -295,7 +295,7 @@ func (s *Server) SetExternalTS(externalTS uint64) error {
 }
 
 // GetConfig gets the config.
-func (s *Server) GetConfig() *tso.Config {
+func (s *Server) GetConfig() *Config {
 	return s.cfg
 }
 
@@ -465,7 +465,7 @@ func (s *Server) startServer() (err error) {
 }
 
 // CreateServer creates the Server
-func CreateServer(ctx context.Context, cfg *tso.Config) *Server {
+func CreateServer(ctx context.Context, cfg *Config) *Server {
 	svr := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		startTimestamp:    time.Now().Unix(),
@@ -479,7 +479,7 @@ func CreateServer(ctx context.Context, cfg *tso.Config) *Server {
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	cmd.Flags().Parse(args)
-	cfg := tso.NewConfig()
+	cfg := NewConfig()
 	flagSet := cmd.Flags()
 	err := cfg.Parse(flagSet)
 	defer logutil.LogPanic()

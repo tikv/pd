@@ -23,14 +23,13 @@ import (
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"google.golang.org/grpc"
 )
 
 // NewTSOTestServer creates a tso server for testing.
-func NewTSOTestServer(ctx context.Context, re *require.Assertions, cfg *tso.Config) (*Server, testutil.CleanupFunc, error) {
+func NewTSOTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, testutil.CleanupFunc, error) {
 	// New zap logger
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
@@ -58,7 +57,7 @@ func MustNewGrpcClient(re *require.Assertions, addr string) (*grpc.ClientConn, t
 }
 
 // GenerateConfig generates a new config with the given options.
-func GenerateConfig(c *tso.Config) (*tso.Config, error) {
+func GenerateConfig(c *Config) (*Config, error) {
 	arguments := []string{
 		"--listen-addr=" + c.ListenAddr,
 		"--advertise-listen-addr=" + c.AdvertiseListenAddr,
@@ -78,7 +77,7 @@ func GenerateConfig(c *tso.Config) (*tso.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg := tso.NewConfig()
+	cfg := NewConfig()
 	err = cfg.Parse(flagSet)
 	if err != nil {
 		return nil, err

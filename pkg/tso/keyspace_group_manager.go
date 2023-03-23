@@ -32,13 +32,17 @@ import (
 )
 
 const (
-	// maxKeyspaceGroupCount is the max count of keyspace groups.
-	// Keyspace group in tso is the sharding unit, i.e., by the definition here,
-	// the max count of the shards we support is maxKeyspaceGroupCount. We use
-	// five-digits number (%05d) to render the keyspace group id in the storage
-	// path, so theoretically the max count is 99999 which is far beyond what's
-	// actually needed.
-	maxKeyspaceGroupCount = uint32(4096)
+	// maxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
+	// is the sharding unit, i.e., by the definition here, the max count of the shards
+	// that we support is maxKeyspaceGroupCount. The keyspace group id is in the range
+	// [0, 99999], which explains we use five-digits number (%05d) to render the keyspace
+	// group id in the storage endpoint path.
+	maxKeyspaceGroupCount = uint32(100000)
+	// maxKeyspaceGroupCountInUse is the max count of keyspace groups in use, which should
+	// never exceed maxKeyspaceGroupCount defined above. Compared to maxKeyspaceGroupCount,
+	// maxKeyspaceGroupCountInUse is a much more reasonable value of the max count in the
+	// foreseen future, and the former is just for extensibility in theory.
+	maxKeyspaceGroupCountInUse = uint32(4096)
 	// primaryElectionSuffix is the suffix of the key for keyspace group primary election
 	primaryElectionSuffix = "primary"
 )
@@ -52,7 +56,7 @@ type KeyspaceGroupManager struct {
 	// different keyspace groups for tso service.
 	// TODO: change item type to atomic.Value stored as *AllocatorManager after we
 	// support online keyspace group assignment.
-	ksgAllocatorManagers [maxKeyspaceGroupCount]*AllocatorManager
+	ksgAllocatorManagers [maxKeyspaceGroupCountInUse]*AllocatorManager
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -83,7 +87,7 @@ type KeyspaceGroupManager struct {
 	// Note: The {group} is 5 digits integer with leading zeros.
 	tsoSvcRootPath string
 	// cfg is the TSO config
-	cfg           *Config
+	cfg           ServiceConfig
 	maxResetTSGap func() time.Duration
 }
 
@@ -94,8 +98,14 @@ func NewKeyspaceGroupManager(
 	electionNamePrefix string,
 	defaultKsgStorageTSRootPath string,
 	tsoSvcRootPath string,
-	cfg *Config,
+	cfg ServiceConfig,
 ) *KeyspaceGroupManager {
+	if maxKeyspaceGroupCountInUse > maxKeyspaceGroupCount {
+		log.Fatal("maxKeyspaceGroupCountInUse is larger than maxKeyspaceGroupCount",
+			zap.Uint32("maxKeyspaceGroupCountInUse", maxKeyspaceGroupCountInUse),
+			zap.Uint32("maxKeyspaceGroupCount", maxKeyspaceGroupCount))
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	ksgMgr := &KeyspaceGroupManager{
 		ctx:                         ctx,
@@ -105,7 +115,7 @@ func NewKeyspaceGroupManager(
 		defaultKsgStorageTSRootPath: defaultKsgStorageTSRootPath,
 		tsoSvcRootPath:              tsoSvcRootPath,
 		cfg:                         cfg,
-		maxResetTSGap:               func() time.Duration { return cfg.MaxResetTSGap.Duration },
+		maxResetTSGap:               func() time.Duration { return cfg.GetMaxResetTSGap() },
 	}
 
 	return ksgMgr
@@ -114,15 +124,18 @@ func NewKeyspaceGroupManager(
 // Initialize this KeyspaceGroupManager
 func (kgm *KeyspaceGroupManager) Initialize() {
 	// TODO: dynamically load keyspace group assignment from the persistent storage and add watch for the assignment change
+	kgm.initDefaultKeyspaceGroup()
+}
 
-	// Generate the default keyspace group
-	uniqueName := fmt.Sprintf("%s:%5d", kgm.electionNamePrefix, mcsutils.DefaultKeySpaceGroupID)
+// Initialize this the default keyspace group
+func (kgm *KeyspaceGroupManager) initDefaultKeyspaceGroup() {
+	uniqueName := fmt.Sprintf("%s-%5d", kgm.electionNamePrefix, mcsutils.DefaultKeySpaceGroupID)
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
 	participant := member.NewParticipant(kgm.etcdClient)
 	participant.InitInfo(uniqueName, uniqueID, path.Join(kgm.tsoSvcRootPath, fmt.Sprintf("%05d", mcsutils.DefaultKeySpaceGroupID)),
-		primaryElectionSuffix, "keyspace group primary election", kgm.cfg.AdvertiseListenAddr)
+		primaryElectionSuffix, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
 
 	defaultKsgGroupStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(kgm.etcdClient, kgm.defaultKsgStorageTSRootPath), nil)
 	kgm.ksgAllocatorManagers[mcsutils.DefaultKeySpaceGroupID] = NewAllocatorManager(

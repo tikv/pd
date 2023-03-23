@@ -257,9 +257,7 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 	defer logutil.LogPanic()
 	defer am.wg.Done()
 
-	ctx, cancel := context.WithCancel(am.ctx)
-	defer cancel()
-	am.AllocatorDaemon(ctx)
+	am.AllocatorDaemon(am.ctx)
 	log.Info("exit allocator loop", zap.Uint32("keyspace-group-id", am.ksgID))
 }
 
