@@ -52,14 +52,12 @@ func GenerateConfig(c *Config) (*Config, error) {
 		"--listen-addr=" + c.ListenAddr,
 		"--advertise-listen-addr=" + c.AdvertiseListenAddr,
 		"--backend-endpoints=" + c.BackendEndpoints,
-		"--advertise-backend-endpoints=" + c.AdvertiseBackendEndpoints,
 	}
 
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	flagSet.BoolP("version", "V", false, "print version information and exit")
 	flagSet.StringP("config", "", "", "config file")
 	flagSet.StringP("backend-endpoints", "", "", "url for etcd client")
-	flagSet.StringP("advertise-backend-endpoints", "", "", "advertise urls for backend endpoints (default '${backend-endpoints}')")
 	flagSet.StringP("listen-addr", "", "", "listen address for tso service")
 	flagSet.StringP("advertise-listen-addr", "", "", "advertise urls for listen address (default '${listen-addr}')")
 	flagSet.StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")

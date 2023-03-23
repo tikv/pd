@@ -341,6 +341,5 @@ func TestAdvertiseAddr(t *testing.T) {
 	defer cleanup()
 
 	tsoServerConf := s.GetConfig()
-	re.Equal(leader.GetAddr(), tsoServerConf.AdvertiseBackendEndpoints)
 	re.Equal(u, tsoServerConf.AdvertiseListenAddr)
 }
