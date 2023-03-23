@@ -168,7 +168,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	r.lim.mu.Lock()
 	defer r.lim.mu.Unlock()
 
-	if r.lim.limit == Inf || r.tokens == 0 {
+	if r.lim.limit == Inf || r.tokens == 0 || r.lim.burst < 0 {
 		return
 	}
 	// advance time to now
@@ -217,7 +217,6 @@ func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now
 func (lim *Limiter) SetupNotificationThreshold(now time.Time, threshold float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	lim.advance(now)
 	lim.notifyThreshold = threshold
 }
 
@@ -268,6 +267,9 @@ func (lim *Limiter) GetBurst() int64 {
 func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
+	if lim.limit == Inf || lim.burst < 0 {
+		return
+	}
 	now, _, tokens := lim.advance(now)
 	lim.last = now
 	lim.tokens = tokens - amount
@@ -297,9 +299,14 @@ func (lim *Limiter) Reconfigure(now time.Time,
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	log.Debug("[resource group controller] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
-	now, _, tokens := lim.advance(now)
-	lim.last = now
-	lim.tokens = tokens + args.NewTokens
+	if lim.limit == Inf || lim.burst < 0 {
+		lim.last = now
+		lim.tokens = float64(lim.limit)
+	} else {
+		now, _, tokens := lim.advance(now)
+		lim.last = now
+		lim.tokens = tokens + args.NewTokens
+	}
 	lim.limit = Limit(args.NewRate)
 	lim.burst = args.NewBurst
 	lim.notifyThreshold = args.NotifyThreshold
