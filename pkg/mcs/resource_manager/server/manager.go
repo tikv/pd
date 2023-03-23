@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
@@ -156,11 +155,11 @@ func (m *Manager) Init(ctx context.Context) {
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	// Check the name.
 	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
-		return errors.New("invalid resource group name, the length should be in [1,32]")
+		return errs.ErrInvalidGroup
 	}
 	// Check the Priority.
 	if grouppb.GetPriority() > 16 {
-		return errors.New("invalid resource group priority, the value should be in [0,16]")
+		return errs.ErrInvalidGroup
 	}
 	m.RLock()
 	_, ok := m.groups[grouppb.Name]
