@@ -308,7 +308,6 @@ func (lim *Limiter) Reconfigure(now time.Time,
 	}
 	lim.limit = Limit(args.NewRate)
 	lim.burst = args.NewBurst
-	_, _, lim.tokens = lim.advance(now)
 	lim.notifyThreshold = args.NotifyThreshold
 	for _, opt := range opts {
 		opt(lim)

@@ -334,6 +334,114 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	controller.Stop()
 }
 
+// TestSwitchBurst is used to test https://github.com/tikv/pd/issue/6209
+func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
+	re := suite.Require()
+	cli := suite.client
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod", "return(true)"))
+
+	for _, group := range suite.initGroups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+
+	cfg := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+		CPUMsCost:        1,
+	}
+	testCases := []struct {
+		resourceGroupName string
+		tcs               []tokenConsumptionPerSecond
+		len               int
+	}{
+		{
+			resourceGroupName: suite.initGroups[0].Name,
+			len:               8,
+			tcs: []tokenConsumptionPerSecond{
+				{rruTokensAtATime: 50, wruTokensAtATime: 20, times: 100, waitDuration: 0},
+				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 100, waitDuration: 0},
+				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 100, waitDuration: 0},
+				{rruTokensAtATime: 20, wruTokensAtATime: 40, times: 250, waitDuration: 0},
+				{rruTokensAtATime: 25, wruTokensAtATime: 50, times: 200, waitDuration: 0},
+				{rruTokensAtATime: 30, wruTokensAtATime: 60, times: 165, waitDuration: 0},
+				{rruTokensAtATime: 40, wruTokensAtATime: 80, times: 125, waitDuration: 0},
+				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 100, waitDuration: 0},
+			},
+		},
+	}
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
+	controller.Start(suite.ctx)
+	resourceGroupName := suite.initGroups[1].Name
+	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 2, times: 100, waitDuration: 0}
+	for j := 0; j < tcs.times; j++ {
+		rreq := tcs.makeReadRequest()
+		wreq := tcs.makeWriteRequest()
+		rres := tcs.makeReadResponse()
+		wres := tcs.makeWriteResponse()
+		_, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+		re.NoError(err)
+		_, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+		re.NoError(err)
+		controller.OnResponse(resourceGroupName, rreq, rres)
+		controller.OnResponse(resourceGroupName, wreq, wres)
+	}
+	time.Sleep(2 * time.Second)
+	cli.ModifyResourceGroup(suite.ctx, &rmpb.ResourceGroup{
+		Name: "test2",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   20000,
+					BurstLimit: 20000,
+				},
+			},
+		},
+	})
+	time.Sleep(100 * time.Millisecond)
+	tricker := time.NewTicker(time.Second)
+	defer tricker.Stop()
+	i := 0
+	for {
+		v := false
+		<-tricker.C
+		for _, cas := range testCases {
+			if i >= cas.len {
+				continue
+			}
+			v = true
+			sum := time.Duration(0)
+			for j := 0; j < cas.tcs[i].times; j++ {
+				rreq := cas.tcs[i].makeReadRequest()
+				wreq := cas.tcs[i].makeWriteRequest()
+				rres := cas.tcs[i].makeReadResponse()
+				wres := cas.tcs[i].makeWriteResponse()
+				startTime := time.Now()
+				_, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+				re.NoError(err)
+				_, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+				re.NoError(err)
+				sum += time.Since(startTime)
+				controller.OnResponse(resourceGroupName, rreq, rres)
+				controller.OnResponse(resourceGroupName, wreq, wres)
+				time.Sleep(1000 * time.Microsecond)
+			}
+			re.LessOrEqual(sum, buffDuration+cas.tcs[i].waitDuration)
+		}
+		i++
+		if !v {
+			break
+		}
+	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod", "return(true)"))
+	suite.cleanupResourceGroups()
+	controller.Stop()
+}
+
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re := suite.Require()
 	cli := suite.client

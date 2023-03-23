@@ -194,6 +194,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Stop()
 			stateUpdateTicker = time.NewTicker(200 * time.Millisecond)
 		})
+		failpoint.Inject("acceleratedReportingPeriod", func() {
+			stateUpdateTicker.Stop()
+			stateUpdateTicker = time.NewTicker(time.Millisecond * 100)
+		})
 
 		for {
 			select {
@@ -731,6 +735,9 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
+	failpoint.Inject("acceleratedReportingPeriod", func() {
+		deltaDuration = 100 * time.Millisecond
+	})
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
 	counter.avgLastTime = gc.run.now
@@ -743,6 +750,9 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 		return true
 	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
+	failpoint.Inject("acceleratedReportingPeriod", func() {
+		timeSinceLastRequest = extendedReportingPeriodFactor * defaultTargetPeriod
+	})
 	if timeSinceLastRequest >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
@@ -806,9 +816,9 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		counter.inDegradedMode = true
 		initCounterNotify(counter)
 		var cfg tokenBucketReconfigureArgs
-		tb := counter.getTokenBucketFunc()
-		cfg.NewBurst = int64(tb.Settings.FillRate)
-		cfg.NewRate = float64(tb.Settings.FillRate)
+		fillRate := counter.getTokenBucketFunc().Settings.FillRate
+		cfg.NewBurst = int64(fillRate)
+		cfg.NewRate = float64(fillRate)
 		failpoint.Inject("degradedModeRU", func() {
 			cfg.NewRate = 99999999
 		})
@@ -824,9 +834,9 @@ func (gc *groupCostController) applyBasicConfigForRawResourceTokenCounter() {
 		}
 		initCounterNotify(counter)
 		var cfg tokenBucketReconfigureArgs
-		tb := counter.getTokenBucketFunc()
-		cfg.NewBurst = int64(tb.Settings.FillRate)
-		cfg.NewRate = float64(tb.Settings.FillRate)
+		fillRate := counter.getTokenBucketFunc().Settings.FillRate
+		cfg.NewBurst = int64(fillRate)
+		cfg.NewRate = float64(fillRate)
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 	}
 }
