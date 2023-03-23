@@ -91,3 +91,34 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 	re.NoError(err)
 	re.Equal(localTS1, ts)
 }
+
+func TestTimestampTxn(t *testing.T) {
+	re := require.New(t)
+
+	cfg := etcdutil.NewTestSingleConfig(t)
+	etcd, err := embed.StartEtcd(cfg)
+	re.NoError(err)
+	defer etcd.Close()
+
+	ep := cfg.LCUrls[0].String()
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints: []string{ep},
+	})
+	re.NoError(err)
+	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
+	storage := NewStorageWithEtcdBackend(client, rootPath)
+
+	timestampKey := "timestamp"
+
+	globalTS1 := time.Now().Round(0)
+	err = storage.SaveTimestamp(timestampKey, globalTS1)
+	re.NoError(err)
+
+	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
+	err = storage.SaveTimestamp(timestampKey, globalTS2)
+	re.NoError(err)
+
+	ts, err := storage.LoadTimestamp("")
+	re.NoError(err)
+	re.Equal(globalTS1, ts)
+}

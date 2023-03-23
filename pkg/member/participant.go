@@ -56,11 +56,11 @@ func NewParticipant(client *clientv3.Client) *Participant {
 }
 
 // InitInfo initializes the member info. The leader key is path.Join(rootPath, leaderName)
-func (m *Participant) InitInfo(name string, id uint64, rootPath string, leaderName string, purpose string, listenURL string) {
+func (m *Participant) InitInfo(name string, id uint64, rootPath string, leaderName string, purpose string, advertiseListenAddr string) {
 	leader := &tsopb.Participant{
 		Name:       name,
 		Id:         id, // id is unique among all participants
-		ListenUrls: []string{listenURL},
+		ListenUrls: []string{advertiseListenAddr},
 	}
 
 	data, err := leader.Marshal()

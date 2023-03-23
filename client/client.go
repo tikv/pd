@@ -240,12 +240,29 @@ func WithMaxErrorRetry(count int) ClientOption {
 
 var _ Client = (*client)(nil)
 
-// serviceModeKeeper is for service mode switching
+// serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
-	svcModeMutex    sync.RWMutex
+	// RMutex here is for the future usage that there might be multiple goroutines
+	// triggering service mode switching concurrently.
+	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
-	tsoClient       atomic.Value
+	tsoClient       atomic.Value // *tsoClient
 	tsoSvcDiscovery ServiceDiscovery
+}
+
+func (smk *serviceModeKeeper) close() {
+	smk.Lock()
+	defer smk.Unlock()
+	switch smk.serviceMode {
+	case pdpb.ServiceMode_API_SVC_MODE:
+		smk.tsoSvcDiscovery.Close()
+		fallthrough
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		if tsoCli := smk.tsoClient.Load(); tsoCli != nil {
+			tsoCli.(*tsoClient).Close()
+		}
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+	}
 }
 
 type client struct {
@@ -253,6 +270,8 @@ type client struct {
 	svrUrls         []string
 	pdSvcDiscovery  ServiceDiscovery
 	tokenDispatcher *tokenDispatcher
+
+	// For service mode switching.
 	serviceModeKeeper
 
 	// For internal usage.
@@ -348,12 +367,7 @@ func (c *client) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	if tsoClient := c.getTSOClient(); tsoClient != nil {
-		tsoClient.Close()
-	}
-	if c.tsoSvcDiscovery != nil {
-		c.tsoSvcDiscovery.Close()
-	}
+	c.serviceModeKeeper.close()
 	c.pdSvcDiscovery.Close()
 
 	if c.tokenDispatcher != nil {
@@ -364,57 +378,56 @@ func (c *client) Close() {
 }
 
 func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
-	c.svcModeMutex.Lock()
-	defer c.svcModeMutex.Unlock()
-
+	c.Lock()
+	defer c.Unlock()
 	if newMode == c.serviceMode {
 		return
 	}
-
-	log.Info("changing service mode", zap.String("old-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]),
-		zap.String("new-mode", pdpb.ServiceMode_name[int32(newMode)]))
-
-	if newMode == pdpb.ServiceMode_UNKNOWN_SVC_MODE {
-		log.Warn("intend to switch to unknown service mode. do nothing")
-		return
-	}
-
-	var newTSOCli *tsoClient
-	tsoSvcDiscovery := c.tsoSvcDiscovery
-	ctx, cancel := context.WithCancel(c.ctx)
-
-	if newMode == pdpb.ServiceMode_PD_SVC_MODE {
-		newTSOCli = newTSOClient(ctx, cancel, c.option, c.keyspaceID,
-			c.pdSvcDiscovery, c.pdSvcDiscovery.(tsoAllocatorEventSource), &pdTSOStreamBuilderFactory{})
-		newTSOCli.Setup()
-	} else {
-		tsoSvcDiscovery = newTSOServiceDiscovery(ctx, cancel, MetaStorageClient(c),
+	log.Info("[pd] changing service mode",
+		zap.String("old-mode", c.serviceMode.String()),
+		zap.String("new-mode", newMode.String()))
+	// Re-create a new TSO client.
+	var (
+		newTSOCli          *tsoClient
+		newTSOSvcDiscovery ServiceDiscovery
+	)
+	switch newMode {
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
+			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
+	case pdpb.ServiceMode_API_SVC_MODE:
+		newTSOSvcDiscovery = newTSOServiceDiscovery(c.ctx, MetaStorageClient(c),
 			c.GetClusterID(c.ctx), c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
-		newTSOCli = newTSOClient(ctx, cancel, c.option, c.keyspaceID,
-			tsoSvcDiscovery, tsoSvcDiscovery.(tsoAllocatorEventSource), &tsoTSOStreamBuilderFactory{})
-		if err := tsoSvcDiscovery.Init(); err != nil {
-			cancel()
-			log.Error("failed to initialize tso service discovery. keep the current service mode",
-				zap.Strings("svr-urls", c.svrUrls), zap.String("current-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]), zap.Error(err))
+		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
+			newTSOSvcDiscovery, &tsoTSOStreamBuilderFactory{})
+		if err := newTSOSvcDiscovery.Init(); err != nil {
+			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
+				zap.Strings("svr-urls", c.svrUrls), zap.String("current-mode", c.serviceMode.String()), zap.Error(err))
 			return
 		}
-		newTSOCli.Setup()
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		log.Warn("[pd] intend to switch to unknown service mode, just return")
+		return
 	}
-
-	// cleanup the old tso client
-	if oldTSOCli := c.getTSOClient(); oldTSOCli != nil {
-		oldTSOCli.Close()
-	}
-	if c.serviceMode == pdpb.ServiceMode_API_SVC_MODE {
-		c.tsoSvcDiscovery.Close()
-	}
-
-	c.tsoSvcDiscovery = tsoSvcDiscovery
+	newTSOCli.Setup()
+	// Replace the old TSO client.
+	oldTSOClient := c.getTSOClient()
 	c.tsoClient.Store(newTSOCli)
-
-	log.Info("service mode changed", zap.String("old-mode", pdpb.ServiceMode_name[int32(c.serviceMode)]),
-		zap.String("new-mode", pdpb.ServiceMode_name[int32(newMode)]))
+	oldTSOClient.Close()
+	// Replace the old TSO service discovery if needed.
+	oldTSOSvcDiscovery := c.tsoSvcDiscovery
+	if newTSOSvcDiscovery != nil {
+		c.tsoSvcDiscovery = newTSOSvcDiscovery
+		// Close the old TSO service discovery safely after both the old client
+		// and service discovery are replaced.
+		if oldTSOSvcDiscovery != nil {
+			oldTSOSvcDiscovery.Close()
+		}
+	}
 	c.serviceMode = newMode
+	log.Info("[pd] service mode changed",
+		zap.String("old-mode", c.serviceMode.String()),
+		zap.String("new-mode", newMode.String()))
 }
 
 func (c *client) getTSOClient() *tsoClient {

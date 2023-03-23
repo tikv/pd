@@ -334,7 +334,8 @@ func (m *EmbeddedEtcdMember) ResignEtcdLeader(ctx context.Context, from string, 
 	if len(etcdLeaderIDs) == 0 {
 		return errors.New("no valid pd to transfer etcd leader")
 	}
-	nextEtcdLeaderID := etcdLeaderIDs[rand.Intn(len(etcdLeaderIDs))]
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	nextEtcdLeaderID := etcdLeaderIDs[r.Intn(len(etcdLeaderIDs))]
 	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)
 }
 
