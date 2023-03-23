@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
@@ -130,7 +131,7 @@ func (m *Manager) Init(ctx context.Context) {
 		Name: reservedDefaultGroupName,
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &RequestUnitSettings{
-			RU: GroupTokenBucket{
+			RU: &GroupTokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
 					FillRate:   1000000,
 					BurstLimit: -1,
@@ -139,7 +140,7 @@ func (m *Manager) Init(ctx context.Context) {
 		},
 		Priority: middlePriority,
 	}
-	if err := m.AddResourceGroup(defaultGroup); err != nil {
+	if err := m.AddResourceGroup(defaultGroup.IntoProtoResourceGroup()); err != nil {
 		log.Warn("init default group failed", zap.Error(err))
 	}
 	// Start the background metrics flusher.
@@ -165,7 +166,7 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	_, ok := m.groups[grouppb.Name]
 	m.RUnlock()
 	if ok {
-		return errs.ErrResourceGroupAlreadyExists.FastGenByArgs(group.Name)
+		return errs.ErrResourceGroupAlreadyExists.FastGenByArgs(grouppb.Name)
 	}
 	group := FromProtoResourceGroup(grouppb)
 	m.Lock()

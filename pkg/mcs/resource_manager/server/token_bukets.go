@@ -314,7 +314,7 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 	var res rmpb.TokenBucket
 	burstLimit := ts.settings.GetBurstLimit()
 	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: burstLimit}
-	// If BurstLimit is -1, just return.
+	// If BurstLimit < 0, just return.
 	if burstLimit < 0 {
 		res.Tokens = neededTokens
 		return &res, 0
@@ -323,7 +323,7 @@ func (ts *TokenSlot) assignSlotTokens(neededTokens float64, targetPeriodMs uint6
 	if neededTokens <= 0 {
 		return &res, 0
 	}
-	// If the current tokens can directly meet the requirement, returns the need token
+	// If the current tokens can directly meet the requirement, returns the need token.
 	if ts.tokenCapacity >= neededTokens {
 		ts.tokenCapacity -= neededTokens
 		// granted the total request tokens
