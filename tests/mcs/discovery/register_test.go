@@ -22,6 +22,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/mcs"
@@ -39,6 +40,7 @@ type serverRegisterTestSuite struct {
 	cluster          *tests.TestCluster
 	pdLeader         *tests.TestServer
 	backendEndpoints string
+	listenAddr       string
 }
 
 func TestServerRegisterTestSuite(t *testing.T) {
@@ -59,6 +61,7 @@ func (suite *serverRegisterTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	suite.listenAddr = tempurl.Alloc()
 }
 
 func (suite *serverRegisterTestSuite) TearDownSuite() {
@@ -147,7 +150,7 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	re := suite.Require()
 	switch serviceName {
 	case utils.TSOServiceName:
-		return mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
+		return mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, suite.listenAddr)
 	case utils.ResourceManagerServiceName:
 		return mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints)
 	default:
