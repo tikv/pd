@@ -234,6 +234,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		mode:                            mode,
+		tsoClientPool: struct {
+			sync.RWMutex
+			clients map[string]tsopb.TSO_TsoClient
+		}{
+			clients: make(map[string]tsopb.TSO_TsoClient),
+		},
 	}
 	s.handler = newHandler(s)
 
