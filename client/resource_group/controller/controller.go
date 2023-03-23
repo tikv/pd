@@ -414,7 +414,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 	}()
 }
 
-// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs wait some time.
+// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
 ) (*rmpb.Consumption, error) {
@@ -855,7 +855,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 	counter.inDegradedMode = false
 	var cfg tokenBucketReconfigureArgs
 	cfg.NewBurst = bucket.GetSettings().GetBurstLimit()
-	// when trickleTimeMs equals zero, server has enough tokens and does not need to
+	// When trickleTimeMs equals zero, server has enough tokens and does not need to
 	// limit client consume token. So all token is granted to client right now.
 	if trickleTimeMs == 0 {
 		cfg.NewTokens = granted

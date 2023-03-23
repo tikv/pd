@@ -64,7 +64,7 @@ func Every(interval time.Duration) Limit {
 //
 // Some changes about burst(b):
 //   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within an unlimited capacity).
-//   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within a unlimited capacity).
+//   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within an unlimited capacity).
 //   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
 	mu     sync.Mutex

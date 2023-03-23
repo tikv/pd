@@ -126,8 +126,7 @@ func (s *Service) AddResourceGroup(ctx context.Context, req *rmpb.PutResourceGro
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := FromProtoResourceGroup(req.GetGroup())
-	err := s.manager.AddResourceGroup(rg)
+	err := s.manager.AddResourceGroup(req.GetGroup())
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +179,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			return err
 		}
 		targetPeriodMs := request.GetTargetRequestPeriodMs()
+		clientUniqueID := request.GetClientUniqueId()
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
@@ -203,7 +203,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs)
+						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID)
 					}
 					if tokens == nil {
 						continue
