@@ -574,7 +574,7 @@ func (s *Server) startServer() (err error) {
 
 	s.participant = member.NewParticipant(s.etcdClient)
 	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tsoSvcDiscoveryPrefixFormat, s.clusterID, mcsutils.DefaultKeyspaceID),
-		"primary", "keyspace group primary election", s.cfg.ListenAddr)
+		"primary", "keyspace group primary election", s.cfg.AdvertiseListenAddr)
 
 	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
 	s.tsoAllocatorManager = tso.NewAllocatorManager(

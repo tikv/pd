@@ -22,6 +22,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/mcs"
@@ -147,9 +148,9 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	re := suite.Require()
 	switch serviceName {
 	case utils.TSOServiceName:
-		return mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
+		return mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	case utils.ResourceManagerServiceName:
-		return mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints)
+		return mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	default:
 		return nil, nil
 	}

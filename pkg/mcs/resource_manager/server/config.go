@@ -55,11 +55,12 @@ const (
 
 // Config is the configuration for the resource manager.
 type Config struct {
-	BackendEndpoints  string `toml:"backend-endpoints" json:"backend-endpoints"`
-	ListenAddr        string `toml:"listen-addr" json:"listen-addr"`
-	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`      // TODO: use it
+	BackendEndpoints    string `toml:"backend-endpoints" json:"backend-endpoints"`
+	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
+	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
+	Name                string `toml:"name" json:"name"`
+	DataDir             string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
+	EnableGRPCGateway   bool   `json:"enable-grpc-gateway"`      // TODO: use it
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -170,6 +171,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
 	configutil.AdjustCommandlineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
 	configutil.AdjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
+	configutil.AdjustCommandlineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
 	return c.Adjust(meta, false)
 }
@@ -199,6 +201,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
+	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway

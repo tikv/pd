@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsopkg "github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	pd "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/mcs"
@@ -82,7 +83,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.pdClient = pd.MustNewGrpcClient(re, backendEndpoints)
 	} else {
-		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints)
+		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
 		suite.tsoClientConn, suite.tsoClient = tso.MustNewGrpcClient(re, suite.tsoServer.GetAddr())
 	}
 }
