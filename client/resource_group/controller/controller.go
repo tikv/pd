@@ -852,10 +852,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		cfg.NewRate = float64(bucket.GetSettings().FillRate)
 		counter.lastDeadline = time.Time{}
 		cfg.NotifyThreshold = math.Min((granted+counter.limiter.AvailableTokens(gc.run.now)), counter.avgRUPerSec*defaultTargetPeriod.Seconds()) * notifyFraction
-		// In the non-trickle case, clients can be allowed to accumulate more tokens.
-		if cfg.NewBurst >= 0 {
-			cfg.NewBurst = 0
-		} else {
+		if cfg.NewBurst < 0 {
 			cfg.NewTokens = float64(counter.getTokenBucketFunc().Settings.FillRate)
 		}
 	} else {
