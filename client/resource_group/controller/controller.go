@@ -492,6 +492,8 @@ type groupCostController struct {
 }
 
 type tokenCounter struct {
+	getTokenBucketFunc func() *rmpb.TokenBucket
+
 	// avgRUPerSec is an exponentially-weighted moving average of the RU
 	// consumption per second; used to estimate the RU requirements for the next
 	// request.
@@ -596,6 +598,9 @@ func (gc *groupCostController) initRunState() {
 				limiter:     limiter,
 				avgRUPerSec: 0,
 				avgLastTime: now,
+				getTokenBucketFunc: func() *rmpb.TokenBucket {
+					return getRUTokenBucketSetting(gc.ResourceGroup, typ)
+				},
 			}
 			gc.run.requestUnitTokens[typ] = counter
 		}
@@ -609,6 +614,9 @@ func (gc *groupCostController) initRunState() {
 				limiter:     limiter,
 				avgRUPerSec: 0,
 				avgLastTime: now,
+				getTokenBucketFunc: func() *rmpb.TokenBucket {
+					return getRawResourceTokenBucketSetting(gc.ResourceGroup, typ)
+				},
 			}
 			gc.run.resourceTokens[typ] = counter
 		}
@@ -798,9 +806,9 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		counter.inDegradedMode = true
 		initCounterNotify(counter)
 		var cfg tokenBucketReconfigureArgs
-		fillRate := getRUTokenBucketSetting(gc.ResourceGroup, typ)
-		cfg.NewBurst = int64(fillRate.Settings.FillRate)
-		cfg.NewRate = float64(fillRate.Settings.FillRate)
+		tb := counter.getTokenBucketFunc()
+		cfg.NewBurst = int64(tb.Settings.FillRate)
+		cfg.NewRate = float64(tb.Settings.FillRate)
 		failpoint.Inject("degradedModeRU", func() {
 			cfg.NewRate = 99999999
 		})
@@ -810,15 +818,15 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 }
 
 func (gc *groupCostController) applyBasicConfigForRawResourceTokenCounter() {
-	for typ, counter := range gc.run.resourceTokens {
+	for _, counter := range gc.run.resourceTokens {
 		if !counter.limiter.IsLowTokens() {
 			continue
 		}
 		initCounterNotify(counter)
 		var cfg tokenBucketReconfigureArgs
-		fillRate := getRawResourceTokenBucketSetting(gc.ResourceGroup, typ)
-		cfg.NewBurst = int64(fillRate.Settings.FillRate)
-		cfg.NewRate = float64(fillRate.Settings.FillRate)
+		tb := counter.getTokenBucketFunc()
+		cfg.NewBurst = int64(tb.Settings.FillRate)
+		cfg.NewRate = float64(tb.Settings.FillRate)
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 	}
 }
@@ -847,6 +855,8 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		// In the non-trickle case, clients can be allowed to accumulate more tokens.
 		if cfg.NewBurst >= 0 {
 			cfg.NewBurst = 0
+		} else {
+			cfg.NewTokens = float64(counter.getTokenBucketFunc().Settings.FillRate)
 		}
 	} else {
 		// Otherwise the granted token is delivered to the client by fill rate.
