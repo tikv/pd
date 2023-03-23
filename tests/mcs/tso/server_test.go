@@ -53,7 +53,6 @@ type tsoServerTestSuite struct {
 	cluster          *tests.TestCluster
 	pdLeader         *tests.TestServer
 	backendEndpoints string
-	listenAddr       string
 }
 
 func TestTSOServerTestSuite(t *testing.T) {
@@ -74,7 +73,6 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
-	suite.listenAddr = tempurl.Alloc()
 }
 
 func (suite *tsoServerTestSuite) TearDownSuite() {
@@ -91,7 +89,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}()
 
 	re := suite.Require()
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, suite.listenAddr)
+	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 
 	defer cleanup()
 	testutil.Eventually(re, func() bool {
@@ -186,7 +184,6 @@ type APIServerForwardTestSuite struct {
 	cluster          *tests.TestCluster
 	pdLeader         *tests.TestServer
 	backendEndpoints string
-	listenAddr       string
 	pdClient         pd.Client
 }
 
@@ -207,7 +204,6 @@ func (suite *APIServerForwardTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
-	suite.listenAddr = tempurl.Alloc()
 	suite.NoError(suite.pdLeader.BootstrapCluster())
 	suite.addRegions()
 
@@ -235,7 +231,7 @@ func (suite *APIServerForwardTestSuite) TestForwardTSORelated() {
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO()
 	// can use the tso-related interface with tso server
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, suite.listenAddr)
+	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 	serverMap := make(map[string]bs.Server)
 	serverMap[s.GetAddr()] = s
 	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
@@ -246,7 +242,7 @@ func (suite *APIServerForwardTestSuite) TestForwardTSORelated() {
 func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 	serverMap := make(map[string]bs.Server)
 	for i := 0; i < 3; i++ {
-		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, suite.listenAddr)
+		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 		defer cleanup()
 		serverMap[s.GetAddr()] = s
 	}

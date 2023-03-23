@@ -56,11 +56,8 @@ func MustNewGrpcClient(re *require.Assertions, addr string) (*grpc.ClientConn, t
 	return conn, tsopb.NewTSOClient(conn)
 }
 
-// ConfigOption is the type of the functional option for config.
-type ConfigOption func(conf *Config)
-
 // GenerateConfig generates a new config with the given options.
-func GenerateConfig(c *Config, opts ...ConfigOption) (*Config, error) {
+func GenerateConfig(c *Config) (*Config, error) {
 	arguments := []string{
 		"--listen-addr=" + c.ListenAddr,
 		"--advertise-listen-addr=" + c.AdvertiseListenAddr,

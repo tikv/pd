@@ -40,7 +40,6 @@ type serverRegisterTestSuite struct {
 	cluster          *tests.TestCluster
 	pdLeader         *tests.TestServer
 	backendEndpoints string
-	listenAddr       string
 }
 
 func TestServerRegisterTestSuite(t *testing.T) {
@@ -61,7 +60,6 @@ func (suite *serverRegisterTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
-	suite.listenAddr = tempurl.Alloc()
 }
 
 func (suite *serverRegisterTestSuite) TearDownSuite() {
@@ -150,9 +148,9 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	re := suite.Require()
 	switch serviceName {
 	case utils.TSOServiceName:
-		return mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, suite.listenAddr)
+		return mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	case utils.ResourceManagerServiceName:
-		return mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints)
+		return mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	default:
 		return nil, nil
 	}
