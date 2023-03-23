@@ -2016,19 +2016,21 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 }
 
 func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost string) (tsopb.TSO_TsoClient, error) {
-	v, ok := s.tsoClientPool.clients.Load(forwardedHost)
+	s.tsoClientPool.mux.RLock()
+	forwardStream, ok := s.tsoClientPool.clients[forwardedHost]
+	s.tsoClientPool.mux.RUnlock()
 	if ok {
 		// This is the common case to return here
-		return v.(tsopb.TSO_TsoClient), nil
+		return forwardStream, nil
 	}
 
 	s.tsoClientPool.mux.Lock()
 	defer s.tsoClientPool.mux.Unlock()
 
 	// Double check after entering the critical section
-	v, ok = s.tsoClientPool.clients.Load(forwardedHost)
+	forwardStream, ok = s.tsoClientPool.clients[forwardedHost]
 	if ok {
-		return v.(tsopb.TSO_TsoClient), nil
+		return forwardStream, nil
 	}
 
 	// Now let's create the client connection and the forward stream
@@ -2039,12 +2041,12 @@ func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost stri
 	done := make(chan struct{})
 	ctx, cancel := context.WithTimeout(s.ctx, defaultTSOProxyTimeout)
 	go checkStream(ctx, cancel, done)
-	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
+	forwardStream, err = tsopb.NewTSOClient(client).Tso(ctx)
 	if err != nil {
 		return nil, err
 	}
 	done <- struct{}{}
-	s.tsoClientPool.clients.Store(forwardedHost, forwardStream)
+	s.tsoClientPool.clients[forwardedHost] = forwardStream
 	return forwardStream, nil
 }
 

@@ -189,9 +189,8 @@ type Server struct {
 	clientConns sync.Map
 
 	tsoClientPool struct {
-		mux sync.Mutex
-		// Store as map[string]*tsopb.TSOClient
-		clients sync.Map
+		mux     sync.RWMutex
+		clients map[string]tsopb.TSO_TsoClient
 	}
 
 	// tsoDispatcher is used to dispatch different TSO requests to
