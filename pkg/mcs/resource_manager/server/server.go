@@ -31,6 +31,7 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
@@ -131,10 +132,12 @@ func (s *Server) primaryElectionLoop() {
 			continue
 		}
 		if primary != nil {
-			log.Info("start to watch the primary/leader", zap.Stringer("resource-manager-primary", primary))
-			// WatchLeader will keep looping and never return unless the primary/leader has changed.
-			s.participant.WatchLeader(s.serverLoopCtx, primary, rev)
-			log.Info("the resource manager primary/leader has changed, try to re-campaign a primary/leader")
+			if rsPrimary, ok := primary.(*tsopb.Participant); ok {
+				log.Info("start to watch the primary", zap.Stringer("resource-manager-primary", rsPrimary))
+				// WatchLeader will keep looping and never return unless the primary/leader has changed.
+				s.participant.WatchLeader(s.serverLoopCtx, rsPrimary, rev)
+				log.Info("the resource manager primary has changed, try to re-campaign a primaryr")
+			}
 		}
 
 		s.campaignLeader()

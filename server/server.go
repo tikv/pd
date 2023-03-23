@@ -405,7 +405,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	if !s.IsAPIServiceMode() {
 		s.tsoAllocatorManager = tso.NewAllocatorManager(
 			s.ctx, false, mcs.DefaultKeySpaceGroupID, s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(),
-			s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.LeaderLease, s.cfg.GetTLSConfig(),
+			s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetLeaderLease(), s.cfg.GetTLSConfig(),
 			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
 		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 		if !s.cfg.EnableLocalTSO {

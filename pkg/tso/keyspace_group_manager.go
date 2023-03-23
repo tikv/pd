@@ -17,21 +17,30 @@ package tso
 import (
 	"context"
 	"fmt"
+	"path"
 	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
 const (
 	// maxKeyspaceGroupCount is the max count of keyspace groups.
+	// Keyspace group in tso is the sharding unit, i.e., by the definition here,
+	// the max count of the shards we support is maxKeyspaceGroupCount. We use
+	// five-digits number (%05d) to render the keyspace group id in the storage
+	// path, so theoritically the max count is 99999 which is far beyond what's
+	// actually needed.
 	maxKeyspaceGroupCount = uint32(4096)
+	// primaryElectionSuffix is the suffix of the key for keyspace group primary election
+	primaryElectionSuffix = "primary"
 )
 
 // KeyspaceGroupManager manages the primary/secondaries of the keyspace groups
@@ -45,69 +54,78 @@ type KeyspaceGroupManager struct {
 	// support online keyspace group assignment.
 	ksgAllocatorManagers [maxKeyspaceGroupCount]*AllocatorManager
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	// TSO config
-	ksgRootPath            string
-	storage                endpoint.TSOStorage
-	enableLocalTSO         bool
-	saveInterval           time.Duration
-	updatePhysicalInterval time.Duration
-	// leaderLease defines the time within which a TSO primary/leader must update its TTL
-	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
-	// the primary/leader again. Etcd only supports seconds TTL, so here is second too.
-	leaderLease    int64
-	maxResetTSGap  func() time.Duration
-	securityConfig *grpcutil.TLSConfig
+	ctx        context.Context
+	cancel     context.CancelFunc
+	etcdClient *clientv3.Client
+	// electionNamePrefix is the name prefix to generate the unique name of a participant,
+	// which participate in the election of its keyspace group's primary, in the format of
+	// "electionNamePrefix:keyspace-group-id"
+	electionNamePrefix string
+	// defaultKsgStorageTSRootPath is the root path of the default keyspace group in the
+	// storage endpoiont which is used for LoadTimestamp/SaveTimestamp.
+	// This is the legacy root path in the format of "/pd/{cluster_id}".
+	// Below is the entire path of in the legacy format (used by the default keyspace group)
+	// Key: /pd/{cluster_id}/timestamp
+	// Value: ts(time.Time)
+	// Key: /pd/{cluster_id}/lta/{dc-location}/timestamp
+	// Value: ts(time.Time)
+	defaultKsgStorageTSRootPath string
+	// tsoSvcRootPath defines the root path for all etcd paths used for different purposes.
+	// It is in the format of "/ms/<cluster-id>/tso".
+	// The main paths for different usages in the tso microservice include:
+	// 1. The path for keyspace group primary election. Format: "/ms/{cluster_id}/tso/{group}/primary"
+	// 2. The path for LoadTimestamp/SaveTimestamp in the storage endpoint for all the non-default
+	//    keyspace groups.
+	//    Key: /ms/{cluster_id}/tso/{group}/gts/timestamp
+	//    Value: ts(time.Time)
+	//    Key: /ms/{cluster_id}/tso/{group}/lts/{dc-location}/timestamp
+	//    Value: ts(time.Time)
+	// Note: The {group} is 5 digits integer with leading zeros.
+	tsoSvcRootPath string
+	// cfg is the TSO config
+	cfg           *Config
+	maxResetTSGap func() time.Duration
 }
 
 // NewAllocatorManager creates a new Keyspace Group Manager.
 func NewKeyspaceGroupManager(
-	parentCtx context.Context,
-	electionNamePrefix  
-	ksgRootPath string,
-	storage endpoint.TSOStorage,
-	enableLocalTSO bool,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
-	leaderLease int64,
-	tlsConfig *grpcutil.TLSConfig,
-	maxResetTSGap func() time.Duration,
+	ctx context.Context,
+	etcdClient *clientv3.Client,
+	electionNamePrefix string,
+	defaultKsgStorageTSRootPath string,
+	tsoSvcRootPath string,
+	cfg *Config,
 ) *KeyspaceGroupManager {
-	ctx, cancel := context.WithCancel(parentCtx)
-	allocatorManager := &KeyspaceGroupManager{
-		ctx:                    ctx,
-		cancel:                 cancel,
-		ksgRootPath:            ksgRootPath,
-		storage:                storage,
-		enableLocalTSO:         enableLocalTSO,
-		saveInterval:           saveInterval,
-		updatePhysicalInterval: updatePhysicalInterval,
-		leaderLease:            leaderLease,
-		maxResetTSGap:          maxResetTSGap,
-		securityConfig:         tlsConfig,
+	ctx, cancel := context.WithCancel(ctx)
+	ksgMgr := &KeyspaceGroupManager{
+		ctx:                         ctx,
+		cancel:                      cancel,
+		etcdClient:                  etcdClient,
+		electionNamePrefix:          electionNamePrefix,
+		defaultKsgStorageTSRootPath: defaultKsgStorageTSRootPath,
+		tsoSvcRootPath:              tsoSvcRootPath,
+		cfg:                         cfg,
+		maxResetTSGap:               func() time.Duration { return cfg.MaxResetTSGap.Duration },
 	}
 
-	// TODO: add watch and dynamically load keyspace group assignment from the persistent storage
-	allocatorManager.ksgAllocatorManagers[utils.DefaultKeySpaceGroupID]
+	return ksgMgr
+}
 
-	uniqueName := s.listenURL.Host // in the host:port format
+func (s *KeyspaceGroupManager) Initialize() {
+	// TODO: dynamically load keyspace group assignment from the persistent storage and add watch for the assignment change
+
+	// Generate the default keyspace group
+	uniqueName := fmt.Sprintf("%s:%5d", s.electionNamePrefix, utils.DefaultKeySpaceGroupID)
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
-	s.participant = member.NewParticipant(s.etcdClient)
-	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tsoSvcDiscoveryPrefixFormat, s.clusterID, mcsutils.DefaultKeyspaceID),
-		"primary", "keyspace group primary election", s.cfg.ListenAddr)
+	participant := member.NewParticipant(s.etcdClient)
+	participant.InitInfo(uniqueName, uniqueID, path.Join(s.tsoSvcRootPath, fmt.Sprintf("%05d", mcsutils.DefaultKeySpaceGroupID)),
+		primaryElectionSuffix, "keyspace group primary election", s.cfg.AdvertiseListenAddr)
 
-	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
-	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.ctx, true, mcsutils.DefaultKeySpaceGroupID, s.participant, s.defaultGroupRootPath, s.defaultGroupStorage,
-		s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.LeaderLease,
-		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
-
-	return allocatorManager
-}
-
-func (mgr *KeyspaceGroupManager) a() {
-
+	defaultKsgGroupStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.etcdClient, s.defaultKsgStorageTSRootPath), nil)
+	s.ksgAllocatorManagers[utils.DefaultKeySpaceGroupID] = NewAllocatorManager(
+		s.ctx, true, mcsutils.DefaultKeySpaceGroupID, participant, s.defaultKsgStorageTSRootPath, defaultKsgGroupStorage,
+		s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetLeaderLease(),
+		s.cfg.GetTLSConfig(), s.maxResetTSGap)
 }

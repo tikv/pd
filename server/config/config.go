@@ -1215,6 +1215,11 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
+// GetLeaderLease returns the leader lease.
+func (c *Config) GetLeaderLease() int64 {
+	return c.LeaderLease
+}
+
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO

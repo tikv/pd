@@ -44,13 +44,11 @@ import (
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -66,11 +64,9 @@ const (
 	// pdRootPath is the old path for storing the tso related root path.
 	pdRootPath        = "/pd"
 	msServiceRootPath = "/ms"
-	// tsoSvcDiscoveryPrefixFormat defines the key prefix for keyspace group primary election.
-	// This key prefix is in the format of "/ms/<cluster-id>/tso/<group-id>", and the entire key
-	// is in the format of "/ms/<cluster-id>/tso/<group-id>/primary". The <group-id> is 5 digits
-	// integer with leading zeros.
-	tsoSvcDiscoveryPrefixFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName + "/%05d"
+	// tsoSvcRootPathFormat defines the root path for all etcd paths used for different purposes.
+	// format: "/ms/{cluster_id}/tso".
+	tsoSvcRootPathFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -92,23 +88,21 @@ type Server struct {
 
 	handler *Handler
 
-	cfg                  *Config
+	cfg                  *tso.Config
 	clusterID            uint64
 	defaultGroupRootPath string
 	defaultGroupStorage  endpoint.TSOStorage
 	listenURL            *url.URL
 	backendUrls          []url.URL
 
-	// for the primary election in the TSO cluster
-	participant *member.Participant
 	// etcd client
 	etcdClient *clientv3.Client
 	// http client
 	httpClient *http.Client
 
-	muxListener         net.Listener
-	service             *Service
-	tsoAllocatorManager *tso.AllocatorManager
+	muxListener          net.Listener
+	service              *Service
+	keyspaceGroupManager *tso.KeyspaceGroupManager
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
 	// tsoDispatcher is used to dispatch the TSO requests to
@@ -172,8 +166,7 @@ func (s *Server) Run() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(2)
-	go s.primaryElectionLoop()
+	s.serverLoopWg.Add(1)
 	go s.tsoAllocatorLoop()
 }
 
@@ -326,7 +319,7 @@ func (s *Server) SetExternalTS(externalTS uint64) error {
 }
 
 // GetConfig gets the config.
-func (s *Server) GetConfig() *Config {
+func (s *Server) GetConfig() *tso.Config {
 	return s.cfg
 }
 
@@ -447,23 +440,14 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 
-	uniqueName := s.listenURL.Host // in the host:port format
-	uniqueID := memberutil.GenerateUniqueID(uniqueName)
-	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
+	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
+	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
+		s.ctx, s.etcdClient, s.listenURL.Host, s.defaultGroupRootPath, tsoSvcRootPath, s.cfg)
+	s.keyspaceGroupManager.Initialize()
 
-	s.participant = member.NewParticipant(s.etcdClient)
-	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tsoSvcDiscoveryPrefixFormat, s.clusterID, mcsutils.DefaultKeyspaceID),
-		"primary", "keyspace group primary election", s.cfg.AdvertiseListenAddr)
-
-	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
-	s.tsoAllocatorManager = tso.NewAllocatorManager(
-		s.ctx, true, mcsutils.DefaultKeySpaceGroupID, s.participant, s.defaultGroupRootPath, s.defaultGroupStorage,
-		s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.LeaderLease,
-		s.cfg.GetTLSConfig(), func() time.Duration { return s.cfg.MaxResetTSGap.Duration })
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 
 	s.service = &Service{Server: s}
-
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
@@ -503,7 +487,7 @@ func (s *Server) startServer() (err error) {
 }
 
 // CreateServer creates the Server
-func CreateServer(ctx context.Context, cfg *Config) *Server {
+func CreateServer(ctx context.Context, cfg *tso.Config) *Server {
 	svr := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		startTimestamp:    time.Now().Unix(),
@@ -517,7 +501,7 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	cmd.Flags().Parse(args)
-	cfg := NewConfig()
+	cfg := tso.NewConfig()
 	flagSet := cmd.Flags()
 	err := cfg.Parse(flagSet)
 	defer logutil.LogPanic()

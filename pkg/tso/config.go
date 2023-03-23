@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package tso
 
 import (
 	"fmt"
@@ -99,6 +99,10 @@ func NewConfig() *Config {
 	return &Config{}
 }
 
+// GetLeaderLease returns the leader lease.
+func (c *Config) GetLeaderLease() int64 {
+	return c.LeaderLease
+}
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO
