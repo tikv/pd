@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -575,7 +574,7 @@ func (s *Server) startServer() (err error) {
 
 	s.participant = member.NewParticipant(s.etcdClient)
 	s.participant.InitInfo(uniqueName, uniqueID, fmt.Sprintf(tsoSvcDiscoveryPrefixFormat, s.clusterID, mcsutils.DefaultKeyspaceID),
-		"primary", "keyspace group primary election", s.cfg.ListenAddr)
+		"primary", "keyspace group primary election", s.cfg.AdvertiseListenAddr)
 
 	s.defaultGroupStorage = endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.GetClient(), s.defaultGroupRootPath), nil)
 	s.tsoAllocatorManager = tso.NewAllocatorManager(
@@ -627,7 +626,6 @@ func (s *Server) startServer() (err error) {
 
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *Config) *Server {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
 	svr := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		startTimestamp:    time.Now().Unix(),

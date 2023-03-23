@@ -16,7 +16,6 @@ package schedule
 
 import (
 	"math/rand"
-	"time"
 
 	"github.com/tikv/pd/pkg/schedule/operator"
 )
@@ -117,8 +116,4 @@ func NewWaitingOperatorStatus() *WaitingOperatorStatus {
 	return &WaitingOperatorStatus{
 		make(map[string]uint64),
 	}
-}
-
-func init() {
-	rand.New(rand.NewSource(time.Now().UnixNano()))
 }

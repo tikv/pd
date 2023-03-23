@@ -316,8 +316,9 @@ func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 	defer cancel()
 
 	// Generate a random cluster ID.
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	ts := uint64(time.Now().Unix())
-	clusterID := (ts << 32) + uint64(rand.Uint32())
+	clusterID := (ts << 32) + uint64(r.Uint32())
 	value := typeutil.Uint64ToBytes(clusterID)
 
 	// Multiple servers may try to init the cluster ID at the same time.

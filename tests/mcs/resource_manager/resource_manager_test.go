@@ -129,6 +129,10 @@ func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
 	suite.NoError(err)
 	for _, group := range groups {
 		deleteResp, err := cli.DeleteResourceGroup(suite.ctx, group.GetName())
+		if group.Name == "default" {
+			suite.Contains(err.Error(), "cannot delete reserved group")
+			continue
+		}
 		suite.NoError(err)
 		suite.Contains(deleteResp, "Success!")
 	}
@@ -166,7 +170,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	}
 	lresp, err := cli.ListResourceGroups(suite.ctx)
 	re.NoError(err)
-	re.Equal(len(lresp), 3)
+	re.Equal(len(lresp), 4)
 	// Start watcher
 	watchChan, err := suite.client.WatchResourceGroup(suite.ctx, int64(0))
 	suite.NoError(err)
@@ -456,7 +460,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 	}
 
-	finalNum := 0
+	finalNum := 1
 	// Test Resource Group CURD via gRPC
 	for i, tcase := range testCasesSet1 {
 		group := &rmpb.ResourceGroup{
@@ -497,6 +501,10 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			for _, g := range lresp {
 				// Delete Resource Group
 				dresp, err := cli.DeleteResourceGroup(suite.ctx, g.Name)
+				if g.Name == "default" {
+					re.Contains(err.Error(), "cannot delete reserved group")
+					continue
+				}
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
 				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
@@ -508,12 +516,12 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			// List Resource Group
 			lresp, err = cli.ListResourceGroups(suite.ctx)
 			re.NoError(err)
-			re.Equal(0, len(lresp))
+			re.Equal(1, len(lresp))
 		}
 	}
 
 	// Test Resource Group CURD via HTTP
-	finalNum = 0
+	finalNum = 1
 	getAddr := func(i int) string {
 		server := suite.cluster.GetServer(suite.cluster.GetLeader())
 		if i%2 == 1 {
@@ -586,9 +594,13 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				resp, err := http.DefaultClient.Do(req)
 				re.NoError(err)
 				defer resp.Body.Close()
-				re.Equal(http.StatusOK, resp.StatusCode)
 				respString, err := io.ReadAll(resp.Body)
 				re.NoError(err)
+				if g.Name == "default" {
+					re.Contains(string(respString), "cannot delete reserved group")
+					continue
+				}
+				re.Equal(http.StatusOK, resp.StatusCode)
 				re.Contains(string(respString), "Success!")
 			}
 
@@ -601,7 +613,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			re.NoError(err)
 			groups1 := make([]server.ResourceGroup, 0)
 			json.Unmarshal(respString1, &groups1)
-			re.Equal(0, len(groups1))
+			re.Equal(1, len(groups1))
 		}
 	}
 }

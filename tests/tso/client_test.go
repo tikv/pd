@@ -26,6 +26,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/testutil"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/mcs"
@@ -78,7 +79,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 		suite.client, err = pd.NewClientWithContext(suite.ctx, strings.Split(backendEndpoints, ","), pd.SecurityOption{})
 		re.NoError(err)
 	} else {
-		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints)
+		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
 		suite.client = mcs.SetupTSOClient(suite.ctx, re, strings.Split(backendEndpoints, ","))
 	}
 }

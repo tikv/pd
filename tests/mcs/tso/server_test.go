@@ -32,6 +32,7 @@ import (
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
@@ -88,7 +89,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}()
 
 	re := suite.Require()
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints)
+	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 
 	defer cleanup()
 	testutil.Eventually(re, func() bool {
@@ -150,7 +151,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
 	}
 
-	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
+	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
 	cli := mcs.SetupTSOClient(ctx, re, []string{backendEndpoints})
@@ -230,7 +231,7 @@ func (suite *APIServerForwardTestSuite) TestForwardTSORelated() {
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO()
 	// can use the tso-related interface with tso server
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints)
+	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 	serverMap := make(map[string]bs.Server)
 	serverMap[s.GetAddr()] = s
 	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
@@ -241,7 +242,7 @@ func (suite *APIServerForwardTestSuite) TestForwardTSORelated() {
 func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 	serverMap := make(map[string]bs.Server)
 	for i := 0; i < 3; i++ {
-		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints)
+		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 		defer cleanup()
 		serverMap[s.GetAddr()] = s
 	}
@@ -318,4 +319,27 @@ func (suite *APIServerForwardTestSuite) checkAvailableTSO() {
 	suite.NoError(err)
 	err = suite.pdClient.SetExternalTimestamp(suite.ctx, ts+1)
 	suite.NoError(err)
+}
+
+func TestAdvertiseAddr(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	leader := cluster.GetServer(leaderName)
+
+	u := tempurl.Alloc()
+	s, cleanup := mcs.StartSingleTSOTestServer(ctx, re, leader.GetAddr(), u)
+	defer cleanup()
+
+	tsoServerConf := s.GetConfig()
+	re.Equal(u, tsoServerConf.AdvertiseListenAddr)
 }

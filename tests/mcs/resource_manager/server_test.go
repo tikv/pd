@@ -25,6 +25,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/mcs"
 )
@@ -44,7 +45,7 @@ func TestResourceManagerServer(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	s, cleanup := mcs.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr())
+	s, cleanup := mcs.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
 	addr := s.GetAddr()
 	defer cleanup()
 
@@ -68,7 +69,7 @@ func TestResourceManagerServer(t *testing.T) {
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respString, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		re.Equal("[]", string(respString))
+		re.Equal(`[{"name":"default","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":1000000,"burst_limit":-1},"state":{"initialized":false}}},"priority":8}]`, string(respString))
 	}
 	{
 		group := &rmpb.ResourceGroup{

@@ -91,8 +91,11 @@ type tsoClient struct {
 }
 
 // newTSOClient returns a new TSO client.
-func newTSOClient(ctx context.Context, cancel context.CancelFunc, option *option, keyspaceID uint32,
-	svcDiscovery ServiceDiscovery, eventSrc tsoAllocatorEventSource, factory tsoStreamBuilderFactory) *tsoClient {
+func newTSOClient(
+	ctx context.Context, option *option, keyspaceID uint32,
+	svcDiscovery ServiceDiscovery, factory tsoStreamBuilderFactory,
+) *tsoClient {
+	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoClient{
 		ctx:                       ctx,
 		cancel:                    cancel,
@@ -105,6 +108,7 @@ func newTSOClient(ctx context.Context, cancel context.CancelFunc, option *option
 		updateTSOConnectionCtxsCh: make(chan struct{}, 1),
 	}
 
+	eventSrc := svcDiscovery.(tsoAllocatorEventSource)
 	eventSrc.SetTSOLocalServAddrsUpdatedCallback(c.updateTSOLocalServAddrs)
 	eventSrc.SetTSOGlobalServAddrUpdatedCallback(c.updateTSOGlobalServAddr)
 	c.svcDiscovery.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
@@ -124,6 +128,9 @@ func (c *tsoClient) Setup() {
 
 // Close closes the TSO client
 func (c *tsoClient) Close() {
+	if c == nil {
+		return
+	}
 	log.Info("closing tso client")
 
 	c.cancel()

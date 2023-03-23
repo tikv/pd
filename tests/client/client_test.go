@@ -1358,7 +1358,10 @@ func TestWatch(t *testing.T) {
 	defer client.Close()
 
 	key := "test"
-	ch, err := client.Watch(ctx, []byte(key))
+	resp, err := client.Get(ctx, []byte(key))
+	re.NoError(err)
+	rev := resp.GetHeader().GetRevision()
+	ch, err := client.Watch(ctx, []byte(key), pd.WithRev(rev))
 	re.NoError(err)
 	exit := make(chan struct{})
 	go func() {

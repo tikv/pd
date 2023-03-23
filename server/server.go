@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"os"
 	"path"
@@ -188,8 +187,12 @@ type Server struct {
 	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
-	// Store as map[string]*tsopb.TSOClient
-	tsoClients sync.Map
+
+	tsoClientPool struct {
+		sync.RWMutex
+		clients map[string]tsopb.TSO_TsoClient
+	}
+
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
 	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
@@ -219,7 +222,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		mode = APIServiceMode
 	}
 	log.Info(fmt.Sprintf("%s config", mode), zap.Reflect("config", cfg))
-	rand.New(rand.NewSource(time.Now().UnixNano()))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
@@ -232,6 +234,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		mode:                            mode,
+		tsoClientPool: struct {
+			sync.RWMutex
+			clients map[string]tsopb.TSO_TsoClient
+		}{
+			clients: make(map[string]tsopb.TSO_TsoClient),
+		},
 	}
 	s.handler = newHandler(s)
 

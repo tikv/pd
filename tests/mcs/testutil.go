@@ -22,7 +22,6 @@ import (
 	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 
 	"github.com/stretchr/testify/require"
@@ -38,11 +37,12 @@ func SetupTSOClient(ctx context.Context, re *require.Assertions, endpoints []str
 }
 
 // StartSingleResourceManagerTestServer creates and starts a resource manager server with default config for testing.
-func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Assertions, backendEndpoints string) (*rm.Server, func()) {
-	cfg, err := rm.NewTestDefaultConfig()
-	re.NoError(err)
+func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*rm.Server, func()) {
+	cfg := rm.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = tempurl.Alloc()
+	cfg.ListenAddr = listenAddrs
+	cfg, err := rm.GenerateConfig(cfg)
+	re.NoError(err)
 
 	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
 	re.NoError(err)
@@ -54,15 +54,12 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 }
 
 // StartSingleTSOTestServer creates and starts a tso server with default config for testing.
-func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints string, listenAddrs ...string) (*tso.Server, func()) {
-	cfg, err := tso.NewTSOTestDefaultConfig()
-	re.NoError(err)
+func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*tso.Server, func()) {
+	cfg := tso.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
-	if len(listenAddrs) > 0 {
-		cfg.ListenAddr = listenAddrs[0]
-	} else {
-		cfg.ListenAddr = tempurl.Alloc()
-	}
+	cfg.ListenAddr = listenAddrs
+	cfg, err := tso.GenerateConfig(cfg)
+	re.NoError(err)
 
 	s, cleanup, err := tso.NewTSOTestServer(ctx, re, cfg)
 	re.NoError(err)
