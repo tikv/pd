@@ -189,7 +189,7 @@ type Server struct {
 	clientConns sync.Map
 
 	tsoClientPool struct {
-		mux     sync.RWMutex
+		sync.RWMutex
 		clients map[string]tsopb.TSO_TsoClient
 	}
 

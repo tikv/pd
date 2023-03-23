@@ -2016,16 +2016,16 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 }
 
 func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost string) (tsopb.TSO_TsoClient, error) {
-	s.tsoClientPool.mux.RLock()
+	s.tsoClientPool.RLock()
 	forwardStream, ok := s.tsoClientPool.clients[forwardedHost]
-	s.tsoClientPool.mux.RUnlock()
+	s.tsoClientPool.RUnlock()
 	if ok {
 		// This is the common case to return here
 		return forwardStream, nil
 	}
 
-	s.tsoClientPool.mux.Lock()
-	defer s.tsoClientPool.mux.Unlock()
+	s.tsoClientPool.Lock()
+	defer s.tsoClientPool.Unlock()
 
 	// Double check after entering the critical section
 	forwardStream, ok = s.tsoClientPool.clients[forwardedHost]
