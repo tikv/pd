@@ -108,8 +108,7 @@ func (s *Service) postResourceGroup(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	nGroup := rmserver.FromProtoResourceGroup(&group)
-	if err := s.manager.AddResourceGroup(nGroup); err != nil {
+	if err := s.manager.AddResourceGroup(&group); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}

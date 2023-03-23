@@ -130,7 +130,7 @@ func (m *Manager) Init(ctx context.Context) {
 		Name: reservedDefaultGroupName,
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &RequestUnitSettings{
-			RU: GroupTokenBucket{
+			RU: &GroupTokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
 					FillRate:   1000000,
 					BurstLimit: -1,
@@ -139,7 +139,7 @@ func (m *Manager) Init(ctx context.Context) {
 		},
 		Priority: middlePriority,
 	}
-	if err := m.AddResourceGroup(defaultGroup); err != nil {
+	if err := m.AddResourceGroup(defaultGroup.IntoProtoResourceGroup()); err != nil {
 		log.Warn("init default group failed", zap.Error(err))
 	}
 	// Start the background metrics flusher.
@@ -152,17 +152,22 @@ func (m *Manager) Init(ctx context.Context) {
 }
 
 // AddResourceGroup puts a resource group.
-func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
+func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	// Check the name.
+	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
+		return errs.ErrInvalidGroup
+	}
+	// Check the Priority.
+	if grouppb.GetPriority() > 16 {
+		return errs.ErrInvalidGroup
+	}
 	m.RLock()
-	_, ok := m.groups[group.Name]
+	_, ok := m.groups[grouppb.Name]
 	m.RUnlock()
 	if ok {
-		return errs.ErrResourceGroupAlreadyExists.FastGenByArgs(group.Name)
+		return errs.ErrResourceGroupAlreadyExists.FastGenByArgs(grouppb.Name)
 	}
-	err := group.CheckAndInit()
-	if err != nil {
-		return err
-	}
+	group := FromProtoResourceGroup(grouppb)
 	m.Lock()
 	defer m.Unlock()
 	if err := group.persistSettings(m.storage); err != nil {
@@ -271,7 +276,9 @@ func (m *Manager) persistResourceGroupRunningState() {
 		group, ok := m.groups[keys[idx]]
 		m.RUnlock()
 		if ok {
+			m.Lock()
 			group.persistStates(m.storage)
+			m.Unlock()
 		}
 	}
 }
