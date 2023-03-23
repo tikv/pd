@@ -1431,7 +1431,6 @@ func (s *Server) leaderLoop() {
 				syncer.StopSyncWithLeader()
 				log.Info("pd leader has changed, try to re-campaign a pd leader")
 			}
-
 		}
 
 		// To make sure the etcd leader and PD leader are on the same server.

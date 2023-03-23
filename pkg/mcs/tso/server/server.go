@@ -43,7 +43,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -70,7 +69,7 @@ const (
 )
 
 var _ bs.Server = (*Server)(nil)
-var _ tso.Member = (*member.Participant)(nil)
+var _ tso.ElectionMember = (*member.Participant)(nil)
 
 // Server is the TSO server, and it implements bs.Server.
 type Server struct {
@@ -88,12 +87,10 @@ type Server struct {
 
 	handler *Handler
 
-	cfg                  *tso.Config
-	clusterID            uint64
-	defaultGroupRootPath string
-	defaultGroupStorage  endpoint.TSOStorage
-	listenURL            *url.URL
-	backendUrls          []url.URL
+	cfg         *tso.Config
+	clusterID   uint64
+	listenURL   *url.URL
+	backendUrls []url.URL
 
 	// etcd client
 	etcdClient *clientv3.Client
@@ -155,30 +152,7 @@ func (s *Server) Run() error {
 	if err := s.initClient(); err != nil {
 		return err
 	}
-	if err := s.startServer(); err != nil {
-		return err
-	}
-
-	s.startServerLoop()
-
-	return nil
-}
-
-func (s *Server) startServerLoop() {
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(1)
-	go s.tsoAllocatorLoop()
-}
-
-// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
-func (s *Server) tsoAllocatorLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-	s.tsoAllocatorManager.AllocatorDaemon(ctx)
-	log.Info("tso server is closed, exit allocator loop")
+	return s.startServer()
 }
 
 // Close closes the server.
@@ -189,6 +163,8 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing tso server ...")
+	// close tso service loops in the keyspace group manager
+	s.keyspaceGroupManager.Close()
 	s.serviceRegister.Deregister()
 	s.muxListener.Close()
 	s.serverLoopCancel()
@@ -224,13 +200,13 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return atomic.LoadInt64(&s.isServing) == 1 && s.participant.IsLeader()
+	return atomic.LoadInt64(&s.isServing) == 1 && s.keyspaceGroupManager.GetElectionMember(mcsutils.DefaultKeySpaceGroupID).IsLeader()
 }
 
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
 // The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
-	return s.participant.GetLeaderListenUrls()
+	return s.keyspaceGroupManager.GetElectionMember(mcsutils.DefaultKeySpaceGroupID).GetLeaderListenUrls()
 }
 
 // AddServiceReadyCallback implements basicserver.
@@ -254,7 +230,7 @@ func (s *Server) IsClosed() bool {
 
 // GetTSOAllocatorManager returns the manager of TSO Allocator.
 func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.tsoAllocatorManager
+	return s.keyspaceGroupManager.GetAllocatorManager(mcsutils.DefaultKeySpaceGroupID)
 }
 
 // IsLocalRequest checks if the forwarded host is the current host
@@ -433,21 +409,23 @@ func (s *Server) startServer() (err error) {
 	// The independent TSO service still reuses PD version info since PD and TSO are just
 	// different service modes provided by the same pd-server binary
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
-	s.defaultGroupRootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 
 	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
 	if err != nil {
 		return err
 	}
 
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	defaultKsgStorageTSRootPath := path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
-		s.ctx, s.etcdClient, s.listenURL.Host, s.defaultGroupRootPath, tsoSvcRootPath, s.cfg)
+		s.serverLoopCtx, s.etcdClient, s.listenURL.Host, defaultKsgStorageTSRootPath, tsoSvcRootPath, s.cfg)
 	s.keyspaceGroupManager.Initialize()
 
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 
 	s.service = &Service{Server: s}
+
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err

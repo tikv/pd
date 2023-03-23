@@ -67,7 +67,7 @@ type GlobalTSOAllocator struct {
 	// for global TSO synchronization
 	am *AllocatorManager
 	// for election use
-	member          Member
+	member          ElectionMember
 	timestampOracle *timestampOracle
 	// syncRTT is the RTT duration a SyncMaxTS RPC call will cost,
 	// which is used to estimate the MaxTS in a Global TSO generation
@@ -106,6 +106,13 @@ func NewGlobalTSOAllocator(
 	}
 
 	return gta
+}
+
+// close is used to shutdown the primary election loop.
+// tso service call this function to shutdown the loop here, but pd manages its own loop.
+func (gta *GlobalTSOAllocator) close() {
+	gta.cancel()
+	gta.wg.Wait()
 }
 
 func (gta *GlobalTSOAllocator) setSyncRTT(rtt int64) {

@@ -136,7 +136,7 @@ func (lta *LocalTSOAllocator) GetAllocatorLeader() *pdpb.Member {
 }
 
 // GetMember returns the Local TSO Allocator's member value.
-func (lta *LocalTSOAllocator) GetMember() Member {
+func (lta *LocalTSOAllocator) GetMember() ElectionMember {
 	return lta.allocatorManager.member
 }
 

@@ -95,8 +95,8 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 	return copiedInfo
 }
 
-// Member defines the interface for the election related logic.
-type Member interface {
+// ElectionMember defines the interface for the election related logic.
+type ElectionMember interface {
 	// ID returns the unique ID in the election group. For example, it can be unique
 	// server id of a cluster or the unique keyspace group replica id of the election
 	// group comprised of the replicas of a keyspace group.
@@ -162,11 +162,12 @@ type AllocatorManager struct {
 	}
 	wg sync.WaitGroup
 
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
 	// ksgID is the keyspace group id
 	ksgID uint32
 	// member is for election use
-	member Member
+	member ElectionMember
 	// TSO config
 	rootPath               string
 	storage                endpoint.TSOStorage
@@ -191,7 +192,7 @@ func NewAllocatorManager(
 	ctx context.Context,
 	startGlobalLeaderLoop bool,
 	keyspaceGroupID uint32,
-	member Member,
+	member ElectionMember,
 	rootPath string,
 	storage endpoint.TSOStorage,
 	enableLocalTSO bool,
@@ -201,8 +202,10 @@ func NewAllocatorManager(
 	tlsConfig *grpcutil.TLSConfig,
 	maxResetTSGap func() time.Duration,
 ) *AllocatorManager {
+	ctx, cancel := context.WithCancel(ctx)
 	allocatorManager := &AllocatorManager{
 		ctx:                    ctx,
+		cancel:                 cancel,
 		ksgID:                  keyspaceGroupID,
 		member:                 member,
 		rootPath:               rootPath,
@@ -219,7 +222,7 @@ func NewAllocatorManager(
 	allocatorManager.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
 
 	// Set up the Global TSO Allocator here, it will be initialized once the member campaigns leader successfully.
-	allocatorManager.setUpGlobalAllocator(ctx, startGlobalLeaderLoop)
+	allocatorManager.setUpGlobalAllocator(startGlobalLeaderLoop)
 
 	return allocatorManager
 }
@@ -227,13 +230,13 @@ func NewAllocatorManager(
 // setUpGlobalAllocator is used to set up the global allocator, which will initialize the allocator and put it into
 // an allocator daemon. An TSO Allocator should only be set once, and may be initialized and reset multiple times
 // depending on the election.
-func (am *AllocatorManager) setUpGlobalAllocator(parentCtx context.Context, startGlobalLeaderLoop bool) {
+func (am *AllocatorManager) setUpGlobalAllocator(startGlobalLeaderLoop bool) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	allocator := NewGlobalTSOAllocator(parentCtx, am, startGlobalLeaderLoop)
+	allocator := NewGlobalTSOAllocator(am.ctx, am, startGlobalLeaderLoop)
 	// Create a new allocatorGroup
-	ctx, cancel := context.WithCancel(parentCtx)
+	ctx, cancel := context.WithCancel(am.ctx)
 	am.mu.allocatorGroups[GlobalDCLocation] = &allocatorGroup{
 		dcLocation: GlobalDCLocation,
 		ctx:        ctx,
@@ -241,6 +244,23 @@ func (am *AllocatorManager) setUpGlobalAllocator(parentCtx context.Context, star
 		leadership: am.member.GetLeadership(),
 		allocator:  allocator,
 	}
+
+	if startGlobalLeaderLoop {
+		am.wg.Add(1)
+		go am.tsoAllocatorLoop()
+	}
+}
+
+// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
+// tso service starts the loop here, but pd starts its own loop.
+func (am *AllocatorManager) tsoAllocatorLoop() {
+	defer logutil.LogPanic()
+	defer am.wg.Done()
+
+	ctx, cancel := context.WithCancel(am.ctx)
+	defer cancel()
+	am.AllocatorDaemon(ctx)
+	log.Info("exit allocator loop", zap.Uint32("keyspace-group-id", am.ksgID))
 }
 
 // setUpLocalAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
@@ -265,6 +285,21 @@ func (am *AllocatorManager) setUpLocalAllocator(parentCtx context.Context, dcLoc
 	// Start election of the Local TSO Allocator here
 	localTSOAllocator, _ := allocator.(*LocalTSOAllocator)
 	go am.allocatorLeaderLoop(parentCtx, localTSOAllocator)
+}
+
+// close is used to shutdown TSO Allocator updating daemon.
+// tso service call this function to shutdown the loop here, but pd manages its own loop.
+func (am *AllocatorManager) close() {
+	if allocatorGroup, exist := am.getAllocatorGroup(GlobalDCLocation); exist {
+		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
+	}
+
+	am.cancel()
+	am.wg.Wait()
+}
+
+func (am *AllocatorManager) getMember() *ElectionMember {
+	return &am.member
 }
 
 // SetLocalTSOConfig receives the zone label of this PD server and write it into etcd as dc-location
@@ -662,7 +697,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
 // any new local allocator that needs to be set up.
-func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
+func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 	// allocatorPatroller should only work when enableLocalTSO is true to
 	// set up the new Local TSO Allocator in time.
 	var patrolTicker = &time.Ticker{}
@@ -679,7 +714,7 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 		select {
 		case <-patrolTicker.C:
 			// Inspect the cluster dc-location info and set up the new Local TSO Allocator in time.
-			am.allocatorPatroller(serverCtx)
+			am.allocatorPatroller(ctx)
 		case <-tsTicker.C:
 			// Update the initialized TSO Allocator to advance TSO.
 			am.allocatorUpdater()
@@ -693,7 +728,7 @@ func (am *AllocatorManager) AllocatorDaemon(serverCtx context.Context) {
 			}
 			// PS: ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
 			// we should run them concurrently to speed up the progress.
-		case <-serverCtx.Done():
+		case <-ctx.Done():
 			return
 		}
 	}

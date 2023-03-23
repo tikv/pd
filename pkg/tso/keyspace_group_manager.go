@@ -20,8 +20,8 @@ import (
 	"path"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/mcs/utils"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -36,7 +36,7 @@ const (
 	// Keyspace group in tso is the sharding unit, i.e., by the definition here,
 	// the max count of the shards we support is maxKeyspaceGroupCount. We use
 	// five-digits number (%05d) to render the keyspace group id in the storage
-	// path, so theoritically the max count is 99999 which is far beyond what's
+	// path, so theoretically the max count is 99999 which is far beyond what's
 	// actually needed.
 	maxKeyspaceGroupCount = uint32(4096)
 	// primaryElectionSuffix is the suffix of the key for keyspace group primary election
@@ -87,7 +87,7 @@ type KeyspaceGroupManager struct {
 	maxResetTSGap func() time.Duration
 }
 
-// NewAllocatorManager creates a new Keyspace Group Manager.
+// NewKeyspaceGroupManager creates a new Keyspace Group Manager.
 func NewKeyspaceGroupManager(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
@@ -111,21 +111,45 @@ func NewKeyspaceGroupManager(
 	return ksgMgr
 }
 
-func (s *KeyspaceGroupManager) Initialize() {
+// Initialize this KeyspaceGroupManager
+func (kgm *KeyspaceGroupManager) Initialize() {
 	// TODO: dynamically load keyspace group assignment from the persistent storage and add watch for the assignment change
 
 	// Generate the default keyspace group
-	uniqueName := fmt.Sprintf("%s:%5d", s.electionNamePrefix, utils.DefaultKeySpaceGroupID)
+	uniqueName := fmt.Sprintf("%s:%5d", kgm.electionNamePrefix, mcsutils.DefaultKeySpaceGroupID)
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
-	participant := member.NewParticipant(s.etcdClient)
-	participant.InitInfo(uniqueName, uniqueID, path.Join(s.tsoSvcRootPath, fmt.Sprintf("%05d", mcsutils.DefaultKeySpaceGroupID)),
-		primaryElectionSuffix, "keyspace group primary election", s.cfg.AdvertiseListenAddr)
+	participant := member.NewParticipant(kgm.etcdClient)
+	participant.InitInfo(uniqueName, uniqueID, path.Join(kgm.tsoSvcRootPath, fmt.Sprintf("%05d", mcsutils.DefaultKeySpaceGroupID)),
+		primaryElectionSuffix, "keyspace group primary election", kgm.cfg.AdvertiseListenAddr)
 
-	defaultKsgGroupStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(s.etcdClient, s.defaultKsgStorageTSRootPath), nil)
-	s.ksgAllocatorManagers[utils.DefaultKeySpaceGroupID] = NewAllocatorManager(
-		s.ctx, true, mcsutils.DefaultKeySpaceGroupID, participant, s.defaultKsgStorageTSRootPath, defaultKsgGroupStorage,
-		s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetLeaderLease(),
-		s.cfg.GetTLSConfig(), s.maxResetTSGap)
+	defaultKsgGroupStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(kgm.etcdClient, kgm.defaultKsgStorageTSRootPath), nil)
+	kgm.ksgAllocatorManagers[mcsutils.DefaultKeySpaceGroupID] = NewAllocatorManager(
+		kgm.ctx, true, mcsutils.DefaultKeySpaceGroupID, participant,
+		kgm.defaultKsgStorageTSRootPath, defaultKsgGroupStorage,
+		kgm.cfg.IsLocalTSOEnabled(), kgm.cfg.GetTSOSaveInterval(),
+		kgm.cfg.GetTSOUpdatePhysicalInterval(), kgm.cfg.GetLeaderLease(),
+		kgm.cfg.GetTLSConfig(), kgm.maxResetTSGap)
+}
+
+// GetAllocatorManager returns the AllocatorManager of the given keyspace group
+func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) *AllocatorManager {
+	return kgm.ksgAllocatorManagers[keyspaceGroupID]
+}
+
+// GetElectionMember returns the election member of the given keyspace group
+func (kgm *KeyspaceGroupManager) GetElectionMember(keyspaceGroupID uint32) ElectionMember {
+	return *kgm.ksgAllocatorManagers[keyspaceGroupID].getMember()
+}
+
+// HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
+func (kgm *KeyspaceGroupManager) HandleTSORequest(keyspaceGroupID uint32, dcLocation string, count uint32) (pdpb.Timestamp, error) {
+	return kgm.ksgAllocatorManagers[keyspaceGroupID].HandleTSORequest(dcLocation, count)
+}
+
+// Close this KeyspaceGroupManager
+func (kgm *KeyspaceGroupManager) Close() {
+	kgm.cancel()
+	kgm.ksgAllocatorManagers[mcsutils.DefaultKeySpaceGroupID].close()
 }
