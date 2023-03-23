@@ -17,7 +17,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -140,9 +139,8 @@ func (m *Manager) Init(ctx context.Context) {
 		},
 		Priority: middlePriority,
 	}
-	err := m.AddResourceGroup(defaultGroup)
-	if err != nil && !errors.Is(err, errs.ErrResourceGroupAlreadyExists) {
-		log.Fatal("init default group failed", zap.Error(err))
+	if err := m.AddResourceGroup(defaultGroup); err != nil {
+		log.Warn("init default group failed", zap.Error(err))
 	}
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
