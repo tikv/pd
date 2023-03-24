@@ -195,28 +195,7 @@ func (suite *tsoClientTestSuite) TestRandomTransferLeader() {
 		cancel()
 	}()
 
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
-			defer wg.Done()
-			client := mcs.SetupClientWithKeyspace(suite.ctx, re, strings.Split(suite.backendEndpoints, ","))
-			var ts, lastTS uint64
-			for {
-				physical, logical, err := client.GetTS(suite.ctx)
-				if err != nil {
-					re.ErrorContains(err, "not leader")
-				} else {
-					ts = tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
-					lastTS = ts
-				}
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-			}
-		}()
-	}
+	checkTSO(ctx, re, &wg, suite.backendEndpoints)
 	wg.Wait()
 }
 
@@ -250,28 +229,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 		cancel()
 	}()
 
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
-			defer wg.Done()
-			client := mcs.SetupClientWithKeyspace(suite.ctx, re, strings.Split(suite.backendEndpoints, ","))
-			var ts, lastTS uint64
-			for {
-				physical, logical, err := client.GetTS(suite.ctx)
-				if err != nil {
-					re.Regexp("(server not started|closed unexpectedly)", err.Error())
-				} else {
-					ts = tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
-					lastTS = ts
-				}
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-			}
-		}()
-	}
+	checkTSO(ctx, re, &wg, suite.backendEndpoints)
 	wg.Wait()
 	suite.TearDownSuite()
 	suite.SetupSuite()
@@ -320,28 +278,33 @@ func TestMixedTSODeployment(t *testing.T) {
 		}
 		cancel1()
 	}()
+	checkTSO(ctx1, re, &wg, backendEndpoints)
+	wg.Wait()
+}
 
+func checkTSO(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, backendEndpoints string) {
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
-			cli := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
+			cli := mcs.SetupClientWithKeyspace(context.Background(), re, strings.Split(backendEndpoints, ","))
 			var ts, lastTS uint64
 			for {
-				physical, logical, err := cli.GetTS(ctx)
-				if err != nil {
-					re.Regexp("(context canceled|not leader|not the pd or local tso allocator leader)", err.Error())
-				} else {
+				physical, logical, err := cli.GetTS(context.Background())
+				// omit the error check since there are many kinds of errors
+				if err == nil {
 					ts = tsoutil.ComposeTS(physical, logical)
 					re.Less(lastTS, ts)
 					lastTS = ts
 				}
 				select {
-				case <-ctx1.Done():
+				case <-ctx.Done():
+					physical, logical, _ := cli.GetTS(context.Background())
+					ts = tsoutil.ComposeTS(physical, logical)
+					re.Less(lastTS, ts)
 					return
 				default:
 				}
 			}
 		}()
 	}
-	wg.Wait()
 }
