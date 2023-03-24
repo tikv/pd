@@ -47,6 +47,8 @@ type tsoClientTestSuite struct {
 	tsoServer        *tso.Server
 	tsoServerCleanup func()
 
+	backendEndpoints string
+
 	client pd.TSOClient
 }
 
@@ -77,13 +79,14 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	re.NoError(err)
 	leaderName := suite.cluster.WaitLeader()
 	pdLeader := suite.cluster.GetServer(leaderName)
-	backendEndpoints := pdLeader.GetAddr()
+	re.NoError(pdLeader.BootstrapCluster())
+	suite.backendEndpoints = pdLeader.GetAddr()
 	if suite.legacy {
-		suite.client, err = pd.NewClientWithContext(suite.ctx, strings.Split(backendEndpoints, ","), pd.SecurityOption{})
+		suite.client, err = pd.NewClientWithContext(suite.ctx, strings.Split(suite.backendEndpoints, ","), pd.SecurityOption{})
 		re.NoError(err)
 	} else {
-		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
-		suite.client = mcs.SetupClientWithKeyspace(suite.ctx, re, strings.Split(backendEndpoints, ","))
+		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		suite.client = mcs.SetupClientWithKeyspace(suite.ctx, re, strings.Split(suite.backendEndpoints, ","))
 	}
 }
 
@@ -172,60 +175,106 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp"))
 }
 
-func TestRandomTransferAPILeader(t *testing.T) {
-	re := require.New(t)
+func (suite *tsoClientTestSuite) TestRandomTransferLeader() {
+	re := suite.Require()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	ctx, cancel := context.WithCancel(context.Background())
-	cluster, err := tests.NewTestAPICluster(ctx, 3)
-	re.NoError(err)
-	defer cancel()
-	defer cluster.Destroy()
 
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-
-	leaderServer := cluster.GetServer(cluster.WaitLeader())
-	backendEndpoints := leaderServer.GetAddr()
-
-	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
-	defer cleanup()
-
-	cli1 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
-	cli2 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
-
+	ctx, cancel := context.WithCancel(suite.ctx)
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber + 1)
 	go func() {
 		defer wg.Done()
-		n := r.Intn(3) + 1
+		n := r.Intn(2) + 1
 		time.Sleep(time.Duration(n) * time.Second)
-		leaderServer.ResignLeader()
-		leaderServer = cluster.GetServer(cluster.WaitLeader())
+		err := suite.cluster.ResignLeader()
+		re.NoError(err)
+		suite.cluster.WaitLeader()
+		cancel()
 	}()
 
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
-			var lastTS uint64
-			for i := 0; i < tsoRequestRound; i++ {
-				time.Sleep(time.Millisecond * 30)
-				physical, logical, err := cli1.GetTS(context.Background())
-				re.NoError(err)
-				ts := tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
-				lastTS = ts
-				physical, logical, err = cli2.GetTS(context.Background())
-				re.NoError(err)
-				ts = tsoutil.ComposeTS(physical, logical)
-				re.Less(lastTS, ts)
-				lastTS = ts
+			client := mcs.SetupClientWithKeyspace(suite.ctx, re, strings.Split(suite.backendEndpoints, ","))
+			var ts, lastTS uint64
+			for {
+				physical, logical, err := client.GetTS(suite.ctx)
+				if err != nil {
+					re.ErrorContains(err, "not leader")
+				} else {
+					ts = tsoutil.ComposeTS(physical, logical)
+					re.Less(lastTS, ts)
+					lastTS = ts
+				}
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 			}
 		}()
 	}
 	wg.Wait()
+}
+
+func (suite *tsoClientTestSuite) TestRandomShutdown() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+
+	tsoSvr, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanup()
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber + 1)
+	go func() {
+		defer wg.Done()
+		r := rand.New(rand.NewSource(time.Now().UnixNano()))
+		n := r.Intn(2) + 1
+		time.Sleep(time.Duration(n) * time.Second)
+		if !suite.legacy {
+			// random close one of the tso servers
+			if r.Intn(2) == 0 {
+				tsoSvr.Close()
+			} else {
+				suite.tsoServer.Close()
+			}
+		} else {
+			// close pd leader server
+			suite.cluster.GetServer(suite.cluster.GetLeader()).GetServer().Close()
+		}
+		cancel()
+	}()
+
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		go func() {
+			defer wg.Done()
+			client := mcs.SetupClientWithKeyspace(suite.ctx, re, strings.Split(suite.backendEndpoints, ","))
+			var ts, lastTS uint64
+			for {
+				physical, logical, err := client.GetTS(suite.ctx)
+				if err != nil {
+					re.Regexp("(server not started|closed unexpectedly)", err.Error())
+				} else {
+					ts = tsoutil.ComposeTS(physical, logical)
+					re.Less(lastTS, ts)
+					lastTS = ts
+				}
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	suite.TearDownSuite()
+	suite.SetupSuite()
 }
 
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
@@ -237,7 +286,6 @@ func TestMixedTSODeployment(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
 	defer re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
@@ -255,112 +303,42 @@ func TestMixedTSODeployment(t *testing.T) {
 	err = apiSvr.Run()
 	re.NoError(err)
 
-	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
+	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	cli1 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
-	cli2 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
-
+	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber + 1)
 	go func() {
 		defer wg.Done()
+		r := rand.New(rand.NewSource(time.Now().UnixNano()))
 		for i := 0; i < 2; i++ {
-			n := r.Intn(3) + 1
+			n := r.Intn(2) + 1
 			time.Sleep(time.Duration(n) * time.Second)
 			leaderServer.ResignLeader()
 			leaderServer = cluster.GetServer(cluster.WaitLeader())
 		}
+		cancel1()
 	}()
 
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
+			cli := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
 			var ts, lastTS uint64
-			for i := 0; i < tsoRequestRound; i++ {
-				time.Sleep(time.Millisecond * 30)
-				physical, logical, err := cli1.GetTS(context.Background())
+			for {
+				physical, logical, err := cli.GetTS(ctx)
 				if err != nil {
-					re.ErrorContains(err, "not leader")
+					re.Regexp("(context canceled|not leader|not the pd or local tso allocator leader)", err.Error())
 				} else {
 					ts = tsoutil.ComposeTS(physical, logical)
 					re.Less(lastTS, ts)
 					lastTS = ts
 				}
-				physical, logical, _ = cli2.GetTS(context.Background())
-				if err != nil {
-					re.ErrorContains(err, "not leader")
-				} else {
-					ts = tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
-					lastTS = ts
-				}
-			}
-		}()
-	}
-	wg.Wait()
-}
-
-func TestRandomShutdown(t *testing.T) {
-	re := require.New(t)
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	ctx, cancel := context.WithCancel(context.Background())
-	cluster, err := tests.NewTestAPICluster(ctx, 3)
-	re.NoError(err)
-	defer cancel()
-	defer cluster.Destroy()
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-
-	leaderServer := cluster.GetServer(cluster.WaitLeader())
-	backendEndpoints := leaderServer.GetAddr()
-
-	tsoSvr1, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
-	defer cleanup()
-	tsoSvr2, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints)
-	defer cleanup()
-
-	cli1 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
-	cli2 := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
-
-	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber + 1)
-	go func() {
-		defer wg.Done()
-		n := r.Intn(3) + 1
-		time.Sleep(time.Duration(n) * time.Second)
-		if r.Intn(2) == 0 {
-			tsoSvr1.Close()
-		} else {
-			tsoSvr2.Close()
-		}
-	}()
-
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
-			defer wg.Done()
-			var ts, lastTS uint64
-			for i := 0; i < tsoRequestRound; i++ {
-				time.Sleep(time.Millisecond * 30)
-				physical, logical, err := cli1.GetTS(context.Background())
-				if err != nil {
-					re.ErrorContains(err, "server not started")
-				} else {
-					ts = tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
-					lastTS = ts
-				}
-				physical, logical, err = cli2.GetTS(context.Background())
-				if err != nil {
-					re.ErrorContains(err, "server not started")
-				} else {
-					ts = tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
-					lastTS = ts
+				select {
+				case <-ctx1.Done():
+					return
+				default:
 				}
 			}
 		}()

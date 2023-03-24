@@ -264,7 +264,6 @@ func (c *RaftCluster) Start(s Server) error {
 	if cluster == nil {
 		return nil
 	}
-
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
@@ -272,7 +271,6 @@ func (c *RaftCluster) Start(s Server) error {
 			return err
 		}
 	}
-
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	if err != nil {
 		return err
