@@ -28,11 +28,11 @@ tidy:
 	git diff --quiet go.mod go.sum
 
 test: failpoint-enable
-	CGO_ENABLED=1 go test ./... -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	CGO_ENABLED=1 go test -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
 ci-test-job:
-	CGO_ENABLED=1 go test ./... -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=$(ROOT_PATH)/... github.com/tikv/pd/tests/integrations/mcs
+	CGO_ENABLED=1 go test -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=$(ROOT_PATH)/... github.com/tikv/pd/tests/integrations/mcs
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools
