@@ -61,7 +61,7 @@ func (l *EmbeddedEtcdLeader) Watch(ctx context.Context) {
 	l.parent.WatchLeader(ctx, l.member, l.revision)
 }
 
-// EmbeddedEtcdLeader is the leader in the election group backed by the etcd, but it's
+// EtcdLeader is the leader in the election group backed by the etcd, but it's
 // decouple from the embedded etcd.
 type EtcdLeader struct {
 	parent       *Participant
