@@ -31,7 +31,6 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
@@ -127,17 +126,15 @@ func (s *Server) primaryElectionLoop() {
 			return
 		}
 
-		primary, rev, checkAgain := s.participant.CheckLeader()
+		primary, checkAgain := s.participant.CheckLeader()
 		if checkAgain {
 			continue
 		}
 		if primary != nil {
-			if rsPrimary, ok := primary.(*tsopb.Participant); ok {
-				log.Info("start to watch the primary", zap.Stringer("resource-manager-primary", rsPrimary))
-				// WatchLeader will keep looping and never return unless the primary/leader has changed.
-				s.participant.WatchLeader(s.serverLoopCtx, rsPrimary, rev)
-				log.Info("the resource manager primary has changed, try to re-campaign a primaryr")
-			}
+			log.Info("start to watch the primary", zap.Stringer("resource-manager-primary", primary))
+			// Watch will keep looping and never return unless the primary/leader has changed.
+			primary.Watch(s.serverLoopCtx)
+			log.Info("the resource manager primary has changed, try to re-campaign a primaryr")
 		}
 
 		s.campaignLeader()
@@ -148,10 +145,10 @@ func (s *Server) campaignLeader() {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info("campaign resource manager primary/leader meets error due to txn conflict, another resource manager server may campaign successfully",
+			log.Info("campaign resource manager primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 		} else {
-			log.Error("campaign resource manager primary/leader meets error due to etcd error",
+			log.Error("campaign resource manager primary meets error due to etcd error",
 				zap.String("campaign-resource-manager-primary-name", s.participant.Name()),
 				errs.ZapError(err))
 		}

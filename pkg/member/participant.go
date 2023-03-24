@@ -32,8 +32,8 @@ import (
 )
 
 // Participant is used for the election related logic. Compared to its counterpart
-// EmbeddedEtcdMember, Participant relies on etcd for election, but it's decoupled
-// with the embedded etcd. It implements Member interface.
+// EmbeddedEtcdMember, Participant relies on etcd for election, but it's decouple
+// from the embedded etcd. It implements Member interface.
 type Participant struct {
 	leadership *election.Leadership
 	// stored as member type
@@ -136,7 +136,7 @@ func (m *Participant) GetLeader() *tsopb.Participant {
 }
 
 // setLeader sets the member's leader.
-func (m *Participant) setLeader(member interface{}) {
+func (m *Participant) setLeader(member *tsopb.Participant) {
 	m.leader.Store(member)
 }
 
@@ -191,19 +191,20 @@ func (m *Participant) getPersistentLeader() (*tsopb.Participant, int64, error) {
 	return leader, rev, nil
 }
 
-// CheckLeader checks returns true if it is needed to check later.
-func (m *Participant) CheckLeader() (interface{}, int64, bool) {
+// CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
+// otherwise returns a bool which indicates if it is needed to check later.
+func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 	if err := m.PrecheckLeader(); err != nil {
 		log.Error("failed to pass pre-check, check the leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
 		time.Sleep(200 * time.Millisecond)
-		return nil, 0, true
+		return nil, true
 	}
 
 	leader, revision, err := m.getPersistentLeader()
 	if err != nil {
 		log.Error("getting the leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
-		return nil, 0, true
+		return nil, true
 	}
 	if leader != nil {
 		if m.IsSameLeader(leader) {
@@ -214,19 +215,24 @@ func (m *Participant) CheckLeader() (interface{}, int64, bool) {
 			if err = m.leadership.DeleteLeaderKey(); err != nil {
 				log.Error("deleting the leader key meets error", errs.ZapError(err))
 				time.Sleep(200 * time.Millisecond)
-				return nil, 0, true
+				return nil, true
 			}
 			// Return nil and false to make sure the campaign will start immediately.
-			return nil, 0, false
+			return nil, false
 		}
 	}
-	return leader, revision, false
+
+	return &EtcdLeader{
+		parent:       m,
+		pariticipant: leader,
+		revision:     revision,
+	}, false
 }
 
 // WatchLeader is used to watch the changes of the leader.
-func (m *Participant) WatchLeader(serverCtx context.Context, leader interface{}, revision int64) {
+func (m *Participant) WatchLeader(ctx context.Context, leader *tsopb.Participant, revision int64) {
 	m.setLeader(leader)
-	m.leadership.Watch(serverCtx, revision)
+	m.leadership.Watch(ctx, revision)
 	m.unsetLeader()
 }
 

@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -112,18 +113,17 @@ type ElectionMember interface {
 	// IsLeader returns whether the participant is the leader or not by checking its
 	// leadership's lease and leader info.
 	IsLeader() bool
-	// IsLeaderElected returns true if the leader exists; otherwise false
+	// IsLeaderElected returns true if the leader exists; otherwise false.
 	IsLeaderElected() bool
-	// CheckLeader checks the current leader.
-	CheckLeader() (leader interface{}, revision int64, checkAgain bool)
+	// CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
+	// otherwise returns a bool which indicates if it is needed to check later.
+	CheckLeader() (leader member.ElectionLeader, checkAgain bool)
 	// EnableLeader declares the member itself to be the leader.
 	EnableLeader()
 	// KeepLeader is used to keep the leader's leadership.
 	KeepLeader(ctx context.Context)
 	// CampaignLeader is used to campaign the leadership and make it become a leader in an election group.
 	CampaignLeader(leaseTimeout int64) error
-	// WatchLeader is used to watch the changes of the leader.
-	WatchLeader(ctx context.Context, leader interface{}, revision int64)
 	// ResetLeader is used to reset the member's current leadership.
 	// Basically it will reset the leader lease and unset leader info.
 	ResetLeader()

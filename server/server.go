@@ -1406,31 +1406,29 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-		leader, revision, checkAgain := s.member.CheckLeader()
+		leader, checkAgain := s.member.CheckLeader()
 		if checkAgain {
 			continue
 		}
 		if leader != nil {
-			if pdLeader, ok := leader.(*pdpb.Member); ok {
-				err := s.reloadConfigFromKV()
-				if err != nil {
-					log.Error("reload config failed", errs.ZapError(err))
-					continue
-				}
-				if !s.IsAPIServiceMode() {
-					// Check the cluster dc-location after the PD leader is elected
-					go s.tsoAllocatorManager.ClusterDCLocationChecker()
-				}
-				syncer := s.cluster.GetRegionSyncer()
-				if s.persistOptions.IsUseRegionStorage() {
-					syncer.StartSyncWithLeader(pdLeader.GetClientUrls()[0])
-				}
-				log.Info("start to watch pd leader", zap.Stringer("pd-leader", pdLeader))
-				// WatchLeader will keep looping and never return unless the PD leader has changed.
-				s.member.WatchLeader(s.serverLoopCtx, pdLeader, revision)
-				syncer.StopSyncWithLeader()
-				log.Info("pd leader has changed, try to re-campaign a pd leader")
+			err := s.reloadConfigFromKV()
+			if err != nil {
+				log.Error("reload config failed", errs.ZapError(err))
+				continue
 			}
+			if !s.IsAPIServiceMode() {
+				// Check the cluster dc-location after the PD leader is elected
+				go s.tsoAllocatorManager.ClusterDCLocationChecker()
+			}
+			syncer := s.cluster.GetRegionSyncer()
+			if s.persistOptions.IsUseRegionStorage() {
+				syncer.StartSyncWithLeader(leader.GetListenUrls()[0])
+			}
+			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
+			// WatchLeader will keep looping and never return unless the PD leader has changed.
+			leader.Watch(s.serverLoopCtx)
+			syncer.StopSyncWithLeader()
+			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
 
 		// To make sure the etcd leader and PD leader are on the same server.

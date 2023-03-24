@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
@@ -490,19 +489,17 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 		default:
 		}
 
-		primary, rev, checkAgain := gta.member.CheckLeader()
+		primary, checkAgain := gta.member.CheckLeader()
 		if checkAgain {
 			continue
 		}
 		if primary != nil {
-			if tsoPrimary, ok := primary.(*tsopb.Participant); ok {
-				log.Info("start to watch the primary",
-					zap.Uint32("keyspace-group-id", gta.am.ksgID),
-					zap.Stringer("tso-primary", tsoPrimary))
-				// WatchLeader will keep looping and never return unless the primary has changed.
-				gta.member.WatchLeader(gta.ctx, tsoPrimary, rev)
-				log.Info("the tso primary has changed, try to re-campaign a primary")
-			}
+			log.Info("start to watch the primary",
+				zap.Uint32("keyspace-group-id", gta.am.ksgID),
+				zap.Stringer("tso-primary", primary))
+			// Watch will keep looping and never return unless the primary has changed.
+			primary.Watch(gta.ctx)
+			log.Info("the tso primary has changed, try to re-campaign a primary")
 		}
 
 		gta.campaignLeader()
