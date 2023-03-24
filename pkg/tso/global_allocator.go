@@ -501,7 +501,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 }
 
 func (gta *GlobalTSOAllocator) campaignLeader() {
-	log.Info("start to campaign the primary",	zap.String("campaign-tso-primary-name", gta.member.Name()))
+	log.Info("start to campaign the primary", zap.String("campaign-tso-primary-name", gta.member.Name()))
 	if err := gta.am.member.CampaignLeader(gta.am.leaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
@@ -526,7 +526,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 
 	// maintain the the leadership, after this, TSO can be service.
 	gta.member.KeepLeader(ctx)
-	log.Info("campaign tso primary ok",	zap.String("campaign-tso-primary-name", gta.member.Name()))
+	log.Info("campaign tso primary ok", zap.String("campaign-tso-primary-name", gta.member.Name()))
 
 	allocator, err := gta.am.GetAllocator(GlobalDCLocation)
 	if err != nil {
@@ -545,7 +545,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	gta.member.EnableLeader()
 	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
 	// go gta.tsoAllocatorManager.ClusterDCLocationChecker()
-	log.Info("tso primary is ready to serve",	zap.String("tso-primary-name", gta.member.Name()))
+	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", gta.member.Name()))
 
 	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
 	defer leaderTicker.Stop()
