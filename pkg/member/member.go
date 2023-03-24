@@ -230,7 +230,7 @@ func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 	}
 
 	return &EmbeddedEtcdLeader{
-		parent:   m,
+		wrapper:  m,
 		member:   leader,
 		revision: revision,
 	}, false

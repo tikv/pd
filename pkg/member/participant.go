@@ -32,7 +32,7 @@ import (
 )
 
 // Participant is used for the election related logic. Compared to its counterpart
-// EmbeddedEtcdMember, Participant relies on etcd for election, but it's decouple
+// EmbeddedEtcdMember, Participant relies on etcd for election, but it's decoupled
 // from the embedded etcd. It implements Member interface.
 type Participant struct {
 	leadership *election.Leadership
@@ -226,7 +226,7 @@ func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 	}
 
 	return &EtcdLeader{
-		parent:       m,
+		wrapper:      m,
 		pariticipant: leader,
 		revision:     revision,
 	}, false

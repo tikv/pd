@@ -30,13 +30,13 @@ type ElectionLeader interface {
 	GetRevision() int64
 	// String declares fmt.Stringer
 	String() string
-	// Watch on the leader in the election group
+	// Watch on itself, the leader in the election group
 	Watch(context.Context)
 }
 
 // EmbeddedEtcdLeader is the leader in the election group backed by the embedded etcd.
 type EmbeddedEtcdLeader struct {
-	parent   *EmbeddedEtcdMember
+	wrapper  *EmbeddedEtcdMember
 	member   *pdpb.Member
 	revision int64
 }
@@ -58,13 +58,13 @@ func (l *EmbeddedEtcdLeader) String() string {
 
 // Watch on the leader
 func (l *EmbeddedEtcdLeader) Watch(ctx context.Context) {
-	l.parent.WatchLeader(ctx, l.member, l.revision)
+	l.wrapper.WatchLeader(ctx, l.member, l.revision)
 }
 
 // EtcdLeader is the leader in the election group backed by the etcd, but it's
-// decouple from the embedded etcd.
+// decoupled from the embedded etcd.
 type EtcdLeader struct {
-	parent       *Participant
+	wrapper      *Participant
 	pariticipant *tsopb.Participant
 	revision     int64
 }
@@ -86,5 +86,5 @@ func (l *EtcdLeader) String() string {
 
 // Watch on the leader
 func (l *EtcdLeader) Watch(ctx context.Context) {
-	l.parent.WatchLeader(ctx, l.pariticipant, l.revision)
+	l.wrapper.WatchLeader(ctx, l.pariticipant, l.revision)
 }
