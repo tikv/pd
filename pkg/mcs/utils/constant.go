@@ -31,7 +31,7 @@ const (
 	// DefaultDisableErrorVerbose is the default value of DisableErrorVerbose
 	DefaultDisableErrorVerbose = true
 	// DefaultLeaderLease is the default value of LeaderLease
-	DefaultLeaderLease = 3
+	DefaultLeaderLease = int64(3)
 	// LeaderTickInterval is the interval to check leader
 	LeaderTickInterval = 50 * time.Millisecond
 
