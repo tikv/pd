@@ -334,7 +334,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	controller.Stop()
 }
 
-// TestSwitchBurst is used to test https://github.com/tikv/pd/issue/6209
+// TestSwitchBurst is used to test https://github.com/tikv/pd/issues/6209
 func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	re := suite.Require()
 	cli := suite.client
