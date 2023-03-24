@@ -297,9 +297,7 @@ func (am *AllocatorManager) close() {
 		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
 	}
 
-	log.Info("In the middle of allocator manager !!!!!! 111111", zap.Uint32("keyspace-group-id", am.ksgID))
 	am.cancel()
-	log.Info("In the middle of allocator manager !!!!!! 222222", zap.Uint32("keyspace-group-id", am.ksgID))
 	am.svcLoopWG.Wait()
 
 	log.Info("closed the allocator manager", zap.Uint32("keyspace-group-id", am.ksgID))
