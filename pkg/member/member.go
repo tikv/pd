@@ -229,8 +229,6 @@ func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 		return nil, false
 	}
 
-	log.Info("Found Leader !!!!!!!!!", zap.Stringer("leader-info", leader))
-
 	return &EmbeddedEtcdLeader{
 		parent:   m,
 		member:   leader,

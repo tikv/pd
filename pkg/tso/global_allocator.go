@@ -80,9 +80,9 @@ func NewGlobalTSOAllocator(
 	am *AllocatorManager,
 	startGlobalLeaderLoop bool,
 ) Allocator {
-	cctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	gta := &GlobalTSOAllocator{
-		ctx:    cctx,
+		ctx:    ctx,
 		cancel: cancel,
 		am:     am,
 		member: am.member,
@@ -575,7 +575,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
-			log.Info("server is closed", zap.Uint32("keyspace-group-id", gta.am.ksgID))
+			log.Info("exit leader campaign", zap.Uint32("keyspace-group-id", gta.am.ksgID))
 			return
 		}
 	}

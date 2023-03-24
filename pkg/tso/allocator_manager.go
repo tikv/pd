@@ -160,7 +160,10 @@ type AllocatorManager struct {
 		// the number of suffix bits we need in the TSO logical part.
 		maxSuffix int32
 	}
+	// for the synchronization purpose of the allocator update checks
 	wg sync.WaitGroup
+	// for the synchronization purpose of the service loops
+	svcLoopWG sync.WaitGroup
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -246,19 +249,9 @@ func (am *AllocatorManager) SetUpGlobalAllocator(ctx context.Context, leadership
 	}
 
 	if startGlobalLeaderLoop {
-		am.wg.Add(1)
+		am.svcLoopWG.Add(1)
 		go am.tsoAllocatorLoop()
 	}
-}
-
-// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
-// tso service starts the loop here, but pd starts its own loop.
-func (am *AllocatorManager) tsoAllocatorLoop() {
-	defer logutil.LogPanic()
-	defer am.wg.Done()
-
-	am.AllocatorDaemon(am.ctx)
-	log.Info("exit allocator loop", zap.Uint32("keyspace-group-id", am.ksgID))
 }
 
 // setUpLocalAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
@@ -285,15 +278,31 @@ func (am *AllocatorManager) setUpLocalAllocator(parentCtx context.Context, dcLoc
 	go am.allocatorLeaderLoop(parentCtx, localTSOAllocator)
 }
 
+// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
+// tso service starts the loop here, but pd starts its own loop.
+func (am *AllocatorManager) tsoAllocatorLoop() {
+	defer logutil.LogPanic()
+	defer am.svcLoopWG.Done()
+
+	am.AllocatorDaemon(am.ctx)
+	log.Info("exit allocator loop", zap.Uint32("keyspace-group-id", am.ksgID))
+}
+
 // close is used to shutdown TSO Allocator updating daemon.
 // tso service call this function to shutdown the loop here, but pd manages its own loop.
 func (am *AllocatorManager) close() {
+	log.Info("closing the allocator manager", zap.Uint32("keyspace-group-id", am.ksgID))
+
 	if allocatorGroup, exist := am.getAllocatorGroup(GlobalDCLocation); exist {
 		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
 	}
 
+	log.Info("In the middle of allocator manager !!!!!! 111111", zap.Uint32("keyspace-group-id", am.ksgID))
 	am.cancel()
-	am.wg.Wait()
+	log.Info("In the middle of allocator manager !!!!!! 222222", zap.Uint32("keyspace-group-id", am.ksgID))
+	am.svcLoopWG.Wait()
+
+	log.Info("closed the allocator manager", zap.Uint32("keyspace-group-id", am.ksgID))
 }
 
 func (am *AllocatorManager) getMember() *ElectionMember {
@@ -696,6 +705,8 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
 // any new local allocator that needs to be set up.
 func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
+	log.Info("entering into allocator daemon", zap.Uint32("keyspace-group-id", am.ksgID))
+
 	// allocatorPatroller should only work when enableLocalTSO is true to
 	// set up the new Local TSO Allocator in time.
 	var patrolTicker = &time.Ticker{}
@@ -727,6 +738,7 @@ func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 			// PS: ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
 			// we should run them concurrently to speed up the progress.
 		case <-ctx.Done():
+			log.Info("exit allocator daemon", zap.Uint32("keyspace-group-id", am.ksgID))
 			return
 		}
 	}
@@ -748,10 +760,12 @@ func (am *AllocatorManager) allocatorUpdater() {
 func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	defer logutil.LogPanic()
 	defer am.wg.Done()
+
 	select {
 	case <-ag.ctx.Done():
 		// Resetting the allocator will clear TSO in memory
 		ag.allocator.Reset()
+		log.Info("exit the allocator update loop", zap.Uint32("keyspace-group-id", am.ksgID))
 		return
 	default:
 	}
@@ -806,7 +820,8 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 	}
 	newClusterDCLocations, err := am.GetClusterDCLocationsFromEtcd()
 	if err != nil {
-		log.Error("get cluster dc-locations from etcd failed", errs.ZapError(err))
+		log.Error("get cluster dc-locations from etcd failed",
+			zap.Uint32("keyspace-group-id", am.ksgID), errs.ZapError(err))
 		return
 	}
 	am.mu.Lock()
