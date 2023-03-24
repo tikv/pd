@@ -73,7 +73,7 @@ func (m *Participant) InitInfo(name string, id uint64, rootPath string, leaderNa
 	m.rootPath = rootPath
 	m.leaderPath = path.Join(rootPath, leaderName)
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
-	log.Info("Participant initialized", zap.String("leader-path", m.leaderPath))
+	log.Info("Participant joining election", zap.Stringer("participant-info", m.member), zap.String("leader-path", m.leaderPath))
 }
 
 // ID returns the unique ID for this participant in the election group
@@ -206,20 +206,23 @@ func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 		time.Sleep(200 * time.Millisecond)
 		return nil, true
 	}
-	if leader != nil {
-		if m.IsSameLeader(leader) {
-			// oh, we are already the leader, which indicates we may meet something wrong
-			// in previous CampaignLeader. We should delete the leadership and campaign again.
-			log.Warn("the leader has not changed, delete and campaign again", zap.Stringer("old-leader", leader))
-			// Delete the leader itself and let others start a new election again.
-			if err = m.leadership.DeleteLeaderKey(); err != nil {
-				log.Error("deleting the leader key meets error", errs.ZapError(err))
-				time.Sleep(200 * time.Millisecond)
-				return nil, true
-			}
-			// Return nil and false to make sure the campaign will start immediately.
-			return nil, false
+	if leader == nil {
+		// no leader yet
+		return nil, false
+	}
+
+	if m.IsSameLeader(leader) {
+		// oh, we are already the leader, which indicates we may meet something wrong
+		// in previous CampaignLeader. We should delete the leadership and campaign again.
+		log.Warn("the leader has not changed, delete and campaign again", zap.Stringer("old-leader", leader))
+		// Delete the leader itself and let others start a new election again.
+		if err = m.leadership.DeleteLeaderKey(); err != nil {
+			log.Error("deleting the leader key meets error", errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			return nil, true
 		}
+		// Return nil and false to make sure the campaign will start immediately.
+		return nil, false
 	}
 
 	return &EtcdLeader{

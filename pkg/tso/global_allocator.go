@@ -486,6 +486,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 		select {
 		case <-gta.ctx.Done():
 			log.Info("exit the global tso primary election loop", zap.Uint32("keyspace-group-id", gta.am.ksgID))
+			return
 		default:
 		}
 

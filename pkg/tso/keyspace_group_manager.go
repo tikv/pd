@@ -129,7 +129,7 @@ func (kgm *KeyspaceGroupManager) Initialize() {
 
 // Initialize this the default keyspace group
 func (kgm *KeyspaceGroupManager) initDefaultKeyspaceGroup() {
-	uniqueName := fmt.Sprintf("%s-%5d", kgm.electionNamePrefix, mcsutils.DefaultKeySpaceGroupID)
+	uniqueName := fmt.Sprintf("%s-%05d", kgm.electionNamePrefix, mcsutils.DefaultKeySpaceGroupID)
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 
@@ -138,12 +138,13 @@ func (kgm *KeyspaceGroupManager) initDefaultKeyspaceGroup() {
 		primaryElectionSuffix, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
 
 	defaultKsgGroupStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(kgm.etcdClient, kgm.defaultKsgStorageTSRootPath), nil)
-	kgm.ksgAllocatorManagers[mcsutils.DefaultKeySpaceGroupID] = NewAllocatorManager(
-		kgm.ctx, true, mcsutils.DefaultKeySpaceGroupID, participant,
-		kgm.defaultKsgStorageTSRootPath, defaultKsgGroupStorage,
-		kgm.cfg.IsLocalTSOEnabled(), kgm.cfg.GetTSOSaveInterval(),
-		kgm.cfg.GetTSOUpdatePhysicalInterval(), kgm.cfg.GetLeaderLease(),
-		kgm.cfg.GetTLSConfig(), kgm.maxResetTSGap)
+	kgm.ksgAllocatorManagers[mcsutils.DefaultKeySpaceGroupID] =
+		NewAllocatorManager(
+			kgm.ctx, true, mcsutils.DefaultKeySpaceGroupID, participant,
+			kgm.defaultKsgStorageTSRootPath, defaultKsgGroupStorage,
+			kgm.cfg.IsLocalTSOEnabled(), kgm.cfg.GetTSOSaveInterval(),
+			kgm.cfg.GetTSOUpdatePhysicalInterval(), kgm.cfg.GetLeaderLease(),
+			kgm.cfg.GetTLSConfig(), kgm.maxResetTSGap)
 }
 
 // GetAllocatorManager returns the AllocatorManager of the given keyspace group

@@ -210,21 +210,26 @@ func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 		time.Sleep(200 * time.Millisecond)
 		return nil, true
 	}
-	if leader != nil {
-		if m.IsSameLeader(leader) {
-			// oh, we are already a PD leader, which indicates we may meet something wrong
-			// in previous CampaignLeader. We should delete the leadership and campaign again.
-			log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
-			// Delete the leader itself and let others start a new election again.
-			if err = m.leadership.DeleteLeaderKey(); err != nil {
-				log.Error("deleting pd leader key meets error", errs.ZapError(err))
-				time.Sleep(200 * time.Millisecond)
-				return nil, true
-			}
-			// Return nil and false to make sure the campaign will start immediately.
-			return nil, false
-		}
+	if leader == nil {
+		// no leader yet
+		return nil, false
 	}
+
+	if m.IsSameLeader(leader) {
+		// oh, we are already a PD leader, which indicates we may meet something wrong
+		// in previous CampaignLeader. We should delete the leadership and campaign again.
+		log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
+		// Delete the leader itself and let others start a new election again.
+		if err = m.leadership.DeleteLeaderKey(); err != nil {
+			log.Error("deleting pd leader key meets error", errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			return nil, true
+		}
+		// Return nil and false to make sure the campaign will start immediately.
+		return nil, false
+	}
+
+	log.Info("Found Leader !!!!!!!!!", zap.Stringer("leader-info", leader))
 
 	return &EmbeddedEtcdLeader{
 		parent:   m,
@@ -314,6 +319,7 @@ func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUr
 	m.memberValue = string(data)
 	m.rootPath = rootPath
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "leader election")
+	log.Info("Member joining election", zap.Stringer("member-info", m.member), zap.String("root-path", m.rootPath))
 }
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all

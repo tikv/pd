@@ -203,7 +203,7 @@ func NewAllocatorManager(
 	maxResetTSGap func() time.Duration,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
-	allocatorManager := &AllocatorManager{
+	am := &AllocatorManager{
 		ctx:                    ctx,
 		cancel:                 cancel,
 		ksgID:                  keyspaceGroupID,
@@ -217,31 +217,31 @@ func NewAllocatorManager(
 		maxResetTSGap:          maxResetTSGap,
 		securityConfig:         tlsConfig,
 	}
-	allocatorManager.mu.allocatorGroups = make(map[string]*allocatorGroup)
-	allocatorManager.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
-	allocatorManager.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
+	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
+	am.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
+	am.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
 
 	// Set up the Global TSO Allocator here, it will be initialized once the member campaigns leader successfully.
-	allocatorManager.setUpGlobalAllocator(startGlobalLeaderLoop)
+	am.SetUpGlobalAllocator(am.ctx, am.member.GetLeadership(), startGlobalLeaderLoop)
 
-	return allocatorManager
+	return am
 }
 
-// setUpGlobalAllocator is used to set up the global allocator, which will initialize the allocator and put it into
+// SetUpGlobalAllocator is used to set up the global allocator, which will initialize the allocator and put it into
 // an allocator daemon. An TSO Allocator should only be set once, and may be initialized and reset multiple times
 // depending on the election.
-func (am *AllocatorManager) setUpGlobalAllocator(startGlobalLeaderLoop bool) {
+func (am *AllocatorManager) SetUpGlobalAllocator(ctx context.Context, leadership *election.Leadership, startGlobalLeaderLoop bool) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	allocator := NewGlobalTSOAllocator(am.ctx, am, startGlobalLeaderLoop)
+	allocator := NewGlobalTSOAllocator(ctx, am, startGlobalLeaderLoop)
 	// Create a new allocatorGroup
-	ctx, cancel := context.WithCancel(am.ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	am.mu.allocatorGroups[GlobalDCLocation] = &allocatorGroup{
 		dcLocation: GlobalDCLocation,
 		ctx:        ctx,
 		cancel:     cancel,
-		leadership: am.member.GetLeadership(),
+		leadership: leadership,
 		allocator:  allocator,
 	}
 
