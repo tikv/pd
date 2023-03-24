@@ -207,8 +207,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT.
 		estimatedMaxTSO, shouldRetry, err = gta.estimateMaxTS(count, suffixBits)
 		if err != nil {
-			log.Error("global tso allocator estimates MaxTS failed",
-				zap.Uint32("keyspace-group-id", gta.am.ksgID), errs.ZapError(err))
+			log.Error("global tso allocator estimates MaxTS failed", errs.ZapError(err))
 			continue
 		}
 		if shouldRetry {
@@ -221,8 +220,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		// we need to validate it first before we write it into every Local TSO Allocator's memory.
 		globalTSOResp = *estimatedMaxTSO
 		if err = gta.SyncMaxTS(ctx, dcLocationMap, &globalTSOResp, skipCheck); err != nil {
-			log.Error("global tso allocator synchronizes MaxTS failed",
-				zap.Uint32("keyspace-group-id", gta.am.ksgID), errs.ZapError(err))
+			log.Error("global tso allocator synchronizes MaxTS failed", errs.ZapError(err))
 			continue
 		}
 		// 3. If skipCheck is false and the maxTSO is bigger than estimatedMaxTSO,
@@ -246,8 +244,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		// 4. Persist MaxTS into memory, and etcd if needed
 		var currentGlobalTSO *pdpb.Timestamp
 		if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
-			log.Error("global tso allocator gets the current global tso in memory failed",
-				zap.Uint32("keyspace-group-id", gta.am.ksgID), errs.ZapError(err))
+			log.Error("global tso allocator gets the current global tso in memory failed", errs.ZapError(err))
 			continue
 		}
 		if tsoutil.CompareTimestamp(currentGlobalTSO, &globalTSOResp) < 0 {
@@ -255,8 +252,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 			// Update the Global TSO in memory
 			if err = gta.timestampOracle.resetUserTimestamp(gta.member.GetLeadership(), tsoutil.GenerateTS(&globalTSOResp), true); err != nil {
 				tsoCounter.WithLabelValues("global_tso_persist_err", gta.timestampOracle.dcLocation).Inc()
-				log.Error("global tso allocator update the global tso in memory failed",
-					zap.Uint32("keyspace-group-id", gta.am.ksgID), errs.ZapError(err))
+				log.Error("global tso allocator update the global tso in memory failed", errs.ZapError(err))
 				continue
 			}
 		}
@@ -291,9 +287,7 @@ func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBit
 	// Check if the logical part will reach the overflow condition after being differentiated.
 	if caliLogical := gta.timestampOracle.calibrateLogical(maxTSO.Logical, suffixBits); caliLogical >= maxLogical {
 		log.Error("estimated logical part outside of max logical interval, please check ntp time",
-			zap.Uint32("keyspace-group-id", gta.am.ksgID),
-			zap.Reflect("max-tso", maxTSO),
-			errs.ZapError(errs.ErrLogicOverflow))
+			zap.Reflect("max-tso", maxTSO), errs.ZapError(errs.ErrLogicOverflow))
 		tsoCounter.WithLabelValues("precheck_logical_overflow", gta.timestampOracle.dcLocation).Inc()
 		return false
 	}
@@ -379,14 +373,12 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 				respCh <- syncMaxTSResp
 				if syncMaxTSResp.err != nil {
 					log.Error("sync max ts rpc failed, got an error",
-						zap.Uint32("keyspace-group-id", gta.am.ksgID),
 						zap.String("local-allocator-leader-url", leaderConn.Target()),
 						errs.ZapError(err))
 					return
 				}
 				if syncMaxTSResp.rpcRes.GetHeader().GetError() != nil {
 					log.Error("sync max ts rpc failed, got an error",
-						zap.Uint32("keyspace-group-id", gta.am.ksgID),
 						zap.String("local-allocator-leader-url", leaderConn.Target()),
 						errs.ZapError(errors.Errorf("%s", syncMaxTSResp.rpcRes.GetHeader().GetError().String())))
 					return
@@ -436,7 +428,8 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 		}
 		// Check whether all dc-locations have been considered during the synchronization and retry once if any dc-location missed.
 		if ok, unsyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); !ok {
-			log.Info("unsynced dc-locations found, will retry", zap.Uint32("keyspace-group-id", gta.am.ksgID), zap.Bool("skip-check", skipCheck), zap.Strings("synced-DCs", syncedDCs), zap.Strings("unsynced-DCs", unsyncedDCs))
+			log.Info("unsynced dc-locations found, will retry",
+				zap.Bool("skip-check", skipCheck), zap.Strings("synced-DCs", syncedDCs), zap.Strings("unsynced-DCs", unsyncedDCs))
 			if i < syncMaxRetryCount-1 {
 				// maxTSO should remain the same.
 				*maxTSO = originalMaxTSO
@@ -444,7 +437,9 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 				gta.am.ClusterDCLocationChecker()
 				continue
 			}
-			return errs.ErrSyncMaxTS.FastGenByArgs(fmt.Sprintf("unsynced dc-locations found, skip-check: %t, synced dc-locations: %+v, unsynced dc-locations: %+v", skipCheck, syncedDCs, unsyncedDCs))
+			return errs.ErrSyncMaxTS.FastGenByArgs(
+				fmt.Sprintf("unsynced dc-locations found, skip-check: %t, synced dc-locations: %+v, unsynced dc-locations: %+v",
+					skipCheck, syncedDCs, unsyncedDCs))
 		}
 		// Update the sync RTT to help estimate MaxTS later.
 		if maxTSORtt != 0 {
@@ -461,7 +456,7 @@ func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string]DCLocatio
 			unsyncedDCs = append(unsyncedDCs, dcLocation)
 		}
 	}
-	log.Debug("check unsynced dc-locations", zap.Uint32("keyspace-group-id", gta.am.ksgID), zap.Strings("unsynced-DCs", unsyncedDCs), zap.Strings("synced-DCs", syncedDCs))
+	log.Debug("check unsynced dc-locations", zap.Strings("unsynced-DCs", unsyncedDCs), zap.Strings("synced-DCs", syncedDCs))
 	return len(unsyncedDCs) == 0, unsyncedDCs
 }
 
@@ -485,7 +480,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 	for {
 		select {
 		case <-gta.ctx.Done():
-			log.Info("exit the global tso primary election loop", zap.Uint32("keyspace-group-id", gta.am.ksgID))
+			log.Info("exit the global tso primary election loop")
 			return
 		default:
 		}
@@ -495,9 +490,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 			continue
 		}
 		if primary != nil {
-			log.Info("start to watch the primary",
-				zap.Uint32("keyspace-group-id", gta.am.ksgID),
-				zap.Stringer("tso-primary", primary))
+			log.Info("start to watch the primary", zap.Stringer("tso-primary", primary))
 			// Watch will keep looping and never return unless the primary has changed.
 			primary.Watch(gta.ctx)
 			log.Info("the tso primary has changed, try to re-campaign a primary")
@@ -508,18 +501,14 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 }
 
 func (gta *GlobalTSOAllocator) campaignLeader() {
-	log.Info("start to campaign the primary",
-		zap.Uint32("keyspace-group-id", gta.am.ksgID),
-		zap.String("campaign-tso-primary-name", gta.member.Name()))
+	log.Info("start to campaign the primary",	zap.String("campaign-tso-primary-name", gta.member.Name()))
 	if err := gta.am.member.CampaignLeader(gta.am.leaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
-				zap.Uint32("keyspace-group-id", gta.am.ksgID),
 				zap.String("campaign-tso-primary-name", gta.member.Name()))
 		} else {
-			log.Error("campaign tso primary meets error due to etcd error", zap.Uint32("keyspace-group-id", gta.am.ksgID),
-				zap.String("campaign-tso-primary-name", gta.member.Name()),
-				errs.ZapError(err))
+			log.Error("campaign tso primary meets error due to etcd error",
+				zap.String("campaign-tso-primary-name", gta.member.Name()), errs.ZapError(err))
 		}
 		return
 	}
@@ -537,18 +526,16 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 
 	// maintain the the leadership, after this, TSO can be service.
 	gta.member.KeepLeader(ctx)
-	log.Info("campaign tso primary ok",
-		zap.Uint32("keyspace-group-id", gta.am.ksgID),
-		zap.String("campaign-tso-primary-name", gta.member.Name()))
+	log.Info("campaign tso primary ok",	zap.String("campaign-tso-primary-name", gta.member.Name()))
 
 	allocator, err := gta.am.GetAllocator(GlobalDCLocation)
 	if err != nil {
-		log.Error("failed to get the global tso allocator", zap.Uint32("keyspace-group-id", gta.am.ksgID), errs.ZapError(err))
+		log.Error("failed to get the global tso allocator", errs.ZapError(err))
 		return
 	}
 	log.Info("initializing the global tso allocator")
 	if err := allocator.Initialize(0); err != nil {
-		log.Error("failed to initialize the global tso allocator", zap.Uint32("keyspace-group-id", gta.am.ksgID), errs.ZapError(err))
+		log.Error("failed to initialize the global tso allocator", errs.ZapError(err))
 		return
 	}
 	defer func() {
@@ -558,9 +545,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	gta.member.EnableLeader()
 	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
 	// go gta.tsoAllocatorManager.ClusterDCLocationChecker()
-	log.Info("tso primary is ready to serve",
-		zap.Uint32("keyspace-group-id", gta.am.ksgID),
-		zap.String("tso-primary-name", gta.member.Name()))
+	log.Info("tso primary is ready to serve",	zap.String("tso-primary-name", gta.member.Name()))
 
 	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -569,13 +554,12 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		select {
 		case <-leaderTicker.C:
 			if !gta.member.IsLeader() {
-				log.Info("no longer a primary because lease has expired, the tso primary will step down",
-					zap.Uint32("keyspace-group-id", gta.am.ksgID))
+				log.Info("no longer a primary because lease has expired, the tso primary will step down")
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
-			log.Info("exit leader campaign", zap.Uint32("keyspace-group-id", gta.am.ksgID))
+			log.Info("exit leader campaign")
 			return
 		}
 	}
