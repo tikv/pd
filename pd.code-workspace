@@ -10,15 +10,15 @@
 		},
 		{
 			"name": "pd-client-tests",
-			"path": "tests/client"
+			"path": "tests/integrations/client"
 		},
 		{
 			"name": "mcs-tests",
-			"path": "tests/mcs"
+			"path": "tests/integrations/mcs"
 		},
 		{
 			"name": "tso-tests",
-			"path": "tests/tso"
+			"path": "tests/integrations/tso"
 		},
 		{
 			"name": "pd-tso-bench",
