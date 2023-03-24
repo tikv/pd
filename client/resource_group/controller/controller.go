@@ -194,6 +194,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Stop()
 			stateUpdateTicker = time.NewTicker(200 * time.Millisecond)
 		})
+		failpoint.Inject("acceleratedReportingPeriod", func() {
+			stateUpdateTicker.Stop()
+			stateUpdateTicker = time.NewTicker(time.Millisecond * 100)
+		})
 
 		for {
 			select {
@@ -493,6 +497,8 @@ type groupCostController struct {
 }
 
 type tokenCounter struct {
+	getTokenBucketFunc func() *rmpb.TokenBucket
+
 	// avgRUPerSec is an exponentially-weighted moving average of the RU
 	// consumption per second; used to estimate the RU requirements for the next
 	// request.
@@ -597,6 +603,9 @@ func (gc *groupCostController) initRunState() {
 				limiter:     limiter,
 				avgRUPerSec: 0,
 				avgLastTime: now,
+				getTokenBucketFunc: func() *rmpb.TokenBucket {
+					return getRUTokenBucketSetting(gc.ResourceGroup, typ)
+				},
 			}
 			gc.run.requestUnitTokens[typ] = counter
 		}
@@ -610,6 +619,9 @@ func (gc *groupCostController) initRunState() {
 				limiter:     limiter,
 				avgRUPerSec: 0,
 				avgLastTime: now,
+				getTokenBucketFunc: func() *rmpb.TokenBucket {
+					return getRawResourceTokenBucketSetting(gc.ResourceGroup, typ)
+				},
 			}
 			gc.run.resourceTokens[typ] = counter
 		}
@@ -724,6 +736,9 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
+	failpoint.Inject("acceleratedReportingPeriod", func() {
+		deltaDuration = 100 * time.Millisecond
+	})
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
 	counter.avgLastTime = gc.run.now
@@ -736,6 +751,9 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 		return true
 	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
+	failpoint.Inject("acceleratedReportingPeriod", func() {
+		timeSinceLastRequest = extendedReportingPeriodFactor * defaultTargetPeriod
+	})
 	if timeSinceLastRequest >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
@@ -799,9 +817,9 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		counter.inDegradedMode = true
 		initCounterNotify(counter)
 		var cfg tokenBucketReconfigureArgs
-		fillRate := getRUTokenBucketSetting(gc.ResourceGroup, typ)
-		cfg.NewBurst = int64(fillRate.Settings.FillRate)
-		cfg.NewRate = float64(fillRate.Settings.FillRate)
+		fillRate := counter.getTokenBucketFunc().Settings.FillRate
+		cfg.NewBurst = int64(fillRate)
+		cfg.NewRate = float64(fillRate)
 		failpoint.Inject("degradedModeRU", func() {
 			cfg.NewRate = 99999999
 		})
@@ -811,15 +829,15 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 }
 
 func (gc *groupCostController) applyBasicConfigForRawResourceTokenCounter() {
-	for typ, counter := range gc.run.resourceTokens {
+	for _, counter := range gc.run.resourceTokens {
 		if !counter.limiter.IsLowTokens() {
 			continue
 		}
 		initCounterNotify(counter)
 		var cfg tokenBucketReconfigureArgs
-		fillRate := getRawResourceTokenBucketSetting(gc.ResourceGroup, typ)
-		cfg.NewBurst = int64(fillRate.Settings.FillRate)
-		cfg.NewRate = float64(fillRate.Settings.FillRate)
+		fillRate := counter.getTokenBucketFunc().Settings.FillRate
+		cfg.NewBurst = int64(fillRate)
+		cfg.NewRate = float64(fillRate)
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 	}
 }
@@ -844,10 +862,9 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		cfg.NewTokens = granted
 		cfg.NewRate = float64(bucket.GetSettings().FillRate)
 		counter.lastDeadline = time.Time{}
-		cfg.NotifyThreshold = math.Min(granted+counter.limiter.AvailableTokens(gc.run.now), counter.avgRUPerSec*float64(defaultTargetPeriod)) * notifyFraction
-		// In the non-trickle case, clients can be allowed to accumulate more tokens.
-		if cfg.NewBurst >= 0 {
-			cfg.NewBurst = 0
+		cfg.NotifyThreshold = math.Min(granted+counter.limiter.AvailableTokens(gc.run.now), counter.avgRUPerSec*defaultTargetPeriod.Seconds()) * notifyFraction
+		if cfg.NewBurst < 0 {
+			cfg.NewTokens = float64(counter.getTokenBucketFunc().Settings.FillRate)
 		}
 	} else {
 		// Otherwise the granted token is delivered to the client by fill rate.
