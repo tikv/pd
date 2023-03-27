@@ -1084,7 +1084,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		labels := store.GetLabels()
 		if !force {
 			// If 'force' isn't set, the given labels will merge into those labels which already existed in the store.
-			labels = s.MergeLabels(labels)
+			labels = s.Clone().MergeLabels(labels)
 		}
 		// Update an existed store.
 		s = s.Clone(
