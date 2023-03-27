@@ -134,7 +134,7 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("start to watch the primary", zap.Stringer("resource-manager-primary", primary))
 			// Watch will keep looping and never return unless the primary/leader has changed.
 			primary.Watch(s.serverLoopCtx)
-			log.Info("the resource manager primary has changed, try to re-campaign a primaryr")
+			log.Info("the resource manager primary has changed, try to re-campaign a primary")
 		}
 
 		s.campaignLeader()
