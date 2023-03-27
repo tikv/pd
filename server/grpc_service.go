@@ -202,17 +202,9 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 
-		streamCtx := stream.Context()
-		forwardedHost := grpcutil.GetForwardedHost(streamCtx)
-		if s.IsAPIServiceMode() || !s.isLocalRequest(forwardedHost) {
-			if s.IsAPIServiceMode() {
-				var ok bool
-				forwardedHost, ok = s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
-				if !ok || len(forwardedHost) == 0 {
-					return ErrNotFoundTSOAddr
-				}
-			}
-
+		if forwardedHost, err := s.getForwardedHost(ctx, stream.Context()); err != nil {
+			return err
+		} else if len(forwardedHost) > 0 {
 			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
 			if err != nil {
 				return errors.WithStack(err)
@@ -259,6 +251,19 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 	}
+}
+
+func (s *GrpcServer) getForwardedHost(ctx, streamCtx context.Context) (forwardedHost string, err error) {
+	if s.IsAPIServiceMode() {
+		var ok bool
+		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
+		if !ok || len(forwardedHost) == 0 {
+			return "", ErrNotFoundTSOAddr
+		}
+	} else if fh := grpcutil.GetForwardedHost(streamCtx); !s.isLocalRequest(fh) {
+		forwardedHost = fh
+	}
+	return forwardedHost, nil
 }
 
 // Bootstrap implements gRPC PDServer.

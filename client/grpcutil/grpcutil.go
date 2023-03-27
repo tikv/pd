@@ -90,12 +90,13 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string
 	if err != nil {
 		return nil, err
 	}
-	existing, loaded := clientConns.LoadOrStore(addr, cc)
+	conn, loaded := clientConns.LoadOrStore(addr, cc)
 	if !loaded {
 		// Successfully stored the connection.
 		return cc, nil
 	}
 	cc.Close()
+	cc = conn.(*grpc.ClientConn)
 	log.Debug("use existing connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
-	return existing.(*grpc.ClientConn), nil
+	return cc, nil
 }
