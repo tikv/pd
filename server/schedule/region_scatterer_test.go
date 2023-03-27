@@ -19,11 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-<<<<<<< HEAD
-=======
 	"strconv"
-	"sync"
->>>>>>> 710b511dc (region_scatter: fix a bug that the leaders may be unbalanced after scatter region (#6054))
 	"testing"
 	"time"
 

@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/filter"
 	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/placement"
 	"go.uber.org/zap"
 )
 
@@ -325,13 +326,10 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 				// it is considered that the selected peer select itself.
 				// This origin peer re-selects.
 				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
-<<<<<<< HEAD
-=======
 					selectedStores[peer.GetStoreId()] = struct{}{}
 					if allowLeader(oldFit, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
->>>>>>> 710b511dc (region_scatter: fix a bug that the leaders may be unbalanced after scatter region (#6054))
 					break
 				}
 			}
@@ -385,14 +383,8 @@ func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 	case metapb.PeerRole_Learner, metapb.PeerRole_DemotingVoter:
 		return false
 	}
-	if peer.IsWitness {
-		return false
-	}
 
 	rule := fit.GetRuleFit(peer.GetId()).Rule
-	if rule.IsWitness {
-		return false
-	}
 	switch rule.Role {
 	case placement.Voter, placement.Leader:
 		return true
@@ -419,15 +411,8 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, oldFit *plac
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(r.name, nil, selectedStores),
 	}
-<<<<<<< HEAD
 	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore)
 	filters = append(filters, context.filters...)
-=======
-	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
-	for _, filterFunc := range context.filterFuncs {
-		filters = append(filters, filterFunc())
-	}
->>>>>>> 710b511dc (region_scatter: fix a bug that the leaders may be unbalanced after scatter region (#6054))
 	filters = append(filters, scoreGuard)
 	stores := r.cluster.GetStores()
 	candidates := make([]uint64, 0)
@@ -492,21 +477,6 @@ func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.
 		log.Error("failed to get the store", zap.Uint64("store-id", region.GetLeader().GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
 		return 0
 	}
-<<<<<<< HEAD
-	leaderCandidateStores := make([]uint64, 0)
-	// use PlacementLeaderSafeguard for filtering follower and learner in rule
-	filter := filter.NewPlacementLeaderSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, true /*allowMoveLeader*/)
-	for storeID := range peers {
-		store := r.cluster.GetStore(storeID)
-		if store == nil {
-			return 0
-		}
-		if filter == nil || filter.Target(r.cluster.GetOpts(), store) {
-			leaderCandidateStores = append(leaderCandidateStores, storeID)
-		}
-	}
-=======
->>>>>>> 710b511dc (region_scatter: fix a bug that the leaders may be unbalanced after scatter region (#6054))
 	minStoreGroupLeader := uint64(math.MaxUint64)
 	id := uint64(0)
 	for _, storeID := range leaderCandidateStores {
