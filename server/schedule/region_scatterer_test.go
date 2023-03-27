@@ -609,12 +609,7 @@ func TestRegionHasLearner(t *testing.T) {
 
 // TestSelectedStoresTooFewPeers tests if the peer count has changed due to the picking strategy.
 // Ref https://github.com/tikv/pd/issues/4565
-<<<<<<< HEAD
 func (s *testScatterRegionSuite) TestSelectedStores(c *C) {
-=======
-func TestSelectedStoresTooFewPeers(t *testing.T) {
-	re := require.New(t)
->>>>>>> f5b5391c0 (region_scatterer: fix the bug that could generate schedule with too many peers (#5920))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	opt := config.NewTestOptions()
