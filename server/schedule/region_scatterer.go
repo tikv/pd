@@ -318,7 +318,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 				continue
 			}
 			for {
-				candidates := r.selectCandidates(region, oldFit, peer.GetStoreId(), selectedStores, context)
+				candidates := r.selectCandidates(region, peer.GetStoreId(), selectedStores, context)
 				newPeer := r.selectStore(group, peer, peer.GetStoreId(), candidates, context)
 				targetPeers[newPeer.GetStoreId()] = newPeer
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
@@ -402,7 +402,7 @@ func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.
 	return region.GetLeader().GetStoreId() == targetLeader
 }
 
-func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, oldFit *placement.RegionFit, sourceStoreID uint64, selectedStores map[uint64]struct{}, context engineContext) []uint64 {
+func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, sourceStoreID uint64, selectedStores map[uint64]struct{}, context engineContext) []uint64 {
 	sourceStore := r.cluster.GetStore(sourceStoreID)
 	if sourceStore == nil {
 		log.Error("failed to get the store", zap.Uint64("store-id", sourceStoreID), errs.ZapError(errs.ErrGetSourceStore))
