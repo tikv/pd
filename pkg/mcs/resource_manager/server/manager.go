@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -132,7 +133,7 @@ func (m *Manager) Init(ctx context.Context) {
 		RUSettings: &RequestUnitSettings{
 			RU: &GroupTokenBucket{
 				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   1000000,
+					FillRate:   math.MaxInt32,
 					BurstLimit: -1,
 				},
 			},
