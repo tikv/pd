@@ -199,4 +199,4 @@
 # internal-proxy = false
 
 ## When enabled, usage data will be sent to PingCAP for improving user experience.
-# enable-telemetry = true
+# enable-telemetry = false
