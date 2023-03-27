@@ -159,7 +159,7 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(keyspaceGroupID uint32) Elect
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
 func (kgm *KeyspaceGroupManager) HandleTSORequest(keyspaceGroupID uint32, dcLocation string, count uint32) (pdpb.Timestamp, error) {
-	return kgm.ksgAllocatorManagers[keyspaceGroupID].HandleTSORequest(dcLocation, count)
+	return kgm.ksgAllocatorManagers[keyspaceGroupID].HandleRequest(dcLocation, count)
 }
 
 // Close this KeyspaceGroupManager

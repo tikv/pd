@@ -423,7 +423,6 @@ func (s *Server) startServer() (err error) {
 	s.keyspaceGroupManager.Initialize()
 
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
-
 	s.service = &Service{Server: s}
 
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()

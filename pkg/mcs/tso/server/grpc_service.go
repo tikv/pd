@@ -134,7 +134,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.keyspaceGroupManager.HandleRequest(utils.DefaultKeySpaceGroupID, request.GetDcLocation(), count)
+		ts, err := s.keyspaceGroupManager.HandleTSORequest(utils.DefaultKeySpaceGroupID, request.GetDcLocation(), count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
