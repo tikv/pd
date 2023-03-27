@@ -497,8 +497,8 @@ func (c *tsoClient) chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoCo
 
 type tsoConnectionContext struct {
 	streamAddr string
-	// Current stream to send gRPC requests, pdpb.PD_TsoClient for a leader/follower in the PD cluser,
-	// or tsopb.TSO_TsoClient for a primary/secondary in the TSO clusrer
+	// Current stream to send gRPC requests, pdpb.PD_TsoClient for a leader/follower in the PD cluster,
+	// or tsopb.TSO_TsoClient for a primary/secondary in the TSO cluster
 	stream tsoStream
 	ctx    context.Context
 	cancel context.CancelFunc
