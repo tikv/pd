@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -51,6 +52,8 @@ const (
 // Manager manages keyspace related data.
 // It validates requests and provides concurrency control.
 type Manager struct {
+	// ctx is the context of the manager, to be used in transaction.
+	ctx context.Context
 	// metaLock guards keyspace meta.
 	metaLock *syncutil.LockGroup
 	// idAllocator allocates keyspace id.
@@ -59,10 +62,12 @@ type Manager struct {
 	store endpoint.KeyspaceStorage
 	// rc is the raft cluster of the server.
 	rc *cluster.RaftCluster
-	// ctx is the context of the manager, to be used in transaction.
-	ctx context.Context
 	// config is the configurations of the manager.
 	config config.KeyspaceConfig
+	// member is the current pd's member information, used to check if server is leader.
+	member *member.EmbeddedEtcdMember
+	// gcWorker is used to clean up archived keyspace.
+	gcWorker *gcWorker
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -76,19 +81,25 @@ type CreateKeyspaceRequest struct {
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
-func NewKeyspaceManager(store endpoint.KeyspaceStorage,
+func NewKeyspaceManager(
+	ctx context.Context,
+	store endpoint.KeyspaceStorage,
 	rc *cluster.RaftCluster,
 	idAllocator id.Allocator,
 	config config.KeyspaceConfig,
+	member *member.EmbeddedEtcdMember,
 ) *Manager {
-	return &Manager{
+	manager := &Manager{
+		ctx:         ctx,
 		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
 		idAllocator: idAllocator,
 		store:       store,
 		rc:          rc,
-		ctx:         context.TODO(),
 		config:      config,
+		member:      member,
 	}
+	manager.gcWorker = manager.newGCWorker()
+	return manager
 }
 
 // Bootstrap saves default keyspace info.
@@ -124,6 +135,8 @@ func (manager *Manager) Bootstrap() error {
 			return err
 		}
 	}
+	// start gc loop.
+	go manager.gcWorker.run()
 	return nil
 }
 
@@ -445,6 +458,12 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		zap.String("new state", newState.String()),
 	)
 	return meta, nil
+}
+
+// UpdateConfig update keyspace manager's config.
+func (manager *Manager) UpdateConfig(cfg *config.KeyspaceConfig) {
+	manager.config = *cfg
+	manager.gcWorker.reload(cfg)
 }
 
 // updateKeyspaceState updates keyspace meta and record the update time.
