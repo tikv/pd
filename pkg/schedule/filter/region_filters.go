@@ -173,8 +173,9 @@ type SnapshotSenderFilter struct {
 }
 
 // NewSnapshotSendFilter returns creates a RegionFilter that filters regions with witness peer on the specific store.
+// level should be set as same with the operator priority level.
 func NewSnapshotSendFilter(stores []*core.StoreInfo, level constant.PriorityLevel) RegionFilter {
-	senders := make(map[uint64]struct{}, 0)
+	senders := make(map[uint64]struct{})
 	for _, store := range stores {
 		if store.IsAvailable(storelimit.SendSnapshot, level) && !store.IsBusy() {
 			senders[store.GetID()] = struct{}{}

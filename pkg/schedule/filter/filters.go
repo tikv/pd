@@ -326,8 +326,8 @@ type StoreStateFilter struct {
 	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
-	// set if operator should not low
-	Level constant.PriorityLevel
+	// Set true if it uses low priority to schedule.
+	OperatorLevel constant.PriorityLevel
 	// Reason is used to distinguish the reason of store state filter
 	Reason filterType
 }
@@ -420,7 +420,7 @@ func (f *StoreStateFilter) isBusy(_ config.Config, store *core.StoreInfo) *plan.
 }
 
 func (f *StoreStateFilter) exceedRemoveLimit(_ config.Config, store *core.StoreInfo) *plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer, f.Level) {
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer, f.OperatorLevel) {
 		f.Reason = storeStateExceedRemoveLimit
 		return statusStoreRemoveLimit
 	}
@@ -429,7 +429,7 @@ func (f *StoreStateFilter) exceedRemoveLimit(_ config.Config, store *core.StoreI
 }
 
 func (f *StoreStateFilter) exceedAddLimit(_ config.Config, store *core.StoreInfo) *plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer, f.Level) {
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer, f.OperatorLevel) {
 		f.Reason = storeStateExceedAddLimit
 		return statusStoreAddLimit
 	}
