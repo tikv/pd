@@ -57,8 +57,8 @@ func (m *GroupManager) Bootstrap() error {
 	return nil
 }
 
-// CreateKeyspaces creates keyspace groups.
-func (m *GroupManager) CreateKeyspaces(keyspaceGroups []*endpoint.KeyspaceGroup) error {
+// CreateKeyspaceGroups creates keyspace groups.
+func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
 	for _, keyspaceGroup := range keyspaceGroups {
 		// TODO: add replica count
 		kg := &endpoint.KeyspaceGroup{
@@ -78,8 +78,8 @@ func (m *GroupManager) CreateKeyspaces(keyspaceGroups []*endpoint.KeyspaceGroup)
 }
 
 // GetKeyspaceGroups returns all keyspace groups.
-func (m *GroupManager) GetKeyspaceGroups() ([]*endpoint.KeyspaceGroup, error) {
-	return m.store.LoadKeyspaceGroups()
+func (m *GroupManager) GetKeyspaceGroups(startID uint32, limit int) ([]*endpoint.KeyspaceGroup, error) {
+	return m.store.LoadKeyspaceGroups(startID, limit)
 }
 
 // GetKeyspaceGroupByID returns the keyspace group by id.

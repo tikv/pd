@@ -55,12 +55,16 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 			UserKind: "business",
 		},
 	}
-	err := suite.manager.CreateKeyspaces(keyspaceGroups)
+	err := suite.manager.CreateKeyspaceGroups(keyspaceGroups)
 	re.NoError(err)
 	// list all keyspace groups
-	kgs, err := suite.manager.GetKeyspaceGroups()
+	kgs, err := suite.manager.GetKeyspaceGroups(uint32(0), 0)
 	re.NoError(err)
 	re.Len(kgs, 4)
+	// list part of keyspace groups
+	kgs, err = suite.manager.GetKeyspaceGroups(uint32(1), 0)
+	re.NoError(err)
+	re.Len(kgs, 3)
 	// get the default keyspace group
 	kg, err := suite.manager.GetKeyspaceGroupByID(0)
 	re.NoError(err)
@@ -80,7 +84,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 
 	// create an existing keyspace group
 	keyspaceGroups = []*endpoint.KeyspaceGroup{{ID: uint32(1), UserKind: "business"}}
-	err = suite.manager.CreateKeyspaces(keyspaceGroups)
+	err = suite.manager.CreateKeyspaceGroups(keyspaceGroups)
 	// only print the warning log
 	re.NoError(err)
 }

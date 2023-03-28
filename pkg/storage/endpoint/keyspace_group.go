@@ -31,7 +31,7 @@ type KeyspaceGroup struct {
 
 // KeyspaceGroupStorage is the interface for keyspace group storage.
 type KeyspaceGroupStorage interface {
-	LoadKeyspaceGroups() ([]*KeyspaceGroup, error)
+	LoadKeyspaceGroups(startID uint32, limit int) ([]*KeyspaceGroup, error)
 	LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error)
 	SaveKeyspaceGroup(txn kv.Txn, kg *KeyspaceGroup) error
 	DeleteKeyspaceGroup(txn kv.Txn, id uint32) error
@@ -70,10 +70,10 @@ func (se *StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
 }
 
 // LoadKeyspaceGroups loads all keyspace groups.
-func (se *StorageEndpoint) LoadKeyspaceGroups() ([]*KeyspaceGroup, error) {
-	prefix := KeyspaceGroupIDPrefix()
-	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
+func (se *StorageEndpoint) LoadKeyspaceGroups(startID uint32, limit int) ([]*KeyspaceGroup, error) {
+	prefix := KeyspaceGroupIDPath(startID)
+	prefixEnd := clientv3.GetPrefixRangeEnd(KeyspaceGroupIDPrefix())
+	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
 	if err != nil {
 		return nil, err
 	}

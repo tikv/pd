@@ -27,7 +27,7 @@ import (
 
 // RegisterTSOKeyspaceGroup registers keyspace group handlers to the server.
 func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
-	router := r.Group("tso/keyspace-group")
+	router := r.Group("tso/keyspace-groups")
 	router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateKeyspaceGroups)
 	router.GET("", GetKeyspaceGroups)
@@ -58,7 +58,7 @@ func CreateKeyspaceGroups(c *gin.Context) {
 		}
 	}
 
-	err = manager.CreateKeyspaces(createParams.KeyspaceGroups)
+	err = manager.CreateKeyspaceGroups(createParams.KeyspaceGroups)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -70,7 +70,12 @@ func CreateKeyspaceGroups(c *gin.Context) {
 func GetKeyspaceGroups(c *gin.Context) {
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
-	keyspaceGroups, err := manager.GetKeyspaceGroups()
+	scanStart, scanLimit, err := parseLoadAllQuery(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	keyspaceGroups, err := manager.GetKeyspaceGroups(scanStart, scanLimit)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
