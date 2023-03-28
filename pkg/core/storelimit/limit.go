@@ -40,4 +40,6 @@ type StoreLimit interface {
 	Take(count int64, typ Type, level constant.PriorityLevel) bool
 	// Reset resets the store limit
 	Reset(rate float64, typ Type)
+	// Ack acks the operator cost.
+	Ack(cost int64, typ Type)
 }

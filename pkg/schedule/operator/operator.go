@@ -52,6 +52,7 @@ type Operator struct {
 	AdditionalInfos  map[string]string
 	ApproximateSize  int64
 	timeout          time.Duration
+	influence        *OpInfluence
 }
 
 // NewOperator creates a new operator.
@@ -342,9 +343,17 @@ func (o *Operator) UnfinishedInfluence(opInfluence OpInfluence, region *core.Reg
 
 // TotalInfluence calculates the store difference which whole operator steps make.
 func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionInfo) {
-	for step := 0; step < len(o.steps); step++ {
-		o.steps[step].Influence(opInfluence, region)
+	// skip if region is nil and not cache influence.
+	if region == nil && o.influence == nil {
+		return
 	}
+	if o.influence == nil {
+		o.influence = NewOpInfluence()
+		for step := 0; step < len(o.steps); step++ {
+			o.steps[step].Influence(*o.influence, region)
+		}
+	}
+	opInfluence.Add(*o.influence)
 }
 
 // OpHistory is used to log and visualize completed operators.

@@ -511,6 +511,20 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	return true
 }
 
+func (oc *OperatorController) ack(op *operator.Operator) {
+	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
+	for storeID := range opInfluence.StoresInfluence {
+		for _, v := range storelimit.TypeNameValue {
+			limiter := oc.getOrCreateStoreLimit(storeID, v)
+			if limiter == nil {
+				return
+			}
+			cost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
+			limiter.Ack(cost, v)
+		}
+	}
+}
+
 // RemoveOperator removes a operator from the running operators.
 func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFields ...zap.Field) bool {
 	oc.Lock()
@@ -540,6 +554,7 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 		delete(oc.operators, regionID)
 		oc.updateCounts(oc.operators)
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
+		oc.ack(op)
 		return true
 	}
 	return false
@@ -711,20 +726,18 @@ func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 
 // GetOpInfluence gets OpInfluence.
 func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluence {
-	influence := operator.OpInfluence{
-		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
-	}
+	influence := operator.NewOpInfluence()
 	oc.RLock()
 	defer oc.RUnlock()
 	for _, op := range oc.operators {
 		if !op.CheckTimeout() && !op.CheckSuccess() {
 			region := cluster.GetRegion(op.RegionID())
 			if region != nil {
-				op.UnfinishedInfluence(influence, region)
+				op.UnfinishedInfluence(*influence, region)
 			}
 		}
 	}
-	return influence
+	return *influence
 }
 
 // GetFastOpInfluence get fast finish operator influence
@@ -745,9 +758,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 // AddOpInfluence add operator influence for cluster
 func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster Cluster) {
 	region := cluster.GetRegion(op.RegionID())
-	if region != nil {
-		op.TotalInfluence(influence, region)
-	}
+	op.TotalInfluence(influence, region)
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
