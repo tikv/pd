@@ -81,6 +81,7 @@ func NewStoreRateLimit(ratePerSec float64) StoreLimit {
 	}
 }
 
+// Ack does nothing.
 func (l *StoreRateLimit) Ack(_ int64, _ Type) {}
 
 // Available returns the number of available tokens.
