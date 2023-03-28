@@ -19,7 +19,9 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -52,7 +54,7 @@ func CreateKeyspaceGroups(c *gin.Context) {
 	}
 
 	for _, keyspaceGroup := range createParams.KeyspaceGroups {
-		if err := validateKeyspaceGroupID(keyspaceGroup.ID); err != nil {
+		if !isValid(keyspaceGroup.ID) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 			return
 		}
@@ -86,18 +88,14 @@ func GetKeyspaceGroups(c *gin.Context) {
 
 // GetKeyspaceGroupByID gets keyspace group by id.
 func GetKeyspaceGroupByID(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	id, err := validateKeyspaceGroupID(c)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
-		return
-	}
-	if err := validateKeyspaceGroupID(uint32(id)); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 		return
 	}
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
-	kg, err := manager.GetKeyspaceGroupByID(uint32(id))
+	kg, err := manager.GetKeyspaceGroupByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -108,18 +106,14 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 
 // DeleteKeyspaceGroupByID deletes keyspace group by id.
 func DeleteKeyspaceGroupByID(c *gin.Context) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	id, err := validateKeyspaceGroupID(c)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
-		return
-	}
-	if err := validateKeyspaceGroupID(uint32(id)); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 		return
 	}
 	svr := c.MustGet("server").(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
-	err = manager.DeleteKeyspaceGroupByID(uint32(id))
+	err = manager.DeleteKeyspaceGroupByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -127,7 +121,17 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
-func validateKeyspaceGroupID(id uint32) error {
-	// TODO: check if id is in the valid range.
-	return nil
+func validateKeyspaceGroupID(c *gin.Context) (uint32, error) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if !isValid(uint32(id)) {
+		return 0, errors.Errorf("invalid keyspace group id: %d", id)
+	}
+	return uint32(id), nil
+}
+
+func isValid(id uint32) bool {
+	return id >= utils.DefaultKeySpaceGroupID && id <= 4096
 }

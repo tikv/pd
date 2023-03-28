@@ -18,12 +18,11 @@ import (
 	"context"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"go.uber.org/zap"
 )
-
-const defaultKeyspaceGroupID = uint32(0)
 
 // GroupManager is the manager of keyspace group related data.
 type GroupManager struct {
@@ -43,7 +42,7 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 // Bootstrap saves default keyspace group info.
 func (m *GroupManager) Bootstrap() error {
 	defaultKeyspaceGroup := &endpoint.KeyspaceGroup{
-		ID: defaultKeyspaceGroupID,
+		ID: utils.DefaultKeySpaceGroupID,
 		// TODO: define a user kind type
 		UserKind: "default",
 	}
