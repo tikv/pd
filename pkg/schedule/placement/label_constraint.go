@@ -84,6 +84,7 @@ func MatchLabelConstraints(store *core.StoreInfo, constraints []LabelConstraint)
 	}
 
 	for _, l := range store.GetLabels() {
+		// *Do not* change this behavior, we rely on it to physically isolate stores.
 		if isExclusiveLabel(l.GetKey()) &&
 			slice.NoneOf(constraints, func(i int) bool { return constraints[i].Key == l.GetKey() }) {
 			return false
