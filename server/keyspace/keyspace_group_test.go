@@ -62,9 +62,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	re.NoError(err)
 	re.Len(kgs, 4)
 	// list part of keyspace groups
-	kgs, err = suite.manager.GetKeyspaceGroups(uint32(1), 0)
+	kgs, err = suite.manager.GetKeyspaceGroups(uint32(1), 2)
 	re.NoError(err)
-	re.Len(kgs, 3)
+	re.Len(kgs, 2)
 	// get the default keyspace group
 	kg, err := suite.manager.GetKeyspaceGroupByID(0)
 	re.NoError(err)
