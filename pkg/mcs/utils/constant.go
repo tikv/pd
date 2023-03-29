@@ -50,4 +50,16 @@ const (
 	TSOServiceName = "tso"
 	// ResourceManagerServiceName is the name of resource manager server.
 	ResourceManagerServiceName = "resource_manager"
+
+	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
+	// is the sharding unit, i.e., by the definition here, the max count of the shards
+	// that we support is MaxKeyspaceGroupCount. The keyspace group id is in the range
+	// [0, 99999], which explains we use five-digits number (%05d) to render the keyspace
+	// group id in the storage endpoint path.
+	MaxKeyspaceGroupCount = uint32(100000)
+	// MaxKeyspaceGroupCountInUse is the max count of keyspace groups in use, which should
+	// never exceed MaxKeyspaceGroupCount defined above. Compared to MaxKeyspaceGroupCount,
+	// MaxKeyspaceGroupCountInUse is a much more reasonable value of the max count in the
+	// foreseen future, and the former is just for extensibility in theory.
+	MaxKeyspaceGroupCountInUse = uint32(4096)
 )
