@@ -243,7 +243,7 @@ func (lim *Limiter) maybeNotify() {
 }
 
 func (lim *Limiter) isLowTokensLocked() bool {
-	if lim.isLowProcess || (lim.notifyThreshold > 0 && lim.tokens < lim.notifyThreshold) {
+	if lim.burst >= 0 && (lim.isLowProcess || (lim.notifyThreshold > 0 && lim.tokens < lim.notifyThreshold)) {
 		return true
 	}
 	return false
