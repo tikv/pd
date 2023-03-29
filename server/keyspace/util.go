@@ -38,7 +38,7 @@ var (
 	// ErrKeyspaceNotFound is used to indicate target keyspace does not exist.
 	ErrKeyspaceNotFound = errors.New("keyspace does not exist")
 	// ErrKeyspaceExists indicates target keyspace already exists.
-	// Used when creating a new keyspace.
+	// It's used when creating a new keyspace.
 	ErrKeyspaceExists = errors.New("keyspace already exists")
 	// ErrKeyspaceGroupExists indicates target keyspace group already exists.
 	ErrKeyspaceGroupExists = errors.New("keyspace group already exists")

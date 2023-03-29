@@ -85,6 +85,5 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	// create an existing keyspace group
 	keyspaceGroups = []*endpoint.KeyspaceGroup{{ID: uint32(1), UserKind: "business"}}
 	err = suite.manager.CreateKeyspaceGroups(keyspaceGroups)
-	// only print the warning log
-	re.NoError(err)
+	re.Error(err)
 }

@@ -59,7 +59,7 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	suite.cluster.Destroy()
 }
 
-func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroup() {
+func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 	re := suite.Require()
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{

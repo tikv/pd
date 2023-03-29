@@ -31,21 +31,8 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// maxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
-	// is the sharding unit, i.e., by the definition here, the max count of the shards
-	// that we support is maxKeyspaceGroupCount. The keyspace group id is in the range
-	// [0, 99999], which explains we use five-digits number (%05d) to render the keyspace
-	// group id in the storage endpoint path.
-	maxKeyspaceGroupCount = uint32(100000)
-	// maxKeyspaceGroupCountInUse is the max count of keyspace groups in use, which should
-	// never exceed maxKeyspaceGroupCount defined above. Compared to maxKeyspaceGroupCount,
-	// maxKeyspaceGroupCountInUse is a much more reasonable value of the max count in the
-	// foreseen future, and the former is just for extensibility in theory.
-	maxKeyspaceGroupCountInUse = uint32(4096)
-	// primaryElectionSuffix is the suffix of the key for keyspace group primary election
-	primaryElectionSuffix = "primary"
-)
+// primaryElectionSuffix is the suffix of the key for keyspace group primary election
+const primaryElectionSuffix = "primary"
 
 // KeyspaceGroupManager manages the primary/secondaries of the keyspace groups
 // assigned to this host. The primaries provide the tso service for the corresponding
@@ -56,7 +43,7 @@ type KeyspaceGroupManager struct {
 	// different keyspace groups for tso service.
 	// TODO: change item type to atomic.Value stored as *AllocatorManager after we
 	// support online keyspace group assignment.
-	ksgAllocatorManagers [maxKeyspaceGroupCountInUse]*AllocatorManager
+	ksgAllocatorManagers [mcsutils.MaxKeyspaceGroupCountInUse]*AllocatorManager
 
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -100,10 +87,10 @@ func NewKeyspaceGroupManager(
 	tsoSvcRootPath string,
 	cfg ServiceConfig,
 ) *KeyspaceGroupManager {
-	if maxKeyspaceGroupCountInUse > maxKeyspaceGroupCount {
-		log.Fatal("maxKeyspaceGroupCountInUse is larger than maxKeyspaceGroupCount",
-			zap.Uint32("maxKeyspaceGroupCountInUse", maxKeyspaceGroupCountInUse),
-			zap.Uint32("maxKeyspaceGroupCount", maxKeyspaceGroupCount))
+	if mcsutils.MaxKeyspaceGroupCountInUse > mcsutils.MaxKeyspaceGroupCount {
+		log.Fatal("MaxKeyspaceGroupCountInUse is larger than MaxKeyspaceGroupCount",
+			zap.Uint32("max-keyspace-group-count-in-use", mcsutils.MaxKeyspaceGroupCountInUse),
+			zap.Uint32("max-keyspace-group-count", mcsutils.MaxKeyspaceGroupCount))
 	}
 
 	ctx, cancel := context.WithCancel(ctx)

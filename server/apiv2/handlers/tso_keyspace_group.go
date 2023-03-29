@@ -37,14 +37,14 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router.DELETE("/:id", DeleteKeyspaceGroupByID)
 }
 
-// CreateKeyspaceGroupParams is the params for creating keyspace groups.
+// CreateKeyspaceGroupParams defines the params for creating keyspace groups.
 type CreateKeyspaceGroupParams struct {
 	KeyspaceGroups []*endpoint.KeyspaceGroup `json:"keyspace-groups"`
 }
 
 // CreateKeyspaceGroups creates keyspace groups.
 func CreateKeyspaceGroups(c *gin.Context) {
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
 	createParams := &CreateKeyspaceGroupParams{}
 	err := c.BindJSON(createParams)
@@ -68,9 +68,10 @@ func CreateKeyspaceGroups(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
-// GetKeyspaceGroups gets all keyspace groups.
+// GetKeyspaceGroups gets keyspace groups from the start ID with limit.
+// If limit is 0, it will load all keyspace groups from the start ID.
 func GetKeyspaceGroups(c *gin.Context) {
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
 	scanStart, scanLimit, err := parseLoadAllQuery(c)
 	if err != nil {
@@ -93,7 +94,7 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 		return
 	}
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
 	kg, err := manager.GetKeyspaceGroupByID(id)
 	if err != nil {
@@ -111,7 +112,7 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 		return
 	}
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
 	err = manager.DeleteKeyspaceGroupByID(id)
 	if err != nil {
@@ -133,5 +134,5 @@ func validateKeyspaceGroupID(c *gin.Context) (uint32, error) {
 }
 
 func isValid(id uint32) bool {
-	return id >= utils.DefaultKeySpaceGroupID && id <= 4096
+	return id >= utils.DefaultKeySpaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
 }

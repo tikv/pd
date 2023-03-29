@@ -69,7 +69,8 @@ func (se *StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
 	return txn.Remove(KeyspaceGroupIDPath(id))
 }
 
-// LoadKeyspaceGroups loads all keyspace groups.
+// LoadKeyspaceGroups loads keyspace groups from the start ID with limit.
+// If limit is 0, it will load all keyspace groups from the start ID.
 func (se *StorageEndpoint) LoadKeyspaceGroups(startID uint32, limit int) ([]*KeyspaceGroup, error) {
 	prefix := KeyspaceGroupIDPath(startID)
 	prefixEnd := clientv3.GetPrefixRangeEnd(KeyspaceGroupIDPrefix())

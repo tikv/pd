@@ -17,11 +17,9 @@ package keyspace
 import (
 	"context"
 
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"go.uber.org/zap"
 )
 
 // GroupManager is the manager of keyspace group related data.
@@ -46,7 +44,7 @@ func (m *GroupManager) Bootstrap() error {
 		// TODO: define a user kind type
 		UserKind: "default",
 	}
-	err := m.saveKeyspaceGroup(defaultKeyspaceGroup)
+	err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup})
 	// It's possible that default keyspace group already exists in the storage (e.g. PD restart/recover),
 	// so we ignore the ErrKeyspaceGroupExists.
 	if err != nil && err != ErrKeyspaceGroupExists {
@@ -58,25 +56,11 @@ func (m *GroupManager) Bootstrap() error {
 
 // CreateKeyspaceGroups creates keyspace groups.
 func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
-	for _, keyspaceGroup := range keyspaceGroups {
-		// TODO: add replica count
-		kg := &endpoint.KeyspaceGroup{
-			ID:       keyspaceGroup.ID,
-			UserKind: keyspaceGroup.UserKind,
-		}
-		err := m.saveKeyspaceGroup(kg)
-		if err != nil {
-			log.Warn("failed to create keyspace group",
-				zap.Uint32("id", kg.ID),
-				zap.String("use-kind", kg.UserKind),
-				zap.Error(err),
-			)
-		}
-	}
-	return nil
+	return m.saveKeyspaceGroups(keyspaceGroups)
 }
 
-// GetKeyspaceGroups returns all keyspace groups.
+// GetKeyspaceGroups gets keyspace groups from the start ID with limit.
+// If limit is 0, it will load all keyspace groups from the start ID.
 func (m *GroupManager) GetKeyspaceGroups(startID uint32, limit int) ([]*endpoint.KeyspaceGroup, error) {
 	return m.store.LoadKeyspaceGroups(startID, limit)
 }
@@ -106,17 +90,24 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
 	return nil
 }
 
-func (m *GroupManager) saveKeyspaceGroup(keyspaceGroup *endpoint.KeyspaceGroup) error {
+func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
 	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		// Save keyspace ID.
-		// Check if keyspace with that name already exists.
-		kg, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
-		if err != nil {
-			return err
+		for _, keyspaceGroup := range keyspaceGroups {
+			// TODO: add replica count
+			newKG := &endpoint.KeyspaceGroup{
+				ID:       keyspaceGroup.ID,
+				UserKind: keyspaceGroup.UserKind,
+			}
+			// Check if keyspace group has already existed.
+			oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
+			if err != nil {
+				return err
+			}
+			if oldKG != nil {
+				return ErrKeyspaceGroupExists
+			}
+			m.store.SaveKeyspaceGroup(txn, newKG)
 		}
-		if kg != nil {
-			return ErrKeyspaceGroupExists
-		}
-		return m.store.SaveKeyspaceGroup(txn, keyspaceGroup)
+		return nil
 	})
 }
