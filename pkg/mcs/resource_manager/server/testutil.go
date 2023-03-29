@@ -19,16 +19,14 @@ import (
 	"os"
 
 	"github.com/pingcap/log"
-	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
-// CleanupFunc closes test resource manager server(s) and deletes any files left behind.
-type CleanupFunc func()
-
 // NewTestServer creates a resource manager server for testing.
-func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, CleanupFunc, error) {
+func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, testutil.CleanupFunc, error) {
 	// New zap logger
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
@@ -48,13 +46,32 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*S
 	return s, cleanup, nil
 }
 
-// NewTestDefaultConfig creates a new default config for testing.
-func NewTestDefaultConfig() (*Config, error) {
-	cmd := &cobra.Command{
-		Use:   "resource_manager",
-		Short: "Run the resource manager service",
+// GenerateConfig generates a new config with the given options.
+func GenerateConfig(c *Config) (*Config, error) {
+	arguments := []string{
+		"--listen-addr=" + c.ListenAddr,
+		"--advertise-listen-addr=" + c.AdvertiseListenAddr,
+		"--backend-endpoints=" + c.BackendEndpoints,
+	}
+
+	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flagSet.BoolP("version", "V", false, "print version information and exit")
+	flagSet.StringP("config", "", "", "config file")
+	flagSet.StringP("backend-endpoints", "", "", "url for etcd client")
+	flagSet.StringP("listen-addr", "", "", "listen address for tso service")
+	flagSet.StringP("advertise-listen-addr", "", "", "advertise urls for listen address (default '${listen-addr}')")
+	flagSet.StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
+	flagSet.StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
+	flagSet.StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	err := flagSet.Parse(arguments)
+	if err != nil {
+		return nil, err
 	}
 	cfg := NewConfig()
-	flagSet := cmd.Flags()
-	return cfg, cfg.Parse(flagSet)
+	err = cfg.Parse(flagSet)
+	if err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }

@@ -25,9 +25,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
@@ -58,11 +59,14 @@ type Allocator interface {
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
 	// for global TSO synchronization
-	allocatorManager *AllocatorManager
-	// leadership is used to check the current PD server's leadership
-	// to determine whether a TSO request could be processed.
-	leadership      *election.Leadership
+	am *AllocatorManager
+	// for election use
+	member          ElectionMember
 	timestampOracle *timestampOracle
 	// syncRTT is the RTT duration a SyncMaxTS RPC call will cost,
 	// which is used to estimate the MaxTS in a Global TSO generation
@@ -72,14 +76,18 @@ type GlobalTSOAllocator struct {
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
 func NewGlobalTSOAllocator(
+	ctx context.Context,
 	am *AllocatorManager,
-	leadership *election.Leadership,
+	startGlobalLeaderLoop bool,
 ) Allocator {
+	ctx, cancel := context.WithCancel(ctx)
 	gta := &GlobalTSOAllocator{
-		allocatorManager: am,
-		leadership:       leadership,
+		ctx:    ctx,
+		cancel: cancel,
+		am:     am,
+		member: am.member,
 		timestampOracle: &timestampOracle{
-			client:                 leadership.GetClient(),
+			client:                 am.member.GetLeadership().GetClient(),
 			rootPath:               am.rootPath,
 			ltsPath:                "",
 			storage:                am.storage,
@@ -90,7 +98,20 @@ func NewGlobalTSOAllocator(
 			tsoMux:                 &tsoObject{},
 		},
 	}
+
+	if startGlobalLeaderLoop {
+		gta.wg.Add(1)
+		go gta.primaryElectionLoop()
+	}
+
 	return gta
+}
+
+// close is used to shutdown the primary election loop.
+// tso service call this function to shutdown the loop here, but pd manages its own loop.
+func (gta *GlobalTSOAllocator) close() {
+	gta.cancel()
+	gta.wg.Wait()
 }
 
 func (gta *GlobalTSOAllocator) setSyncRTT(rtt int64) {
@@ -129,7 +150,7 @@ func (gta *GlobalTSOAllocator) Initialize(int) error {
 	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(1)
 	// The suffix of a Global TSO should always be 0.
 	gta.timestampOracle.suffix = 0
-	return gta.timestampOracle.SyncTimestamp(gta.leadership)
+	return gta.timestampOracle.SyncTimestamp(gta.member.GetLeadership())
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.
@@ -139,12 +160,12 @@ func (gta *GlobalTSOAllocator) IsInitialize() bool {
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
 func (gta *GlobalTSOAllocator) UpdateTSO() error {
-	return gta.timestampOracle.UpdateTimestamp(gta.leadership)
+	return gta.timestampOracle.UpdateTimestamp(gta.member.GetLeadership())
 }
 
 // SetTSO sets the physical part with given TSO.
 func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
-	return gta.timestampOracle.resetUserTimestampInner(gta.leadership, tso, ignoreSmaller, skipUpperBoundCheck)
+	return gta.timestampOracle.resetUserTimestampInner(gta.member.GetLeadership(), tso, ignoreSmaller, skipUpperBoundCheck)
 }
 
 // GenerateTSO is used to generate the given number of TSOs.
@@ -158,16 +179,16 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundC
 //  2. Estimate a MaxTS and try to write it to all Local TSO Allocator leaders directly to reduce the RTT.
 //     During the process, if the estimated MaxTS is not accurate, it will fallback to the collecting way.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	if !gta.leadership.Check() {
+	if !gta.member.GetLeadership().Check() {
 		tsoCounter.WithLabelValues("not_leader", gta.timestampOracle.dcLocation).Inc()
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 	// To check if we have any dc-location configured in the cluster
-	dcLocationMap := gta.allocatorManager.GetClusterDCLocations()
+	dcLocationMap := gta.am.GetClusterDCLocations()
 	// No dc-locations configured in the cluster, use the normal Global TSO generation way.
 	// (without synchronization with other Local TSO Allocators)
 	if len(dcLocationMap) == 0 {
-		return gta.timestampOracle.getTS(gta.leadership, count, 0)
+		return gta.timestampOracle.getTS(gta.member.GetLeadership(), count, 0)
 	}
 
 	// Have dc-locations configured in the cluster, use the Global TSO generation way.
@@ -180,7 +201,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 			shouldRetry, skipCheck bool
 			globalTSOResp          pdpb.Timestamp
 			estimatedMaxTSO        *pdpb.Timestamp
-			suffixBits             = gta.allocatorManager.GetSuffixBits()
+			suffixBits             = gta.am.GetSuffixBits()
 		)
 		// TODO: add a switch to control whether to enable the MaxTSO estimation.
 		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT.
@@ -229,19 +250,19 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		if tsoutil.CompareTimestamp(currentGlobalTSO, &globalTSOResp) < 0 {
 			tsoCounter.WithLabelValues("global_tso_persist", gta.timestampOracle.dcLocation).Inc()
 			// Update the Global TSO in memory
-			if err = gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(&globalTSOResp), true); err != nil {
+			if err = gta.timestampOracle.resetUserTimestamp(gta.member.GetLeadership(), tsoutil.GenerateTS(&globalTSOResp), true); err != nil {
 				tsoCounter.WithLabelValues("global_tso_persist_err", gta.timestampOracle.dcLocation).Inc()
 				log.Error("global tso allocator update the global tso in memory failed", errs.ZapError(err))
 				continue
 			}
 		}
 		// 5. Check leadership again before we returning the response.
-		if !gta.leadership.Check() {
+		if !gta.member.GetLeadership().Check() {
 			tsoCounter.WithLabelValues("not_leader_anymore", gta.timestampOracle.dcLocation).Inc()
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd leader anymore")
 		}
-		// 6. Differentiate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
-		globalTSOResp.Logical = gta.timestampOracle.differentiateLogical(globalTSOResp.GetLogical(), suffixBits)
+		// 6. Calibrate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
+		globalTSOResp.Logical = gta.timestampOracle.calibrateLogical(globalTSOResp.GetLogical(), suffixBits)
 		globalTSOResp.SuffixBits = uint32(suffixBits)
 		return globalTSOResp, nil
 	}
@@ -264,7 +285,7 @@ func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBit
 		return false
 	}
 	// Check if the logical part will reach the overflow condition after being differentiated.
-	if differentiatedLogical := gta.timestampOracle.differentiateLogical(maxTSO.Logical, suffixBits); differentiatedLogical >= maxLogical {
+	if caliLogical := gta.timestampOracle.calibrateLogical(maxTSO.Logical, suffixBits); caliLogical >= maxLogical {
 		log.Error("estimated logical part outside of max logical interval, please check ntp time",
 			zap.Reflect("max-tso", maxTSO), errs.ZapError(errs.ErrLogicOverflow))
 		tsoCounter.WithLabelValues("precheck_logical_overflow", gta.timestampOracle.dcLocation).Inc()
@@ -301,7 +322,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 		// Collect all allocator leaders' client URLs
 		allocatorLeaders := make(map[string]*pdpb.Member)
 		for dcLocation := range dcLocationMap {
-			allocator, err := gta.allocatorManager.GetAllocator(dcLocation)
+			allocator, err := gta.am.GetAllocator(dcLocation)
 			if err != nil {
 				return err
 			}
@@ -327,19 +348,20 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 		wg := sync.WaitGroup{}
 		request := &pdpb.SyncMaxTSRequest{
 			Header: &pdpb.RequestHeader{
-				SenderId: gta.allocatorManager.member.ID(),
+				SenderId: gta.am.member.ID(),
 			},
 			SkipCheck: skipCheck,
 			MaxTs:     maxTSO,
 		}
 		for _, leaderURL := range leaderURLs {
-			leaderConn, err := gta.allocatorManager.getOrCreateGRPCConn(ctx, leaderURL)
+			leaderConn, err := gta.am.getOrCreateGRPCConn(ctx, leaderURL)
 			if err != nil {
 				return err
 			}
 			// Send SyncMaxTSRequest to all allocator leaders concurrently.
 			wg.Add(1)
 			go func(ctx context.Context, conn *grpc.ClientConn, respCh chan<- *syncResp) {
+				defer logutil.LogPanic()
 				defer wg.Done()
 				syncMaxTSResp := &syncResp{}
 				syncCtx, cancel := context.WithTimeout(ctx, rpcTimeout)
@@ -350,11 +372,14 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 				cancel()
 				respCh <- syncMaxTSResp
 				if syncMaxTSResp.err != nil {
-					log.Error("sync max ts rpc failed, got an error", zap.String("local-allocator-leader-url", leaderConn.Target()), errs.ZapError(err))
+					log.Error("sync max ts rpc failed, got an error",
+						zap.String("local-allocator-leader-url", leaderConn.Target()),
+						errs.ZapError(err))
 					return
 				}
 				if syncMaxTSResp.rpcRes.GetHeader().GetError() != nil {
-					log.Error("sync max ts rpc failed, got an error", zap.String("local-allocator-leader-url", leaderConn.Target()),
+					log.Error("sync max ts rpc failed, got an error",
+						zap.String("local-allocator-leader-url", leaderConn.Target()),
 						errs.ZapError(errors.Errorf("%s", syncMaxTSResp.rpcRes.GetHeader().GetError().String())))
 					return
 				}
@@ -403,15 +428,18 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 		}
 		// Check whether all dc-locations have been considered during the synchronization and retry once if any dc-location missed.
 		if ok, unsyncedDCs := gta.checkSyncedDCs(dcLocationMap, syncedDCs); !ok {
-			log.Info("unsynced dc-locations found, will retry", zap.Bool("skip-check", skipCheck), zap.Strings("synced-DCs", syncedDCs), zap.Strings("unsynced-DCs", unsyncedDCs))
+			log.Info("unsynced dc-locations found, will retry",
+				zap.Bool("skip-check", skipCheck), zap.Strings("synced-DCs", syncedDCs), zap.Strings("unsynced-DCs", unsyncedDCs))
 			if i < syncMaxRetryCount-1 {
 				// maxTSO should remain the same.
 				*maxTSO = originalMaxTSO
 				// To make sure we have the latest dc-location info
-				gta.allocatorManager.ClusterDCLocationChecker()
+				gta.am.ClusterDCLocationChecker()
 				continue
 			}
-			return errs.ErrSyncMaxTS.FastGenByArgs(fmt.Sprintf("unsynced dc-locations found, skip-check: %t, synced dc-locations: %+v, unsynced dc-locations: %+v", skipCheck, syncedDCs, unsyncedDCs))
+			return errs.ErrSyncMaxTS.FastGenByArgs(
+				fmt.Sprintf("unsynced dc-locations found, skip-check: %t, synced dc-locations: %+v, unsynced dc-locations: %+v",
+					skipCheck, syncedDCs, unsyncedDCs))
 		}
 		// Update the sync RTT to help estimate MaxTS later.
 		if maxTSORtt != 0 {
@@ -444,4 +472,95 @@ func (gta *GlobalTSOAllocator) getCurrentTSO() (*pdpb.Timestamp, error) {
 func (gta *GlobalTSOAllocator) Reset() {
 	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(0)
 	gta.timestampOracle.ResetTimestamp()
+}
+
+func (gta *GlobalTSOAllocator) primaryElectionLoop() {
+	defer gta.wg.Done()
+
+	for {
+		select {
+		case <-gta.ctx.Done():
+			log.Info("exit the global tso primary election loop")
+			return
+		default:
+		}
+
+		primary, checkAgain := gta.member.CheckLeader()
+		if checkAgain {
+			continue
+		}
+		if primary != nil {
+			log.Info("start to watch the primary", zap.Stringer("tso-primary", primary))
+			// Watch will keep looping and never return unless the primary has changed.
+			primary.Watch(gta.ctx)
+			log.Info("the tso primary has changed, try to re-campaign a primary")
+		}
+
+		gta.campaignLeader()
+	}
+}
+
+func (gta *GlobalTSOAllocator) campaignLeader() {
+	log.Info("start to campaign the primary", zap.String("campaign-tso-primary-name", gta.member.Name()))
+	if err := gta.am.member.CampaignLeader(gta.am.leaderLease); err != nil {
+		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
+			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
+				zap.String("campaign-tso-primary-name", gta.member.Name()))
+		} else {
+			log.Error("campaign tso primary meets error due to etcd error",
+				zap.String("campaign-tso-primary-name", gta.member.Name()), errs.ZapError(err))
+		}
+		return
+	}
+
+	// Start keepalive the leadership and enable TSO service.
+	// TSO service is strictly enabled/disabled by the leader lease for 2 reasons:
+	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
+	//   2. load region could be slow. Based on lease we can recover TSO service faster.
+	ctx, cancel := context.WithCancel(gta.ctx)
+	var resetLeaderOnce sync.Once
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+		gta.member.ResetLeader()
+	})
+
+	// maintain the the leadership, after this, TSO can be service.
+	gta.member.KeepLeader(ctx)
+	log.Info("campaign tso primary ok", zap.String("campaign-tso-primary-name", gta.member.Name()))
+
+	allocator, err := gta.am.GetAllocator(GlobalDCLocation)
+	if err != nil {
+		log.Error("failed to get the global tso allocator", errs.ZapError(err))
+		return
+	}
+	log.Info("initializing the global tso allocator")
+	if err := allocator.Initialize(0); err != nil {
+		log.Error("failed to initialize the global tso allocator", errs.ZapError(err))
+		return
+	}
+	defer func() {
+		gta.am.ResetAllocatorGroup(GlobalDCLocation)
+	}()
+
+	gta.member.EnableLeader()
+	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
+	// go gta.tsoAllocatorManager.ClusterDCLocationChecker()
+	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", gta.member.Name()))
+
+	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
+	defer leaderTicker.Stop()
+
+	for {
+		select {
+		case <-leaderTicker.C:
+			if !gta.member.IsLeader() {
+				log.Info("no longer a primary because lease has expired, the tso primary will step down")
+				return
+			}
+		case <-ctx.Done():
+			// Server is closed and it should return nil.
+			log.Info("exit leader campaign")
+			return
+		}
+	}
 }

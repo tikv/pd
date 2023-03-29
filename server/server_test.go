@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -84,7 +85,7 @@ func (suite *leaderServerTestSuite) TearDownSuite() {
 	}
 }
 
-func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, cfgs []*config.Config) ([]*Server, CleanupFunc) {
+func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, cfgs []*config.Config) ([]*Server, testutil.CleanupFunc) {
 	svrs := make([]*Server, 0, len(cfgs))
 
 	ch := make(chan *Server)
@@ -297,7 +298,7 @@ func TestAPIService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfg, []string{"api"}, mockHandler)
+	svr, err := CreateServer(ctx, cfg, []string{utils.APIServiceName}, mockHandler)
 	re.NoError(err)
 	defer svr.Close()
 	err = svr.Run()

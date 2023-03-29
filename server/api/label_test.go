@@ -30,7 +30,7 @@ import (
 type labelsStoreTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 	stores    []*metapb.Store
 }
@@ -190,7 +190,7 @@ type strictlyLabelsStoreTestSuite struct {
 	suite.Suite
 	svr       *server.Server
 	grpcSvr   *server.GrpcServer
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 

@@ -17,18 +17,20 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
 
@@ -36,15 +38,18 @@ const (
 	defaultConsumptionChanSize = 1024
 	metricsCleanupInterval     = time.Minute
 	metricsCleanupTimeout      = 20 * time.Minute
+
+	reservedDefaultGroupName = "default"
+	middlePriority           = 8
 )
 
 // Manager is the manager of resource group.
 type Manager struct {
 	sync.RWMutex
-	srv      bs.Server
-	ruConfig *RequestUnitConfig
-	groups   map[string]*ResourceGroup
-	storage  endpoint.ResourceGroupStorage
+	srv              bs.Server
+	controllerConfig *ControllerConfig
+	groups           map[string]*ResourceGroup
+	storage          endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan struct {
@@ -55,18 +60,18 @@ type Manager struct {
 	consumptionRecord map[string]time.Time
 }
 
-// RUConfigProvider is used to get RU config from the given
+// ResourceManagerConfigProvider is used to get resource manager config from the given
 // `bs.server` without modifying its interface.
-type RUConfigProvider interface {
-	GetRequestUnitConfig() *RequestUnitConfig
+type ResourceManagerConfigProvider interface {
+	GetControllerConfig() *ControllerConfig
 }
 
 // NewManager returns a new manager base on the given server,
-// which should implement the `RUConfigProvider` interface.
-func NewManager[T RUConfigProvider](srv bs.Server) *Manager {
+// which should implement the `ResourceManagerConfigProvider` interface.
+func NewManager[T ResourceManagerConfigProvider](srv bs.Server) *Manager {
 	m := &Manager{
-		ruConfig: srv.(T).GetRequestUnitConfig(),
-		groups:   make(map[string]*ResourceGroup),
+		controllerConfig: srv.(T).GetControllerConfig(),
+		groups:           make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
@@ -94,8 +99,9 @@ func (m *Manager) GetBasicServer() bs.Server {
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
-	// Store the RU model config into the storage.
-	m.storage.SaveRequestUnitConfig(m.ruConfig)
+	// Todo: If we can modify following configs in the future, we should reload these configs.
+	// Store the controller config into the storage.
+	m.storage.SaveControllerConfig(m.controllerConfig)
 	// Load resource group meta info from storage.
 	m.groups = make(map[string]*ResourceGroup)
 	handler := func(k, v string) {
@@ -119,24 +125,50 @@ func (m *Manager) Init(ctx context.Context) {
 		}
 	}
 	m.storage.LoadResourceGroupStates(tokenHandler)
+
+	// Add default group
+	defaultGroup := &ResourceGroup{
+		Name: reservedDefaultGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &RequestUnitSettings{
+			RU: &GroupTokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   math.MaxInt32,
+					BurstLimit: -1,
+				},
+			},
+		},
+		Priority: middlePriority,
+	}
+	if err := m.AddResourceGroup(defaultGroup.IntoProtoResourceGroup()); err != nil {
+		log.Warn("init default group failed", zap.Error(err))
+	}
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
-	go m.persistLoop(ctx)
+	go func() {
+		defer logutil.LogPanic()
+		m.persistLoop(ctx)
+	}()
 	log.Info("resource group manager finishes initialization")
 }
 
 // AddResourceGroup puts a resource group.
-func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
+func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	// Check the name.
+	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
+		return errs.ErrInvalidGroup
+	}
+	// Check the Priority.
+	if grouppb.GetPriority() > 16 {
+		return errs.ErrInvalidGroup
+	}
 	m.RLock()
-	_, ok := m.groups[group.Name]
+	_, ok := m.groups[grouppb.Name]
 	m.RUnlock()
 	if ok {
-		return errors.New("this group already exists")
+		return errs.ErrResourceGroupAlreadyExists.FastGenByArgs(grouppb.Name)
 	}
-	err := group.CheckAndInit()
-	if err != nil {
-		return err
-	}
+	group := FromProtoResourceGroup(grouppb)
 	m.Lock()
 	defer m.Unlock()
 	if err := group.persistSettings(m.storage); err != nil {
@@ -152,13 +184,13 @@ func (m *Manager) AddResourceGroup(group *ResourceGroup) error {
 // ModifyResourceGroup modifies an existing resource group.
 func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if group == nil || group.Name == "" {
-		return errors.New("invalid group name")
+		return errs.ErrInvalidGroup
 	}
 	m.Lock()
 	curGroup, ok := m.groups[group.Name]
 	m.Unlock()
 	if !ok {
-		return errors.New("not exists the group")
+		return errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
 	}
 
 	err := curGroup.PatchSettings(group)
@@ -170,6 +202,9 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(name string) error {
+	if name == reservedDefaultGroupName {
+		return errs.ErrDeleteReservedGroup
+	}
 	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
 		return err
 	}
@@ -242,13 +277,16 @@ func (m *Manager) persistResourceGroupRunningState() {
 		group, ok := m.groups[keys[idx]]
 		m.RUnlock()
 		if ok {
+			m.Lock()
 			group.persistStates(m.storage)
+			m.Unlock()
 		}
 	}
 }
 
 // Receive the consumption and flush it to the metrics.
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+	defer logutil.LogPanic()
 	ticker := time.NewTicker(metricsCleanupInterval)
 	defer ticker.Stop()
 	for {
@@ -289,7 +327,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			// CPU time info.
 			if consumption.TotalCpuTimeMs > 0 {
 				if consumption.SqlLayerCpuTimeMs > 0 {
-					sqlLayerRuMetrics.Add(consumption.SqlLayerCpuTimeMs * m.ruConfig.CPUMsCost)
+					sqlLayerRuMetrics.Add(consumption.SqlLayerCpuTimeMs * m.controllerConfig.RequestUnit.CPUMsCost)
 					sqlCPUMetrics.Observe(consumption.SqlLayerCpuTimeMs)
 				}
 				kvCPUMetrics.Observe(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)

@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -117,6 +118,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	ctx := s.mu.clientCtx
 
 	go func() {
+		defer logutil.LogPanic()
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()

@@ -24,9 +24,9 @@ func TestToTLSConfig(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	tlsConfig := TLSConfig{
-		KeyPath:  "../../../tests/client/cert/pd-server-key.pem",
-		CertPath: "../../../tests/client/cert/pd-server.pem",
-		CAPath:   "../../../tests/client/cert/ca.pem",
+		KeyPath:  "../../../tests/integrations/client/cert/pd-server-key.pem",
+		CertPath: "../../../tests/integrations/client/cert/pd-server.pem",
+		CAPath:   "../../../tests/integrations/client/cert/ca.pem",
 	}
 	// test without bytes
 	_, err := tlsConfig.ToTLSConfig()

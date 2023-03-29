@@ -21,16 +21,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/grpcutil"
-	"github.com/tikv/pd/pkg/mcs/discovery"
-	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/tempurl"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/integrations/mcs"
 )
 
 func TestResourceManagerServer(t *testing.T) {
@@ -38,7 +35,7 @@ func TestResourceManagerServer(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -48,20 +45,12 @@ func TestResourceManagerServer(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	cfg, err := rm.NewTestDefaultConfig()
-	re.NoError(err)
-	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = tempurl.Alloc()
-
-	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
-	re.NoError(err)
+	s, cleanup := mcs.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
+	addr := s.GetAddr()
 	defer cleanup()
-	testutil.Eventually(re, func() bool {
-		return s.IsServing()
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
-	cc, err := grpcutil.GetClientConn(ctx, cfg.ListenAddr, nil)
+	cc, err := grpcutil.GetClientConn(ctx, addr, nil)
 	re.NoError(err)
 	defer cc.Close()
 
@@ -72,7 +61,7 @@ func TestResourceManagerServer(t *testing.T) {
 	re.ErrorContains(err, "resource group not found")
 
 	// Test registered REST HTTP Handler
-	url := cfg.ListenAddr + "/resource-manager/api/v1/config"
+	url := addr + "/resource-manager/api/v1/config"
 	{
 		resp, err := http.Get(url + "/groups")
 		re.NoError(err)
@@ -80,7 +69,7 @@ func TestResourceManagerServer(t *testing.T) {
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respString, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		re.Equal("[]", string(respString))
+		re.Equal(`[{"name":"default","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":2147483647,"burst_limit":-1},"state":{"initialized":false}}},"priority":8}]`, string(respString))
 	}
 	{
 		group := &rmpb.ResourceGroup{
@@ -101,44 +90,6 @@ func TestResourceManagerServer(t *testing.T) {
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respString, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"r_u\":{\"state\":{\"initialized\":false}}}}", string(respString))
+		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"r_u\":{\"state\":{\"initialized\":false}}},\"priority\":0}", string(respString))
 	}
-}
-
-func TestResourceManagerRegister(t *testing.T) {
-	re := require.New(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
-	re.NoError(err)
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-
-	leaderName := cluster.WaitLeader()
-	leader := cluster.GetServer(leaderName)
-
-	cfg, err := rm.NewTestDefaultConfig()
-	re.NoError(err)
-	cfg.BackendEndpoints = leader.GetAddr()
-	cfg.ListenAddr = tempurl.Alloc()
-
-	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
-	re.NoError(err)
-	defer cleanup()
-	testutil.Eventually(re, func() bool {
-		return s.IsServing()
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-
-	client := leader.GetEtcdClient()
-	endpoints, err := discovery.Discover(client, "resource_manager")
-	re.NoError(err)
-	re.Equal(cfg.ListenAddr, endpoints[0])
-
-	s.Close()
-	endpoints, err = discovery.Discover(client, "resource_manager")
-	re.NoError(err)
-	re.Empty(endpoints)
 }

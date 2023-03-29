@@ -17,6 +17,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -194,6 +195,17 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 	v := o.GetReplicationConfig().Clone()
 	v.MaxReplicas = uint64(replicas)
 	o.SetReplicationConfig(v)
+}
+
+// UseRaftV2 set some config for raft store v2 by default temporary.
+// todo: remove this after raft store support this.
+// disable merge check
+// disable split buckets
+func (o *PersistOptions) UseRaftV2() {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxMergeRegionSize = 0
+	v.MaxMovableHotPeerSize = math.MaxInt64
+	o.SetScheduleConfig(v)
 }
 
 const (

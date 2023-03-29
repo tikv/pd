@@ -19,6 +19,8 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	"github.com/tikv/pd/pkg/mcs/utils"
 )
 
 const (
@@ -45,11 +47,14 @@ const (
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
 	resourceGroupStatesPath   = "states"
-	requestUnitConfigPath     = "ru_config"
+	controllerConfigPath      = "controller"
 	// tso storage endpoint has prefix `tso`
 	microserviceKey = "microservice"
-	tsoServiceKey   = "tso"
+	tsoServiceKey   = utils.TSOServiceName
 	timestampKey    = "timestamp"
+
+	tsoKeyspaceGroupPrefix     = "tso/keyspace_groups"
+	keyspaceGroupMembershipKey = "membership"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
@@ -220,4 +225,21 @@ func KeyspaceIDAlloc() string {
 // Width of the padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
 func encodeKeyspaceID(spaceID uint32) string {
 	return fmt.Sprintf("%08d", spaceID)
+}
+
+// KeyspaceGroupIDPrefix returns the prefix of keyspace group id.
+// Path: tso/keyspace_groups/membership
+func KeyspaceGroupIDPrefix() string {
+	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey)
+}
+
+// KeyspaceGroupIDPath returns the path to keyspace id from the given name.
+// Path: tso/keyspace_groups/membership/{id}
+func KeyspaceGroupIDPath(id uint32) string {
+	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey, encodeKeyspaceGroupID(id))
+}
+
+// encodeKeyspaceGroupID from uint32 to string.
+func encodeKeyspaceGroupID(groupID uint32) string {
+	return fmt.Sprintf("%05d", groupID)
 }

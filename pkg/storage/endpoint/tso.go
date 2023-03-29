@@ -15,10 +15,12 @@
 package endpoint
 
 import (
+	"context"
 	"strings"
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -65,6 +67,24 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 
 // SaveTimestamp saves the timestamp to the storage.
 func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
-	data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
-	return se.Save(key, string(data))
+	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		value, err := txn.Load(key)
+		if err != nil {
+			return err
+		}
+
+		previousTS := typeutil.ZeroTime
+		if value != "" {
+			previousTS, err = typeutil.ParseTimestamp([]byte(value))
+			if err != nil {
+				log.Error("parse timestamp failed", zap.String("key", key), zap.String("value", value), zap.Error(err))
+				return err
+			}
+		}
+		if previousTS != typeutil.ZeroTime && typeutil.SubRealTimeByWallClock(ts, previousTS) <= 0 {
+			return nil
+		}
+		data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
+		return txn.Save(key, string(data))
+	})
 }

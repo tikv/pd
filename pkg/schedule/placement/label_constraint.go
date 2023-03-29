@@ -72,6 +72,7 @@ var legacyExclusiveLabels = []string{core.EngineKey, "exclusive"}
 // If a store has exclusiveLabels, it can only be selected when the label is
 // explicitly specified in constraints.
 func isExclusiveLabel(key string) bool {
+	// *Do not* change this behavior, we rely on it to physically isolate stores.
 	return strings.HasPrefix(key, "$") || slice.AnyOf(legacyExclusiveLabels, func(i int) bool {
 		return key == legacyExclusiveLabels[i]
 	})

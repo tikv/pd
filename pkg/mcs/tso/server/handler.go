@@ -36,7 +36,7 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) er
 		zap.Uint64("new-ts", ts),
 		zap.Bool("ignore-smaller", ignoreSmaller),
 		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck))
-	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+	tsoAllocator, err := h.s.GetTSOAllocatorManager().GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		return err
 	}

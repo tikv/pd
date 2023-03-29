@@ -349,3 +349,11 @@ var (
 	ErrProgressWrongStatus = errors.Normalize("progress status is wrong", errors.RFCCodeText("PD:progress:ErrProgressWrongStatus"))
 	ErrProgressNotFound    = errors.Normalize("no progress found for %s", errors.RFCCodeText("PD:progress:ErrProgressNotFound"))
 )
+
+// Resource Manager errors
+var (
+	ErrResourceGroupAlreadyExists = errors.Normalize("the %s resource group already exists", errors.RFCCodeText("PD:resourcemanager:ErrResourceGroupAlreadyExists"))
+	ErrResourceGroupNotExists     = errors.Normalize("the %s resource group does not exist", errors.RFCCodeText("PD:resourcemanager:ErrGroupNotExists"))
+	ErrDeleteReservedGroup        = errors.Normalize("cannot delete reserved group", errors.RFCCodeText("PD:resourcemanager:ErrDeleteReservedGroup"))
+	ErrInvalidGroup               = errors.Normalize("invalid group settings, please check the group name, priority and the number of resources", errors.RFCCodeText("PD:resourcemanager:ErrInvalidGroup"))
+)

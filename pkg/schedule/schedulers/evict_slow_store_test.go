@@ -27,7 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 )
 
 type evictSlowStoreTestSuite struct {
@@ -76,7 +76,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	suite.True(suite.es.IsScheduleAllowed(suite.tc))
 	// Add evict leader scheduler to store 1
 	ops, _ := suite.es.Schedule(suite.tc, false)
-	testutil.CheckMultiTargetTransferLeader(suite.Require(), ops[0], operator.OpLeader, 1, []uint64{2})
+	operatorutil.CheckMultiTargetTransferLeader(suite.Require(), ops[0], operator.OpLeader, 1, []uint64{2})
 	suite.Equal(EvictSlowStoreType, ops[0].Desc())
 	// Cannot balance leaders to store 1
 	ops, _ = suite.bs.Schedule(suite.tc, false)
@@ -89,7 +89,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	ops, _ = suite.es.Schedule(suite.tc, false)
 	suite.Empty(ops)
 	ops, _ = suite.bs.Schedule(suite.tc, false)
-	testutil.CheckTransferLeader(suite.Require(), ops[0], operator.OpLeader, 2, 1)
+	operatorutil.CheckTransferLeader(suite.Require(), ops[0], operator.OpLeader, 2, 1)
 
 	// no slow store need to evict.
 	ops, _ = suite.es.Schedule(suite.tc, false)

@@ -159,7 +159,7 @@ type Config struct {
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 
-	RequestUnit rm.RequestUnitConfig `toml:"request-unit" json:"request-unit"`
+	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
 }
 
 // NewConfig creates a new config.
@@ -502,7 +502,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.Log.Format = defaultLogFormat
 	}
 
-	c.RequestUnit.Adjust()
+	c.Controller.Adjust(configMetaData.Child("controller"))
 
 	return nil
 }
@@ -1213,6 +1213,11 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 		m[k] = sl2
 	}
 	return m
+}
+
+// GetLeaderLease returns the leader lease.
+func (c *Config) GetLeaderLease() int64 {
+	return c.LeaderLease
 }
 
 // IsLocalTSOEnabled returns if the local TSO is enabled.

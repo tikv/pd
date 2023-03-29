@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -70,6 +71,7 @@ func (sr *ServiceRegister) Register() error {
 		return fmt.Errorf("keepalive failed: %v", err)
 	}
 	go func() {
+		defer logutil.LogPanic()
 		for {
 			select {
 			case <-sr.ctx.Done():

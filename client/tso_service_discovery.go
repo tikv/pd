@@ -17,14 +17,13 @@ package pd
 import (
 	"context"
 	"fmt"
-	"path"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
@@ -34,10 +33,12 @@ import (
 )
 
 const (
-	// tsoPrimaryPrefix defines the key prefix for keyspace group primary election.
-	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary" in which
-	// <group-id> is 5 digits integer with leading zeros. For now we use 0 as the default cluster id.
-	tsoPrimaryPrefix = "/ms/0/tso"
+	msServiceRootPath = "/ms"
+	tsoServiceName    = "tso"
+	// tspSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
+	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary".
+	// The <group-id> is 5 digits integer with leading zeros.
+	tspSvcDiscoveryFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d/primary"
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
@@ -48,7 +49,7 @@ type tsoServiceDiscovery struct {
 	clusterID  uint64
 	keyspaceID uint32
 	urls       atomic.Value // Store as []string
-	// primary key is the etcd path used for discoverying the serving endpoint of this keyspace
+	// primary key is the etcd path used for discovering the serving endpoint of this keyspace
 	primaryKey string
 	// TSO Primary URL
 	primary atomic.Value // Store as string
@@ -59,22 +60,17 @@ type tsoServiceDiscovery struct {
 	// addr -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
-	// primarySwitchedCbs will be called after the primary swichted
-	primarySwitchedCbs []func()
-	// membersChangedCbs will be called after there is any membership
-	// change in the primary and followers
-	membersChangedCbs []func()
 	// localAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
-	// The input is a map {DC Localtion -> Leader Addr}
+	// The input is a map {DC Location -> Leader Addr}
 	localAllocPrimariesUpdatedCb tsoLocalServAddrsUpdatedFunc
 	// globalAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
 	globalAllocPrimariesUpdatedCb tsoGlobalServAddrUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
-	wg     *sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	tlsCfg *tlsutil.TLSConfig
 
@@ -83,23 +79,27 @@ type tsoServiceDiscovery struct {
 }
 
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
-func newTSOServiceDiscovery(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, metacli MetaStorageClient,
-	clusterID uint64, keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option) ServiceDiscovery {
-	bc := &tsoServiceDiscovery{
+func newTSOServiceDiscovery(
+	ctx context.Context, metacli MetaStorageClient,
+	clusterID uint64, keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option,
+) ServiceDiscovery {
+	ctx, cancel := context.WithCancel(ctx)
+	c := &tsoServiceDiscovery{
 		ctx:               ctx,
 		cancel:            cancel,
-		wg:                wg,
 		metacli:           metacli,
 		keyspaceID:        keyspaceID,
 		clusterID:         clusterID,
-		primaryKey:        path.Join(tsoPrimaryPrefix, fmt.Sprintf("%05d", 0), "primary"),
+		primaryKey:        fmt.Sprintf(tspSvcDiscoveryFormat, clusterID, keyspaceID),
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
 	}
-	bc.urls.Store(urls)
+	c.urls.Store(urls)
 
-	return bc
+	log.Info("created tso service discovery", zap.String("discovery-key", c.primaryKey))
+
+	return c
 }
 
 // Init initialize the concrete client underlying
@@ -128,6 +128,24 @@ func (c *tsoServiceDiscovery) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
+// Close releases all resources
+func (c *tsoServiceDiscovery) Close() {
+	log.Info("closing tso service discovery")
+
+	c.cancel()
+	c.wg.Wait()
+
+	c.clientConns.Range(func(key, cc interface{}) bool {
+		if err := cc.(*grpc.ClientConn).Close(); err != nil {
+			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+		}
+		c.clientConns.Delete(key)
+		return true
+	})
+
+	log.Info("tso service discovery is closed")
+}
+
 func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 	defer c.wg.Done()
 
@@ -139,24 +157,13 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 		case <-c.checkMembershipCh:
 		case <-time.After(memberUpdateInterval):
 		case <-ctx.Done():
+			log.Info("[tso] exit check member loop")
 			return
 		}
 		if err := c.updateMember(); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
-}
-
-// Close releases all resources
-func (c *tsoServiceDiscovery) Close() {
-	log.Info("close tso service discovery")
-	c.clientConns.Range(func(key, cc interface{}) bool {
-		if err := cc.(*grpc.ClientConn).Close(); err != nil {
-			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
-		}
-		c.clientConns.Delete(key)
-		return true
-	})
 }
 
 // GetClusterID returns the ID of the cluster
@@ -179,7 +186,7 @@ func (c *tsoServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	return nil
 }
 
-// GetClientConns returns the mapping {addr -> a gRPC connectio}
+// GetClientConns returns the mapping {addr -> a gRPC connection}
 func (c *tsoServiceDiscovery) GetClientConns() *sync.Map {
 	return &c.clientConns
 }
@@ -202,7 +209,7 @@ func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
-// ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in ervice endpoints.
+// ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in service endpoints.
 func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
 	case c.checkMembershipCh <- struct{}{}:
@@ -219,13 +226,11 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 // AddServingAddrSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
 func (c *tsoServiceDiscovery) AddServingAddrSwitchedCallback(callbacks ...func()) {
-	c.primarySwitchedCbs = append(c.primarySwitchedCbs, callbacks...)
 }
 
 // AddServiceAddrsSwitchedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.
 func (c *tsoServiceDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
-	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
 // SetTSOLocalServAddrsUpdatedCallback adds a callback which will be called when the local tso
@@ -237,6 +242,10 @@ func (c *tsoServiceDiscovery) SetTSOLocalServAddrsUpdatedCallback(callback tsoLo
 // SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
 // allocator leader is updated.
 func (c *tsoServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc) {
+	addr := c.getPrimaryAddr()
+	if len(addr) > 0 {
+		callback(addr)
+	}
 	c.globalAllocPrimariesUpdatedCb = callback
 }
 
@@ -278,9 +287,6 @@ func (c *tsoServiceDiscovery) switchPrimary(addrs []string) error {
 			return err
 		}
 	}
-	for _, cb := range c.primarySwitchedCbs {
-		cb()
-	}
 	log.Info("[tso] switch primary", zap.String("new-primary", addr), zap.String("old-primary", oldPrimary))
 	return nil
 }
@@ -288,21 +294,26 @@ func (c *tsoServiceDiscovery) switchPrimary(addrs []string) error {
 func (c *tsoServiceDiscovery) updateMember() error {
 	resp, err := c.metacli.Get(c.ctx, []byte(c.primaryKey))
 	if err != nil {
-		log.Error("[tso] failed to get the keyspace serving endpoint", errs.ZapError(err))
+		log.Error("[tso] failed to get the keyspace serving endpoint", zap.String("primary-key", c.primaryKey), errs.ZapError(err))
 		return err
 	}
 
 	if resp == nil || len(resp.Kvs) == 0 {
-		log.Error("[tso] didn't find the keyspace serving endpoint")
-		return errs.ErrClientGetLeader
+		log.Error("[tso] didn't find the keyspace serving endpoint", zap.String("primary-key", c.primaryKey))
+		return errs.ErrClientGetServingEndpoint
 	} else if resp.Count > 1 {
 		return errs.ErrClientGetMultiResponse.FastGenByArgs(resp.Kvs)
 	}
 
 	value := resp.Kvs[0].Value
-	member := &pdpb.Member{}
-	if err := proto.Unmarshal(value, member); err != nil {
+	primary := &tsopb.Participant{}
+	if err := proto.Unmarshal(value, primary); err != nil {
 		return errs.ErrClientProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
-	return c.switchPrimary(addrsToUrls([]string{member.Name}))
+	listenUrls := primary.GetListenUrls()
+	if len(listenUrls) == 0 {
+		log.Error("[tso] the keyspace serving endpoint list is empty", zap.String("primary-key", c.primaryKey))
+		return errs.ErrClientGetServingEndpoint
+	}
+	return c.switchPrimary(listenUrls)
 }

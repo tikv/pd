@@ -64,7 +64,7 @@ func Every(interval time.Duration) Limit {
 //
 // Some changes about burst(b):
 //   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within an unlimited capacity).
-//   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within a unlimited capacity).
+//   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within an unlimited capacity).
 //   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
 	mu     sync.Mutex
@@ -168,7 +168,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	r.lim.mu.Lock()
 	defer r.lim.mu.Unlock()
 
-	if r.lim.limit == Inf || r.tokens == 0 {
+	if r.tokens == 0 || r.lim.burst < 0 || r.lim.limit == Inf {
 		return
 	}
 	// advance time to now
@@ -217,7 +217,6 @@ func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now
 func (lim *Limiter) SetupNotificationThreshold(now time.Time, threshold float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	lim.advance(now)
 	lim.notifyThreshold = threshold
 }
 
@@ -244,7 +243,7 @@ func (lim *Limiter) maybeNotify() {
 }
 
 func (lim *Limiter) isLowTokensLocked() bool {
-	if lim.isLowProcess || (lim.notifyThreshold > 0 && lim.tokens < lim.notifyThreshold) {
+	if lim.burst >= 0 && (lim.isLowProcess || (lim.notifyThreshold > 0 && lim.tokens < lim.notifyThreshold)) {
 		return true
 	}
 	return false
@@ -268,6 +267,9 @@ func (lim *Limiter) GetBurst() int64 {
 func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
+	if lim.burst < 0 || lim.limit == Inf {
+		return
+	}
 	now, _, tokens := lim.advance(now)
 	lim.last = now
 	lim.tokens = tokens - amount
@@ -281,20 +283,38 @@ type tokenBucketReconfigureArgs struct {
 	NotifyThreshold float64
 }
 
+type LimiterOption func(*Limiter)
+
+func resetLowProcess() func(*Limiter) {
+	return func(limiter *Limiter) {
+		limiter.isLowProcess = false
+	}
+}
+
 // Reconfigure modifies all setting for limiter
-func (lim *Limiter) Reconfigure(now time.Time, args tokenBucketReconfigureArgs) {
+func (lim *Limiter) Reconfigure(now time.Time,
+	args tokenBucketReconfigureArgs,
+	opts ...LimiterOption,
+) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	log.Debug("[resource group controller] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
-	now, _, tokens := lim.advance(now)
-	lim.last = now
-	lim.tokens = tokens + args.NewTokens
+	log.Debug("[resource group controller] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
+	if args.NewBurst < 0 {
+		lim.last = now
+		lim.tokens = args.NewTokens
+	} else {
+		now, _, tokens := lim.advance(now)
+		lim.last = now
+		lim.tokens = tokens + args.NewTokens
+	}
 	lim.limit = Limit(args.NewRate)
 	lim.burst = args.NewBurst
 	lim.notifyThreshold = args.NotifyThreshold
-	lim.isLowProcess = false
+	for _, opt := range opts {
+		opt(lim)
+	}
 	lim.maybeNotify()
-	log.Debug("[resource group controller] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold))
+	log.Debug("[resource group controller] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -312,7 +332,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 
-	if lim.limit == Inf || lim.burst < 0 {
+	if lim.burst < 0 || lim.limit == Inf {
 		return Reservation{
 			ok:        true,
 			lim:       lim,
@@ -362,12 +382,15 @@ func (lim *Limiter) advance(now time.Time) (newNow time.Time, newLast time.Time,
 	if now.Before(last) {
 		last = now
 	}
+	if lim.burst < 0 {
+		return now, last, lim.tokens
+	}
 
 	// Calculate the new number of tokens, due to time that passed.
 	elapsed := now.Sub(last)
 	delta := lim.limit.tokensFromDuration(elapsed)
 	tokens := lim.tokens + delta
-	if lim.burst != 0 {
+	if lim.burst > 0 {
 		if burst := float64(lim.burst); tokens > burst {
 			tokens = burst
 		}
@@ -396,9 +419,9 @@ func (limit Limit) tokensFromDuration(d time.Duration) float64 {
 
 // WaitReservations is used to process a series of reservations
 // so that all limiter tokens are returned if one reservation fails
-func WaitReservations(ctx context.Context, now time.Time, reservations []*Reservation) error {
+func WaitReservations(ctx context.Context, now time.Time, reservations []*Reservation) (time.Duration, error) {
 	if len(reservations) == 0 {
-		return nil
+		return 0, nil
 	}
 	cancel := func() {
 		for _, res := range reservations {
@@ -409,7 +432,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
-			return errs.ErrClientResourceGroupThrottled
+			return 0, errs.ErrClientResourceGroupThrottled
 		}
 		delay := res.DelayFrom(now)
 		if delay > longestDelayDuration {
@@ -417,7 +440,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 		}
 	}
 	if longestDelayDuration <= 0 {
-		return nil
+		return 0, nil
 	}
 	t := time.NewTimer(longestDelayDuration)
 	defer t.Stop()
@@ -425,11 +448,11 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	select {
 	case <-t.C:
 		// We can proceed.
-		return nil
+		return longestDelayDuration, nil
 	case <-ctx.Done():
 		// Context was canceled before we could proceed.  Cancel the
 		// reservation, which may permit other events to proceed sooner.
 		cancel()
-		return ctx.Err()
+		return 0, ctx.Err()
 	}
 }

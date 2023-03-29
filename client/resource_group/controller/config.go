@@ -32,8 +32,6 @@ var (
 )
 
 const (
-	initialRequestUnits = 10000
-	bufferRUs           = 2000
 	// movingAvgFactor is the weight applied to a new "sample" of RU usage (with one
 	// sample per mainLoopUpdateInterval).
 	//
@@ -42,14 +40,18 @@ const (
 	//	0.5^(1 second / mainLoopUpdateInterval)
 	movingAvgFactor                = 0.5
 	notifyFraction                 = 0.1
+	tokenReserveFraction           = 0.8
 	consumptionsReportingThreshold = 100
 	extendedReportingPeriodFactor  = 4
 	// defaultGroupCleanupInterval is the interval to clean up the deleted resource groups in memory.
-	defaultGroupCleanupInterval = 10 * time.Minute
+	defaultGroupCleanupInterval = 5 * time.Minute
 	// defaultGroupStateUpdateInterval is the interval to update the state of the resource groups.
 	defaultGroupStateUpdateInterval = 1 * time.Second
 	// targetPeriod indicate how long it is expected to cost token when acquiring token.
-	defaultTargetPeriod = 10 * time.Second
+	// According to the resource control Grafana panel and Prometheus sampling period, the period should be the factor of 15.
+	defaultTargetPeriod = 5 * time.Second
+	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
+	defaultMaxWaitDuration = time.Second
 )
 
 const (
@@ -61,7 +63,29 @@ const (
 	defaultWriteCostPerByte = 1. / 1024
 	// 1 RU = 3 millisecond CPU time
 	defaultCPUMsCost = 1. / 3
+
+	// Because the resource manager has not been deployed in microservice mode,
+	// do not enable this function.
+	defaultDegradedModeWaitDuration = "0s"
 )
+
+// ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
+type ControllerConfig struct {
+	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
+	DegradedModeWaitDuration string `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
+
+	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
+	// This configuration should be modified carefully.
+	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
+}
+
+// DefaultControllerConfig returns the default resource manager controller configuration.
+func DefaultControllerConfig() *ControllerConfig {
+	return &ControllerConfig{
+		DegradedModeWaitDuration: defaultDegradedModeWaitDuration,
+		RequestUnit:              DefaultRequestUnitConfig(),
+	}
+}
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
 // the RRU and WRU cost. This configuration should be modified carefully.
@@ -82,8 +106,8 @@ type RequestUnitConfig struct {
 }
 
 // DefaultRequestUnitConfig returns the default request unit configuration.
-func DefaultRequestUnitConfig() *RequestUnitConfig {
-	return &RequestUnitConfig{
+func DefaultRequestUnitConfig() RequestUnitConfig {
+	return RequestUnitConfig{
 		ReadBaseCost:     defaultReadBaseCost,
 		ReadCostPerByte:  defaultReadCostPerByte,
 		WriteBaseCost:    defaultWriteBaseCost,
@@ -103,24 +127,33 @@ type Config struct {
 	WriteBytesCost RequestUnit
 	CPUMsCost      RequestUnit
 	// The CPU statistics need to distinguish between different environments.
-	isSingleGroupByKeyspace bool
+	isSingleGroupByKeyspace  bool
+	maxWaitDuration          time.Duration
+	DegradedModeWaitDuration time.Duration
 }
 
 // DefaultConfig returns the default configuration.
 func DefaultConfig() *Config {
 	return GenerateConfig(
-		DefaultRequestUnitConfig(),
+		DefaultControllerConfig(),
 	)
 }
 
 // GenerateConfig generates the configuration by the given request unit configuration.
-func GenerateConfig(ruConfig *RequestUnitConfig) *Config {
+func GenerateConfig(config *ControllerConfig) *Config {
 	cfg := &Config{
-		ReadBaseCost:   RequestUnit(ruConfig.ReadBaseCost),
-		ReadBytesCost:  RequestUnit(ruConfig.ReadCostPerByte),
-		WriteBaseCost:  RequestUnit(ruConfig.WriteBaseCost),
-		WriteBytesCost: RequestUnit(ruConfig.WriteCostPerByte),
-		CPUMsCost:      RequestUnit(ruConfig.CPUMsCost),
+		ReadBaseCost:    RequestUnit(config.RequestUnit.ReadBaseCost),
+		ReadBytesCost:   RequestUnit(config.RequestUnit.ReadCostPerByte),
+		WriteBaseCost:   RequestUnit(config.RequestUnit.WriteBaseCost),
+		WriteBytesCost:  RequestUnit(config.RequestUnit.WriteCostPerByte),
+		CPUMsCost:       RequestUnit(config.RequestUnit.CPUMsCost),
+		maxWaitDuration: defaultMaxWaitDuration,
+	}
+	duration, err := time.ParseDuration(config.DegradedModeWaitDuration)
+	if err != nil {
+		cfg.DegradedModeWaitDuration, _ = time.ParseDuration(defaultDegradedModeWaitDuration)
+	} else {
+		cfg.DegradedModeWaitDuration = duration
 	}
 	return cfg
 }

@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -96,12 +96,12 @@ func TestRejectLeader(t *testing.T) {
 	sl, err := schedule.CreateScheduler(LabelType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(LabelType, []string{"", ""}))
 	re.NoError(err)
 	ops, _ := sl.Schedule(tc, false)
-	testutil.CheckTransferLeaderFrom(re, ops[0], operator.OpLeader, 1)
+	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpLeader, 1)
 
 	// If store3 is disconnected, transfer leader to store 2.
 	tc.SetStoreDisconnect(3)
 	ops, _ = sl.Schedule(tc, false)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
@@ -128,7 +128,7 @@ func TestRejectLeader(t *testing.T) {
 	origin, overlaps, rangeChanged := tc.SetRegion(region)
 	tc.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	ops, _ = sl.Schedule(tc, false)
-	testutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 }
 
 func TestRemoveRejectLeader(t *testing.T) {
@@ -300,11 +300,11 @@ func TestShuffleRegionRole(t *testing.T) {
 	conf.Roles = []string{"follower"}
 	ops, _ := sl.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpKind(0), 2, 4) // transfer follower
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpKind(0), 2, 4) // transfer follower
 	conf.Roles = []string{"learner"}
 	ops, _ = sl.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferLearner(re, ops[0], operator.OpRegion, 3, 4)
+	operatorutil.CheckTransferLearner(re, ops[0], operator.OpRegion, 3, 4)
 }
 
 func TestSpecialUseHotRegion(t *testing.T) {
@@ -335,7 +335,7 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	// balance region without label
 	ops, _ := bs.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpKind(0), 1, 4)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpKind(0), 1, 4)
 
 	// cannot balance to store 4 and 5 with label
 	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "hotRegion"})
@@ -356,7 +356,7 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*units.KiB*statistics.WriteReportInterval, 0, 0, statistics.WriteReportInterval, []uint64{1, 2})
 	ops, _ = hs.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 4)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 4)
 }
 
 func TestSpecialUseReserved(t *testing.T) {
@@ -384,7 +384,7 @@ func TestSpecialUseReserved(t *testing.T) {
 	// balance region without label
 	ops, _ := bs.Schedule(tc, false)
 	re.Len(ops, 1)
-	testutil.CheckTransferPeer(re, ops[0], operator.OpKind(0), 1, 4)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpKind(0), 1, 4)
 
 	// cannot balance to store 4 with label
 	tc.AddLabelsStore(4, 0, map[string]string{"specialUse": "reserved"})

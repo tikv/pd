@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -129,6 +130,7 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 	ch := make(chan time.Time)
 
 	go func() {
+		defer logutil.LogPanic()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -137,6 +139,7 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 
 		for {
 			go func() {
+				defer logutil.LogPanic()
 				start := time.Now()
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
