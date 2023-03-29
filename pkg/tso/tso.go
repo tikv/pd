@@ -116,7 +116,7 @@ func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int
 	t.tsoMux.logical += count
 	logical = t.tsoMux.logical
 	if suffixBits > 0 && t.suffix >= 0 {
-		logical = t.differentiateLogical(logical, suffixBits)
+		logical = t.calibrateLogical(logical, suffixBits)
 	}
 	// Return the last update time
 	lastUpdateTime = t.tsoMux.updateTime
@@ -137,7 +137,7 @@ func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int
 //	  dc-1: xxxxxxxxxx00000001
 //	  dc-2: xxxxxxxxxx00000010
 //	  dc-3: xxxxxxxxxx00000011
-func (t *timestampOracle) differentiateLogical(rawLogical int64, suffixBits int) int64 {
+func (t *timestampOracle) calibrateLogical(rawLogical int64, suffixBits int) int64 {
 	return rawLogical<<suffixBits + int64(t.suffix)
 }
 
@@ -168,7 +168,8 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubRealTimeByWallClock(next, last) < UpdateTimestampGuard {
-		log.Error("system time may be incorrect", zap.Time("last", last), zap.Time("next", next), errs.ZapError(errs.ErrIncorrectSystemTime))
+		log.Error("system time may be incorrect",
+			zap.Time("last", last), zap.Time("next", next), errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(UpdateTimestampGuard)
 	}
 

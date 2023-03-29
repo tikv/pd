@@ -84,7 +84,6 @@ import (
 
 const (
 	serverMetricsInterval = time.Minute
-	leaderTickInterval    = 50 * time.Millisecond
 	// pdRootPath for all pd servers.
 	pdRootPath      = "/pd"
 	pdAPIPrefix     = "/pd/"
@@ -195,7 +194,13 @@ type Server struct {
 
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding forwarding TSO channel.
-	tsoDispatcher sync.Map /* Store as map[string]chan *tsoRequest */
+	tsoDispatcher *tsoutil.TSODispatcher
+	// tsoProtoFactory is the abstract factory for creating tso
+	// related data structures defined in the TSO grpc service
+	tsoProtoFactory *tsoutil.TSOProtoFactory
+	// pdProtoFactory is the abstract factory for creating tso
+	// related data structures defined in the PD grpc service
+	pdProtoFactory *tsoutil.PDProtoFactory
 
 	serviceRateLimiter *ratelimit.Limiter
 	serviceLabels      map[string][]apiutil.AccessPath
@@ -394,12 +399,16 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
+	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
+	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
+	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	if !s.IsAPIServiceMode() {
 		s.tsoAllocatorManager = tso.NewAllocatorManager(
-			s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(), s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetTLSConfig(),
+			s.ctx, false, mcs.DefaultKeySpaceGroupID, s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(),
+			s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetLeaderLease(), s.cfg.GetTLSConfig(),
 			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
 		// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
-		s.tsoAllocatorManager.SetUpAllocator(ctx, tso.GlobalDCLocation, s.member.GetLeadership())
+		s.tsoAllocatorManager.SetUpGlobalAllocator(ctx, s.member.GetLeadership(), false)
 		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 		if !s.cfg.EnableLocalTSO {
 			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
@@ -1399,7 +1408,7 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-		leader, rev, checkAgain := s.member.CheckLeader()
+		leader, checkAgain := s.member.CheckLeader()
 		if checkAgain {
 			continue
 		}
@@ -1415,11 +1424,11 @@ func (s *Server) leaderLoop() {
 			}
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
-				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
+				syncer.StartSyncWithLeader(leader.GetListenUrls()[0])
 			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
 			// WatchLeader will keep looping and never return unless the PD leader has changed.
-			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
+			leader.Watch(s.serverLoopCtx)
 			syncer.StopSyncWithLeader()
 			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
@@ -1533,7 +1542,7 @@ func (s *Server) campaignLeader() {
 	CheckPDVersion(s.persistOptions)
 	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
 
-	leaderTicker := time.NewTicker(leaderTickInterval)
+	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {

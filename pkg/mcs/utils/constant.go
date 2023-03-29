@@ -31,7 +31,7 @@ const (
 	// DefaultDisableErrorVerbose is the default value of DisableErrorVerbose
 	DefaultDisableErrorVerbose = true
 	// DefaultLeaderLease is the default value of LeaderLease
-	DefaultLeaderLease = 3
+	DefaultLeaderLease = int64(3)
 	// LeaderTickInterval is the interval to check leader
 	LeaderTickInterval = 50 * time.Millisecond
 
@@ -42,7 +42,7 @@ const (
 
 	// DefaultKeySpaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
-	DefaultKeySpaceGroupID = 0
+	DefaultKeySpaceGroupID = uint32(0)
 
 	// APIServiceName is the name of api server.
 	APIServiceName = "api"
