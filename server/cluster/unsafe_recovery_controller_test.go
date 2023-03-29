@@ -301,7 +301,7 @@ func (s *testUnsafeRecoverySuite) TestFailed(c *C) {
 	req := newStoreHeartbeat(2, nil)
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	c.Assert(resp.RecoveryPlan, Equals, exitForceLeader)
+	c.Assert(recoveryController.GetStage(), Equals, exitForceLeader)
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
