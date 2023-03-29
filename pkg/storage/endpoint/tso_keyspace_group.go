@@ -22,6 +22,44 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+// UserKind represents the user kind.
+type UserKind int
+
+// Different user kinds.
+const (
+	Basic UserKind = iota
+	Standard
+	Enterprise
+
+	UserKindCount
+)
+
+// StringUserKind creates a UserKind with string.
+func StringUserKind(input string) UserKind {
+	switch input {
+	case Basic.String():
+		return Basic
+	case Standard.String():
+		return Standard
+	case Enterprise.String():
+		return Enterprise
+	default:
+		return Basic
+	}
+}
+
+func (k UserKind) String() string {
+	switch k {
+	case Basic:
+		return "basic"
+	case Standard:
+		return "standard"
+	case Enterprise:
+		return "enterprise"
+	}
+	return "unknown UserKind"
+}
+
 // KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
 type KeyspaceGroupMember struct {
 	Address string `json:"address"`
