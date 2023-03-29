@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -116,6 +117,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	ctx := s.mu.clientCtx
 
 	go func() {
+		defer logutil.LogPanic()
 		defer s.wg.Done()
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
