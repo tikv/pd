@@ -44,6 +44,11 @@ func NewSlidingWindows(cap float64) *SlidingWindows {
 	}
 }
 
+// Cap returns the capacity of the sliding windows.
+func (s *SlidingWindows) Cap(typ Type) float64 {
+	return float64(s.windows[typ].capacity)
+}
+
 // Reset resets the capacity of the sliding windows.
 // It doesn't clear all the used, only set the capacity.
 func (s *SlidingWindows) Reset(cap float64, typ Type) {

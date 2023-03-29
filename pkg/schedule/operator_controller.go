@@ -866,7 +866,8 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 		return nil
 	}
 
-	limit := s.GetStoreLimit()
-	limit.Reset(ratePerSec, limitType)
-	return limit
+	if limit := s.GetStoreLimit(); limit.Cap(limitType) != ratePerSec {
+		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType)
+	}
+	return s.GetStoreLimit()
 }
