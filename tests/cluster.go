@@ -717,6 +717,20 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	return s, nil
 }
 
+// JoinAPIServer is used to add a new TestAPIServer into the cluster.
+func (c *TestCluster) JoinAPIServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
+	conf, err := c.config.Join().Generate(opts...)
+	if err != nil {
+		return nil, err
+	}
+	s, err := NewTestAPIServer(ctx, conf)
+	if err != nil {
+		return nil, err
+	}
+	c.servers[conf.Name] = s
+	return s, nil
+}
+
 // Destroy is used to destroy a TestCluster.
 func (c *TestCluster) Destroy() {
 	for _, s := range c.servers {
