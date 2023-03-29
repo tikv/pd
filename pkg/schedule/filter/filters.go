@@ -326,7 +326,7 @@ type StoreStateFilter struct {
 	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
-	// Set true if it uses low priority to schedule.
+	// Set the priority level of the filter, it should be same with the operator level.
 	OperatorLevel constant.PriorityLevel
 	// Reason is used to distinguish the reason of store state filter
 	Reason filterType
