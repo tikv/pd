@@ -327,6 +327,10 @@ type StoreStateFilter struct {
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
 	// Set the priority level of the filter, it should be same with the operator level.
+	// The priority level can be higher than the operator level in checker,
+	// the operator controller should check it again by using the actual operator level.
+	// If it checks failed, the operator will be put back to the waiting queue util the limit is available.
+	// But the scheduler should keep the same with the operator level.
 	OperatorLevel constant.PriorityLevel
 	// Reason is used to distinguish the reason of store state filter
 	Reason filterType
