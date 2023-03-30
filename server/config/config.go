@@ -1389,3 +1389,8 @@ type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
 }
+
+// GetPreAlloc returns the keyspace to be allocated during keyspace manager initialization.
+func (c *KeyspaceConfig) GetPreAlloc() []string {
+	return c.PreAlloc
+}
