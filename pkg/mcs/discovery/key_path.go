@@ -14,7 +14,7 @@
 
 package discovery
 
-import "path"
+import "strings"
 
 const (
 	registryPrefix = "/ms"
@@ -22,9 +22,9 @@ const (
 )
 
 func registryPath(clusterID, serviceName, serviceAddr string) string {
-	return path.Join(registryPrefix, clusterID, serviceName, registryKey, serviceAddr)
+	return strings.Join([]string{registryPrefix, clusterID, serviceName, registryKey, serviceAddr}, "/")
 }
 
 func discoveryPath(clusterID, serviceName string) string {
-	return path.Join(registryPrefix, clusterID, serviceName, registryKey)
+	return strings.Join([]string{registryPrefix, clusterID, serviceName, registryKey}, "/")
 }
