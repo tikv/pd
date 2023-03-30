@@ -49,7 +49,7 @@ const (
 	resourceGroupStatesPath   = "states"
 	controllerConfigPath      = "controller"
 	// tso storage endpoint has prefix `tso`
-	microserviceKey = "microservice"
+	microserviceKey = "ms"
 	tsoServiceKey   = utils.TSOServiceName
 	timestampKey    = "timestamp"
 

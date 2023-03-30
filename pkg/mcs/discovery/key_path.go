@@ -17,14 +17,14 @@ package discovery
 import "path"
 
 const (
-	registryPrefix = "/pd/microservice"
+	registryPrefix = "/ms"
 	registryKey    = "registry"
 )
 
-func registryPath(serviceName, serviceAddr string) string {
-	return path.Join(registryPrefix, serviceName, registryKey, serviceAddr)
+func registryPath(clusterID, serviceName, serviceAddr string) string {
+	return path.Join(registryPrefix, clusterID, serviceName, registryKey, serviceAddr)
 }
 
-func discoveryPath(serviceName string) string {
-	return path.Join(registryPrefix, serviceName, registryKey)
+func discoveryPath(clusterID, serviceName string) string {
+	return path.Join(registryPrefix, clusterID, serviceName, registryKey)
 }

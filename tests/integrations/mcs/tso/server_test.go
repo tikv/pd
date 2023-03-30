@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -216,10 +217,11 @@ func (suite *APIServerForwardTestSuite) TearDownSuite() {
 	suite.pdClient.Close()
 
 	etcdClient := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(etcdClient, utils.TSOServiceName)
+	clusterID := strconv.FormatUint(suite.pdLeader.GetClusterID(), 10)
+	endpoints, err := discovery.Discover(etcdClient, clusterID, utils.TSOServiceName)
 	suite.NoError(err)
 	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, utils.TSOServiceName)
+		endpoints, err = discovery.Discover(etcdClient, clusterID, utils.TSOServiceName)
 		suite.NoError(err)
 		suite.Empty(endpoints)
 	}

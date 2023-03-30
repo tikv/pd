@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -399,12 +400,13 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.ListenAddr}
+	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	serializedEntry, err := entry.Serialize()
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.ResourceManagerServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, strconv.FormatUint(s.clusterID, 10),
+		utils.ResourceManagerServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
 		log.Error("failed to regiser the service", zap.String("service-name", utils.ResourceManagerServiceName), errs.ZapError(err))
 		return err

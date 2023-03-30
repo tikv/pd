@@ -448,14 +448,15 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.ListenAddr}
+	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	serializedEntry, err := entry.Serialize()
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, mcsutils.TSOServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, strconv.FormatUint(s.clusterID, 10),
+		mcsutils.TSOServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
-		log.Error("failed to regiser the service", zap.String("service-name", mcsutils.TSOServiceName), errs.ZapError(err))
+		log.Error("failed to register the service", zap.String("service-name", mcsutils.TSOServiceName), errs.ZapError(err))
 		return err
 	}
 
