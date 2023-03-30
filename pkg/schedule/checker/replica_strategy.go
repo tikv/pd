@@ -128,12 +128,8 @@ func (s *ReplicaStrategy) swapStoreToFirst(stores []*core.StoreInfo, id uint64) 
 // SelectStoreToRemove returns the best option to remove from the region.
 func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) uint64 {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
-	level := constant.High
-	if s.fastFailover {
-		level = constant.Urgent
-	}
 	source := filter.NewCandidates(coLocationStores).
-		FilterSource(s.cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true, OperatorLevel: level}).
+		FilterSource(s.cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true, OperatorLevel: constant.Medium}).
 		KeepTheTopStores(isolationComparer, true).
 		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), false)
 	if source == nil {
