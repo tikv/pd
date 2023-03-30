@@ -19,15 +19,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -44,15 +47,20 @@ const (
 	defaultWriteCostPerByte = 1. / 1024
 	// 1 RU = 3 millisecond CPU time
 	defaultCPUMsCost = 1. / 3
+
+	// Because the resource manager has not been deployed in microservice mode,
+	// do not enable this function.
+	defaultDegradedModeWaitDuration = time.Second * 0
 )
 
 // Config is the configuration for the resource manager.
 type Config struct {
-	BackendEndpoints  string `toml:"backend-endpoints" json:"backend-endpoints"`
-	ListenAddr        string `toml:"listen-addr" json:"listen-addr"`
-	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`      // TODO: use it
+	BackendEndpoints    string `toml:"backend-endpoints" json:"backend-endpoints"`
+	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
+	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
+	Name                string `toml:"name" json:"name"`
+	DataDir             string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
+	EnableGRPCGateway   bool   `json:"enable-grpc-gateway"`      // TODO: use it
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -69,9 +77,30 @@ type Config struct {
 	// second too.
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
+	Controller ControllerConfig `toml:"controller" json:"controller"`
+}
+
+// ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
+type ControllerConfig struct {
+	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
+	DegradedModeWaitDuration typeutil.Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
+
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
-	RequestUnit RequestUnitConfig
+	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
+}
+
+// Adjust adjusts the configuration and initializes it with the default value if necessary.
+func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
+	if rmc == nil {
+		return
+	}
+	rmc.RequestUnit.Adjust()
+
+	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
+	failpoint.Inject("enableDegradedMode", func() {
+		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
+	})
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
@@ -142,6 +171,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
 	configutil.AdjustCommandlineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
 	configutil.AdjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
+	configutil.AdjustCommandlineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
 	return c.Adjust(meta, false)
 }
@@ -171,6 +201,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
+	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
 		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
@@ -183,9 +214,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		c.Log.Format = utils.DefaultLogFormat
 	}
 
+	c.Controller.Adjust(configMetaData.Child("controller"))
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
-
-	c.RequestUnit.Adjust()
 
 	return nil
 }

@@ -16,11 +16,13 @@ package pd
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
+	"github.com/tikv/pd/client/errs"
 	"google.golang.org/grpc"
 )
 
@@ -116,13 +118,21 @@ func (s *pdTSOStream) processRequests(clusterID uint64, dcLocation string, reque
 	}
 
 	if err = s.stream.Send(req); err != nil {
-		err = errors.WithStack(err)
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
 		return
 	}
 	tsoBatchSendLatency.Observe(float64(time.Since(batchStartTime)))
 	resp, err := s.stream.Recv()
 	if err != nil {
-		err = errors.WithStack(err)
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
 		return
 	}
 	requestDurationTSO.Observe(time.Since(start).Seconds())
@@ -133,7 +143,8 @@ func (s *pdTSOStream) processRequests(clusterID uint64, dcLocation string, reque
 		return
 	}
 
-	physical, logical, suffixBits = resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
+	ts := resp.GetTimestamp()
+	physical, logical, suffixBits = ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
 	return
 }
 
@@ -154,13 +165,21 @@ func (s *tsoTSOStream) processRequests(clusterID uint64, dcLocation string, requ
 	}
 
 	if err = s.stream.Send(req); err != nil {
-		err = errors.WithStack(err)
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
 		return
 	}
 	tsoBatchSendLatency.Observe(float64(time.Since(batchStartTime)))
 	resp, err := s.stream.Recv()
 	if err != nil {
-		err = errors.WithStack(err)
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
 		return
 	}
 	requestDurationTSO.Observe(time.Since(start).Seconds())
@@ -171,6 +190,7 @@ func (s *tsoTSOStream) processRequests(clusterID uint64, dcLocation string, requ
 		return
 	}
 
-	physical, logical, suffixBits = resp.GetTimestamp().GetPhysical(), resp.GetTimestamp().GetLogical(), resp.GetTimestamp().GetSuffixBits()
+	ts := resp.GetTimestamp()
+	physical, logical, suffixBits = ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
 	return
 }

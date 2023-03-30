@@ -19,7 +19,6 @@ package tso_test
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
@@ -42,62 +41,6 @@ import (
 // 3. Synchronized global TSO, the new way to get a global TSO from the PD leader,
 //    which will coordinate and synchronize a TSO with other Local TSO Allocator
 //    leaders.
-
-func TestConcurrentlyReset(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
-	re.NoError(err)
-
-	re.NoError(cluster.RunInitialServers())
-
-	cluster.WaitLeader()
-	leader := cluster.GetServer(cluster.GetLeader())
-	re.NotNil(leader)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	now := time.Now()
-	for i := 0; i < 2; i++ {
-		go func() {
-			defer wg.Done()
-			for i := 0; i <= 100; i++ {
-				physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
-				ts := uint64(physical << 18)
-				leader.GetServer().GetHandler().ResetTS(ts, false, false)
-			}
-		}()
-	}
-	wg.Wait()
-}
-
-func TestZeroTSOCount(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
-	re.NoError(err)
-	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
-
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
-	clusterID := leaderServer.GetClusterID()
-
-	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		DcLocation: tso.GlobalDCLocation,
-	}
-	tsoClient, err := grpcPDClient.Tso(ctx)
-	re.NoError(err)
-	defer tsoClient.CloseSend()
-	re.NoError(tsoClient.Send(req))
-	_, err = tsoClient.Recv()
-	re.Error(err)
-}
 
 func TestRequestFollower(t *testing.T) {
 	re := require.New(t)

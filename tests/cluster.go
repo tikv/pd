@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/tso"
@@ -74,6 +75,15 @@ var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
 func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
+	return createTestServer(ctx, cfg, nil)
+}
+
+// NewTestAPIServer creates a new TestServer.
+func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
+	return createTestServer(ctx, cfg, []string{utils.APIServiceName})
+}
+
+func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
 		return nil, err
@@ -87,7 +97,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	}
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, nil, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		return nil, err
 	}
@@ -430,6 +440,15 @@ type ConfigOption func(conf *config.Config, serverName string)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
+	return createTestCluster(ctx, initialServerCount, false, opts...)
+}
+
+// NewTestAPICluster creates a new TestCluster with API service.
+func NewTestAPICluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
+	return createTestCluster(ctx, initialServerCount, true, opts...)
+}
+
+func createTestCluster(ctx context.Context, initialServerCount int, isAPIServiceMode bool, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
@@ -438,7 +457,12 @@ func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigO
 		if err != nil {
 			return nil, err
 		}
-		s, err := NewTestServer(ctx, serverConf)
+		var s *TestServer
+		if isAPIServiceMode {
+			s, err = NewTestAPIServer(ctx, serverConf)
+		} else {
+			s, err = NewTestServer(ctx, serverConf)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -686,6 +710,20 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 		return nil, err
 	}
 	s, err := NewTestServer(ctx, conf)
+	if err != nil {
+		return nil, err
+	}
+	c.servers[conf.Name] = s
+	return s, nil
+}
+
+// JoinAPIServer is used to add a new TestAPIServer into the cluster.
+func (c *TestCluster) JoinAPIServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
+	conf, err := c.config.Join().Generate(opts...)
+	if err != nil {
+		return nil, err
+	}
+	s, err := NewTestAPIServer(ctx, conf)
 	if err != nil {
 		return nil, err
 	}

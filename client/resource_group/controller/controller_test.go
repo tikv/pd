@@ -19,6 +19,8 @@
 package controller
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,8 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGroupControlBurstable(t *testing.T) {
-	re := require.New(t)
+func createTestGroupCostController(re *require.Assertions) *groupCostController {
 	group := &rmpb.ResourceGroup{
 		Name: "test",
 		Mode: rmpb.GroupMode_RUMode,
@@ -41,8 +42,14 @@ func TestGroupControlBurstable(t *testing.T) {
 	}
 	ch1 := make(chan struct{})
 	ch2 := make(chan *groupCostController)
-	gc, err := newGroupCostController(group, DefaultConfig(), ch1, ch2)
+	gc, err := newGroupCostController(group, DefaultConfig(), ch1, ch2, successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name), resourceGroupTokenRequestCounter.WithLabelValues(group.Name))
 	re.NoError(err)
+	return gc
+}
+
+func TestGroupControlBurstable(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
 	gc.initRunState()
 	args := tokenBucketReconfigureArgs{
 		NewRate:  1000,
@@ -53,4 +60,55 @@ func TestGroupControlBurstable(t *testing.T) {
 	}
 	gc.updateAvgRequestResourcePerSec()
 	re.Equal(gc.burstable.Load(), true)
+}
+
+func TestRequestAndResponseConsumption(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	gc.initRunState()
+	testCases := []struct {
+		req  *TestRequestInfo
+		resp *TestResponseInfo
+	}{
+		// Write request
+		{
+			req: &TestRequestInfo{
+				isWrite:    true,
+				writeBytes: 100,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				succeed:   true,
+			},
+		},
+		// Read request
+		{
+			req: &TestRequestInfo{
+				isWrite:    false,
+				writeBytes: 0,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				kvCPU:     100 * time.Millisecond,
+				succeed:   true,
+			},
+		},
+	}
+	kvCalculator := gc.getKVCalculator()
+	for idx, testCase := range testCases {
+		caseNum := fmt.Sprintf("case %d", idx)
+		consumption, err := gc.onRequestWait(context.TODO(), testCase.req)
+		re.NoError(err, caseNum)
+		expectedConsumption := &rmpb.Consumption{}
+		if testCase.req.IsWrite() {
+			kvCalculator.calculateWriteCost(expectedConsumption, testCase.req)
+			re.Equal(expectedConsumption.WRU, consumption.WRU)
+		}
+		consumption, err = gc.onResponse(testCase.req, testCase.resp)
+		re.NoError(err, caseNum)
+		kvCalculator.calculateReadCost(expectedConsumption, testCase.resp)
+		kvCalculator.calculateCPUCost(expectedConsumption, testCase.resp)
+		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
+		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
+	}
 }

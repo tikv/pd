@@ -17,10 +17,12 @@ package apis
 import (
 	"errors"
 	"net/http"
+	"sync"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	rmserver "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -31,6 +33,7 @@ import (
 const APIPathPrefix = "/resource-manager/api/v1/"
 
 var (
+	once            sync.Once
 	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "resource-manager",
 		Version:    "v1",
@@ -56,6 +59,11 @@ type Service struct {
 
 // NewService returns a new Service.
 func NewService(srv *rmserver.Service) *Service {
+	once.Do(func() {
+		// These global modification will be effective only for the first invoke.
+		_ = godotenv.Load()
+		gin.SetMode(gin.ReleaseMode)
+	})
 	apiHandlerEngine := gin.New()
 	apiHandlerEngine.Use(gin.Recovery())
 	apiHandlerEngine.Use(cors.Default())
@@ -108,8 +116,7 @@ func (s *Service) postResourceGroup(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	nGroup := rmserver.FromProtoResourceGroup(&group)
-	if err := s.manager.AddResourceGroup(nGroup); err != nil {
+	if err := s.manager.AddResourceGroup(&group); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}

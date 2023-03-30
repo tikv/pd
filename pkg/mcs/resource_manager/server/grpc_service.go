@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -59,7 +60,7 @@ type Service struct {
 }
 
 // NewService creates a new resource manager service.
-func NewService[T RUConfigProvider](svr bs.Server) registry.RegistrableService {
+func NewService[T ResourceManagerConfigProvider](svr bs.Server) registry.RegistrableService {
 	manager := NewManager[T](svr)
 
 	return &Service{
@@ -85,7 +86,7 @@ func (s *Service) GetManager() *Manager {
 }
 
 func (s *Service) checkServing() error {
-	if !s.manager.srv.IsServing() {
+	if s.manager == nil || s.manager.srv == nil || !s.manager.srv.IsServing() {
 		return errNotLeader
 	}
 	return nil
@@ -125,8 +126,7 @@ func (s *Service) AddResourceGroup(ctx context.Context, req *rmpb.PutResourceGro
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := FromProtoResourceGroup(req.GetGroup())
-	err := s.manager.AddResourceGroup(rg)
+	err := s.manager.AddResourceGroup(req.GetGroup())
 	if err != nil {
 		return nil, err
 	}
@@ -169,6 +169,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		if err == io.EOF {
 			return nil
 		}
+		failpoint.Inject("acquireFailed", func() {
+			err = errors.New("error")
+		})
 		if err != nil {
 			return errors.WithStack(err)
 		}
@@ -176,6 +179,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			return err
 		}
 		targetPeriodMs := request.GetTargetRequestPeriodMs()
+		clientUniqueID := request.GetClientUniqueId()
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
@@ -199,7 +203,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs)
+						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID)
 					}
 					if tokens == nil {
 						continue

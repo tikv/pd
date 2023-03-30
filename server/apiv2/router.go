@@ -57,11 +57,12 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	})
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
-		c.Set("server", svr)
+		c.Set(middlewares.ServerContextKey, svr)
 		c.Next()
 	})
 	router.Use(middlewares.Redirector())
 	root := router.Group(apiV2Prefix)
 	handlers.RegisterKeyspace(root)
+	handlers.RegisterTSOKeyspaceGroup(root)
 	return router, group, nil
 }

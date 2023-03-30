@@ -19,6 +19,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
@@ -28,7 +29,7 @@ import (
 const apiPrefix = "/pd"
 
 // NewHandler creates a HTTP handler for API.
-func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 	group := apiutil.APIServiceGroup{
 		Name:   "core",
 		IsCore: true,
@@ -37,7 +38,8 @@ func NewHandler(ctx context.Context, svr *server.Server) (http.Handler, apiutil.
 	r := createRouter(apiPrefix, svr)
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
-		serverapi.NewRedirector(svr),
+		serverapi.NewRedirector(svr, serverapi.MicroserviceRedirectRule(
+			apiPrefix+"/api/v1"+"/admin/reset-ts", tsoapi.APIPathPrefix+"/admin/reset-ts", "tso")),
 		negroni.Wrap(r)),
 	)
 

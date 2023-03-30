@@ -75,7 +75,7 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 }
 
 func (s *Service) checkServing() error {
-	if !s.manager.srv.IsServing() {
+	if s.manager == nil || s.manager.srv == nil || !s.manager.srv.IsServing() {
 		return errNotLeader
 	}
 	return nil

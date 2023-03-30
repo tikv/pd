@@ -45,8 +45,6 @@ type lastTSO struct {
 }
 
 const (
-	dialTimeout            = 3 * time.Second
-	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
 	tsLoopDCCheckInterval  = time.Minute
 	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
 	retryInterval          = 500 * time.Millisecond
@@ -161,6 +159,7 @@ func (c *tsoClient) tsCancelLoop() {
 		case <-ticker.C:
 			continue
 		case <-tsCancelLoopCtx.Done():
+			log.Info("exit tso requests cancel loop")
 			return
 		}
 	}
@@ -212,7 +211,7 @@ func (c *tsoClient) tsoDispatcherCheckLoop() {
 		case <-ticker.C:
 		case <-c.checkTSODispatcherCh:
 		case <-loopCtx.Done():
-			log.Info("exit tso dispacther loop")
+			log.Info("exit tso dispatcher loop")
 			return
 		}
 	}
@@ -405,7 +404,7 @@ tsoBatchLoop:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.svcDiscovery.ScheduleCheckMemberChanged()
-					c.finishTSORequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
+					c.finishRequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					continue tsoBatchLoop
 				case <-time.After(retryInterval):
 					continue streamChoosingLoop
@@ -441,7 +440,7 @@ tsoBatchLoop:
 		case tsDeadlineCh.(chan deadline) <- dl:
 		}
 		opts = extractSpanReference(tbc, opts[:0])
-		err = c.processTSORequests(stream, dc, tbc, opts)
+		err = c.processRequests(stream, dc, tbc, opts)
 		close(done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err != nil {
@@ -498,8 +497,8 @@ func (c *tsoClient) chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoCo
 
 type tsoConnectionContext struct {
 	streamAddr string
-	// Current stream to send gRPC requests, pdpb.PD_TsoClient for a leader/follower in the PD cluser,
-	// or tsopb.TSO_TsoClient for a primary/secondary in the TSO clusrer
+	// Current stream to send gRPC requests, pdpb.PD_TsoClient for a leader/follower in the PD cluster,
+	// or tsopb.TSO_TsoClient for a primary/secondary in the TSO cluster
 	stream tsoStream
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -692,9 +691,9 @@ func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanO
 	return opts
 }
 
-func (c *tsoClient) processTSORequests(stream tsoStream, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption) error {
+func (c *tsoClient) processRequests(stream tsoStream, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption) error {
 	if len(opts) > 0 {
-		span := opentracing.StartSpan("pdclient.processTSORequests", opts...)
+		span := opentracing.StartSpan("pdclient.processRequests", opts...)
 		defer span.Finish()
 	}
 
@@ -702,13 +701,13 @@ func (c *tsoClient) processTSORequests(stream tsoStream, dcLocation string, tbc 
 	count := int64(len(requests))
 	physical, logical, suffixBits, err := stream.processRequests(c.svcDiscovery.GetClusterID(), dcLocation, requests, tbc.batchStartTime)
 	if err != nil {
-		c.finishTSORequest(requests, 0, 0, 0, err)
+		c.finishRequest(requests, 0, 0, 0, err)
 		return err
 	}
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 	firstLogical := addLogical(logical, -count+1, suffixBits)
 	c.compareAndSwapTS(dcLocation, physical, firstLogical, suffixBits, count)
-	c.finishTSORequest(requests, physical, firstLogical, suffixBits, nil)
+	c.finishRequest(requests, physical, firstLogical, suffixBits, nil)
 	return nil
 }
 
@@ -730,8 +729,9 @@ func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical i
 	lastTSOPointer := lastTSOInterface.(*lastTSO)
 	lastPhysical := lastTSOPointer.physical
 	lastLogical := lastTSOPointer.logical
-	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical to compare with the new TSO's first logical.
-	// For example, if we have a TSO resp with logical 10, count 5, then all TSOs we get will be [6, 7, 8, 9, 10].
+	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical
+	// to compare with the new TSO's first logical. For example, if we have a TSO resp with logical 10, count 5, then
+	// all TSOs we get will be [6, 7, 8, 9, 10].
 	if tsLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
 		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
 			dcLocation, physical, firstLogical, lastPhysical, lastLogical))
@@ -748,7 +748,7 @@ func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
 	return physical < thatPhysical
 }
 
-func (c *tsoClient) finishTSORequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
+func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
 	for i := 0; i < len(requests); i++ {
 		if span := opentracing.SpanFromContext(requests[i].requestCtx); span != nil {
 			span.Finish()

@@ -647,7 +647,7 @@ func (f *ruleFitFilter) Source(_ config.Config, _ *core.StoreInfo) *plan.Status 
 // the replaced store can match the source rule.
 // RegionA:[1,2,3], move peer1 --> peer2 will not allow, because it's count not match the rule.
 // but transfer role peer1 --> peer2, it will support.
-func (f *ruleFitFilter) Target(options config.Config, store *core.StoreInfo) *plan.Status {
+func (f *ruleFitFilter) Target(_ config.Config, store *core.StoreInfo) *plan.Status {
 	if f.oldFit.Replace(f.srcStore, store) {
 		return statusOK
 	}

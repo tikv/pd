@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -38,9 +39,9 @@ type ServiceRegister struct {
 }
 
 // NewServiceRegister creates a new ServiceRegister.
-func NewServiceRegister(ctx context.Context, cli *clientv3.Client, serviceName, serviceAddr, serializedValue string, ttl int64) *ServiceRegister {
+func NewServiceRegister(ctx context.Context, cli *clientv3.Client, clusterID, serviceName, serviceAddr, serializedValue string, ttl int64) *ServiceRegister {
 	cctx, cancel := context.WithCancel(ctx)
-	serviceKey := registryPath(serviceName, serviceAddr)
+	serviceKey := registryPath(clusterID, serviceName, serviceAddr)
 	return &ServiceRegister{
 		ctx:    cctx,
 		cancel: cancel,
@@ -70,6 +71,7 @@ func (sr *ServiceRegister) Register() error {
 		return fmt.Errorf("keepalive failed: %v", err)
 	}
 	go func() {
+		defer logutil.LogPanic()
 		for {
 			select {
 			case <-sr.ctx.Done():

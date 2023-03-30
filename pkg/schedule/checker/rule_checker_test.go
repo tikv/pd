@@ -32,7 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -807,10 +807,10 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeer() {
 	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{Peer: region.GetStorePeer(4), DownSeconds: 6000},
 	}))
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
+	operatorutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
 
 	suite.cluster.SetStoreDown(5)
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
+	operatorutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
 	suite.ruleManager.SetRule(rule)
@@ -1022,10 +1022,10 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 	suite.Nil(suite.rc.Check(region))
 
 	suite.cluster.SetStoreOffline(4)
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
+	operatorutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 5)
 
 	suite.cluster.SetStoreOffline(5)
-	testutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
+	operatorutil.CheckTransferPeer(suite.Require(), suite.rc.Check(region), operator.OpRegion, 4, 2)
 
 	rule.IsolationLevel = "zone"
 	suite.ruleManager.SetRule(rule)
@@ -1061,75 +1061,6 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvaliableWitness() {
 	op := suite.rc.Check(r)
 	suite.NotNil(op)
 	suite.Equal("replace-rule-offline-peer", op.Desc())
-}
-
-func (suite *ruleCheckerTestSuite) TestFixPendingVoterWithAvailableWitness() {
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	r := suite.cluster.GetRegion(1)
-	// set peer2 as pending voter
-	r = r.Clone(core.WithPendingPeers([]*metapb.Peer{r.GetPeer(2)}))
-	// set peer3 to witness
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
-
-	suite.ruleManager.SetRule(&placement.Rule{
-		GroupID: "pd",
-		ID:      "default",
-		Role:    placement.Voter,
-		Count:   2,
-	})
-	suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   "pd",
-		ID:        "r1",
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-	})
-
-	op := suite.rc.Check(r)
-
-	suite.NotNil(op)
-	suite.Equal("promote-witness-for-pending", op.Desc())
-	suite.Equal(uint64(3), op.Step(0).(operator.RemovePeer).FromStore)
-	suite.Equal(uint64(3), op.Step(1).(operator.AddLearner).ToStore)
-	suite.Equal(uint64(3), op.Step(2).(operator.BecomeNonWitness).StoreID)
-	suite.Equal(uint64(3), op.Step(3).(operator.PromoteLearner).ToStore)
-}
-
-func (suite *ruleCheckerTestSuite) TestFixPendingVoterWithAvailableWitness2() {
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
-
-	r := suite.cluster.GetRegion(1)
-	// set peer2 as pending learner
-	peer := r.GetPeer(2)
-	peer.Role = metapb.PeerRole_Learner
-	r = r.Clone(core.WithPendingPeers([]*metapb.Peer{peer}))
-	// set peer3 to witness
-	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
-
-	suite.ruleManager.SetRule(&placement.Rule{
-		GroupID: "pd",
-		ID:      "default",
-		Role:    placement.Voter,
-		Count:   2,
-	})
-	suite.ruleManager.SetRule(&placement.Rule{
-		GroupID:   "pd",
-		ID:        "r1",
-		Role:      placement.Voter,
-		Count:     1,
-		IsWitness: true,
-	})
-
-	op := suite.rc.Check(r)
-
-	suite.Nil(op)
 }
 
 func (suite *ruleCheckerTestSuite) TestRuleCache() {

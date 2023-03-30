@@ -26,6 +26,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -46,10 +47,13 @@ const (
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 )
 
+var _ tso.ServiceConfig = (*Config)(nil)
+
 // Config is the configuration for the TSO.
 type Config struct {
-	BackendEndpoints string `toml:"backend-endpoints" json:"backend-endpoints"`
-	ListenAddr       string `toml:"listen-addr" json:"listen-addr"`
+	BackendEndpoints    string `toml:"backend-endpoints" json:"backend-endpoints"`
+	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
+	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
 
 	Name              string `toml:"name" json:"name"`
 	DataDir           string `toml:"data-dir" json:"data-dir"`
@@ -98,6 +102,31 @@ func NewConfig() *Config {
 	return &Config{}
 }
 
+// GetName returns the Name
+func (c *Config) GetName() string {
+	return c.Name
+}
+
+// GeBackendEndpoints returns the BackendEndpoints
+func (c *Config) GeBackendEndpoints() string {
+	return c.BackendEndpoints
+}
+
+// GetListenAddr returns the ListenAddr
+func (c *Config) GetListenAddr() string {
+	return c.ListenAddr
+}
+
+// GetAdvertiseListenAddr returns the AdvertiseListenAddr
+func (c *Config) GetAdvertiseListenAddr() string {
+	return c.AdvertiseListenAddr
+}
+
+// GetLeaderLease returns the leader lease.
+func (c *Config) GetLeaderLease() int64 {
+	return c.LeaderLease
+}
+
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO
@@ -111,6 +140,11 @@ func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
 // GetTSOSaveInterval returns TSO save interval.
 func (c *Config) GetTSOSaveInterval() time.Duration {
 	return c.TSOSaveInterval.Duration
+}
+
+// GetMaxResetTSGap returns the MaxResetTSGap.
+func (c *Config) GetMaxResetTSGap() time.Duration {
+	return c.MaxResetTSGap.Duration
 }
 
 // GetTLSConfig returns the TLS config.
@@ -141,6 +175,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
 	configutil.AdjustCommandlineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
 	configutil.AdjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
+	configutil.AdjustCommandlineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
 	return c.Adjust(meta, false)
 }
@@ -167,6 +202,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
+	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	configutil.AdjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)

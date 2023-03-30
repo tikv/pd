@@ -117,7 +117,7 @@ func (lta *LocalTSOAllocator) Reset() {
 }
 
 // setAllocatorLeader sets the current Local TSO Allocator leader.
-func (lta *LocalTSOAllocator) setAllocatorLeader(member *pdpb.Member) {
+func (lta *LocalTSOAllocator) setAllocatorLeader(member interface{}) {
 	lta.allocatorLeader.Store(member)
 }
 
@@ -136,8 +136,8 @@ func (lta *LocalTSOAllocator) GetAllocatorLeader() *pdpb.Member {
 }
 
 // GetMember returns the Local TSO Allocator's member value.
-func (lta *LocalTSOAllocator) GetMember() *pdpb.Member {
-	return lta.allocatorManager.member.Member()
+func (lta *LocalTSOAllocator) GetMember() ElectionMember {
+	return lta.allocatorManager.member
 }
 
 // GetCurrentTSO returns current TSO in memory.
@@ -164,7 +164,7 @@ func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
 
 // EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.
 func (lta *LocalTSOAllocator) EnableAllocatorLeader() {
-	lta.setAllocatorLeader(lta.allocatorManager.member.Member())
+	lta.setAllocatorLeader(lta.allocatorManager.member.GetMember())
 }
 
 // CampaignAllocatorLeader is used to campaign a Local TSO Allocator's leadership.
@@ -180,12 +180,12 @@ func (lta *LocalTSOAllocator) KeepAllocatorLeader(ctx context.Context) {
 // IsAllocatorLeader returns whether the allocator is still a
 // Local TSO Allocator leader by checking its leadership's lease and leader info.
 func (lta *LocalTSOAllocator) IsAllocatorLeader() bool {
-	return lta.leadership.Check() && lta.GetAllocatorLeader().GetMemberId() == lta.GetMember().GetMemberId()
+	return lta.leadership.Check() && lta.GetAllocatorLeader().GetMemberId() == lta.GetMember().ID()
 }
 
 // isSameAllocatorLeader checks whether a server is the leader itself.
 func (lta *LocalTSOAllocator) isSameAllocatorLeader(leader *pdpb.Member) bool {
-	return leader.GetMemberId() == lta.allocatorManager.member.Member().MemberId
+	return leader.GetMemberId() == lta.allocatorManager.member.ID()
 }
 
 // CheckAllocatorLeader checks who is the current Local TSO Allocator leader, and returns true if it is needed to check later.

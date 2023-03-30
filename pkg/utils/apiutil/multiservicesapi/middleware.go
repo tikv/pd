@@ -52,14 +52,13 @@ func ServiceRedirector() gin.HandlerFunc {
 
 		c.Request.Header.Set(ServiceRedirectorHeader, svr.Name())
 
-		primary := svr.GetPrimary()
-		if primary == nil {
+		listenUrls := svr.GetLeaderListenUrls()
+		if listenUrls == nil {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 			return
 		}
-		clientUrls := primary.GetClientUrls()
-		urls := make([]url.URL, 0, len(clientUrls))
-		for _, item := range clientUrls {
+		urls := make([]url.URL, 0, len(listenUrls))
+		for _, item := range listenUrls {
 			u, err := url.Parse(item)
 			if err != nil {
 				c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrURLParse.Wrap(err).GenWithStackByCause().Error())

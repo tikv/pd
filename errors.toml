@@ -576,6 +576,26 @@ error = '''
 region label rule not found for id %s
 '''
 
+["PD:resourcemanager:ErrDeleteReservedGroup"]
+error = '''
+cannot delete reserved group
+'''
+
+["PD:resourcemanager:ErrGroupNotExists"]
+error = '''
+the %s resource group does not exist
+'''
+
+["PD:resourcemanager:ErrInvalidGroup"]
+error = '''
+invalid group settings, please check the group name, priority and the number of resources
+'''
+
+["PD:resourcemanager:ErrResourceGroupAlreadyExists"]
+error = '''
+the %s resource group already exists
+'''
+
 ["PD:schedule:ErrCreateOperator"]
 error = '''
 unable to create operator, %s

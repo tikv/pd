@@ -264,7 +264,6 @@ func (c *RaftCluster) Start(s Server) error {
 	if cluster == nil {
 		return nil
 	}
-
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
@@ -272,7 +271,6 @@ func (c *RaftCluster) Start(s Server) error {
 			return err
 		}
 	}
-
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	if err != nil {
 		return err
@@ -380,30 +378,43 @@ func (c *RaftCluster) startGCTuner() {
 func (c *RaftCluster) runSyncConfig() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	stores := c.GetStores()
 
-	syncConfig(c.storeConfigManager, stores)
+	stores := c.GetStores()
+	syncFunc := func() {
+		synced, switchRaftV2Config := syncConfig(c.storeConfigManager, stores)
+		if switchRaftV2Config {
+			c.GetOpts().UseRaftV2()
+			if err := c.opt.Persist(c.GetStorage()); err != nil {
+				log.Warn("store config persisted failed", zap.Error(err))
+			}
+		}
+		if !synced {
+			stores = c.GetStores()
+		}
+	}
+
+	syncFunc()
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("sync store config job is stopped")
 			return
 		case <-ticker.C:
-			if !syncConfig(c.storeConfigManager, stores) {
-				stores = c.GetStores()
-			}
+			syncFunc()
 		}
 	}
 }
 
-func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
+// syncConfig syncs the config of the stores.
+// synced is true if sync config from one tikv.
+// switchRaftV2 is true if the config of tikv engine is changed and engine is raft-kv2.
+func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) (synced bool, switchRaftV2 bool) {
 	for index := 0; index < len(stores); index++ {
 		// filter out the stores that are tiflash
 		store := stores[index]
-		if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
+		if store.IsTiFlash() {
 			continue
 		}
 
@@ -413,16 +424,19 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bo
 		}
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
-		if err := manager.ObserveConfig(address); err != nil {
+		switchRaftV2, err := manager.ObserveConfig(address)
+		if err != nil {
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
+		} else if switchRaftV2 {
+			storeSyncConfigEvent.WithLabelValues(address, "raft-v2").Inc()
 		}
 		storeSyncConfigEvent.WithLabelValues(address, "succ").Inc()
-		// it will only try one store.
-		return true
+
+		return true, switchRaftV2
 	}
-	return false
+	return false, false
 }
 
 // LoadClusterInfo loads cluster related info.
