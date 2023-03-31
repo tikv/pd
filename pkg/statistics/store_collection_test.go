@@ -72,7 +72,7 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal(0, stats.Unhealthy)
 	re.Equal(0, stats.Disconnect)
 	re.Equal(1, stats.Tombstone)
-	re.Equal(8, stats.LowSpace)
+	re.Equal(0, stats.LowSpace)
 	re.Equal(2, stats.LabelCounter["zone:z1"])
 	re.Equal(2, stats.LabelCounter["zone:z2"])
 	re.Equal(2, stats.LabelCounter["zone:z3"])

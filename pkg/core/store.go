@@ -441,7 +441,7 @@ func (s *StoreInfo) IsLowSpace(lowSpaceRatio float64) bool {
 	}
 	// See https://github.com/tikv/pd/issues/3444 and https://github.com/tikv/pd/issues/5391
 	// TODO: we need find a better way to get the init region number when starting a new cluster.
-	// We need to ignore the store if the capacity is 0.
+	// We don't need to consider the store as low space when the capacity is 0.
 	if s.regionCount < InitClusterRegionThreshold && s.GetAvailable() > initialMinSpace || s.GetCapacity() == 0 {
 		return false
 	}
