@@ -1766,7 +1766,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	if !ok || forwardedHost == "" {
 		return pdpb.Timestamp{}, ErrNotFoundTSOAddr
 	}
-	forwardStream, err := s.getTSOForwardStream(ctx, forwardedHost)
+	forwardStream, err := s.getTSOForwardStream(forwardedHost)
 	if err != nil {
 		return pdpb.Timestamp{}, err
 	}
@@ -1780,12 +1780,13 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	})
 	ts, err := forwardStream.Recv()
 	if err != nil {
+		log.Error("get global tso from tso server failed", zap.Error(err))
 		return pdpb.Timestamp{}, err
 	}
 	return *ts.GetTimestamp(), nil
 }
 
-func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost string) (tsopb.TSO_TsoClient, error) {
+func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoClient, error) {
 	s.tsoClientPool.RLock()
 	forwardStream, ok := s.tsoClientPool.clients[forwardedHost]
 	s.tsoClientPool.RUnlock()
@@ -1804,18 +1805,18 @@ func (s *GrpcServer) getTSOForwardStream(ctx context.Context, forwardedHost stri
 	}
 
 	// Now let's create the client connection and the forward stream
-	client, err := s.getDelegateClient(ctx, forwardedHost)
+	client, err := s.getDelegateClient(s.ctx, forwardedHost)
 	if err != nil {
 		return nil, err
 	}
 	done := make(chan struct{})
-	ctx, cancel := context.WithTimeout(s.ctx, tsoutil.DefaultTSOProxyTimeout)
+	ctx, cancel := context.WithCancel(s.ctx)
 	go checkStream(ctx, cancel, done)
 	forwardStream, err = tsopb.NewTSOClient(client).Tso(ctx)
+	done <- struct{}{}
 	if err != nil {
 		return nil, err
 	}
-	done <- struct{}{}
 	s.tsoClientPool.clients[forwardedHost] = forwardStream
 	return forwardStream, nil
 }
