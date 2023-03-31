@@ -22,9 +22,11 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 // KeyspaceServer wraps GrpcServer to provide keyspace service.
@@ -82,16 +84,24 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
 
-	err := s.sendAllKeyspaceMeta(ctx, stream)
+	revision, err := s.sendAllKeyspaceMeta(ctx, stream)
 	if err != nil {
 		return err
 	}
-	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix())
+
 	for {
+		watchChan := s.client.Watch(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix(), clientv3.WithRev(revision))
 		select {
 		case <-ctx.Done():
 			return nil
 		case res := <-watchChan:
+			if res.CompactRevision != 0 {
+				log.Warn("required revision has been compacted, use the compact revision",
+					zap.Int64("required-revision", revision),
+					zap.Int64("compact-revision", res.CompactRevision))
+				revision = res.CompactRevision
+				break
+			}
 			keyspaces := make([]*keyspacepb.KeyspaceMeta, 0, len(res.Events))
 			for _, event := range res.Events {
 				if event.Type != clientv3.EventTypePut {
@@ -112,20 +122,24 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	}
 }
 
-func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
+func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspacepb.Keyspace_WatchKeyspacesServer) (int64, error) {
 	getResp, err := s.client.Get(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix())
 	if err != nil {
-		return err
+		return 0, err
 	}
 	metas := make([]*keyspacepb.KeyspaceMeta, getResp.Count)
 	for i, kv := range getResp.Kvs {
 		meta := &keyspacepb.KeyspaceMeta{}
 		if err = proto.Unmarshal(kv.Value, meta); err != nil {
-			return err
+			return 0, err
 		}
 		metas[i] = meta
 	}
-	return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: metas})
+	var revision int64
+	if getResp.Header != nil {
+		revision = getResp.Header.GetRevision()
+	}
+	return revision, stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: metas})
 }
 
 // UpdateKeyspaceState updates the state of keyspace specified in the request.
