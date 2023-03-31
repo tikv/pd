@@ -698,8 +698,12 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, err
 	}
 
+	if err := s.GetKeyspaceGroupManager().Bootstrap(); err != nil {
+		log.Warn("bootstrapping keyspace group manager failed", errs.ZapError(err))
+	}
+
 	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
-		log.Warn("bootstrap keyspace manager failed", errs.ZapError(err))
+		log.Warn("bootstrapping keyspace manager failed", errs.ZapError(err))
 	}
 
 	return &pdpb.BootstrapResponse{

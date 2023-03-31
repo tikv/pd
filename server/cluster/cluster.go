@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/schedule"
@@ -108,8 +107,6 @@ type Server interface {
 	GetBasicCluster() *core.BasicCluster
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
-	GetKeyspaceGroupManager() *keyspace.GroupManager
-	GetKeyspaceManager() *keyspace.Manager
 }
 
 // RaftCluster is used for cluster config management.
@@ -277,14 +274,6 @@ func (c *RaftCluster) Start(s Server) error {
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	if err != nil {
 		return err
-	}
-
-	if err := s.GetKeyspaceGroupManager().Bootstrap(); err != nil {
-		log.Warn("bootstrap keyspace group manager failed", errs.ZapError(err))
-	}
-
-	if err := s.GetKeyspaceManager().Bootstrap(); err != nil {
-		log.Warn("bootstrap keyspace manager failed", errs.ZapError(err))
 	}
 
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
