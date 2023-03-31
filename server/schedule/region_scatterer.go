@@ -394,12 +394,14 @@ func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
 	if peer.IsWitness {
 		return false
 	}
-
-	rule := fit.GetRuleFit(peer.GetId()).Rule
-	if rule.IsWitness {
+	peerFit := fit.GetRuleFit(peer.GetId())
+	if peerFit == nil || peerFit.Rule == nil {
 		return false
 	}
-	switch rule.Role {
+	if peerFit.Rule.IsWitness {
+		return false
+	}
+	switch peerFit.Rule.Role {
 	case placement.Voter, placement.Leader:
 		return true
 	}
