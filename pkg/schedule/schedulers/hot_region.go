@@ -802,13 +802,11 @@ func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *sta
 	})
 }
 
-func (bs *balanceSolver) checkSrcHistoryLoadByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
-	if minLoad == nil || len(minLoad.HistoryLoads) == 0 {
-		return true
-	}
-	return bs.checkHistoryLoadsByPriority(minLoad.HistoryLoads, func(i int) bool {
-		return slice.AllOf(minLoad.HistoryLoads[i], func(j int) bool {
-			return minLoad.HistoryLoads[i][j] > toleranceRatio*expectLoad.HistoryLoads[i][j]
+func (bs *balanceSolver) checkSrcHistoryLoadByPriorityAndTolerance(current, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
+	log.Info("check src history load", zap.Any("current", current), zap.Any("expectLoad", expectLoad), zap.Any("bs", bs))
+	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
+		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
+			return current.HistoryLoads[i][j] > toleranceRatio*expectLoad.HistoryLoads[i][j]
 		})
 	})
 }
@@ -1036,7 +1034,7 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 func (bs *balanceSolver) checkDstHistoryLoadsByPriorityAndTolerance(current, expect *statistics.StoreLoad, toleranceRatio float64) bool {
 	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
 		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
-			return current.HistoryLoads[i][j]*toleranceRatio < expect.Loads[i]
+			return current.HistoryLoads[i][j]*toleranceRatio < expect.HistoryLoads[i][j]
 		})
 	})
 }
