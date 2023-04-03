@@ -1068,6 +1068,15 @@ func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads []float64, f fun
 	})
 }
 
+func (bs *balanceSolver) checkHistoryByPriorityAndToleranceAnyOf(loads [][]float64, f func(int) bool) bool {
+	return slice.AnyOf(loads, func(i int) bool {
+		if bs.isSelectedDim(i) {
+			return f(i)
+		}
+		return false
+	})
+}
+
 func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(loads []float64, f func(int) bool) bool {
 	return f(bs.firstPriority)
 }

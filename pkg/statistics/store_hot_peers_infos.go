@@ -16,7 +16,6 @@ package statistics
 
 import (
 	"fmt"
-
 	"math"
 
 	"github.com/pingcap/log"
@@ -191,7 +190,6 @@ func summaryStoresLoadByEngine(
 		historyLoads := make([][]float64, DimLen)
 
 		if storesHistoryLoads, ok := storesHistoryLoads[id]; ok {
-			log.Info("history loads", zap.Uint64("id", id), zap.Any("history loads", storesHistoryLoads))
 			historyLoads = collector.GetHistoryLoads(storesHistoryLoads, peerLoadSum, rwTy, kind)
 			for i := range allStoreHistoryLoadSum {
 				for j := range allStoreHistoryLoadSum[i] {
@@ -238,6 +236,8 @@ func summaryStoresLoadByEngine(
 			expectHistoryLoads[i][j] = allStoreLoadSum[i] / float64(allStoreCount)
 		}
 	}
+
+	log.Info("history loads", zap.Any("expect loads", expectHistoryLoads))
 
 	stddevLoads := make([]float64, len(allStoreLoadSum))
 	if allHotPeersCount != 0 {
