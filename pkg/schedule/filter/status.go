@@ -43,10 +43,11 @@ var (
 	statusStoreNotMatchIsolation = plan.NewStatus(plan.StatusStoreNotMatchIsolation)
 
 	// region filter status
-	statusRegionPendingPeer   = plan.NewStatus(plan.StatusRegionUnhealthy)
-	statusRegionDownPeer      = plan.NewStatus(plan.StatusRegionUnhealthy)
-	statusRegionEmpty         = plan.NewStatus(plan.StatusRegionEmpty)
-	statusRegionNotMatchRule  = plan.NewStatus(plan.StatusRegionNotMatchRule)
-	statusRegionNotReplicated = plan.NewStatus(plan.StatusRegionNotReplicated)
-	statusRegionWitnessPeer   = plan.NewStatus(plan.StatusRegionNotMatchRule)
+	statusRegionPendingPeer                 = plan.NewStatus(plan.StatusRegionUnhealthy)
+	statusRegionDownPeer                    = plan.NewStatus(plan.StatusRegionUnhealthy)
+	statusRegionEmpty                       = plan.NewStatus(plan.StatusRegionEmpty)
+	statusRegionNotMatchRule                = plan.NewStatus(plan.StatusRegionNotMatchRule)
+	statusRegionNotReplicated               = plan.NewStatus(plan.StatusRegionNotReplicated)
+	statusRegionWitnessPeer                 = plan.NewStatus(plan.StatusRegionNotMatchRule)
+	statusRegionLeaderSendSnapshotThrottled = plan.NewStatus(plan.StatusRegionSendSnapshotThrottled)
 )

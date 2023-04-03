@@ -137,10 +137,10 @@ func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
 }
 
 // IsAvailable returns if the store bucket of limitation is available
-func (s *StoreInfo) IsAvailable(limitType storelimit.Type) bool {
+func (s *StoreInfo) IsAvailable(limitType storelimit.Type, level constant.PriorityLevel) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType, constant.Low)
+	return s.limiter.Available(storelimit.RegionInfluence[limitType], limitType, level)
 }
 
 // IsTiFlash returns true if the store is tiflash.

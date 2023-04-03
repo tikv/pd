@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -325,6 +326,12 @@ type StoreStateFilter struct {
 	AllowFastFailover bool
 	// Set true if allows temporary states.
 	AllowTemporaryStates bool
+	// Set the priority level of the filter, it should be same with the operator level.
+	// The priority level can be higher than the operator level in checker,
+	// the operator controller should check it again by using the actual operator level.
+	// If it checks failed, the operator will be put back to the waiting queue util the limit is available.
+	// But the scheduler should keep the same with the operator level.
+	OperatorLevel constant.PriorityLevel
 	// Reason is used to distinguish the reason of store state filter
 	Reason filterType
 }
@@ -417,7 +424,7 @@ func (f *StoreStateFilter) isBusy(_ config.Config, store *core.StoreInfo) *plan.
 }
 
 func (f *StoreStateFilter) exceedRemoveLimit(_ config.Config, store *core.StoreInfo) *plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer) {
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.RemovePeer, f.OperatorLevel) {
 		f.Reason = storeStateExceedRemoveLimit
 		return statusStoreRemoveLimit
 	}
@@ -426,7 +433,7 @@ func (f *StoreStateFilter) exceedRemoveLimit(_ config.Config, store *core.StoreI
 }
 
 func (f *StoreStateFilter) exceedAddLimit(_ config.Config, store *core.StoreInfo) *plan.Status {
-	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer) {
+	if !f.AllowTemporaryStates && !store.IsAvailable(storelimit.AddPeer, f.OperatorLevel) {
 		f.Reason = storeStateExceedAddLimit
 		return statusStoreAddLimit
 	}
@@ -531,6 +538,7 @@ func (f *StoreStateFilter) Source(conf config.Config, store *core.StoreInfo) (st
 			return
 		}
 	}
+
 	return statusOK
 }
 

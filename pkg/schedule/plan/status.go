@@ -92,6 +92,8 @@ const (
 	StatusNoTargetRegion
 	// StatusRegionLabelReject represents the plan conflicts with region label.
 	StatusRegionLabelReject
+	// StatusRegionSendSnapshotThrottled represents the plan conflicts with send snapshot.
+	StatusRegionSendSnapshotThrottled
 )
 
 const (
