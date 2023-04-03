@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.etcd.io/etcd/clientv3"
@@ -89,21 +90,27 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		return err
 	}
 
+	watcher := clientv3.NewWatcher(s.client)
+	defer watcher.Close()
+
 	for {
-		watchChan := s.client.Watch(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix(), clientv3.WithRev(revision))
-		select {
-		case <-ctx.Done():
-			return nil
-		case res := <-watchChan:
-			if res.CompactRevision != 0 {
+		rch := watcher.Watch(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix(), clientv3.WithRev(revision))
+		for wresp := range rch {
+			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision",
 					zap.Int64("required-revision", revision),
-					zap.Int64("compact-revision", res.CompactRevision))
-				revision = res.CompactRevision
+					zap.Int64("compact-revision", wresp.CompactRevision))
+				revision = wresp.CompactRevision
 				break
 			}
-			keyspaces := make([]*keyspacepb.KeyspaceMeta, 0, len(res.Events))
-			for _, event := range res.Events {
+			if wresp.Canceled {
+				log.Error("watcher is canceled with",
+					zap.Int64("revision", revision),
+					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
+				return nil
+			}
+			keyspaces := make([]*keyspacepb.KeyspaceMeta, 0, len(wresp.Events))
+			for _, event := range wresp.Events {
 				if event.Type != clientv3.EventTypePut {
 					continue
 				}
@@ -118,6 +125,12 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 					return err
 				}
 			}
+		}
+		select {
+		case <-ctx.Done():
+			// server closed, return
+			return nil
+		default:
 		}
 	}
 }
@@ -137,7 +150,8 @@ func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspac
 	}
 	var revision int64
 	if getResp.Header != nil {
-		revision = getResp.Header.GetRevision()
+		// start from the next revision
+		revision = getResp.Header.GetRevision() + 1
 	}
 	return revision, stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: metas})
 }
