@@ -18,6 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
@@ -54,6 +57,12 @@ func TestStoreStatistics(t *testing.T) {
 	stores[3] = store3
 	store4 := stores[4].Clone(core.SetLastHeartbeatTS(stores[4].GetLastHeartbeatTS().Add(-time.Hour)))
 	stores[4] = store4
+	store5 := stores[5].Clone(core.SetStoreStats(&pdpb.StoreStats{
+		Capacity:  512 * units.MiB,
+		Available: 100 * units.MiB,
+		UsedSize:  0,
+	}))
+	stores[5] = store5
 	storeStats := NewStoreStatisticsMap(opt, nil)
 	for _, store := range stores {
 		storeStats.Observe(store, storesStats)
@@ -72,7 +81,7 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal(0, stats.Unhealthy)
 	re.Equal(0, stats.Disconnect)
 	re.Equal(1, stats.Tombstone)
-	re.Equal(0, stats.LowSpace)
+	re.Equal(1, stats.LowSpace)
 	re.Equal(2, stats.LabelCounter["zone:z1"])
 	re.Equal(2, stats.LabelCounter["zone:z2"])
 	re.Equal(2, stats.LabelCounter["zone:z3"])
