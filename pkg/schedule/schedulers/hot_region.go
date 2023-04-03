@@ -786,7 +786,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			continue
 		}
 
-		if !bs.checkHistoryLoadByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
+		if !bs.checkSrcHistoryLoadByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
 			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed", strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
@@ -802,7 +802,10 @@ func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *sta
 	})
 }
 
-func (bs *balanceSolver) checkHistoryLoadByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
+func (bs *balanceSolver) checkSrcHistoryLoadByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
+	if minLoad == nil || len(minLoad.HistoryLoads) == 0 {
+		return true
+	}
 	return bs.checkHistoryLoadsByPriority(minLoad.HistoryLoads, func(i int) bool {
 		return slice.AllOf(minLoad.HistoryLoads[i], func(j int) bool {
 			return minLoad.HistoryLoads[i][j] > toleranceRatio*expectLoad.HistoryLoads[i][j]
