@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -47,18 +46,25 @@ func TestKeyspaceTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceTestSuite))
 }
 
+type mockConfig struct {
+	PreAlloc []string
+}
+
+func (m *mockConfig) GetPreAlloc() []string { return m.PreAlloc }
+
 func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	suite.manager = NewKeyspaceManager(store, nil, allocator, config.KeyspaceConfig{})
+	suite.manager = NewKeyspaceManager(store, nil, allocator, &mockConfig{})
 	suite.NoError(suite.manager.Bootstrap())
 }
 
 func (suite *keyspaceTestSuite) SetupSuite() {
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/keyspace/skipSplitRegion", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 }
+
 func (suite *keyspaceTestSuite) TearDownSuite() {
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/keyspace/skipSplitRegion"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
