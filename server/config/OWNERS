@@ -1,0 +1,13 @@
+# See the OWNERS docs at https://go.k8s.io/owners
+filters:
+  "config\\.go$":
+    options:
+      no_parent_owners: true
+    reviewers:
+      - nolouch
+      - disksing
+      - rleungx
+    approvers:
+      - nolouch
+      - disksing
+      - rleungx
