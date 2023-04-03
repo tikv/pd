@@ -698,7 +698,7 @@ const (
 	defaultMaxMergeRegionSize        = 20
 	defaultSplitMergeInterval        = time.Hour
 	defaultSwitchWitnessInterval     = time.Hour
-	defaultEnableDiagnostic          = false
+	defaultEnableDiagnostic          = true
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
