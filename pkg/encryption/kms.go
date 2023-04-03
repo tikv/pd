@@ -51,11 +51,11 @@ func newMasterKeyFromKMS(
 	cfg, err := sdkconfig.LoadDefaultConfig(context.TODO(),
 		sdkconfig.WithRegion(config.Region),
 	)
-
 	if err != nil {
 		return nil, errs.ErrEncryptionKMS.Wrap(err).GenWithStack(
-			"fail to create AWS session to access KMS CMK")
+			"fail to load default config")
 	}
+
 	// Credentials from K8S IAM role.
 	roleArn := os.Getenv(envAwsRoleArn)
 	tokenFile := os.Getenv(envAwsWebIdentityTokenFile)
