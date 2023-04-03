@@ -25,9 +25,9 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
-	"github.com/tikv/pd/server/keyspace"
 )
 
 // RegisterKeyspace register keyspace related handlers to router paths.
