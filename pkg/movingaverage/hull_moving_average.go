@@ -26,6 +26,8 @@ type HMA struct {
 	wma  []*WMA
 }
 
+var _ MovingAvg = &HMA{}
+
 // NewHMA returns a WMA.
 func NewHMA(sizes ...float64) *HMA {
 	size := defaultHMASize
@@ -52,6 +54,11 @@ func (h *HMA) Add(n float64) {
 // Get returns the weight average of the data set.
 func (h *HMA) Get() float64 {
 	return h.wma[2].Get()
+}
+
+// GetAll returns all the data points.
+func (h *HMA) GetAll() []float64 {
+	return h.wma[2].GetAll()
 }
 
 // Reset cleans the data set.

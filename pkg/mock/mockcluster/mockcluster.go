@@ -45,6 +45,8 @@ const (
 	defaultRegionSize    = 96 * units.MiB  // 96MiB
 )
 
+var _ statistics.StoreStatInformer = &Cluster{}
+
 // Cluster is used to mock a cluster for test purpose.
 type Cluster struct {
 	*core.BasicCluster
@@ -112,6 +114,12 @@ func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
 	mc.HotStat.FilterUnhealthyStore(mc)
 	return mc.HotStat.GetStoresLoads()
+}
+
+// GetStoresHistoryLoads gets stores load statistics.
+func (mc *Cluster) GetStoresHistoryLoads() map[uint64][][]float64 {
+	mc.HotStat.FilterUnhealthyStore(mc)
+	return mc.HotStat.GetStoresHistoryLoads()
 }
 
 // GetStore gets a store with a given store ID.

@@ -111,12 +111,14 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 	h.summaryPendingInfluence(cluster)
 	h.storesLoads = cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
+	storesHistoryLoads := cluster.GetStoresHistoryLoads()
 
 	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource constant.ResourceKind) {
 		ty := buildResourceType(rw, resource)
 		h.stLoadInfos[ty] = statistics.SummaryStoresLoad(
 			h.stInfos,
 			h.storesLoads,
+			storesHistoryLoads,
 			regionStats,
 			isTraceRegionFlow,
 			rw, resource)
@@ -462,6 +464,7 @@ type balanceSolver struct {
 	betterThan                  func(*solution) bool
 	rankToDimString             func() string
 	checkByPriorityAndTolerance func(loads []float64, f func(int) bool) bool
+	checkHistoryLoadsByPriority func(loads [][]float64, f func(int) bool) bool
 }
 
 func (bs *balanceSolver) init() {
@@ -526,10 +529,13 @@ func (bs *balanceSolver) pickCheckPolicyV1() {
 	switch {
 	case bs.resourceTy == writeLeader:
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
+		bs.checkHistoryLoadsByPriority = bs.checkHistoryByPriorityAndToleranceFirstOnly
 	case bs.sche.conf.IsStrictPickingStoreEnabled():
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAllOf
+		bs.checkHistoryLoadsByPriority = bs.checkHistoryLoadsByPriorityAndToleranceAllOf
 	default:
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
+		bs.checkHistoryLoadsByPriority = bs.checkHistoryByPriorityAndToleranceFirstOnly
 	}
 }
 
@@ -775,12 +781,17 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			continue
 		}
 
-		if bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
-			ret[id] = detail
-			hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
-		} else {
+		if !bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
 			hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+			continue
 		}
+
+		if !bs.checkHistoryLoadByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
+			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed", strconv.FormatUint(id, 10)).Inc()
+			continue
+		}
+		ret[id] = detail
+		hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
 }
@@ -788,6 +799,14 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
 	return bs.checkByPriorityAndTolerance(minLoad.Loads, func(i int) bool {
 		return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
+	})
+}
+
+func (bs *balanceSolver) checkHistoryLoadByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
+	return bs.checkHistoryLoadsByPriority(minLoad.HistoryLoads, func(i int) bool {
+		return slice.AllOf(minLoad.HistoryLoads[i], func(j int) bool {
+			return minLoad.HistoryLoads[i][j] > toleranceRatio*expectLoad.HistoryLoads[i][j]
+		})
 	})
 }
 
@@ -989,12 +1008,17 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		}
 		if filter.Target(bs.GetOpts(), store, filters) {
 			id := store.GetID()
-			if bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
-				ret[id] = detail
-				hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(id, 10)).Inc()
-			} else {
+			if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				hotSchedulerResultCounter.WithLabelValues("dst-store-failed", strconv.FormatUint(id, 10)).Inc()
+				continue
 			}
+
+			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
+				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed", strconv.FormatUint(id, 10)).Inc()
+				continue
+			}
+			hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(id, 10)).Inc()
+			ret[id] = detail
 		}
 	}
 	return ret
@@ -1006,7 +1030,24 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 	})
 }
 
+func (bs *balanceSolver) checkDstHistoryLoadsByPriorityAndTolerance(current, expect *statistics.StoreLoad, toleranceRatio float64) bool {
+	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
+		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
+			return current.HistoryLoads[i][j]*toleranceRatio < expect.Loads[i]
+		})
+	})
+}
+
 func (bs *balanceSolver) checkByPriorityAndToleranceAllOf(loads []float64, f func(int) bool) bool {
+	return slice.AllOf(loads, func(i int) bool {
+		if bs.isSelectedDim(i) {
+			return f(i)
+		}
+		return true
+	})
+}
+
+func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceAllOf(loads [][]float64, f func(int) bool) bool {
 	return slice.AllOf(loads, func(i int) bool {
 		if bs.isSelectedDim(i) {
 			return f(i)
@@ -1025,6 +1066,10 @@ func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads []float64, f fun
 }
 
 func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(loads []float64, f func(int) bool) bool {
+	return f(bs.firstPriority)
+}
+
+func (bs *balanceSolver) checkHistoryByPriorityAndToleranceFirstOnly(_ [][]float64, f func(int) bool) bool {
 	return f(bs.firstPriority)
 }
 

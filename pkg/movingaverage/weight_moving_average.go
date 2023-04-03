@@ -16,6 +16,8 @@ package movingaverage
 
 const defaultWMASize = 10
 
+var _ MovingAvg = &WMA{}
+
 // WMA works as a weight with specified window size.
 // There are at most `size` data points for calculating.
 // References:https://en.wikipedia.org/wiki/Moving_average#Weighted_moving_average
@@ -62,6 +64,11 @@ func (w *WMA) Get() float64 {
 		return w.score / float64((w.size+(w.size-w.count+1))*w.count/2.0)
 	}
 	return w.score / float64((w.size+1)*w.size/2)
+}
+
+// GetAll returns all the data points.
+func (w *WMA) GetAll() []float64 {
+	return w.records
 }
 
 // Reset cleans the data set.

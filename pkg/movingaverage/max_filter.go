@@ -16,6 +16,8 @@ package movingaverage
 
 import "github.com/elliotchance/pie/v2"
 
+var _ MovingAvg = &MaxFilter{}
+
 // MaxFilter works as a maximum filter with specified window size.
 // There are at most `size` data points for calculating.
 type MaxFilter struct {
@@ -48,6 +50,11 @@ func (r *MaxFilter) Get() float64 {
 		records = r.records[:r.count]
 	}
 	return pie.Max(records)
+}
+
+// GetAll returns all the data points.
+func (r *MaxFilter) GetAll() []float64 {
+	return r.records
 }
 
 // Reset cleans the data set.

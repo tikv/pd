@@ -54,6 +54,10 @@ func (r *MedianFilter) Get() float64 {
 	return r.result
 }
 
+func (r *MedianFilter) GetAll() []float64 {
+	return r.records
+}
+
 // Reset cleans the data set.
 func (r *MedianFilter) Reset() {
 	r.count = 0

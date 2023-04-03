@@ -27,7 +27,11 @@ type storeCollector interface {
 	Filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool
 	// GetLoads obtains available loads from storeLoads and peerLoadSum according to rwTy and kind.
 	GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, kind constant.ResourceKind) (loads []float64)
+	GetHistoryLoads(storeLoads [][]float64, peerLoadSum []float64, rwTy RWType, kind constant.ResourceKind) (loads [][]float64)
 }
+
+var _ storeCollector = tikvCollector{}
+var _ storeCollector = tiflashCollector{}
 
 type tikvCollector struct{}
 
@@ -78,6 +82,32 @@ func (c tikvCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, 
 	return
 }
 
+func (c tikvCollector) GetHistoryLoads(storeLoads [][]float64, peerLoadSum []float64, rwTy RWType, kind constant.ResourceKind) (loads [][]float64) {
+	loads = make([][]float64, DimLen)
+	switch rwTy {
+	case Read:
+		loads[ByteDim] = storeLoads[StoreReadBytes]
+		loads[KeyDim] = storeLoads[StoreReadKeys]
+		loads[QueryDim] = storeLoads[StoreReadQuery]
+	case Write:
+		switch kind {
+		case constant.LeaderKind:
+			// Use sum of hot peers to estimate leader-only byte rate.
+			// For Write requests, Write{Bytes, Keys} is applied to all Peers at the same time,
+			// while the Leader and Follower are under different loads (usually the Leader consumes more CPU).
+			// Write{Query} does not require such processing.
+			loads[ByteDim] = []float64{peerLoadSum[ByteDim]}
+			loads[KeyDim] = []float64{peerLoadSum[KeyDim]}
+			loads[QueryDim] = storeLoads[StoreWriteQuery]
+		case constant.RegionKind:
+			loads[ByteDim] = storeLoads[StoreWriteBytes]
+			loads[KeyDim] = storeLoads[StoreWriteKeys]
+			// The `Write-peer` does not have `QueryDim`
+		}
+	}
+	return
+}
+
 type tiflashCollector struct {
 	isTraceRegionFlow bool
 }
@@ -118,6 +148,31 @@ func (c tiflashCollector) GetLoads(storeLoads, peerLoadSum []float64, rwTy RWTyp
 			} else {
 				loads[ByteDim] = peerLoadSum[ByteDim]
 				loads[KeyDim] = peerLoadSum[KeyDim]
+			}
+			// The `Write-peer` does not have `QueryDim`
+		}
+	}
+	return
+}
+
+func (c tiflashCollector) GetHistoryLoads(storeLoads [][]float64, peerLoadSum []float64, rwTy RWType, kind constant.ResourceKind) (loads [][]float64) {
+	loads = make([][]float64, DimLen)
+	switch rwTy {
+	case Read:
+		// TODO: Need TiFlash StoreHeartbeat support
+	case Write:
+		switch kind {
+		case constant.LeaderKind:
+			// There is no Leader on TiFlash
+		case constant.RegionKind:
+			// TiFlash is currently unable to report statistics in the same unit as Region,
+			// so it uses the sum of Regions. If it is not accurate enough, use sum of hot peer.
+			if c.isTraceRegionFlow {
+				loads[ByteDim] = storeLoads[StoreRegionsWriteBytes]
+				loads[KeyDim] = storeLoads[StoreRegionsWriteKeys]
+			} else {
+				loads[ByteDim] = []float64{peerLoadSum[ByteDim]}
+				loads[KeyDim] = []float64{peerLoadSum[KeyDim]}
 			}
 			// The `Write-peer` does not have `QueryDim`
 		}

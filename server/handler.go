@@ -78,6 +78,8 @@ var (
 	schedulerConfigPrefix = "pd/api/v1/scheduler-config"
 )
 
+var _ statistics.StoreStatInformer = &Handler{}
+
 // Handler is a helper to export methods to handle API/RPC requests.
 type Handler struct {
 	s               *Server
@@ -212,6 +214,15 @@ func (h *Handler) GetStoresLoads() map[uint64][]float64 {
 		return nil
 	}
 	return rc.GetStoresLoads()
+}
+
+// GetStoresHistoryLoads gets all hot write stores stats.
+func (h *Handler) GetStoresHistoryLoads() map[uint64][][]float64 {
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return nil
+	}
+	return rc.GetStoresHistoryLoads()
 }
 
 // AddScheduler adds a scheduler.

@@ -34,6 +34,8 @@ const (
 	RegionsStatsRollingWindowsSize = 9
 )
 
+var _ StoreStatInformer = &StoresStats{}
+
 // StoresStats is a cache hold hot regions.
 type StoresStats struct {
 	syncutil.RWMutex
@@ -109,6 +111,19 @@ func (s *StoresStats) GetStoresLoads() map[uint64][]float64 {
 	for storeID, stats := range s.rollingStoresStats {
 		for i := StoreStatKind(0); i < StoreStatCount; i++ {
 			res[storeID] = append(res[storeID], stats.GetLoad(i))
+		}
+	}
+	return res
+}
+
+// GetStoresHistoryLoads returns all stores loads.
+func (s *StoresStats) GetStoresHistoryLoads() map[uint64][][]float64 {
+	s.RLock()
+	defer s.RUnlock()
+	res := make(map[uint64][][]float64, len(s.rollingStoresStats))
+	for storeID, stats := range s.rollingStoresStats {
+		for i := StoreStatKind(0); i < StoreStatCount; i++ {
+			res[storeID] = append(res[storeID], stats.GetLoads(i))
 		}
 	}
 	return res
@@ -251,6 +266,19 @@ func (r *RollingStoreStats) GetLoad(k StoreStatKind) float64 {
 		return r.movingAvgs[k].Get()
 	}
 	return 0
+}
+
+// GetLoads returns store's loads.
+func (r *RollingStoreStats) GetLoads(k StoreStatKind) []float64 {
+	r.RLock()
+	defer r.RUnlock()
+	switch k {
+	case StoreReadBytes, StoreReadKeys, StoreReadQuery, StoreWriteBytes, StoreWriteKeys, StoreWriteQuery:
+		return r.timeMedians[k].GetAll()
+	case StoreCPUUsage, StoreDiskReadRate, StoreDiskWriteRate, StoreRegionsWriteBytes, StoreRegionsWriteKeys:
+		return r.movingAvgs[k].GetAll()
+	}
+	return []float64{0}
 }
 
 // GetInstantLoad returns store's instant load.

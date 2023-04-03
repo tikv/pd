@@ -144,8 +144,9 @@ func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
 
 // StoreLoad records the current load.
 type StoreLoad struct {
-	Loads []float64
-	Count float64
+	Loads        []float64
+	Count        float64
+	HistoryLoads [][]float64
 }
 
 // ToLoadPred returns the current load and future predictive load.
