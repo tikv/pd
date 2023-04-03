@@ -110,10 +110,7 @@ func (manager *Manager) Bootstrap() error {
 		return err
 	}
 	now := time.Now().Unix()
-	id, err := manager.kgm.GetAvailableKeyspaceGroupIDByKind(endpoint.Basic)
-	if err != nil {
-		return err
-	}
+	id := manager.kgm.GetAvailableKeyspaceGroupIDByKind(endpoint.Basic)
 	defaultKeyspace := &keyspacepb.KeyspaceMeta{
 		Id:             DefaultKeyspaceID,
 		Name:           DefaultKeyspaceName,
@@ -125,21 +122,20 @@ func (manager *Manager) Bootstrap() error {
 			TSOKeyspaceGroupIDKey: id,
 		},
 	}
-	err = manager.saveNewKeyspace(defaultKeyspace)
+	err := manager.saveNewKeyspace(defaultKeyspace)
 	// It's possible that default keyspace already exists in the storage (e.g. PD restart/recover),
 	// so we ignore the keyspaceExists error.
 	if err != nil && err != ErrKeyspaceExists {
 		return err
 	}
-
+	if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, id, defaultKeyspace.GetId()); err != nil {
+		return err
+	}
 	// Initialize pre-alloc keyspace.
 	preAlloc := manager.config.GetPreAlloc()
 	for _, keyspaceName := range preAlloc {
-		id, err := manager.kgm.GetAvailableKeyspaceGroupIDByKind(endpoint.Basic)
-		if err != nil {
-			return err
-		}
-		_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{
+		id := manager.kgm.GetAvailableKeyspaceGroupIDByKind(endpoint.Basic)
+		keyspace, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
 			Name: keyspaceName,
 			Now:  now,
 			Config: map[string]string{
@@ -149,6 +145,9 @@ func (manager *Manager) Bootstrap() error {
 		})
 		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
 		if err != nil && err != ErrKeyspaceExists {
+			return err
+		}
+		if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, id, keyspace.GetId()); err != nil {
 			return err
 		}
 	}
@@ -172,10 +171,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		return nil, err
 	}
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
-	id, err := manager.kgm.GetAvailableKeyspaceGroupIDByKind(userKind)
-	if err != nil {
-		return nil, err
-	}
+	id := manager.kgm.GetAvailableKeyspaceGroupIDByKind(userKind)
 	if request.Config == nil {
 		request.Config = make(map[string]string)
 	}
@@ -197,6 +193,9 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			zap.String("name", keyspace.GetName()),
 			zap.Error(err),
 		)
+		return nil, err
+	}
+	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, id, keyspace.GetId()); err != nil {
 		return nil, err
 	}
 	log.Info("[keyspace] keyspace created",
