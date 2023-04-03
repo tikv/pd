@@ -107,7 +107,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 				log.Error("watcher is canceled with",
 					zap.Int64("revision", revision),
 					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
-				return nil
+				return wresp.Err()
 			}
 			keyspaces := make([]*keyspacepb.KeyspaceMeta, 0, len(wresp.Events))
 			for _, event := range wresp.Events {
