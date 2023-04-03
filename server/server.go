@@ -436,7 +436,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Step:      keyspace.AllocStep,
 	})
 	s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage)
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
