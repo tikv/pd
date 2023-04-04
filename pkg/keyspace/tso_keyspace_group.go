@@ -44,10 +44,14 @@ type GroupManager struct {
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
 func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupStorage) *GroupManager {
+	groups := make(map[endpoint.UserKind]*indexedHeap)
+	for i := 0; i < int(endpoint.UserKindCount); i++ {
+		groups[endpoint.UserKind(i)] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
+	}
 	return &GroupManager{
 		ctx:    ctx,
 		store:  store,
-		groups: make(map[endpoint.UserKind]*indexedHeap),
+		groups: groups,
 	}
 }
 
@@ -57,9 +61,9 @@ func (m *GroupManager) Bootstrap() error {
 		ID:       utils.DefaultKeySpaceGroupID,
 		UserKind: endpoint.Basic.String(),
 	}
+
+	// Ignore the error if default keyspace group already exists in the storage (e.g. PD restart/recover).
 	err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup}, false)
-	// It's possible that default keyspace group already exists in the storage (e.g. PD restart/recover),
-	// so we ignore the ErrKeyspaceGroupExists.
 	if err != nil && err != ErrKeyspaceGroupExists {
 		return err
 	}
@@ -67,10 +71,25 @@ func (m *GroupManager) Bootstrap() error {
 	m.Lock()
 	defer m.Unlock()
 	userKind := endpoint.StringUserKind(defaultKeyspaceGroup.UserKind)
+
+	// If the group for the userKind does not exist, create a new one.
 	if _, ok := m.groups[userKind]; !ok {
 		m.groups[userKind] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
 	}
 	m.groups[userKind].Put(defaultKeyspaceGroup)
+
+	// Load all the keyspace groups from the storage and add to the respective userKind groups.
+	groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeySpaceGroupID, 0)
+	if err != nil {
+		return err
+	}
+	for _, group := range groups {
+		userKind := endpoint.StringUserKind(group.UserKind)
+		if _, ok := m.groups[userKind]; !ok {
+			m.groups[userKind] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
+		}
+		m.groups[userKind].Put(group)
+	}
 
 	return nil
 }
@@ -84,9 +103,6 @@ func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceG
 	defer m.Unlock()
 	for _, keyspaceGroup := range keyspaceGroups {
 		userKind := endpoint.StringUserKind(keyspaceGroup.UserKind)
-		if _, ok := m.groups[userKind]; !ok {
-			m.groups[userKind] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
-		}
 		m.groups[userKind].Put(keyspaceGroup)
 	}
 
@@ -138,6 +154,7 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
 	userKind := endpoint.StringUserKind(kg.UserKind)
 	m.Lock()
 	defer m.Unlock()
+	// TODO: move out the keyspace to another group
 	// we don't need the keyspace group as the return value
 	m.groups[userKind].Remove(id)
 
@@ -226,6 +243,7 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 	if newKG == nil {
 		return errors.Errorf("keyspace group %s not found in %s group", newGroupID, newUserKind)
 	}
+
 	if !slice.Contains(newKG.Keyspaces, keyspaceID) {
 		newKG.Keyspaces = append(newKG.Keyspaces, keyspaceID)
 		m.groups[newUserKind].Put(newKG)
