@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/spf13/cobra"
@@ -35,7 +36,7 @@ import (
 // ExecuteCommand is used for test purpose.
 func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {
 	buf := new(bytes.Buffer)
-	root.SetOutput(buf)
+	root.SetOut(buf)
 	root.SetArgs(args)
 	err = root.Execute()
 	return buf.Bytes(), err
@@ -101,6 +102,14 @@ func MustPutStore(re *require.Assertions, svr *server.Server, store *metapb.Stor
 		Store:  store,
 	})
 	re.NoError(err)
+
+	storeInfo := grpcServer.GetRaftCluster().GetStore(store.GetId())
+	newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
+		Capacity:  uint64(10 * units.GiB),
+		UsedSize:  uint64(9 * units.GiB),
+		Available: uint64(1 * units.GiB),
+	}))
+	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
 }
 
 // MustPutRegion is used for test purpose.

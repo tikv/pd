@@ -72,7 +72,7 @@ func NewController(ctx context.Context, cluster schedule.Cluster, conf config.Co
 
 // CheckRegion will check the region and add a new operator if needed.
 func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
-	// If PD has restarted, it need to check learners added before and promote them.
+	// If PD has restarted, it needs to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
 	opController := c.opController
 
