@@ -236,7 +236,7 @@ func summaryStoresLoadByEngine(
 	for i := range allStoreHistoryLoadSum {
 		expectHistoryLoads[i] = make([]float64, len(allStoreHistoryLoadSum[i]))
 		for j := range allStoreHistoryLoadSum[i] {
-			expectHistoryLoads[i][j] = allStoreLoadSum[i] / float64(allStoreCount)
+			expectHistoryLoads[i][j] = allStoreHistoryLoadSum[i][j] / float64(allStoreCount)
 		}
 	}
 
