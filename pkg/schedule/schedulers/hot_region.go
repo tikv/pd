@@ -782,16 +782,16 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 		}
 
 		if !bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-failed"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("src-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
 
 		if !bs.checkSrcHistoryLoadByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
 		ret[id] = detail
-		hotSchedulerResultCounter.WithLabelValues("src-store-succ"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+		hotSchedulerResultCounter.WithLabelValues("src-store-succ-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
 }
@@ -1010,15 +1010,15 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		if filter.Target(bs.GetOpts(), store, filters) {
 			id := store.GetID()
 			if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
-				hotSchedulerResultCounter.WithLabelValues("dst-store-failed"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+				hotSchedulerResultCounter.WithLabelValues("dst-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
 
 			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
-				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
-			hotSchedulerResultCounter.WithLabelValues("dst-store-succ"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("dst-store-succ-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			ret[id] = detail
 		}
 	}
@@ -1595,9 +1595,9 @@ type resourceType int
 func (rt resourceType) String() string {
 	switch rt {
 	case writePeer:
-		return "write_peer"
+		return "write-peer"
 	case writeLeader:
-		return "write_leader"
+		return "write-leader"
 	case readLeader:
 		return "read-leader"
 	case readPeer:
