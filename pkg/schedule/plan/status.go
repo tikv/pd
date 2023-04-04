@@ -29,7 +29,7 @@ const (
 	StatusStoreScoreDisallowed = iota + 100
 	// StatusStoreAlreadyHasPeer represents the store is excluded due to the existed region peer.
 	StatusStoreAlreadyHasPeer
-	// StatusNotMatchRule represents the placement rule cannot satisfy the requirement.
+	// StatusStoreNotMatchRule represents the placement rule cannot satisfy the requirement.
 	StatusStoreNotMatchRule
 )
 
