@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/keyspace"
 	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
@@ -73,7 +74,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/gc"
-	"github.com/tikv/pd/server/keyspace"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -121,8 +121,8 @@ var (
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
-	// Server state.
-	isServing int64
+	// Server state. 0 is not running, 1 is running.
+	isRunning int64
 
 	// Server start timestamp
 	startTimestamp int64
@@ -440,7 +440,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace)
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace)
 	s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
@@ -456,7 +456,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 
 	// Server has started.
-	atomic.StoreInt64(&s.isServing, 1)
+	atomic.StoreInt64(&s.isRunning, 1)
 	serverMaxProcs.Set(float64(runtime.GOMAXPROCS(0)))
 	return nil
 }
@@ -468,7 +468,7 @@ func (s *Server) AddCloseCallback(callbacks ...func()) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
+	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
 		// server is already closed
 		return
 	}
@@ -513,7 +513,7 @@ func (s *Server) Close() {
 
 // IsClosed checks whether server is closed or not.
 func (s *Server) IsClosed() bool {
-	return atomic.LoadInt64(&s.isServing) == 0
+	return atomic.LoadInt64(&s.isRunning) == 0
 }
 
 // Run runs the pd server.
@@ -698,12 +698,12 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, err
 	}
 
-	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
-		log.Warn("bootstrap keyspace manager failed", errs.ZapError(err))
+	if err := s.GetKeyspaceGroupManager().Bootstrap(); err != nil {
+		log.Warn("bootstrapping keyspace group manager failed", errs.ZapError(err))
 	}
 
-	if err = s.GetKeyspaceGroupManager().Bootstrap(); err != nil {
-		log.Warn("bootstrap keyspace group manager failed", errs.ZapError(err))
+	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
+		log.Warn("bootstrapping keyspace manager failed", errs.ZapError(err))
 	}
 
 	return &pdpb.BootstrapResponse{
