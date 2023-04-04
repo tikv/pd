@@ -19,10 +19,16 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+)
+
+const (
+	opAdd    = "add"
+	opDelete = "delete"
 )
 
 // GroupManager is the manager of keyspace group related data.
@@ -59,12 +65,13 @@ func (m *GroupManager) Bootstrap() error {
 	}
 
 	m.Lock()
+	defer m.Unlock()
 	userKind := endpoint.StringUserKind(defaultKeyspaceGroup.UserKind)
 	if _, ok := m.groups[userKind]; !ok {
 		m.groups[userKind] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
 	}
 	m.groups[userKind].Put(defaultKeyspaceGroup)
-	m.Unlock()
+
 	return nil
 }
 
@@ -74,6 +81,7 @@ func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceG
 		return err
 	}
 	m.Lock()
+	defer m.Unlock()
 	for _, keyspaceGroup := range keyspaceGroups {
 		userKind := endpoint.StringUserKind(keyspaceGroup.UserKind)
 		if _, ok := m.groups[userKind]; !ok {
@@ -81,7 +89,7 @@ func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceG
 		}
 		m.groups[userKind].Put(keyspaceGroup)
 	}
-	m.Unlock()
+
 	return nil
 }
 
@@ -129,9 +137,10 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
 
 	userKind := endpoint.StringUserKind(kg.UserKind)
 	m.Lock()
+	defer m.Unlock()
 	// we don't need the keyspace group as the return value
 	m.groups[userKind].Remove(id)
-	m.Unlock()
+
 	return nil
 }
 
@@ -159,26 +168,73 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 }
 
 // GetAvailableKeyspaceGroupIDByKind returns the available keyspace group id by user kind.
-func (m *GroupManager) GetAvailableKeyspaceGroupIDByKind(userKind endpoint.UserKind) string {
+func (m *GroupManager) GetAvailableKeyspaceGroupIDByKind(userKind endpoint.UserKind) (string, error) {
 	m.RLock()
-	kg := m.groups[userKind].Top()
-	m.RUnlock()
-	return strconv.FormatUint(uint64(kg.ID), 10)
+	defer m.RUnlock()
+	groups, ok := m.groups[userKind]
+	if !ok {
+		return "", errors.Errorf("user kind %s not found", userKind)
+	}
+	kg := groups.Top()
+	return strconv.FormatUint(uint64(kg.ID), 10), nil
 }
 
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
-func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32) error {
+func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation string) error {
 	id, err := strconv.ParseUint(groupID, 10, 64)
 	if err != nil {
 		return err
 	}
 
 	m.Lock()
+	defer m.Unlock()
 	kg := m.groups[userKind].Get(uint32(id))
-	if !slice.Contains(kg.Keyspaces, keyspaceID) {
-		kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
-		m.groups[userKind].Put(kg)
+	switch mutation {
+	case opAdd:
+		if !slice.Contains(kg.Keyspaces, keyspaceID) {
+			kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
+			m.groups[userKind].Put(kg)
+		}
+	case opDelete:
+		if slice.Contains(kg.Keyspaces, keyspaceID) {
+			kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
+			m.groups[userKind].Put(kg)
+		}
 	}
-	m.Unlock()
+
 	return m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true)
+}
+
+// UpdateKeyspaceGroup updates the keyspace group.
+func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUserKind, newUserKind endpoint.UserKind, keyspaceID uint32) error {
+	oldID, err := strconv.ParseUint(oldGroupID, 10, 64)
+	if err != nil {
+		return err
+	}
+	newID, err := strconv.ParseUint(newGroupID, 10, 64)
+	if err != nil {
+		return err
+	}
+
+	m.Lock()
+	defer m.Unlock()
+	oldKG := m.groups[oldUserKind].Get(uint32(oldID))
+	if oldKG == nil {
+		return errors.Errorf("keyspace group %s not found in %s group", oldGroupID, oldUserKind)
+	}
+	newKG := m.groups[newUserKind].Get(uint32(newID))
+	if newKG == nil {
+		return errors.Errorf("keyspace group %s not found in %s group", newGroupID, newUserKind)
+	}
+	if !slice.Contains(newKG.Keyspaces, keyspaceID) {
+		newKG.Keyspaces = append(newKG.Keyspaces, keyspaceID)
+		m.groups[newUserKind].Put(newKG)
+	}
+
+	if slice.Contains(oldKG.Keyspaces, keyspaceID) {
+		oldKG.Keyspaces = slice.Remove(oldKG.Keyspaces, keyspaceID)
+		m.groups[oldUserKind].Put(oldKG)
+	}
+
+	return m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{oldKG, newKG}, true)
 }

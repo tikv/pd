@@ -145,3 +145,84 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceAssignment() {
 		re.Len(kg.Keyspaces, 33)
 	}
 }
+
+func (suite *keyspaceGroupTestSuite) TestUpdateKeyspace() {
+	re := suite.Require()
+
+	keyspaceGroups := []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(1),
+			UserKind: endpoint.Basic.String(),
+		},
+		{
+			ID:       uint32(2),
+			UserKind: endpoint.Standard.String(),
+		},
+		{
+			ID:       uint32(3),
+			UserKind: endpoint.Enterprise.String(),
+		},
+	}
+	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
+	re.NoError(err)
+	// list all keyspace groups
+	_, err = suite.kgm.GetKeyspaceGroups(uint32(0), 0)
+	re.NoError(err)
+	re.Equal(2, suite.kgm.groups[endpoint.Basic].Len())
+	re.Equal(1, suite.kgm.groups[endpoint.Standard].Len())
+	re.Equal(1, suite.kgm.groups[endpoint.Enterprise].Len())
+
+	_, err = suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
+		Name: "test",
+		Config: map[string]string{
+			UserKindKey: endpoint.Standard.String(),
+		},
+		Now: time.Now().Unix(),
+	})
+	re.NoError(err)
+	kg2, err := suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Len(kg2.Keyspaces, 1)
+	kg3, err := suite.kgm.GetKeyspaceGroupByID(3)
+	re.NoError(err)
+	re.Len(kg3.Keyspaces, 0)
+
+	_, err = suite.kg.UpdateKeyspaceConfig("test", []*Mutation{
+		{
+			Op:    OpPut,
+			Key:   UserKindKey,
+			Value: endpoint.Enterprise.String(),
+		},
+		{
+			Op:    OpPut,
+			Key:   TSOKeyspaceGroupIDKey,
+			Value: "2",
+		},
+	})
+	re.Error(err)
+	kg2, err = suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Len(kg2.Keyspaces, 1)
+	kg3, err = suite.kgm.GetKeyspaceGroupByID(3)
+	re.NoError(err)
+	re.Len(kg3.Keyspaces, 0)
+	_, err = suite.kg.UpdateKeyspaceConfig("test", []*Mutation{
+		{
+			Op:    OpPut,
+			Key:   UserKindKey,
+			Value: endpoint.Enterprise.String(),
+		},
+		{
+			Op:    OpPut,
+			Key:   TSOKeyspaceGroupIDKey,
+			Value: "3",
+		},
+	})
+	re.NoError(err)
+	kg2, err = suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Len(kg2.Keyspaces, 0)
+	kg3, err = suite.kgm.GetKeyspaceGroupByID(3)
+	re.NoError(err)
+	re.Len(kg3.Keyspaces, 1)
+}
