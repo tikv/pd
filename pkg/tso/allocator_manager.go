@@ -231,6 +231,8 @@ func NewAllocatorManager(
 
 	// Set up the Global TSO Allocator here, it will be initialized once the member campaigns leader successfully.
 	am.SetUpGlobalAllocator(am.ctx, am.member.GetLeadership(), startGlobalLeaderLoop)
+	am.svcLoopWG.Add(1)
+	go am.tsoAllocatorLoop()
 
 	return am
 }
@@ -252,9 +254,6 @@ func (am *AllocatorManager) SetUpGlobalAllocator(ctx context.Context, leadership
 		leadership: leadership,
 		allocator:  allocator,
 	}
-
-	am.svcLoopWG.Add(1)
-	go am.tsoAllocatorLoop()
 }
 
 // setUpLocalAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
@@ -282,7 +281,6 @@ func (am *AllocatorManager) setUpLocalAllocator(parentCtx context.Context, dcLoc
 }
 
 // tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
-// tso service starts the loop here, but pd starts its own loop.
 func (am *AllocatorManager) tsoAllocatorLoop() {
 	defer logutil.LogPanic()
 	defer am.svcLoopWG.Done()
