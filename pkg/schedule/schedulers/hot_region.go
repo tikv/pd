@@ -601,7 +601,7 @@ func (bs *balanceSolver) filterUniformStoreV1() (string, bool) {
 // solve travels all the src stores, hot peers, dst stores and select each one of them to make a best scheduling solution.
 // The comparing between solutions is based on calcProgressiveRank.
 func (bs *balanceSolver) solve() []*operator.Operator {
-	if !bs.isValid() || bs.opTy != transferLeader {
+	if !bs.isValid() {
 		return nil
 	}
 
