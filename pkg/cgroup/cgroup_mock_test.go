@@ -305,6 +305,7 @@ func TestCgroupsGetMemoryLimit(t *testing.T) {
 	}
 }
 
+//nolint:gosec
 const (
 	v1CgroupWithEccentricMemoryController = `
 13:devices:/system.slice/containerd.service/kubepods-burstable-pod94598a35_ad1e_4a00_91b1_1db37e8f52f6.slice:cri-containerd:0ac322a00cf64a4d58144a1974b993d91537f3ceec12928b10d881af6be8bbb2
