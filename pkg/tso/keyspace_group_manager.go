@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -74,8 +73,7 @@ type KeyspaceGroupManager struct {
 	// Note: The {group} is 5 digits integer with leading zeros.
 	tsoSvcRootPath string
 	// cfg is the TSO config
-	cfg           ServiceConfig
-	maxResetTSGap func() time.Duration
+	cfg ServiceConfig
 }
 
 // NewKeyspaceGroupManager creates a new Keyspace Group Manager.
@@ -102,7 +100,6 @@ func NewKeyspaceGroupManager(
 		defaultKsgStorageTSRootPath: defaultKsgStorageTSRootPath,
 		tsoSvcRootPath:              tsoSvcRootPath,
 		cfg:                         cfg,
-		maxResetTSGap:               func() time.Duration { return cfg.GetMaxResetTSGap() },
 	}
 
 	return ksgMgr
@@ -127,11 +124,9 @@ func (kgm *KeyspaceGroupManager) initDefaultKeyspaceGroup() {
 	defaultKsgGroupStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(kgm.etcdClient, kgm.defaultKsgStorageTSRootPath), nil)
 	kgm.ksgAllocatorManagers[mcsutils.DefaultKeySpaceGroupID] =
 		NewAllocatorManager(
-			kgm.ctx, true, mcsutils.DefaultKeySpaceGroupID, participant,
+			kgm.ctx, mcsutils.DefaultKeySpaceGroupID, participant,
 			kgm.defaultKsgStorageTSRootPath, defaultKsgGroupStorage,
-			kgm.cfg.IsLocalTSOEnabled(), kgm.cfg.GetTSOSaveInterval(),
-			kgm.cfg.GetTSOUpdatePhysicalInterval(), kgm.cfg.GetLeaderLease(),
-			kgm.cfg.GetTLSConfig(), kgm.maxResetTSGap)
+			kgm.cfg, true)
 }
 
 // GetAllocatorManager returns the AllocatorManager of the given keyspace group

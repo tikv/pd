@@ -62,7 +62,7 @@ func TestNewKeyspaceGroupManager(t *testing.T) {
 	re.False(am.enableLocalTSO)
 	re.Equal(utils.DefaultKeySpaceGroupID, am.ksgID)
 	re.Equal(utils.DefaultLeaderLease, am.leaderLease)
-	re.Equal(time.Hour*24, am.maxResetTSGap())
+	re.Equal(time.Hour*24, am.maxResetTSGap)
 	re.Equal(defaultKsgStorageTSRootPath, am.rootPath)
 	re.Equal(time.Duration(utils.DefaultLeaderLease)*time.Second, am.saveInterval)
 	re.Equal(time.Duration(50)*time.Millisecond, am.updatePhysicalInterval)

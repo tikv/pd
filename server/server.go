@@ -405,10 +405,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	if !s.IsAPIServiceMode() {
-		s.tsoAllocatorManager = tso.NewAllocatorManager(
-			s.ctx, false, mcs.DefaultKeySpaceGroupID, s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(),
-			s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetLeaderLease(), s.cfg.GetTLSConfig(),
-			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
+		s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeySpaceGroupID, s.member, s.rootPath, s.storage, s, false)
 		// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
 		s.tsoAllocatorManager.SetUpGlobalAllocator(ctx, s.member.GetLeadership(), false)
 		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
@@ -1812,4 +1809,29 @@ func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	}
 	s.GetRaftCluster().SetExternalTS(externalTS)
 	return nil
+}
+
+// IsLocalTSOEnabled returns if the local TSO is enabled.
+func (s *Server) IsLocalTSOEnabled() bool {
+	return s.cfg.IsLocalTSOEnabled()
+}
+
+// GetLeaderLease returns the leader lease.
+func (s *Server) GetLeaderLease() int64 {
+	return s.cfg.GetLeaderLease()
+}
+
+// GetTSOSaveInterval returns TSO save interval.
+func (s *Server) GetTSOSaveInterval() time.Duration {
+	return s.cfg.GetTSOSaveInterval()
+}
+
+// GetTSOUpdatePhysicalInterval returns TSO update physical interval.
+func (s *Server) GetTSOUpdatePhysicalInterval() time.Duration {
+	return s.cfg.GetTSOUpdatePhysicalInterval()
+}
+
+// GetMaxResetTSGap gets the max gap to reset the tso.
+func (s *Server) GetMaxResetTSGap() time.Duration {
+	return s.persistOptions.GetMaxResetTSGap()
 }

@@ -143,6 +143,16 @@ type ElectionMember interface {
 	PrecheckLeader() error
 }
 
+// ConfigProvider is used to provide TSO configuration.
+type ConfigProvider interface {
+	IsLocalTSOEnabled() bool
+	GetLeaderLease() int64
+	GetTSOSaveInterval() time.Duration
+	GetTSOUpdatePhysicalInterval() time.Duration
+	GetMaxResetTSGap() time.Duration
+	GetTLSConfig() *grpcutil.TLSConfig
+}
+
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
@@ -181,7 +191,7 @@ type AllocatorManager struct {
 	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
 	// the primary/leader again. Etcd only supports seconds TTL, so here is second too.
 	leaderLease    int64
-	maxResetTSGap  func() time.Duration
+	maxResetTSGap  time.Duration
 	securityConfig *grpcutil.TLSConfig
 	// for gRPC use
 	localAllocatorConn struct {
@@ -193,17 +203,12 @@ type AllocatorManager struct {
 // NewAllocatorManager creates a new TSO Allocator Manager.
 func NewAllocatorManager(
 	ctx context.Context,
-	startGlobalLeaderLoop bool,
 	keyspaceGroupID uint32,
 	member ElectionMember,
 	rootPath string,
 	storage endpoint.TSOStorage,
-	enableLocalTSO bool,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
-	leaderLease int64,
-	tlsConfig *grpcutil.TLSConfig,
-	maxResetTSGap func() time.Duration,
+	configProvider ConfigProvider,
+	startGlobalLeaderLoop bool,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
 	am := &AllocatorManager{
@@ -213,12 +218,12 @@ func NewAllocatorManager(
 		member:                 member,
 		rootPath:               rootPath,
 		storage:                storage,
-		enableLocalTSO:         enableLocalTSO,
-		saveInterval:           saveInterval,
-		updatePhysicalInterval: updatePhysicalInterval,
-		leaderLease:            leaderLease,
-		maxResetTSGap:          maxResetTSGap,
-		securityConfig:         tlsConfig,
+		enableLocalTSO:         configProvider.IsLocalTSOEnabled(),
+		saveInterval:           configProvider.GetTSOSaveInterval(),
+		updatePhysicalInterval: configProvider.GetTSOUpdatePhysicalInterval(),
+		leaderLease:            configProvider.GetLeaderLease(),
+		maxResetTSGap:          configProvider.GetMaxResetTSGap(),
+		securityConfig:         configProvider.GetTLSConfig(),
 	}
 	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	am.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -248,10 +253,8 @@ func (am *AllocatorManager) SetUpGlobalAllocator(ctx context.Context, leadership
 		allocator:  allocator,
 	}
 
-	if startGlobalLeaderLoop {
-		am.svcLoopWG.Add(1)
-		go am.tsoAllocatorLoop()
-	}
+	am.svcLoopWG.Add(1)
+	go am.tsoAllocatorLoop()
 }
 
 // setUpLocalAllocator is used to set up an allocator, which will initialize the allocator and put it into allocator daemon.
