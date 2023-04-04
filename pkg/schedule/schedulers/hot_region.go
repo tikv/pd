@@ -782,16 +782,16 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 		}
 
 		if !bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-failed", strconv.FormatUint(id, 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("src-store-failed"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
 
 		if !bs.checkSrcHistoryLoadByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed", strconv.FormatUint(id, 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
 		ret[id] = detail
-		hotSchedulerResultCounter.WithLabelValues("src-store-succ", strconv.FormatUint(id, 10)).Inc()
+		hotSchedulerResultCounter.WithLabelValues("src-store-succ"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
 }
@@ -803,7 +803,7 @@ func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *sta
 }
 
 func (bs *balanceSolver) checkSrcHistoryLoadByPriorityAndTolerance(current, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
-	log.Info("check src history load", zap.Any("current", current), zap.Any("expectLoad", expectLoad), zap.Any("bs", bs))
+	log.Info("check src history load", zap.Any("current", current), zap.Any("expect-load", expectLoad), zap.Any("bs", bs))
 	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
 		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
 			return current.HistoryLoads[i][j] > toleranceRatio*expectLoad.HistoryLoads[i][j]
@@ -1010,15 +1010,15 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		if filter.Target(bs.GetOpts(), store, filters) {
 			id := store.GetID()
 			if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
-				hotSchedulerResultCounter.WithLabelValues("dst-store-failed", strconv.FormatUint(id, 10)).Inc()
+				hotSchedulerResultCounter.WithLabelValues("dst-store-failed"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
 
-			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
-				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed", strconv.FormatUint(id, 10)).Inc()
+			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
+				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
-			hotSchedulerResultCounter.WithLabelValues("dst-store-succ", strconv.FormatUint(id, 10)).Inc()
+			hotSchedulerResultCounter.WithLabelValues("dst-store-succ"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			ret[id] = detail
 		}
 	}
@@ -1032,6 +1032,7 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 }
 
 func (bs *balanceSolver) checkDstHistoryLoadsByPriorityAndTolerance(current, expect *statistics.StoreLoad, toleranceRatio float64) bool {
+	log.Info("check dst history load", zap.Any("current", current), zap.Any("expectLoad", expect), zap.Any("bs", bs))
 	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
 		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
 			return current.HistoryLoads[i][j]*toleranceRatio < expect.HistoryLoads[i][j]
@@ -1590,6 +1591,21 @@ func (ty opType) String() string {
 }
 
 type resourceType int
+
+func (rt resourceType) String() string {
+	switch rt {
+	case writePeer:
+		return "write_peer"
+	case writeLeader:
+		return "write_leader"
+	case readLeader:
+		return "read-leader"
+	case readPeer:
+		return "read-peer"
+	default:
+		return "unknown"
+	}
+}
 
 const (
 	writePeer resourceType = iota
