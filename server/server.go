@@ -406,8 +406,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	if !s.IsAPIServiceMode() {
 		s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeySpaceGroupID, s.member, s.rootPath, s.storage, s, false)
-		// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
-		s.tsoAllocatorManager.SetUpGlobalAllocator(ctx, s.member.GetLeadership(), false)
 		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 		if !s.cfg.EnableLocalTSO {
 			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
@@ -561,9 +559,6 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	if s.IsAPIServiceMode() { // disable tso service in api server
 		s.serverLoopWg.Add(1)
 		go s.watchServicePrimaryAddrLoop(mcs.TSOServiceName)
-	} else { // enable tso service
-		s.serverLoopWg.Add(1)
-		go s.tsoAllocatorLoop()
 	}
 }
 
@@ -587,17 +582,6 @@ func (s *Server) serverMetricsLoop() {
 			return
 		}
 	}
-}
-
-// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
-func (s *Server) tsoAllocatorLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-	s.tsoAllocatorManager.AllocatorDaemon(ctx)
-	log.Info("server is closed, exit allocator loop")
 }
 
 // encryptionKeyManagerLoop is used to start monitor encryption key changes.
