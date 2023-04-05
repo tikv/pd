@@ -68,7 +68,7 @@ type timestampOracle struct {
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
-	maxResetTSGap          time.Duration
+	maxResetTSGap          func() time.Duration
 	// tso info stored in the memory
 	tsoMux *tsoObject
 	// last timestamp window stored in etcd
@@ -234,7 +234,7 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified counter is smaller than now")
 	}
 	// do not update if physical time is too greater than prev
-	if !skipUpperBoundCheck && physicalDifference >= t.maxResetTSGap.Milliseconds() {
+	if !skipUpperBoundCheck && physicalDifference >= t.maxResetTSGap().Milliseconds() {
 		tsoCounter.WithLabelValues("err_reset_large_ts", t.dcLocation).Inc()
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}

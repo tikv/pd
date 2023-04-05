@@ -191,7 +191,7 @@ type AllocatorManager struct {
 	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
 	// the primary/leader again. Etcd only supports seconds TTL, so here is second too.
 	leaderLease    int64
-	maxResetTSGap  time.Duration
+	maxResetTSGap  func() time.Duration
 	securityConfig *grpcutil.TLSConfig
 	// for gRPC use
 	localAllocatorConn struct {
@@ -222,7 +222,7 @@ func NewAllocatorManager(
 		saveInterval:           configProvider.GetTSOSaveInterval(),
 		updatePhysicalInterval: configProvider.GetTSOUpdatePhysicalInterval(),
 		leaderLease:            configProvider.GetLeaderLease(),
-		maxResetTSGap:          configProvider.GetMaxResetTSGap(),
+		maxResetTSGap:          configProvider.GetMaxResetTSGap,
 		securityConfig:         configProvider.GetTLSConfig(),
 	}
 	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
