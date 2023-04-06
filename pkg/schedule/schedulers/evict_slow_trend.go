@@ -237,12 +237,15 @@ func (s *evictSlowTrendScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.cancel:too-faster").Inc()
 		return ops, nil
 	}
-	if !checkStoresAreUpdated(cluster, slowStore) {
-		log.Info("slow store candidate waiting for other stores to update heartbeats",
-			zap.Uint64("store-id", slowStoreID))
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.wait").Inc()
-		return ops, nil
-	}
+	// TODO: exists bugs when the ts of heartbeat in slowStore is equal to other normal Stores'.
+	/*
+		if !checkStoresAreUpdated(cluster, slowStore) {
+			log.Info("slow store candidate waiting for other stores to update heartbeats",
+				zap.Uint64("store-id", slowStoreID))
+			storeSlowTrendActionStatusGauge.WithLabelValues("cand.wait").Inc()
+			return ops, nil
+		}
+	*/
 
 	candCapturedSecs := s.conf.candidateCapturedSecs()
 	log.Info("detected slow store by trend, start to evict leaders",
