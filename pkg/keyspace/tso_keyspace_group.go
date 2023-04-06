@@ -34,6 +34,7 @@ const (
 // GroupManager is the manager of keyspace group related data.
 type GroupManager struct {
 	ctx context.Context
+	// the lock for the groups
 	sync.RWMutex
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
@@ -55,23 +56,22 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 	}
 }
 
-// Bootstrap saves default keyspace group info.
+// Bootstrap saves default keyspace group info and init group mapping in the memory.
 func (m *GroupManager) Bootstrap() error {
 	defaultKeyspaceGroup := &endpoint.KeyspaceGroup{
 		ID:       utils.DefaultKeySpaceGroupID,
 		UserKind: endpoint.Basic.String(),
 	}
 
+	m.Lock()
+	defer m.Unlock()
 	// Ignore the error if default keyspace group already exists in the storage (e.g. PD restart/recover).
 	err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup}, false)
 	if err != nil && err != ErrKeyspaceGroupExists {
 		return err
 	}
 
-	m.Lock()
-	defer m.Unlock()
 	userKind := endpoint.StringUserKind(defaultKeyspaceGroup.UserKind)
-
 	// If the group for the userKind does not exist, create a new one.
 	if _, ok := m.groups[userKind]; !ok {
 		m.groups[userKind] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
@@ -96,11 +96,12 @@ func (m *GroupManager) Bootstrap() error {
 
 // CreateKeyspaceGroups creates keyspace groups.
 func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
+	m.Lock()
+	defer m.Unlock()
 	if err := m.saveKeyspaceGroups(keyspaceGroups, false); err != nil {
 		return err
 	}
-	m.Lock()
-	defer m.Unlock()
+
 	for _, keyspaceGroup := range keyspaceGroups {
 		userKind := endpoint.StringUserKind(keyspaceGroup.UserKind)
 		m.groups[userKind].Put(keyspaceGroup)
@@ -141,10 +142,15 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
 		err error
 	)
 
+	m.Lock()
+	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		kg, err = m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
 			return err
+		}
+		if kg == nil {
+			return nil
 		}
 		return m.store.DeleteKeyspaceGroup(txn, id)
 	}); err != nil {
@@ -152,8 +158,6 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
 	}
 
 	userKind := endpoint.StringUserKind(kg.UserKind)
-	m.Lock()
-	defer m.Unlock()
 	// TODO: move out the keyspace to another group
 	// we don't need the keyspace group as the return value
 	m.groups[userKind].Remove(id)

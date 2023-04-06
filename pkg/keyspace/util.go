@@ -154,6 +154,7 @@ func makeLabelRule(id uint32) *labeler.LabelRule {
 // indexedHeap is a heap with index.
 type indexedHeap struct {
 	items []*endpoint.KeyspaceGroup
+	// keyspace group id -> position in items
 	index map[uint32]int
 }
 
@@ -171,6 +172,7 @@ func (hp *indexedHeap) Len() int {
 
 // Implementing heap.Interface.
 func (hp *indexedHeap) Less(i, j int) bool {
+	// Gives the keyspace group with the least number of keyspaces first
 	return len(hp.items[j].Keyspaces) > len(hp.items[i].Keyspaces)
 }
 
