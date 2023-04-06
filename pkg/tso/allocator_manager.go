@@ -143,16 +143,6 @@ type ElectionMember interface {
 	PrecheckLeader() error
 }
 
-// ConfigProvider is used to provide TSO configuration.
-type ConfigProvider interface {
-	IsLocalTSOEnabled() bool
-	GetLeaderLease() int64
-	GetTSOSaveInterval() time.Duration
-	GetTSOUpdatePhysicalInterval() time.Duration
-	GetMaxResetTSGap() time.Duration
-	GetTLSConfig() *grpcutil.TLSConfig
-}
-
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
@@ -207,7 +197,7 @@ func NewAllocatorManager(
 	member ElectionMember,
 	rootPath string,
 	storage endpoint.TSOStorage,
-	configProvider ConfigProvider,
+	cfg TSOConfig,
 	startGlobalLeaderLoop bool,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
@@ -218,12 +208,12 @@ func NewAllocatorManager(
 		member:                 member,
 		rootPath:               rootPath,
 		storage:                storage,
-		enableLocalTSO:         configProvider.IsLocalTSOEnabled(),
-		saveInterval:           configProvider.GetTSOSaveInterval(),
-		updatePhysicalInterval: configProvider.GetTSOUpdatePhysicalInterval(),
-		leaderLease:            configProvider.GetLeaderLease(),
-		maxResetTSGap:          configProvider.GetMaxResetTSGap,
-		securityConfig:         configProvider.GetTLSConfig(),
+		enableLocalTSO:         cfg.IsLocalTSOEnabled(),
+		saveInterval:           cfg.GetTSOSaveInterval(),
+		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
+		leaderLease:            cfg.GetLeaderLease(),
+		maxResetTSGap:          cfg.GetMaxResetTSGap,
+		securityConfig:         cfg.GetTLSConfig(),
 	}
 	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	am.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
