@@ -22,8 +22,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -44,6 +45,8 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/disableAllocate", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/disableAllocate", "return(true)"))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(suite.ctx, 1)
 	suite.cluster = cluster
@@ -55,6 +58,8 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 }
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/disableAllocate"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/disableAllocate"))
 	suite.cancel()
 	suite.cluster.Destroy()
 }
@@ -65,14 +70,69 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 		{
 			ID:       uint32(1),
 			UserKind: endpoint.Standard.String(),
+			Replica:  1,
 		},
 		{
 			ID:       uint32(2),
 			UserKind: endpoint.Standard.String(),
+			Replica:  1,
 		},
 	}}
+	code := suite.tryCreateKeyspaceGroup(kgs)
+	re.Equal(http.StatusOK, code)
 
-	mustCreateKeyspaceGroup(re, suite.server, kgs)
+	// miss user kind.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:      uint32(3),
+			Replica: 1,
+		},
+	}}
+	code = suite.tryCreateKeyspaceGroup(kgs)
+	re.Equal(http.StatusBadRequest, code)
+
+	// invalid user kind.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(3),
+			UserKind: "invalid",
+			Replica:  1,
+		},
+	}}
+	code = suite.tryCreateKeyspaceGroup(kgs)
+	re.Equal(http.StatusBadRequest, code)
+
+	// miss ID.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			UserKind: endpoint.Standard.String(),
+			Replica:  1,
+		},
+	}}
+	code = suite.tryCreateKeyspaceGroup(kgs)
+	re.Equal(http.StatusInternalServerError, code)
+
+	// invalid ID.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       utils.MaxKeyspaceGroupCount + 1,
+			UserKind: endpoint.Standard.String(),
+			Replica:  1,
+		},
+	}}
+	code = suite.tryCreateKeyspaceGroup(kgs)
+	re.Equal(http.StatusBadRequest, code)
+
+	// repeated ID.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(2),
+			UserKind: endpoint.Standard.String(),
+			Replica:  1,
+		},
+	}}
+	code = suite.tryCreateKeyspaceGroup(kgs)
+	re.Equal(http.StatusInternalServerError, code)
 }
 
 func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
@@ -81,46 +141,49 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 		{
 			ID:       uint32(1),
 			UserKind: endpoint.Standard.String(),
+			Replica:  1,
 		},
 		{
 			ID:       uint32(2),
 			UserKind: endpoint.Standard.String(),
+			Replica:  1,
 		},
 	}}
 
-	mustCreateKeyspaceGroup(re, suite.server, kgs)
-	resp := sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	code := suite.tryCreateKeyspaceGroup(kgs)
+	re.Equal(http.StatusOK, code)
+	resp := suite.sendLoadKeyspaceGroupRequest("0", "0")
 	re.Equal(3, len(resp))
 }
 
-func sendLoadKeyspaceGroupRequest(re *require.Assertions, server *tests.TestServer, token, limit string) []*endpoint.KeyspaceGroup {
+func (suite *keyspaceGroupTestSuite) sendLoadKeyspaceGroupRequest(token, limit string) []*endpoint.KeyspaceGroup {
 	// Construct load range request.
-	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix, nil)
-	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodGet, suite.server.GetAddr()+keyspaceGroupsPrefix, nil)
+	suite.NoError(err)
 	query := httpReq.URL.Query()
 	query.Add("page_token", token)
 	query.Add("limit", limit)
 	httpReq.URL.RawQuery = query.Encode()
 	// Send request.
 	httpResp, err := dialClient.Do(httpReq)
-	re.NoError(err)
+	suite.NoError(err)
 	defer httpResp.Body.Close()
-	re.Equal(http.StatusOK, httpResp.StatusCode)
+	suite.Equal(http.StatusOK, httpResp.StatusCode)
 	// Receive & decode response.
 	data, err := io.ReadAll(httpResp.Body)
-	re.NoError(err)
+	suite.NoError(err)
 	var resp []*endpoint.KeyspaceGroup
-	re.NoError(json.Unmarshal(data, &resp))
+	suite.NoError(json.Unmarshal(data, &resp))
 	return resp
 }
 
-func mustCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceGroupParams) {
+func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(request *handlers.CreateKeyspaceGroupParams) int {
 	data, err := json.Marshal(request)
-	re.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspaceGroupsPrefix, bytes.NewBuffer(data))
-	re.NoError(err)
+	suite.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+keyspaceGroupsPrefix, bytes.NewBuffer(data))
+	suite.NoError(err)
 	resp, err := dialClient.Do(httpReq)
-	re.NoError(err)
+	suite.NoError(err)
 	defer resp.Body.Close()
-	re.Equal(http.StatusOK, resp.StatusCode)
+	return resp.StatusCode
 }

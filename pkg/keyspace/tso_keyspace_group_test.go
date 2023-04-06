@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -41,9 +42,10 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/disableAllocate", "return(true)"))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store)
+	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
 	idAllocator := mockid.NewIDAllocator()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	suite.kg = NewKeyspaceManager(store, cluster, idAllocator, &mockConfig{}, suite.kgm)
@@ -51,6 +53,7 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 }
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/disableAllocate"))
 	suite.cancel()
 }
 
@@ -135,7 +138,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceAssignment() {
 			Config: map[string]string{
 				UserKindKey: endpoint.Standard.String(),
 			},
-			Now: time.Now().Unix(),
+			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
 	}
@@ -178,7 +181,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspace() {
 		Config: map[string]string{
 			UserKindKey: endpoint.Standard.String(),
 		},
-		Now: time.Now().Unix(),
+		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
 	kg2, err := suite.kgm.GetKeyspaceGroupByID(2)

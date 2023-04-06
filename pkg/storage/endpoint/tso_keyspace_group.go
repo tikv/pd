@@ -60,6 +60,16 @@ func (k UserKind) String() string {
 	return "unknown UserKind"
 }
 
+// IsUserKindValid checks if the user kind is valid.
+func IsUserKindValid(kind string) bool {
+	switch kind {
+	case Basic.String(), Standard.String(), Enterprise.String():
+		return true
+	default:
+		return false
+	}
+}
+
 // KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
 type KeyspaceGroupMember struct {
 	Address string `json:"address"`
@@ -76,6 +86,8 @@ type KeyspaceGroup struct {
 	// KeyspaceLookupTable is for fast lookup if a given keyspace belongs to this keyspace group.
 	// It's not persisted and will be built when loading from storage.
 	KeyspaceLookupTable map[uint32]struct{} `json:"-"`
+	// Replica is the tso replica count of the keyspace group.
+	Replica int `json:"replica"`
 }
 
 // KeyspaceGroupStorage is the interface for keyspace group storage.
