@@ -18,10 +18,8 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
-	"go.uber.org/zap"
 )
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
@@ -239,9 +237,6 @@ func summaryStoresLoadByEngine(
 			expectHistoryLoads[i][j] = allStoreHistoryLoadSum[i][j] / float64(allStoreCount)
 		}
 	}
-
-	log.Info("history loads", zap.Any("expect loads", expectHistoryLoads))
-
 	stddevLoads := make([]float64, len(allStoreLoadSum))
 	if allHotPeersCount != 0 {
 		for _, detail := range loadDetail {

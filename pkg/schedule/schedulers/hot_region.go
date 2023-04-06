@@ -1032,7 +1032,6 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 }
 
 func (bs *balanceSolver) checkDstHistoryLoadsByPriorityAndTolerance(current, expect *statistics.StoreLoad, toleranceRatio float64) bool {
-	log.Info("check dst history load", zap.Any("current", current), zap.Any("expectLoad", expect), zap.Any("bs", bs))
 	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
 		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
 			return current.HistoryLoads[i][j]*toleranceRatio < expect.HistoryLoads[i][j]
