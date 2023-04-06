@@ -27,8 +27,8 @@ import (
 )
 
 const (
-	opAdd    = "add"
-	opDelete = "delete"
+	opAdd int = iota
+	opDelete
 )
 
 // GroupManager is the manager of keyspace group related data.
@@ -136,7 +136,7 @@ func (m *GroupManager) GetKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup,
 }
 
 // DeleteKeyspaceGroupByID deletes the keyspace group by id.
-func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
+func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup, error) {
 	var (
 		kg  *endpoint.KeyspaceGroup
 		err error
@@ -154,7 +154,7 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
 		}
 		return m.store.DeleteKeyspaceGroup(txn, id)
 	}); err != nil {
-		return err
+		return nil, err
 	}
 
 	userKind := endpoint.StringUserKind(kg.UserKind)
@@ -162,7 +162,7 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
 	// we don't need the keyspace group as the return value
 	m.groups[userKind].Remove(id)
 
-	return nil
+	return kg, nil
 }
 
 func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup, overwrite bool) error {
@@ -201,7 +201,7 @@ func (m *GroupManager) GetAvailableKeyspaceGroupIDByKind(userKind endpoint.UserK
 }
 
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
-func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation string) error {
+func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation int) error {
 	id, err := strconv.ParseUint(groupID, 10, 64)
 	if err != nil {
 		return err
@@ -218,7 +218,6 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	case opDelete:
 		if slice.Contains(kg.Keyspaces, keyspaceID) {
 			kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-
 		}
 	}
 	if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true); err != nil {

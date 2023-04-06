@@ -114,12 +114,12 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 	}
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
-	err = manager.DeleteKeyspaceGroupByID(id)
+	kg, err := manager.DeleteKeyspaceGroupByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, nil)
+	c.IndentedJSON(http.StatusOK, kg)
 }
 
 func validateKeyspaceGroupID(c *gin.Context) (uint32, error) {

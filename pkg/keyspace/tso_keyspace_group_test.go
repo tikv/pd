@@ -91,8 +91,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	re.Equal(uint32(3), kg.ID)
 	re.Equal(endpoint.Standard.String(), kg.UserKind)
 	// remove the keyspace group 3
-	err = suite.kgm.DeleteKeyspaceGroupByID(3)
+	kg, err = suite.kgm.DeleteKeyspaceGroupByID(3)
 	re.NoError(err)
+	re.Equal(uint32(3), kg.ID)
 	// get non-existing keyspace group
 	kg, err = suite.kgm.GetKeyspaceGroupByID(3)
 	re.NoError(err)
