@@ -15,7 +15,9 @@
 package schedulers
 
 import (
+	"bytes"
 	"fmt"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"math"
 	"math/rand"
 	"net/http"
@@ -52,7 +54,8 @@ var (
 	hotSchedulerAbnormalReplicaCounter         = schedulerCounter.WithLabelValues(HotRegionName, "abnormal_replica")
 	hotSchedulerCreateOperatorFailedCounter    = schedulerCounter.WithLabelValues(HotRegionName, "create_operator_failed")
 	hotSchedulerNewOperatorCounter             = schedulerCounter.WithLabelValues(HotRegionName, "new_operator")
-	hotSchedulerSnapshotSenderLimit            = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
+	hotSchedulerSnapshotSenderLimitCounter     = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
+	hotSchedulerNotFoundSplitKeysCounter       = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
 
 	hotSchedulerMoveLeaderCounter     = schedulerCounter.WithLabelValues(HotRegionName, moveLeader.String())
 	hotSchedulerMovePeerCounter       = schedulerCounter.WithLabelValues(HotRegionName, movePeer.String())
@@ -634,11 +637,8 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
 			} else if bs.opTy == movePeer {
-				if bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
-					hotSchedulerNeedSplitBeforeScheduleCounter.Inc()
-					continue
-				} else if !snapshotFilter.Select(bs.cur.region).IsOK() {
-					hotSchedulerSnapshotSenderLimit.Inc()
+				if !snapshotFilter.Select(bs.cur.region).IsOK() {
+					hotSchedulerSnapshotSenderLimitCounter.Inc()
 					continue
 				}
 			}
@@ -1347,6 +1347,19 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	targetLabel := strconv.FormatUint(dstStoreID, 10)
 	dim := bs.rankToDimString()
 
+	splitRegions := make([]*core.RegionInfo, 0)
+	if bs.opTy == movePeer {
+		for _, region := range []*core.RegionInfo{bs.cur.region, bs.cur.revertRegion} {
+			if region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
+				hotSchedulerNeedSplitBeforeScheduleCounter.Inc()
+				splitRegions = append(splitRegions, region)
+			}
+		}
+	}
+	if len(splitRegions) > 0 {
+		return bs.createSplitOperator(splitRegions)
+	}
+
 	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
 	switch bs.rwTy {
 	case statistics.Read:
@@ -1375,6 +1388,59 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	}
 
 	return
+}
+
+func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*operator.Operator {
+	if len(regions) == 0 {
+		return nil
+	}
+	ids := make([]uint64, len(regions))
+	for i, region := range regions {
+		ids[i] = region.GetID()
+	}
+	hotBuckets := bs.Cluster.BucketsStats(bs.minHotDegree, ids...)
+	operators := make([]*operator.Operator, 0)
+	createFunc := func(region *core.RegionInfo) {
+		stats, ok := hotBuckets[region.GetID()]
+		if !ok {
+			return
+		}
+		splitKey := make([][]byte, 0)
+		for _, stat := range stats {
+			for _, key := range [][]byte{stat.StartKey, stat.EndKey} {
+				if bytes.Compare(key, region.GetStartKey()) > 0 && bytes.Compare(key, region.GetEndKey()) < 0 {
+					if len(splitKey) == 0 {
+						splitKey = append(splitKey, key)
+						continue
+					}
+
+					if bytes.Equal(key, splitKey[len(splitKey)-1]) {
+						splitKey = append(splitKey, key)
+					}
+				}
+			}
+		}
+		if len(splitKey) == 0 {
+			hotSchedulerNotFoundSplitKeysCounter.Inc()
+			return
+		}
+		if op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err != nil {
+			op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
+			op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
+			keys := ""
+			for _, key := range splitKey {
+				keys += core.HexRegionKeyStr(key) + ","
+			}
+			op.AdditionalInfos["hot-degree"] = keys
+			operators = append(operators, op)
+		}
+	}
+
+	for _, region := range regions {
+		createFunc(region)
+
+	}
+	return operators
 }
 
 func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {

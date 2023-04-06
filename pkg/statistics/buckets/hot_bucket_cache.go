@@ -54,9 +54,9 @@ type HotBucketCache struct {
 }
 
 // GetHotBucketStats returns the hot stats of the regions that great than degree.
-func (h *HotBucketCache) GetHotBucketStats(degree int) map[uint64][]*BucketStat {
+func (h *HotBucketCache) GetHotBucketStats(degree int, regions []uint64) map[uint64][]*BucketStat {
 	rst := make(map[uint64][]*BucketStat)
-	for _, item := range h.bucketsOfRegion {
+	appendItems := func(item *BucketTreeItem) {
 		stats := make([]*BucketStat, 0)
 		for _, b := range item.stats {
 			if b.HotDegree >= degree {
@@ -67,6 +67,18 @@ func (h *HotBucketCache) GetHotBucketStats(degree int) map[uint64][]*BucketStat 
 			rst[item.regionID] = stats
 		}
 	}
+	if len(regions) == 0 {
+		for _, item := range h.bucketsOfRegion {
+			appendItems(item)
+		}
+	} else {
+		for _, region := range regions {
+			if item, ok := h.bucketsOfRegion[region]; ok {
+				appendItems(item)
+			}
+		}
+	}
+
 	return rst
 }
 

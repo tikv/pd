@@ -35,7 +35,7 @@ func init() {
 
 // BucketStatInformer is used to get the bucket statistics.
 type BucketStatInformer interface {
-	BucketsStats(degree int) map[uint64][]*BucketStat
+	BucketsStats(degree int, regions ...uint64) map[uint64][]*BucketStat
 }
 
 // BucketStat is the record the bucket statistics.
