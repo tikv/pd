@@ -133,9 +133,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsAssignment() {
 	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, 3, 0, 100)
 	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, maxCountInUse-1, 0, 10)
 	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, maxCountInUse, 0, 10)
-	// Test loading of the keyspace group assignment which exceeds the maximum
-	// keyspace group count. In this case, the manager should only load/serve the
-	// first MaxKeyspaceGroupCountInUse keyspace groups and ignore the rest
+	// Test loading of the keyspace group assignment which exceeds the maximum keyspace group count.
+	// In this case, the manager should only load/serve the first MaxKeyspaceGroupCountInUse keyspace
+	// groups and ignore the rest.
 	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, maxCountInUse+1, 0, 10)
 }
 
