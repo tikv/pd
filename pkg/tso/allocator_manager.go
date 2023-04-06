@@ -294,8 +294,8 @@ func (am *AllocatorManager) close() {
 	log.Info("closed the allocator manager")
 }
 
-func (am *AllocatorManager) getMember() *ElectionMember {
-	return &am.member
+func (am *AllocatorManager) getMember() ElectionMember {
+	return am.member
 }
 
 // SetLocalTSOConfig receives the zone label of this PD server and write it into etcd as dc-location
@@ -1072,6 +1072,7 @@ func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb
 		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
 		return pdpb.Timestamp{}, err
 	}
+
 	return allocatorGroup.allocator.GenerateTSO(count)
 }
 

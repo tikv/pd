@@ -17,6 +17,7 @@ package server
 import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/tso"
 	"go.uber.org/zap"
 )
@@ -31,12 +32,18 @@ func newHandler(s *Server) *Handler {
 }
 
 // ResetTS resets the ts with specified tso.
+// TODO: Support multiple keyspace groups.
 func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	log.Info("reset-ts",
 		zap.Uint64("new-ts", ts),
 		zap.Bool("ignore-smaller", ignoreSmaller),
 		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck))
-	tsoAllocator, err := h.s.GetTSOAllocatorManager().GetAllocator(tso.GlobalDCLocation)
+	tsoAllocatorManager, err := h.s.GetTSOAllocatorManager(mcsutils.DefaultKeySpaceGroupID)
+	if err != nil {
+		log.Error("failed to get allocator manager", errs.ZapError(err))
+		return err
+	}
+	tsoAllocator, err := tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		return err
 	}

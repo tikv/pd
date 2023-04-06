@@ -22,11 +22,19 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+// KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
+type KeyspaceGroupMember struct {
+	Address string `json:"address"`
+}
+
 // KeyspaceGroup is the keyspace group.
 type KeyspaceGroup struct {
 	ID       uint32 `json:"id"`
 	UserKind string `json:"user-kind"`
-	// TODO: add `Members` field
+	// Members are the election members which campaign for the primary of the keyspace group.
+	Members []KeyspaceGroupMember `json:"members"`
+	// Keyspaces are the keyspace IDs which belong to the keyspace group.
+	Keyspaces []uint32 `json:"keyspaces"`
 }
 
 // KeyspaceGroupStorage is the interface for keyspace group storage.
