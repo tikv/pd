@@ -1167,7 +1167,9 @@ func IsLeaderChange(err error) bool {
 		return true
 	}
 	errMsg := err.Error()
-	return strings.Contains(errMsg, errs.NotLeaderErr) || strings.Contains(errMsg, errs.MismatchLeaderErr)
+	return strings.Contains(errMsg, errs.NotLeaderErr) ||
+		strings.Contains(errMsg, errs.MismatchLeaderErr) ||
+		strings.Contains(errMsg, errs.NotServedErr)
 }
 
 func trimHTTPPrefix(str string) string {
