@@ -197,7 +197,7 @@ func NewAllocatorManager(
 	member ElectionMember,
 	rootPath string,
 	storage endpoint.TSOStorage,
-	cfg TSOConfig,
+	cfg Config,
 	startGlobalLeaderLoop bool,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
