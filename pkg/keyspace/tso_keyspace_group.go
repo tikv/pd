@@ -214,16 +214,19 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	case opAdd:
 		if !slice.Contains(kg.Keyspaces, keyspaceID) {
 			kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
-			m.groups[userKind].Put(kg)
 		}
 	case opDelete:
 		if slice.Contains(kg.Keyspaces, keyspaceID) {
 			kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
-			m.groups[userKind].Put(kg)
+
 		}
 	}
+	if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true); err != nil {
+		return err
+	}
 
-	return m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true)
+	m.groups[userKind].Put(kg)
+	return nil
 }
 
 // UpdateKeyspaceGroup updates the keyspace group.
@@ -248,15 +251,28 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 		return errors.Errorf("keyspace group %s not found in %s group", newGroupID, newUserKind)
 	}
 
+	var updateOld, updateNew bool
 	if !slice.Contains(newKG.Keyspaces, keyspaceID) {
 		newKG.Keyspaces = append(newKG.Keyspaces, keyspaceID)
-		m.groups[newUserKind].Put(newKG)
+		updateNew = true
 	}
 
 	if slice.Contains(oldKG.Keyspaces, keyspaceID) {
 		oldKG.Keyspaces = slice.Remove(oldKG.Keyspaces, keyspaceID)
+		updateOld = true
+	}
+
+	if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{oldKG, newKG}, true); err != nil {
+		return err
+	}
+
+	if updateOld {
 		m.groups[oldUserKind].Put(oldKG)
 	}
 
-	return m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{oldKG, newKG}, true)
+	if updateNew {
+		m.groups[newUserKind].Put(newKG)
+	}
+
+	return nil
 }
