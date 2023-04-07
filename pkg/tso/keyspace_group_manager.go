@@ -341,7 +341,7 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 	return revison, kgs, resp.More, nil
 }
 
-// startKeyspaceGroupsMetaWatchLoop Repeatedly watches any change in keyspace group membership/distribution
+// startKeyspaceGroupsMetaWatchLoop repeatedly watches any change in keyspace group membership/distribution
 // and apply the change dynamically.
 func (kgm *KeyspaceGroupManager) startKeyspaceGroupsMetaWatchLoop(revision int64) {
 	defer logutil.LogPanic()
@@ -357,7 +357,7 @@ func (kgm *KeyspaceGroupManager) startKeyspaceGroupsMetaWatchLoop(revision int64
 
 		nextRevision, err := kgm.watchKeyspaceGroupsMetaChange(revision)
 		if err != nil {
-			log.Error("watcher canceled unexpectedly. Will start a new watcher after a while",
+			log.Error("watcher canceled unexpectedly and a new watcher will start after a while",
 				zap.Int64("next-revision", nextRevision),
 				zap.Time("retry-at", time.Now().Add(watchKEtcdChangeRetryInterval)),
 				zap.Error(err))

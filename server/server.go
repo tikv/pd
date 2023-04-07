@@ -104,6 +104,8 @@ const (
 	maxRetryTimesGetServicePrimary = 25
 	// retryIntervalGetServicePrimary is the retry interval for getting primary addr.
 	retryIntervalGetServicePrimary = 100 * time.Millisecond
+	// TODO: move it to etcdutil
+	watchKEtcdChangeRetryInterval = 1 * time.Second
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -558,7 +560,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.encryptionKeyManagerLoop()
 	if s.IsAPIServiceMode() { // disable tso service in api server
 		s.serverLoopWg.Add(1)
-		go s.watchServicePrimaryAddrLoop(mcs.TSOServiceName)
+		go s.startWatchServicePrimaryAddrLoop(mcs.TSOServiceName)
 	}
 }
 
@@ -1716,43 +1718,88 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 	return "", false
 }
 
-func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
+// startWatchServicePrimaryAddrLoop starts a loop to watch the primary address of a given service.
+func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 
-	serviceKey := fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
-	log.Info("start to watch", zap.String("service-key", serviceKey))
-
-	primary := &tsopb.Participant{}
-	ok, rev, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
-	if err != nil {
-		log.Error("get service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
+	serviceKey := s.servicePrimaryKey(serviceName)
+	var revision int64
+	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryIntervalGetServicePrimary):
+		}
+		primary := &tsopb.Participant{}
+		ok, r, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
+		if err != nil {
+			log.Error("get service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
+			continue
+		}
+		listenUrls := primary.GetListenUrls()
+		if ok && len(listenUrls) > 0 {
+			// listenUrls[0] is the primary service endpoint of the keyspace group
+			s.servicePrimaryMap.Store(serviceName, listenUrls[0])
+			revision = r
+			log.Info("get service primary addr", zap.String("service-key", serviceKey), zap.String("primary-addr", listenUrls[0]))
+			break
+		}
 	}
-	listenUrls := primary.GetListenUrls()
-	if ok && len(listenUrls) > 0 {
-		// listenUrls[0] is the primary service endpoint of the keyspace group
-		s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-	} else {
+	if revision == 0 {
 		log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))
 	}
-
-	watchChan := s.client.Watch(ctx, serviceKey, clientv3.WithPrefix(), clientv3.WithRev(rev))
+	log.Info("start to watch", zap.String("service-key", serviceKey))
 	for {
 		select {
 		case <-ctx.Done():
 			log.Info("server is closed, exist watch service primary addr loop", zap.String("service", serviceName))
 			return
-		case res := <-watchChan:
-			for _, event := range res.Events {
+		default:
+		}
+		nextRevision, err := s.watchServicePrimaryAddr(ctx, serviceName, revision)
+		if err != nil {
+			log.Error("watcher canceled unexpectedly and a new watcher will start after a while",
+				zap.Int64("next-revision", nextRevision),
+				zap.Time("retry-at", time.Now().Add(watchKEtcdChangeRetryInterval)),
+				zap.Error(err))
+			revision = nextRevision
+			time.Sleep(watchKEtcdChangeRetryInterval)
+		}
+	}
+}
+
+func (s *Server) watchServicePrimaryAddr(ctx context.Context, serviceName string, revision int64) (nextRevision int64, err error) {
+	serviceKey := s.servicePrimaryKey(serviceName)
+	watcher := clientv3.NewWatcher(s.client)
+	defer watcher.Close()
+
+	for {
+		watchChan := watcher.Watch(s.serverLoopCtx, serviceKey, clientv3.WithPrefix(), clientv3.WithRev(revision))
+		for wresp := range watchChan {
+			if wresp.CompactRevision != 0 {
+				log.Warn("required revision has been compacted, use the compact revision",
+					zap.Int64("required-revision", revision),
+					zap.Int64("compact-revision", wresp.CompactRevision))
+				revision = wresp.CompactRevision
+				break
+			}
+			if wresp.Err() != nil {
+				log.Error("watcher is canceled with",
+					zap.Int64("revision", revision),
+					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
+				return revision, wresp.Err()
+			}
+			for _, event := range wresp.Events {
 				switch event.Type {
 				case clientv3.EventTypePut:
-					primary.ListenUrls = nil // reset the field
+					primary := &tsopb.Participant{}
 					if err := proto.Unmarshal(event.Kv.Value, primary); err != nil {
 						log.Error("watch service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
 					} else {
-						listenUrls = primary.GetListenUrls()
+						listenUrls := primary.GetListenUrls()
 						if len(listenUrls) > 0 {
 							// listenUrls[0] is the primary service endpoint of the keyspace group
 							s.servicePrimaryMap.Store(serviceName, listenUrls[0])
@@ -1761,11 +1808,22 @@ func (s *Server) watchServicePrimaryAddrLoop(serviceName string) {
 						}
 					}
 				case clientv3.EventTypeDelete:
+					log.Warn("service primary is deleted", zap.String("service-key", serviceKey))
 					s.servicePrimaryMap.Delete(serviceName)
 				}
 			}
+			revision = wresp.Header.Revision
+		}
+		select {
+		case <-ctx.Done():
+			return revision, nil
+		default:
 		}
 	}
+}
+
+func (s *Server) servicePrimaryKey(serviceName string) string {
+	return fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id
