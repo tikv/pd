@@ -52,6 +52,7 @@ var (
 	ErrLoadKeyspaceGroupsTimeout       = errors.Normalize("load keyspace groups timeout", errors.RFCCodeText("ErrLoadKeyspaceGroupsTimeout"))
 	ErrLoadKeyspaceGroupsTerminated    = errors.Normalize("load keyspace groups terminated", errors.RFCCodeText("ErrLoadKeyspaceGroupsTerminated"))
 	ErrLoadKeyspaceGroupsRetryExhaustd = errors.Normalize("load keyspace groups retry exhausted, %s", errors.RFCCodeText("ErrLoadKeyspaceGroupsRetryExhaustd"))
+	ErrKeyspaceNotAssigned             = errors.Normalize("the keyspace isn't assigned to any keyspace group, %s", errors.RFCCodeText("PD:tso:ErrKeyspaceNotAssigned"))
 )
 
 // member errors
