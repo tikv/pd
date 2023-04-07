@@ -40,9 +40,8 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 // Bootstrap saves default keyspace group info.
 func (m *GroupManager) Bootstrap() error {
 	defaultKeyspaceGroup := &endpoint.KeyspaceGroup{
-		ID: utils.DefaultKeySpaceGroupID,
-		// TODO: define a user kind type
-		UserKind: "default",
+		ID:       utils.DefaultKeySpaceGroupID,
+		UserKind: endpoint.Basic.String(),
 	}
 	err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup})
 	// It's possible that default keyspace group already exists in the storage (e.g. PD restart/recover),
@@ -110,4 +109,10 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 		}
 		return nil
 	})
+}
+
+// GetAvailableKeyspaceGroupIDByKind returns the available keyspace group id by user kind.
+func (m *GroupManager) GetAvailableKeyspaceGroupIDByKind(userKind endpoint.UserKind) (string, error) {
+	// TODO: implement it
+	return "0", nil
 }

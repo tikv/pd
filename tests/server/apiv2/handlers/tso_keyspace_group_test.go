@@ -33,7 +33,8 @@ const keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
 
 type keyspaceGroupTestSuite struct {
 	suite.Suite
-	cleanup func()
+	ctx     context.Context
+	cancel  context.CancelFunc
 	cluster *tests.TestCluster
 	server  *tests.TestServer
 }
@@ -43,9 +44,8 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {
-	ctx, cancel := context.WithCancel(context.Background())
-	suite.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	cluster, err := tests.NewTestCluster(suite.ctx, 1)
 	suite.cluster = cluster
 	suite.NoError(err)
 	suite.NoError(cluster.RunInitialServers())
@@ -55,7 +55,7 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 }
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
-	suite.cleanup()
+	suite.cancel()
 	suite.cluster.Destroy()
 }
 
@@ -64,11 +64,11 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
 			ID:       uint32(1),
-			UserKind: "business",
+			UserKind: endpoint.Standard.String(),
 		},
 		{
 			ID:       uint32(2),
-			UserKind: "business",
+			UserKind: endpoint.Standard.String(),
 		},
 	}}
 
@@ -80,11 +80,11 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
 			ID:       uint32(1),
-			UserKind: "business",
+			UserKind: endpoint.Standard.String(),
 		},
 		{
 			ID:       uint32(2),
-			UserKind: "business",
+			UserKind: endpoint.Standard.String(),
 		},
 	}}
 

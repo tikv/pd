@@ -52,6 +52,7 @@ var (
 	hotSchedulerAbnormalReplicaCounter         = schedulerCounter.WithLabelValues(HotRegionName, "abnormal_replica")
 	hotSchedulerCreateOperatorFailedCounter    = schedulerCounter.WithLabelValues(HotRegionName, "create_operator_failed")
 	hotSchedulerNewOperatorCounter             = schedulerCounter.WithLabelValues(HotRegionName, "new_operator")
+	hotSchedulerSnapshotSenderLimit            = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
 
 	hotSchedulerMoveLeaderCounter     = schedulerCounter.WithLabelValues(HotRegionName, moveLeader.String())
 	hotSchedulerMovePeerCounter       = schedulerCounter.WithLabelValues(HotRegionName, movePeer.String())
@@ -629,16 +630,21 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			return region.GetStorePeer(srcStoreID) == nil
 		}
 	}
-
+	snapshotFilter := filter.NewSnapshotSendFilter(bs.GetStores(), constant.Medium)
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
 		for _, mainPeerStat := range bs.filterHotPeers(srcStore) {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
-			} else if bs.opTy == movePeer && bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
-				hotSchedulerNeedSplitBeforeScheduleCounter.Inc()
-				continue
+			} else if bs.opTy == movePeer {
+				if bs.cur.region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
+					hotSchedulerNeedSplitBeforeScheduleCounter.Inc()
+					continue
+				} else if !snapshotFilter.Select(bs.cur.region).IsOK() {
+					hotSchedulerSnapshotSenderLimit.Inc()
+					continue
+				}
 			}
 			bs.cur.mainPeerStat = mainPeerStat
 
@@ -932,7 +938,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			return nil
 		}
 		filters = []filter.Filter{
-			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true},
+			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, nil),
@@ -946,12 +952,12 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			return nil
 		}
 		filters = []filter.Filter{
-			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true},
+			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true, OperatorLevel: constant.High},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
 		if bs.rwTy == statistics.Read {
 			peers := bs.cur.region.GetPeers()
-			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true}}
+			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High}}
 			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}

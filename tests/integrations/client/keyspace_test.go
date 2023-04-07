@@ -20,9 +20,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/keyspace"
 )
 
 const (
