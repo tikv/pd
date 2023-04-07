@@ -170,7 +170,7 @@ func newBalanceWitnessScheduler(opController *schedule.OperatorController, conf 
 		option(s)
 	}
 	s.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true},
+		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	return s

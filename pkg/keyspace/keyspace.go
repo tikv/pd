@@ -23,12 +23,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -46,7 +46,16 @@ const (
 	regionLabelIDPrefix = "keyspaces/"
 	// regionLabelKey is the key for keyspace id in keyspace region label.
 	regionLabelKey = "id"
+	// UserKindKey is the key for user kind in keyspace config.
+	UserKindKey = "user_kind"
+	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
+	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
 )
+
+// Config is the interface for keyspace config.
+type Config interface {
+	GetPreAlloc() []string
+}
 
 // Manager manages keyspace related data.
 // It validates requests and provides concurrency control.
@@ -58,11 +67,12 @@ type Manager struct {
 	// store is the storage for keyspace related information.
 	store endpoint.KeyspaceStorage
 	// rc is the raft cluster of the server.
-	rc *cluster.RaftCluster
+	cluster schedule.Cluster
 	// ctx is the context of the manager, to be used in transaction.
 	ctx context.Context
 	// config is the configurations of the manager.
-	config config.KeyspaceConfig
+	config Config
+	kgm    *GroupManager
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -77,17 +87,19 @@ type CreateKeyspaceRequest struct {
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
 func NewKeyspaceManager(store endpoint.KeyspaceStorage,
-	rc *cluster.RaftCluster,
+	cluster schedule.Cluster,
 	idAllocator id.Allocator,
-	config config.KeyspaceConfig,
+	config Config,
+	kgm *GroupManager,
 ) *Manager {
 	return &Manager{
 		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
 		idAllocator: idAllocator,
 		store:       store,
-		rc:          rc,
+		cluster:     cluster,
 		ctx:         context.TODO(),
 		config:      config,
+		kgm:         kgm,
 	}
 }
 
@@ -98,14 +110,22 @@ func (manager *Manager) Bootstrap() error {
 		return err
 	}
 	now := time.Now().Unix()
+	id, err := manager.kgm.GetAvailableKeyspaceGroupIDByKind(endpoint.Basic)
+	if err != nil {
+		return err
+	}
 	defaultKeyspace := &keyspacepb.KeyspaceMeta{
 		Id:             DefaultKeyspaceID,
 		Name:           DefaultKeyspaceName,
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
 		StateChangedAt: now,
+		Config: map[string]string{
+			UserKindKey:           endpoint.Basic.String(),
+			TSOKeyspaceGroupIDKey: id,
+		},
 	}
-	err := manager.saveNewKeyspace(defaultKeyspace)
+	err = manager.saveNewKeyspace(defaultKeyspace)
 	// It's possible that default keyspace already exists in the storage (e.g. PD restart/recover),
 	// so we ignore the keyspaceExists error.
 	if err != nil && err != ErrKeyspaceExists {
@@ -113,11 +133,19 @@ func (manager *Manager) Bootstrap() error {
 	}
 
 	// Initialize pre-alloc keyspace.
-	preAlloc := manager.config.PreAlloc
+	preAlloc := manager.config.GetPreAlloc()
 	for _, keyspaceName := range preAlloc {
+		id, err := manager.kgm.GetAvailableKeyspaceGroupIDByKind(endpoint.Basic)
+		if err != nil {
+			return err
+		}
 		_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{
 			Name: keyspaceName,
 			Now:  now,
+			Config: map[string]string{
+				UserKindKey:           endpoint.Basic.String(),
+				TSOKeyspaceGroupIDKey: id,
+			},
 		})
 		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
 		if err != nil && err != ErrKeyspaceExists {
@@ -143,6 +171,16 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
+	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
+	id, err := manager.kgm.GetAvailableKeyspaceGroupIDByKind(userKind)
+	if err != nil {
+		return nil, err
+	}
+	if request.Config == nil {
+		request.Config = make(map[string]string)
+	}
+	request.Config[TSOKeyspaceGroupIDKey] = id
+	request.Config[UserKindKey] = userKind.String()
 	// Create and save keyspace metadata.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
@@ -207,18 +245,21 @@ func (manager *Manager) splitKeyspaceRegion(id uint32) error {
 	})
 
 	keyspaceRule := makeLabelRule(id)
-	err := manager.rc.GetRegionLabeler().SetLabelRule(keyspaceRule)
-	if err != nil {
-		log.Warn("[keyspace] failed to add region label for keyspace",
+	if cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+		err := cl.GetRegionLabeler().SetLabelRule(keyspaceRule)
+		if err != nil {
+			log.Warn("[keyspace] failed to add region label for keyspace",
+				zap.Uint32("keyspaceID", id),
+				zap.Error(err),
+			)
+		}
+		log.Info("[keyspace] added region label for keyspace",
 			zap.Uint32("keyspaceID", id),
-			zap.Error(err),
+			zap.Any("LabelRule", keyspaceRule),
 		)
+		return nil
 	}
-	log.Info("[keyspace] added region label for keyspace",
-		zap.Uint32("keyspaceID", id),
-		zap.Any("LabelRule", keyspaceRule),
-	)
-	return nil
+	return errors.New("cluster does not support region label")
 }
 
 // LoadKeyspace returns the keyspace specified by name.

@@ -107,7 +107,7 @@ func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ 
 	for _, peer := range region.GetPendingPeers() {
 		unhealthyPeerStores[peer.GetStoreId()] = struct{}{}
 	}
-	filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores), &filter.StoreStateFilter{ActionScope: name, TransferLeader: true})
+	filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores), &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
 	candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).FilterTarget(cluster.GetOpts(), nil, nil, filters...)
 	// Compatible with old TiKV transfer leader logic.
 	target := candidates.RandomPick()

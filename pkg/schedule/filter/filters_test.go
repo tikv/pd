@@ -23,6 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -146,6 +148,19 @@ func TestRuleFitFilter(t *testing.T) {
 	// store-6 is not exist in the peers, so it will not allow transferring leader to store 6.
 	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, false)
 	re.False(leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(6)).IsOK())
+}
+
+func TestSendStateFilter(t *testing.T) {
+	re := require.New(t)
+	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SetStoreLimit(storelimit.NewSlidingWindows(1000)))
+	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
+
+	snapshotFilter := NewSnapshotSendFilter([]*core.StoreInfo{store}, constant.Medium)
+	re.NotNil(SelectOneRegion([]*core.RegionInfo{region}, nil, snapshotFilter))
+	re.True(store.GetStoreLimit().Take(1000, storelimit.SendSnapshot, constant.Medium))
+	re.True(store.GetStoreLimit().Take(1000, storelimit.SendSnapshot, constant.Medium))
+	snapshotFilter = NewSnapshotSendFilter([]*core.StoreInfo{store}, constant.Medium)
+	re.Nil(SelectOneRegion([]*core.RegionInfo{region}, nil, snapshotFilter))
 }
 
 func TestStoreStateFilter(t *testing.T) {

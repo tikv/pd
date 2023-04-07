@@ -17,6 +17,7 @@ package endpoint
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -237,6 +238,22 @@ func KeyspaceGroupIDPrefix() string {
 // Path: tso/keyspace_groups/membership/{id}
 func KeyspaceGroupIDPath(id uint32) string {
 	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey, encodeKeyspaceGroupID(id))
+}
+
+// ExtractKeyspaceGroupIDFromPath extracts keyspace group id from the given path, which contains
+// the pattern of `tso/keyspace_groups/membership/(\d{5})$`.
+func ExtractKeyspaceGroupIDFromPath(path string) (uint32, error) {
+	pattern := strings.Join([]string{KeyspaceGroupIDPrefix(), `(\d{5})$`}, "/")
+	re := regexp.MustCompile(pattern)
+	match := re.FindStringSubmatch(path)
+	if match == nil {
+		return 0, fmt.Errorf("invalid keyspace group id path: %s", path)
+	}
+	id, err := strconv.ParseUint(match[1], 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse keyspace group ID: %v", err)
+	}
+	return uint32(id), nil
 }
 
 // encodeKeyspaceGroupID from uint32 to string.

@@ -28,6 +28,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -786,6 +787,14 @@ func (suite *clientTestSuite) SetupSuite() {
 				LastHeartbeat: now,
 			},
 		})
+
+		storeInfo := suite.grpcSvr.GetRaftCluster().GetStore(store.GetId())
+		newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
+			Capacity:  uint64(10 * units.GiB),
+			UsedSize:  uint64(9 * units.GiB),
+			Available: uint64(1 * units.GiB),
+		}))
+		suite.grpcSvr.GetRaftCluster().GetBasicCluster().PutStore(newStore)
 	}
 	cluster.GetStoreConfig().SetRegionBucketEnabled(true)
 }

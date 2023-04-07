@@ -54,6 +54,7 @@ func (r *MedianFilter) Get() float64 {
 	return r.result
 }
 
+// GetAll return all the data set.
 func (r *MedianFilter) GetAll() []float64 {
 	if r.count < r.size {
 		return r.records[:r.count]

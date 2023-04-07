@@ -72,6 +72,7 @@ func (e *EMA) Get() float64 {
 	return e.value
 }
 
+// GetAll returns all the data set.
 func (e *EMA) GetAll() []float64 {
 	return []float64{e.Get()}
 }

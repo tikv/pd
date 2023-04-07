@@ -55,7 +55,7 @@ type shuffleLeaderScheduler struct {
 // between stores.
 func newShuffleLeaderScheduler(opController *schedule.OperatorController, conf *shuffleLeaderSchedulerConfig) schedule.Scheduler {
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
+		&filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true, OperatorLevel: constant.Low},
 		filter.NewSpecialUseFilter(conf.Name),
 	}
 	base := NewBaseScheduler(opController)

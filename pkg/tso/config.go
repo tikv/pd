@@ -30,6 +30,12 @@ type ServiceConfig interface {
 	GetListenAddr() string
 	// GetAdvertiseListenAddr returns the AdvertiseListenAddr
 	GetAdvertiseListenAddr() string
+	// TSO-related configuration
+	Config
+}
+
+// Config is used to provide TSO configuration.
+type Config interface {
 	// GetLeaderLease returns the leader lease.
 	GetLeaderLease() int64
 	// IsLocalTSOEnabled returns if the local TSO is enabled.
