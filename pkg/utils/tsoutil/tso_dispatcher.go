@@ -16,6 +16,7 @@ package tsoutil
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -57,12 +58,12 @@ func NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize prometheus.Histo
 
 // DispatchRequest is the entry point for dispatching/forwarding a tso request to the detination host
 func (s *TSODispatcher) DispatchRequest(
-	ctx context.Context, req Request, tsoProtoFactory ProtoFactory, doneCh <-chan struct{}, errCh chan<- error) {
+	ctx context.Context, req Request, tsoProtoFactory ProtoFactory, doneCh <-chan struct{}, errCh chan<- error, updateServicePrimaryAddrChs ...chan<- struct{}) {
 	val, loaded := s.dispatchChs.LoadOrStore(req.getForwardedHost(), make(chan Request, maxMergeRequests))
 	reqCh := val.(chan Request)
 	if !loaded {
 		tsDeadlineCh := make(chan deadline, 1)
-		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh)
+		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh, updateServicePrimaryAddrChs...)
 		go watchTSDeadline(ctx, tsDeadlineCh)
 	}
 	reqCh <- req
@@ -70,7 +71,7 @@ func (s *TSODispatcher) DispatchRequest(
 
 func (s *TSODispatcher) dispatch(
 	ctx context.Context, tsoProtoFactory ProtoFactory, forwardedHost string, clientConn *grpc.ClientConn,
-	tsoRequestCh <-chan Request, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error) {
+	tsoRequestCh <-chan Request, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error, updateServicePrimaryAddrChs ...chan<- struct{}) {
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
 	defer s.dispatchChs.Delete(forwardedHost)
@@ -121,6 +122,11 @@ func (s *TSODispatcher) dispatch(
 				log.Error("proxy forward tso error",
 					zap.String("forwarded-host", forwardedHost),
 					errs.ZapError(errs.ErrGRPCSend, err))
+				if len(updateServicePrimaryAddrChs) > 0 {
+					if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
+						updateServicePrimaryAddrChs[0] <- struct{}{}
+					}
+				}
 				select {
 				case <-dispatcherCtx.Done():
 					return
