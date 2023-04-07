@@ -267,7 +267,6 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster)
 	if h.conf.IsForbidRWType(typ) {
 		return nil
 	}
-
 	switch typ {
 	case statistics.Read:
 		return h.balanceHotReadRegions(cluster)
@@ -604,7 +603,6 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	if !bs.isValid() {
 		return nil
 	}
-
 	bs.cur = &solution{}
 	tryUpdateBestSolution := func() {
 		if label, ok := bs.filterUniformStore(); ok {
@@ -803,7 +801,6 @@ func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *sta
 }
 
 func (bs *balanceSolver) checkSrcHistoryLoadByPriorityAndTolerance(current, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
-	log.Info("check src history load", zap.Any("current", current), zap.Any("expect-load", expectLoad), zap.Any("bs", bs))
 	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
 		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
 			return current.HistoryLoads[i][j] > toleranceRatio*expectLoad.HistoryLoads[i][j]

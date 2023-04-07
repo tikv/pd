@@ -68,6 +68,9 @@ func (w *WMA) Get() float64 {
 
 // GetAll returns all the data points.
 func (w *WMA) GetAll() []float64 {
+	if w.count < w.size {
+		return w.records[:w.count]
+	}
 	return w.records
 }
 
