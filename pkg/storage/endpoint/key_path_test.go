@@ -35,14 +35,14 @@ func TestExtractKeyspaceGroupIDFromPath(t *testing.T) {
 		path string
 		id   uint32
 	}{
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/00000", id: 0},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/00001", id: 1},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/12345", id: 12345},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/99999", id: 99999},
-		{path: "tso/keyspace_groups/membership/00000", id: 0},
-		{path: "tso/keyspace_groups/membership/00001", id: 1},
-		{path: "tso/keyspace_groups/membership/12345", id: 12345},
-		{path: "tso/keyspace_groups/membership/99999", id: 99999},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/00000", id: 0},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/00001", id: 1},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/12345", id: 12345},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/99999", id: 99999},
+		{path: "keyspace_groups/membership/00000", id: 0},
+		{path: "keyspace_groups/membership/00001", id: 1},
+		{path: "keyspace_groups/membership/12345", id: 12345},
+		{path: "keyspace_groups/membership/99999", id: 99999},
 	}
 
 	for _, tt := range rightCases {
@@ -57,17 +57,17 @@ func TestExtractKeyspaceGroupIDFromPath(t *testing.T) {
 		{path: ""},
 		{path: "00001"},
 		{path: "xxx/keyspace_groups/membership/00001"},
-		{path: "tso/xxxxxxxxxxxxxxx/membership/00001"},
-		{path: "tso/keyspace_groups/xxxxxxxxxx/00001"},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/xxxxxxxxxx/00001"},
+		{path: "xxxxxxxxxxxxxxx/membership/00001"},
+		{path: "keyspace_groups/xxxxxxxxxx/00001"},
+		{path: "/pd/{cluster_id}/keyspace_groups/xxxxxxxxxx/00001"},
 		{path: "/pd/{cluster_id}/xxx/keyspace_groups/membership/00001"},
-		{path: "/pd/{cluster_id}/tso/xxxxxxxxxxxxxxx/membership/00001"},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/"},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/0"},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/0001"},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/123456"},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/1234a"},
-		{path: "/pd/{cluster_id}/tso/keyspace_groups/membership/12345a"},
+		{path: "/pd/{cluster_id}/xxxxxxxxxxxxxxx/membership/00001"},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/"},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/0"},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/0001"},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/123456"},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/1234a"},
+		{path: "/pd/{cluster_id}/keyspace_groups/membership/12345a"},
 	}
 
 	for _, tt := range wrongCases {

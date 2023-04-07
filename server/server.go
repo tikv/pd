@@ -162,8 +162,6 @@ type Server struct {
 	gcSafePointManager *gc.SafePointManager
 	// keyspace manager
 	keyspaceManager *keyspace.Manager
-	// keyspace group manager
-	keyspaceGroupManager *keyspace.GroupManager
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
@@ -435,8 +433,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage)
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.keyspaceManager = keyspace.NewManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -679,10 +676,6 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, err
 	}
 
-	if err := s.GetKeyspaceGroupManager().Bootstrap(); err != nil {
-		log.Warn("bootstrapping keyspace group manager failed", errs.ZapError(err))
-	}
-
 	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
 		log.Warn("bootstrapping keyspace manager failed", errs.ZapError(err))
 	}
@@ -812,11 +805,6 @@ func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 // GetKeyspaceManager returns the keyspace manager of server.
 func (s *Server) GetKeyspaceManager() *keyspace.Manager {
 	return s.keyspaceManager
-}
-
-// GetKeyspaceGroupManager returns the keyspace group manager of server.
-func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
-	return s.keyspaceGroupManager
 }
 
 // Name returns the unique etcd Name for this server in etcd cluster.

@@ -86,7 +86,7 @@ type KeyspaceGroupManager struct {
 	//    Key: /pd/{cluster_id}/lta/{dc-location}/timestamp
 	//    Value: ts(time.Time)
 	// 2. The path for storing keyspace group membership/distribution metadata.
-	//    Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
+	//    Key: /pd/{cluster_id}/keyspace_groups/membership/{group}
 	//    Value: endpoint.KeyspaceGroup
 	// Note: The {group} is 5 digits integer with leading zeros.
 	legacySvcRootPath string

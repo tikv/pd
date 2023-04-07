@@ -44,6 +44,8 @@ const (
 	keyspaceMetaInfix          = "meta"
 	keyspaceIDInfix            = "id"
 	keyspaceAllocID            = "alloc_id"
+	keyspaceGroupPrefix        = "keyspace_groups"
+	keyspaceGroupMembershipKey = "membership"
 	regionPathPrefix           = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
@@ -53,9 +55,6 @@ const (
 	microserviceKey = "ms"
 	tsoServiceKey   = utils.TSOServiceName
 	timestampKey    = "timestamp"
-
-	tsoKeyspaceGroupPrefix     = "tso/keyspace_groups"
-	keyspaceGroupMembershipKey = "membership"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
@@ -229,19 +228,19 @@ func encodeKeyspaceID(spaceID uint32) string {
 }
 
 // KeyspaceGroupIDPrefix returns the prefix of keyspace group id.
-// Path: tso/keyspace_groups/membership
+// Path: keyspace_groups/membership
 func KeyspaceGroupIDPrefix() string {
-	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey)
+	return path.Join(keyspaceGroupPrefix, keyspaceGroupMembershipKey)
 }
 
 // KeyspaceGroupIDPath returns the path to keyspace id from the given name.
-// Path: tso/keyspace_groups/membership/{id}
+// Path: keyspace_groups/membership/{id}
 func KeyspaceGroupIDPath(id uint32) string {
-	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey, encodeKeyspaceGroupID(id))
+	return path.Join(keyspaceGroupPrefix, keyspaceGroupMembershipKey, encodeKeyspaceGroupID(id))
 }
 
 // ExtractKeyspaceGroupIDFromPath extracts keyspace group id from the given path, which contains
-// the pattern of `tso/keyspace_groups/membership/(\d{5})$`.
+// the pattern of `keyspace_groups/membership/(\d{5})$`.
 func ExtractKeyspaceGroupIDFromPath(path string) (uint32, error) {
 	pattern := strings.Join([]string{KeyspaceGroupIDPrefix(), `(\d{5})$`}, "/")
 	re := regexp.MustCompile(pattern)

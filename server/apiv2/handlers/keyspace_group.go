@@ -27,9 +27,9 @@ import (
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
-// RegisterTSOKeyspaceGroup registers keyspace group handlers to the server.
-func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
-	router := r.Group("tso/keyspace-groups")
+// RegisterKeyspaceGroup registers keyspace group handlers to the server.
+func RegisterKeyspaceGroup(r *gin.RouterGroup) {
+	router := r.Group("keyspace-groups")
 	router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateKeyspaceGroups)
 	router.GET("", GetKeyspaceGroups)
@@ -45,7 +45,7 @@ type CreateKeyspaceGroupParams struct {
 // CreateKeyspaceGroups creates keyspace groups.
 func CreateKeyspaceGroups(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	manager := svr.GetKeyspaceGroupManager()
+	manager := svr.GetKeyspaceManager()
 	createParams := &CreateKeyspaceGroupParams{}
 	err := c.BindJSON(createParams)
 	if err != nil {
@@ -72,7 +72,7 @@ func CreateKeyspaceGroups(c *gin.Context) {
 // If limit is 0, it will load all keyspace groups from the start ID.
 func GetKeyspaceGroups(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	manager := svr.GetKeyspaceGroupManager()
+	manager := svr.GetKeyspaceManager()
 	scanStart, scanLimit, err := parseLoadAllQuery(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
@@ -95,7 +95,7 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 		return
 	}
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	manager := svr.GetKeyspaceGroupManager()
+	manager := svr.GetKeyspaceManager()
 	kg, err := manager.GetKeyspaceGroupByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -113,7 +113,7 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 		return
 	}
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	manager := svr.GetKeyspaceGroupManager()
+	manager := svr.GetKeyspaceManager()
 	err = manager.DeleteKeyspaceGroupByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())

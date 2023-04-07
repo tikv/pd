@@ -59,8 +59,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	kgm := NewKeyspaceGroupManager(suite.ctx, store)
-	suite.manager = NewKeyspaceManager(store, nil, allocator, &mockConfig{}, kgm)
+	suite.manager = NewManager(suite.ctx, store, nil, allocator, &mockConfig{})
 	suite.NoError(suite.manager.Bootstrap())
 }
 
@@ -352,4 +351,54 @@ func updateKeyspaceConfig(re *require.Assertions, manager *Manager, name string,
 		checkMutations(re, oldMeta.GetConfig(), updatedMeta.GetConfig(), mutations)
 		oldMeta = updatedMeta
 	}
+}
+
+func (suite *keyspaceTestSuite) TestKeyspaceGroupOperations() {
+	re := suite.Require()
+
+	keyspaceGroups := []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(1),
+			UserKind: endpoint.Standard.String(),
+		},
+		{
+			ID:       uint32(2),
+			UserKind: endpoint.Standard.String(),
+		},
+		{
+			ID:       uint32(3),
+			UserKind: endpoint.Standard.String(),
+		},
+	}
+	err := suite.manager.CreateKeyspaceGroups(keyspaceGroups)
+	re.NoError(err)
+	// list all keyspace groups
+	kgs, err := suite.manager.GetKeyspaceGroups(uint32(0), 0)
+	re.NoError(err)
+	re.Len(kgs, 4)
+	// list part of keyspace groups
+	kgs, err = suite.manager.GetKeyspaceGroups(uint32(1), 2)
+	re.NoError(err)
+	re.Len(kgs, 2)
+	// get the default keyspace group
+	kg, err := suite.manager.GetKeyspaceGroupByID(0)
+	re.NoError(err)
+	re.Equal(uint32(0), kg.ID)
+	re.Equal(endpoint.Basic.String(), kg.UserKind)
+	kg, err = suite.manager.GetKeyspaceGroupByID(3)
+	re.NoError(err)
+	re.Equal(uint32(3), kg.ID)
+	re.Equal(endpoint.Standard.String(), kg.UserKind)
+	// remove the keyspace group 3
+	err = suite.manager.DeleteKeyspaceGroupByID(3)
+	re.NoError(err)
+	// get non-existing keyspace group
+	kg, err = suite.manager.GetKeyspaceGroupByID(3)
+	re.NoError(err)
+	re.Empty(kg)
+
+	// create an existing keyspace group
+	keyspaceGroups = []*endpoint.KeyspaceGroup{{ID: uint32(1), UserKind: endpoint.Standard.String()}}
+	err = suite.manager.CreateKeyspaceGroups(keyspaceGroups)
+	re.Error(err)
 }
