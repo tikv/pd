@@ -175,7 +175,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadWithDifferentBatchSize() {
 func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 	re := suite.Require()
 
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 0, 1)
+	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -198,7 +198,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSucceedWithTempFailures() {
 	re := suite.Require()
 
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 0, 1)
+	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -220,7 +220,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSucceedWithTem
 func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsFailed() {
 	re := suite.Require()
 
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 0, 1)
+	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -243,7 +243,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestWatchAndDynamicallyApplyChanges(
 	re := suite.Require()
 
 	// Start with the empty keyspace group assignment.
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 0, 0)
+	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 0)
 	re.NotNil(mgr)
 	defer mgr.Close()
 	err := mgr.Initialize(true)
@@ -343,7 +343,7 @@ func runTestLoadKeyspaceGroupsAssignment(
 	probabilityAssignToMe int, // percentage of assigning keyspace groups to this host/pod
 ) {
 	idsExpected := []int{}
-	mgr := newUniqueKeyspaceGroupManager(ctx, etcdClient, cfg, 0, loadKeyspaceGroupsBatchSize)
+	mgr := newUniqueKeyspaceGroupManager(ctx, etcdClient, cfg, loadKeyspaceGroupsBatchSize)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -390,8 +390,9 @@ func runTestLoadKeyspaceGroupsAssignment(
 }
 
 func newUniqueKeyspaceGroupManager(
-	ctx context.Context, etcdClient *clientv3.Client, cfg *TestServiceConfig,
-	loadKeyspaceGroupsTimeout time.Duration, // set to 0 to use the default value
+	ctx context.Context,
+	etcdClient *clientv3.Client,
+	cfg *TestServiceConfig,
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
 ) *KeyspaceGroupManager {
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.AdvertiseListenAddr}
@@ -403,9 +404,7 @@ func newUniqueKeyspaceGroupManager(
 
 	keyspaceGroupManager := NewKeyspaceGroupManager(
 		ctx, tsoServiceID, etcdClient, electionNamePrefix, legacySvcRootPath, tsoSvcRootPath, cfg)
-	if loadKeyspaceGroupsTimeout != 0 {
-		keyspaceGroupManager.loadKeyspaceGroupsTimeout = loadKeyspaceGroupsTimeout
-	}
+
 	if loadKeyspaceGroupsBatchSize != 0 {
 		keyspaceGroupManager.loadKeyspaceGroupsBatchSize = loadKeyspaceGroupsBatchSize
 	}
