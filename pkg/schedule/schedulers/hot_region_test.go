@@ -520,11 +520,13 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		tikvKeysSum += float64(storesBytes[i]/100) / 10
 		tikvQuerySum += float64(storesBytes[i]/100) / 10
 	}
+
 	for i := uint64(1); i <= storeCount; i++ {
 		if i != downStoreID {
 			tc.UpdateStorageWrittenBytes(i, storesBytes[i])
 		}
 	}
+
 	{ // Check the load expect
 		aliveTiKVCount := float64(aliveTiKVLastID - aliveTiKVStartID + 1)
 		allowLeaderTiKVCount := aliveTiKVCount - 1 // store 5 with evict leader

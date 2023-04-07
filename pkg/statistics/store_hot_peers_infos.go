@@ -158,7 +158,6 @@ func summaryStoresLoadByEngine(
 		store := info.StoreInfo
 		id := store.GetID()
 		storeLoads, ok := storesLoads[id]
-		//storesHistoryLoads, ok1 := storesHistoryLoads[id]
 		if !ok || !collector.Filter(info, kind) {
 			continue
 		}
