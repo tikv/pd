@@ -29,7 +29,7 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-const keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
+const keyspaceGroupsPrefix = "/pd/api/v2/keyspace-groups"
 
 type keyspaceGroupTestSuite struct {
 	suite.Suite
