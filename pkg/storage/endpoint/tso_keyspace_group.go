@@ -73,7 +73,7 @@ type KeyspaceGroup struct {
 	Members []KeyspaceGroupMember `json:"members"`
 	// Keyspaces are the keyspace IDs which belong to the keyspace group.
 	Keyspaces []uint32 `json:"keyspaces"`
-	// KeyspaceLookupTable is for fast lookup if an given keyspace belongs to this keyspace group.
+	// KeyspaceLookupTable is for fast lookup if a given keyspace belongs to this keyspace group.
 	// It's not persisted and will be built when loading from storage.
 	KeyspaceLookupTable map[uint32]struct{} `json:"-"`
 }

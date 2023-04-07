@@ -514,8 +514,11 @@ func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) (*A
 	return nil, kgm.genNotServedErr(keyspaceGroupID)
 }
 
-// GetAllocatorManager returns the AllocatorManager of the given keyspace group
-func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceID, keyspaceGroupID uint32) (*AllocatorManager, error) {
+// GetAMWithMembershipCheck returns the AllocatorManager of the given keyspace group and check if the keyspace
+// is served by this keyspace group.
+func (kgm *KeyspaceGroupManager) GetAMWithMembershipCheck(
+	keyspaceID, keyspaceGroupID uint32,
+) (*AllocatorManager, error) {
 	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
@@ -537,7 +540,7 @@ func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceID, keyspaceGroupID
 func (kgm *KeyspaceGroupManager) GetElectionMember(
 	keyspaceID, keyspaceGroupID uint32,
 ) (ElectionMember, error) {
-	am, err := kgm.GetAllocatorManager(keyspaceID, keyspaceGroupID)
+	am, err := kgm.GetAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -549,17 +552,18 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	keyspaceID, keyspaceGroupID uint32,
 	dcLocation string, count uint32,
 ) (ts pdpb.Timestamp, currentKeyspaceGroupID uint32, err error) {
-	am, err := kgm.GetAllocatorManager(keyspaceID, keyspaceGroupID)
+	am, err := kgm.GetAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
+		// If the keyspace doesn't belong to this keyspace group, we should check if it belongs to any other
+		// keyspace groups, and return the correct keyspace group ID to the client.
 		if strings.Contains(err.Error(), errs.NotServedErr) {
-			for _, ksgp := range kgm.ksgs {
-				if ksg := ksgp.Load(); ksg == nil {
-					continue;
+			for i := 0; i < int(mcsutils.MaxKeyspaceGroupCountInUse); i++ {
+				if ksg := kgm.ksgs[i].Load(); ksg == nil {
+					continue
 				} else if _, ok := ksg.KeyspaceLookupTable[keyspaceID]; ok {
-					return pdpb.Timestamp{}, ksg.ID,err
+					return pdpb.Timestamp{}, ksg.ID, err
 				}
 			}
-			return pdpb.Timestamp{}, keyspaceGroupID, err
 		}
 		return pdpb.Timestamp{}, keyspaceGroupID, err
 	}
