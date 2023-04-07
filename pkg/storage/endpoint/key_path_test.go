@@ -56,11 +56,11 @@ func TestExtractKeyspaceGroupIDFromPath(t *testing.T) {
 	}{
 		{path: ""},
 		{path: "00001"},
-		{path: "xxx/keyspace_groups/membership/00001"},
+		{path: "keyspace_group/membership/00001"},
 		{path: "xxxxxxxxxxxxxxx/membership/00001"},
 		{path: "keyspace_groups/xxxxxxxxxx/00001"},
 		{path: "/pd/{cluster_id}/keyspace_groups/xxxxxxxxxx/00001"},
-		{path: "/pd/{cluster_id}/xxx/keyspace_groups/membership/00001"},
+		{path: "/pd/{cluster_id}/xxx/keyspace_group/membership/00001"},
 		{path: "/pd/{cluster_id}/xxxxxxxxxxxxxxx/membership/00001"},
 		{path: "/pd/{cluster_id}/keyspace_groups/membership/"},
 		{path: "/pd/{cluster_id}/keyspace_groups/membership/0"},
