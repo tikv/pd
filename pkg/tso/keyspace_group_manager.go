@@ -17,6 +17,7 @@ package tso
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -46,8 +48,8 @@ const (
 	// keyspace group assignment
 	defaultLoadKeyspaceGroupsTimeout   = 30 * time.Second
 	defaultLoadKeyspaceGroupsBatchSize = int64(400)
-	loadFromEtcdMaxRetryTimes          = 6
-	loadFromEtcdRetryInterval          = 500 * time.Millisecond
+	defaultLoadFromEtcdRetryInterval   = 500 * time.Millisecond
+	defaultLoadFromEtcdMaxRetryTimes   = int(defaultLoadKeyspaceGroupsTimeout / defaultLoadFromEtcdRetryInterval)
 	watchKEtcdChangeRetryInterval      = 1 * time.Second
 )
 
@@ -109,6 +111,7 @@ type KeyspaceGroupManager struct {
 	// loadKeyspaceGroupsTimeout is the timeout for loading the initial keyspace group assignment.
 	loadKeyspaceGroupsTimeout   time.Duration
 	loadKeyspaceGroupsBatchSize int64
+	loadFromEtcdMaxRetryTimes   int
 }
 
 // NewKeyspaceGroupManager creates a new Keyspace Group Manager.
@@ -139,6 +142,7 @@ func NewKeyspaceGroupManager(
 		cfg:                         cfg,
 		loadKeyspaceGroupsTimeout:   defaultLoadKeyspaceGroupsTimeout,
 		loadKeyspaceGroupsBatchSize: defaultLoadKeyspaceGroupsBatchSize,
+		loadFromEtcdMaxRetryTimes:   defaultLoadFromEtcdMaxRetryTimes,
 	}
 
 	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
@@ -286,17 +290,39 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 		[]string{rootPath, clientv3.GetPrefixRangeEnd(endpoint.KeyspaceGroupIDPrefix())}, "/")
 	opOption := []clientv3.OpOption{clientv3.WithRange(endKey), clientv3.WithLimit(limit)}
 
-	var resp *clientv3.GetResponse
-	for i := 0; i < loadFromEtcdMaxRetryTimes; i++ {
+	var (
+		i    int
+		resp *clientv3.GetResponse
+	)
+	for ; i < kgm.loadFromEtcdMaxRetryTimes; i++ {
 		resp, err = etcdutil.EtcdKVGet(kgm.etcdClient, startKey, opOption...)
+
+		failpoint.Inject("delayLoadKeyspaceGroups", func(val failpoint.Value) {
+			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
+				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
+			}
+		})
+
+		failpoint.Inject("loadKeyspaceGroupsTemporaryFail", func(val failpoint.Value) {
+			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
+				err = errors.New("fail to read from etcd")
+				failpoint.Continue()
+			}
+		})
+
 		if err == nil && resp != nil {
 			break
 		}
+
 		select {
 		case <-ctx.Done():
 			return 0, []*endpoint.KeyspaceGroup{}, false, errs.ErrLoadKeyspaceGroupsTerminated
-		case <-time.After(loadFromEtcdRetryInterval):
+		case <-time.After(defaultLoadFromEtcdRetryInterval):
 		}
+	}
+
+	if i == kgm.loadFromEtcdMaxRetryTimes {
+		return 0, []*endpoint.KeyspaceGroup{}, false, errs.ErrLoadKeyspaceGroupsRetryExhaustd.FastGenByArgs(err)
 	}
 
 	kgs := make([]*endpoint.KeyspaceGroup, 0, len(resp.Kvs))
