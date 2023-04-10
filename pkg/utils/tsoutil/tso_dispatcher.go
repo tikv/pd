@@ -137,7 +137,10 @@ func (s *TSODispatcher) dispatch(
 					errs.ZapError(errs.ErrGRPCSend, err))
 				if needUpdateServicePrimaryAddr {
 					if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
-						updateServicePrimaryAddrChs[0] <- struct{}{}
+						select {
+						case updateServicePrimaryAddrChs[0] <- struct{}{}:
+						default:
+						}
 					}
 				}
 				select {
