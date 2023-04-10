@@ -16,6 +16,7 @@ package replication
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -158,6 +159,20 @@ func newMockReplicator(ids []uint64) *mockFileReplicator {
 	}
 }
 
+func assertLastData(t *testing.T, data string, state string, stateID uint64, availableStores []uint64) {
+	type status struct {
+		State           string   `json:"state"`
+		StateID         uint64   `json:"state_id"`
+		AvailableStores []uint64 `json:"available_stores"`
+	}
+	var s status
+	err := json.Unmarshal([]byte(data), &s)
+	require.NoError(t, err)
+	require.Equal(t, state, s.State)
+	require.Equal(t, stateID, s.StateID)
+	require.Equal(t, availableStores, s.AvailableStores)
+}
+
 func TestStateSwitch(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -185,7 +200,7 @@ func TestStateSwitch(t *testing.T) {
 	re.Equal(drStateSync, rep.drGetState())
 	stateID := rep.drAutoSync.StateID
 	re.NotEqual(uint64(0), stateID)
-	re.Equal(fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID), replicator.lastData[1])
+	assertLastData(t, replicator.lastData[1], "sync", stateID, nil)
 	assertStateIDUpdate := func() {
 		re.NotEqual(stateID, rep.drAutoSync.StateID)
 		stateID = rep.drAutoSync.StateID
@@ -201,7 +216,7 @@ func TestStateSwitch(t *testing.T) {
 	rep.tickDR()
 	re.Equal(drStateAsyncWait, rep.drGetState())
 	assertStateIDUpdate()
-	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2,3,4]}`, stateID), replicator.lastData[1])
+	assertLastData(t, replicator.lastData[1], "async_wait", stateID, []uint64{1, 2, 3, 4})
 
 	re.False(rep.GetReplicationStatus().GetDrAutoSync().GetPauseRegionSplit())
 	conf.DRAutoSync.PauseRegionSplit = true
@@ -211,7 +226,7 @@ func TestStateSwitch(t *testing.T) {
 	syncStoreStatus(1, 2, 3, 4)
 	rep.tickDR()
 	assertStateIDUpdate()
-	re.Equal(fmt.Sprintf(`{"state":"async","state_id":%d,"available_stores":[1,2,3,4]}`, stateID), replicator.lastData[1])
+	assertLastData(t, replicator.lastData[1], "async", stateID, []uint64{1, 2, 3, 4})
 
 	// add new store in dr zone.
 	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone2"})
@@ -257,11 +272,11 @@ func TestStateSwitch(t *testing.T) {
 	rep.tickDR()
 	re.Equal(drStateAsyncWait, rep.drGetState())
 	assertStateIDUpdate()
-	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2,3,4]}`, stateID), replicator.lastData[1])
+	assertLastData(t, replicator.lastData[1], "async_wait", stateID, []uint64{1, 2, 3, 4})
 	setStoreState(cluster, "down", "up", "up", "up", "down", "up")
 	rep.tickDR()
 	assertStateIDUpdate()
-	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[2,3,4]}`, stateID), replicator.lastData[1])
+	assertLastData(t, replicator.lastData[1], "async_wait", stateID, []uint64{2, 3, 4})
 	setStoreState(cluster, "up", "down", "up", "up", "down", "up")
 	rep.tickDR()
 	assertStateIDUpdate()
@@ -276,24 +291,30 @@ func TestStateSwitch(t *testing.T) {
 	syncStoreStatus(4)
 	rep.tickDR()
 	assertStateIDUpdate()
-	re.Equal(fmt.Sprintf(`{"state":"async","state_id":%d,"available_stores":[1,3,4]}`, stateID), replicator.lastData[1])
+	assertLastData(t, replicator.lastData[1], "async", stateID, []uint64{1, 3, 4})
 
 	// async -> async
 	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
 	rep.tickDR()
 	// store 2 won't be available before it syncs status.
-	re.Equal(fmt.Sprintf(`{"state":"async","state_id":%d,"available_stores":[1,3,4]}`, stateID), replicator.lastData[1])
+	assertLastData(t, replicator.lastData[1], "async", stateID, []uint64{1, 3, 4})
 	syncStoreStatus(1, 2, 3, 4)
 	rep.tickDR()
 	assertStateIDUpdate()
-	re.Equal(fmt.Sprintf(`{"state":"async","state_id":%d,"available_stores":[1,2,3,4]}`, stateID), replicator.lastData[1])
+	assertLastData(t, replicator.lastData[1], "async", stateID, []uint64{1, 2, 3, 4})
 
 	// async -> sync_recover
 	setStoreState(cluster, "up", "up", "up", "up", "up", "up")
 	rep.tickDR()
 	re.Equal(drStateSyncRecover, rep.drGetState())
 	assertStateIDUpdate()
+
 	rep.drSwitchToAsync([]uint64{1, 2, 3, 4, 5})
+	rep.config.DRAutoSync.WaitRecoverTimeout = typeutil.NewDuration(time.Hour)
+	rep.tickDR()
+	re.Equal(drStateAsync, rep.drGetState()) // wait recover timeout
+
+	rep.config.DRAutoSync.WaitRecoverTimeout = typeutil.NewDuration(0)
 	setStoreState(cluster, "down", "up", "up", "up", "up", "up")
 	rep.tickDR()
 	re.Equal(drStateSyncRecover, rep.drGetState())
