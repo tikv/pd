@@ -98,31 +98,39 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	re := suite.Require()
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
-			ID:       uint32(1),
-			UserKind: endpoint.Standard.String(),
-		},
-		{
-			ID:       uint32(2),
-			UserKind: endpoint.Standard.String(),
+			ID:        uint32(1),
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{111, 222, 333},
 		},
 	}}
 
 	mustCreateKeyspaceGroup(re, suite.server, kgs)
 	resp := sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
-	re.Len(resp, 3)
-	mustSplitKeyspaceGroup(re, suite.server, 1, 3)
+	re.Len(resp, 2)
+	mustSplitKeyspaceGroup(re, suite.server, &handlers.SplitKeyspaceGroupByIDParams{
+		ID:        uint32(1),
+		NewID:     uint32(2),
+		Keyspaces: []uint32{111, 222},
+	})
 	resp = sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
-	re.Len(resp, 4)
+	re.Len(resp, 3)
+	// Check keyspace group 1.
 	kg1 := mustLoadKeyspaceGroupByID(re, suite.server, 1)
-	kg3 := mustLoadKeyspaceGroupByID(re, suite.server, 3)
-	re.NotEqual(kg1.ID, kg3.ID)
-	re.Equal(kg1.UserKind, kg3.UserKind)
-	re.Equal(kg1.Members, kg3.Members)
-	re.Empty(kg3.Keyspaces)
-	re.True(kg3.InSplit)
-	mustFinishSplitKeyspaceGroup(re, suite.server, 3)
-	kg3 = mustLoadKeyspaceGroupByID(re, suite.server, 3)
-	re.False(kg3.InSplit)
+	re.Equal(uint32(1), kg1.ID)
+	re.Equal([]uint32{333}, kg1.Keyspaces)
+	re.False(kg1.InSplit)
+	// Check keyspace group 2.
+	kg2 := mustLoadKeyspaceGroupByID(re, suite.server, 2)
+	re.Equal(uint32(2), kg2.ID)
+	re.Equal([]uint32{111, 222}, kg2.Keyspaces)
+	re.True(kg2.InSplit)
+	// They should have the same user kind and members.
+	re.Equal(kg1.UserKind, kg2.UserKind)
+	re.Equal(kg1.Members, kg2.Members)
+	// Finish the split and check the split state.
+	mustFinishSplitKeyspaceGroup(re, suite.server, 2)
+	kg2 = mustLoadKeyspaceGroupByID(re, suite.server, 2)
+	re.False(kg2.InSplit)
 }
 
 func sendLoadKeyspaceGroupRequest(re *require.Assertions, server *tests.TestServer, token, limit string) []*endpoint.KeyspaceGroup {
@@ -171,12 +179,11 @@ func mustCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, r
 	re.Equal(http.StatusOK, resp.StatusCode)
 }
 
-func mustSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id, newID uint32) {
-	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/split/%d", id), nil)
+func mustSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, request *handlers.SplitKeyspaceGroupByIDParams) {
+	data, err := json.Marshal(request)
 	re.NoError(err)
-	query := httpReq.URL.Query()
-	query.Add("new_id", fmt.Sprintf("%d", newID))
-	httpReq.URL.RawQuery = query.Encode()
+	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspaceGroupsPrefix+"/split", bytes.NewBuffer(data))
+	re.NoError(err)
 	// Send request.
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)

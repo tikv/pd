@@ -102,9 +102,11 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 			}
 			// TODO: add replica count
 			m.store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
-				ID:       keyspaceGroup.ID,
-				UserKind: keyspaceGroup.UserKind,
-				InSplit:  keyspaceGroup.InSplit,
+				ID:        keyspaceGroup.ID,
+				UserKind:  keyspaceGroup.UserKind,
+				Members:   keyspaceGroup.Members,
+				Keyspaces: keyspaceGroup.Keyspaces,
+				InSplit:   keyspaceGroup.InSplit,
 			})
 		}
 		return nil
@@ -124,9 +126,11 @@ func (m *GroupManager) updateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceG
 			}
 			// TODO: add replica count
 			m.store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
-				ID:       keyspaceGroup.ID,
-				UserKind: keyspaceGroup.UserKind,
-				InSplit:  keyspaceGroup.InSplit,
+				ID:        keyspaceGroup.ID,
+				UserKind:  keyspaceGroup.UserKind,
+				Members:   keyspaceGroup.Members,
+				Keyspaces: keyspaceGroup.Keyspaces,
+				InSplit:   keyspaceGroup.InSplit,
 			})
 		}
 		return nil
@@ -139,27 +143,64 @@ func (m *GroupManager) GetAvailableKeyspaceGroupIDByKind(userKind endpoint.UserK
 	return "0", nil
 }
 
-// SplitKeyspaceGroupByID splits the keyspace group by ID.
-func (m *GroupManager) SplitKeyspaceGroupByID(id, newID uint32) error {
-	// Load the old keyspace group first.
-	kg, err := m.GetKeyspaceGroupByID(id)
-	if err != nil {
-		return err
-	}
-	if kg == nil {
-		return ErrKeyspaceGroupNotFound
-	}
-	newKg := &endpoint.KeyspaceGroup{
-		ID: newID,
-		// Keep the same user kind and members as the old keyspace group.
-		UserKind: kg.UserKind,
-		Members:  kg.Members,
-		// TODO: assign keyspaces to the new keyspace group.
-		Keyspaces: make([]uint32, 0),
-		// Only set the new keyspace group in split state.
-		InSplit: true,
-	}
-	return m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{newKg})
+// SplitKeyspaceGroupByID splits the keyspace group by ID into a new keyspace group with the new ID
+// and the keyspaces will be assigned to the new keyspace group.
+func (m *GroupManager) SplitKeyspaceGroupByID(id, newID uint32, keyspaces []uint32) error {
+	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		// Load the old keyspace group first.
+		oldKg, err := m.store.LoadKeyspaceGroup(txn, id)
+		if err != nil {
+			return err
+		}
+		if oldKg == nil {
+			return ErrKeyspaceGroupNotFound
+		}
+		// Check if the new keyspace group already exists.
+		newKg, err := m.store.LoadKeyspaceGroup(txn, newID)
+		if err != nil {
+			return err
+		}
+		if newKg != nil {
+			return ErrKeyspaceGroupExists
+		}
+		// Check if the keyspaces are all in the old keyspace group.
+		if len(keyspaces) > len(oldKg.Keyspaces) {
+			return ErrKeyspaceNotInKeyspaceGroup
+		}
+		var (
+			oldKeyspaceMap = make(map[uint32]struct{}, len(oldKg.Keyspaces))
+			newKeyspaceMap = make(map[uint32]struct{}, len(keyspaces))
+		)
+		for _, keyspace := range oldKg.Keyspaces {
+			oldKeyspaceMap[keyspace] = struct{}{}
+		}
+		for _, keyspace := range keyspaces {
+			if _, ok := oldKeyspaceMap[keyspace]; !ok {
+				return ErrKeyspaceNotInKeyspaceGroup
+			}
+			newKeyspaceMap[keyspace] = struct{}{}
+		}
+		// Get the split keyspace group for the old keyspace group.
+		splitKeyspaces := make([]uint32, 0, len(oldKg.Keyspaces)-len(keyspaces))
+		for _, keyspace := range oldKg.Keyspaces {
+			if _, ok := newKeyspaceMap[keyspace]; !ok {
+				splitKeyspaces = append(splitKeyspaces, keyspace)
+			}
+		}
+		// Update the old keyspace group.
+		oldKg.Keyspaces = splitKeyspaces
+		m.store.SaveKeyspaceGroup(txn, oldKg)
+		// Create the new split keyspace group.
+		return m.store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID: newID,
+			// Keep the same user kind and members as the old keyspace group.
+			UserKind:  oldKg.UserKind,
+			Members:   oldKg.Members,
+			Keyspaces: keyspaces,
+			// Only set the new keyspace group in split state.
+			InSplit: true,
+		})
+	})
 }
 
 // FinishSplitKeyspaceByID finishes the split keyspace group by ID.

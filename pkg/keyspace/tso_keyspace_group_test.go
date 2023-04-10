@@ -54,8 +54,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 			UserKind: endpoint.Standard.String(),
 		},
 		{
-			ID:       uint32(2),
-			UserKind: endpoint.Standard.String(),
+			ID:        uint32(2),
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{111, 222, 333},
 		},
 		{
 			ID:       uint32(3),
@@ -95,17 +96,20 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	err = suite.manager.CreateKeyspaceGroups(keyspaceGroups)
 	re.Error(err)
 	// split the keyspace group 2 to 4
-	err = suite.manager.SplitKeyspaceGroupByID(2, 4)
+	err = suite.manager.SplitKeyspaceGroupByID(2, 4, []uint32{333})
 	re.NoError(err)
 	kg2, err := suite.manager.GetKeyspaceGroupByID(2)
 	re.NoError(err)
 	re.Equal(uint32(2), kg2.ID)
+	re.Equal([]uint32{111, 222}, kg2.Keyspaces)
+	re.False(kg2.InSplit)
 	kg4, err := suite.manager.GetKeyspaceGroupByID(4)
 	re.NoError(err)
 	re.Equal(uint32(4), kg4.ID)
-	re.Equal(kg2.UserKind, kg4.UserKind)
-	re.False(kg2.InSplit)
+	re.Equal([]uint32{333}, kg4.Keyspaces)
 	re.True(kg4.InSplit)
+	re.Equal(kg2.UserKind, kg4.UserKind)
+	re.Equal(kg2.Members, kg4.Members)
 	// finish the split of keyspace group 4
 	err = suite.manager.FinishSplitKeyspaceByID(4)
 	re.NoError(err)
@@ -114,12 +118,15 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	re.Equal(uint32(4), kg4.ID)
 	re.False(kg4.InSplit)
 	// split a non-existing keyspace group
-	err = suite.manager.SplitKeyspaceGroupByID(3, 5)
+	err = suite.manager.SplitKeyspaceGroupByID(3, 5, nil)
 	re.ErrorIs(err, ErrKeyspaceGroupNotFound)
 	// finish the split of a non-existing keyspace group
 	err = suite.manager.FinishSplitKeyspaceByID(5)
 	re.ErrorIs(err, ErrKeyspaceGroupNotFound)
 	// split into an existing keyspace group
-	err = suite.manager.SplitKeyspaceGroupByID(2, 4)
+	err = suite.manager.SplitKeyspaceGroupByID(2, 4, nil)
 	re.ErrorIs(err, ErrKeyspaceGroupExists)
+	// split with the wrong keyspaces.
+	err = suite.manager.SplitKeyspaceGroupByID(2, 5, []uint32{111, 222, 444})
+	re.ErrorIs(err, ErrKeyspaceNotInKeyspaceGroup)
 }
