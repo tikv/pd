@@ -457,22 +457,16 @@ func requestGlobalAndLocalTSO(
 					// The allocator leader may be changed due to the environment issue.
 					if err != nil {
 						re.ErrorContains(err, errs.NotLeaderErr)
-					} else {
-						re.NoError(err)
 					}
 					globalTS1 := tsoutil.ComposeTS(globalPhysical1, globalLogical1)
 					localPhysical, localLogical, err := cli.GetLocalTS(context.TODO(), dc)
 					if err != nil {
 						re.ErrorContains(err, errs.NotLeaderErr)
-					} else {
-						re.NoError(err)
 					}
 					localTS := tsoutil.ComposeTS(localPhysical, localLogical)
 					globalPhysical2, globalLogical2, err := cli.GetTS(context.TODO())
 					if err != nil {
 						re.ErrorContains(err, errs.NotLeaderErr)
-					} else {
-						re.NoError(err)
 					}
 					globalTS2 := tsoutil.ComposeTS(globalPhysical2, globalLogical2)
 					re.Less(lastTS, globalTS1)
