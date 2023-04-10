@@ -536,15 +536,14 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		log.Warn("keyspace IDs are not sorted in ascending order, do a full update",
 			zap.Uint32("keyspace-group-id", groupID))
 
-		// Do a full update, because the keyspace IDs are not sorted in ascending order.
-		for _, kid := range oldKeyspaces {
-			kgm.keyspaceLookupTable.Delete(kid)
+		for ; i < oldLen; i++ {
+			kgm.keyspaceLookupTable.Delete(oldKeyspaces[i])
 		}
+		// Do a full update, because the keyspace IDs are not sorted in ascending order.
 		// Sort the keyspaces in ascending order
 		sort.Slice(newKeyspaces, func(i, j int) bool {
 			return newKeyspaces[i] < newKeyspaces[j]
 		})
-
 		keyspaceLookupTable = kgm.buildKeyspaceLookupTable(groupID, newKeyspaces)
 	} else if sameMembership {
 		// The keyspace group membership is not changed, so we reuse the old one.
