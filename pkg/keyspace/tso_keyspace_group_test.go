@@ -77,10 +77,12 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	re.NoError(err)
 	re.Equal(uint32(0), kg.ID)
 	re.Equal(endpoint.Basic.String(), kg.UserKind)
+	re.False(kg.InSplit)
 	kg, err = suite.manager.GetKeyspaceGroupByID(3)
 	re.NoError(err)
 	re.Equal(uint32(3), kg.ID)
 	re.Equal(endpoint.Standard.String(), kg.UserKind)
+	re.False(kg.InSplit)
 	// remove the keyspace group 3
 	err = suite.manager.DeleteKeyspaceGroupByID(3)
 	re.NoError(err)
@@ -88,9 +90,36 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	kg, err = suite.manager.GetKeyspaceGroupByID(3)
 	re.NoError(err)
 	re.Empty(kg)
-
 	// create an existing keyspace group
 	keyspaceGroups = []*endpoint.KeyspaceGroup{{ID: uint32(1), UserKind: endpoint.Standard.String()}}
 	err = suite.manager.CreateKeyspaceGroups(keyspaceGroups)
 	re.Error(err)
+	// split the keyspace group 2 to 4
+	err = suite.manager.SplitKeyspaceGroupByID(2, 4)
+	re.NoError(err)
+	kg2, err := suite.manager.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Equal(uint32(2), kg2.ID)
+	kg4, err := suite.manager.GetKeyspaceGroupByID(4)
+	re.NoError(err)
+	re.Equal(uint32(4), kg4.ID)
+	re.Equal(kg2.UserKind, kg4.UserKind)
+	re.False(kg2.InSplit)
+	re.True(kg4.InSplit)
+	// finish the split of keyspace group 4
+	err = suite.manager.FinishSplitKeyspaceByID(4)
+	re.NoError(err)
+	kg4, err = suite.manager.GetKeyspaceGroupByID(4)
+	re.NoError(err)
+	re.Equal(uint32(4), kg4.ID)
+	re.False(kg4.InSplit)
+	// split a non-existing keyspace group
+	err = suite.manager.SplitKeyspaceGroupByID(3, 5)
+	re.ErrorIs(err, ErrKeyspaceGroupNotFound)
+	// finish the split of a non-existing keyspace group
+	err = suite.manager.FinishSplitKeyspaceByID(5)
+	re.ErrorIs(err, ErrKeyspaceGroupNotFound)
+	// split into an existing keyspace group
+	err = suite.manager.SplitKeyspaceGroupByID(2, 4)
+	re.ErrorIs(err, ErrKeyspaceGroupExists)
 }

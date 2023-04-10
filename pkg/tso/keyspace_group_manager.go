@@ -410,9 +410,8 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 						log.Warn("failed to unmarshal keyspace group",
 							zap.Uint32("keysapce-group-id", id),
 							zap.Error(errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()))
-					} else {
-						kgm.updateKeyspaceGroup(group)
 					}
+					kgm.updateKeyspaceGroup(group)
 				case clientv3.EventTypeDelete:
 					kgm.deleteKeyspaceGroup(id)
 				}
@@ -466,6 +465,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			zap.String("participant-name", uniqueName),
 			zap.Uint64("participant-id", uniqueID))
 
+		// TODO: handle the keyspace group & TSO split logic.
 		participant := member.NewParticipant(kgm.etcdClient)
 		participant.InitInfo(
 			uniqueName, uniqueID, path.Join(kgm.tsoSvcRootPath, fmt.Sprintf("%05d", group.ID)),
