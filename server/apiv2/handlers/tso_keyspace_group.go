@@ -133,7 +133,8 @@ type SplitKeyspaceGroupByIDParams struct {
 	Keyspaces []uint32 `json:"keyspaces"`
 }
 
-// SplitKeyspaceGroupByID splits keyspace group by ID.
+// SplitKeyspaceGroupByID splits keyspace group by ID into a new keyspace group with the given new ID.
+// And the keyspaces in the old keyspace group will be moved to the new keyspace group.
 func SplitKeyspaceGroupByID(c *gin.Context) {
 	splitParams := &SplitKeyspaceGroupByIDParams{}
 	err := c.BindJSON(splitParams)
