@@ -133,8 +133,8 @@ func (m *GroupManager) SplitKeyspaceGroupByID(id, newID uint32) error {
 		// Keep the same user kind and members as the old keyspace group.
 		UserKind: kg.UserKind,
 		Members:  kg.Members,
-		// Init an empty keyspace list.
-		Keyspaces: make([]uint32, 0, len(kg.Keyspaces)),
+		// TODO: assign keyspaces to the new keyspace group.
+		Keyspaces: make([]uint32, 0),
 		// Only set the new keyspace group in split state.
 		InSplit: true,
 	}
