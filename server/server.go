@@ -105,7 +105,7 @@ const (
 	// retryIntervalGetServicePrimary is the retry interval for getting primary addr.
 	retryIntervalGetServicePrimary = 100 * time.Millisecond
 	// TODO: move it to etcdutil
-	watchKEtcdChangeRetryInterval = 1 * time.Second
+	watchEtcdChangeRetryInterval = 1 * time.Second
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -214,9 +214,11 @@ type Server struct {
 
 	auditBackends []audit.Backend
 
-	registry                   *registry.ServiceRegistry
-	mode                       string
-	servicePrimaryMap          sync.Map /* Store as map[string]string */
+	registry          *registry.ServiceRegistry
+	mode              string
+	servicePrimaryMap sync.Map /* Store as map[string]string */
+	// updateServicePrimaryAddrCh is used to notify the server to update the service primary address.
+	// Note: it is only used in API service mode.
 	updateServicePrimaryAddrCh chan struct{}
 }
 
@@ -250,7 +252,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		}{
 			clients: make(map[string]tsopb.TSO_TsoClient),
 		},
-		updateServicePrimaryAddrCh: make(chan struct{}, 1),
 	}
 	s.handler = newHandler(s)
 
@@ -1726,7 +1727,7 @@ func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 	defer s.serverLoopWg.Done()
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
-
+	s.updateServicePrimaryAddrCh = make(chan struct{}, 1)
 	serviceKey := s.servicePrimaryKey(serviceName)
 	var (
 		revision int64
@@ -1739,7 +1740,7 @@ func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 		case <-time.After(retryIntervalGetServicePrimary):
 		}
 		revision, err = s.updateServicePrimaryAddr(serviceName)
-		if err == nil {
+		if err != nil {
 			break
 		}
 	}
@@ -1758,10 +1759,10 @@ func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 		if err != nil {
 			log.Error("watcher canceled unexpectedly and a new watcher will start after a while",
 				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(watchKEtcdChangeRetryInterval)),
+				zap.Time("retry-at", time.Now().Add(watchEtcdChangeRetryInterval)),
 				zap.Error(err))
 			revision = nextRevision
-			time.Sleep(watchKEtcdChangeRetryInterval)
+			time.Sleep(watchEtcdChangeRetryInterval)
 		}
 	}
 }
@@ -1770,21 +1771,6 @@ func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 // Note: This function is only used for test.
 func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 	s.servicePrimaryMap.Store(serviceName, addr)
-}
-
-// updateServicePrimaryAddr updates the primary address from etcd with get operation.
-func (s *Server) updateServicePrimaryAddr(serviceName string) (nextRevision int64, err error) {
-	serviceKey := s.servicePrimaryKey(serviceName)
-	primary := &tsopb.Participant{}
-	ok, revision, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
-	listenUrls := primary.GetListenUrls()
-	if !ok || err != nil || len(listenUrls) == 0 {
-		return 0, err
-	}
-	// listenUrls[0] is the primary service endpoint of the keyspace group
-	s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-	log.Info("update service primary addr", zap.String("service-key", serviceKey), zap.String("primary-addr", listenUrls[0]))
-	return revision, nil
 }
 
 // watchServicePrimaryAddr watches the primary address on etcd.
@@ -1801,6 +1787,9 @@ func (s *Server) watchServicePrimaryAddr(ctx context.Context, serviceName string
 			return revision, nil
 		case <-s.updateServicePrimaryAddrCh:
 			revision, err = s.updateServicePrimaryAddr(serviceName)
+			if err != nil {
+				log.Warn("update service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
+			}
 			goto WatchChan
 		case wresp := <-watchChan:
 			if wresp.CompactRevision != 0 {
@@ -1839,6 +1828,21 @@ func (s *Server) watchServicePrimaryAddr(ctx context.Context, serviceName string
 			revision = wresp.Header.Revision
 		}
 	}
+}
+
+// updateServicePrimaryAddr updates the primary address from etcd with get operation.
+func (s *Server) updateServicePrimaryAddr(serviceName string) (nextRevision int64, err error) {
+	serviceKey := s.servicePrimaryKey(serviceName)
+	primary := &tsopb.Participant{}
+	ok, revision, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
+	listenUrls := primary.GetListenUrls()
+	if !ok || err != nil || len(listenUrls) == 0 {
+		return 0, err
+	}
+	// listenUrls[0] is the primary service endpoint of the keyspace group
+	s.servicePrimaryMap.Store(serviceName, listenUrls[0])
+	log.Info("update service primary addr", zap.String("service-key", serviceKey), zap.String("primary-addr", listenUrls[0]))
+	return revision, nil
 }
 
 func (s *Server) servicePrimaryKey(serviceName string) string {

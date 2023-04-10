@@ -50,7 +50,7 @@ const (
 	defaultLoadKeyspaceGroupsBatchSize = int64(400)
 	defaultLoadFromEtcdRetryInterval   = 500 * time.Millisecond
 	defaultLoadFromEtcdMaxRetryTimes   = int(defaultLoadKeyspaceGroupsTimeout / defaultLoadFromEtcdRetryInterval)
-	watchKEtcdChangeRetryInterval      = 1 * time.Second
+	watchEtcdChangeRetryInterval       = 1 * time.Second
 )
 
 // KeyspaceGroupManager manages the members of the keyspace groups assigned to this host.
@@ -359,9 +359,9 @@ func (kgm *KeyspaceGroupManager) startKeyspaceGroupsMetaWatchLoop(revision int64
 		if err != nil {
 			log.Error("watcher canceled unexpectedly and a new watcher will start after a while",
 				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(watchKEtcdChangeRetryInterval)),
+				zap.Time("retry-at", time.Now().Add(watchEtcdChangeRetryInterval)),
 				zap.Error(err))
-			time.Sleep(watchKEtcdChangeRetryInterval)
+			time.Sleep(watchEtcdChangeRetryInterval)
 		}
 	}
 }
