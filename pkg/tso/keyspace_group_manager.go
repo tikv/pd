@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -539,6 +540,11 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		for _, kid := range oldKeyspaces {
 			kgm.keyspaceLookupTable.Delete(kid)
 		}
+		// Sort the keyspaces in ascending order
+		sort.Slice(newKeyspaces, func(i, j int) bool {
+			return newKeyspaces[i] < newKeyspaces[j]
+		})
+
 		keyspaceLookupTable = kgm.buildKeyspaceLookupTable(groupID, newKeyspaces)
 	} else if sameMembership {
 		// The keyspace group membership is not changed, so we reuse the old one.

@@ -569,10 +569,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 
 	var keyspaceLookupTable map[uint32]struct{}
 
-	// Start with empty keyspace group.
+	// Start from an empty keyspace group.
 	// Add keyspace 1 to the keyspace group.
 	oldKeyspaces := []uint32{}
-	newKeyspaces := []uint32{1}
+	newKeyspaces := []uint32{}
 	defaultKeyspaceLookupTable := map[uint32]struct{}{}
 	kgm := &KeyspaceGroupManager{}
 
@@ -580,8 +580,19 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	verifyLocalKeyspaceLookupTable(re, keyspaceLookupTable, newKeyspaces)
 	verifyGlobalKeyspaceLookupTable(re, kgm, keyspaceLookupTable)
 
-	targetKeyspacesList := [][]uint32 {
-		{1, 2}, {1, 2}, {1, 2, 3, 4}, {5, 6, 7}, {7, 8, 9}, {1, 2, 3, 4, 5, 6, 7, 8, 9}, {8, 9}, {10}, {},
+	targetKeyspacesList := [][]uint32{
+		{1}, // Add keyspace 1 to the keyspace group.
+		{1, 2}, // Add keyspace 2 to the keyspace group.
+		{1, 2}, // No change.
+		{1, 2, 3, 4}, // Add keyspace 3 and 4 to the keyspace group.
+		{5, 6, 7}, // Remove keyspace 1, 2, 3, 4 from the keyspace group and add 5, 6, 7
+		{7, 8, 9}, // Partially update the keyspace group.
+		{1, 2, 3, 4, 5, 6, 7, 8, 9}, // Add more keyspace to the keyspace group.
+		{9, 8, 4, 5, 6}, // Out of order.
+		{9, 8, 4, 5, 6}, // No change. Out of order.
+		{8, 9}, // Remove
+		{10}, // Remove
+		{}, // End with the empty keyspace group.
 	}
 
 	for _, keyspaces := range targetKeyspacesList {
