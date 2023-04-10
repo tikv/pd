@@ -92,21 +92,42 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
 func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
 	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		for _, keyspaceGroup := range keyspaceGroups {
-			// TODO: add replica count
-			newKG := &endpoint.KeyspaceGroup{
-				ID:       keyspaceGroup.ID,
-				UserKind: keyspaceGroup.UserKind,
-				InSplit:  keyspaceGroup.InSplit,
-			}
 			// Check if keyspace group has already existed.
-			oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
+			kg, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
 			if err != nil {
 				return err
 			}
-			if oldKG != nil {
+			if kg != nil {
 				return ErrKeyspaceGroupExists
 			}
-			m.store.SaveKeyspaceGroup(txn, newKG)
+			// TODO: add replica count
+			m.store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+				ID:       keyspaceGroup.ID,
+				UserKind: keyspaceGroup.UserKind,
+				InSplit:  keyspaceGroup.InSplit,
+			})
+		}
+		return nil
+	})
+}
+
+func (m *GroupManager) updateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
+	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		for _, keyspaceGroup := range keyspaceGroups {
+			// Check if the keyspace group exists.
+			kg, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
+			if err != nil {
+				return err
+			}
+			if kg == nil {
+				return ErrKeyspaceGroupNotFound
+			}
+			// TODO: add replica count
+			m.store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+				ID:       keyspaceGroup.ID,
+				UserKind: keyspaceGroup.UserKind,
+				InSplit:  keyspaceGroup.InSplit,
+			})
 		}
 		return nil
 	})
@@ -157,21 +178,4 @@ func (m *GroupManager) FinishSplitKeyspaceByID(id uint32) error {
 	}
 	kg.InSplit = false
 	return m.updateKeyspaceGroups([]*endpoint.KeyspaceGroup{kg})
-}
-
-func (m *GroupManager) updateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
-	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		for _, keyspaceGroup := range keyspaceGroups {
-			// Check if the keyspace group exists.
-			kg, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
-			if err != nil {
-				return err
-			}
-			if kg == nil {
-				return ErrKeyspaceGroupNotFound
-			}
-			m.store.SaveKeyspaceGroup(txn, keyspaceGroup)
-		}
-		return nil
-	})
 }
