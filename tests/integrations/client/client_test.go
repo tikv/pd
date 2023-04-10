@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/tso"
@@ -347,7 +348,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		defer wg.Done()
 		leader := cluster.GetServer(cluster.GetLeader())
 		leader.Stop()
-		cluster.WaitLeader()
+		re.NotEmpty(cluster.WaitLeader())
 		leaderReadyTime = time.Now()
 		cluster.RunServers([]*tests.TestServer{leader})
 	}()
@@ -363,7 +364,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		leader := cluster.GetServer(cluster.GetLeader())
 		re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
 		leader.Stop()
-		cluster.WaitLeader()
+		re.NotEmpty(cluster.WaitLeader())
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
 		leaderReadyTime = time.Now()
 	}()
@@ -421,7 +422,7 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateMember", `return(true)`))
 	err = cluster.ResignLeader()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	_, _, err = cli.GetTS(ctx)
 	re.Error(err)
 	re.True(pd.IsLeaderChange(err))
@@ -453,13 +454,26 @@ func requestGlobalAndLocalTSO(
 				var lastTS uint64
 				for i := 0; i < tsoRequestRound; i++ {
 					globalPhysical1, globalLogical1, err := cli.GetTS(context.TODO())
-					re.NoError(err)
+					// The allocator leader may be changed due to the environment issue.
+					if err != nil {
+						re.ErrorContains(err, errs.NotLeaderErr)
+					} else {
+						re.NoError(err)
+					}
 					globalTS1 := tsoutil.ComposeTS(globalPhysical1, globalLogical1)
 					localPhysical, localLogical, err := cli.GetLocalTS(context.TODO(), dc)
-					re.NoError(err)
+					if err != nil {
+						re.ErrorContains(err, errs.NotLeaderErr)
+					} else {
+						re.NoError(err)
+					}
 					localTS := tsoutil.ComposeTS(localPhysical, localLogical)
 					globalPhysical2, globalLogical2, err := cli.GetTS(context.TODO())
-					re.NoError(err)
+					if err != nil {
+						re.ErrorContains(err, errs.NotLeaderErr)
+					} else {
+						re.NoError(err)
+					}
 					globalTS2 := tsoutil.ComposeTS(globalPhysical2, globalLogical2)
 					re.Less(lastTS, globalTS1)
 					re.Less(globalTS1, localTS)
@@ -588,7 +602,7 @@ func TestGetTsoFromFollowerClient2(t *testing.T) {
 
 	lastTS = checkTS(re, cli, lastTS)
 	re.NoError(cluster.GetServer(cluster.GetLeader()).ResignLeader())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	lastTS = checkTS(re, cli, lastTS)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
@@ -612,7 +626,7 @@ func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {
 func runServer(re *require.Assertions, cluster *tests.TestCluster) []string {
 	err := cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
 
