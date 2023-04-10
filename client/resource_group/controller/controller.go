@@ -270,7 +270,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	}
 	// Initialize the resource group controller.
 	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan,
-		successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name), resourceGroupTokenRequestCounter.WithLabelValues(group.Name))
+		successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name), requestRetryCounter.WithLabelValues(group.Name), resourceGroupTokenRequestCounter.WithLabelValues(group.Name))
 	if err != nil {
 		return nil, err
 	}
@@ -448,6 +448,7 @@ type groupCostController struct {
 	handleRespFunc func(*rmpb.TokenBucketResponse)
 
 	successfulRequestDuration prometheus.Observer
+	requestRetryCounter       prometheus.Counter
 	failedRequestCounter      prometheus.Counter
 	tokenRequestCounter       prometheus.Counter
 
@@ -528,7 +529,7 @@ func newGroupCostController(
 	lowRUNotifyChan chan struct{},
 	tokenBucketUpdateChan chan *groupCostController,
 	successfulRequestDuration prometheus.Observer,
-	failedRequestCounter, tokenRequestCounter prometheus.Counter,
+	failedRequestCounter, requestRetryCounter, tokenRequestCounter prometheus.Counter,
 ) (*groupCostController, error) {
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -544,6 +545,7 @@ func newGroupCostController(
 		mainCfg:                   mainCfg,
 		successfulRequestDuration: successfulRequestDuration,
 		failedRequestCounter:      failedRequestCounter,
+		requestRetryCounter:       requestRetryCounter,
 		tokenRequestCounter:       tokenRequestCounter,
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
@@ -1030,6 +1032,7 @@ func (gc *groupCostController) onRequestWait(
 					break retryLoop
 				}
 			}
+			gc.requestRetryCounter.Inc()
 			time.Sleep(retryInterval)
 		}
 		if err != nil {
