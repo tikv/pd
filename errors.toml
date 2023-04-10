@@ -763,7 +763,7 @@ the keyspace group id is invalid, %s
 
 ["PD:tso:ErrKeyspaceNotAssigned"]
 error = '''
-the keyspace isn't assigned to any keyspace group, %s
+the keyspace %d isn't assigned to any keyspace group
 '''
 
 ["PD:tso:ErrLogicOverflow"]

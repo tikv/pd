@@ -543,8 +543,8 @@ func addKeyspaceGroupAssignment(
 
 func collectAssignedKeyspaceGroupIDs(re *require.Assertions, ksgMgr *KeyspaceGroupManager) []int {
 	ids := []int{}
-	for i := 0; i < len(ksgMgr.ksgs); i++ {
-		ksg := ksgMgr.ksgs[i].Load()
+	for i := 0; i < len(ksgMgr.kgs); i++ {
+		ksg := ksgMgr.kgs[i].Load()
 		if ksg == nil {
 			re.Nil(ksgMgr.ams[i].Load(), fmt.Sprintf("ksg is nil but am is not nil for id %d", i))
 		} else {
@@ -562,4 +562,51 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, ksgMgr *KeyspaceGro
 	}
 
 	return ids
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() {
+	re := suite.Require()
+
+	var keyspaceLookupTable map[uint32]struct{}
+
+	// Start with empty keyspace group.
+	// Add keyspace 1 to the keyspace group.
+	oldKeyspaces := []uint32{}
+	newKeyspaces := []uint32{1}
+	defaultKeyspaceLookupTable := map[uint32]struct{}{}
+	kgm := &KeyspaceGroupManager{}
+
+	keyspaceLookupTable = kgm.updateKeyspaceGroupMembership(0, oldKeyspaces, newKeyspaces, defaultKeyspaceLookupTable)
+	verifyLocalKeyspaceLookupTable(re, keyspaceLookupTable, newKeyspaces)
+	verifyGlobalKeyspaceLookupTable(re, kgm, keyspaceLookupTable)
+
+	targetKeyspacesList := [][]uint32 {
+		{1, 2}, {1, 2}, {1, 2, 3, 4}, {5, 6, 7}, {7, 8, 9}, {1, 2, 3, 4, 5, 6, 7, 8, 9}, {8, 9}, {10}, {},
+	}
+
+	for _, keyspaces := range targetKeyspacesList {
+		oldKeyspaces = newKeyspaces
+		newKeyspaces = keyspaces
+		defaultKeyspaceLookupTable = keyspaceLookupTable
+		keyspaceLookupTable = kgm.updateKeyspaceGroupMembership(0, oldKeyspaces, newKeyspaces, defaultKeyspaceLookupTable)
+		verifyLocalKeyspaceLookupTable(re, keyspaceLookupTable, newKeyspaces)
+		verifyGlobalKeyspaceLookupTable(re, kgm, keyspaceLookupTable)
+	}
+}
+
+func verifyLocalKeyspaceLookupTable(re *require.Assertions, keyspaceLookupTable map[uint32]struct{}, newKeyspaces []uint32) {
+	re.Equal(len(newKeyspaces), len(keyspaceLookupTable), fmt.Sprintf("%v %v", newKeyspaces, keyspaceLookupTable))
+	for _, keyspace := range newKeyspaces {
+		_, ok := keyspaceLookupTable[keyspace]
+		re.True(ok)
+	}
+}
+
+func verifyGlobalKeyspaceLookupTable(re *require.Assertions, kgm *KeyspaceGroupManager, keyspaceLookupTable map[uint32]struct{}) {
+	kgm.keyspaceLookupTable.Range(func(key, value interface{}) bool {
+		_, ok := keyspaceLookupTable[key.(uint32)]
+		re.True(ok)
+		re.Equal(uint32(0), value.(uint32))
+		return true
+	})
 }
