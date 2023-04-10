@@ -34,7 +34,8 @@ import (
 
 const (
 	controllerConfigPath    = "resource_group/controller"
-	maxRetry                = 3
+	maxRetry                = 5
+	retryInterval           = 100 * time.Millisecond
 	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
 )
@@ -990,6 +991,9 @@ func (gc *groupCostController) onRequestWait(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
+	gc.mu.Lock()
+	add(gc.mu.consumption, delta)
+	gc.mu.Unlock()
 	if !gc.burstable.Load() {
 		var err error
 		now := time.Now()
@@ -1019,18 +1023,18 @@ func (gc *groupCostController) onRequestWait(
 					break retryLoop
 				}
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(retryInterval)
 		}
 		if err != nil {
 			gc.failedRequestCounter.Inc()
+			gc.mu.Lock()
+			sub(gc.mu.consumption, delta)
+			gc.mu.Unlock()
 			return nil, err
 		} else {
 			gc.successfulRequestDuration.Observe(d.Seconds())
 		}
 	}
-	gc.mu.Lock()
-	add(gc.mu.consumption, delta)
-	gc.mu.Unlock()
 	return delta, nil
 }
 

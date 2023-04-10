@@ -370,6 +370,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.maybeNotify()
 	} else {
 		lim.last = last
+		lim.notify()
 	}
 	return r
 }
