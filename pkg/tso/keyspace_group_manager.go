@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -511,7 +512,7 @@ func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) (*A
 	if am := kgm.ams[keyspaceGroupID].Load(); am != nil {
 		return am, nil
 	}
-	return nil, kgm.genNotServedErr(keyspaceGroupID)
+	return nil, kgm.genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 }
 
 // GetAMWithMembershipCheck returns the AllocatorManager of the given keyspace group and check if the keyspace
@@ -519,20 +520,17 @@ func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) (*A
 func (kgm *KeyspaceGroupManager) GetAMWithMembershipCheck(
 	keyspaceID, keyspaceGroupID uint32,
 ) (*AllocatorManager, error) {
-	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
-		return nil, err
-	}
 	if am := kgm.ams[keyspaceGroupID].Load(); am != nil {
 		ksg := kgm.ksgs[keyspaceGroupID].Load()
 		if ksg == nil {
-			return nil, kgm.genNotServedErr(keyspaceGroupID)
+			return nil, kgm.genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 		}
 		if _, ok := ksg.KeyspaceLookupTable[keyspaceID]; !ok {
-			return nil, kgm.genNotServedErr(keyspaceGroupID)
+			return nil, kgm.genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 		}
 		return am, nil
 	}
-	return nil, kgm.genNotServedErr(keyspaceGroupID)
+	return nil, kgm.genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 }
 
 // GetElectionMember returns the election member of the given keyspace group
@@ -540,6 +538,9 @@ func (kgm *KeyspaceGroupManager) GetAMWithMembershipCheck(
 func (kgm *KeyspaceGroupManager) GetElectionMember(
 	keyspaceID, keyspaceGroupID uint32,
 ) (ElectionMember, error) {
+	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
+		return nil, err
+	}
 	am, err := kgm.GetAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
@@ -552,17 +553,18 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	keyspaceID, keyspaceGroupID uint32,
 	dcLocation string, count uint32,
 ) (ts pdpb.Timestamp, currentKeyspaceGroupID uint32, err error) {
+	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
+		return pdpb.Timestamp{}, keyspaceGroupID, err
+	}
 	am, err := kgm.GetAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
-		// If the keyspace doesn't belong to this keyspace group, we should check if it belongs to any other
+		// The keyspace doesn't belong to this keyspace group, we should check if it belongs to any other
 		// keyspace groups, and return the correct keyspace group ID to the client.
-		if strings.Contains(err.Error(), errs.NotServedErr) {
-			for i := 0; i < int(mcsutils.MaxKeyspaceGroupCountInUse); i++ {
-				if ksg := kgm.ksgs[i].Load(); ksg == nil {
-					continue
-				} else if _, ok := ksg.KeyspaceLookupTable[keyspaceID]; ok {
-					return pdpb.Timestamp{}, ksg.ID, err
-				}
+		for i := 0; i < int(mcsutils.MaxKeyspaceGroupCountInUse); i++ {
+			if ksg := kgm.ksgs[i].Load(); ksg == nil {
+				continue
+			} else if _, ok := ksg.KeyspaceLookupTable[keyspaceID]; ok {
+				return pdpb.Timestamp{}, ksg.ID, err
 			}
 		}
 		return pdpb.Timestamp{}, keyspaceGroupID, err
@@ -580,8 +582,9 @@ func (kgm *KeyspaceGroupManager) checkKeySpaceGroupID(id uint32) error {
 			id, mcsutils.MaxKeyspaceGroupCountInUse))
 }
 
-func (kgm *KeyspaceGroupManager) genNotServedErr(keyspaceGroupID uint32) error {
-	return errs.ErrGetAllocatorManager.FastGenByArgs(
-		fmt.Sprintf("requested keyspace group with id %d %s by this host/pod",
+func (kgm *KeyspaceGroupManager) genNotServedErr(perr *perrors.Error, keyspaceGroupID uint32) error {
+	return perr.FastGenByArgs(
+		fmt.Sprintf(
+			"requested keyspace group with id %d %s by this host/pod",
 			keyspaceGroupID, errs.NotServedErr))
 }

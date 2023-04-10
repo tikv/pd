@@ -181,7 +181,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 
 	addKeyspaceGroupAssignment(
 		suite.ctx, suite.etcdClient, true,
-		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0))
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0), []uint32{0})
 
 	// Set the timeout to 1 second and inject the delayLoadKeyspaceGroups to return 3 seconds to let
 	// the loading sleep 3 seconds.
@@ -204,7 +204,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSucceedWithTem
 
 	addKeyspaceGroupAssignment(
 		suite.ctx, suite.etcdClient, true,
-		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0))
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0), []uint32{0})
 
 	// Set the max retry times to 3 and inject the loadKeyspaceGroupsTemporaryFail to return 2 to let
 	// loading from etcd fail 2 times but the whole initialization still succeeds.
@@ -226,7 +226,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsFailed() {
 
 	addKeyspaceGroupAssignment(
 		suite.ctx, suite.etcdClient, true,
-		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0))
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0), []uint32{0})
 
 	// Set the max retry times to 3 and inject the loadKeyspaceGroupsTemporaryFail to return 3 to let
 	// loading from etcd fail 3 times which should cause the whole initialization to fail.
@@ -307,6 +307,73 @@ func (suite *keyspaceGroupManagerTestSuite) TestWatchAndDynamicallyApplyChanges(
 	})
 }
 
+// TestGetAMWithMembershipCheck tests GetAMWithMembershipCheck.
+func (suite *keyspaceGroupManagerTestSuite) TestGetAMWithMembershipCheck() {
+	re := suite.Require()
+
+	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
+	re.NotNil(mgr)
+	defer mgr.Close()
+
+	var (
+		am  *AllocatorManager
+		err error
+	)
+
+	// Create keyspace group 0 which contains keyspace 0, 1, 2.
+	addKeyspaceGroupAssignment(
+		suite.ctx, suite.etcdClient, true,
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr,
+		uint32(0), []uint32{0, 1, 2})
+
+	err = mgr.Initialize(true)
+	re.NoError(err)
+
+	// Should be able to get AM for keyspace 0, 1, 2 in keyspace group 0.
+	am, err = mgr.GetAMWithMembershipCheck(0, 0)
+	re.NoError(err)
+	re.NotNil(am)
+	am, err = mgr.GetAMWithMembershipCheck(1, 0)
+	re.NoError(err)
+	re.NotNil(am)
+	am, err = mgr.GetAMWithMembershipCheck(2, 0)
+	re.NoError(err)
+	re.NotNil(am)
+	// Should fail because keyspace 3 is not in keyspace group 0.
+	am, err = mgr.GetAMWithMembershipCheck(3, 0)
+	re.Error(err)
+	re.Nil(am)
+	// Should fail because keyspace group 1 doesn't exist.
+	am, err = mgr.GetAMWithMembershipCheck(0, 1)
+	re.Error(err)
+	re.Nil(am)
+}
+
+// TestHandleTSORequestWithWrongMembership tests the case that HandleTSORequest receives
+// a tso request with mismatched keyspace and keyspace group.
+func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembership() {
+	re := suite.Require()
+
+	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
+	re.NotNil(mgr)
+	defer mgr.Close()
+
+	// Create keyspace group 0 which contains keyspace 0, 1, 2.
+	addKeyspaceGroupAssignment(
+		suite.ctx, suite.etcdClient, true,
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr,
+		uint32(0), []uint32{0, 1, 2})
+
+	err := mgr.Initialize(true)
+	re.NoError(err)
+
+	// Should fail because keyspace 0 is not in keyspace group 1 and the API returns
+	// the keyspace group 0 to which the keyspace 0 belongs.
+	_, keyspaceGroupBelongTo, err := mgr.HandleTSORequest(0, 1, GlobalDCLocation, 1)
+	re.Error(err)
+	re.Equal(uint32(0), keyspaceGroupBelongTo)
+}
+
 type etcdEvent struct {
 	eventType mvccpb.Event_EventType
 	ksg       *endpoint.KeyspaceGroup
@@ -374,7 +441,7 @@ func runTestLoadKeyspaceGroupsAssignment(
 				}
 				addKeyspaceGroupAssignment(
 					ctx, etcdClient, assignToMe,
-					mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(j))
+					mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(j), []uint32{uint32(j)})
 			}
 		}(i)
 	}
@@ -446,7 +513,8 @@ func deleteKeyspaceGroupInEtcd(
 // addKeyspaceGroupAssignment adds a keyspace group assignment to etcd.
 func addKeyspaceGroupAssignment(
 	ctx context.Context, etcdClient *clientv3.Client,
-	assignToMe bool, rootPath, svcAddr string, id uint32,
+	assignToMe bool, rootPath, svcAddr string,
+	groupID uint32, keyspaces []uint32,
 ) error {
 	var location string
 	if assignToMe {
@@ -455,12 +523,12 @@ func addKeyspaceGroupAssignment(
 		location = uuid.NewString()
 	}
 	group := &endpoint.KeyspaceGroup{
-		ID:        id,
+		ID:        groupID,
 		Members:   []endpoint.KeyspaceGroupMember{{Address: location}},
-		Keyspaces: []uint32{id},
+		Keyspaces: keyspaces,
 	}
 
-	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(id)}, "/")
+	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(groupID)}, "/")
 	value, err := json.Marshal(group)
 	if err != nil {
 		return err
