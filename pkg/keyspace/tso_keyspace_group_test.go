@@ -25,6 +25,8 @@ import (
 
 type keyspaceGroupTestSuite struct {
 	suite.Suite
+	ctx     context.Context
+	cancel  context.CancelFunc
 	manager *GroupManager
 }
 
@@ -33,9 +35,14 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.manager = NewKeyspaceGroupManager(context.Background(), store)
+	suite.manager = NewKeyspaceGroupManager(suite.ctx, store)
 	suite.NoError(suite.manager.Bootstrap())
+}
+
+func (suite *keyspaceGroupTestSuite) TearDownTest() {
+	suite.cancel()
 }
 
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
@@ -44,15 +51,15 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	keyspaceGroups := []*endpoint.KeyspaceGroup{
 		{
 			ID:       uint32(1),
-			UserKind: "business",
+			UserKind: endpoint.Standard.String(),
 		},
 		{
 			ID:       uint32(2),
-			UserKind: "business",
+			UserKind: endpoint.Standard.String(),
 		},
 		{
 			ID:       uint32(3),
-			UserKind: "business",
+			UserKind: endpoint.Standard.String(),
 		},
 	}
 	err := suite.manager.CreateKeyspaceGroups(keyspaceGroups)
@@ -69,11 +76,11 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	kg, err := suite.manager.GetKeyspaceGroupByID(0)
 	re.NoError(err)
 	re.Equal(uint32(0), kg.ID)
-	re.Equal("default", kg.UserKind)
+	re.Equal(endpoint.Basic.String(), kg.UserKind)
 	kg, err = suite.manager.GetKeyspaceGroupByID(3)
 	re.NoError(err)
 	re.Equal(uint32(3), kg.ID)
-	re.Equal("business", kg.UserKind)
+	re.Equal(endpoint.Standard.String(), kg.UserKind)
 	// remove the keyspace group 3
 	err = suite.manager.DeleteKeyspaceGroupByID(3)
 	re.NoError(err)
@@ -83,7 +90,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	re.Empty(kg)
 
 	// create an existing keyspace group
-	keyspaceGroups = []*endpoint.KeyspaceGroup{{ID: uint32(1), UserKind: "business"}}
+	keyspaceGroups = []*endpoint.KeyspaceGroup{{ID: uint32(1), UserKind: endpoint.Standard.String()}}
 	err = suite.manager.CreateKeyspaceGroups(keyspaceGroups)
 	re.Error(err)
 }
