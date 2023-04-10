@@ -132,9 +132,9 @@ type Filter interface {
 	// Scope is used to indicate where the filter will act on.
 	Scope() string
 	Type() filterType
-	// Return plan.Status to show whether be filtered as source
+	// Source Return plan.Status to show whether be filtered as source
 	Source(conf config.Config, store *core.StoreInfo) *plan.Status
-	// Return plan.Status to show whether be filtered as target
+	// Target Return plan.Status to show whether be filtered as target
 	Target(conf config.Config, store *core.StoreInfo) *plan.Status
 }
 
