@@ -370,7 +370,10 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.maybeNotify()
 	} else {
 		lim.last = last
-		lim.notify()
+		if lim.limit == 0 {
+			lim.notify()
+		}
+		log.Warn("[resource group controller]", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("n", n), zap.Int64("burst", lim.burst))
 	}
 	return r
 }
