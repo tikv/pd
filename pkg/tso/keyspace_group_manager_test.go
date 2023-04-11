@@ -581,18 +581,18 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	verifyGlobalKeyspaceLookupTable(re, kgm, keyspaceLookupTable)
 
 	targetKeyspacesList := [][]uint32{
-		{1}, // Add keyspace 1 to the keyspace group.
-		{1, 2}, // Add keyspace 2 to the keyspace group.
-		{1, 2}, // No change.
-		{1, 2, 3, 4}, // Add keyspace 3 and 4 to the keyspace group.
-		{5, 6, 7}, // Remove keyspace 1, 2, 3, 4 from the keyspace group and add 5, 6, 7
-		{7, 8, 9}, // Partially update the keyspace group.
+		{1},                         // Add keyspace 1 to the keyspace group.
+		{1, 2},                      // Add keyspace 2 to the keyspace group.
+		{1, 2},                      // No change.
+		{1, 2, 3, 4},                // Add keyspace 3 and 4 to the keyspace group.
+		{5, 6, 7},                   // Remove keyspace 1, 2, 3, 4 from the keyspace group and add 5, 6, 7
+		{7, 8, 9},                   // Partially update the keyspace group.
 		{1, 2, 3, 4, 5, 6, 7, 8, 9}, // Add more keyspace to the keyspace group.
-		{9, 8, 4, 5, 6}, // Out of order.
-		{9, 8, 4, 5, 6}, // No change. Out of order.
-		{8, 9}, // Remove
-		{10}, // Remove
-		{}, // End with the empty keyspace group.
+		{9, 8, 4, 5, 6},             // Out of order.
+		{9, 8, 4, 5, 6},             // No change. Out of order.
+		{8, 9},                      // Remove
+		{10},                        // Remove
+		{},                          // End with the empty keyspace group.
 	}
 
 	for _, keyspaces := range targetKeyspacesList {
