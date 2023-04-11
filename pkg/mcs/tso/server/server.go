@@ -208,7 +208,8 @@ func (s *Server) IsServing() bool {
 		return false
 	}
 
-	member, err := s.keyspaceGroupManager.GetElectionMember(mcsutils.DefaultKeySpaceGroupID)
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeySpaceGroupID)
 	if err != nil {
 		log.Error("failed to get election member", errs.ZapError(err))
 		return false
@@ -219,7 +220,8 @@ func (s *Server) IsServing() bool {
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
 // The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
-	member, err := s.keyspaceGroupManager.GetElectionMember(mcsutils.DefaultKeySpaceGroupID)
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeySpaceGroupID)
 	if err != nil {
 		log.Error("failed to get election member", errs.ZapError(err))
 		return nil
