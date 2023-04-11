@@ -570,7 +570,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 	var keyspaceLookupTable map[uint32]struct{}
 
 	// Start from an empty keyspace group.
-	// Add keyspace 1 to the keyspace group.
 	oldKeyspaces := []uint32{}
 	newKeyspaces := []uint32{}
 	defaultKeyspaceLookupTable := map[uint32]struct{}{}

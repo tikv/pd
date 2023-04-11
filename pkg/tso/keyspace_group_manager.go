@@ -494,14 +494,14 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 }
 
 // updateKeyspaceGroupMembership updates the keyspace lookup table for the given keyspace group.
-// Mostly, the membership has no change, so we optimize for this case.
 func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	groupID uint32, oldKeyspaces, newKeyspaces []uint32,
-	defaultKeyspaceLookupTable map[uint32]struct{},
-) (keyspaceLookupTable map[uint32]struct{}) {
+	oldKeyspaceLookupTable map[uint32]struct{},
+) map[uint32]struct{} {
 	oldLen := len(oldKeyspaces)
 	newLen := len(newKeyspaces)
 
+	// Mostly, the membership has no change, so we optimize for this case.
 	sameMembership := true
 	i, j := 0, 0
 	for i < oldLen || j < newLen {
@@ -524,13 +524,11 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		} else {
 			sameMembership = false
 			kgm.keyspaceLookupTable.Store(newKeyspaces[j], groupID)
-			if keyspaceLookupTable == nil {
-				keyspaceLookupTable = make(map[uint32]struct{})
-			}
-			keyspaceLookupTable[newKeyspaces[j]] = struct{}{}
 			j++
 		}
 	}
+
+	var newKeyspaceLookupTable map[uint32]struct{}
 
 	if i < oldLen || j < newLen {
 		log.Warn("keyspace IDs are not sorted in ascending order, do a full update",
@@ -544,30 +542,29 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		sort.Slice(newKeyspaces, func(i, j int) bool {
 			return newKeyspaces[i] < newKeyspaces[j]
 		})
-		keyspaceLookupTable = kgm.buildKeyspaceLookupTable(groupID, newKeyspaces)
+		newKeyspaceLookupTable = kgm.buildKeyspaceLookupTable(groupID, newKeyspaces)
 	} else if sameMembership {
 		// The keyspace group membership is not changed, so we reuse the old one.
-		return defaultKeyspaceLookupTable
+		newKeyspaceLookupTable = oldKeyspaceLookupTable
 	} else {
 		// The keyspace group membership is changed, so we update the keyspace lookup table.
 		// We haven't added the keyspace IDs which belong to both old and new groups, so add them.
-		if keyspaceLookupTable == nil {
-			keyspaceLookupTable = make(map[uint32]struct{})
-		}
-		for i, j = 0, 0; i < oldLen && j < newLen; {
-			if oldKeyspaces[i] == newKeyspaces[j] {
-				keyspaceLookupTable[oldKeyspaces[i]] = struct{}{}
+		newKeyspaceLookupTable = make(map[uint32]struct{})
+		for i, j = 0, 0; i < oldLen || j < newLen; {
+			if i < oldLen && j < newLen && oldKeyspaces[i] == newKeyspaces[j] {
+				newKeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
 				i++
 				j++
-			} else if oldKeyspaces[i] < newKeyspaces[j] {
+			} else if i < oldLen && j < newLen && oldKeyspaces[i] < newKeyspaces[j] || j == newLen {
 				i++
 			} else {
+				newKeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
 				j++
 			}
 		}
 	}
 
-	return keyspaceLookupTable
+	return newKeyspaceLookupTable
 }
 
 func (kgm *KeyspaceGroupManager) buildKeyspaceLookupTable(groupID uint32, keyspaces []uint32) map[uint32]struct{} {
