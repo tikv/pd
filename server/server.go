@@ -1740,12 +1740,12 @@ func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 		case <-time.After(retryIntervalGetServicePrimary):
 		}
 		revision, err = s.updateServicePrimaryAddr(serviceName)
-		if err != nil {
+		if revision != 0 && err == nil { // update success
 			break
 		}
 	}
-	if revision == 0 {
-		log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))
+	if err != nil {
+		log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey), zap.Error(err))
 	}
 	log.Info("start to watch service primary addr", zap.String("service-key", serviceKey))
 	for {
