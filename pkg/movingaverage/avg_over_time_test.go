@@ -49,6 +49,7 @@ func TestPulse2(t *testing.T) {
 	aot := NewAvgOverTime(dur)
 	aot.Add(1000, dur)
 	re.Equal(float64(1000), aot.GetInstantaneous())
+	re.True(aot.IsFull())
 	aot.Clear()
 	aot.Add(1000, dur)
 	re.Equal(float64(1000), aot.GetInstantaneous())
