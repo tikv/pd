@@ -674,11 +674,11 @@ func (gc *groupCostController) resetEmergencyTokenAcquisition() {
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
-			counter.limiter.ResetNotifytime()
+			counter.limiter.ResetRemainingNotifyTimes()
 		}
 	case rmpb.GroupMode_RUMode:
 		for _, counter := range gc.run.requestUnitTokens {
-			counter.limiter.ResetNotifytime()
+			counter.limiter.ResetRemainingNotifyTimes()
 		}
 	}
 }
