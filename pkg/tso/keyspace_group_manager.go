@@ -501,63 +501,43 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	oldLen := len(oldKeyspaces)
 	newLen := len(newKeyspaces)
 
+	// Sort the keyspaces in ascending order
+	sort.Slice(newKeyspaces, func(i, j int) bool {
+		return newKeyspaces[i] < newKeyspaces[j]
+	})
+
 	// Mostly, the membership has no change, so we optimize for this case.
 	sameMembership := true
-	i, j := 0, 0
-	for i < oldLen || j < newLen {
-		// We assume that the keyspace IDs are sorted in ascending order. If not, we will
-		// break the loop and do a full update.
-		if i < oldLen && i > 0 && oldKeyspaces[i-1] >= oldKeyspaces[i] {
-			break
-		}
-		if j < newLen && j > 0 && newKeyspaces[j-1] >= newKeyspaces[j] {
-			break
-		}
-
-		if i < oldLen && j < newLen && oldKeyspaces[i] == newKeyspaces[j] {
-			i++
-			j++
-		} else if i < oldLen && j < newLen && oldKeyspaces[i] < newKeyspaces[j] || j == newLen {
-			sameMembership = false
-			kgm.keyspaceLookupTable.Delete(oldKeyspaces[i])
-			i++
-		} else {
-			sameMembership = false
-			kgm.keyspaceLookupTable.Store(newKeyspaces[j], groupID)
-			j++
+	if oldLen != newLen {
+		sameMembership = false
+	} else {
+		for i := 0; i < oldLen; i++ {
+			if oldKeyspaces[i] != newKeyspaces[i] {
+				sameMembership = false
+				break
+			}
 		}
 	}
 
 	var newKeyspaceLookupTable map[uint32]struct{}
 
-	if i < oldLen || j < newLen {
-		log.Warn("keyspace IDs are not sorted in ascending order, do a full update",
-			zap.Uint32("keyspace-group-id", groupID))
-
-		// Do a full update, because the keyspace IDs are not sorted in ascending order.
-		for ; i < oldLen; i++ {
-			kgm.keyspaceLookupTable.Delete(oldKeyspaces[i])
-		}
-		// Sort the keyspaces in ascending order
-		sort.Slice(newKeyspaces, func(i, j int) bool {
-			return newKeyspaces[i] < newKeyspaces[j]
-		})
-		newKeyspaceLookupTable = kgm.buildKeyspaceLookupTable(groupID, newKeyspaces)
-	} else if sameMembership {
+	if sameMembership {
 		// The keyspace group membership is not changed, so we reuse the old one.
 		newKeyspaceLookupTable = oldKeyspaceLookupTable
 	} else {
 		// The keyspace group membership is changed, so we update the keyspace lookup table.
 		newKeyspaceLookupTable = make(map[uint32]struct{})
-		for i, j = 0, 0; i < oldLen || j < newLen; {
+		for i, j := 0, 0; i < oldLen || j < newLen; {
 			if i < oldLen && j < newLen && oldKeyspaces[i] == newKeyspaces[j] {
 				newKeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
 				i++
 				j++
 			} else if i < oldLen && j < newLen && oldKeyspaces[i] < newKeyspaces[j] || j == newLen {
+				kgm.keyspaceLookupTable.Delete(oldKeyspaces[i])
 				i++
 			} else {
 				newKeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
+				kgm.keyspaceLookupTable.Store(newKeyspaces[j], groupID)
 				j++
 			}
 		}
