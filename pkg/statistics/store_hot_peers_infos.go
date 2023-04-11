@@ -187,12 +187,12 @@ func summaryStoresLoadByEngine(
 		historyLoads := make([][]float64, DimLen)
 		if storesHistoryLoads, ok := storesHistoryLoads[id]; ok {
 			historyLoads = collector.GetHistoryLoads(storesHistoryLoads, peerLoadSum, rwTy, kind)
-			for i := range historyLoads {
-				if allStoreHistoryLoadSum[i] == nil {
-					allStoreHistoryLoadSum[i] = make([]float64, len(historyLoads[i]))
+			for i, loads := range historyLoads {
+				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
+					allStoreHistoryLoadSum[i] = make([]float64, len(loads))
 				}
-				for j := range historyLoads[i] {
-					allStoreHistoryLoadSum[i][j] += historyLoads[i][j]
+				for j, load := range loads {
+					allStoreHistoryLoadSum[i][j] += load
 				}
 			}
 		}
