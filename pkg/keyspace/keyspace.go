@@ -388,14 +388,15 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 		newUserKind := endpoint.StringUserKind(newConfig[UserKindKey])
 		oldID := oldConfig[TSOKeyspaceGroupIDKey]
 		newID := newConfig[TSOKeyspaceGroupIDKey]
-		if oldUserKind != newUserKind || oldID != newID {
+		needUpdate := oldUserKind != newUserKind || oldID != newID
+		if needUpdate {
 			if err := manager.kgm.UpdateKeyspaceGroup(oldID, newID, oldUserKind, newUserKind, meta.GetId()); err != nil {
 				return err
 			}
 		}
 		// Save the updated keyspace meta.
 		if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
-			if oldUserKind != newUserKind || oldID != newID {
+			if needUpdate {
 				if err := manager.kgm.UpdateKeyspaceGroup(newID, oldID, newUserKind, oldUserKind, meta.GetId()); err != nil {
 					log.Error("failed to revert keyspace group", zap.Error(err))
 				}

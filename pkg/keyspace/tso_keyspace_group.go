@@ -210,6 +210,9 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	m.Lock()
 	defer m.Unlock()
 	kg := m.groups[userKind].Get(uint32(id))
+	if kg == nil {
+		return errors.Errorf("keyspace group %d not found", id)
+	}
 	switch mutation {
 	case opAdd:
 		if !slice.Contains(kg.Keyspaces, keyspaceID) {
