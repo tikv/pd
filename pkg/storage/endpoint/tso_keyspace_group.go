@@ -79,6 +79,8 @@ type KeyspaceGroupMember struct {
 type KeyspaceGroup struct {
 	ID       uint32 `json:"id"`
 	UserKind string `json:"user-kind"`
+	// InSplit indicates whether the keyspace group is in split.
+	InSplit bool `json:"in-split"`
 	// Members are the election members which campaign for the primary of the keyspace group.
 	Members []KeyspaceGroupMember `json:"members"`
 	// Keyspaces are the keyspace IDs which belong to the keyspace group.
@@ -100,7 +102,7 @@ type KeyspaceGroupStorage interface {
 
 var _ KeyspaceGroupStorage = (*StorageEndpoint)(nil)
 
-// LoadKeyspaceGroup loads the keyspace group by id.
+// LoadKeyspaceGroup loads the keyspace group by ID.
 func (se *StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
 	value, err := txn.Load(KeyspaceGroupIDPath(id))
 	if err != nil || value == "" {

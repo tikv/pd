@@ -45,9 +45,14 @@ var (
 	ErrKeyspaceGroupExists = errors.New("keyspace group already exists")
 	// ErrKeyspaceGroupNotExists indicates target keyspace group does not exist.
 	ErrKeyspaceGroupNotExists = errors.New("keyspace group does not exist")
-	errModifyDefault          = errors.New("cannot modify default keyspace's state")
-	errIllegalOperation       = errors.New("unknown operation")
-	errNoAvailableNode        = errors.New("no available node")
+	// ErrKeyspaceGroupNotInSplit is used to indicate target keyspace group is not in split state.
+	ErrKeyspaceGroupNotInSplit = errors.New("keyspace group is not in split state")
+	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
+	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
+	// ErrNoAvailableNode is used to indicate no available node in the keyspace group.
+	ErrNoAvailableNode  = errors.New("no available node")
+	errModifyDefault    = errors.New("cannot modify default keyspace's state")
+	errIllegalOperation = errors.New("unknown operation")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
