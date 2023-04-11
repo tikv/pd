@@ -761,6 +761,11 @@ error = '''
 the keyspace group id is invalid, %s
 '''
 
+["PD:tso:ErrKeyspaceNotAssigned"]
+error = '''
+the keyspace %d isn't assigned to any keyspace group
+'''
+
 ["PD:tso:ErrLogicOverflow"]
 error = '''
 logic part overflow
