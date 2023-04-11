@@ -44,7 +44,7 @@ func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 		que: queue.New(),
 		margin: deltaWithInterval{
 			delta:    0,
-			interval: 0,
+			interval: time.Microsecond,
 		},
 		deltaSum:    0,
 		intervalSum: 0,
@@ -68,7 +68,7 @@ func (aot *AvgOverTime) Clear() {
 	}
 	aot.margin = deltaWithInterval{
 		delta:    0,
-		interval: 0,
+		interval: time.Microsecond,
 	}
 	aot.intervalSum = 0
 	aot.deltaSum = 0
