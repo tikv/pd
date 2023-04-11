@@ -230,7 +230,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspace() {
 	re.Len(kg3.Keyspaces, 1)
 }
 
-func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
+func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re := suite.Require()
 
 	keyspaceGroups := []*endpoint.KeyspaceGroup{
