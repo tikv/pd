@@ -181,7 +181,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 
 	addKeyspaceGroupAssignment(
 		suite.ctx, suite.etcdClient, true,
-		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0))
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0), []uint32{0})
 
 	// Set the timeout to 1 second and inject the delayLoadKeyspaceGroups to return 3 seconds to let
 	// the loading sleep 3 seconds.
@@ -204,7 +204,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSucceedWithTem
 
 	addKeyspaceGroupAssignment(
 		suite.ctx, suite.etcdClient, true,
-		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0))
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0), []uint32{0})
 
 	// Set the max retry times to 3 and inject the loadKeyspaceGroupsTemporaryFail to return 2 to let
 	// loading from etcd fail 2 times but the whole initialization still succeeds.
@@ -226,7 +226,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsFailed() {
 
 	addKeyspaceGroupAssignment(
 		suite.ctx, suite.etcdClient, true,
-		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0))
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0), []uint32{0})
 
 	// Set the max retry times to 3 and inject the loadKeyspaceGroupsTemporaryFail to return 3 to let
 	// loading from etcd fail 3 times which should cause the whole initialization to fail.
@@ -307,6 +307,73 @@ func (suite *keyspaceGroupManagerTestSuite) TestWatchAndDynamicallyApplyChanges(
 	})
 }
 
+// TestGetAMWithMembershipCheck tests GetAMWithMembershipCheck.
+func (suite *keyspaceGroupManagerTestSuite) TestGetAMWithMembershipCheck() {
+	re := suite.Require()
+
+	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
+	re.NotNil(mgr)
+	defer mgr.Close()
+
+	var (
+		am  *AllocatorManager
+		err error
+	)
+
+	// Create keyspace group 0 which contains keyspace 0, 1, 2.
+	addKeyspaceGroupAssignment(
+		suite.ctx, suite.etcdClient, true,
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr,
+		uint32(0), []uint32{0, 1, 2})
+
+	err = mgr.Initialize(true)
+	re.NoError(err)
+
+	// Should be able to get AM for keyspace 0, 1, 2 in keyspace group 0.
+	am, err = mgr.GetAMWithMembershipCheck(0, 0)
+	re.NoError(err)
+	re.NotNil(am)
+	am, err = mgr.GetAMWithMembershipCheck(1, 0)
+	re.NoError(err)
+	re.NotNil(am)
+	am, err = mgr.GetAMWithMembershipCheck(2, 0)
+	re.NoError(err)
+	re.NotNil(am)
+	// Should fail because keyspace 3 is not in keyspace group 0.
+	am, err = mgr.GetAMWithMembershipCheck(3, 0)
+	re.Error(err)
+	re.Nil(am)
+	// Should fail because keyspace group 1 doesn't exist.
+	am, err = mgr.GetAMWithMembershipCheck(0, 1)
+	re.Error(err)
+	re.Nil(am)
+}
+
+// TestHandleTSORequestWithWrongMembership tests the case that HandleTSORequest receives
+// a tso request with mismatched keyspace and keyspace group.
+func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembership() {
+	re := suite.Require()
+
+	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
+	re.NotNil(mgr)
+	defer mgr.Close()
+
+	// Create keyspace group 0 which contains keyspace 0, 1, 2.
+	addKeyspaceGroupAssignment(
+		suite.ctx, suite.etcdClient, true,
+		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr,
+		uint32(0), []uint32{0, 1, 2})
+
+	err := mgr.Initialize(true)
+	re.NoError(err)
+
+	// Should fail because keyspace 0 is not in keyspace group 1 and the API returns
+	// the keyspace group 0 to which the keyspace 0 belongs.
+	_, keyspaceGroupBelongTo, err := mgr.HandleTSORequest(0, 1, GlobalDCLocation, 1)
+	re.Error(err)
+	re.Equal(uint32(0), keyspaceGroupBelongTo)
+}
+
 type etcdEvent struct {
 	eventType mvccpb.Event_EventType
 	ksg       *endpoint.KeyspaceGroup
@@ -374,7 +441,7 @@ func runTestLoadKeyspaceGroupsAssignment(
 				}
 				addKeyspaceGroupAssignment(
 					ctx, etcdClient, assignToMe,
-					mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(j))
+					mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(j), []uint32{uint32(j)})
 			}
 		}(i)
 	}
@@ -446,7 +513,8 @@ func deleteKeyspaceGroupInEtcd(
 // addKeyspaceGroupAssignment adds a keyspace group assignment to etcd.
 func addKeyspaceGroupAssignment(
 	ctx context.Context, etcdClient *clientv3.Client,
-	assignToMe bool, rootPath, svcAddr string, id uint32,
+	assignToMe bool, rootPath, svcAddr string,
+	groupID uint32, keyspaces []uint32,
 ) error {
 	var location string
 	if assignToMe {
@@ -455,12 +523,12 @@ func addKeyspaceGroupAssignment(
 		location = uuid.NewString()
 	}
 	group := &endpoint.KeyspaceGroup{
-		ID:        id,
+		ID:        groupID,
 		Members:   []endpoint.KeyspaceGroupMember{{Address: location}},
-		Keyspaces: []uint32{id},
+		Keyspaces: keyspaces,
 	}
 
-	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(id)}, "/")
+	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(groupID)}, "/")
 	value, err := json.Marshal(group)
 	if err != nil {
 		return err
@@ -475,8 +543,8 @@ func addKeyspaceGroupAssignment(
 
 func collectAssignedKeyspaceGroupIDs(re *require.Assertions, ksgMgr *KeyspaceGroupManager) []int {
 	ids := []int{}
-	for i := 0; i < len(ksgMgr.ksgs); i++ {
-		ksg := ksgMgr.ksgs[i].Load()
+	for i := 0; i < len(ksgMgr.kgs); i++ {
+		ksg := ksgMgr.kgs[i].Load()
 		if ksg == nil {
 			re.Nil(ksgMgr.ams[i].Load(), fmt.Sprintf("ksg is nil but am is not nil for id %d", i))
 		} else {
@@ -494,4 +562,61 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, ksgMgr *KeyspaceGro
 	}
 
 	return ids
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() {
+	re := suite.Require()
+
+	var keyspaceLookupTable map[uint32]struct{}
+
+	// Start from an empty keyspace group.
+	oldKeyspaces := []uint32{}
+	newKeyspaces := []uint32{}
+	defaultKeyspaceLookupTable := map[uint32]struct{}{}
+	kgm := &KeyspaceGroupManager{}
+
+	keyspaceLookupTable = kgm.updateKeyspaceGroupMembership(0, oldKeyspaces, newKeyspaces, defaultKeyspaceLookupTable)
+	verifyLocalKeyspaceLookupTable(re, keyspaceLookupTable, newKeyspaces)
+	verifyGlobalKeyspaceLookupTable(re, kgm, keyspaceLookupTable)
+
+	targetKeyspacesList := [][]uint32{
+		{1},                         // Add keyspace 1 to the keyspace group.
+		{1, 2},                      // Add keyspace 2 to the keyspace group.
+		{1, 2},                      // No change.
+		{1, 2, 3, 4},                // Add keyspace 3 and 4 to the keyspace group.
+		{5, 6, 7},                   // Remove keyspace 1, 2, 3, 4 from the keyspace group and add 5, 6, 7
+		{7, 8, 9},                   // Partially update the keyspace group.
+		{1, 2, 3, 4, 5, 6, 7, 8, 9}, // Add more keyspace to the keyspace group.
+		{9, 8, 4, 5, 6},             // Out of order.
+		{9, 8, 4, 5, 6},             // No change. Out of order.
+		{8, 9},                      // Remove
+		{10},                        // Remove
+		{},                          // End with the empty keyspace group.
+	}
+
+	for _, keyspaces := range targetKeyspacesList {
+		oldKeyspaces = newKeyspaces
+		newKeyspaces = keyspaces
+		defaultKeyspaceLookupTable = keyspaceLookupTable
+		keyspaceLookupTable = kgm.updateKeyspaceGroupMembership(0, oldKeyspaces, newKeyspaces, defaultKeyspaceLookupTable)
+		verifyLocalKeyspaceLookupTable(re, keyspaceLookupTable, newKeyspaces)
+		verifyGlobalKeyspaceLookupTable(re, kgm, keyspaceLookupTable)
+	}
+}
+
+func verifyLocalKeyspaceLookupTable(re *require.Assertions, keyspaceLookupTable map[uint32]struct{}, newKeyspaces []uint32) {
+	re.Equal(len(newKeyspaces), len(keyspaceLookupTable), fmt.Sprintf("%v %v", newKeyspaces, keyspaceLookupTable))
+	for _, keyspace := range newKeyspaces {
+		_, ok := keyspaceLookupTable[keyspace]
+		re.True(ok)
+	}
+}
+
+func verifyGlobalKeyspaceLookupTable(re *require.Assertions, kgm *KeyspaceGroupManager, keyspaceLookupTable map[uint32]struct{}) {
+	kgm.keyspaceLookupTable.Range(func(key, value interface{}) bool {
+		_, ok := keyspaceLookupTable[key.(uint32)]
+		re.True(ok)
+		re.Equal(uint32(0), value.(uint32))
+		return true
+	})
 }

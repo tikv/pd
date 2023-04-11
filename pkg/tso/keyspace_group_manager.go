@@ -20,11 +20,13 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -57,13 +59,16 @@ const (
 // The replicas campaign for the leaders which provide the tso service for the corresponding
 // keyspace groups.
 type KeyspaceGroupManager struct {
-	// ams stores the allocator managers of the keyspace groups. Each keyspace group is assigned
-	// with an allocator manager managing its global/local tso allocators.
+	// ams stores the allocator managers of the keyspace groups. Each keyspace group is
+	// assigned with an allocator manager managing its global/local tso allocators.
 	// Use a fixed size array to maximize the efficiency of concurrent access to
 	// different keyspace groups for tso service.
 	ams [mcsutils.MaxKeyspaceGroupCountInUse]atomic.Pointer[AllocatorManager]
-	// ksgs stores the keyspace groups' membership/distribution meta.
-	ksgs [mcsutils.MaxKeyspaceGroupCountInUse]atomic.Pointer[endpoint.KeyspaceGroup]
+	// kgs stores the keyspace groups' membership/distribution meta.
+	kgs [mcsutils.MaxKeyspaceGroupCountInUse]atomic.Pointer[endpoint.KeyspaceGroup]
+	// keyspaceLookupTable is a map from keyspace (id) to its keyspace group (id).
+	// stored as map[uint32]uint32
+	keyspaceLookupTable sync.Map
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -446,7 +451,11 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		if kgm.ams[group.ID].Load() != nil {
 			log.Info("keyspace group already initialized, so update meta only",
 				zap.Uint32("keyspace-group-id", group.ID))
-			kgm.ksgs[group.ID].Store(group)
+
+			oldGroup := kgm.kgs[group.ID].Load()
+			group.KeyspaceLookupTable = kgm.updateKeyspaceGroupMembership(
+				group.ID, oldGroup.Keyspaces, group.Keyspaces, oldGroup.KeyspaceLookupTable)
+			kgm.kgs[group.ID].Store(group)
 			return
 		}
 
@@ -475,40 +484,130 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			storage = kgm.tsoSvcStorage
 		}
 
+		group.KeyspaceLookupTable = kgm.buildKeyspaceLookupTable(group.ID, group.Keyspaces)
+		kgm.kgs[group.ID].Store(group)
 		kgm.ams[group.ID].Store(NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg, true))
-		kgm.ksgs[group.ID].Store(group)
 	} else {
 		// Not assigned to me. If this host/pod owns this keyspace group, it should resign.
 		kgm.deleteKeyspaceGroup(group.ID)
 	}
 }
 
-// deleteKeyspaceGroup deletes the given keyspace group.
-func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(id uint32) {
-	kgm.ksgs[id].Store(nil)
-	am := kgm.ams[id].Swap(nil)
-	if am == nil {
-		return
+// updateKeyspaceGroupMembership updates the keyspace lookup table for the given keyspace group.
+func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
+	groupID uint32, oldKeyspaces, newKeyspaces []uint32,
+	oldKeyspaceLookupTable map[uint32]struct{},
+) map[uint32]struct{} {
+	oldLen := len(oldKeyspaces)
+	newLen := len(newKeyspaces)
+
+	// Sort the keyspaces in ascending order
+	sort.Slice(newKeyspaces, func(i, j int) bool {
+		return newKeyspaces[i] < newKeyspaces[j]
+	})
+
+	// Mostly, the membership has no change, so we optimize for this case.
+	sameMembership := true
+	if oldLen != newLen {
+		sameMembership = false
+	} else {
+		for i := 0; i < oldLen; i++ {
+			if oldKeyspaces[i] != newKeyspaces[i] {
+				sameMembership = false
+				break
+			}
+		}
 	}
-	am.close()
-	log.Info("deleted keyspace group", zap.Uint32("keyspace-group-id", id))
+
+	var newKeyspaceLookupTable map[uint32]struct{}
+
+	if sameMembership {
+		// The keyspace group membership is not changed, so we reuse the old one.
+		newKeyspaceLookupTable = oldKeyspaceLookupTable
+	} else {
+		// The keyspace group membership is changed, so we update the keyspace lookup table.
+		newKeyspaceLookupTable = make(map[uint32]struct{})
+		for i, j := 0, 0; i < oldLen || j < newLen; {
+			if i < oldLen && j < newLen && oldKeyspaces[i] == newKeyspaces[j] {
+				newKeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
+				i++
+				j++
+			} else if i < oldLen && j < newLen && oldKeyspaces[i] < newKeyspaces[j] || j == newLen {
+				kgm.keyspaceLookupTable.Delete(oldKeyspaces[i])
+				i++
+			} else {
+				newKeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
+				kgm.keyspaceLookupTable.Store(newKeyspaces[j], groupID)
+				j++
+			}
+		}
+	}
+
+	return newKeyspaceLookupTable
+}
+
+func (kgm *KeyspaceGroupManager) buildKeyspaceLookupTable(groupID uint32, keyspaces []uint32) map[uint32]struct{} {
+	keyspaceLookupTable := make(map[uint32]struct{})
+	for _, kid := range keyspaces {
+		keyspaceLookupTable[kid] = struct{}{}
+		kgm.keyspaceLookupTable.Store(kid, groupID)
+	}
+	return keyspaceLookupTable
+}
+
+// deleteKeyspaceGroup deletes the given keyspace group.
+func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
+	kg := kgm.kgs[groupID].Swap(nil)
+	if kg != nil {
+		for _, kid := range kg.Keyspaces {
+			kgm.keyspaceLookupTable.CompareAndDelete(kid, kg.ID)
+		}
+	}
+	am := kgm.ams[groupID].Swap(nil)
+	if am != nil {
+		am.close()
+	}
+
+	log.Info("deleted keyspace group", zap.Uint32("keyspace-group-id", groupID))
 }
 
 // GetAllocatorManager returns the AllocatorManager of the given keyspace group
-func (kgm *KeyspaceGroupManager) GetAllocatorManager(id uint32) (*AllocatorManager, error) {
-	if err := kgm.checkKeySpaceGroupID(id); err != nil {
+func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) (*AllocatorManager, error) {
+	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
-	if am := kgm.ams[id].Load(); am != nil {
+	if am := kgm.ams[keyspaceGroupID].Load(); am != nil {
 		return am, nil
 	}
-	return nil, errs.ErrGetAllocatorManager.FastGenByArgs(
-		fmt.Sprintf("requested keyspace group with id %d %s by this host/pod", id, errs.NotServedErr))
+	return nil, kgm.genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
+}
+
+// GetAMWithMembershipCheck returns the AllocatorManager of the given keyspace group and check if the keyspace
+// is served by this keyspace group.
+func (kgm *KeyspaceGroupManager) GetAMWithMembershipCheck(
+	keyspaceID, keyspaceGroupID uint32,
+) (*AllocatorManager, error) {
+	if am := kgm.ams[keyspaceGroupID].Load(); am != nil {
+		ksg := kgm.kgs[keyspaceGroupID].Load()
+		if ksg == nil {
+			return nil, kgm.genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
+		}
+		if _, ok := ksg.KeyspaceLookupTable[keyspaceID]; !ok {
+			return nil, kgm.genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
+		}
+		return am, nil
+	}
+	return nil, kgm.genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 }
 
 // GetElectionMember returns the election member of the given keyspace group
-func (kgm *KeyspaceGroupManager) GetElectionMember(id uint32) (ElectionMember, error) {
-	am, err := kgm.GetAllocatorManager(id)
+func (kgm *KeyspaceGroupManager) GetElectionMember(
+	keyspaceID, keyspaceGroupID uint32,
+) (ElectionMember, error) {
+	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
+		return nil, err
+	}
+	am, err := kgm.GetAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -516,12 +615,25 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(id uint32) (ElectionMember, e
 }
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
-func (kgm *KeyspaceGroupManager) HandleTSORequest(id uint32, dcLocation string, count uint32) (pdpb.Timestamp, error) {
-	am, err := kgm.GetAllocatorManager(id)
-	if err != nil {
-		return pdpb.Timestamp{}, err
+func (kgm *KeyspaceGroupManager) HandleTSORequest(
+	keyspaceID, keyspaceGroupID uint32,
+	dcLocation string, count uint32,
+) (ts pdpb.Timestamp, currentKeyspaceGroupID uint32, err error) {
+	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
+		return pdpb.Timestamp{}, keyspaceGroupID, err
 	}
-	return am.HandleRequest(dcLocation, count)
+	am, err := kgm.GetAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
+	if err != nil {
+		// The keyspace doesn't belong to this keyspace group, we should check if it belongs to any other
+		// keyspace groups, and return the correct keyspace group ID to the client.
+		kgid, loaded := kgm.keyspaceLookupTable.Load(keyspaceID)
+		if loaded && kgid != nil {
+			return pdpb.Timestamp{}, kgid.(uint32), err
+		}
+		return pdpb.Timestamp{}, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+	}
+	ts, err = am.HandleRequest(dcLocation, count)
+	return ts, keyspaceGroupID, err
 }
 
 func (kgm *KeyspaceGroupManager) checkKeySpaceGroupID(id uint32) error {
@@ -529,5 +641,12 @@ func (kgm *KeyspaceGroupManager) checkKeySpaceGroupID(id uint32) error {
 		return nil
 	}
 	return errs.ErrKeyspaceGroupIDInvalid.FastGenByArgs(
-		fmt.Sprintf("invalid keyspace group id %d which shouldn't >= %d", id, mcsutils.MaxKeyspaceGroupCountInUse))
+		fmt.Sprintf("%d shouldn't >= %d", id, mcsutils.MaxKeyspaceGroupCountInUse))
+}
+
+func (kgm *KeyspaceGroupManager) genNotServedErr(perr *perrors.Error, keyspaceGroupID uint32) error {
+	return perr.FastGenByArgs(
+		fmt.Sprintf(
+			"requested keyspace group with id %d %s by this host/pod",
+			keyspaceGroupID, errs.NotServedErr))
 }
