@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -78,12 +79,13 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 
 func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 	// add three nodes.
-	nodes := make(map[string]struct{})
+	nodes := make(map[string]bs.Server)
 	for i := 0; i < 3; i++ {
 		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 		defer cleanup()
-		nodes[s.GetAddr()] = struct{}{}
+		nodes[s.GetAddr()] = s
 	}
+	mcs.WaitForPrimaryServing(suite.Require(), nodes)
 
 	// create a keyspace group.
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -118,10 +120,11 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 }
 
 func (suite *keyspaceGroupTestSuite) TestReplica() {
-	nodes := make(map[string]struct{})
+	nodes := make(map[string]bs.Server)
 	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 	defer cleanup()
-	nodes[s.GetAddr()] = struct{}{}
+	nodes[s.GetAddr()] = s
+	mcs.WaitForPrimaryServing(suite.Require(), nodes)
 
 	// miss replica.
 	params := &handlers.AllocNodeForKeyspaceGroupParams{
@@ -174,7 +177,8 @@ func (suite *keyspaceGroupTestSuite) TestReplica() {
 	// the keyspace group is exist, the new replica is more than the old replica.
 	s2, cleanup2 := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 	defer cleanup2()
-	nodes[s2.GetAddr()] = struct{}{}
+	nodes[s2.GetAddr()] = s2
+	mcs.WaitForPrimaryServing(suite.Require(), nodes)
 	params = &handlers.AllocNodeForKeyspaceGroupParams{
 		KeyspaceGroupID: 1,
 		Replica:         2,
@@ -228,12 +232,12 @@ func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(request *handlers.Cr
 	return resp.StatusCode
 }
 
-func checkNodes(nodes []endpoint.KeyspaceGroupMember, addrs map[string]struct{}) bool {
-	if len(nodes) != len(addrs) {
+func checkNodes(nodes []endpoint.KeyspaceGroupMember, servers map[string]bs.Server) bool {
+	if len(nodes) != len(servers) {
 		return false
 	}
 	for _, node := range nodes {
-		if _, ok := addrs[node.Address]; !ok {
+		if _, ok := servers[node.Address]; !ok {
 			return false
 		}
 	}
