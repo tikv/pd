@@ -273,8 +273,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan,
-		successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name), requestRetryCounter.WithLabelValues(group.Name), resourceGroupTokenRequestCounter.WithLabelValues(group.Name))
+	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 	if err != nil {
 		return nil, err
 	}
@@ -540,8 +539,6 @@ func newGroupCostController(
 	mainCfg *Config,
 	lowRUNotifyChan chan struct{},
 	tokenBucketUpdateChan chan *groupCostController,
-	successfulRequestDuration prometheus.Observer,
-	failedRequestCounter, requestRetryCounter, tokenRequestCounter prometheus.Counter,
 ) (*groupCostController, error) {
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -551,14 +548,13 @@ func newGroupCostController(
 	default:
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
-
 	gc := &groupCostController{
 		ResourceGroup:             group,
 		mainCfg:                   mainCfg,
-		successfulRequestDuration: successfulRequestDuration,
-		failedRequestCounter:      failedRequestCounter,
-		requestRetryCounter:       requestRetryCounter,
-		tokenRequestCounter:       tokenRequestCounter,
+		successfulRequestDuration: successfulRequestDuration.WithLabelValues(group.Name),
+		failedRequestCounter:      failedRequestCounter.WithLabelValues(group.Name),
+		requestRetryCounter:       requestRetryCounter.WithLabelValues(group.Name),
+		tokenRequestCounter:       resourceGroupTokenRequestCounter.WithLabelValues(group.Name),
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
