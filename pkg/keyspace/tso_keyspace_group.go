@@ -89,8 +89,8 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) error {
 	return nil
 }
 
-// saveKeyspaceGroups will try to save a new keyspace group into the storage.
-// If the keyspace group already exists, it will return ErrKeyspaceGroupExists.
+// saveKeyspaceGroups will try to save the given keyspace groups into the storage.
+// If any keyspace group already exists, it will return ErrKeyspaceGroupExists.
 func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
 	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		for _, keyspaceGroup := range keyspaceGroups {
@@ -102,7 +102,6 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 			if kg != nil {
 				return ErrKeyspaceGroupExists
 			}
-			// TODO: add replica count
 			m.store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 				ID:        keyspaceGroup.ID,
 				UserKind:  keyspaceGroup.UserKind,
@@ -115,8 +114,8 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 	})
 }
 
-// updateKeyspaceGroups will try to update the keyspace group into the storage.
-// If the keyspace group does not exist, it will return ErrKeyspaceGroupNotFound.
+// updateKeyspaceGroups will try to update the given keyspace group in the storage.
+// If any keyspace group does not exist, it returns ErrKeyspaceGroupNotFound.
 func (m *GroupManager) updateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
 	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		for _, keyspaceGroup := range keyspaceGroups {
@@ -128,7 +127,6 @@ func (m *GroupManager) updateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceG
 			if kg == nil {
 				return ErrKeyspaceGroupNotFound
 			}
-			// TODO: add replica count
 			m.store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 				ID:        keyspaceGroup.ID,
 				UserKind:  keyspaceGroup.UserKind,
@@ -193,7 +191,9 @@ func (m *GroupManager) SplitKeyspaceGroupByID(id, newID uint32, keyspaces []uint
 		}
 		// Update the old keyspace group.
 		oldKg.Keyspaces = splitKeyspaces
-		m.store.SaveKeyspaceGroup(txn, oldKg)
+		if err = m.store.SaveKeyspaceGroup(txn, oldKg); err != nil {
+			return err
+		}
 		// Create the new split keyspace group.
 		return m.store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 			ID: newID,
