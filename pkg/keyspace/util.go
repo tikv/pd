@@ -43,9 +43,11 @@ var (
 	ErrKeyspaceExists = errors.New("keyspace already exists")
 	// ErrKeyspaceGroupExists indicates target keyspace group already exists.
 	ErrKeyspaceGroupExists = errors.New("keyspace group already exists")
-	errModifyDefault       = errors.New("cannot modify default keyspace's state")
-	errIllegalOperation    = errors.New("unknown operation")
-	errNoAvailableNode     = errors.New("no available node")
+	// ErrKeyspaceGroupNotExists indicates target keyspace group does not exist.
+	ErrKeyspaceGroupNotExists = errors.New("keyspace group does not exist")
+	errModifyDefault          = errors.New("cannot modify default keyspace's state")
+	errIllegalOperation       = errors.New("unknown operation")
+	errNoAvailableNode        = errors.New("no available node")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.

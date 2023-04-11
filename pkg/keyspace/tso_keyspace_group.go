@@ -16,14 +16,14 @@ package keyspace
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/pingcap/failpoint"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/balancer"
-	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
@@ -38,6 +38,10 @@ const (
 	defaultBalancerPolicy = balancer.PolicyRoundRobin
 	allocNodeTimeout      = 1 * time.Second
 	allocNodeInterval     = 10 * time.Millisecond
+	// TODO: move it to etcdutil
+	watchEtcdChangeRetryInterval = 1 * time.Second
+	maxRetryTimes                = 25
+	retryInterval                = 100 * time.Millisecond
 )
 
 const (
@@ -55,6 +59,7 @@ type GroupManager struct {
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
+
 	// store is the storage for keyspace group related information.
 	store endpoint.KeyspaceGroupStorage
 
@@ -67,13 +72,15 @@ type GroupManager struct {
 
 	policy balancer.Policy
 
+	// TODO: add user kind with different balancer
+	// when we ensure where the correspondence between tso node and user kind will be found
 	nodesBalancer balancer.Balancer[string]
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
 func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupStorage, client *clientv3.Client, clusterID uint64) *GroupManager {
 	ctx, cancel := context.WithCancel(ctx)
-	key := discovery.TSOAddrsPath(clusterID)
+	key := discovery.TSOPath(clusterID)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
 	for i := 0; i < int(endpoint.UserKindCount); i++ {
 		groups[endpoint.UserKind(i)] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
@@ -81,12 +88,12 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 	return &GroupManager{
 		ctx:              ctx,
 		cancel:           cancel,
-		groups: groups,
 		store:            store,
 		client:           client,
 		tsoServiceKey:    key,
 		tsoServiceEndKey: clientv3.GetPrefixRangeEnd(key) + "/",
 		policy:           defaultBalancerPolicy,
+		groups:           groups,
 	}
 }
 
@@ -125,17 +132,11 @@ func (m *GroupManager) Bootstrap() error {
 		m.groups[userKind].Put(group)
 	}
 
+	// If the etcd client is not nil, start the watch loop.
 	if m.client != nil {
 		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
-		resp, err := etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
-		if err != nil {
-			return err
-		}
-		for _, item := range resp.Kvs {
-			m.nodesBalancer.Put(string(item.Value))
-		}
 		m.wg.Add(1)
-		go m.startWatchLoop(resp.Header.GetRevision())
+		go m.startWatchLoop()
 	}
 	return nil
 }
@@ -146,49 +147,88 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
-func (m *GroupManager) startWatchLoop(revision int64) {
+func (m *GroupManager) startWatchLoop() {
 	defer m.wg.Done()
-	if err := m.watchServiceAddrs(revision); err != nil {
-		log.Error("watch service addresses failed", zap.Error(err))
-	}
-}
-
-func (m *GroupManager) watchServiceAddrs(revision int64) error {
 	ctx, cancel := context.WithCancel(m.ctx)
 	defer cancel()
+	var (
+		revision int64
+		err      error
+	)
+	for i := 0; i < maxRetryTimes; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryInterval):
+		}
+		resp, err := etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
+		if err == nil {
+			revision = resp.Header.Revision
+			for _, item := range resp.Kvs {
+				s := &discovery.ServiceRegistryEntry{}
+				if err := json.Unmarshal(item.Value, s); err != nil {
+					log.Warn("failed to unmarshal service registry entry", zap.Error(err))
+					continue
+				}
+				m.nodesBalancer.Put(s.ServiceAddr)
+			}
+			break
+		}
+	}
+	if err != nil {
+		log.Warn("failed to get tso service addrs from etcd", zap.Error(err))
+	}
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		default:
 		}
-		watchChan := m.client.Watch(ctx, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey), clientv3.WithRev(revision))
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			case wresp := <-watchChan:
-				if wresp.CompactRevision != 0 {
-					log.Warn("required revision has been compacted, the watcher will watch again with the compact revision",
-						zap.Int64("required-revision", revision),
-						zap.Int64("compact-revision", wresp.CompactRevision))
-					revision = wresp.CompactRevision
-					break
+		nextRevision, err := m.watchServiceAddrs(ctx, revision)
+		if err != nil {
+			log.Error("watcher canceled unexpectedly and a new watcher will start after a while",
+				zap.Int64("next-revision", nextRevision),
+				zap.Time("retry-at", time.Now().Add(watchEtcdChangeRetryInterval)),
+				zap.Error(err))
+			revision = nextRevision
+			time.Sleep(watchEtcdChangeRetryInterval)
+		}
+	}
+}
+
+func (m *GroupManager) watchServiceAddrs(ctx context.Context, revision int64) (int64, error) {
+	watcher := clientv3.NewWatcher(m.client)
+	defer watcher.Close()
+	for {
+	WatchChan:
+		watchChan := watcher.Watch(ctx, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey), clientv3.WithRev(revision))
+		select {
+		case <-ctx.Done():
+			return revision, nil
+		case wresp := <-watchChan:
+			if wresp.CompactRevision != 0 {
+				log.Warn("required revision has been compacted, the watcher will watch again with the compact revision",
+					zap.Int64("required-revision", revision),
+					zap.Int64("compact-revision", wresp.CompactRevision))
+				revision = wresp.CompactRevision
+				goto WatchChan
+			}
+			if wresp.Err() != nil {
+				log.Error("watch is canceled or closed",
+					zap.Int64("required-revision", revision),
+					zap.Error(wresp.Err()))
+				return revision, wresp.Err()
+			}
+			for _, event := range wresp.Events {
+				s := &discovery.ServiceRegistryEntry{}
+				if err := json.Unmarshal(event.Kv.Value, s); err != nil {
+					log.Warn("failed to unmarshal service registry entry", zap.Error(err))
 				}
-				if wresp.Err() != nil {
-					log.Error("watch is canceled or closed",
-						zap.Int64("required-revision", revision),
-						zap.Error(wresp.Err()))
-					return wresp.Err()
-				}
-				for _, event := range wresp.Events {
-					addr := string(event.Kv.Value)
-					switch event.Type {
-					case clientv3.EventTypePut:
-						m.nodesBalancer.Put(addr)
-					case clientv3.EventTypeDelete:
-						m.nodesBalancer.Delete(addr)
-					}
+				switch event.Type {
+				case clientv3.EventTypePut:
+					m.nodesBalancer.Put(s.ServiceAddr)
+				case clientv3.EventTypeDelete:
+					m.nodesBalancer.Delete(s.ServiceAddr)
 				}
 			}
 		}
@@ -199,22 +239,6 @@ func (m *GroupManager) watchServiceAddrs(revision int64) error {
 func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
 	m.Lock()
 	defer m.Unlock()
-	enableAllocate := true
-	failpoint.Inject("disableAllocate", func() {
-		enableAllocate = false
-	})
-	if enableAllocate {
-		for _, keyspaceGroup := range keyspaceGroups {
-			// TODO: consider the case that the node offline
-			members := m.AllocNodesForGroup(keyspaceGroup.Replica)
-			if len(members) == 0 {
-				// directly return error if no available node.
-				// It means that the number of nodes is reducing between the check of controller and the execution of this function.
-				return errNoAvailableNode
-			}
-			keyspaceGroup.Members = members
-		}
-	}
 	if err := m.saveKeyspaceGroups(keyspaceGroups, false); err != nil {
 		return err
 	}
@@ -294,10 +318,9 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 				return ErrKeyspaceGroupExists
 			}
 			newKG := &endpoint.KeyspaceGroup{
-				ID:       keyspaceGroup.ID,
-				UserKind: keyspaceGroup.UserKind,
+				ID:        keyspaceGroup.ID,
+				UserKind:  keyspaceGroup.UserKind,
 				Keyspaces: keyspaceGroup.Keyspaces,
-				Replica:  keyspaceGroup.Replica,
 			}
 			m.store.SaveKeyspaceGroup(txn, newKG)
 		}
@@ -401,30 +424,52 @@ func (m *GroupManager) GetNodesNum() int {
 	return len(m.nodesBalancer.GetAll())
 }
 
-// AllocNodesForGroup allocates nodes for the keyspace group.
-// Note: the replica should be less than the number of nodes.
-func (m *GroupManager) AllocNodesForGroup(replica int) []endpoint.KeyspaceGroupMember {
+// AllocNodesForKeyspaceGroup allocates nodes for the keyspace group.
+func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]endpoint.KeyspaceGroupMember, error) {
 	ctx, cancel := context.WithTimeout(m.ctx, allocNodeTimeout)
 	defer cancel()
 	ticker := time.NewTicker(allocNodeInterval)
 	defer ticker.Stop()
-	exists := make(map[string]struct{})
 	nodes := make([]endpoint.KeyspaceGroupMember, 0, replica)
-	for len(exists) < replica {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
+	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		kg, err := m.store.LoadKeyspaceGroup(txn, id)
+		if err != nil {
+			return err
 		}
-		addr := m.nodesBalancer.Next()
-		if addr == "" { // no node
-			return nil
+		if kg == nil {
+			return ErrKeyspaceGroupNotExists
 		}
-		if _, ok := exists[addr]; ok {
-			continue
+		exists := make(map[string]struct{})
+		for _, member := range kg.Members {
+			exists[member.Address] = struct{}{}
+			nodes = append(nodes, member)
 		}
-		exists[addr] = struct{}{}
-		nodes = append(nodes, endpoint.KeyspaceGroupMember{Address: addr})
+		for len(exists) < replica {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+			}
+			num := len(m.nodesBalancer.GetAll())
+			if num < replica || num == 0 { // double check
+				return errNoAvailableNode
+			}
+			addr := m.nodesBalancer.Next()
+			if addr == "" {
+				return errNoAvailableNode
+			}
+			if _, ok := exists[addr]; ok {
+				continue
+			}
+			exists[addr] = struct{}{}
+			nodes = append(nodes, endpoint.KeyspaceGroupMember{Address: addr})
+		}
+		kg.Members = nodes
+		m.store.SaveKeyspaceGroup(txn, kg)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nodes
+	return nodes, nil
 }

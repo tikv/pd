@@ -82,7 +82,7 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	requests := make([]*CreateKeyspaceRequest, count)
 	for i := 0; i < count; i++ {
 		requests[i] = &CreateKeyspaceRequest{
-			Name: fmt.Sprintf("test_keyspace%d", i),
+			Name: fmt.Sprintf("test_keyspace_%d", i),
 			Config: map[string]string{
 				testConfig1: "100",
 				testConfig2: "200",

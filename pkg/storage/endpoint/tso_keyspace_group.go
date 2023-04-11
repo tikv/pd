@@ -86,8 +86,6 @@ type KeyspaceGroup struct {
 	// KeyspaceLookupTable is for fast lookup if a given keyspace belongs to this keyspace group.
 	// It's not persisted and will be built when loading from storage.
 	KeyspaceLookupTable map[uint32]struct{} `json:"-"`
-	// Replica is the tso replica count of the keyspace group.
-	Replica int `json:"replica"`
 }
 
 // KeyspaceGroupStorage is the interface for keyspace group storage.

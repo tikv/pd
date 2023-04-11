@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -45,8 +44,6 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/disableAllocate", "return(true)"))
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/disableAllocate", "return(true)"))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(suite.ctx, 1)
 	suite.cluster = cluster
@@ -58,8 +55,6 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 }
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/disableAllocate"))
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/disableAllocate"))
 	suite.cancel()
 	suite.cluster.Destroy()
 }
@@ -70,33 +65,29 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 		{
 			ID:       uint32(1),
 			UserKind: endpoint.Standard.String(),
-			Replica:  1,
 		},
 		{
 			ID:       uint32(2),
 			UserKind: endpoint.Standard.String(),
-			Replica:  1,
 		},
 	}}
 	code := suite.tryCreateKeyspaceGroup(kgs)
 	re.Equal(http.StatusOK, code)
 
-	// miss user kind.
+	// miss user kind, use default value.
 	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
-			ID:      uint32(3),
-			Replica: 1,
+			ID: uint32(3),
 		},
 	}}
 	code = suite.tryCreateKeyspaceGroup(kgs)
-	re.Equal(http.StatusBadRequest, code)
+	re.Equal(http.StatusOK, code)
 
 	// invalid user kind.
 	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
-			ID:       uint32(3),
+			ID:       uint32(4),
 			UserKind: "invalid",
-			Replica:  1,
 		},
 	}}
 	code = suite.tryCreateKeyspaceGroup(kgs)
@@ -106,7 +97,6 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
 			UserKind: endpoint.Standard.String(),
-			Replica:  1,
 		},
 	}}
 	code = suite.tryCreateKeyspaceGroup(kgs)
@@ -117,7 +107,6 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 		{
 			ID:       utils.MaxKeyspaceGroupCount + 1,
 			UserKind: endpoint.Standard.String(),
-			Replica:  1,
 		},
 	}}
 	code = suite.tryCreateKeyspaceGroup(kgs)
@@ -128,7 +117,6 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 		{
 			ID:       uint32(2),
 			UserKind: endpoint.Standard.String(),
-			Replica:  1,
 		},
 	}}
 	code = suite.tryCreateKeyspaceGroup(kgs)
@@ -141,12 +129,10 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 		{
 			ID:       uint32(1),
 			UserKind: endpoint.Standard.String(),
-			Replica:  1,
 		},
 		{
 			ID:       uint32(2),
 			UserKind: endpoint.Standard.String(),
-			Replica:  1,
 		},
 	}}
 

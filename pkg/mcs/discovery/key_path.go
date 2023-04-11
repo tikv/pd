@@ -32,7 +32,7 @@ func discoveryPath(clusterID, serviceName string) string {
 	return strings.Join([]string{registryPrefix, clusterID, serviceName, registryKey}, "/")
 }
 
-// TSOAddrsPath returns the path to store TSO addresses.
-func TSOAddrsPath(clusterID uint64) string {
+// TSOPath returns the path to store TSO addresses.
+func TSOPath(clusterID uint64) string {
 	return discoveryPath(strconv.FormatUint(clusterID, 10), "tso") + "/"
 }

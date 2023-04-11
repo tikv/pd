@@ -198,7 +198,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, cou
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
 	for i := 0; i < count; i++ {
 		createRequest := &handlers.CreateKeyspaceParams{
-			Name:   fmt.Sprintf("test_keyspace%d", i),
+			Name:   fmt.Sprintf("test_keyspace_%d", i),
 			Config: testConfig,
 		}
 		resultMeta[i] = mustCreateKeyspace(re, server, createRequest)

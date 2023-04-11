@@ -18,12 +18,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -32,7 +31,10 @@ import (
 	"github.com/tikv/pd/tests/integrations/mcs"
 )
 
-const keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
+const (
+	allocPrefix          = "/pd/api/v2/tso/keyspace-groups/alloc"
+	keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
+)
 
 type keyspaceGroupTestSuite struct {
 	suite.Suite
@@ -74,87 +76,145 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	suite.cluster.Destroy()
 }
 
-func (suite *keyspaceGroupTestSuite) TestAllocNodesForGroup() {
-	manager := suite.server.GetServer().GetKeyspaceGroupManager()
-	// successful to allocate one node, there is one node in the cluster.
-	_, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
-	defer cleanup()
-	members := manager.AllocNodesForGroup(1)
-	suite.Len(members, 1)
-	// failed to allocate two nodes, there is only one node in the cluster.
-	members = manager.AllocNodesForGroup(2)
-	suite.Empty(members)
-	// successful to allocate two nodes, there are two nodes in the cluster.
-	_, cleanup2 := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
-	defer cleanup2()
-	client := suite.server.GetEtcdClient()
-	clusterID := strconv.FormatUint(suite.server.GetClusterID(), 10)
-	endpoints, err := discovery.Discover(client, clusterID, "tso")
-	suite.NoError(err)
-	suite.Len(endpoints, 2)
-	for i := 0; i < 10; i++ {
-		members = manager.AllocNodesForGroup(2)
-		suite.Len(members, 2)
-		// the two nodes are different always.
-		suite.NotEqual(members[0].Address, members[1].Address)
-		// the two nodes are in the cluster.
-		for _, member := range members {
-			switch member.Address {
-			case endpoints[0]:
-			case endpoints[1]:
-			default:
-				suite.Fail("unexpected member", member.Address)
-			}
-		}
+func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
+	// add three nodes.
+	nodes := make(map[string]struct{})
+	for i := 0; i < 3; i++ {
+		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+		defer cleanup()
+		nodes[s.GetAddr()] = struct{}{}
 	}
-}
 
-func (suite *keyspaceGroupTestSuite) TestReplicaNum() {
-	_, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
-	defer cleanup()
-	// replica is more than the num of nodes.
+	// create a keyspace group.
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
 			ID:       uint32(1),
 			UserKind: endpoint.Standard.String(),
-			Replica:  2,
 		},
 	}}
 	code := suite.tryCreateKeyspaceGroup(kgs)
-	suite.Equal(http.StatusBadRequest, code)
+	suite.Equal(http.StatusOK, code)
+
+	// alloc nodes for the keyspace group.
+	params := &handlers.AllocNodeForKeyspaceGroupParams{
+		KeyspaceGroupID: 1,
+		Replica:         1,
+	}
+	code, got := suite.tryAllocNodesForKeyspaceGroup(params)
+	suite.Equal(http.StatusOK, code)
+	suite.Equal(1, len(got))
+	suite.Contains(nodes, got[0].Address)
+	oldNode := got[0].Address
+
+	// alloc node update to 2.
+	params.Replica = 2
+	code, got = suite.tryAllocNodesForKeyspaceGroup(params)
+	suite.Equal(http.StatusOK, code)
+	suite.Equal(2, len(got))
+	suite.Contains(nodes, got[0].Address)
+	suite.Contains(nodes, got[1].Address)
+	suite.True(oldNode == got[0].Address || oldNode == got[1].Address) // the old node is also in the new result.
+	suite.NotEqual(got[0].Address, got[1].Address)                     // the two nodes are different.
+}
+
+func (suite *keyspaceGroupTestSuite) TestReplica() {
+	nodes := make(map[string]struct{})
+	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+	defer cleanup()
+	nodes[s.GetAddr()] = struct{}{}
+
 	// miss replica.
-	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
-		{
-			ID:       uint32(2),
-			UserKind: endpoint.Standard.String(),
-		},
-	}}
-	code = suite.tryCreateKeyspaceGroup(kgs)
+	params := &handlers.AllocNodeForKeyspaceGroupParams{
+		KeyspaceGroupID: 1,
+	}
+	code, got := suite.tryAllocNodesForKeyspaceGroup(params)
 	suite.Equal(http.StatusBadRequest, code)
+	suite.Empty(got)
 
 	// replica is negative.
-	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
-		{
-			ID:       uint32(3),
-			UserKind: endpoint.Standard.String(),
-			Replica:  -1,
-		},
-	}}
-	code = suite.tryCreateKeyspaceGroup(kgs)
+	params = &handlers.AllocNodeForKeyspaceGroupParams{
+		KeyspaceGroupID: 1,
+		Replica:         -1,
+	}
+	code, _ = suite.tryAllocNodesForKeyspaceGroup(params)
 	suite.Equal(http.StatusBadRequest, code)
 
-	// replica is equal with the num of nodes.
-	_, cleanup2 := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
-	defer cleanup2()
-	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+	// the keyspace group is not exist.
+	params = &handlers.AllocNodeForKeyspaceGroupParams{
+		KeyspaceGroupID: 2,
+		Replica:         1,
+	}
+	code, _ = suite.tryAllocNodesForKeyspaceGroup(params)
+	suite.Equal(http.StatusBadRequest, code)
+
+	// the keyspace group is exist.
+	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
-			ID:       uint32(4),
+			ID:       uint32(1),
 			UserKind: endpoint.Standard.String(),
-			Replica:  2,
 		},
 	}}
 	code = suite.tryCreateKeyspaceGroup(kgs)
 	suite.Equal(http.StatusOK, code)
+	params = &handlers.AllocNodeForKeyspaceGroupParams{
+		KeyspaceGroupID: 1,
+		Replica:         1,
+	}
+	code, got = suite.tryAllocNodesForKeyspaceGroup(params)
+	suite.Equal(http.StatusOK, code)
+	suite.True(checkNodes(got, nodes))
+
+	// the keyspace group is exist, but the replica is more than the num of nodes.
+	params = &handlers.AllocNodeForKeyspaceGroupParams{
+		KeyspaceGroupID: 1,
+		Replica:         2,
+	}
+	code, _ = suite.tryAllocNodesForKeyspaceGroup(params)
+	suite.Equal(http.StatusBadRequest, code)
+	// the keyspace group is exist, the new replica is more than the old replica.
+	s2, cleanup2 := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+	defer cleanup2()
+	nodes[s2.GetAddr()] = struct{}{}
+	params = &handlers.AllocNodeForKeyspaceGroupParams{
+		KeyspaceGroupID: 1,
+		Replica:         2,
+	}
+	code, got = suite.tryAllocNodesForKeyspaceGroup(params)
+	suite.Equal(http.StatusOK, code)
+	suite.True(checkNodes(got, nodes))
+
+	// the keyspace group is exist, the new replica is equal to the old replica.
+	params = &handlers.AllocNodeForKeyspaceGroupParams{
+		KeyspaceGroupID: 1,
+		Replica:         2,
+	}
+	code, _ = suite.tryAllocNodesForKeyspaceGroup(params)
+	suite.Equal(http.StatusBadRequest, code)
+
+	// the keyspace group is exist, the new replica is less than the old replica.
+	params = &handlers.AllocNodeForKeyspaceGroupParams{
+		KeyspaceGroupID: 1,
+		Replica:         1,
+	}
+	code, _ = suite.tryAllocNodesForKeyspaceGroup(params)
+	suite.Equal(http.StatusBadRequest, code)
+}
+
+func (suite *keyspaceGroupTestSuite) tryAllocNodesForKeyspaceGroup(request *handlers.AllocNodeForKeyspaceGroupParams) (int, []endpoint.KeyspaceGroupMember) {
+	data, err := json.Marshal(request)
+	suite.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+allocPrefix, bytes.NewBuffer(data))
+	suite.NoError(err)
+	resp, err := suite.dialClient.Do(httpReq)
+	suite.NoError(err)
+	defer resp.Body.Close()
+	nodes := make([]endpoint.KeyspaceGroupMember, 0)
+	if resp.StatusCode == http.StatusOK {
+		bodyBytes, err := io.ReadAll(resp.Body)
+		suite.NoError(err)
+		suite.NoError(json.Unmarshal(bodyBytes, &nodes))
+	}
+	return resp.StatusCode, nodes
 }
 
 func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(request *handlers.CreateKeyspaceGroupParams) int {
@@ -166,4 +226,16 @@ func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(request *handlers.Cr
 	suite.NoError(err)
 	defer resp.Body.Close()
 	return resp.StatusCode
+}
+
+func checkNodes(nodes []endpoint.KeyspaceGroupMember, addrs map[string]struct{}) bool {
+	if len(nodes) != len(addrs) {
+		return false
+	}
+	for _, node := range nodes {
+		if _, ok := addrs[node.Address]; !ok {
+			return false
+		}
+	}
+	return true
 }

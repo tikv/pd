@@ -81,7 +81,7 @@ func (suite *keyspaceTestSuite) TestRegionLabeler() {
 	var err error
 	for i := 0; i < count; i++ {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name:       fmt.Sprintf("test_keyspace%d", i),
+			Name:       fmt.Sprintf("test_keyspace_%d", i),
 			CreateTime: now,
 		})
 		re.NoError(err)
