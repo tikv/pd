@@ -107,8 +107,7 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	mustCreateKeyspaceGroup(re, suite.server, kgs)
 	resp := sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
 	re.Len(resp, 2)
-	mustSplitKeyspaceGroup(re, suite.server, &handlers.SplitKeyspaceGroupByIDParams{
-		ID:        uint32(1),
+	mustSplitKeyspaceGroup(re, suite.server, 1, &handlers.SplitKeyspaceGroupByIDParams{
 		NewID:     uint32(2),
 		Keyspaces: []uint32{111, 222},
 	})
@@ -179,10 +178,10 @@ func mustCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, r
 	re.Equal(http.StatusOK, resp.StatusCode)
 }
 
-func mustSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, request *handlers.SplitKeyspaceGroupByIDParams) {
+func mustSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id uint32, request *handlers.SplitKeyspaceGroupByIDParams) {
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspaceGroupsPrefix+"/split", bytes.NewBuffer(data))
+	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/split", id), bytes.NewBuffer(data))
 	re.NoError(err)
 	// Send request.
 	resp, err := dialClient.Do(httpReq)
@@ -192,7 +191,7 @@ func mustSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, re
 }
 
 func mustFinishSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id uint32) {
-	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/split/%d", id), nil)
+	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/split", id), nil)
 	re.NoError(err)
 	// Send request.
 	resp, err := dialClient.Do(httpReq)

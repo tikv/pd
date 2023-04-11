@@ -35,8 +35,8 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router.GET("", GetKeyspaceGroups)
 	router.GET("/:id", GetKeyspaceGroupByID)
 	router.DELETE("/:id", DeleteKeyspaceGroupByID)
-	router.POST("/split", SplitKeyspaceGroupByID)
-	router.DELETE("/split/:id", FinishSplitKeyspaceByID)
+	router.POST("/:id/split", SplitKeyspaceGroupByID)
+	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
 }
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.
@@ -128,7 +128,6 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 
 // SplitKeyspaceGroupByIDParams defines the params for splitting a keyspace group.
 type SplitKeyspaceGroupByIDParams struct {
-	ID        uint32   `json:"id"`
 	NewID     uint32   `json:"new-id"`
 	Keyspaces []uint32 `json:"keyspaces"`
 }
@@ -136,13 +135,18 @@ type SplitKeyspaceGroupByIDParams struct {
 // SplitKeyspaceGroupByID splits keyspace group by ID into a new keyspace group with the given new ID.
 // And the keyspaces in the old keyspace group will be moved to the new keyspace group.
 func SplitKeyspaceGroupByID(c *gin.Context) {
+	id, err := validateKeyspaceGroupID(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
 	splitParams := &SplitKeyspaceGroupByIDParams{}
-	err := c.BindJSON(splitParams)
+	err = c.BindJSON(splitParams)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	if !isValid(splitParams.ID) || !isValid(splitParams.NewID) {
+	if !isValid(splitParams.NewID) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 		return
 	}
@@ -153,7 +157,7 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
-	err = manager.SplitKeyspaceGroupByID(splitParams.ID, splitParams.NewID, splitParams.Keyspaces)
+	err = manager.SplitKeyspaceGroupByID(id, splitParams.NewID, splitParams.Keyspaces)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
