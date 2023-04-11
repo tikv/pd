@@ -218,7 +218,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 			failpoint.Continue()
 		})
 		if err := c.updateMember(); err != nil {
-			log.Error("[pd] failed to update member", errs.ZapError(err))
+			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetURLs()), errs.ZapError(err))
 		}
 	}
 }
@@ -453,7 +453,7 @@ func (c *pdServiceDiscovery) updateMember() error {
 		// the error of `switchTSOAllocatorLeader` will be returned.
 		return errTSO
 	}
-	return errs.ErrClientGetMember.FastGenByArgs(c.GetURLs())
+	return errs.ErrClientGetMember.FastGenByArgs()
 }
 
 func (c *pdServiceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {
