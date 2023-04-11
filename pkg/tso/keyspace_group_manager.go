@@ -601,7 +601,6 @@ func (kgm *KeyspaceGroupManager) GetAMWithMembershipCheck(
 }
 
 // GetElectionMember returns the election member of the given keyspace group
-// TODO: support multiple keyspace groups for GetElectionMember
 func (kgm *KeyspaceGroupManager) GetElectionMember(
 	keyspaceID, keyspaceGroupID uint32,
 ) (ElectionMember, error) {
@@ -642,7 +641,7 @@ func (kgm *KeyspaceGroupManager) checkKeySpaceGroupID(id uint32) error {
 		return nil
 	}
 	return errs.ErrKeyspaceGroupIDInvalid.FastGenByArgs(
-		fmt.Sprintf("%d which shouldn't >= %d", id, mcsutils.MaxKeyspaceGroupCountInUse))
+		fmt.Sprintf("%d shouldn't >= %d", id, mcsutils.MaxKeyspaceGroupCountInUse))
 }
 
 func (kgm *KeyspaceGroupManager) genNotServedErr(perr *perrors.Error, keyspaceGroupID uint32) error {
