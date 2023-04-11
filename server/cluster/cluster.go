@@ -286,7 +286,6 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
 	go c.runStatsBackgroundJobs()
-	go c.syncRegions()
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
 	go c.runSyncConfig()

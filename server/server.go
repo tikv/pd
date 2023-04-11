@@ -1399,14 +1399,9 @@ func (s *Server) leaderLoop() {
 			}
 			// Check the cluster dc-location after the PD leader is elected
 			go s.tsoAllocatorManager.ClusterDCLocationChecker()
-			syncer := s.cluster.GetRegionSyncer()
-			if s.persistOptions.IsUseRegionStorage() {
-				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
-			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
 			// WatchLeader will keep looping and never return unless the PD leader has changed.
 			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
-			syncer.StopSyncWithLeader()
 			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
 
