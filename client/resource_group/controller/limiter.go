@@ -79,6 +79,8 @@ type Limiter struct {
 	// So the notifyThreshold cannot show whether the limiter is in the low token state,
 	// isLowProcess is used to check it.
 	isLowProcess bool
+	// notifyTime is used to limit notify when the speed limit is already set.
+	notifyTime int
 }
 
 // Limit returns the maximum overall event rate.
@@ -372,10 +374,23 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.last = last
 		if lim.limit == 0 {
 			lim.notify()
+		} else {
+			// When fillrate is greater than 0, the speed limit is already set.
+			// If limiter are in limit state, the server has allocated tokens as much as possible. Don't need to request tokens.
+			if lim.notifyTime > 0 {
+				lim.notifyTime--
+				lim.notify()
+			}
 		}
 		log.Warn("[resource group controller]", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("n", n), zap.Int64("burst", lim.burst))
 	}
 	return r
+}
+
+func (lim *Limiter) ResetNotifytime() {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	lim.notifyTime = 1
 }
 
 // advance calculates and returns an updated state for lim resulting from the passage of time.

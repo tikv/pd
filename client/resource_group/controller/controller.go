@@ -186,6 +186,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		defer cleanupTicker.Stop()
 		stateUpdateTicker := time.NewTicker(defaultGroupStateUpdateInterval)
 		defer stateUpdateTicker.Stop()
+		emergencyTokenAcquisitionTicker := time.NewTicker(defaultTargetPeriod)
+		defer emergencyTokenAcquisitionTicker.Stop()
 
 		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Stop()
@@ -234,6 +236,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				if c.run.inDegradedMode {
 					c.applyDegradedMode()
 				}
+			case <-emergencyTokenAcquisitionTicker.C:
+				c.resetEmergencyTokenAcquisition()
 			case gc := <-c.tokenBucketUpdateChan:
 				now := gc.run.now
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx, now)
@@ -342,6 +346,14 @@ func (c *ResourceGroupsController) updateAvgRequestResourcePerSec() {
 	c.groupsController.Range(func(name, value any) bool {
 		gc := value.(*groupCostController)
 		gc.updateAvgRequestResourcePerSec()
+		return true
+	})
+}
+
+func (c *ResourceGroupsController) resetEmergencyTokenAcquisition() {
+	c.groupsController.Range(func(name, value any) bool {
+		gc := value.(*groupCostController)
+		gc.resetEmergencyTokenAcquisition()
 		return true
 	})
 }
@@ -659,6 +671,19 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 		gc.updateAvgRaWResourcePerSec()
 	case rmpb.GroupMode_RUMode:
 		gc.updateAvgRUPerSec()
+	}
+}
+
+func (gc *groupCostController) resetEmergencyTokenAcquisition() {
+	switch gc.mode {
+	case rmpb.GroupMode_RawMode:
+		for _, counter := range gc.run.resourceTokens {
+			counter.limiter.ResetNotifytime()
+		}
+	case rmpb.GroupMode_RUMode:
+		for _, counter := range gc.run.requestUnitTokens {
+			counter.limiter.ResetNotifytime()
+		}
 	}
 }
 
