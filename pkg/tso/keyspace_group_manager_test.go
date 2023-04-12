@@ -327,7 +327,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestInitDefaultKeyspaceGroup() {
 
 	expectedGroupIDs = []uint32{0}
 	assignedGroupIDs := collectAssignedKeyspaceGroupIDs(re, mgr)
-	re.True(reflect.DeepEqual(expectedGroupIDs, assignedGroupIDs))
+	re.Equal(expectedGroupIDs, assignedGroupIDs)
 
 	// Config keyspace group 0 in the storage but assigned to no one.
 	// final result: []
@@ -750,7 +750,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 		oldGroup = newGroup
 		keyspacesCopy := make([]uint32, len(keyspaces))
 		copy(keyspacesCopy, keyspaces)
-		newGroup = &endpoint.KeyspaceGroup{ID: 0, Keyspaces: keyspacesCopy}
+		newGroup = &endpoint.KeyspaceGroup{ID: groupID, Keyspaces: keyspacesCopy}
 		kgm.updateKeyspaceGroupMembership(oldGroup, newGroup)
 		verifyLocalKeyspaceLookupTable(re, newGroup.KeyspaceLookupTable, newGroup.Keyspaces)
 		verifyGlobalKeyspaceLookupTable(re, kgm.keyspaceLookupTable, newGroup.KeyspaceLookupTable)

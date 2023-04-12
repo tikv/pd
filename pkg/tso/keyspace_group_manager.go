@@ -280,6 +280,8 @@ func (kgm *KeyspaceGroupManager) checkInitProgress(ctx context.Context, cancel c
 }
 
 func (kgm *KeyspaceGroupManager) initDefaultKeysapceGroup(keyspaces []uint32) {
+	log.Info("initializing default keyspace group", zap.Any("keyspaces", keyspaces))
+
 	group := &endpoint.KeyspaceGroup{
 		ID:        mcsutils.DefaultKeyspaceGroupID,
 		Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
@@ -472,7 +474,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 						kgm.deleteKeyspaceGroup(groupID)
 						log.Warn("removed default keyspace group meta config from the storage. " +
 							"now every tso node/pod will initialize it")
-						kgm.initDefaultKeysapceGroup(keyspaces)						
+						kgm.initDefaultKeysapceGroup(keyspaces)
 					} else {
 						kgm.deleteKeyspaceGroup(groupID)
 					}
@@ -490,6 +492,11 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 }
 
 func (kgm *KeyspaceGroupManager) isAssignedToMe(group *endpoint.KeyspaceGroup) bool {
+	// If the default keyspace group isn't assigned to any tso node/pod, assign it to everyone.
+	if group.ID == mcsutils.DefaultKeyspaceGroupID && len(group.Members) == 0 {
+		return true
+	}
+
 	for _, member := range group.Members {
 		if member.Address == kgm.tsoServiceID.ServiceAddr {
 			return true
@@ -553,6 +560,10 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		kgm.ams[group.ID] = am
 		kgm.Unlock()
 	} else {
+		if group.ID == mcsutils.DefaultKeyspaceGroupID {
+			log.Info("resign default keyspace group membership",
+				zap.Any("default-keyspace-group", group))
+		}
 		// Not assigned to me. If this host/pod owns this keyspace group, it should resign.
 		kgm.deleteKeyspaceGroup(group.ID)
 	}
@@ -610,14 +621,18 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		if groupID == mcsutils.DefaultKeyspaceGroupID {
 			if _, ok := newGroup.KeyspaceLookupTable[mcsutils.DefaultKeyspaceID]; !ok {
 				log.Warn("default keyspace is not in default keyspace group. add it back")
-				newGroup.KeyspaceLookupTable[mcsutils.DefaultKeyspaceID] = struct{}{}
 				kgm.keyspaceLookupTable[mcsutils.DefaultKeyspaceID] = groupID
+				newGroup.KeyspaceLookupTable[mcsutils.DefaultKeyspaceID] = struct{}{}
+				newGroup.Keyspaces = make([]uint32, 1+len(newKeyspaces))
+				newGroup.Keyspaces[0] = mcsutils.DefaultKeyspaceID
+				copy(newGroup.Keyspaces[1:], newKeyspaces)
 			}
 		} else {
 			if _, ok := newGroup.KeyspaceLookupTable[mcsutils.DefaultKeyspaceID]; ok {
 				log.Warn("default keyspace is in non-default keyspace group. remove it")
+				kgm.keyspaceLookupTable[mcsutils.DefaultKeyspaceID] = mcsutils.DefaultKeyspaceGroupID
 				delete(newGroup.KeyspaceLookupTable, mcsutils.DefaultKeyspaceID)
-				delete(kgm.keyspaceLookupTable, mcsutils.DefaultKeyspaceID)
+				newGroup.Keyspaces = newKeyspaces[1:]
 			}
 		}
 	}
@@ -626,6 +641,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 
 // deleteKeyspaceGroup deletes the given keyspace group.
 func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
+	log.Info("delete keyspace group", zap.Uint32("keyspace-group-id", groupID))
+
 	kgm.Lock()
 	defer kgm.Unlock()
 
@@ -648,8 +665,6 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 		am.close()
 		kgm.ams[groupID] = nil
 	}
-
-	log.Info("deleted keyspace group", zap.Uint32("keyspace-group-id", groupID))
 }
 
 // GetAllocatorManager returns the AllocatorManager of the given keyspace group
