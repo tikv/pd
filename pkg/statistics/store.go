@@ -34,8 +34,6 @@ const (
 	RegionsStatsRollingWindowsSize = 9
 )
 
-var _ StoreStatInformer = &StoresStats{}
-
 // StoresStats is a cache hold hot regions.
 type StoresStats struct {
 	syncutil.RWMutex

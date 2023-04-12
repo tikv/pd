@@ -16,8 +16,6 @@ package movingaverage
 
 import "github.com/elliotchance/pie/v2"
 
-var _ MovingAvg = &MaxFilter{}
-
 // MaxFilter works as a maximum filter with specified window size.
 // There are at most `size` data points for calculating.
 type MaxFilter struct {

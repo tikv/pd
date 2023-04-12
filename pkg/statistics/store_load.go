@@ -15,11 +15,11 @@
 package statistics
 
 import (
-	"github.com/tikv/pd/pkg/core/constant"
 	"math"
 	"time"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 )
 
 // StoreLoadDetail records store load information.
@@ -245,10 +245,10 @@ func MaxLoad(a, b *StoreLoad) *StoreLoad {
 }
 
 var (
-	// historyLoadInterval is the duration for saving history load.
-	historyLoadInterval = 30 * time.Second
-	// HistorySampleDuration is the sampling interval for history load
-	HistorySampleDuration = 5 * time.Minute
+	// historySampleInterval is the sampling interval for history load.
+	historySampleInterval = 30 * time.Second
+	// historySampleDuration  is the duration for saving history load.
+	historySampleDuration = 5 * time.Minute
 )
 
 type StoreHistoryLoads struct {
@@ -272,8 +272,8 @@ func (s *StoreHistoryLoads) Add(storeID uint64, rwTp RWType, kind constant.Resou
 	load, ok := s.loads[rwTp][kind][storeID]
 	if !ok {
 		size := 10
-		if historyLoadInterval != 0 {
-			size = int(HistorySampleDuration / historyLoadInterval)
+		if historySampleInterval != 0 {
+			size = int(historySampleDuration / historySampleInterval)
 		}
 		load = newStoreHistoryLoad(size, s.dim)
 		s.loads[rwTp][kind][storeID] = load
@@ -305,7 +305,7 @@ func newStoreHistoryLoad(size int, dim int) *storeHistoryLoad {
 }
 
 func (s *storeHistoryLoad) add(loads []float64) {
-	if time.Now().Sub(s.update) < historyLoadInterval {
+	if time.Since(s.update) < historySampleInterval {
 		return
 	}
 	if s.count == 0 {

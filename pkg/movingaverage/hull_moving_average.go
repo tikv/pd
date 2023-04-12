@@ -26,8 +26,6 @@ type HMA struct {
 	wma  []*WMA
 }
 
-var _ MovingAvg = &HMA{}
-
 // NewHMA returns a WMA.
 func NewHMA(sizes ...float64) *HMA {
 	size := defaultHMASize

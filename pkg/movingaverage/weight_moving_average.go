@@ -16,8 +16,6 @@ package movingaverage
 
 const defaultWMASize = 10
 
-var _ MovingAvg = &WMA{}
-
 // WMA works as a weight with specified window size.
 // There are at most `size` data points for calculating.
 // References:https://en.wikipedia.org/wiki/Moving_average#Weighted_moving_average

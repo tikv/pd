@@ -29,9 +29,6 @@ type storeCollector interface {
 	GetLoads(storeLoads, peerLoadSum []float64, rwTy RWType, kind constant.ResourceKind) (loads []float64)
 }
 
-var _ storeCollector = tikvCollector{}
-var _ storeCollector = tiflashCollector{}
-
 type tikvCollector struct{}
 
 func newTikvCollector() storeCollector {

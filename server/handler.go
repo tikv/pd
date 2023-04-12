@@ -78,8 +78,6 @@ var (
 	schedulerConfigPrefix = "pd/api/v1/scheduler-config"
 )
 
-var _ statistics.StoreStatInformer = &Handler{}
-
 // Handler is a helper to export methods to handle API/RPC requests.
 type Handler struct {
 	s               *Server

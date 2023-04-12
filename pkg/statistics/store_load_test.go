@@ -23,7 +23,7 @@ import (
 
 func TestHistoryLoads(t *testing.T) {
 	re := require.New(t)
-	historyLoadInterval = 0
+	historySampleInterval = 0
 	historyLoads := NewStoreHistoryLoads(DimLen)
 	loads := []float64{1.0, 2.0, 3.0}
 	rwTp := Read

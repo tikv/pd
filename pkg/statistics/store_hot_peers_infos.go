@@ -185,8 +185,9 @@ func summaryStoresLoadByEngine(
 		}
 		loads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
 
+		var historyLoads [][]float64
 		if storesHistoryLoads != nil {
-			historyLoads := storesHistoryLoads.Get(id, rwTy, kind)
+			historyLoads = storesHistoryLoads.Get(id, rwTy, kind)
 			for i, loads := range historyLoads {
 				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
 					allStoreHistoryLoadSum[i] = make([]float64, len(loads))

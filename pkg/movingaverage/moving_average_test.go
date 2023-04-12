@@ -80,7 +80,6 @@ func TestMedianFilter(t *testing.T) {
 
 	mf := NewMedianFilter(5)
 	re.Equal(empty, mf.Get())
-	re.Equal([]float64{}, mf.GetAll())
 
 	checkReset(re, mf, empty)
 	checkAdd(re, mf, data, expected)

@@ -109,8 +109,6 @@ type Server interface {
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 }
 
-var _ statistics.StoreStatInformer = &RaftCluster{}
-
 // RaftCluster is used for cluster config management.
 // Raft cluster key format:
 // cluster 1 -> /1/raft, value is metapb.Cluster

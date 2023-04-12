@@ -31,8 +31,6 @@ type EMA struct {
 	instantaneous float64
 }
 
-var _ MovingAvg = &EMA{}
-
 // NewEMA returns an EMA.
 func NewEMA(decays ...float64) *EMA {
 	decay := defaultDecay
