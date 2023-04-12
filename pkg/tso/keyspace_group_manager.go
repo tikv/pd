@@ -76,6 +76,7 @@ func (s *state) deinitialize() {
 
 	s.Lock()
 	defer s.Unlock()
+
 	wg := sync.WaitGroup{}
 	for _, am := range s.ams {
 		if am != nil {
@@ -89,7 +90,7 @@ func (s *state) deinitialize() {
 	}
 	wg.Wait()
 
-	log.Info("All keyspace groups closed")
+	log.Info("all keyspace groups closed")
 }
 
 // getAllocatorManager returns the AllocatorManager of the given keyspace group
@@ -108,9 +109,9 @@ func (s *state) getAMWithMembershipCheck(
 	defer s.RUnlock()
 
 	if am := s.ams[keyspaceGroupID]; am != nil {
-		ksg := s.kgs[keyspaceGroupID]
-		if ksg != nil {
-			if _, ok := ksg.KeyspaceLookupTable[keyspaceID]; ok {
+		kg := s.kgs[keyspaceGroupID]
+		if kg != nil {
+			if _, ok := kg.KeyspaceLookupTable[keyspaceID]; ok {
 				return am, keyspaceGroupID, nil
 			}
 		}
@@ -595,6 +596,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 
 // deleteKeyspaceGroup deletes the given keyspace group.
 func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
+	kgm.Lock()
+	defer kgm.Unlock()
+
 	kg := kgm.kgs[groupID]
 	if kg != nil {
 		for _, kid := range kg.Keyspaces {

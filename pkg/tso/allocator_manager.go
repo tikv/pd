@@ -167,7 +167,7 @@ type AllocatorManager struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	// kgID is the keyspace group id
+	// kgID is the keyspace group ID
 	kgID uint32
 	// member is for election use
 	member ElectionMember
