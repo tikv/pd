@@ -237,7 +237,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				}
 			case <-emergencyTokenAcquisitionTicker.C:
-				c.resetEmergencyTokenAcquisition()
+				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			case gc := <-c.tokenBucketUpdateChan:
 				now := gc.run.now
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx, now)
@@ -328,14 +328,6 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 func (c *ResourceGroupsController) executeOnAllGroups(f func(controller *groupCostController)) {
 	c.groupsController.Range(func(name, value any) bool {
 		f(value.(*groupCostController))
-		return true
-	})
-}
-
-func (c *ResourceGroupsController) resetEmergencyTokenAcquisition() {
-	c.groupsController.Range(func(name, value any) bool {
-		gc := value.(*groupCostController)
-		gc.resetEmergencyTokenAcquisition()
 		return true
 	})
 }
