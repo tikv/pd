@@ -280,7 +280,8 @@ func (kgm *KeyspaceGroupManager) checkInitProgress(ctx context.Context, cancel c
 }
 
 func (kgm *KeyspaceGroupManager) initDefaultKeysapceGroup(keyspaces []uint32) {
-	log.Info("initializing default keyspace group", zap.Any("keyspaces", keyspaces))
+	log.Info("initializing default keyspace group",
+		zap.Int("keyspaces-length", len(keyspaces)))
 
 	group := &endpoint.KeyspaceGroup{
 		ID:        mcsutils.DefaultKeyspaceGroupID,

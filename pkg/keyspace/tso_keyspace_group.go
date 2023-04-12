@@ -58,6 +58,10 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
 func (m *GroupManager) Bootstrap() error {
+	// Force the membership restriction that the default keyspace must belong to default keyspace group.
+	// Have no information to specify the distribution of the default keyspace group replicas, so just
+	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica
+	// to every tso node/pod by default.
 	defaultKeyspaceGroup := &endpoint.KeyspaceGroup{
 		ID:        utils.DefaultKeyspaceGroupID,
 		UserKind:  endpoint.Basic.String(),
@@ -71,9 +75,6 @@ func (m *GroupManager) Bootstrap() error {
 	if err != nil && err != ErrKeyspaceGroupExists {
 		return err
 	}
-
-	userKind := endpoint.StringUserKind(defaultKeyspaceGroup.UserKind)
-	m.groups[userKind].Put(defaultKeyspaceGroup)
 
 	// Load all the keyspace groups from the storage and add to the respective userKind groups.
 	groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
