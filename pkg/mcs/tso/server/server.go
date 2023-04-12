@@ -165,7 +165,7 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.Info("closing tso server ...")
+	log.Info("closing tso server")
 	// close tso service loops in the keyspace group manager
 	s.keyspaceGroupManager.Close()
 	s.serviceRegister.Deregister()
@@ -377,9 +377,8 @@ func (s *Server) startHTTPServer(l net.Listener) {
 
 	handler, _ := SetUpRestHandler(s.service)
 	hs := &http.Server{
-		Handler:           handler,
-		ReadTimeout:       5 * time.Minute,
-		ReadHeaderTimeout: 5 * time.Second,
+		Handler:     handler,
+		ReadTimeout: 5 * time.Second,
 	}
 	serverr := hs.Serve(l)
 	log.Info("http server stopped serving")

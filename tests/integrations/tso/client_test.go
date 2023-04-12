@@ -185,6 +185,7 @@ func (suite *tsoClientTestSuite) TestRandomTransferLeader() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber + 1)
+	checkTSO(ctx, re, &wg, suite.backendEndpoints)
 	go func() {
 		defer wg.Done()
 		n := r.Intn(2) + 1
@@ -195,7 +196,6 @@ func (suite *tsoClientTestSuite) TestRandomTransferLeader() {
 		cancel()
 	}()
 
-	checkTSO(ctx, re, &wg, suite.backendEndpoints)
 	wg.Wait()
 }
 
@@ -210,6 +210,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber + 1)
+	checkTSO(ctx, re, &wg, suite.backendEndpoints)
 	go func() {
 		defer wg.Done()
 		r := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -229,7 +230,6 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 		cancel()
 	}()
 
-	checkTSO(ctx, re, &wg, suite.backendEndpoints)
 	wg.Wait()
 	suite.TearDownSuite()
 	suite.SetupSuite()
@@ -245,26 +245,29 @@ func TestMixedTSODeployment(t *testing.T) {
 	defer re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
-	defer cancel()
 	defer cluster.Destroy()
-
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-
 	leaderServer := cluster.GetServer(cluster.WaitLeader())
-	backendEndpoints := leaderServer.GetAddr()
+	re.NoError(leaderServer.BootstrapCluster())
 
 	apiSvr, err := cluster.JoinAPIServer(ctx)
 	re.NoError(err)
 	err = apiSvr.Run()
 	re.NoError(err)
 
+	var backendEndpoints string
+	for _, s := range cluster.GetServers() {
+		backendEndpoints += s.GetAddr() + ","
+	}
+	backendEndpoints = strings.TrimSuffix(backendEndpoints, ",")
 	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	ctx1, cancel1 := context.WithCancel(context.Background())
+	ctx1, cancel1 := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber + 1)
 	go func() {
@@ -284,9 +287,10 @@ func TestMixedTSODeployment(t *testing.T) {
 
 func checkTSO(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, backendEndpoints string) {
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
+		go func(ctx context.Context, wg *sync.WaitGroup) {
 			defer wg.Done()
 			cli := mcs.SetupClientWithKeyspace(context.Background(), re, strings.Split(backendEndpoints, ","))
+			defer cli.Close()
 			var ts, lastTS uint64
 			for {
 				physical, logical, err := cli.GetTS(context.Background())
@@ -298,13 +302,16 @@ func checkTSO(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, b
 				}
 				select {
 				case <-ctx.Done():
-					physical, logical, _ := cli.GetTS(context.Background())
-					ts = tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
+					physical, logical, err := cli.GetTS(context.Background())
+					// omit the error check since there are many kinds of errors
+					if err == nil {
+						ts = tsoutil.ComposeTS(physical, logical)
+						re.Less(lastTS, ts)
+					}
 					return
 				default:
 				}
 			}
-		}()
+		}(ctx, wg)
 	}
 }

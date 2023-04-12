@@ -305,9 +305,8 @@ func (s *Server) startHTTPServer(l net.Listener) {
 
 	handler, _ := SetUpRestHandler(s.service)
 	hs := &http.Server{
-		Handler:           handler,
-		ReadTimeout:       5 * time.Minute,
-		ReadHeaderTimeout: 5 * time.Second,
+		Handler:     handler,
+		ReadTimeout: 5 * time.Second,
 	}
 	err := hs.Serve(l)
 	log.Info("http server stop serving")

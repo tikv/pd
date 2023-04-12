@@ -224,10 +224,10 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 }
 
 func (c *pdServiceDiscovery) updateServiceModeLoop() {
+	defer c.wg.Done()
 	failpoint.Inject("skipUpdateServiceMode", func() {
 		failpoint.Return()
 	})
-	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
