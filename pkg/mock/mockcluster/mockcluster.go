@@ -116,12 +116,6 @@ func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
 	return mc.HotStat.GetStoresLoads()
 }
 
-// GetStoresHistoryLoads gets stores load statistics.
-func (mc *Cluster) GetStoresHistoryLoads() map[uint64][][]float64 {
-	mc.HotStat.FilterUnhealthyStore(mc)
-	return mc.HotStat.GetStoresHistoryLoads()
-}
-
 // GetStore gets a store with a given store ID.
 func (mc *Cluster) GetStore(storeID uint64) *core.StoreInfo {
 	return mc.Stores.GetStore(storeID)

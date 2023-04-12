@@ -15,7 +15,9 @@
 package statistics
 
 import (
+	"fmt"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 )
 
 const (
@@ -170,6 +172,7 @@ type RWType int
 const (
 	Write RWType = iota
 	Read
+	RWTypeLen
 )
 
 func (rw RWType) String() string {
@@ -266,6 +269,31 @@ const (
 	ActionTypeLen
 )
 
+type ResourceType int
+
+const (
+	WritePeer ResourceType = iota
+	WriteLeader
+	ReadPeer
+	ReadLeader
+	ResourceTypeLen
+)
+
+func (rt ResourceType) String() string {
+	switch rt {
+	case WritePeer:
+		return "write-peer"
+	case WriteLeader:
+		return "write-leader"
+	case ReadLeader:
+		return "read-leader"
+	case ReadPeer:
+		return "read-peer"
+	default:
+		return "unknown"
+	}
+}
+
 func (t ActionType) String() string {
 	switch t {
 	case Add:
@@ -276,4 +304,24 @@ func (t ActionType) String() string {
 		return "update"
 	}
 	return "unimplemented"
+}
+
+func BuildResourceType(rwTy RWType, ty constant.ResourceKind) ResourceType {
+	switch rwTy {
+	case Write:
+		switch ty {
+		case constant.RegionKind:
+			return WritePeer
+		case constant.LeaderKind:
+			return WriteLeader
+		}
+	case Read:
+		switch ty {
+		case constant.RegionKind:
+			return ReadPeer
+		case constant.LeaderKind:
+			return ReadLeader
+		}
+	}
+	panic(fmt.Sprintf("invalid arguments for buildResourceType: rwTy = %v, ty = %v", rwTy, ty))
 }

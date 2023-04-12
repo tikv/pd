@@ -38,11 +38,6 @@ func (t *TimeMedian) Get() float64 {
 	return t.mf.Get()
 }
 
-// GetAll returns all the data points in the median filter.
-func (t *TimeMedian) GetAll() []float64 {
-	return t.mf.GetAll()
-}
-
 // Add adds recent change to TimeMedian.
 func (t *TimeMedian) Add(delta float64, interval time.Duration) {
 	t.aot.Add(delta, interval)

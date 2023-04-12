@@ -51,6 +51,8 @@ const (
 	RegionKind
 	// WitnessKind indicates the witness kind resource
 	WitnessKind
+
+	ResourceKindLen
 )
 
 func (k ResourceKind) String() string {

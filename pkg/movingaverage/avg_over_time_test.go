@@ -84,7 +84,6 @@ func TestMinFilled(t *testing.T) {
 	for aotSize := 2; aotSize < 10; aotSize++ {
 		for mfSize := 2; mfSize < 10; mfSize++ {
 			tm := NewTimeMedian(aotSize, mfSize, interval)
-			re.Equal([]float64{}, tm.GetAll())
 			for i := 0; i < aotSize; i++ {
 				re.Equal(0.0, tm.Get())
 				tm.Add(rate*interval.Seconds(), interval)

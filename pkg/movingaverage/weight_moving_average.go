@@ -66,14 +66,6 @@ func (w *WMA) Get() float64 {
 	return w.score / float64((w.size+1)*w.size/2)
 }
 
-// GetAll returns all the data points.
-func (w *WMA) GetAll() []float64 {
-	if w.count < w.size {
-		return w.records[:w.count]
-	}
-	return w.records
-}
-
 // Reset cleans the data set.
 func (w *WMA) Reset() {
 	w.count = 0

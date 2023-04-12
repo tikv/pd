@@ -56,11 +56,6 @@ func (h *HMA) Get() float64 {
 	return h.wma[2].Get()
 }
 
-// GetAll returns all the data points.
-func (h *HMA) GetAll() []float64 {
-	return h.wma[2].GetAll()
-}
-
 // Reset cleans the data set.
 func (h *HMA) Reset() {
 	h.wma[0] = NewWMA(int(h.size / 2))
