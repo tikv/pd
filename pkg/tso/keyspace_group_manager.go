@@ -227,7 +227,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 	done := make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(kgm.ctx)
 	go kgm.checkInitProgress(ctx, cancel, done)
-	watchStartRevision, sawDefaultKeyspaceGroup, err := kgm.initAssignment(ctx)
+	watchStartRevision, defaultKGConfigured, err := kgm.initAssignment(ctx)
 	done <- struct{}{}
 	if err != nil {
 		log.Error("failed to initialize keyspace group manager", errs.ZapError(err))
@@ -237,7 +237,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 	}
 
 	// Initialize the default keyspace group if it isn't configured in the storage.
-	if !sawDefaultKeyspaceGroup {
+	if !defaultKGConfigured {
 		keyspaces := []uint32{mcsutils.DefaultKeyspaceID}
 		kgm.initDefaultKeysapceGroup(keyspaces)
 	}
@@ -292,7 +292,7 @@ func (kgm *KeyspaceGroupManager) initDefaultKeysapceGroup(keyspaces []uint32) {
 // Return watchStartRevision, the start revision for watching keyspace group membership/distribution change.
 func (kgm *KeyspaceGroupManager) initAssignment(
 	ctx context.Context,
-) (watchStartRevision int64, sawDefaultKeyspaceGroup bool, err error) {
+) (watchStartRevision int64, defaultKGConfigured bool, err error) {
 	var (
 		groups               []*endpoint.KeyspaceGroup
 		more                 bool
@@ -323,7 +323,7 @@ func (kgm *KeyspaceGroupManager) initAssignment(
 			}
 
 			if group.ID == mcsutils.DefaultKeyspaceGroupID {
-				sawDefaultKeyspaceGroup = true
+				defaultKGConfigured = true
 			}
 
 			kgm.updateKeyspaceGroup(group)
