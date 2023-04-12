@@ -72,10 +72,6 @@ func (m *GroupManager) Bootstrap() error {
 	}
 
 	userKind := endpoint.StringUserKind(defaultKeyspaceGroup.UserKind)
-	// If the group for the userKind does not exist, create a new one.
-	if _, ok := m.groups[userKind]; !ok {
-		m.groups[userKind] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
-	}
 	m.groups[userKind].Put(defaultKeyspaceGroup)
 
 	// Load all the keyspace groups from the storage and add to the respective userKind groups.
@@ -85,9 +81,6 @@ func (m *GroupManager) Bootstrap() error {
 	}
 	for _, group := range groups {
 		userKind := endpoint.StringUserKind(group.UserKind)
-		if _, ok := m.groups[userKind]; !ok {
-			m.groups[userKind] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
-		}
 		m.groups[userKind].Put(group)
 	}
 
@@ -191,20 +184,33 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 	})
 }
 
-// GetAvailableKeyspaceGroupIDByKind returns the available keyspace group ID by user kind.
-func (m *GroupManager) GetAvailableKeyspaceGroupIDByKind(userKind endpoint.UserKind) (string, error) {
+// GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
+func (m *GroupManager) GetKeyspaceConfigByKind(userKind endpoint.UserKind) (map[string]string, error) {
+	// when server is not in API mode, we don't need to return the keyspace config
+	if m == nil {
+		return map[string]string{}, nil
+	}
 	m.RLock()
 	defer m.RUnlock()
 	groups, ok := m.groups[userKind]
 	if !ok {
-		return "", errors.Errorf("user kind %s not found", userKind)
+		return map[string]string{}, errors.Errorf("user kind %s not found", userKind)
 	}
 	kg := groups.Top()
-	return strconv.FormatUint(uint64(kg.ID), 10), nil
+	id := strconv.FormatUint(uint64(kg.ID), 10)
+	config := map[string]string{
+		UserKindKey:           userKind.String(),
+		TSOKeyspaceGroupIDKey: id,
+	}
+	return config, nil
 }
 
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
 func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation int) error {
+	// when server is not in API mode, we don't need to update the keyspace for keyspace group
+	if m == nil {
+		return nil
+	}
 	id, err := strconv.ParseUint(groupID, 10, 64)
 	if err != nil {
 		return err
@@ -236,6 +242,10 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 
 // UpdateKeyspaceGroup updates the keyspace group.
 func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUserKind, newUserKind endpoint.UserKind, keyspaceID uint32) error {
+	// when server is not in API mode, we don't need to update the keyspace group
+	if m == nil {
+		return nil
+	}
 	oldID, err := strconv.ParseUint(oldGroupID, 10, 64)
 	if err != nil {
 		return err
