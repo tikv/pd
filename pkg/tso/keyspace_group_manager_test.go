@@ -548,6 +548,9 @@ func addKeyspaceGroupAssignment(
 }
 
 func collectAssignedKeyspaceGroupIDs(re *require.Assertions, ksgMgr *KeyspaceGroupManager) []int {
+	ksgMgr.RLock()
+	defer ksgMgr.RUnlock()
+
 	ids := []int{}
 	for i := 0; i < len(ksgMgr.kgs); i++ {
 		ksg := ksgMgr.kgs[i]
