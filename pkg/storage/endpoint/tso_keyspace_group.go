@@ -71,6 +71,8 @@ type KeyspaceGroup struct {
 	UserKind string `json:"user-kind"`
 	// InSplit indicates whether the keyspace group is in split.
 	InSplit bool `json:"in-split"`
+	// SplitFrom is the keyspace group ID which the keyspace group is split from.
+	SplitFrom uint32 `json:"split-from"`
 	// Members are the election members which campaign for the primary of the keyspace group.
 	Members []KeyspaceGroupMember `json:"members"`
 	// Keyspaces are the keyspace IDs which belong to the keyspace group.

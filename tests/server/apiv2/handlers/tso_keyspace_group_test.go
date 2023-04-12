@@ -118,11 +118,13 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	re.Equal(uint32(1), kg1.ID)
 	re.Equal([]uint32{333}, kg1.Keyspaces)
 	re.False(kg1.InSplit)
+	re.Empty(kg1.SplitFrom)
 	// Check keyspace group 2.
 	kg2 := mustLoadKeyspaceGroupByID(re, suite.server, 2)
 	re.Equal(uint32(2), kg2.ID)
 	re.Equal([]uint32{111, 222}, kg2.Keyspaces)
 	re.True(kg2.InSplit)
+	re.Equal(kg1.ID, kg2.SplitFrom)
 	// They should have the same user kind and members.
 	re.Equal(kg1.UserKind, kg2.UserKind)
 	re.Equal(kg1.Members, kg2.Members)
@@ -130,6 +132,7 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	mustFinishSplitKeyspaceGroup(re, suite.server, 2)
 	kg2 = mustLoadKeyspaceGroupByID(re, suite.server, 2)
 	re.False(kg2.InSplit)
+	re.Equal(kg1.ID, kg2.SplitFrom)
 }
 
 func sendLoadKeyspaceGroupRequest(re *require.Assertions, server *tests.TestServer, token, limit string) []*endpoint.KeyspaceGroup {
