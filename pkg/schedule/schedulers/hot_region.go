@@ -77,7 +77,8 @@ type baseHotScheduler struct {
 	stInfos map[uint64]*statistics.StoreSummaryInfo
 	// temporary states but exported to API or metrics
 	// Every time `Schedule()` will recalculate it.
-	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
+	stLoadInfos    [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
+	stHistoryLoads *statistics.StoreHistoryLoads
 	// temporary states
 	// Every time `Schedule()` will recalculate it.
 	storesLoads map[uint64][]float64
@@ -97,6 +98,7 @@ func newBaseHotScheduler(opController *schedule.OperatorController) *baseHotSche
 		BaseScheduler:  base,
 		types:          []statistics.RWType{statistics.Write, statistics.Read},
 		regionPendings: make(map[uint64]*pendingInfluence),
+		stHistoryLoads: statistics.NewStoreHistoryLoads(statistics.DimLen),
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -112,14 +114,13 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 	h.summaryPendingInfluence(cluster)
 	h.storesLoads = cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
-	storesHistoryLoads := cluster.GetStoresHistoryLoads()
 
 	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource constant.ResourceKind) {
 		ty := buildResourceType(rw, resource)
 		h.stLoadInfos[ty] = statistics.SummaryStoresLoad(
 			h.stInfos,
 			h.storesLoads,
-			storesHistoryLoads,
+			h.stHistoryLoads,
 			regionStats,
 			isTraceRegionFlow,
 			rw, resource)

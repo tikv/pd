@@ -52,14 +52,6 @@ func (r *MaxFilter) Get() float64 {
 	return pie.Max(records)
 }
 
-// GetAll returns all the data points.
-func (r *MaxFilter) GetAll() []float64 {
-	if r.count < r.size {
-		return r.records[:r.count]
-	}
-	return r.records
-}
-
 // Reset cleans the data set.
 func (r *MaxFilter) Reset() {
 	r.count = 0

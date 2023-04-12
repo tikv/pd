@@ -216,15 +216,6 @@ func (h *Handler) GetStoresLoads() map[uint64][]float64 {
 	return rc.GetStoresLoads()
 }
 
-// GetStoresHistoryLoads gets all hot write stores stats.
-func (h *Handler) GetStoresHistoryLoads() map[uint64][][]float64 {
-	rc := h.s.GetRaftCluster()
-	if rc == nil {
-		return nil
-	}
-	return rc.GetStoresHistoryLoads()
-}
-
 // AddScheduler adds a scheduler.
 func (h *Handler) AddScheduler(name string, args ...string) error {
 	c, err := h.GetRaftCluster()

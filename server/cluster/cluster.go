@@ -2222,11 +2222,6 @@ func (c *RaftCluster) GetStoresLoads() map[uint64][]float64 {
 	return c.hotStat.GetStoresLoads()
 }
 
-// GetStoresHistoryLoads returns load stats of all stores.
-func (c *RaftCluster) GetStoresHistoryLoads() map[uint64][][]float64 {
-	return c.hotStat.GetStoresHistoryLoads()
-}
-
 // IsRegionHot checks if a region is in hot state.
 func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
 	return c.hotStat.IsRegionHot(region, c.opt.GetHotRegionCacheHitsThreshold())

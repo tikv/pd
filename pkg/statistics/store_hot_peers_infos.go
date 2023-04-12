@@ -107,7 +107,7 @@ func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, re
 func SummaryStoresLoad(
 	storeInfos map[uint64]*StoreSummaryInfo,
 	storesLoads map[uint64][]float64,
-	storesHistoryLoads map[uint64][][]float64,
+	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
 	isTraceRegionFlow bool,
 	rwTy RWType,
@@ -142,7 +142,7 @@ func SummaryStoresLoad(
 func summaryStoresLoadByEngine(
 	storeInfos map[uint64]*StoreSummaryInfo,
 	storesLoads map[uint64][]float64,
-	storesHistoryLoads map[uint64][][]float64,
+	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
 	rwTy RWType,
 	kind constant.ResourceKind,
@@ -184,20 +184,18 @@ func summaryStoresLoadByEngine(
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[QueryDim])
 		}
 
-		historyLoads := make([][]float64, DimLen)
-		if storesHistoryLoads, ok := storesHistoryLoads[id]; ok {
-			historyLoads = collector.GetHistoryLoads(storesHistoryLoads, peerLoadSum, rwTy, kind)
-			for i, loads := range historyLoads {
-				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
-					allStoreHistoryLoadSum[i] = make([]float64, len(loads))
-				}
-				for j, load := range loads {
-					allStoreHistoryLoadSum[i][j] += load
-				}
+		historyLoads := storesHistoryLoads.Get(id, rwTy, kind)
+		for i, loads := range historyLoads {
+			if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
+				allStoreHistoryLoadSum[i] = make([]float64, len(loads))
+			}
+			for j, load := range loads {
+				allStoreHistoryLoadSum[i][j] += load
 			}
 		}
 
 		loads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
+		storesHistoryLoads.Add(id, rwTy, kind, loads)
 		for i := range allStoreLoadSum {
 			allStoreLoadSum[i] += loads[i]
 		}
