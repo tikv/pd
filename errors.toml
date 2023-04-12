@@ -506,6 +506,11 @@ error = '''
 marshal leader failed
 '''
 
+["PD:member:ErrPreCheckCampaign"]
+error = '''
+pre-check campaign failed
+'''
+
 ["PD:netstat:ErrNetstatTCPSocks"]
 error = '''
 TCP socks error
@@ -784,6 +789,11 @@ reset user timestamp failed, %s
 ["PD:tso:ErrSetLocalTSOConfig"]
 error = '''
 set local tso config failed, %s
+'''
+
+["PD:tso:ErrSplitKeyspaceNotInitialized"]
+error = '''
+the keyspace group %d isn't initialized
 '''
 
 ["PD:tso:ErrSyncMaxTS"]

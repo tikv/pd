@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"path"
 	"reflect"
 	"sort"
@@ -53,6 +54,7 @@ type keyspaceGroupManagerTestSuite struct {
 	cancel           context.CancelFunc
 	backendEndpoints string
 	etcdClient       *clientv3.Client
+	httpClient       *http.Client
 	clean            func()
 	cfg              *TestServiceConfig
 }
@@ -65,7 +67,11 @@ func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.backendEndpoints, suite.etcdClient, suite.clean = startEmbeddedEtcd(t)
-
+	suite.httpClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
 	suite.cfg = &TestServiceConfig{
 		Name:                      "tso-test-name",
 		BackendEndpoints:          suite.backendEndpoints,
@@ -538,7 +544,7 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 	electionNamePrefix, legacySvcRootPath, tsoSvcRootPath string,
 ) *KeyspaceGroupManager {
 	return NewKeyspaceGroupManager(
-		suite.ctx, tsoServiceID, suite.etcdClient,
+		suite.ctx, tsoServiceID, suite.etcdClient, suite.httpClient,
 		electionNamePrefix, legacySvcRootPath, tsoSvcRootPath,
 		suite.cfg)
 }
