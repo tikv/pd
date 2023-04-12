@@ -327,7 +327,7 @@ func chooseEvictCandidate(cluster schedule.Cluster) (slowStore *core.StoreInfo) 
 	}
 
 	storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
-	log.Info("evict-slow-trend-scheduler canptured candidate", zap.Uint64("store-id", store.GetID()))
+	log.Info("evict-slow-trend-scheduler captured candidate", zap.Uint64("store-id", store.GetID()))
 	return store
 }
 
