@@ -50,7 +50,7 @@ const (
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
-	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, error)
+	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, uint64, error)
 	// OnResponse is used to consume tokens after receiving response
 	OnResponse(resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, error)
 }
@@ -96,6 +96,8 @@ type ResourceGroupsController struct {
 	loopCancel func()
 
 	calculators []ResourceCalculator
+
+	requestDelta  [string][uint64]uint64 // resourceGroupName -> storeID -> delta
 
 	// When a signal is received, it means the number of available token is low.
 	lowTokenNotifyChan chan struct{}
@@ -429,13 +431,34 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 // OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
-) (*rmpb.Consumption, error) {
+) (*rmpb.Consumption, uint64, error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
 		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
-		return nil, err
+		return nil, 0, err
 	}
-	return gc.onRequestWait(ctx, info)
+	con, err := gc.onRequestWait(ctx, info)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	v, ok := c.requestDelta[resourceGroupName]; 
+	if !ok {
+		v = make(map[uint64]uint64)
+		c.requestDelta[resourceGroupName] = v
+	}
+
+	// iter all stores
+	for id, delta := range v {	
+		if info.StoreID() == id {
+			continue
+		}
+		delta += 1
+	}
+	delta := v[info.StoreID()]
+	v[info.StoreID()] = 0
+
+	return con, delta, nil
 }
 
 // OnResponse is used to consume tokens after receiving response
