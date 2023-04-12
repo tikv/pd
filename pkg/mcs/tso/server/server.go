@@ -111,7 +111,10 @@ type Server struct {
 
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
-	startCallbacks  []func()
+	startCallbacks []func()
+
+	// for service registry
+	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 }
 
@@ -199,14 +202,32 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
+// TODO: support multiple keyspace groups
 func (s *Server) IsServing() bool {
-	return atomic.LoadInt64(&s.isRunning) == 1 && s.keyspaceGroupManager.GetElectionMember(mcsutils.DefaultKeySpaceGroupID).IsLeader()
+	if atomic.LoadInt64(&s.isRunning) == 0 {
+		return false
+	}
+
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeySpaceGroupID)
+	if err != nil {
+		log.Error("failed to get election member", errs.ZapError(err))
+		return false
+	}
+	return member.IsLeader()
 }
 
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
 // The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
-	return s.keyspaceGroupManager.GetElectionMember(mcsutils.DefaultKeySpaceGroupID).GetLeaderListenUrls()
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeySpaceGroupID)
+	if err != nil {
+		log.Error("failed to get election member", errs.ZapError(err))
+		return nil
+	}
+
+	return member.GetLeaderListenUrls()
 }
 
 // AddServiceReadyCallback implements basicserver.
@@ -229,8 +250,8 @@ func (s *Server) IsClosed() bool {
 }
 
 // GetTSOAllocatorManager returns the manager of TSO Allocator.
-func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.keyspaceGroupManager.GetAllocatorManager(mcsutils.DefaultKeySpaceGroupID)
+func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorManager, error) {
+	return s.keyspaceGroupManager.GetAllocatorManager(keyspaceGroupID)
 }
 
 // IsLocalRequest checks if the forwarded host is the current host
@@ -416,11 +437,16 @@ func (s *Server) startServer() (err error) {
 	}
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	defaultKsgStorageTSRootPath := path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	legacySvcRootPath := path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
+	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
-		s.serverLoopCtx, s.etcdClient, s.listenURL.Host, defaultKsgStorageTSRootPath, tsoSvcRootPath, s.cfg)
-	s.keyspaceGroupManager.Initialize()
+		s.serverLoopCtx, s.serviceID, s.etcdClient, s.listenURL.Host, legacySvcRootPath, tsoSvcRootPath, s.cfg)
+	// The param `false` means that we don't initialize the keyspace group manager
+	// by loading the keyspace group meta from etcd.
+	if err := s.keyspaceGroupManager.Initialize(false); err != nil {
+		return err
+	}
 
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.service = &Service{Server: s}
@@ -448,8 +474,7 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
-	serializedEntry, err := entry.Serialize()
+	serializedEntry, err := s.serviceID.Serialize()
 	if err != nil {
 		return err
 	}

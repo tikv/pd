@@ -163,11 +163,15 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 	}
 	cli := s.manager.GetClient()
 	res, err := cli.Get(ctx, key, options...)
+	var revision int64
+	if res != nil {
+		revision = res.Header.GetRevision()
+	}
 	if err != nil {
-		return &meta_storagepb.GetResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
+		return &meta_storagepb.GetResponse{Header: s.wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 	resp := &meta_storagepb.GetResponse{
-		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: res.Header.GetRevision()},
+		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: revision},
 		Count:  res.Count,
 		More:   res.More,
 	}
@@ -197,12 +201,16 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 
 	cli := s.manager.GetClient()
 	res, err := cli.Put(ctx, key, value, options...)
+	var revision int64
+	if res != nil {
+		revision = res.Header.GetRevision()
+	}
 	if err != nil {
-		return &meta_storagepb.PutResponse{Header: s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
+		return &meta_storagepb.PutResponse{Header: s.wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 
 	resp := &meta_storagepb.PutResponse{
-		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: res.Header.GetRevision()},
+		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: revision},
 	}
 	if res.PrevKv != nil {
 		resp.PrevKv = &meta_storagepb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
