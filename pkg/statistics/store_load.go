@@ -251,6 +251,7 @@ var (
 	historySampleDuration = 5 * time.Minute
 )
 
+// StoreHistoryLoads records the history load of a store.
 type StoreHistoryLoads struct {
 	loads [RWTypeLen][constant.ResourceKindLen]map[uint64]*storeHistoryLoad
 	dim   int
