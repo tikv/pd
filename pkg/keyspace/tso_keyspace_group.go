@@ -59,7 +59,7 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
 func (m *GroupManager) Bootstrap() error {
 	defaultKeyspaceGroup := &endpoint.KeyspaceGroup{
-		ID:       utils.DefaultKeySpaceGroupID,
+		ID:       utils.DefaultKeyspaceGroupID,
 		UserKind: endpoint.Basic.String(),
 	}
 
@@ -75,7 +75,7 @@ func (m *GroupManager) Bootstrap() error {
 	m.groups[userKind].Put(defaultKeyspaceGroup)
 
 	// Load all the keyspace groups from the storage and add to the respective userKind groups.
-	groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeySpaceGroupID, 0)
+	groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
 	if err != nil {
 		return err
 	}

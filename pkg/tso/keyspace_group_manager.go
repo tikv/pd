@@ -222,29 +222,24 @@ func NewKeyspaceGroupManager(
 }
 
 // Initialize this KeyspaceGroupManager
-func (kgm *KeyspaceGroupManager) Initialize(loadFromStorage bool) error {
-	// Initialize the default keyspace group if not loading from storage
-	if !loadFromStorage {
-		group := &endpoint.KeyspaceGroup{
-			ID:        mcsutils.DefaultKeySpaceGroupID,
-			Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
-			Keyspaces: []uint32{mcsutils.DefaultKeyspaceID},
-		}
-		kgm.updateKeyspaceGroup(group)
-		return nil
-	}
-
+func (kgm *KeyspaceGroupManager) Initialize() error {
 	// Load the initial keyspace group assignment from storage with time limit
 	done := make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(kgm.ctx)
 	go kgm.checkInitProgress(ctx, cancel, done)
-	watchStartRevision, err := kgm.initAssignment(ctx)
+	watchStartRevision, sawDefaultKeyspaceGroup, err := kgm.initAssignment(ctx)
 	done <- struct{}{}
 	if err != nil {
 		log.Error("failed to initialize keyspace group manager", errs.ZapError(err))
 		// We might have partially loaded/initialized the keyspace groups. Close the manager to clean up.
 		kgm.Close()
 		return err
+	}
+
+	// Initialize the default keyspace group if it isn't configured in the storage.
+	if !sawDefaultKeyspaceGroup {
+		keyspaces := []uint32{mcsutils.DefaultKeyspaceID}
+		kgm.initDefaultKeysapceGroup(keyspaces)
 	}
 
 	// Watch/apply keyspace group membership/distribution meta changes dynamically.
@@ -284,14 +279,23 @@ func (kgm *KeyspaceGroupManager) checkInitProgress(ctx context.Context, cancel c
 	<-done
 }
 
+func (kgm *KeyspaceGroupManager) initDefaultKeysapceGroup(keyspaces []uint32) {
+	group := &endpoint.KeyspaceGroup{
+		ID:        mcsutils.DefaultKeyspaceGroupID,
+		Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
+		Keyspaces: keyspaces,
+	}
+	kgm.updateKeyspaceGroup(group)
+}
+
 // initAssignment loads initial keyspace group assignment from storage and initialize the group manager.
-func (kgm *KeyspaceGroupManager) initAssignment(ctx context.Context) (int64, error) {
+// Return watchStartRevision, the start revision for watching keyspace group membership/distribution change.
+func (kgm *KeyspaceGroupManager) initAssignment(
+	ctx context.Context,
+) (watchStartRevision int64, sawDefaultKeyspaceGroup bool, err error) {
 	var (
-		// The start revision for watching keyspace group membership/distribution change
-		watchStartRevision   int64
 		groups               []*endpoint.KeyspaceGroup
 		more                 bool
-		err                  error
 		keyspaceGroupsLoaded uint32
 		revision             int64
 	)
@@ -300,7 +304,7 @@ func (kgm *KeyspaceGroupManager) initAssignment(ctx context.Context) (int64, err
 	for {
 		revision, groups, more, err = kgm.loadKeyspaceGroups(ctx, keyspaceGroupsLoaded, kgm.loadKeyspaceGroupsBatchSize)
 		if err != nil {
-			return 0, err
+			return
 		}
 
 		keyspaceGroupsLoaded += uint32(len(groups))
@@ -313,8 +317,13 @@ func (kgm *KeyspaceGroupManager) initAssignment(ctx context.Context) (int64, err
 		for _, group := range groups {
 			select {
 			case <-ctx.Done():
-				return watchStartRevision, errs.ErrLoadKeyspaceGroupsTerminated
+				err = errs.ErrLoadKeyspaceGroupsTerminated
+				return
 			default:
+			}
+
+			if group.ID == mcsutils.DefaultKeyspaceGroupID {
+				sawDefaultKeyspaceGroup = true
 			}
 
 			kgm.updateKeyspaceGroup(group)
@@ -326,7 +335,7 @@ func (kgm *KeyspaceGroupManager) initAssignment(ctx context.Context) (int64, err
 	}
 
 	log.Info("loaded keyspace groups", zap.Uint32("keyspace-groups-loaded", keyspaceGroupsLoaded))
-	return watchStartRevision, nil
+	return
 }
 
 // loadKeyspaceGroups loads keyspace groups from the start ID with limit.
@@ -441,7 +450,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 				return revision, wresp.Err()
 			}
 			for _, event := range wresp.Events {
-				id, err := endpoint.ExtractKeyspaceGroupIDFromPath(string(event.Kv.Key))
+				groupID, err := endpoint.ExtractKeyspaceGroupIDFromPath(string(event.Kv.Key))
 				if err != nil {
 					log.Warn("failed to extract keyspace group ID from the key path",
 						zap.String("key-path", string(event.Kv.Key)), zap.Error(err))
@@ -453,12 +462,20 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 					group := &endpoint.KeyspaceGroup{}
 					if err := json.Unmarshal(event.Kv.Value, group); err != nil {
 						log.Warn("failed to unmarshal keyspace group",
-							zap.Uint32("keysapce-group-id", id),
+							zap.Uint32("keysapce-group-id", groupID),
 							zap.Error(errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()))
 					}
 					kgm.updateKeyspaceGroup(group)
 				case clientv3.EventTypeDelete:
-					kgm.deleteKeyspaceGroup(id)
+					if groupID == mcsutils.DefaultKeyspaceGroupID {
+						keyspaces := kgm.kgs[groupID].Keyspaces
+						kgm.deleteKeyspaceGroup(groupID)
+						log.Warn("removed default keyspace group meta config from the storage. " +
+							"now every tso node/pod will initialize it")
+						kgm.initDefaultKeysapceGroup(keyspaces)						
+					} else {
+						kgm.deleteKeyspaceGroup(groupID)
+					}
 				}
 			}
 			revision = wresp.Header.Revision
@@ -516,7 +533,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			tsRootPath string
 			storage    *endpoint.StorageEndpoint
 		)
-		if group.ID == mcsutils.DefaultKeySpaceGroupID {
+		if group.ID == mcsutils.DefaultKeyspaceGroupID {
 			tsRootPath = kgm.legacySvcRootPath
 			storage = kgm.legacySvcStorage
 		} else {
@@ -554,7 +571,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		return newKeyspaces[i] < newKeyspaces[j]
 	})
 
-	// Mostly, the membership has no change, so we optimize for this case.
+	// Mostly, the membership has no change, so optimize for this case.
 	sameMembership := true
 	if oldLen != newLen {
 		sameMembership = false
@@ -571,22 +588,36 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	defer kgm.Unlock()
 
 	if sameMembership {
-		// The keyspace group membership is not changed, so we reuse the old one.
+		// The keyspace group membership is not changed, so reuse the old one.
 		newGroup.KeyspaceLookupTable = oldGroup.KeyspaceLookupTable
 	} else {
-		// The keyspace group membership is changed, so we update the keyspace lookup table.
+		// The keyspace group membership is changed, so update the keyspace lookup table.
 		newGroup.KeyspaceLookupTable = make(map[uint32]struct{})
 		for i, j := 0, 0; i < oldLen || j < newLen; {
 			if i < oldLen && j < newLen && oldKeyspaces[i] == newKeyspaces[j] {
-				newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
+				if groupID != mcsutils.DefaultKeyspaceGroupID && newKeyspaces[j] == mcsutils.DefaultKeyspaceID {
+					log.Warn("try to move default keyspace to non-default keyspace group. ignore it",
+						zap.Uint32("keyspace-group-id", groupID))
+				} else {
+					newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
+				}
 				i++
 				j++
 			} else if i < oldLen && j < newLen && oldKeyspaces[i] < newKeyspaces[j] || j == newLen {
-				delete(kgm.keyspaceLookupTable, oldKeyspaces[i])
+				if groupID == mcsutils.DefaultKeyspaceGroupID && oldKeyspaces[i] == mcsutils.DefaultKeyspaceID {
+					log.Warn("try to move default keyspace out of default keyspace group. ignore it")
+				} else {
+					delete(kgm.keyspaceLookupTable, oldKeyspaces[i])
+				}
 				i++
 			} else {
-				newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
-				kgm.keyspaceLookupTable[newKeyspaces[j]] = groupID
+				if groupID != mcsutils.DefaultKeyspaceGroupID && newKeyspaces[j] == mcsutils.DefaultKeyspaceID {
+					log.Warn("try to move default keyspace to non-default keyspace group. ignore it",
+						zap.Uint32("keyspace-group-id", groupID))
+				} else {
+					newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
+					kgm.keyspaceLookupTable[newKeyspaces[j]] = groupID
+				}
 				j++
 			}
 		}

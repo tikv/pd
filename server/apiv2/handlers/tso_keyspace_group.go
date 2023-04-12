@@ -195,5 +195,5 @@ func validateKeyspaceGroupID(c *gin.Context) (uint32, error) {
 }
 
 func isValid(id uint32) bool {
-	return id >= utils.DefaultKeySpaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
+	return id >= utils.DefaultKeyspaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
 }
