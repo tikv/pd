@@ -93,11 +93,13 @@ func (s *state) deinitialize() {
 	log.Info("all keyspace groups closed")
 }
 
-// getAllocatorManager returns the AllocatorManager of the given keyspace group
-func (s *state) getAllocatorManager(group uint32) *AllocatorManager {
+// getKeyspaceGroupMeta returns the meta of the given keyspace group
+func (s *state) getKeyspaceGroupMeta(
+	groupID uint32,
+) (*AllocatorManager, *endpoint.KeyspaceGroup) {
 	s.RLock()
 	defer s.RUnlock()
-	return s.ams[group]
+	return s.ams[groupID], s.kgs[groupID]
 }
 
 // getAMWithMembershipCheck returns the AllocatorManager of the given keyspace group and check
@@ -489,11 +491,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 
 	assignedToMe := kgm.isAssignedToMe(group)
 	if assignedToMe {
-		if kgm.ams[group.ID] != nil {
+		if oldAM, oldGroup := kgm.state.getKeyspaceGroupMeta(group.ID); oldAM != nil {
 			log.Info("keyspace group already initialized, so update meta only",
 				zap.Uint32("keyspace-group-id", group.ID))
-
-			oldGroup := kgm.kgs[group.ID]
 			kgm.updateKeyspaceGroupMembership(oldGroup, group)
 			return
 		}
@@ -627,7 +627,7 @@ func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) (*A
 	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
-	if am := kgm.state.getAllocatorManager(keyspaceGroupID); am != nil {
+	if am, _ := kgm.getKeyspaceGroupMeta(keyspaceGroupID); am != nil {
 		return am, nil
 	}
 	return nil, genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
@@ -640,7 +640,7 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(
 	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
-	am, _, err := kgm.state.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
+	am, _, err := kgm.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -655,7 +655,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return pdpb.Timestamp{}, keyspaceGroupID, err
 	}
-	am, currentKeyspaceGroupID, err := kgm.state.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
+	am, currentKeyspaceGroupID, err := kgm.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return pdpb.Timestamp{}, currentKeyspaceGroupID, err
 	}
