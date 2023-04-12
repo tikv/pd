@@ -67,11 +67,11 @@ type state struct {
 	keyspaceLookupTable map[uint32]uint32
 }
 
-func (s *state) Initialize() {
+func (s *state) initialize() {
 	s.keyspaceLookupTable = make(map[uint32]uint32)
 }
 
-func (s *state) Deinitialize() {
+func (s *state) deinitialize() {
 	log.Info("closing all keyspace groups")
 
 	s.Lock()
@@ -214,7 +214,7 @@ func NewKeyspaceGroupManager(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
 	kgm.tsoSvcStorage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.tsoSvcRootPath), nil)
-	kgm.state.Initialize()
+	kgm.state.initialize()
 	return kgm
 }
 
@@ -262,7 +262,7 @@ func (kgm *KeyspaceGroupManager) Close() {
 	// added/initialized after that.
 	kgm.cancel()
 	kgm.wg.Wait()
-	kgm.state.Deinitialize()
+	kgm.state.deinitialize()
 
 	log.Info("keyspace group manager closed")
 }

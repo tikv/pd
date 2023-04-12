@@ -316,9 +316,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetAMWithMembershipCheck() {
 	defer mgr.Close()
 
 	var (
-		am  *AllocatorManager
+		am   *AllocatorManager
 		kgid uint32
-		err error
+		err  error
 	)
 
 	// Create keyspace group 0 which contains keyspace 0, 1, 2.
