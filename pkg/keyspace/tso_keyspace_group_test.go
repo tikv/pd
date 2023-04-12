@@ -254,11 +254,13 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.Equal(uint32(2), kg2.ID)
 	re.Equal([]uint32{111, 222}, kg2.Keyspaces)
 	re.False(kg2.InSplit)
+	re.Empty(kg2.SplitFrom)
 	kg4, err := suite.kgm.GetKeyspaceGroupByID(4)
 	re.NoError(err)
 	re.Equal(uint32(4), kg4.ID)
 	re.Equal([]uint32{333}, kg4.Keyspaces)
 	re.True(kg4.InSplit)
+	re.Equal(kg2.ID, kg4.SplitFrom)
 	re.Equal(kg2.UserKind, kg4.UserKind)
 	re.Equal(kg2.Members, kg4.Members)
 	// finish the split of keyspace group 4
@@ -268,6 +270,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.NoError(err)
 	re.Equal(uint32(4), kg4.ID)
 	re.False(kg4.InSplit)
+	re.Equal(kg2.ID, kg4.SplitFrom)
 	// split a non-existing keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(3, 5, nil)
 	re.ErrorIs(err, ErrKeyspaceGroupNotFound)
