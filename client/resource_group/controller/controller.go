@@ -97,7 +97,7 @@ type ResourceGroupsController struct {
 
 	calculators []ResourceCalculator
 
-	requestDelta  [string][uint64]uint64 // resourceGroupName -> storeID -> delta
+	requestDelta  map[string]map[uint64]uint64 // resourceGroupName -> storeID -> delta
 
 	// When a signal is received, it means the number of available token is low.
 	lowTokenNotifyChan chan struct{}
