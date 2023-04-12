@@ -183,19 +183,21 @@ func summaryStoresLoadByEngine(
 			ty = "query-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[QueryDim])
 		}
+		loads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
 
-		historyLoads := storesHistoryLoads.Get(id, rwTy, kind)
-		for i, loads := range historyLoads {
-			if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
-				allStoreHistoryLoadSum[i] = make([]float64, len(loads))
+		if storesHistoryLoads != nil {
+			historyLoads := storesHistoryLoads.Get(id, rwTy, kind)
+			for i, loads := range historyLoads {
+				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
+					allStoreHistoryLoadSum[i] = make([]float64, len(loads))
+				}
+				for j, load := range loads {
+					allStoreHistoryLoadSum[i][j] += load
+				}
 			}
-			for j, load := range loads {
-				allStoreHistoryLoadSum[i][j] += load
-			}
+			storesHistoryLoads.Add(id, rwTy, kind, loads)
 		}
 
-		loads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
-		storesHistoryLoads.Add(id, rwTy, kind, loads)
 		for i := range allStoreLoadSum {
 			allStoreLoadSum[i] += loads[i]
 		}
