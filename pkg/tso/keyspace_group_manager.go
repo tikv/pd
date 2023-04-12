@@ -588,37 +588,36 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	defer kgm.Unlock()
 
 	if sameMembership {
-		// The keyspace group membership is not changed, so reuse the old one.
+		// The keyspace group membership is not changed. Reuse the old one.
 		newGroup.KeyspaceLookupTable = oldGroup.KeyspaceLookupTable
 	} else {
-		// The keyspace group membership is changed, so update the keyspace lookup table.
+		// The keyspace group membership is changed. Update the keyspace lookup table.
 		newGroup.KeyspaceLookupTable = make(map[uint32]struct{})
 		for i, j := 0, 0; i < oldLen || j < newLen; {
 			if i < oldLen && j < newLen && oldKeyspaces[i] == newKeyspaces[j] {
-				if groupID != mcsutils.DefaultKeyspaceGroupID && newKeyspaces[j] == mcsutils.DefaultKeyspaceID {
-					log.Warn("try to move default keyspace to non-default keyspace group. ignore it",
-						zap.Uint32("keyspace-group-id", groupID))
-				} else {
-					newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
-				}
+				newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
 				i++
 				j++
 			} else if i < oldLen && j < newLen && oldKeyspaces[i] < newKeyspaces[j] || j == newLen {
-				if groupID == mcsutils.DefaultKeyspaceGroupID && oldKeyspaces[i] == mcsutils.DefaultKeyspaceID {
-					log.Warn("try to move default keyspace out of default keyspace group. ignore it")
-				} else {
-					delete(kgm.keyspaceLookupTable, oldKeyspaces[i])
-				}
+				delete(kgm.keyspaceLookupTable, oldKeyspaces[i])
 				i++
 			} else {
-				if groupID != mcsutils.DefaultKeyspaceGroupID && newKeyspaces[j] == mcsutils.DefaultKeyspaceID {
-					log.Warn("try to move default keyspace to non-default keyspace group. ignore it",
-						zap.Uint32("keyspace-group-id", groupID))
-				} else {
-					newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
-					kgm.keyspaceLookupTable[newKeyspaces[j]] = groupID
-				}
+				newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
+				kgm.keyspaceLookupTable[newKeyspaces[j]] = groupID
 				j++
+			}
+		}
+		if groupID == mcsutils.DefaultKeyspaceGroupID {
+			if _, ok := newGroup.KeyspaceLookupTable[mcsutils.DefaultKeyspaceID]; !ok {
+				log.Warn("default keyspace is not in default keyspace group. add it back")
+				newGroup.KeyspaceLookupTable[mcsutils.DefaultKeyspaceID] = struct{}{}
+				kgm.keyspaceLookupTable[mcsutils.DefaultKeyspaceID] = groupID
+			}
+		} else {
+			if _, ok := newGroup.KeyspaceLookupTable[mcsutils.DefaultKeyspaceID]; ok {
+				log.Warn("default keyspace is in non-default keyspace group. remove it")
+				delete(newGroup.KeyspaceLookupTable, mcsutils.DefaultKeyspaceID)
+				delete(kgm.keyspaceLookupTable, mcsutils.DefaultKeyspaceID)
 			}
 		}
 	}

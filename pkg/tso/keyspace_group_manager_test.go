@@ -452,6 +452,13 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	err = mgr.Initialize()
 	re.NoError(err)
 
+	// Should be able to get AM for keyspace 0 in keyspace group 0.
+	am, kgid, err = mgr.getAMWithMembershipCheck(
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.NotNil(am)
+
 	event = generateKeyspaceGroupEvent(
 		mvccpb.PUT, mcsutils.DefaultKeyspaceGroupID, []uint32{1, 2}, []string{svcAddr})
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, rootPath, event.ksg)
@@ -461,11 +468,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, rootPath, event.ksg)
 	re.NoError(err)
 
-	// Should be able to still get AM for keyspace 0 in keyspace group 0.
 	// Sleep for a while to wait for the events to propagate. If the restriction is not working,
 	// it will cause random failure.
 	time.Sleep(1 * time.Second)
-	// Should be able to get AM for keyspace 0 in keyspace group 0.
+	// Should still be able to get AM for keyspace 0 in keyspace group 0.
 	am, kgid, err = mgr.getAMWithMembershipCheck(
 		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
 	re.NoError(err)
