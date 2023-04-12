@@ -50,6 +50,14 @@ var (
 			Help:      "Counter of failed request.",
 		}, []string{resourceGroupNameLabel})
 
+	requestRetryCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: requestSubsystem,
+			Name:      "retry",
+			Help:      "Counter of retry time for request.",
+		}, []string{resourceGroupNameLabel})
+
 	tokenRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -77,6 +85,7 @@ func init() {
 	prometheus.MustRegister(resourceGroupStatusGauge)
 	prometheus.MustRegister(successfulRequestDuration)
 	prometheus.MustRegister(failedRequestCounter)
+	prometheus.MustRegister(requestRetryCounter)
 	prometheus.MustRegister(tokenRequestDuration)
 	prometheus.MustRegister(resourceGroupTokenRequestCounter)
 }

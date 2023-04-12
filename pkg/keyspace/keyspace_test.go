@@ -61,6 +61,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store)
 	suite.manager = NewKeyspaceManager(store, nil, allocator, &mockConfig{}, kgm)
+	suite.NoError(kgm.Bootstrap())
 	suite.NoError(suite.manager.Bootstrap())
 }
 

@@ -1020,7 +1020,6 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 				hotSchedulerResultCounter.WithLabelValues("dst-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
-
 			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
 				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
@@ -1039,6 +1038,9 @@ func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statist
 }
 
 func (bs *balanceSolver) checkDstHistoryLoadsByPriorityAndTolerance(current, expect *statistics.StoreLoad, toleranceRatio float64) bool {
+	if len(current.HistoryLoads) == 0 {
+		return true
+	}
 	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
 		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
 			return current.HistoryLoads[i][j]*toleranceRatio < expect.HistoryLoads[i][j]
