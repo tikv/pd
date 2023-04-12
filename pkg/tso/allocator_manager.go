@@ -167,8 +167,8 @@ type AllocatorManager struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	// ksgID is the keyspace group id
-	ksgID uint32
+	// kgID is the keyspace group ID
+	kgID uint32
 	// member is for election use
 	member ElectionMember
 	// TSO config
@@ -204,7 +204,7 @@ func NewAllocatorManager(
 	am := &AllocatorManager{
 		ctx:                    ctx,
 		cancel:                 cancel,
-		ksgID:                  keyspaceGroupID,
+		kgID:                   keyspaceGroupID,
 		member:                 member,
 		rootPath:               rootPath,
 		storage:                storage,

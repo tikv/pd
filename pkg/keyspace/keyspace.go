@@ -131,7 +131,9 @@ func (manager *Manager) Bootstrap() error {
 	if err != nil && err != ErrKeyspaceExists {
 		return err
 	}
-
+	if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, id, defaultKeyspace.GetId(), opAdd); err != nil {
+		return err
+	}
 	// Initialize pre-alloc keyspace.
 	preAlloc := manager.config.GetPreAlloc()
 	for _, keyspaceName := range preAlloc {
@@ -139,7 +141,7 @@ func (manager *Manager) Bootstrap() error {
 		if err != nil {
 			return err
 		}
-		_, err = manager.CreateKeyspace(&CreateKeyspaceRequest{
+		keyspace, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
 			Name: keyspaceName,
 			Now:  now,
 			Config: map[string]string{
@@ -149,6 +151,9 @@ func (manager *Manager) Bootstrap() error {
 		})
 		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
 		if err != nil && err != ErrKeyspaceExists {
+			return err
+		}
+		if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, id, keyspace.GetId(), opAdd); err != nil {
 			return err
 		}
 	}
@@ -197,6 +202,9 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			zap.String("name", keyspace.GetName()),
 			zap.Error(err),
 		)
+		return nil, err
+	}
+	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, id, keyspace.GetId(), opAdd); err != nil {
 		return nil, err
 	}
 	log.Info("[keyspace] keyspace created",
@@ -333,6 +341,7 @@ const (
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation) (*keyspacepb.KeyspaceMeta, error) {
 	var meta *keyspacepb.KeyspaceMeta
+	oldConfig := make(map[string]string)
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// First get KeyspaceID from Name.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
@@ -360,6 +369,9 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 		if meta.GetConfig() == nil {
 			meta.Config = map[string]string{}
 		}
+		for k, v := range meta.GetConfig() {
+			oldConfig[k] = v
+		}
 		// Update keyspace config according to mutations.
 		for _, mutation := range mutations {
 			switch mutation.Op {
@@ -371,8 +383,27 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 				return errIllegalOperation
 			}
 		}
+		newConfig := meta.GetConfig()
+		oldUserKind := endpoint.StringUserKind(oldConfig[UserKindKey])
+		newUserKind := endpoint.StringUserKind(newConfig[UserKindKey])
+		oldID := oldConfig[TSOKeyspaceGroupIDKey]
+		newID := newConfig[TSOKeyspaceGroupIDKey]
+		needUpdate := oldUserKind != newUserKind || oldID != newID
+		if needUpdate {
+			if err := manager.kgm.UpdateKeyspaceGroup(oldID, newID, oldUserKind, newUserKind, meta.GetId()); err != nil {
+				return err
+			}
+		}
 		// Save the updated keyspace meta.
-		return manager.store.SaveKeyspaceMeta(txn, meta)
+		if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
+			if needUpdate {
+				if err := manager.kgm.UpdateKeyspaceGroup(newID, oldID, newUserKind, oldUserKind, meta.GetId()); err != nil {
+					log.Error("failed to revert keyspace group", zap.Error(err))
+				}
+			}
+			return err
+		}
+		return nil
 	})
 
 	if err != nil {
