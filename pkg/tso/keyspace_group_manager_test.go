@@ -96,8 +96,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	tsoSvcRootPath := path.Join("/ms", guid, "tso")
 	electionNamePrefix := "tso-server-" + guid
 
-	ksgMgr := NewKeyspaceGroupManager(
-		suite.ctx, tsoServiceID, suite.etcdClient, electionNamePrefix, legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+	ksgMgr := suite.newKeyspaceGroupManager(tsoServiceID, electionNamePrefix, legacySvcRootPath, tsoSvcRootPath)
 	err := ksgMgr.Initialize(false)
 	re.NoError(err)
 
@@ -128,17 +127,17 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsAssignment() {
 	re := suite.Require()
 	maxCountInUse := int(mcsutils.MaxKeyspaceGroupCountInUse)
 	// Test loading of empty keyspace group assignment.
-	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, 0, 0, 100)
+	suite.runTestLoadKeyspaceGroupsAssignment(re, 0, 0, 100)
 	// Test loading of single keyspace group assignment.
-	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, 1, 0, 100)
+	suite.runTestLoadKeyspaceGroupsAssignment(re, 1, 0, 100)
 	// Test loading of multiple keyspace group assignment.
-	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, 3, 0, 100)
-	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, maxCountInUse-1, 0, 10)
-	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, maxCountInUse, 0, 10)
+	suite.runTestLoadKeyspaceGroupsAssignment(re, 3, 0, 100)
+	suite.runTestLoadKeyspaceGroupsAssignment(re, maxCountInUse-1, 0, 10)
+	suite.runTestLoadKeyspaceGroupsAssignment(re, maxCountInUse, 0, 10)
 	// Test loading of the keyspace group assignment which exceeds the maximum keyspace group count.
 	// In this case, the manager should only load/serve the first MaxKeyspaceGroupCountInUse keyspace
 	// groups and ignore the rest.
-	runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg, maxCountInUse+1, 0, 10)
+	suite.runTestLoadKeyspaceGroupsAssignment(re, maxCountInUse+1, 0, 10)
 }
 
 // TestLoadWithDifferentBatchSize tests the loading of the keyspace group assignment with the different batch size.
@@ -161,12 +160,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadWithDifferentBatchSize() {
 	}
 
 	for _, param := range params {
-		runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg,
-			param.count-1, param.batchSize, param.probabilityAssignToMe)
-		runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg,
-			param.count, param.batchSize, param.probabilityAssignToMe)
-		runTestLoadKeyspaceGroupsAssignment(suite.ctx, re, suite.etcdClient, suite.cfg,
-			param.count+1, param.batchSize, param.probabilityAssignToMe)
+		suite.runTestLoadKeyspaceGroupsAssignment(re, param.count-1, param.batchSize, param.probabilityAssignToMe)
+		suite.runTestLoadKeyspaceGroupsAssignment(re, param.count, param.batchSize, param.probabilityAssignToMe)
+		suite.runTestLoadKeyspaceGroupsAssignment(re, param.count+1, param.batchSize, param.probabilityAssignToMe)
 	}
 }
 
@@ -175,7 +171,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadWithDifferentBatchSize() {
 func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 	re := suite.Require()
 
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -198,7 +194,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSucceedWithTempFailures() {
 	re := suite.Require()
 
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -220,7 +216,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSucceedWithTem
 func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsFailed() {
 	re := suite.Require()
 
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -243,7 +239,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestWatchAndDynamicallyApplyChanges(
 	re := suite.Require()
 
 	// Start with the empty keyspace group assignment.
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 0)
+	mgr := suite.newUniqueKeyspaceGroupManager(0)
 	re.NotNil(mgr)
 	defer mgr.Close()
 	err := mgr.Initialize(true)
@@ -311,7 +307,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestWatchAndDynamicallyApplyChanges(
 func (suite *keyspaceGroupManagerTestSuite) TestGetAMWithMembershipCheck() {
 	re := suite.Require()
 
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -360,7 +356,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetAMWithMembershipCheck() {
 func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembership() {
 	re := suite.Require()
 
-	mgr := newUniqueKeyspaceGroupManager(suite.ctx, suite.etcdClient, suite.cfg, 1)
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -405,18 +401,25 @@ func generateKeyspaceGroupEvent(
 	)
 }
 
+func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
+	tsoServiceID *discovery.ServiceRegistryEntry,
+	electionNamePrefix, legacySvcRootPath, tsoSvcRootPath string,
+) *KeyspaceGroupManager {
+	return NewKeyspaceGroupManager(
+		suite.ctx, tsoServiceID, suite.etcdClient,
+		electionNamePrefix, legacySvcRootPath, tsoSvcRootPath,
+		suite.cfg)
+}
+
 // runTestLoadMultipleKeyspaceGroupsAssignment tests the loading of multiple keyspace group assignment.
-func runTestLoadKeyspaceGroupsAssignment(
-	ctx context.Context,
+func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	re *require.Assertions,
-	etcdClient *clientv3.Client,
-	cfg *TestServiceConfig,
 	numberOfKeypaceGroupsToAdd int,
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
 	probabilityAssignToMe int, // percentage of assigning keyspace groups to this host/pod
 ) {
 	idsExpected := []int{}
-	mgr := newUniqueKeyspaceGroupManager(ctx, etcdClient, cfg, loadKeyspaceGroupsBatchSize)
+	mgr := suite.newUniqueKeyspaceGroupManager(loadKeyspaceGroupsBatchSize)
 	re.NotNil(mgr)
 	defer mgr.Close()
 
@@ -446,8 +449,9 @@ func runTestLoadKeyspaceGroupsAssignment(
 					mux.Unlock()
 				}
 				addKeyspaceGroupAssignment(
-					ctx, etcdClient, assignToMe,
-					mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(j), []uint32{uint32(j)})
+					suite.ctx, suite.etcdClient,
+					assignToMe, mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr,
+					uint32(j), []uint32{uint32(j)})
 			}
 		}(i)
 	}
@@ -462,21 +466,17 @@ func runTestLoadKeyspaceGroupsAssignment(
 	re.Equal(idsExpected, idsAssigned)
 }
 
-func newUniqueKeyspaceGroupManager(
-	ctx context.Context,
-	etcdClient *clientv3.Client,
-	cfg *TestServiceConfig,
+func (suite *keyspaceGroupManagerTestSuite) newUniqueKeyspaceGroupManager(
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
 ) *KeyspaceGroupManager {
-	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.AdvertiseListenAddr}
+	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: suite.cfg.AdvertiseListenAddr}
 	uniqueID := memberutil.GenerateUniqueID(uuid.New().String())
 	uniqueStr := strconv.FormatUint(uniqueID, 10)
 	legacySvcRootPath := path.Join("/pd", uniqueStr)
 	tsoSvcRootPath := path.Join("/ms", uniqueStr, "tso")
 	electionNamePrefix := "kgm-test-" + uniqueStr
 
-	keyspaceGroupManager := NewKeyspaceGroupManager(
-		ctx, tsoServiceID, etcdClient, electionNamePrefix, legacySvcRootPath, tsoSvcRootPath, cfg)
+	keyspaceGroupManager := suite.newKeyspaceGroupManager(tsoServiceID, electionNamePrefix, legacySvcRootPath, tsoSvcRootPath)
 
 	if loadKeyspaceGroupsBatchSize != 0 {
 		keyspaceGroupManager.loadKeyspaceGroupsBatchSize = loadKeyspaceGroupsBatchSize
