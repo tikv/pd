@@ -473,7 +473,9 @@ func (s *Server) Close() {
 	log.Info("closing server")
 
 	s.stopServerLoop()
-	s.keyspaceGroupManager.Close()
+	if s.IsAPIServiceMode() {
+		s.keyspaceGroupManager.Close()
+	}
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
