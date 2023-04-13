@@ -269,7 +269,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.ErrorIs(err, ErrKeyspaceGroupNotInSplit)
 	// finish the split of a non-existing keyspace group
 	err = suite.kgm.FinishSplitKeyspaceByID(5)
-	re.ErrorIs(err, ErrKeyspaceGroupNotFound)
+	re.ErrorIs(err, ErrKeyspaceGroupNotExists)
 	// split the in-split keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{333})
 	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
@@ -306,9 +306,6 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 
 	// split a non-existing keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(3, 5, nil)
-	re.ErrorIs(err, ErrKeyspaceGroupNotExists)
-	// finish the split of a non-existing keyspace group
-	err = suite.kgm.FinishSplitKeyspaceByID(5)
 	re.ErrorIs(err, ErrKeyspaceGroupNotExists)
 	// split into an existing keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, nil)

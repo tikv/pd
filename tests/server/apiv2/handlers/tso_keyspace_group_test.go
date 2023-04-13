@@ -164,7 +164,7 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	kg1 := suite.mustLoadKeyspaceGroupByID(1)
 	suite.Equal(uint32(1), kg1.ID)
 	suite.Equal([]uint32{333}, kg1.Keyspaces)
-	suite.False(kg1.InSplit)
+	suite.True(kg1.InSplit)
 	suite.Empty(kg1.SplitFrom)
 	// Check keyspace group 2.
 	kg2 := suite.mustLoadKeyspaceGroupByID(2)
