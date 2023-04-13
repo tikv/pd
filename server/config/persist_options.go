@@ -17,7 +17,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -204,7 +203,6 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 func (o *PersistOptions) UseRaftV2() {
 	v := o.GetScheduleConfig().Clone()
 	v.MaxMergeRegionSize = 0
-	v.MaxMovableHotPeerSize = math.MaxInt64
 	o.SetScheduleConfig(v)
 }
 

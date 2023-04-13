@@ -209,6 +209,8 @@ var (
 	// If the distribution of a dimension is below the corresponding stddev threshold, then scheduling will no longer be based on this dimension,
 	// as it implies that this dimension is sufficiently uniform.
 	stddevThreshold = 0.1
+
+	splitBucket = "split-hot-region"
 )
 
 type hotScheduler struct {
@@ -729,7 +731,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		return false
 	}
 	// revert peers
-	if bs.best.revertPeerStat != nil {
+	if bs.best.revertPeerStat != nil && len(bs.ops) > 1 {
 		infl := bs.collectPendingInfluence(bs.best.revertPeerStat)
 		if !bs.sche.tryAddPendingInfluence(bs.ops[1], dstStoreID, srcStoreID, infl, maxZombieDur) {
 			return false
@@ -1499,7 +1501,7 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 			hotSchedulerNotFoundSplitKeysCounter.Inc()
 			return
 		}
-		if op, err := operator.CreateSplitRegionOperator("split-hot-region", region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err == nil {
+		if op, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err == nil {
 			op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
 			op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
 			keys := make([]string, len(splitKey))

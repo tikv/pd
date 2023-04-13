@@ -1333,7 +1333,6 @@ func TestSyncConfig(t *testing.T) {
 			re.True(switchRaftV2)
 			tc.opt.UseRaftV2()
 			re.EqualValues(0, tc.opt.GetScheduleConfig().MaxMergeRegionSize)
-			re.EqualValues(math.MaxInt64, tc.opt.GetScheduleConfig().MaxMovableHotPeerSize)
 			success, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
 			re.True(success)
 			re.False(switchRaftV2)

@@ -234,6 +234,7 @@ func TestSplitBuckets(t *testing.T) {
 	ops := solve.createSplitOperator([]*core.RegionInfo{region})
 	re.Equal(1, len(ops))
 	op := ops[0]
+	re.Equal(splitBucket, op.Desc())
 	keys, ok := op.AdditionalInfos["hot-keys"]
 	re.True(ok)
 
