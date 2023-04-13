@@ -16,8 +16,10 @@ package statistics
 
 import (
 	"math"
+	"time"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 )
 
 // StoreLoadDetail records store load information.
@@ -144,8 +146,9 @@ func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
 
 // StoreLoad records the current load.
 type StoreLoad struct {
-	Loads []float64
-	Count float64
+	Loads        []float64
+	Count        float64
+	HistoryLoads [][]float64
 }
 
 // ToLoadPred returns the current load and future predictive load.
@@ -239,4 +242,93 @@ func MaxLoad(a, b *StoreLoad) *StoreLoad {
 		Loads: loads,
 		Count: math.Max(a.Count, b.Count),
 	}
+}
+
+var (
+	// historySampleInterval is the sampling interval for history load.
+	historySampleInterval = 30 * time.Second
+	// HistorySampleDuration  is the duration for saving history load.
+	HistorySampleDuration = 5 * time.Minute
+)
+
+// StoreHistoryLoads records the history load of a store.
+type StoreHistoryLoads struct {
+	loads [RWTypeLen][constant.ResourceKindLen]map[uint64]*storeHistoryLoad
+	dim   int
+}
+
+// NewStoreHistoryLoads creates a StoreHistoryLoads.
+func NewStoreHistoryLoads(dim int) *StoreHistoryLoads {
+	st := StoreHistoryLoads{dim: dim}
+	for i := RWType(0); i < RWTypeLen; i++ {
+		for j := constant.ResourceKind(0); j < constant.ResourceKindLen; j++ {
+			st.loads[i][j] = make(map[uint64]*storeHistoryLoad)
+		}
+	}
+	return &st
+}
+
+// Add adds the store load to the history.
+func (s *StoreHistoryLoads) Add(storeID uint64, rwTp RWType, kind constant.ResourceKind, loads []float64) {
+	load, ok := s.loads[rwTp][kind][storeID]
+	if !ok {
+		size := 10
+		if historySampleInterval != 0 {
+			size = int(HistorySampleDuration / historySampleInterval)
+		}
+		load = newStoreHistoryLoad(size, s.dim)
+		s.loads[rwTp][kind][storeID] = load
+	}
+	load.add(loads)
+}
+
+// Get returns the store loads from the history, not one time point.
+func (s *StoreHistoryLoads) Get(storeID uint64, rwTp RWType, kind constant.ResourceKind) [][]float64 {
+	load, ok := s.loads[rwTp][kind][storeID]
+	if !ok {
+		return [][]float64{}
+	}
+	return load.get()
+}
+
+type storeHistoryLoad struct {
+	update time.Time
+	loads  [][]float64
+	size   int
+	count  int
+}
+
+func newStoreHistoryLoad(size int, dim int) *storeHistoryLoad {
+	return &storeHistoryLoad{
+		loads: make([][]float64, dim),
+		size:  size,
+	}
+}
+
+func (s *storeHistoryLoad) add(loads []float64) {
+	if time.Since(s.update) < historySampleInterval || s.size == 0 {
+		return
+	}
+	if s.count == 0 {
+		for i := range s.loads {
+			s.loads[i] = make([]float64, s.size)
+		}
+	}
+	for i, v := range loads {
+		s.loads[i][s.count%s.size] = v
+	}
+	s.count++
+	s.update = time.Now()
+}
+
+func (s *storeHistoryLoad) get() [][]float64 {
+	if s.count < s.size {
+		loads := make([][]float64, len(s.loads))
+		for i := range s.loads {
+			loads[i] = make([]float64, s.count)
+			copy(loads[i], s.loads[i][:s.count])
+		}
+		return loads
+	}
+	return s.loads
 }
