@@ -253,7 +253,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.NoError(err)
 	re.Equal(uint32(2), kg2.ID)
 	re.Equal([]uint32{111, 222}, kg2.Keyspaces)
-	re.False(kg2.InSplit)
+	re.True(kg2.InSplit)
 	re.Empty(kg2.SplitFrom)
 	kg4, err := suite.kgm.GetKeyspaceGroupByID(4)
 	re.NoError(err)
@@ -263,19 +263,49 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.Equal(kg2.ID, kg4.SplitFrom)
 	re.Equal(kg2.UserKind, kg4.UserKind)
 	re.Equal(kg2.Members, kg4.Members)
+
+	// finish the split of the keyspace group 2
+	err = suite.kgm.FinishSplitKeyspaceByID(2)
+	re.ErrorIs(err, ErrKeyspaceGroupNotInSplit)
+	// finish the split of a non-existing keyspace group
+	err = suite.kgm.FinishSplitKeyspaceByID(5)
+	re.ErrorIs(err, ErrKeyspaceGroupNotFound)
+	// split the in-split keyspace group
+	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{333})
+	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+	// remove the in-split keyspace group
+	kg2, err = suite.kgm.DeleteKeyspaceGroupByID(2)
+	re.Nil(kg2)
+	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+	kg4, err = suite.kgm.DeleteKeyspaceGroupByID(4)
+	re.Nil(kg4)
+	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+	// update the in-split keyspace group
+	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "2", 444, opAdd)
+	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "4", 444, opAdd)
+	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+
 	// finish the split of keyspace group 4
 	err = suite.kgm.FinishSplitKeyspaceByID(4)
 	re.NoError(err)
+	kg2, err = suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Equal(uint32(2), kg2.ID)
+	re.Equal([]uint32{111, 222}, kg2.Keyspaces)
+	re.False(kg2.InSplit)
+	re.Empty(kg2.SplitFrom)
 	kg4, err = suite.kgm.GetKeyspaceGroupByID(4)
 	re.NoError(err)
 	re.Equal(uint32(4), kg4.ID)
+	re.Equal([]uint32{333}, kg4.Keyspaces)
 	re.False(kg4.InSplit)
 	re.Equal(kg2.ID, kg4.SplitFrom)
+	re.Equal(kg2.UserKind, kg4.UserKind)
+	re.Equal(kg2.Members, kg4.Members)
+
 	// split a non-existing keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(3, 5, nil)
-	re.ErrorIs(err, ErrKeyspaceGroupNotFound)
-	// finish the split of a non-existing keyspace group
-	err = suite.kgm.FinishSplitKeyspaceByID(5)
 	re.ErrorIs(err, ErrKeyspaceGroupNotFound)
 	// split into an existing keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, nil)
