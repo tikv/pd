@@ -532,6 +532,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		allowLeaderTiKVCount := aliveTiKVCount - 1 // store 5 with evict leader
 		aliveTiFlashCount := float64(aliveTiFlashLastID - aliveTiFlashStartID + 1)
 		tc.ObserveRegionsStats()
+		clearPendingInfluence(hb)
 		ops, _ := hb.Schedule(tc, false)
 		re.NotEmpty(ops)
 		re.True(
@@ -1815,6 +1816,7 @@ func checkSortResult(re *require.Assertions, regions []uint64, hotPeers map[*sta
 
 func TestInfluenceByRWType(t *testing.T) {
 	re := require.New(t)
+	statistics.HistorySampleDuration = 0
 	originValue := schedulePeerPr
 	defer func() {
 		schedulePeerPr = originValue

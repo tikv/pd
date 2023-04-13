@@ -247,8 +247,8 @@ func MaxLoad(a, b *StoreLoad) *StoreLoad {
 var (
 	// historySampleInterval is the sampling interval for history load.
 	historySampleInterval = 30 * time.Second
-	// historySampleDuration  is the duration for saving history load.
-	historySampleDuration = 5 * time.Minute
+	// HistorySampleDuration  is the duration for saving history load.
+	HistorySampleDuration = 5 * time.Minute
 )
 
 // StoreHistoryLoads records the history load of a store.
@@ -274,7 +274,7 @@ func (s *StoreHistoryLoads) Add(storeID uint64, rwTp RWType, kind constant.Resou
 	if !ok {
 		size := 10
 		if historySampleInterval != 0 {
-			size = int(historySampleDuration / historySampleInterval)
+			size = int(HistorySampleDuration / historySampleInterval)
 		}
 		load = newStoreHistoryLoad(size, s.dim)
 		s.loads[rwTp][kind][storeID] = load
@@ -306,7 +306,7 @@ func newStoreHistoryLoad(size int, dim int) *storeHistoryLoad {
 }
 
 func (s *storeHistoryLoad) add(loads []float64) {
-	if time.Since(s.update) < historySampleInterval {
+	if time.Since(s.update) < historySampleInterval || s.size == 0 {
 		return
 	}
 	if s.count == 0 {
