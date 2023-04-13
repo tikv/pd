@@ -97,7 +97,7 @@ type ResourceGroupsController struct {
 
 	calculators []ResourceCalculator
 
-	requestDelta  map[string]map[uint64]uint64 // resourceGroupName -> storeID -> delta
+	requestDelta map[string]map[uint64]uint64 // resourceGroupName -> storeID -> delta
 
 	// When a signal is received, it means the number of available token is low.
 	lowTokenNotifyChan chan struct{}
@@ -139,6 +139,7 @@ func NewResourceGroupController(
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
+		requestDelta:          make(map[string]map[uint64]uint64),
 	}
 	for _, opt := range opts {
 		opt(controller)
@@ -442,14 +443,14 @@ func (c *ResourceGroupsController) OnRequestWait(
 		return nil, 0, err
 	}
 
-	v, ok := c.requestDelta[resourceGroupName]; 
+	v, ok := c.requestDelta[resourceGroupName]
 	if !ok {
 		v = make(map[uint64]uint64)
 		c.requestDelta[resourceGroupName] = v
 	}
 
 	// iter all stores
-	for id, delta := range v {	
+	for id, delta := range v {
 		if info.StoreID() == id {
 			continue
 		}

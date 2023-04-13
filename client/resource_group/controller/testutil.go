@@ -24,7 +24,7 @@ import "time"
 type TestRequestInfo struct {
 	isWrite    bool
 	writeBytes uint64
-	storeID uint64
+	storeID    uint64
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
@@ -32,7 +32,7 @@ func NewTestRequestInfo(isWrite bool, writeBytes uint64) *TestRequestInfo {
 	return &TestRequestInfo{
 		isWrite:    isWrite,
 		writeBytes: writeBytes,
-		storeID: 0,
+		storeID:    0,
 	}
 }
 

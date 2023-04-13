@@ -340,9 +340,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
 				startTime := time.Now()
-				_, err := controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
+				_, _, err := controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
 				re.NoError(err)
-				_, err = controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
+				_, _, err = controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
 				re.NoError(err)
 				sum += time.Since(startTime)
 				controller.OnResponse(cas.resourceGroupName, rreq, rres)
@@ -408,9 +408,9 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 		wreq := tcs.makeWriteRequest()
 		rres := tcs.makeReadResponse()
 		wres := tcs.makeWriteResponse()
-		_, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+		_, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
 		re.NoError(err)
-		_, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+		_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
 		re.NoError(err)
 		controller.OnResponse(resourceGroupName, rreq, rres)
 		controller.OnResponse(resourceGroupName, wreq, wres)
@@ -447,9 +447,9 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
 				startTime := time.Now()
-				_, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+				_, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
 				re.NoError(err)
-				_, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+				_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
 				re.NoError(err)
 				sum += time.Since(startTime)
 				controller.OnResponse(resourceGroupName, rreq, rres)
@@ -467,14 +467,14 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	resourceGroupName2 := suite.initGroups[2].Name
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 100000, times: 1, waitDuration: 0}
 	wreq := tcs.makeWriteRequest()
-	_, err := controller.OnRequestWait(suite.ctx, resourceGroupName2, wreq)
+	_, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName2, wreq)
 	re.NoError(err)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend", "return(true)"))
 	resourceGroupName3 := suite.initGroups[3].Name
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 1000, times: 1, waitDuration: 0}
 	wreq = tcs.makeWriteRequest()
-	_, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+	_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
 	re.NoError(err)
 	time.Sleep(110 * time.Millisecond)
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 10, times: 1010, waitDuration: 0}
@@ -482,7 +482,7 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	for i := 0; i < tcs.times; i++ {
 		wreq = tcs.makeWriteRequest()
 		startTime := time.Now()
-		_, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+		_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
 		duration += time.Since(startTime)
 		re.NoError(err)
 	}
