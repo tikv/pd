@@ -165,11 +165,13 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	suite.Equal(uint32(1), kg1.ID)
 	suite.Equal([]uint32{333}, kg1.Keyspaces)
 	suite.False(kg1.InSplit)
+	suite.Empty(kg1.SplitFrom)
 	// Check keyspace group 2.
 	kg2 := suite.mustLoadKeyspaceGroupByID(2)
 	suite.Equal(uint32(2), kg2.ID)
 	suite.Equal([]uint32{111, 222}, kg2.Keyspaces)
 	suite.True(kg2.InSplit)
+	suite.Equal(kg1.ID, kg2.SplitFrom)
 	// They should have the same user kind and members.
 	suite.Equal(kg1.UserKind, kg2.UserKind)
 	suite.Equal(kg1.Members, kg2.Members)
@@ -177,6 +179,7 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	suite.mustFinishSplitKeyspaceGroup(2)
 	kg2 = suite.mustLoadKeyspaceGroupByID(2)
 	suite.False(kg2.InSplit)
+	suite.Equal(kg1.ID, kg2.SplitFrom)
 }
 
 func (suite *keyspaceGroupTestSuite) sendLoadKeyspaceGroupRequest(token, limit string) []*endpoint.KeyspaceGroup {

@@ -325,6 +325,7 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 				Members:   keyspaceGroup.Members,
 				Keyspaces: keyspaceGroup.Keyspaces,
 				InSplit:   keyspaceGroup.InSplit,
+				SplitFrom: keyspaceGroup.SplitFrom,
 			})
 		}
 		return nil
@@ -480,7 +481,8 @@ func (m *GroupManager) SplitKeyspaceGroupByID(id, newID uint32, keyspaces []uint
 			Members:   oldKg.Members,
 			Keyspaces: keyspaces,
 			// Only set the new keyspace group in split state.
-			InSplit: true,
+			InSplit:   true,
+			SplitFrom: oldKg.ID,
 		})
 	})
 }
