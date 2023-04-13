@@ -97,6 +97,7 @@ type ResourceGroupsController struct {
 
 	calculators []ResourceCalculator
 
+	mutex        sync.Mutex
 	requestDelta map[string]map[uint64]uint64 // resourceGroupName -> storeID -> delta
 
 	// When a signal is received, it means the number of available token is low.
@@ -443,6 +444,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 		return nil, 0, err
 	}
 
+	c.mutex.Lock()
 	v, ok := c.requestDelta[resourceGroupName]
 	if !ok {
 		v = make(map[uint64]uint64)
@@ -458,6 +460,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 	}
 	delta := v[info.StoreID()]
 	v[info.StoreID()] = 0
+	c.mutex.Unlock()
 
 	return con, delta, nil
 }
