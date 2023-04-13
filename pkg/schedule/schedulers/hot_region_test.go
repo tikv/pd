@@ -1163,6 +1163,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 		tc.RemoveRegion(r)
 		tc.RemoveRegionFromSubTree(r)
 	}
+	hb.updateReadTime = time.Now().Add(-time.Second)
 	hb.Schedule(tc, false)
 	re.Contains(hb.regionPendings, uint64(4))
 	re.True(typeutil.Float64Equal(509.0*units.KiB, hb.regionPendings[4].origin.Loads[statistics.RegionReadBytes]))
