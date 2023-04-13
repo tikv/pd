@@ -153,8 +153,8 @@ func (suite *tsoServerTestSuite) TestConcurrentlyReset() {
 	for i := 0; i < 2; i++ {
 		go func() {
 			defer wg.Done()
-			for i := 0; i <= 100; i++ {
-				physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
+			for j := 0; j <= 100; j++ {
+				physical := now.Add(time.Duration(2*j)*time.Minute).UnixNano() / int64(time.Millisecond)
 				ts := uint64(physical << 18)
 				suite.resetTS(ts, false, false)
 			}

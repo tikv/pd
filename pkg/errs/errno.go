@@ -17,10 +17,18 @@ package errs
 import "github.com/pingcap/errors"
 
 const (
-	// NotLeaderErr indicates the the non-leader member received the requests which should be received by leader.
+	// NotLeaderErr indicates the non-leader member received the requests which should be received by leader.
+	// Note: keep the same as the ones defined on the client side, because the client side checks if an error message
+	// contains this string to judge whether the leader is changed.
 	NotLeaderErr = "is not leader"
-	// MismatchLeaderErr indicates the the non-leader member received the requests which should be received by leader.
+	// MismatchLeaderErr indicates the non-leader member received the requests which should be received by leader.
+	// Note: keep the same as the ones defined on the client side, because the client side checks if an error message
+	// contains this string to judge whether the leader is changed.
 	MismatchLeaderErr = "mismatch leader id"
+	// NotServedErr indicates an tso node/pod received the requests for the keyspace groups which are not served by it.
+	// Note: keep the same as the ones defined on the client side, because the client side checks if an error message
+	// contains this string to judge whether the leader is changed.
+	NotServedErr = "is not served"
 )
 
 // common error in multiple packages
@@ -31,14 +39,20 @@ var (
 
 // tso errors
 var (
-	ErrSetLocalTSOConfig  = errors.Normalize("set local tso config failed, %s", errors.RFCCodeText("PD:tso:ErrSetLocalTSOConfig"))
-	ErrGetAllocator       = errors.Normalize("get allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocator"))
-	ErrGetLocalAllocator  = errors.Normalize("get local allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetLocalAllocator"))
-	ErrSyncMaxTS          = errors.Normalize("sync max ts failed, %s", errors.RFCCodeText("PD:tso:ErrSyncMaxTS"))
-	ErrResetUserTimestamp = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
-	ErrGenerateTimestamp  = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
-	ErrLogicOverflow      = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
-	ErrProxyTSOTimeout    = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:tso:ErrProxyTSOTimeout"))
+	ErrSetLocalTSOConfig               = errors.Normalize("set local tso config failed, %s", errors.RFCCodeText("PD:tso:ErrSetLocalTSOConfig"))
+	ErrGetAllocator                    = errors.Normalize("get allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocator"))
+	ErrGetLocalAllocator               = errors.Normalize("get local allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetLocalAllocator"))
+	ErrSyncMaxTS                       = errors.Normalize("sync max ts failed, %s", errors.RFCCodeText("PD:tso:ErrSyncMaxTS"))
+	ErrResetUserTimestamp              = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
+	ErrGenerateTimestamp               = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
+	ErrLogicOverflow                   = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
+	ErrProxyTSOTimeout                 = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:tso:ErrProxyTSOTimeout"))
+	ErrKeyspaceGroupIDInvalid          = errors.Normalize("the keyspace group id is invalid, %s", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupIDInvalid"))
+	ErrGetAllocatorManager             = errors.Normalize("get allocator manager failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocatorManager"))
+	ErrLoadKeyspaceGroupsTimeout       = errors.Normalize("load keyspace groups timeout", errors.RFCCodeText("ErrLoadKeyspaceGroupsTimeout"))
+	ErrLoadKeyspaceGroupsTerminated    = errors.Normalize("load keyspace groups terminated", errors.RFCCodeText("ErrLoadKeyspaceGroupsTerminated"))
+	ErrLoadKeyspaceGroupsRetryExhaustd = errors.Normalize("load keyspace groups retry exhausted, %s", errors.RFCCodeText("ErrLoadKeyspaceGroupsRetryExhaustd"))
+	ErrKeyspaceNotAssigned             = errors.Normalize("the keyspace %d isn't assigned to any keyspace group", errors.RFCCodeText("PD:tso:ErrKeyspaceNotAssigned"))
 )
 
 // member errors

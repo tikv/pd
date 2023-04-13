@@ -22,11 +22,66 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+// UserKind represents the user kind.
+type UserKind int
+
+// Different user kinds.
+const (
+	Basic UserKind = iota
+	Standard
+	Enterprise
+
+	UserKindCount
+)
+
+// StringUserKind creates a UserKind with string.
+func StringUserKind(input string) UserKind {
+	switch input {
+	case Basic.String():
+		return Basic
+	case Standard.String():
+		return Standard
+	case Enterprise.String():
+		return Enterprise
+	default:
+		return Basic
+	}
+}
+
+func (k UserKind) String() string {
+	switch k {
+	case Basic:
+		return "basic"
+	case Standard:
+		return "standard"
+	case Enterprise:
+		return "enterprise"
+	}
+	return "unknown UserKind"
+}
+
+// KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
+type KeyspaceGroupMember struct {
+	Address string `json:"address"`
+}
+
 // KeyspaceGroup is the keyspace group.
 type KeyspaceGroup struct {
 	ID       uint32 `json:"id"`
 	UserKind string `json:"user-kind"`
-	// TODO: add `Members` field
+	// InSplit indicates whether the keyspace group is in split.
+	// Both the split-from and split-to keyspace groups wll be in split state.
+	// Once in split state, the keyspace group will not be able to be updated externally.
+	InSplit bool `json:"in-split"`
+	// SplitFrom is the keyspace group ID from which the keyspace group is split.
+	SplitFrom uint32 `json:"split-from"`
+	// Members are the election members which campaign for the primary of the keyspace group.
+	Members []KeyspaceGroupMember `json:"members"`
+	// Keyspaces are the keyspace IDs which belong to the keyspace group.
+	Keyspaces []uint32 `json:"keyspaces"`
+	// KeyspaceLookupTable is for fast lookup if a given keyspace belongs to this keyspace group.
+	// It's not persisted and will be built when loading from storage.
+	KeyspaceLookupTable map[uint32]struct{} `json:"-"`
 }
 
 // KeyspaceGroupStorage is the interface for keyspace group storage.
@@ -41,7 +96,7 @@ type KeyspaceGroupStorage interface {
 
 var _ KeyspaceGroupStorage = (*StorageEndpoint)(nil)
 
-// LoadKeyspaceGroup loads the keyspace group by id.
+// LoadKeyspaceGroup loads the keyspace group by ID.
 func (se *StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
 	value, err := txn.Load(KeyspaceGroupIDPath(id))
 	if err != nil || value == "" {

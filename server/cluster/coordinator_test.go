@@ -713,7 +713,6 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
-	re.NoError(co.removeScheduler(schedulers.SplitBucketName))
 	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
 	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	re.Empty(co.schedulers)
