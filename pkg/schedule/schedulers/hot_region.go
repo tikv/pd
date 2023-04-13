@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"math"
 	"math/rand"
 	"net/http"
@@ -44,18 +45,22 @@ import (
 var (
 	statisticsInterval = time.Second
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	hotSchedulerCounter                        = schedulerCounter.WithLabelValues(HotRegionName, "schedule")
-	hotSchedulerSkipCounter                    = schedulerCounter.WithLabelValues(HotRegionName, "skip")
-	hotSchedulerNeedSplitBeforeScheduleCounter = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
-	hotSchedulerSearchRevertRegionsCounter     = schedulerCounter.WithLabelValues(HotRegionName, "search_revert_regions")
-	hotSchedulerNotSameEngineCounter           = schedulerCounter.WithLabelValues(HotRegionName, "not_same_engine")
-	hotSchedulerNoRegionCounter                = schedulerCounter.WithLabelValues(HotRegionName, "no_region")
-	hotSchedulerUnhealthyReplicaCounter        = schedulerCounter.WithLabelValues(HotRegionName, "unhealthy_replica")
-	hotSchedulerAbnormalReplicaCounter         = schedulerCounter.WithLabelValues(HotRegionName, "abnormal_replica")
-	hotSchedulerCreateOperatorFailedCounter    = schedulerCounter.WithLabelValues(HotRegionName, "create_operator_failed")
-	hotSchedulerNewOperatorCounter             = schedulerCounter.WithLabelValues(HotRegionName, "new_operator")
-	hotSchedulerSnapshotSenderLimitCounter     = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
+	hotSchedulerCounter                     = schedulerCounter.WithLabelValues(HotRegionName, "schedule")
+	hotSchedulerSkipCounter                 = schedulerCounter.WithLabelValues(HotRegionName, "skip")
+	hotSchedulerSearchRevertRegionsCounter  = schedulerCounter.WithLabelValues(HotRegionName, "search_revert_regions")
+	hotSchedulerNotSameEngineCounter        = schedulerCounter.WithLabelValues(HotRegionName, "not_same_engine")
+	hotSchedulerNoRegionCounter             = schedulerCounter.WithLabelValues(HotRegionName, "no_region")
+	hotSchedulerUnhealthyReplicaCounter     = schedulerCounter.WithLabelValues(HotRegionName, "unhealthy_replica")
+	hotSchedulerAbnormalReplicaCounter      = schedulerCounter.WithLabelValues(HotRegionName, "abnormal_replica")
+	hotSchedulerCreateOperatorFailedCounter = schedulerCounter.WithLabelValues(HotRegionName, "create_operator_failed")
+	hotSchedulerNewOperatorCounter          = schedulerCounter.WithLabelValues(HotRegionName, "new_operator")
+	hotSchedulerSnapshotSenderLimitCounter  = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
+
+	// counter related with the split region
 	hotSchedulerNotFoundSplitKeysCounter       = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
+	hotSchedulerRegionBucketsNotHotCounter     = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
+	hotSchedulerSplitSuccessCounter            = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
+	hotSchedulerNeedSplitBeforeScheduleCounter = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
 
 	hotSchedulerMoveLeaderCounter     = schedulerCounter.WithLabelValues(HotRegionName, moveLeader.String())
 	hotSchedulerMovePeerCounter       = schedulerCounter.WithLabelValues(HotRegionName, movePeer.String())
@@ -1350,6 +1355,9 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	splitRegions := make([]*core.RegionInfo, 0)
 	if bs.opTy == movePeer {
 		for _, region := range []*core.RegionInfo{bs.cur.region, bs.cur.revertRegion} {
+			if region == nil {
+				continue
+			}
 			if region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
 				hotSchedulerNeedSplitBeforeScheduleCounter.Inc()
 				splitRegions = append(splitRegions, region)
@@ -1390,6 +1398,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	return
 }
 
+// createSplitOperator creates split operators for the given regions.
 func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*operator.Operator {
 	if len(regions) == 0 {
 		return nil
@@ -1400,23 +1409,29 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 	}
 	hotBuckets := bs.Cluster.BucketsStats(bs.minHotDegree, ids...)
 	operators := make([]*operator.Operator, 0)
+
 	createFunc := func(region *core.RegionInfo) {
 		stats, ok := hotBuckets[region.GetID()]
 		if !ok {
+			hotSchedulerRegionBucketsNotHotCounter.Inc()
 			return
 		}
+		startKey, endKey := region.GetStartKey(), region.GetEndKey()
 		splitKey := make([][]byte, 0)
 		for _, stat := range stats {
-			for _, key := range [][]byte{stat.StartKey, stat.EndKey} {
-				if bytes.Compare(key, region.GetStartKey()) > 0 && bytes.Compare(key, region.GetEndKey()) < 0 {
-					if len(splitKey) == 0 {
-						splitKey = append(splitKey, key)
-						continue
-					}
-
-					if bytes.Equal(key, splitKey[len(splitKey)-1]) {
-						splitKey = append(splitKey, key)
-					}
+			if keyutil.Between(startKey, endKey, stat.StartKey) && keyutil.Between(startKey, endKey, stat.EndKey) {
+				if len(splitKey) == 0 {
+					splitKey = append(splitKey, stat.StartKey, stat.EndKey)
+					continue
+				}
+				// If the last split key is equal to the current start key, we can merge them.
+				// E.g. [a, b), [b, c) -> [a, c) split keys is [a,c]
+				// Otherwise, we should append the current start key and end key.
+				// E.g. [a, b), [c, d) -> [a, b), [c, d) split keys is [a,b,c,d]
+				if bytes.Equal(stat.StartKey, splitKey[len(splitKey)-1]) {
+					splitKey[len(splitKey)-1] = stat.EndKey
+				} else {
+					splitKey = append(splitKey, stat.StartKey, stat.EndKey)
 				}
 			}
 		}
@@ -1424,21 +1439,25 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 			hotSchedulerNotFoundSplitKeysCounter.Inc()
 			return
 		}
-		if op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err != nil {
+		if op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err == nil {
 			op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
 			op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
 			keys := ""
 			for _, key := range splitKey {
 				keys += core.HexRegionKeyStr(key) + ","
 			}
-			op.AdditionalInfos["hot-degree"] = keys
+			op.AdditionalInfos["hot-keys"] = keys
+			hotSchedulerSplitSuccessCounter.Inc()
 			operators = append(operators, op)
+		} else {
+			log.Error("fail to create split operator",
+				zap.Int("resource-type", int(bs.resourceTy)),
+				errs.ZapError(err))
 		}
 	}
 
 	for _, region := range regions {
 		createFunc(region)
-
 	}
 	return operators
 }
