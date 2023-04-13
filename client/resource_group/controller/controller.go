@@ -754,7 +754,10 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 	failpoint.Inject("acceleratedReportingPeriod", func() {
 		timeSinceLastRequest = extendedReportingPeriodFactor * defaultTargetPeriod
 	})
-	if timeSinceLastRequest >= defaultTargetPeriod {
+	// Due to `gc.run.lastRequestTime` update operations late in this logic,
+	// so `timeSinceLastRequest` is less than defaultGroupStateUpdateInterval a little bit, lead to actual report period is greater than defaultTargetPeriod.
+	// Add defaultGroupStateUpdateInterval/2 as duration buffer to avoid it.
+	if timeSinceLastRequest+defaultGroupStateUpdateInterval/2 >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
 		}
