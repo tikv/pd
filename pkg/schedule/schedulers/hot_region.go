@@ -17,16 +17,17 @@ package schedulers
 import (
 	"bytes"
 	"fmt"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/utils/keyutil"
+
 	"math"
 	"math/rand"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
@@ -38,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
@@ -1442,11 +1444,11 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 		if op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err == nil {
 			op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
 			op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
-			keys := ""
-			for _, key := range splitKey {
-				keys += core.HexRegionKeyStr(key) + ","
+			keys := make([]string, len(splitKey))
+			for i, key := range splitKey {
+				keys[i] += core.HexRegionKeyStr(key)
 			}
-			op.AdditionalInfos["hot-keys"] = keys
+			op.AdditionalInfos["hot-keys"] = strings.Join(keys, ",")
 			hotSchedulerSplitSuccessCounter.Inc()
 			operators = append(operators, op)
 		} else {
