@@ -18,6 +18,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -126,4 +127,26 @@ func TestLeader(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return cluster.GetLeader() != leader1
 	})
+}
+
+func TestRetryBootstrap(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leader1 := cluster.WaitLeader()
+	re.NotEmpty(leader1)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/saveRegionFailed", `return(true)`))
+	leaderServer := cluster.GetServer(leader1)
+	re.NoError(leaderServer.BootstrapCluster())
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/saveRegionFailed"))
+	re.NoError(leaderServer.BootstrapCluster())
 }

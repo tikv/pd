@@ -663,10 +663,15 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
-		return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
+		if ok, err := s.storage.LoadRegion(req.GetRegion().GetId(), &metapb.Region{}); !ok && err != nil {
+			log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
+			return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
 	}
 
+	failpoint.Inject("saveRegionFailed", func() {
+		failpoint.Return(&pdpb.BootstrapResponse{}, nil)
+	})
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
 	err = s.storage.SaveRegion(req.GetRegion())
 	if err != nil {
