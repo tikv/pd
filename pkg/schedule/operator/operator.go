@@ -353,7 +353,7 @@ func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionIn
 			o.steps[step].Influence(*o.influence, region)
 		}
 	}
-	opInfluence.Add(*o.influence)
+	opInfluence.Add(o.influence)
 }
 
 // OpHistory is used to log and visualize completed operators.

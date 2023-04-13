@@ -33,9 +33,9 @@ func NewOpInfluence() *OpInfluence {
 }
 
 // Add adds another influence.
-func (m OpInfluence) Add(other OpInfluence) {
+func (m OpInfluence) Add(other *OpInfluence) {
 	for id, v := range other.StoresInfluence {
-		m.GetStoreInfluence(id).add(*v)
+		m.GetStoreInfluence(id).add(v)
 	}
 }
 
@@ -59,11 +59,12 @@ type StoreInfluence struct {
 	StepCost     map[storelimit.Type]int64
 }
 
-func (s *StoreInfluence) add(other StoreInfluence) {
+func (s *StoreInfluence) add(other *StoreInfluence) {
 	s.RegionCount += other.RegionCount
 	s.RegionSize += other.RegionSize
 	s.LeaderSize += other.LeaderSize
 	s.LeaderCount += other.LeaderCount
+	s.WitnessCount += other.WitnessCount
 	for _, v := range storelimit.TypeNameValue {
 		s.AddStepCost(v, other.GetStepCost(v))
 	}

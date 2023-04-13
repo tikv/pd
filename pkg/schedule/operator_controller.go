@@ -726,18 +726,20 @@ func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 
 // GetOpInfluence gets OpInfluence.
 func (oc *OperatorController) GetOpInfluence(cluster Cluster) operator.OpInfluence {
-	influence := operator.NewOpInfluence()
+	influence := operator.OpInfluence{
+		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
+	}
 	oc.RLock()
 	defer oc.RUnlock()
 	for _, op := range oc.operators {
 		if !op.CheckTimeout() && !op.CheckSuccess() {
 			region := cluster.GetRegion(op.RegionID())
 			if region != nil {
-				op.UnfinishedInfluence(*influence, region)
+				op.UnfinishedInfluence(influence, region)
 			}
 		}
 	}
-	return *influence
+	return influence
 }
 
 // GetFastOpInfluence get fast finish operator influence

@@ -49,5 +49,6 @@ type StoreLimit interface {
 	// Reset resets the store limit
 	Reset(rate float64, typ Type)
 	// Ack put back the cost into the limit for the next waiting operator after the operator is finished.
+	// only snapshot type can use this method.
 	Ack(cost int64, typ Type)
 }
