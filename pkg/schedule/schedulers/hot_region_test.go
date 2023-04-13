@@ -234,6 +234,7 @@ func TestSplitBuckets(t *testing.T) {
 	ops := solve.createSplitOperator([]*core.RegionInfo{region})
 	re.Equal(1, len(ops))
 	op := ops[0]
+	re.Equal(splitBucket, op.Desc())
 	keys, ok := op.AdditionalInfos["hot-keys"]
 	re.True(ok)
 
@@ -1163,6 +1164,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 		tc.RemoveRegion(r)
 		tc.RemoveRegionFromSubTree(r)
 	}
+	hb.updateReadTime = time.Now().Add(-time.Second)
 	hb.Schedule(tc, false)
 	re.Contains(hb.regionPendings, uint64(4))
 	re.True(typeutil.Float64Equal(509.0*units.KiB, hb.regionPendings[4].origin.Loads[statistics.RegionReadBytes]))

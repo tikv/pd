@@ -698,7 +698,7 @@ const (
 	defaultMaxMergeRegionSize        = 20
 	defaultSplitMergeInterval        = time.Hour
 	defaultSwitchWitnessInterval     = time.Hour
-	defaultEnableDiagnostic          = false
+	defaultEnableDiagnostic          = true
 	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
@@ -1387,4 +1387,9 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
+}
+
+// GetPreAlloc returns the keyspace to be allocated during keyspace manager initialization.
+func (c *KeyspaceConfig) GetPreAlloc() []string {
+	return c.PreAlloc
 }

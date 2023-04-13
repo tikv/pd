@@ -167,8 +167,8 @@ type AllocatorManager struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	// ksgID is the keyspace group id
-	ksgID uint32
+	// kgID is the keyspace group ID
+	kgID uint32
 	// member is for election use
 	member ElectionMember
 	// TSO config
@@ -193,32 +193,27 @@ type AllocatorManager struct {
 // NewAllocatorManager creates a new TSO Allocator Manager.
 func NewAllocatorManager(
 	ctx context.Context,
-	startGlobalLeaderLoop bool,
 	keyspaceGroupID uint32,
 	member ElectionMember,
 	rootPath string,
 	storage endpoint.TSOStorage,
-	enableLocalTSO bool,
-	saveInterval time.Duration,
-	updatePhysicalInterval time.Duration,
-	leaderLease int64,
-	tlsConfig *grpcutil.TLSConfig,
-	maxResetTSGap func() time.Duration,
+	cfg Config,
+	startGlobalLeaderLoop bool,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
 	am := &AllocatorManager{
 		ctx:                    ctx,
 		cancel:                 cancel,
-		ksgID:                  keyspaceGroupID,
+		kgID:                   keyspaceGroupID,
 		member:                 member,
 		rootPath:               rootPath,
 		storage:                storage,
-		enableLocalTSO:         enableLocalTSO,
-		saveInterval:           saveInterval,
-		updatePhysicalInterval: updatePhysicalInterval,
-		leaderLease:            leaderLease,
-		maxResetTSGap:          maxResetTSGap,
-		securityConfig:         tlsConfig,
+		enableLocalTSO:         cfg.IsLocalTSOEnabled(),
+		saveInterval:           cfg.GetTSOSaveInterval(),
+		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
+		leaderLease:            cfg.GetLeaderLease(),
+		maxResetTSGap:          cfg.GetMaxResetTSGap,
+		securityConfig:         cfg.GetTLSConfig(),
 	}
 	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	am.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
@@ -226,6 +221,8 @@ func NewAllocatorManager(
 
 	// Set up the Global TSO Allocator here, it will be initialized once the member campaigns leader successfully.
 	am.SetUpGlobalAllocator(am.ctx, am.member.GetLeadership(), startGlobalLeaderLoop)
+	am.svcLoopWG.Add(1)
+	go am.tsoAllocatorLoop()
 
 	return am
 }
@@ -246,11 +243,6 @@ func (am *AllocatorManager) SetUpGlobalAllocator(ctx context.Context, leadership
 		cancel:     cancel,
 		leadership: leadership,
 		allocator:  allocator,
-	}
-
-	if startGlobalLeaderLoop {
-		am.svcLoopWG.Add(1)
-		go am.tsoAllocatorLoop()
 	}
 }
 
@@ -279,7 +271,6 @@ func (am *AllocatorManager) setUpLocalAllocator(parentCtx context.Context, dcLoc
 }
 
 // tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
-// tso service starts the loop here, but pd starts its own loop.
 func (am *AllocatorManager) tsoAllocatorLoop() {
 	defer logutil.LogPanic()
 	defer am.svcLoopWG.Done()
@@ -303,8 +294,8 @@ func (am *AllocatorManager) close() {
 	log.Info("closed the allocator manager")
 }
 
-func (am *AllocatorManager) getMember() *ElectionMember {
-	return &am.member
+func (am *AllocatorManager) getMember() ElectionMember {
+	return am.member
 }
 
 // SetLocalTSOConfig receives the zone label of this PD server and write it into etcd as dc-location
@@ -1081,6 +1072,7 @@ func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb
 		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
 		return pdpb.Timestamp{}, err
 	}
+
 	return allocatorGroup.allocator.GenerateTSO(count)
 }
 
