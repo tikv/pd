@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/keyspace"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -219,9 +218,6 @@ func mustCreateKeyspace(re *require.Assertions, server *tests.TestServer, reques
 	re.NoError(err)
 	meta := &handlers.KeyspaceMeta{}
 	re.NoError(json.Unmarshal(data, meta))
-	// When creating a keyspace, it will be assigned a keyspace group id.
-	request.Config[keyspace.TSOKeyspaceGroupIDKey] = "0"
-	request.Config[keyspace.UserKindKey] = endpoint.Basic.String()
 	checkCreateRequest(re, request, meta.KeyspaceMeta)
 	return meta.KeyspaceMeta
 }

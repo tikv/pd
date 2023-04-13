@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/schedule"
@@ -107,6 +108,8 @@ type Server interface {
 	GetBasicCluster() *core.BasicCluster
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
+	GetKeyspaceGroupManager() *keyspace.GroupManager
+	IsAPIServiceMode() bool
 }
 
 // RaftCluster is used for cluster config management.
@@ -156,6 +159,7 @@ type RaftCluster struct {
 	progressManager          *progress.Manager
 	regionSyncer             *syncer.RegionSyncer
 	changedRegions           chan *core.RegionInfo
+	keyspaceGroupManager     *keyspace.GroupManager
 }
 
 // Status saves some state information.
@@ -233,7 +237,8 @@ func (c *RaftCluster) InitCluster(
 	id id.Allocator,
 	opt *config.PersistOptions,
 	storage storage.Storage,
-	basicCluster *core.BasicCluster) {
+	basicCluster *core.BasicCluster,
+	keyspaceGroupManager *keyspace.GroupManager) {
 	c.core, c.opt, c.storage, c.id = basicCluster, opt, storage, id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
@@ -244,6 +249,7 @@ func (c *RaftCluster) InitCluster(
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 	c.unsafeRecoveryController = newUnsafeRecoveryController(c)
+	c.keyspaceGroupManager = keyspaceGroupManager
 }
 
 // Start starts a cluster.
@@ -256,13 +262,19 @@ func (c *RaftCluster) Start(s Server) error {
 	c.Lock()
 	defer c.Unlock()
 
-	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster())
+	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster(), s.GetKeyspaceGroupManager())
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
 	}
 	if cluster == nil {
 		return nil
+	}
+	if s.IsAPIServiceMode() {
+		err = c.keyspaceGroupManager.Bootstrap()
+		if err != nil {
+			return err
+		}
 	}
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
