@@ -407,11 +407,12 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetAMWithMembershipCheck() {
 	re.NoError(err)
 	re.Equal(uint32(0), kgid)
 	re.NotNil(am)
-	// Should fail because keyspace 3 is not in keyspace group 0.
+	// Should still succeed even keyspace 3 isn't explicitly assigned to any
+	// keyspace group. It will be assigned to the default keyspace group.
 	am, kgid, err = mgr.getAMWithMembershipCheck(3, 0)
-	re.Error(err)
+	re.NoError(err)
 	re.Equal(uint32(0), kgid)
-	re.Nil(am)
+	re.NotNil(am)
 	// Should fail because keyspace group 1 doesn't exist.
 	am, kgid, err = mgr.getAMWithMembershipCheck(0, 1)
 	re.Error(err)

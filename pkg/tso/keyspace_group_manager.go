@@ -124,7 +124,15 @@ func (s *state) getAMWithMembershipCheck(
 	if kgid, ok := s.keyspaceLookupTable[keyspaceID]; ok {
 		return nil, kgid, genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 	}
-	return nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+
+	if keyspaceGroupID != mcsutils.DefaultKeyspaceGroupID {
+		return nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+	}
+
+	// The keyspace doesn't belong to any keyspace group, so return the default keyspace group.
+	// It's for migrating the existing keyspaces which have no keyspace group assigned, so the
+	// the default keyspace group is used to serve the keyspaces.
+	return s.ams[mcsutils.DefaultKeyspaceGroupID], mcsutils.DefaultKeyspaceGroupID, nil
 }
 
 // KeyspaceGroupManager manages the members of the keyspace groups assigned to this host.
