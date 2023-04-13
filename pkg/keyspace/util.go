@@ -45,6 +45,8 @@ var (
 	ErrKeyspaceGroupExists = errors.New("keyspace group already exists")
 	// ErrKeyspaceGroupNotFound is used to indicate target keyspace group does not exist.
 	ErrKeyspaceGroupNotFound = errors.New("keyspace group does not exist")
+	// ErrKeyspaceGroupInSplit is used to indicate target keyspace group is in split state.
+	ErrKeyspaceGroupInSplit = errors.New("keyspace group is in split state")
 	// ErrKeyspaceGroupNotInSplit is used to indicate target keyspace group is not in split state.
 	ErrKeyspaceGroupNotInSplit = errors.New("keyspace group is not in split state")
 	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
