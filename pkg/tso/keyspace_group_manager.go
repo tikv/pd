@@ -807,6 +807,9 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
+	if kgm.httpClient == nil {
+		return nil
+	}
 	statusCode, err := apiutil.DoDelete(kgm.httpClient, kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
 	if err != nil {
 		return err
