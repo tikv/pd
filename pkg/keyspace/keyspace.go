@@ -110,7 +110,7 @@ func (manager *Manager) Bootstrap() error {
 		return err
 	}
 	now := time.Now().Unix()
-	defaultKeyspace := &keyspacepb.KeyspaceMeta{
+	defaultKeyspaceMata := &keyspacepb.KeyspaceMeta{
 		Id:             DefaultKeyspaceID,
 		Name:           DefaultKeyspaceName,
 		State:          keyspacepb.KeyspaceState_ENABLED,
@@ -122,14 +122,14 @@ func (manager *Manager) Bootstrap() error {
 	if err != nil {
 		return err
 	}
-	defaultKeyspace.Config = config
-	err = manager.saveNewKeyspace(defaultKeyspace)
+	defaultKeyspaceMata.Config = config
+	err = manager.saveNewKeyspace(defaultKeyspaceMata)
 	// It's possible that default keyspace already exists in the storage (e.g. PD restart/recover),
 	// so we ignore the keyspaceExists error.
 	if err != nil && err != ErrKeyspaceExists {
 		return err
 	}
-	if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], defaultKeyspace.GetId(), opAdd); err != nil {
+	if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], defaultKeyspaceMata.GetId(), opAdd); err != nil {
 		return err
 	}
 	// Initialize pre-alloc keyspace.
@@ -180,9 +180,10 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if len(config) != 0 {
 		if request.Config == nil {
 			request.Config = config
+		} else {
+			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
+			request.Config[UserKindKey] = config[UserKindKey]
 		}
-		request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
-		request.Config[UserKindKey] = config[UserKindKey]
 	}
 	// Create and save keyspace metadata.
 	keyspace := &keyspacepb.KeyspaceMeta{
