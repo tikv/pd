@@ -141,6 +141,8 @@ func TestLowSpaceRatio(t *testing.T) {
 	re.True(store.IsLowSpace(0.8))
 	store.rawStats.Available = store.rawStats.Capacity >> 2
 	re.False(store.IsLowSpace(0.8))
+	store.rawStats.Capacity = 0
+	re.False(store.IsLowSpace(0.8))
 }
 
 func TestLowSpaceScoreV2(t *testing.T) {

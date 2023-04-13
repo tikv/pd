@@ -47,13 +47,13 @@ func (suite *regionLabelTestSuite) SetupSuite() {
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/config/region-label/", addr, apiPrefix)
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/keyspace/skipSplitRegion", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	mustBootstrapCluster(re, suite.svr)
 }
 
 func (suite *regionLabelTestSuite) TearDownSuite() {
 	suite.cleanup()
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/keyspace/skipSplitRegion"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func (suite *regionLabelTestSuite) TestGetSet() {

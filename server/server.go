@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/keyspace"
 	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
@@ -73,7 +74,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/gc"
-	"github.com/tikv/pd/server/keyspace"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -121,8 +121,8 @@ var (
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
-	// Server state.
-	isServing int64
+	// Server state. 0 is not running, 1 is running.
+	isRunning int64
 
 	// Server start timestamp
 	startTimestamp int64
@@ -405,12 +405,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	if !s.IsAPIServiceMode() {
-		s.tsoAllocatorManager = tso.NewAllocatorManager(
-			s.ctx, false, mcs.DefaultKeySpaceGroupID, s.member, s.rootPath, s.storage, s.cfg.IsLocalTSOEnabled(),
-			s.cfg.GetTSOSaveInterval(), s.cfg.GetTSOUpdatePhysicalInterval(), s.cfg.GetLeaderLease(), s.cfg.GetTLSConfig(),
-			func() time.Duration { return s.persistOptions.GetMaxResetTSGap() })
-		// Set up the Global TSO Allocator here, it will be initialized once the PD campaigns leader successfully.
-		s.tsoAllocatorManager.SetUpGlobalAllocator(ctx, s.member.GetLeadership(), false)
+		s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeySpaceGroupID, s.member, s.rootPath, s.storage, s, false)
 		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 		if !s.cfg.EnableLocalTSO {
 			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
@@ -440,8 +435,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, s.cfg.Keyspace)
-	s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage)
+	if s.IsAPIServiceMode() {
+		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage)
+	}
+	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -456,7 +453,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 
 	// Server has started.
-	atomic.StoreInt64(&s.isServing, 1)
+	atomic.StoreInt64(&s.isRunning, 1)
 	serverMaxProcs.Set(float64(runtime.GOMAXPROCS(0)))
 	return nil
 }
@@ -468,7 +465,7 @@ func (s *Server) AddCloseCallback(callbacks ...func()) {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
+	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
 		// server is already closed
 		return
 	}
@@ -513,7 +510,7 @@ func (s *Server) Close() {
 
 // IsClosed checks whether server is closed or not.
 func (s *Server) IsClosed() bool {
-	return atomic.LoadInt64(&s.isServing) == 0
+	return atomic.LoadInt64(&s.isRunning) == 0
 }
 
 // Run runs the pd server.
@@ -564,9 +561,6 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	if s.IsAPIServiceMode() { // disable tso service in api server
 		s.serverLoopWg.Add(1)
 		go s.watchServicePrimaryAddrLoop(mcs.TSOServiceName)
-	} else { // enable tso service
-		s.serverLoopWg.Add(1)
-		go s.tsoAllocatorLoop()
 	}
 }
 
@@ -590,17 +584,6 @@ func (s *Server) serverMetricsLoop() {
 			return
 		}
 	}
-}
-
-// tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
-func (s *Server) tsoAllocatorLoop() {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-	s.tsoAllocatorManager.AllocatorDaemon(ctx)
-	log.Info("server is closed, exit allocator loop")
 }
 
 // encryptionKeyManagerLoop is used to start monitor encryption key changes.
@@ -699,11 +682,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
-		log.Warn("bootstrap keyspace manager failed", errs.ZapError(err))
-	}
-
-	if err = s.GetKeyspaceGroupManager().Bootstrap(); err != nil {
-		log.Warn("bootstrap keyspace group manager failed", errs.ZapError(err))
+		log.Warn("bootstrapping keyspace manager failed", errs.ZapError(err))
 	}
 
 	return &pdpb.BootstrapResponse{
@@ -1318,7 +1297,7 @@ func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
 	return s.serviceRateLimiter
 }
 
-// IsInRateLimitAllowList returns whethis given service label is in allow lost
+// IsInRateLimitAllowList returns whether given service label is in allow lost
 func (s *Server) IsInRateLimitAllowList(serviceLabel string) bool {
 	return s.serviceRateLimiter.IsInAllowList(serviceLabel)
 }
@@ -1812,4 +1791,29 @@ func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	}
 	s.GetRaftCluster().SetExternalTS(externalTS)
 	return nil
+}
+
+// IsLocalTSOEnabled returns if the local TSO is enabled.
+func (s *Server) IsLocalTSOEnabled() bool {
+	return s.cfg.IsLocalTSOEnabled()
+}
+
+// GetLeaderLease returns the leader lease.
+func (s *Server) GetLeaderLease() int64 {
+	return s.cfg.GetLeaderLease()
+}
+
+// GetTSOSaveInterval returns TSO save interval.
+func (s *Server) GetTSOSaveInterval() time.Duration {
+	return s.cfg.GetTSOSaveInterval()
+}
+
+// GetTSOUpdatePhysicalInterval returns TSO update physical interval.
+func (s *Server) GetTSOUpdatePhysicalInterval() time.Duration {
+	return s.cfg.GetTSOUpdatePhysicalInterval()
+}
+
+// GetMaxResetTSGap gets the max gap to reset the tso.
+func (s *Server) GetMaxResetTSGap() time.Duration {
+	return s.persistOptions.GetMaxResetTSGap()
 }

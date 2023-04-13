@@ -1441,7 +1441,7 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 			hotSchedulerNotFoundSplitKeysCounter.Inc()
 			return
 		}
-		if op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err == nil {
+		if op, err := operator.CreateSplitRegionOperator("split-hot-region", region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err == nil {
 			op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
 			op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
 			keys := make([]string, len(splitKey))
