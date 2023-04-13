@@ -54,7 +54,7 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
-	cluster, err := tests.NewTestCluster(suite.ctx, 1)
+	cluster, err := tests.NewTestAPICluster(suite.ctx, 1)
 	suite.cluster = cluster
 	suite.NoError(err)
 	suite.NoError(cluster.RunInitialServers())
