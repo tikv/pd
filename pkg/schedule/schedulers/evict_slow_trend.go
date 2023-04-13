@@ -331,7 +331,7 @@ func chooseEvictCandidate(cluster schedule.Cluster) (slowStore *core.StoreInfo) 
 	return store
 }
 
-func checkStoresAreUpdated(cluster schedule.Cluster, slowStoreID uint64, baselineTS time.Time) bool {
+func checkStoresAreUpdated(cluster schedule.Cluster, slowStoreID uint64, slowStoreRecordTS time.Time) bool {
 	stores := cluster.GetStores()
 	if len(stores) <= 1 {
 		return false
@@ -351,7 +351,7 @@ func checkStoresAreUpdated(cluster schedule.Cluster, slowStoreID uint64, baselin
 			updatedStores += 1
 			continue
 		}
-		if baselineTS.Before(store.GetLastHeartbeatTS()) {
+		if slowStoreRecordTS.Before(store.GetLastHeartbeatTS()) {
 			updatedStores += 1
 		}
 	}
