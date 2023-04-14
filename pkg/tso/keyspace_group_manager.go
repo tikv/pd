@@ -82,6 +82,7 @@ func (s *state) deinitialize() {
 		if am != nil {
 			wg.Add(1)
 			go func(am *AllocatorManager) {
+				defer logutil.LogPanic()
 				defer wg.Done()
 				am.close()
 				log.Info("keyspace group closed", zap.Uint32("keyspace-group-id", am.kgID))
@@ -274,6 +275,8 @@ func (kgm *KeyspaceGroupManager) Close() {
 }
 
 func (kgm *KeyspaceGroupManager) checkInitProgress(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	defer logutil.LogPanic()
+
 	select {
 	case <-done:
 		return
