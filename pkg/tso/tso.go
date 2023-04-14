@@ -168,7 +168,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubRealTimeByWallClock(next, last) < UpdateTimestampGuard {
-		log.Error("system time may be incorrect",
+		log.Warn("system time may be incorrect",
 			zap.Time("last", last), zap.Time("next", next), errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(UpdateTimestampGuard)
 	}

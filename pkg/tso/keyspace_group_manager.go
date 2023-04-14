@@ -247,7 +247,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 	// Initialize the default keyspace group if it isn't configured in the storage.
 	if !defaultKGConfigured {
 		keyspaces := []uint32{mcsutils.DefaultKeyspaceID}
-		kgm.initDefaultKeysapceGroup(keyspaces)
+		kgm.initDefaultKeyspaceGroup(keyspaces)
 	}
 
 	// Watch/apply keyspace group membership/distribution meta changes dynamically.
@@ -287,7 +287,7 @@ func (kgm *KeyspaceGroupManager) checkInitProgress(ctx context.Context, cancel c
 	<-done
 }
 
-func (kgm *KeyspaceGroupManager) initDefaultKeysapceGroup(keyspaces []uint32) {
+func (kgm *KeyspaceGroupManager) initDefaultKeyspaceGroup(keyspaces []uint32) {
 	log.Info("initializing default keyspace group",
 		zap.Int("keyspaces-length", len(keyspaces)))
 
@@ -353,7 +353,7 @@ func (kgm *KeyspaceGroupManager) initAssignment(
 // If limit is 0, it will load all keyspace groups from the start ID.
 func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 	ctx context.Context, startID uint32, limit int64,
-) (revison int64, ksgs []*endpoint.KeyspaceGroup, more bool, err error) {
+) (revision int64, ksgs []*endpoint.KeyspaceGroup, more bool, err error) {
 	rootPath := kgm.legacySvcRootPath
 	startKey := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(startID)}, "/")
 	endKey := strings.Join(
@@ -392,7 +392,7 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 	}
 
 	if i == kgm.loadFromEtcdMaxRetryTimes {
-		return 0, []*endpoint.KeyspaceGroup{}, false, errs.ErrLoadKeyspaceGroupsRetryExhaustd.FastGenByArgs(err)
+		return 0, []*endpoint.KeyspaceGroup{}, false, errs.ErrLoadKeyspaceGroupsRetryExhausted.FastGenByArgs(err)
 	}
 
 	kgs := make([]*endpoint.KeyspaceGroup, 0, len(resp.Kvs))
@@ -405,10 +405,10 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 	}
 
 	if resp.Header != nil {
-		revison = resp.Header.Revision
+		revision = resp.Header.Revision
 	}
 
-	return revison, kgs, resp.More, nil
+	return revision, kgs, resp.More, nil
 }
 
 // startKeyspaceGroupsMetaWatchLoop Repeatedly watches any change in keyspace group membership/distribution
@@ -473,7 +473,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 					group := &endpoint.KeyspaceGroup{}
 					if err := json.Unmarshal(event.Kv.Value, group); err != nil {
 						log.Warn("failed to unmarshal keyspace group",
-							zap.Uint32("keysapce-group-id", groupID),
+							zap.Uint32("keyspace-group-id", groupID),
 							zap.Error(errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()))
 					}
 					kgm.updateKeyspaceGroup(group)
@@ -483,7 +483,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 						kgm.deleteKeyspaceGroup(groupID)
 						log.Warn("removed default keyspace group meta config from the storage. " +
 							"now every tso node/pod will initialize it")
-						kgm.initDefaultKeysapceGroup(keyspaces)
+						kgm.initDefaultKeyspaceGroup(keyspaces)
 					} else {
 						kgm.deleteKeyspaceGroup(groupID)
 					}
