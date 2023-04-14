@@ -664,6 +664,10 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 			}
 		}
 	}
+	// Check if the split is completed.
+	if oldGroup.IsSplitTo() && !newGroup.InSplit() {
+		kgm.ams[groupID].getMember().(*member.Participant).SetPreCampaignChecker(nil)
+	}
 	kgm.kgs[groupID] = newGroup
 }
 
