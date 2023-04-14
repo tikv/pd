@@ -152,6 +152,33 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 	}
 }
 
+func (s *Service) FindGroupByKeyspaceID(
+	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
+) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
+	keyspaceID := request.GetKeyspaceId()
+	curKeyspaceGroup, curKeyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	if err != nil {
+		return nil, status.Errorf(codes.Unknown, err.Error())
+	}
+	var respMembers []*tsopb.KeyspaceGroupMember
+	for _, member := range curKeyspaceGroup.Members {
+		respMembers = append(respMembers, &tsopb.KeyspaceGroupMember{
+			Address: member.Address,
+		})
+	}
+
+	return &tsopb.FindGroupByKeyspaceIDResponse{
+		Header: s.header(curKeyspaceGroupID),
+		KeyspaceGroup: &tsopb.KeyspaceGroup{
+			Id: curKeyspaceGroupID,
+			UserKind: curKeyspaceGroup.UserKind,
+			InSplit: curKeyspaceGroup.InSplit,
+			SplitFrom: curKeyspaceGroup.SplitFrom,
+			Members: respMembers,
+		},
+	}, nil
+}
+
 func (s *Service) header(keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
 	if s.clusterID == 0 {
 		return s.wrapErrorToHeader(

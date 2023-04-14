@@ -294,7 +294,8 @@ func (c *tsoServiceDiscovery) switchPrimary(addrs []string) error {
 func (c *tsoServiceDiscovery) updateMember() error {
 	resp, err := c.metacli.Get(c.ctx, []byte(c.primaryKey))
 	if err != nil {
-		log.Error("[tso] failed to get the keyspace serving endpoint", zap.String("primary-key", c.primaryKey), errs.ZapError(err))
+		log.Error("[tso] failed to get the keyspace serving endpoint",
+			zap.String("primary-key", c.primaryKey), errs.ZapError(err))
 		return err
 	}
 

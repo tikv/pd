@@ -111,7 +111,7 @@ func (s *state) getKeyspaceGroupMeta(
 // if the keyspace is served by this keyspace group.
 func (s *state) getAMWithMembershipCheck(
 	keyspaceID, keyspaceGroupID uint32,
-) (*AllocatorManager, uint32, error) {
+) (*AllocatorManager, *endpoint.KeyspaceGroup, uint32, error) {
 	s.RLock()
 	defer s.RUnlock()
 
@@ -119,7 +119,7 @@ func (s *state) getAMWithMembershipCheck(
 		kg := s.kgs[keyspaceGroupID]
 		if kg != nil {
 			if _, ok := kg.KeyspaceLookupTable[keyspaceID]; ok {
-				return am, keyspaceGroupID, nil
+				return am, kg, keyspaceGroupID, nil
 			}
 		}
 	}
@@ -127,21 +127,20 @@ func (s *state) getAMWithMembershipCheck(
 	// The keyspace doesn't belong to this keyspace group, we should check if it belongs to any other
 	// keyspace groups, and return the correct keyspace group ID to the client.
 	if kgid, ok := s.keyspaceLookupTable[keyspaceID]; ok {
-		return nil, kgid, genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
+		return s.ams[kgid], s.kgs[kgid], kgid,
+			genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 	}
 
-	// The keyspace doesn't belong to any keyspace group but the keyspace has been assigned to a
-	// keyspace group before, which means the keyspace group hasn't initialized yet.
-	if keyspaceGroupID != mcsutils.DefaultKeyspaceGroupID {
-		return nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+	defaultGroupID := mcsutils.DefaultKeyspaceGroupID
+
+	if keyspaceGroupID != defaultGroupID {
+		return nil, nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 
-	// For migrating the existing keyspaces which have no keyspace group assigned as configured in the
-	// keyspace meta. All these keyspaces will be served by the default keyspace group.
-	if s.ams[mcsutils.DefaultKeyspaceGroupID] == nil {
-		return nil, mcsutils.DefaultKeyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
-	}
-	return s.ams[mcsutils.DefaultKeyspaceGroupID], mcsutils.DefaultKeyspaceGroupID, nil
+	// The keyspace doesn't belong to any keyspace group, so return the default keyspace group.
+	// It's for migrating the existing keyspaces which have no keyspace group assigned, so the
+	// the default keyspace group is used to serve the keyspaces.
+	return s.ams[defaultGroupID], s.kgs[defaultGroupID], defaultGroupID, nil
 }
 
 // KeyspaceGroupManager manages the members of the keyspace groups assigned to this host.
@@ -732,6 +731,18 @@ func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) (*A
 	return nil, genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 }
 
+// FindGroupByKeyspaceID returns the keyspace group that contains the keyspace with the given ID.
+func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
+	keyspaceID uint32,
+) (*endpoint.KeyspaceGroup, uint32, error) {
+	_, curKeyspaceGroup, curKeyspaceGroupID, err :=
+		kgm.getAMWithMembershipCheck(keyspaceID, mcsutils.DefaultKeySpaceGroupID)
+	if err != nil {
+		return nil, curKeyspaceGroupID, err
+	}
+	return curKeyspaceGroup, curKeyspaceGroupID, nil
+}
+
 // GetElectionMember returns the election member of the given keyspace group
 func (kgm *KeyspaceGroupManager) GetElectionMember(
 	keyspaceID, keyspaceGroupID uint32,
@@ -739,7 +750,7 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(
 	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
-	am, _, err := kgm.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
+	am, _, _, err := kgm.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -750,13 +761,13 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(
 func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	keyspaceID, keyspaceGroupID uint32,
 	dcLocation string, count uint32,
-) (ts pdpb.Timestamp, currentKeyspaceGroupID uint32, err error) {
+) (ts pdpb.Timestamp, curKeyspaceGroupID uint32, err error) {
 	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return pdpb.Timestamp{}, keyspaceGroupID, err
 	}
-	am, currentKeyspaceGroupID, err := kgm.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
+	am, _, curKeyspaceGroupID, err := kgm.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
-		return pdpb.Timestamp{}, currentKeyspaceGroupID, err
+		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
 	err = kgm.checkTSOSplit(currentKeyspaceGroupID, dcLocation)
 	if err != nil {

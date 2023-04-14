@@ -43,8 +43,12 @@ import (
 const (
 	// defaultKeyspaceID is the default key space id.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap and reserved for users who haven't been assigned keyspace.
+	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap
+	// and reserved for users who haven't been assigned keyspace.
 	defaultKeyspaceID = uint32(0)
+	// defaultKeySpaceGroupID is the default key space group id.
+	// We also reserved 0 for the keyspace group for the same purpose.
+	defaultKeySpaceGroupID = uint32(0)
 )
 
 // Region contains information of a region's meta and its peers.
@@ -380,6 +384,7 @@ func (c *client) Close() {
 func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	c.Lock()
 	defer c.Unlock()
+
 	if newMode == c.serviceMode {
 		return
 	}
@@ -398,11 +403,15 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = newTSOServiceDiscovery(c.ctx, MetaStorageClient(c),
 			c.GetClusterID(c.ctx), c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
+		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
+		// and will be updated later.
 		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
 			newTSOSvcDiscovery, &tsoTSOStreamBuilderFactory{})
 		if err := newTSOSvcDiscovery.Init(); err != nil {
 			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
-				zap.Strings("svr-urls", c.svrUrls), zap.String("current-mode", c.serviceMode.String()), zap.Error(err))
+				zap.Strings("svr-urls", c.svrUrls),
+				zap.String("current-mode", c.serviceMode.String()),
+				zap.Error(err))
 			return
 		}
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
@@ -602,7 +611,6 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req.clientCtx = c.ctx
 	tsoClient := c.getTSOClient()
 	req.start = time.Now()
-	req.keyspaceID = c.keyspaceID
 	req.dcLocation = dcLocation
 
 	if tsoClient == nil {

@@ -662,7 +662,8 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		// Do not proxy the leader client.
 		if addr != leaderAddr {
-			log.Info("[tso] use follower to forward tso stream to do the proxy", zap.String("dc", dc), zap.String("addr", addr))
+			log.Info("[tso] use follower to forward tso stream to do the proxy",
+				zap.String("dc", dc), zap.String("addr", addr))
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
 		}
 		// Create the TSO stream.
@@ -676,7 +677,8 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 			connectionCtxs.Store(addr, &tsoConnectionContext{addr, stream, cctx, cancel})
 			continue
 		}
-		log.Error("[tso] create the tso stream failed", zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
+		log.Error("[tso] create the tso stream failed",
+			zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
 		cancel()
 	}
 	return nil
@@ -691,7 +693,9 @@ func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanO
 	return opts
 }
 
-func (c *tsoClient) processRequests(stream tsoStream, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption) error {
+func (c *tsoClient) processRequests(
+	stream tsoStream, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption,
+) error {
 	if len(opts) > 0 {
 		span := opentracing.StartSpan("pdclient.processRequests", opts...)
 		defer span.Finish()
@@ -699,7 +703,8 @@ func (c *tsoClient) processRequests(stream tsoStream, dcLocation string, tbc *ts
 
 	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
-	physical, logical, suffixBits, err := stream.processRequests(c.svcDiscovery.GetClusterID(), dcLocation, requests, tbc.batchStartTime)
+	physical, logical, suffixBits, err := stream.processRequests(
+		c.svcDiscovery.GetClusterID(), c.keyspaceID, c.keyspaceGroupID, dcLocation, requests, tbc.batchStartTime)
 	if err != nil {
 		c.finishRequest(requests, 0, 0, 0, err)
 		return err
