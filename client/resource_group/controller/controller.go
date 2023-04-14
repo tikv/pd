@@ -456,7 +456,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 		if info.StoreID() == id {
 			continue
 		}
-		delta += 1
+		v[id] = delta + 1
 	}
 	delta := v[info.StoreID()]
 	v[info.StoreID()] = 0
