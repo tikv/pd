@@ -78,3 +78,10 @@ func (r *RoundRobin[T]) Delete(node T) {
 		}
 	}
 }
+
+// Len returns the length of nodes.
+func (r *RoundRobin[T]) Len() int {
+	r.RLock()
+	defer r.RUnlock()
+	return len(r.nodes)
+}

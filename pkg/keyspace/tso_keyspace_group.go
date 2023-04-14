@@ -166,10 +166,12 @@ func (m *GroupManager) startWatchLoop() {
 				m.nodesBalancer.Put(s.ServiceAddr)
 			}
 			break
+		} else {
+			log.Warn("failed to get tso service addrs from etcd and will retry", zap.Error(err))
 		}
 	}
 	if err != nil {
-		log.Warn("failed to get tso service addrs from etcd", zap.Error(err))
+		log.Warn("failed to get tso service addrs from etcd finally when loading", zap.Error(err))
 	}
 	for {
 		select {
@@ -574,7 +576,7 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitToID uint32) error {
 
 // GetNodesNum returns the number of nodes.
 func (m *GroupManager) GetNodesNum() int {
-	return len(m.nodesBalancer.GetAll())
+	return m.nodesBalancer.Len()
 }
 
 // AllocNodesForKeyspaceGroup allocates nodes for the keyspace group.
@@ -618,8 +620,7 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]end
 			nodes = append(nodes, endpoint.KeyspaceGroupMember{Address: addr})
 		}
 		kg.Members = nodes
-		m.store.SaveKeyspaceGroup(txn, kg)
-		return nil
+		return m.store.SaveKeyspaceGroup(txn, kg)
 	})
 	if err != nil {
 		return nil, err

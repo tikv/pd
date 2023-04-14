@@ -46,6 +46,8 @@ type Balancer[T uint32 | string] interface {
 	Delete(T)
 	// GetAll returns all nodes.
 	GetAll() []T
+	// Len returns the length of nodes.
+	Len() int
 }
 
 // GenByPolicy generates a balancer by policy.
