@@ -474,6 +474,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 						zap.String("key-path", string(event.Kv.Key)), zap.Error(err))
 					continue
 				}
+
 				switch event.Type {
 				case clientv3.EventTypePut:
 					group := &endpoint.KeyspaceGroup{}
@@ -534,6 +535,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 				zap.Any("default-keyspace-group", group))
 		}
 		kgm.deleteKeyspaceGroup(group.ID)
+		return
 	}
 	// If the keyspace group is already initialized, just update the meta.
 	if oldAM, oldGroup := kgm.state.getKeyspaceGroupMeta(group.ID); oldAM != nil {
