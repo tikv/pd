@@ -193,7 +193,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 
 	// Have dc-locations configured in the cluster, use the Global TSO generation way.
 	// (whit synchronization with other Local TSO Allocators)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(gta.ctx)
 	defer cancel()
 	for i := 0; i < maxRetryCount; i++ {
 		var (
@@ -237,7 +237,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 			skipCheck = true
 			goto SETTING_PHASE
 		}
-		// Is skipCheck is false and globalTSOResp remains the same, it means the estimatedTSO is valide.
+		// Is skipCheck is false and globalTSOResp remains the same, it means the estimatedTSO is valid.
 		if !skipCheck && tsoutil.CompareTimestamp(&globalTSOResp, estimatedMaxTSO) == 0 {
 			tsoCounter.WithLabelValues("global_tso_estimate", gta.timestampOracle.dcLocation).Inc()
 		}
@@ -309,7 +309,7 @@ type syncResp struct {
 
 // SyncMaxTS is used to sync MaxTS with all Local TSO Allocator leaders in dcLocationMap.
 // If maxTSO is the biggest TSO among all Local TSO Allocators, it will be written into
-// each allocator and remines the same after the synchronization.
+// each allocator and remains the same after the synchronization.
 // If not, it will be replaced with the new max Local TSO and return.
 func (gta *GlobalTSOAllocator) SyncMaxTS(
 	ctx context.Context,
@@ -543,6 +543,11 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	}()
 
 	gta.member.EnableLeader()
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+		gta.member.ResetLeader()
+	})
+
 	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
 	// go gta.tsoAllocatorManager.ClusterDCLocationChecker()
 	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", gta.member.Name()))

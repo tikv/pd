@@ -29,9 +29,16 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 )
 
-// SetupTSOClient creates a TSO client for test.
-func SetupTSOClient(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
+// SetupClientWithKeyspace creates a TSO client for test.
+func SetupClientWithKeyspace(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
 	cli, err := pd.NewClientWithKeyspace(ctx, utils.DefaultKeyspaceID, endpoints, pd.SecurityOption{}, opts...)
+	re.NoError(err)
+	return cli
+}
+
+// SetupClient creates a TSO client for test.
+func SetupClient(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
+	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }

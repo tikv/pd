@@ -16,6 +16,7 @@ package register_test
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -39,6 +40,7 @@ type serverRegisterTestSuite struct {
 	cancel           context.CancelFunc
 	cluster          *tests.TestCluster
 	pdLeader         *tests.TestServer
+	clusterID        string
 	backendEndpoints string
 }
 
@@ -59,6 +61,7 @@ func (suite *serverRegisterTestSuite) SetupSuite() {
 
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
+	suite.clusterID = strconv.FormatUint(suite.pdLeader.GetClusterID(), 10)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 }
 
@@ -84,9 +87,9 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 	addr := s.GetAddr()
 	client := suite.pdLeader.GetEtcdClient()
-
 	// test API server discovery
-	endpoints, err := discovery.Discover(client, serviceName)
+
+	endpoints, err := discovery.Discover(client, suite.clusterID, serviceName)
 	re.NoError(err)
 	returnedEntry := &discovery.ServiceRegistryEntry{}
 	returnedEntry.Deserialize([]byte(endpoints[0]))
@@ -99,7 +102,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 	// test API server discovery after unregister
 	cleanup()
-	endpoints, err = discovery.Discover(client, serviceName)
+	endpoints, err = discovery.Discover(client, suite.clusterID, serviceName)
 	re.NoError(err)
 	re.Empty(endpoints)
 }
@@ -134,7 +137,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	expectedPrimary = mcs.WaitForPrimaryServing(suite.Require(), serverMap)
 	// test API server discovery
 	client := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(client, serviceName)
+	endpoints, err := discovery.Discover(client, suite.clusterID, serviceName)
 	re.NoError(err)
 	re.Len(endpoints, serverNum-1)
 

@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/pingcap/sysutil"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/tikv/pd/pkg/cgroup"
 	"go.uber.org/zap"
@@ -161,6 +162,7 @@ func init() {
 	if cgroup.InContainer() {
 		MemTotal = MemTotalCGroup
 		MemUsed = MemUsedCGroup
+		sysutil.RegisterGetMemoryCapacity(MemTotalCGroup)
 	} else {
 		MemTotal = MemTotalNormal
 		MemUsed = MemUsedNormal

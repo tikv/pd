@@ -39,13 +39,15 @@ func TestRegister(t *testing.T) {
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()
-	sr := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", 10)
+	// with http prefix
+	sr := NewServiceRegister(context.Background(), client, "12345", "test_service", "http://127.0.0.1:1", "http://127.0.0.1:1", 10)
 	re.NoError(err)
 	err = sr.Register()
 	re.NoError(err)
+	re.Equal("/ms/12345/test_service/registry/http://127.0.0.1:1", sr.key)
 	resp, err := client.Get(context.Background(), sr.key)
 	re.NoError(err)
-	re.Equal("127.0.0.1:1", string(resp.Kvs[0].Value))
+	re.Equal("http://127.0.0.1:1", string(resp.Kvs[0].Value))
 
 	err = sr.Deregister()
 	re.NoError(err)
@@ -53,7 +55,7 @@ func TestRegister(t *testing.T) {
 	re.NoError(err)
 	re.Empty(resp.Kvs)
 
-	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr = NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	re.NoError(err)
 	err = sr.Register()
 	re.NoError(err)

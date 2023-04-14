@@ -41,14 +41,14 @@ func TestDiscover(t *testing.T) {
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
+	sr1 := NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
 	err = sr1.Register()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr2 := NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	err = sr2.Register()
 	re.NoError(err)
 
-	endpoints, err := Discover(client, "test_service")
+	endpoints, err := Discover(client, "12345", "test_service")
 	re.NoError(err)
 	re.Len(endpoints, 2)
 	re.Equal("127.0.0.1:1", endpoints[0])
@@ -57,7 +57,7 @@ func TestDiscover(t *testing.T) {
 	sr1.cancel()
 	sr2.cancel()
 	time.Sleep(3 * time.Second)
-	endpoints, err = Discover(client, "test_service")
+	endpoints, err = Discover(client, "12345", "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)
 }
@@ -81,17 +81,17 @@ func TestServiceRegistryEntry(t *testing.T) {
 	entry1 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:1"}
 	s1, err := entry1.Serialize()
 	re.NoError(err)
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", s1, 1)
+	sr1 := NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:1", s1, 1)
 	err = sr1.Register()
 	re.NoError(err)
 	entry2 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:2"}
 	s2, err := entry2.Serialize()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", s2, 1)
+	sr2 := NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:2", s2, 1)
 	err = sr2.Register()
 	re.NoError(err)
 
-	endpoints, err := Discover(client, "test_service")
+	endpoints, err := Discover(client, "12345", "test_service")
 	re.NoError(err)
 	re.Len(endpoints, 2)
 	returnedEntry1 := &ServiceRegistryEntry{}
@@ -104,7 +104,7 @@ func TestServiceRegistryEntry(t *testing.T) {
 	sr1.cancel()
 	sr2.cancel()
 	time.Sleep(3 * time.Second)
-	endpoints, err = Discover(client, "test_service")
+	endpoints, err = Discover(client, "12345", "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)
 }

@@ -259,6 +259,15 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 	}
 }
 
+// SetStoreLimit set the store for a store, it may switch the store limit mode.
+func SetStoreLimit(limit storelimit.StoreLimit) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		store.limiter = limit
+	}
+}
+
 // SetLastAwakenTime sets last awaken time for the store.
 func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
 	return func(store *StoreInfo) {
