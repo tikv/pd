@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -80,6 +81,8 @@ func newLevelDBBackend(
 var dirtyFlushTick = time.Second
 
 func (lb *levelDBBackend) backgroundFlush() {
+	defer logutil.LogPanic()
+
 	var (
 		isFlush bool
 		err     error
