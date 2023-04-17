@@ -209,7 +209,7 @@ func (s *Server) IsServing() bool {
 	}
 
 	member, err := s.keyspaceGroupManager.GetElectionMember(
-		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeySpaceGroupID)
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
 	if err != nil {
 		log.Error("failed to get election member", errs.ZapError(err))
 		return false
@@ -221,7 +221,7 @@ func (s *Server) IsServing() bool {
 // The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
 	member, err := s.keyspaceGroupManager.GetElectionMember(
-		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeySpaceGroupID)
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
 	if err != nil {
 		log.Error("failed to get election member", errs.ZapError(err))
 		return nil
@@ -436,15 +436,14 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 
+	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	legacySvcRootPath := path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
 	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.etcdClient, s.listenURL.Host, legacySvcRootPath, tsoSvcRootPath, s.cfg)
-	// The param `false` means that we don't initialize the keyspace group manager
-	// by loading the keyspace group meta from etcd.
-	if err := s.keyspaceGroupManager.Initialize(false); err != nil {
+	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}
 

@@ -56,6 +56,37 @@ func (suite *operatorControllerTestSuite) TearDownSuite() {
 	suite.cancel()
 }
 
+func (suite *operatorControllerTestSuite) TestCacheInfluence() {
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	oc := NewOperatorController(suite.ctx, tc, nil)
+	tc.AddLeaderStore(2, 1)
+	region := tc.AddLeaderRegion(1, 1, 2)
+
+	steps := []operator.OpStep{
+		operator.RemovePeer{FromStore: 2},
+	}
+	op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	oc.SetOperator(op)
+	suite.True(op.Start())
+	influence := operator.NewOpInfluence()
+	AddOpInfluence(op, *influence, tc)
+	suite.Equal(int64(-96), influence.GetStoreInfluence(2).RegionSize)
+
+	// case: influence is same even if the region size changed.
+	region = region.Clone(core.SetApproximateSize(100))
+	tc.PutRegion(region)
+	influence1 := operator.NewOpInfluence()
+	AddOpInfluence(op, *influence1, tc)
+	suite.Equal(int64(-96), influence1.GetStoreInfluence(2).RegionSize)
+
+	// case: influence is valid even if the region is removed.
+	tc.RemoveRegion(region)
+	influence2 := operator.NewOpInfluence()
+	AddOpInfluence(op, *influence2, tc)
+	suite.Equal(int64(-96), influence2.GetStoreInfluence(2).RegionSize)
+}
+
 // issue #1338
 func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	opt := mockconfig.NewTestOptions()

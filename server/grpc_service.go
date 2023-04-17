@@ -1774,7 +1774,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
 			KeyspaceId:      utils.DefaultKeyspaceID,
-			KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
+			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
 		},
 		Count: 1,
 	})
