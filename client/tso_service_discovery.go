@@ -46,9 +46,10 @@ var _ tsoAllocatorEventSource = (*tsoServiceDiscovery)(nil)
 
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
 type tsoServiceDiscovery struct {
-	clusterID  uint64
-	keyspaceID uint32
-	urls       atomic.Value // Store as []string
+	clusterID       uint64
+	keyspaceID      uint32
+	keyspaceGroupID uint32
+	urls            atomic.Value // Store as []string
 	// primary key is the etcd path used for discovering the serving endpoint of this keyspace
 	primaryKey string
 	// TSO Primary URL
@@ -169,6 +170,16 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 // GetClusterID returns the ID of the cluster
 func (c *tsoServiceDiscovery) GetClusterID() uint64 {
 	return c.clusterID
+}
+
+// GetKeyspaceID returns the ID of the keyspace
+func (c *tsoServiceDiscovery) GetKeyspaceID() uint32 {
+	return c.keyspaceID
+}
+
+// GetKeyspaceGroupID returns the ID of the keyspace group
+func (c *tsoServiceDiscovery) GetKeyspaceGroupID() uint32 {
+	return c.keyspaceGroupID
 }
 
 // GetURLs returns the URLs of the servers.

@@ -107,9 +107,13 @@ func (s *state) getKeyspaceGroupMeta(
 	return s.ams[groupID], s.kgs[groupID]
 }
 
-// getAMWithMembershipCheck returns the AllocatorManager of the given keyspace group and check
-// if the keyspace is served by this keyspace group.
-func (s *state) getAMWithMembershipCheck(
+// getKeyspaceGroupMetaWithCheck returns the keyspace group meta of the given keyspace.
+// It also checks if the keyspace is served by the given keyspace group. If not, it returns the meta
+// of the keyspace group to which the keyspace currently belongs and returns NotServed (by the given
+// keyspace group) error. If the keyspace doesn't belong to any keyspace group, it returns the
+// NotAssigned error, which could happen because loading keyspace group meta isn't atomic when there is
+// keyspace movement between keyspace groups.
+func (s *state) getKeyspaceGroupMetaWithCheck(
 	keyspaceID, keyspaceGroupID uint32,
 ) (*AllocatorManager, *endpoint.KeyspaceGroup, uint32, error) {
 	s.RLock()
@@ -125,22 +129,22 @@ func (s *state) getAMWithMembershipCheck(
 	}
 
 	// The keyspace doesn't belong to this keyspace group, we should check if it belongs to any other
-	// keyspace groups, and return the correct keyspace group ID to the client.
+	// keyspace groups, and return the correct keyspace group meta to the client.
 	if kgid, ok := s.keyspaceLookupTable[keyspaceID]; ok {
 		return s.ams[kgid], s.kgs[kgid], kgid,
 			genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 	}
 
-	defaultGroupID := mcsutils.DefaultKeyspaceGroupID
-
-	if keyspaceGroupID != defaultGroupID {
+	if keyspaceGroupID != mcsutils.DefaultKeyspaceGroupID {
 		return nil, nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 
 	// The keyspace doesn't belong to any keyspace group, so return the default keyspace group.
 	// It's for migrating the existing keyspaces which have no keyspace group assigned, so the
 	// the default keyspace group is used to serve the keyspaces.
-	return s.ams[defaultGroupID], s.kgs[defaultGroupID], defaultGroupID, nil
+	return s.ams[mcsutils.DefaultKeyspaceGroupID],
+		s.kgs[mcsutils.DefaultKeyspaceGroupID],
+		mcsutils.DefaultKeyspaceGroupID, nil
 }
 
 // KeyspaceGroupManager manages the members of the keyspace groups assigned to this host.
@@ -261,8 +265,13 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 
 	// Initialize the default keyspace group if it isn't configured in the storage.
 	if !defaultKGConfigured {
-		keyspaces := []uint32{mcsutils.DefaultKeyspaceID}
-		kgm.initDefaultKeyspaceGroup(keyspaces)
+		log.Info("initializing default keyspace group")
+		group := &endpoint.KeyspaceGroup{
+			ID:        mcsutils.DefaultKeyspaceGroupID,
+			Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
+			Keyspaces: []uint32{mcsutils.DefaultKeyspaceID},
+		}
+		kgm.updateKeyspaceGroup(group)
 	}
 
 	// Watch/apply keyspace group membership/distribution meta changes dynamically.
@@ -302,18 +311,6 @@ func (kgm *KeyspaceGroupManager) checkInitProgress(ctx context.Context, cancel c
 	case <-ctx.Done():
 	}
 	<-done
-}
-
-func (kgm *KeyspaceGroupManager) initDefaultKeyspaceGroup(keyspaces []uint32) {
-	log.Info("initializing default keyspace group",
-		zap.Int("keyspaces-length", len(keyspaces)))
-
-	group := &endpoint.KeyspaceGroup{
-		ID:        mcsutils.DefaultKeyspaceGroupID,
-		Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
-		Keyspaces: keyspaces,
-	}
-	kgm.updateKeyspaceGroup(group)
 }
 
 // initAssignment loads initial keyspace group assignment from storage and initialize the group manager.
@@ -496,15 +493,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 					}
 					kgm.updateKeyspaceGroup(group)
 				case clientv3.EventTypeDelete:
-					if groupID == mcsutils.DefaultKeyspaceGroupID {
-						keyspaces := kgm.kgs[groupID].Keyspaces
-						kgm.deleteKeyspaceGroup(groupID)
-						log.Warn("removed default keyspace group meta config from the storage. " +
-							"now every tso node/pod will initialize it")
-						kgm.initDefaultKeyspaceGroup(keyspaces)
-					} else {
-						kgm.deleteKeyspaceGroup(groupID)
-					}
+					kgm.deleteKeyspaceGroup(groupID)
 				}
 			}
 			// Retry the groups that are not initialized successfully before.
@@ -544,22 +533,23 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		log.Warn("keyspace group ID is invalid, ignore it", zap.Error(err))
 		return
 	}
+
 	// Not assigned to me. If this host/pod owns this keyspace group, it should resign.
 	if !kgm.isAssignedToMe(group) {
-		if group.ID == mcsutils.DefaultKeyspaceGroupID {
-			log.Info("resign default keyspace group membership",
-				zap.Any("default-keyspace-group", group))
-		}
-		kgm.deleteKeyspaceGroup(group.ID)
+		// Not assigned to me. If this host/pod owns a replica of this keyspace group,
+		// it should resign the election membership.
+		kgm.resignElectionMembership(group)
 		return
 	}
+
 	// If the keyspace group is already initialized, just update the meta.
-	if oldAM, oldGroup := kgm.state.getKeyspaceGroupMeta(group.ID); oldAM != nil {
+	if oldAM, oldGroup := kgm.getKeyspaceGroupMeta(group.ID); oldAM != nil {
 		log.Info("keyspace group already initialized, so update meta only",
 			zap.Uint32("keyspace-group-id", group.ID))
-		kgm.updateKeyspaceGroupMembership(oldGroup, group)
+		kgm.updateKeyspaceGroupMembership(oldGroup, group, true)
 		return
 	}
+
 	// If the keyspace group is not initialized, initialize it.
 	uniqueName := fmt.Sprintf("%s-%05d", kgm.electionNamePrefix, group.ID)
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
@@ -620,10 +610,20 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 
 // updateKeyspaceGroupMembership updates the keyspace lookup table for the given keyspace group.
 func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
-	oldGroup, newGroup *endpoint.KeyspaceGroup,
+	oldGroup, newGroup *endpoint.KeyspaceGroup, updateWithLock bool,
 ) {
+	var (
+		oldKeyspaces []uint32
+		oldKeyspaceLookupTable map[uint32]struct{}
+	)
+
+	if oldGroup != nil {
+		oldKeyspaces = oldGroup.Keyspaces
+		oldKeyspaceLookupTable = oldGroup.KeyspaceLookupTable
+	}
+
 	groupID := newGroup.ID
-	oldKeyspaces, newKeyspaces := oldGroup.Keyspaces, newGroup.Keyspaces
+	newKeyspaces := newGroup.Keyspaces
 	oldLen, newLen := len(oldKeyspaces), len(newKeyspaces)
 
 	// Sort the keyspaces in ascending order
@@ -644,12 +644,14 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		}
 	}
 
-	kgm.Lock()
-	defer kgm.Unlock()
+	if updateWithLock {
+		kgm.Lock()
+		defer kgm.Unlock()
+	}
 
 	if sameMembership {
 		// The keyspace group membership is not changed. Reuse the old one.
-		newGroup.KeyspaceLookupTable = oldGroup.KeyspaceLookupTable
+		newGroup.KeyspaceLookupTable = oldKeyspaceLookupTable
 	} else {
 		// The keyspace group membership is changed. Update the keyspace lookup table.
 		newGroup.KeyspaceLookupTable = make(map[uint32]struct{})
@@ -686,7 +688,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		}
 	}
 	// Check if the split is completed.
-	if oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
+	if oldGroup != nil && oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
 		kgm.ams[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
 	}
 	kgm.kgs[groupID] = newGroup
@@ -695,6 +697,18 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 // deleteKeyspaceGroup deletes the given keyspace group.
 func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 	log.Info("delete keyspace group", zap.Uint32("keyspace-group-id", groupID))
+
+	if groupID == mcsutils.DefaultKeyspaceGroupID {
+		log.Info("removed default keyspace group meta config from the storage. " +
+			"now every tso node/pod will initialize it")	
+		group := &endpoint.KeyspaceGroup{
+			ID:        mcsutils.DefaultKeyspaceGroupID,
+			Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
+			Keyspaces: []uint32{mcsutils.DefaultKeyspaceID},
+		}
+		kgm.updateKeyspaceGroup(group)
+		return
+	}
 
 	kgm.Lock()
 	defer kgm.Unlock()
@@ -720,6 +734,24 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 	}
 }
 
+// resignElectionMembership resigns the election membership of the given keyspace group by
+// deinitializing the allocator manager, but still keeps the keyspace group info.
+func (kgm *KeyspaceGroupManager) resignElectionMembership(group *endpoint.KeyspaceGroup) {
+	log.Info("resign election membership", zap.Uint32("keyspace-group-id", group.ID))
+
+	kgm.Lock()
+	defer kgm.Unlock()
+
+	am := kgm.ams[group.ID]
+	if am != nil {
+		am.close()
+		kgm.ams[group.ID] = nil
+	}
+
+	oldGroup := kgm.kgs[group.ID]
+	kgm.updateKeyspaceGroupMembership(oldGroup, group, false)
+}
+
 // GetAllocatorManager returns the AllocatorManager of the given keyspace group
 func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) (*AllocatorManager, error) {
 	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
@@ -736,7 +768,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	keyspaceID uint32,
 ) (*endpoint.KeyspaceGroup, uint32, error) {
 	_, curKeyspaceGroup, curKeyspaceGroupID, err :=
-		kgm.getAMWithMembershipCheck(keyspaceID, mcsutils.DefaultKeySpaceGroupID)
+		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, mcsutils.DefaultKeyspaceGroupID)
 	if err != nil {
 		return nil, curKeyspaceGroupID, err
 	}
@@ -750,7 +782,7 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(
 	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
-	am, _, _, err := kgm.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
+	am, _, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -765,13 +797,13 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return pdpb.Timestamp{}, keyspaceGroupID, err
 	}
-	am, _, curKeyspaceGroupID, err := kgm.getAMWithMembershipCheck(keyspaceID, keyspaceGroupID)
+	am, _, curKeyspaceGroupID, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	err = kgm.checkTSOSplit(currentKeyspaceGroupID, dcLocation)
+	err = kgm.checkTSOSplit(curKeyspaceGroupID, dcLocation)
 	if err != nil {
-		return pdpb.Timestamp{}, currentKeyspaceGroupID, err
+		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
 	ts, err = am.HandleRequest(dcLocation, count)
 	return ts, keyspaceGroupID, err

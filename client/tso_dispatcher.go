@@ -704,7 +704,8 @@ func (c *tsoClient) processRequests(
 	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
 	physical, logical, suffixBits, err := stream.processRequests(
-		c.svcDiscovery.GetClusterID(), c.keyspaceID, c.keyspaceGroupID, dcLocation, requests, tbc.batchStartTime)
+		c.svcDiscovery.GetClusterID(), c.svcDiscovery.GetKeyspaceID(), c.svcDiscovery.GetKeyspaceGroupID(),
+		dcLocation, requests, tbc.batchStartTime)
 	if err != nil {
 		c.finishRequest(requests, 0, 0, 0, err)
 		return err

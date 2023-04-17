@@ -152,13 +152,22 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 	}
 }
 
+// FindGroupByKeyspaceID returns the keyspace group that the keyspace belongs to.
 func (s *Service) FindGroupByKeyspaceID(
 	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
 ) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
 	keyspaceID := request.GetKeyspaceId()
 	curKeyspaceGroup, curKeyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
 	if err != nil {
-		return nil, status.Errorf(codes.Unknown, err.Error())
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), curKeyspaceGroupID),
+		}, nil
+	}
+	if curKeyspaceGroup == nil {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(
+				tsopb.ErrorType_UNKNOWN, "keyspace group not found", curKeyspaceGroupID),
+		}, nil
 	}
 	var respMembers []*tsopb.KeyspaceGroupMember
 	for _, member := range curKeyspaceGroup.Members {
@@ -170,11 +179,11 @@ func (s *Service) FindGroupByKeyspaceID(
 	return &tsopb.FindGroupByKeyspaceIDResponse{
 		Header: s.header(curKeyspaceGroupID),
 		KeyspaceGroup: &tsopb.KeyspaceGroup{
-			Id: curKeyspaceGroupID,
-			UserKind: curKeyspaceGroup.UserKind,
-			InSplit: curKeyspaceGroup.InSplit,
+			Id:        curKeyspaceGroupID,
+			UserKind:  curKeyspaceGroup.UserKind,
+			InSplit:   curKeyspaceGroup.InSplit,
 			SplitFrom: curKeyspaceGroup.SplitFrom,
-			Members: respMembers,
+			Members:   respMembers,
 		},
 	}, nil
 }

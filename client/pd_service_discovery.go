@@ -50,6 +50,10 @@ type ServiceDiscovery interface {
 	Close()
 	// GetClusterID returns the ID of the cluster
 	GetClusterID() uint64
+	// GetKeyspaceID returns the ID of the keyspace
+	GetKeyspaceID() uint32
+	// GetKeyspaceGroupID returns the ID of the keyspace group
+	GetKeyspaceGroupID() uint32
 	// GetURLs returns the URLs of the servers.
 	GetURLs() []string
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
@@ -261,6 +265,18 @@ func (c *pdServiceDiscovery) Close() {
 // GetClusterID returns the ClusterID.
 func (c *pdServiceDiscovery) GetClusterID() uint64 {
 	return c.clusterID
+}
+
+// GetKeyspaceID returns the ID of the keyspace
+func (c *pdServiceDiscovery) GetKeyspaceID() uint32 {
+	// PD/API service only supports the default keyspace
+	return defaultKeyspaceID
+}
+
+// GetKeyspaceGroupID returns the ID of the keyspace group
+func (c *pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
+	// PD/API service only supports the default keyspace group
+	return defaultKeySpaceGroupID
 }
 
 // GetURLs returns the URLs of the servers.
