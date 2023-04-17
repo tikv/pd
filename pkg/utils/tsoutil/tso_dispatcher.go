@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -84,6 +85,7 @@ func (s *TSODispatcher) dispatch(
 	doneCh <-chan struct{},
 	errCh chan<- error,
 	updateServicePrimaryAddrChs ...chan<- struct{}) {
+	defer logutil.LogPanic()
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
 	defer s.dispatchChs.Delete(forwardedHost)
@@ -209,6 +211,7 @@ type deadline struct {
 }
 
 func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
+	defer logutil.LogPanic()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	for {
@@ -231,6 +234,8 @@ func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
 }
 
 func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	defer logutil.LogPanic()
+
 	select {
 	case <-done:
 		return

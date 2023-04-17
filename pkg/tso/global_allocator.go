@@ -475,6 +475,7 @@ func (gta *GlobalTSOAllocator) Reset() {
 }
 
 func (gta *GlobalTSOAllocator) primaryElectionLoop() {
+	defer logutil.LogPanic()
 	defer gta.wg.Done()
 
 	for {
@@ -543,6 +544,11 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	}()
 
 	gta.member.EnableLeader()
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+		gta.member.ResetLeader()
+	})
+
 	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
 	// go gta.tsoAllocatorManager.ClusterDCLocationChecker()
 	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", gta.member.Name()))

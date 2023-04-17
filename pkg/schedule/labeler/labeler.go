@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
@@ -56,6 +57,8 @@ func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage, gcInter
 }
 
 func (l *RegionLabeler) doGC(gcInterval time.Duration) {
+	defer logutil.LogPanic()
+
 	ticker := time.NewTicker(gcInterval)
 	defer ticker.Stop()
 	for {

@@ -35,6 +35,8 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router.GET("", GetKeyspaceGroups)
 	router.GET("/:id", GetKeyspaceGroupByID)
 	router.DELETE("/:id", DeleteKeyspaceGroupByID)
+	router.POST("/:id/split", SplitKeyspaceGroupByID)
+	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
 }
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.
@@ -44,15 +46,12 @@ type CreateKeyspaceGroupParams struct {
 
 // CreateKeyspaceGroups creates keyspace groups.
 func CreateKeyspaceGroups(c *gin.Context) {
-	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	manager := svr.GetKeyspaceGroupManager()
 	createParams := &CreateKeyspaceGroupParams{}
 	err := c.BindJSON(createParams)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-
 	for _, keyspaceGroup := range createParams.KeyspaceGroups {
 		if !isValid(keyspaceGroup.ID) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
@@ -60,6 +59,8 @@ func CreateKeyspaceGroups(c *gin.Context) {
 		}
 	}
 
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceGroupManager()
 	err = manager.CreateKeyspaceGroups(createParams.KeyspaceGroups)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -71,13 +72,14 @@ func CreateKeyspaceGroups(c *gin.Context) {
 // GetKeyspaceGroups gets keyspace groups from the start ID with limit.
 // If limit is 0, it will load all keyspace groups from the start ID.
 func GetKeyspaceGroups(c *gin.Context) {
-	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	manager := svr.GetKeyspaceGroupManager()
 	scanStart, scanLimit, err := parseLoadAllQuery(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 		return
 	}
+
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceGroupManager()
 	keyspaceGroups, err := manager.GetKeyspaceGroups(scanStart, scanLimit)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -87,13 +89,14 @@ func GetKeyspaceGroups(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, keyspaceGroups)
 }
 
-// GetKeyspaceGroupByID gets keyspace group by id.
+// GetKeyspaceGroupByID gets keyspace group by ID.
 func GetKeyspaceGroupByID(c *gin.Context) {
 	id, err := validateKeyspaceGroupID(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 		return
 	}
+
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
 	kg, err := manager.GetKeyspaceGroupByID(id)
@@ -105,16 +108,74 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, kg)
 }
 
-// DeleteKeyspaceGroupByID deletes keyspace group by id.
+// DeleteKeyspaceGroupByID deletes keyspace group by ID.
 func DeleteKeyspaceGroupByID(c *gin.Context) {
 	id, err := validateKeyspaceGroupID(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 		return
 	}
+
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
-	err = manager.DeleteKeyspaceGroupByID(id)
+	kg, err := manager.DeleteKeyspaceGroupByID(id)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, kg)
+}
+
+// SplitKeyspaceGroupByIDParams defines the params for splitting a keyspace group.
+type SplitKeyspaceGroupByIDParams struct {
+	NewID     uint32   `json:"new-id"`
+	Keyspaces []uint32 `json:"keyspaces"`
+}
+
+// SplitKeyspaceGroupByID splits keyspace group by ID into a new keyspace group with the given new ID.
+// And the keyspaces in the old keyspace group will be moved to the new keyspace group.
+func SplitKeyspaceGroupByID(c *gin.Context) {
+	id, err := validateKeyspaceGroupID(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+	splitParams := &SplitKeyspaceGroupByIDParams{}
+	err = c.BindJSON(splitParams)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		return
+	}
+	if !isValid(splitParams.NewID) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+	if len(splitParams.Keyspaces) == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid empty keyspaces")
+		return
+	}
+
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceGroupManager()
+	err = manager.SplitKeyspaceGroupByID(id, splitParams.NewID, splitParams.Keyspaces)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, nil)
+}
+
+// FinishSplitKeyspaceByID finishes split keyspace group by ID.
+func FinishSplitKeyspaceByID(c *gin.Context) {
+	id, err := validateKeyspaceGroupID(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceGroupManager()
+	err = manager.FinishSplitKeyspaceByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -134,5 +195,5 @@ func validateKeyspaceGroupID(c *gin.Context) (uint32, error) {
 }
 
 func isValid(id uint32) bool {
-	return id >= utils.DefaultKeySpaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
+	return id >= utils.DefaultKeyspaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
 }

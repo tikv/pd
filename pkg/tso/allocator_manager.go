@@ -167,8 +167,8 @@ type AllocatorManager struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
-	// ksgID is the keyspace group id
-	ksgID uint32
+	// kgID is the keyspace group ID
+	kgID uint32
 	// member is for election use
 	member ElectionMember
 	// TSO config
@@ -204,7 +204,7 @@ func NewAllocatorManager(
 	am := &AllocatorManager{
 		ctx:                    ctx,
 		cancel:                 cancel,
-		ksgID:                  keyspaceGroupID,
+		kgID:                   keyspaceGroupID,
 		member:                 member,
 		rootPath:               rootPath,
 		storage:                storage,
@@ -940,6 +940,8 @@ func (am *AllocatorManager) GetLocalTSOSuffixPath(dcLocation string) string {
 // 2. If all PD servers with dc-location="dc-1" are down, then the other PD servers
 // of DC could be elected.
 func (am *AllocatorManager) PriorityChecker() {
+	defer logutil.LogPanic()
+
 	serverID := am.member.ID()
 	myServerDCLocation := am.getServerDCLocation(serverID)
 	// Check all Local TSO Allocator followers to see if their priorities is higher than the leaders
