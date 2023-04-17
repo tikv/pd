@@ -332,6 +332,26 @@ func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
 	suite.Len(idList, 2)
 }
 
+func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
+	re := suite.Require()
+	r1 := core.NewTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
+	r2 := core.NewTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
+	r3 := core.NewTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
+	r4 := core.NewTestRegionInfo(560, 16, []byte("a4"), []byte("a5"))
+	r5 := core.NewTestRegionInfo(561, 17, []byte("a5"), []byte("a6"))
+	mustRegionHeartbeat(re, suite.svr, r1)
+	mustRegionHeartbeat(re, suite.svr, r2)
+	mustRegionHeartbeat(re, suite.svr, r3)
+	mustRegionHeartbeat(re, suite.svr, r4)
+	mustRegionHeartbeat(re, suite.svr, r5)
+	body := fmt.Sprintf(`[{"start_key":"%s", "end_key": "%s"}, {"start_key":"%s", "end_key": "%s"}]`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
+
+	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/batch-accelerate-schedule", suite.urlPrefix), []byte(body), tu.StatusOK(re))
+	suite.NoError(err)
+	idList := suite.svr.GetRaftCluster().GetSuspectRegions()
+	suite.Len(idList, 4)
+}
+
 func (suite *regionTestSuite) TestScatterRegions() {
 	re := suite.Require()
 	r1 := core.NewTestRegionInfo(601, 13, []byte("b1"), []byte("b2"))
