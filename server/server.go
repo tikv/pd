@@ -1734,14 +1734,14 @@ func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 		err      error
 	)
 	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
+		revision, err = s.updateServicePrimaryAddr(serviceName)
+		if revision != 0 && err == nil { // update success
+			break
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(retryIntervalGetServicePrimary):
-		}
-		revision, err = s.updateServicePrimaryAddr(serviceName)
-		if revision != 0 && err == nil { // update success
-			break
 		}
 	}
 	if err != nil {
@@ -1767,12 +1767,6 @@ func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 	}
 }
 
-// SetServicePrimaryAddr sets the primary address directly.
-// Note: This function is only used for test.
-func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
-	s.servicePrimaryMap.Store(serviceName, addr)
-}
-
 // watchServicePrimaryAddr watches the primary address on etcd.
 func (s *Server) watchServicePrimaryAddr(ctx context.Context, serviceName string, revision int64) (nextRevision int64, err error) {
 	serviceKey := s.servicePrimaryKey(serviceName)
@@ -1781,7 +1775,7 @@ func (s *Server) watchServicePrimaryAddr(ctx context.Context, serviceName string
 
 	for {
 	WatchChan:
-		watchChan := watcher.Watch(s.serverLoopCtx, serviceKey, clientv3.WithPrefix(), clientv3.WithRev(revision))
+		watchChan := watcher.Watch(s.serverLoopCtx, serviceKey, clientv3.WithRev(revision))
 		select {
 		case <-ctx.Done():
 			return revision, nil
