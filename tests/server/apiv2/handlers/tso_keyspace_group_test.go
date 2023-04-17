@@ -109,21 +109,21 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	kg1 := MustLoadKeyspaceGroupByID(re, suite.server, 1)
 	re.Equal(uint32(1), kg1.ID)
 	re.Equal([]uint32{333}, kg1.Keyspaces)
-	re.True(kg1.IsSplitFrom())
-	re.Equal(kg1.ID, kg1.SplitFrom())
+	re.True(kg1.IsSplitSource())
+	re.Equal(kg1.ID, kg1.SplitSource())
 	// Check keyspace group 2.
 	kg2 := MustLoadKeyspaceGroupByID(re, suite.server, 2)
 	re.Equal(uint32(2), kg2.ID)
 	re.Equal([]uint32{111, 222}, kg2.Keyspaces)
-	re.True(kg2.IsSplitTo())
-	re.Equal(kg1.ID, kg2.SplitFrom())
+	re.True(kg2.IsSplitTarget())
+	re.Equal(kg1.ID, kg2.SplitSource())
 	// They should have the same user kind and members.
 	re.Equal(kg1.UserKind, kg2.UserKind)
 	re.Equal(kg1.Members, kg2.Members)
 	// Finish the split and check the split state.
 	MustFinishSplitKeyspaceGroup(re, suite.server, 2)
 	kg1 = MustLoadKeyspaceGroupByID(re, suite.server, 1)
-	re.False(kg1.InSplit())
+	re.False(kg1.IsSplitting())
 	kg2 = MustLoadKeyspaceGroupByID(re, suite.server, 2)
-	re.False(kg2.InSplit())
+	re.False(kg2.IsSplitting())
 }

@@ -559,19 +559,19 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
-	if group.IsSplitTo() {
-		splitFrom := group.SplitFrom()
+	if group.IsSplitTarget() {
+		splitSource := group.SplitSource()
 		log.Info("keyspace group is in split",
 			zap.Uint32("keyspace-group-id", group.ID),
-			zap.Uint32("split-from", splitFrom))
-		splitFromAM, _ := kgm.getKeyspaceGroupMeta(splitFrom)
-		if splitFromAM == nil {
-			// TODO: guarantee that the split-from keyspace group is initialized before.
-			log.Fatal("the split-from keyspace group is not initialized",
-				zap.Uint32("split-from", splitFrom))
+			zap.Uint32("source", splitSource))
+		splitSourceAM, _ := kgm.getKeyspaceGroupMeta(splitSource)
+		if splitSourceAM == nil {
+			// TODO: guarantee that the split source keyspace group is initialized before.
+			log.Fatal("the split source keyspace group is not initialized",
+				zap.Uint32("source", splitSource))
 		}
 		participant.SetPreCampaignChecker(func(leadership *election.Leadership) bool {
-			return splitFromAM.getMember().IsLeader()
+			return splitSourceAM.getMember().IsLeader()
 		})
 	}
 	// Only the default keyspace group uses the legacy service root path for LoadTimestamp/SyncTimestamp.
@@ -667,7 +667,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		}
 	}
 	// Check if the split is completed.
-	if oldGroup.IsSplitTo() && !newGroup.InSplit() {
+	if oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
 		kgm.ams[groupID].getMember().(*member.Participant).SetPreCampaignChecker(nil)
 	}
 	kgm.kgs[groupID] = newGroup
@@ -768,22 +768,22 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	dcLocation string,
 ) error {
 	splitAM, splitGroup := kgm.getKeyspaceGroupMeta(keyspaceGroupID)
-	// Only the split-to keyspace group needs to check the TSO split.
-	if !splitGroup.IsSplitTo() {
+	// Only the split target keyspace group needs to check the TSO split.
+	if !splitGroup.IsSplitTarget() {
 		return nil
 	}
-	splitFrom := splitGroup.SplitFrom()
-	splitFromAM, splitFromGroup := kgm.getKeyspaceGroupMeta(splitFrom)
-	if splitFromAM == nil || splitFromGroup == nil {
-		log.Error("the split-from keyspace group is not initialized",
-			zap.Uint32("split-from", splitFrom))
-		return errs.ErrKeyspaceGroupNotInitialized.FastGenByArgs(splitFrom)
+	splitSource := splitGroup.SplitSource()
+	splitSourceAM, splitSourceGroup := kgm.getKeyspaceGroupMeta(splitSource)
+	if splitSourceAM == nil || splitSourceGroup == nil {
+		log.Error("the split source keyspace group is not initialized",
+			zap.Uint32("source", splitSource))
+		return errs.ErrKeyspaceGroupNotInitialized.FastGenByArgs(splitSource)
 	}
 	splitAllocator, err := splitAM.GetAllocator(dcLocation)
 	if err != nil {
 		return err
 	}
-	splitFromAllocator, err := splitFromAM.GetAllocator(dcLocation)
+	splitSourceAllocator, err := splitSourceAM.GetAllocator(dcLocation)
 	if err != nil {
 		return err
 	}
@@ -791,18 +791,18 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	if err != nil {
 		return err
 	}
-	splitFromTSO, err := splitFromAllocator.GenerateTSO(1)
+	splitSourceTSO, err := splitSourceAllocator.GenerateTSO(1)
 	if err != nil {
 		return err
 	}
-	if tsoutil.CompareTimestamp(&splitFromTSO, &splitTSO) <= 0 {
+	if tsoutil.CompareTimestamp(&splitSourceTSO, &splitTSO) <= 0 {
 		return nil
 	}
-	// If the split-from TSO is greater than the newly split TSO, we need to update the split
+	// If the split source TSO is greater than the newly split TSO, we need to update the split
 	// TSO to make sure the following TSO will be greater than the split keyspaces ever had
 	// in the past.
-	splitFromTSO.Physical += 1
-	err = splitAllocator.SetTSO(tsoutil.GenerateTS(&splitFromTSO), true, true)
+	splitSourceTSO.Physical += 1
+	err = splitAllocator.SetTSO(tsoutil.GenerateTS(&splitSourceTSO), true, true)
 	if err != nil {
 		return err
 	}
@@ -816,12 +816,16 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	if kgm.httpClient == nil {
 		return nil
 	}
-	statusCode, err := apiutil.DoDelete(kgm.httpClient, kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
+	statusCode, err := apiutil.DoDelete(
+		kgm.httpClient,
+		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
 	if err != nil {
 		return err
 	}
 	if statusCode != http.StatusOK {
-		log.Warn("failed to finish split keyspace group", zap.Uint32("keyspace-group-id", id), zap.Int("status-code", statusCode))
+		log.Warn("failed to finish split keyspace group",
+			zap.Uint32("keyspace-group-id", id),
+			zap.Int("status-code", statusCode))
 		return errs.ErrSendRequest.FastGenByArgs()
 	}
 	return nil

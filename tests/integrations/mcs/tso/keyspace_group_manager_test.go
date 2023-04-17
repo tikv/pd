@@ -100,7 +100,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 1)
 	re.Equal(uint32(1), kg1.ID)
 	re.Equal([]uint32{111, 222, 333}, kg1.Keyspaces)
-	re.False(kg1.InSplit())
+	re.False(kg1.IsSplitting())
 	// Get a TSO from the keyspace group 1.
 	var ts *pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
@@ -120,7 +120,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
 	re.Equal(uint32(2), kg2.ID)
 	re.Equal([]uint32{222, 333}, kg2.Keyspaces)
-	re.True(kg2.IsSplitTo())
+	re.True(kg2.IsSplitTarget())
 	// Check the split TSO from keyspace group 2.
 	var splitTS *pdpb.Timestamp
 	testutil.Eventually(re, func() bool {

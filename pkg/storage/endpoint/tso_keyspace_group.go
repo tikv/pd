@@ -65,19 +65,19 @@ type KeyspaceGroupMember struct {
 	Address string `json:"address"`
 }
 
-// SplitState defines the split state of the keyspace group.
+// SplitState defines the split state of a keyspace group.
 type SplitState struct {
-	// SplitFrom is the keyspace group ID from which the keyspace group is split currently.
-	// When the keyspace group is splitting to another keyspace group, the split-from will
+	// SplitSource is the current keyspace group ID from which the keyspace group is split.
+	// When the keyspace group is being split to another keyspace group, the split-source will
 	// be set to its own ID.
-	SplitFrom uint32 `json:"split-from"`
+	SplitSource uint32 `json:"split-source"`
 }
 
 // KeyspaceGroup is the keyspace group.
 type KeyspaceGroup struct {
 	ID       uint32 `json:"id"`
 	UserKind string `json:"user-kind"`
-	// SplitState is the split state of the keyspace group currently.
+	// SplitState is the current split state of the keyspace group.
 	SplitState *SplitState `json:"split-state,omitempty"`
 	// Members are the election members which campaign for the primary of the keyspace group.
 	Members []KeyspaceGroupMember `json:"members"`
@@ -88,26 +88,26 @@ type KeyspaceGroup struct {
 	KeyspaceLookupTable map[uint32]struct{} `json:"-"`
 }
 
-// InSplit checks if the keyspace group is in split state.
-func (kg *KeyspaceGroup) InSplit() bool {
+// IsSplitting checks if the keyspace group is in split state.
+func (kg *KeyspaceGroup) IsSplitting() bool {
 	return kg != nil && kg.SplitState != nil
 }
 
-// IsSplitTo checks if the keyspace group is in split state and is the split-to keyspace group.
-func (kg *KeyspaceGroup) IsSplitTo() bool {
-	return kg.InSplit() && kg.SplitState.SplitFrom != kg.ID
+// IsSplitTarget checks if the keyspace group is in split state and is the split target.
+func (kg *KeyspaceGroup) IsSplitTarget() bool {
+	return kg.IsSplitting() && kg.SplitState.SplitSource != kg.ID
 }
 
-// IsSplitFrom checks if the keyspace group is in split state and is the split-from keyspace group.
-func (kg *KeyspaceGroup) IsSplitFrom() bool {
-	return kg.InSplit() && kg.SplitState.SplitFrom == kg.ID
+// IsSplitSource checks if the keyspace group is in split state and is the split source.
+func (kg *KeyspaceGroup) IsSplitSource() bool {
+	return kg.IsSplitting() && kg.SplitState.SplitSource == kg.ID
 }
 
-// SplitFrom returns the split-from keyspace group ID. When the keyspace group is the split-from group
+// SplitSource returns the keyspace group split source ID. When the keyspace group is the split source
 // itself, it will return its own ID.
-func (kg *KeyspaceGroup) SplitFrom() uint32 {
-	if kg.InSplit() {
-		return kg.SplitState.SplitFrom
+func (kg *KeyspaceGroup) SplitSource() uint32 {
+	if kg.IsSplitting() {
+		return kg.SplitState.SplitSource
 	}
 	return 0
 }
