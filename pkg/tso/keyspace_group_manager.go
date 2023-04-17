@@ -567,8 +567,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		splitSourceAM, _ := kgm.getKeyspaceGroupMeta(splitSource)
 		if splitSourceAM == nil {
 			// TODO: guarantee that the split source keyspace group is initialized before.
-			log.Fatal("the split source keyspace group is not initialized",
+			log.Error("the split source keyspace group is not initialized",
 				zap.Uint32("source", splitSource))
+			return
 		}
 		participant.SetPreCampaignChecker(func(leadership *election.Leadership) bool {
 			return splitSourceAM.getMember().IsLeader()
