@@ -147,6 +147,7 @@ func (m *GroupManager) startWatchLoop() {
 	ctx, cancel := context.WithCancel(m.ctx)
 	defer cancel()
 	var (
+		resp     *clientv3.GetResponse
 		revision int64
 		err      error
 	)
@@ -156,7 +157,7 @@ func (m *GroupManager) startWatchLoop() {
 			return
 		case <-time.After(retryInterval):
 		}
-		resp, err := etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
+		resp, err = etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
 		if err == nil {
 			revision = resp.Header.Revision
 			for _, item := range resp.Kvs {
@@ -171,7 +172,7 @@ func (m *GroupManager) startWatchLoop() {
 		}
 		log.Warn("failed to get tso service addrs from etcd and will retry", zap.Error(err))
 	}
-	if err != nil {
+	if err != nil || revision == 0 {
 		log.Warn("failed to get tso service addrs from etcd finally when loading", zap.Error(err))
 	}
 	for {
