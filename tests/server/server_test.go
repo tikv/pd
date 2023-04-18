@@ -140,11 +140,11 @@ func TestRetryBootstrap(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	leader1 := cluster.WaitLeader()
-	re.NotEmpty(leader1)
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/saveRegionFailed", `return(true)`))
-	leaderServer := cluster.GetServer(leader1)
+	leaderServer := cluster.GetServer(leader)
 	re.NoError(leaderServer.BootstrapCluster())
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/saveRegionFailed"))
