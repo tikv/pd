@@ -97,7 +97,7 @@ type ResourceGroupsController struct {
 
 	calculators []ResourceCalculator
 
-	mutex           sync.Mutex         // used for the `resourceCounter`
+	mutex           sync.Mutex          // used for the `resourceCounter`
 	resourceCounter map[string]*Counter // resourceGroupName -> counter
 
 	// When a signal is received, it means the number of available token is low.
@@ -469,7 +469,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 	delta := Delta{}
 	if counter, exist := m.storeCounter[info.StoreID()]; exist {
 		delta.WriteBytes = m.globalCounter.WriteBytes - counter.WriteBytes
-		delta.CpuTime=    m.globalCounter.CpuTime - counter.CpuTime
+		delta.CpuTime = m.globalCounter.CpuTime - counter.CpuTime
 	}
 	// More accurately, it should be reset when the request succeed. But it would cause all concurrent requests piggyback large delta which inflates penalty.
 	// So here resets it directly as failure is rare.
@@ -493,7 +493,7 @@ func (c *ResourceGroupsController) OnResponse(
 			}
 			c.resourceCounter[resourceGroupName] = m
 		}
-		storeCounter :=m.storeCounter[req.StoreID()]
+		storeCounter := m.storeCounter[req.StoreID()]
 		if req.IsWrite() {
 			m.globalCounter.WriteBytes += req.WriteBytes()
 			storeCounter.WriteBytes += req.WriteBytes()
