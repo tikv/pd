@@ -258,11 +258,11 @@ type tokenConsumptionPerSecond struct {
 }
 
 func (t tokenConsumptionPerSecond) makeReadRequest() *controller.TestRequestInfo {
-	return controller.NewTestRequestInfo(false, 0)
+	return controller.NewTestRequestInfo(false, 0, 0)
 }
 
 func (t tokenConsumptionPerSecond) makeWriteRequest() *controller.TestRequestInfo {
-	return controller.NewTestRequestInfo(true, uint64(t.wruTokensAtATime-1))
+	return controller.NewTestRequestInfo(true, uint64(t.wruTokensAtATime-1), 0)
 }
 
 func (t tokenConsumptionPerSecond) makeReadResponse() *controller.TestResponseInfo {
@@ -491,6 +491,85 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend"))
 	suite.cleanupResourceGroups()
 	controller.Stop()
+}
+
+func (suite *resourceManagerClientTestSuite) TestResourceDelta() {
+	re := suite.Require()
+	cli := suite.client
+
+	for _, group := range suite.initGroups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+
+	cfg := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+		CPUMsCost:        1,
+	}
+	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
+	c.Start(suite.ctx)
+
+	resourceGroupName := suite.initGroups[1].Name
+	// init 
+	req := controller.NewTestRequestInfo(false, 0, 2 /* store2 */)	
+	resp := controller.NewTestResponseInfo(0, time.Duration(30), true)
+	_, delta, err := c.OnRequestWait(suite.ctx, resourceGroupName, req)
+	re.NoError(err)
+	re.Equal(delta.WriteBytes, uint64(0))
+	re.Equal(delta.CpuTime, time.Duration(0))
+	_, err = c.OnResponse(resourceGroupName, req, resp)
+	re.NoError(err)
+
+	req = controller.NewTestRequestInfo(true, 60, 1 /* store1 */)	
+	resp = controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, delta, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
+	re.NoError(err)
+	re.Equal(delta.WriteBytes, uint64(0))
+	re.Equal(delta.CpuTime, time.Duration(0))
+	_, err = c.OnResponse(resourceGroupName, req, resp)
+	re.NoError(err)
+
+	// failed request, shouldn't be counted in delta
+	req = controller.NewTestRequestInfo(true, 20, 1 /* store1 */)	
+	resp = controller.NewTestResponseInfo(0, time.Duration(0), false)
+	_, delta, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
+	re.NoError(err)
+	re.Equal(delta.WriteBytes, uint64(0))
+	re.Equal(delta.CpuTime, time.Duration(0))
+	_, err = c.OnResponse(resourceGroupName, req, resp)
+	re.NoError(err)
+	
+	// from same store, should be zero
+	req1 := controller.NewTestRequestInfo(true, 70, 1 /* store1 */)	
+	resp1 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, delta, err = c.OnRequestWait(suite.ctx, resourceGroupName, req1)
+	re.NoError(err)
+	re.Equal(delta.WriteBytes, uint64(0))
+	_, err = c.OnResponse(resourceGroupName, req1, resp1)
+	re.NoError(err)
+	
+	// from different store, should be non-zero
+	req2 := controller.NewTestRequestInfo(true, 50, 2 /* store2 */)	
+	resp2 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, delta, err = c.OnRequestWait(suite.ctx, resourceGroupName, req2)
+	re.NoError(err)
+	re.Equal(delta.WriteBytes, uint64(130))
+	_, err = c.OnResponse(resourceGroupName, req2, resp2)
+	re.NoError(err)
+	
+	// from different group, should be zero
+	resourceGroupName = suite.initGroups[2].Name
+	req3 := controller.NewTestRequestInfo(true, 50, 1 /* store2 */)	
+	resp3 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, delta, err = c.OnRequestWait(suite.ctx, resourceGroupName, req3)
+	re.NoError(err)
+	re.Equal(delta.WriteBytes, uint64(0))
+	_, err = c.OnResponse(resourceGroupName, req3, resp3)
+	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {

@@ -28,11 +28,11 @@ type TestRequestInfo struct {
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
-func NewTestRequestInfo(isWrite bool, writeBytes uint64) *TestRequestInfo {
+func NewTestRequestInfo(isWrite bool, writeBytes uint64, storeID uint64) *TestRequestInfo {
 	return &TestRequestInfo{
 		isWrite:    isWrite,
 		writeBytes: writeBytes,
-		storeID:    0,
+		storeID:    storeID,
 	}
 }
 
@@ -46,6 +46,7 @@ func (tri *TestRequestInfo) WriteBytes() uint64 {
 	return tri.writeBytes
 }
 
+// StoreID implements the RequestInfo interface.
 func (tri *TestRequestInfo) StoreID() uint64 {
 	return tri.storeID
 }

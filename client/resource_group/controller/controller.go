@@ -50,7 +50,7 @@ const (
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
-	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, uint64, error)
+	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, Delta, error)
 	// OnResponse is used to consume tokens after receiving response
 	OnResponse(resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, error)
 }
@@ -97,8 +97,8 @@ type ResourceGroupsController struct {
 
 	calculators []ResourceCalculator
 
-	mutex        sync.Mutex
-	requestDelta map[string]map[uint64]uint64 // resourceGroupName -> storeID -> delta
+	mutex         sync.Mutex                  // used for the `resourceDelta`
+	resourceDelta map[string]map[uint64]Delta // resourceGroupName -> storeID -> delta
 
 	// When a signal is received, it means the number of available token is low.
 	lowTokenNotifyChan chan struct{}
@@ -115,6 +115,12 @@ type ResourceGroupsController struct {
 		// Currently, we don't do multiple `AcquireTokenBuckets`` at the same time, so there are no concurrency problems with `currentRequests`.
 		currentRequests []*rmpb.TokenBucketRequest
 	}
+}
+
+// Delta records resource usage on all stores between two adjacent requests on same store.
+type Delta struct {
+	WriteBytes uint64
+	CpuTime    time.Duration
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -140,7 +146,7 @@ func NewResourceGroupController(
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
-		requestDelta:          make(map[string]map[uint64]uint64),
+		resourceDelta:         make(map[string]map[uint64]Delta),
 	}
 	for _, opt := range opts {
 		opt(controller)
@@ -433,42 +439,57 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 // OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
-) (*rmpb.Consumption, uint64, error) {
+) (*rmpb.Consumption, Delta, error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
 		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
-		return nil, 0, err
+		return nil, Delta{}, err
 	}
-	con, err := gc.onRequestWait(ctx, info)
+	consumption, err := gc.onRequestWait(ctx, info)
 	if err != nil {
-		return nil, 0, err
+		return nil, Delta{}, err
 	}
 
 	c.mutex.Lock()
-	v, ok := c.requestDelta[resourceGroupName]
+	defer c.mutex.Unlock()
+	m, ok := c.resourceDelta[resourceGroupName]
 	if !ok {
-		v = make(map[uint64]uint64)
-		c.requestDelta[resourceGroupName] = v
+		m = make(map[uint64]Delta)
+		c.resourceDelta[resourceGroupName] = m
 	}
+	delta := m[info.StoreID()]
+	// More accurately, it should be reset when the request succeed. But it would cause all concurrent requests piggyback large delta which inflates penalty.
+	// So here resets it directly as failure is rare.
+	m[info.StoreID()] = Delta{}
 
-	// iter all stores
-	for id, delta := range v {
-		if info.StoreID() == id {
-			continue
-		}
-		v[id] = delta + 1
-	}
-	delta := v[info.StoreID()]
-	v[info.StoreID()] = 0
-	c.mutex.Unlock()
-
-	return con, delta, nil
+	return consumption, delta, nil
 }
 
 // OnResponse is used to consume tokens after receiving response
 func (c *ResourceGroupsController) OnResponse(
 	resourceGroupName string, req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, error) {
+	// record resource delta
+	c.mutex.Lock()
+	if resp.Succeed() {
+		m, ok := c.resourceDelta[resourceGroupName]
+		if !ok {
+			m = make(map[uint64]Delta)
+			c.resourceDelta[resourceGroupName] = m
+		}
+		for id, delta := range m {
+			if req.StoreID() == id {
+				continue
+			}
+			if req.IsWrite() {
+				delta.WriteBytes += req.WriteBytes()
+			}
+			delta.CpuTime += resp.KVCPU()
+			m[id] = delta
+		}
+	}
+	c.mutex.Unlock()
+
 	tmp, ok := c.groupsController.Load(resourceGroupName)
 	if !ok {
 		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
