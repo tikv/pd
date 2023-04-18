@@ -663,6 +663,10 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
+		// Ref issue: https://github.com/tikv/pd/issues/6311
+		// When etcd duration exceed gRPC context deadline, but still completes the txn write to etcd.
+		// The region meta is not written to LevelDB due to the error returned.
+		// Need to check the synchronization status of etcd and leveldb.
 		if ok, err := s.storage.LoadRegion(req.GetRegion().GetId(), &metapb.Region{}); !ok && err != nil {
 			log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
 			return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
