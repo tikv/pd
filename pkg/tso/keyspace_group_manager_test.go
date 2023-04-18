@@ -538,7 +538,7 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 	electionNamePrefix, legacySvcRootPath, tsoSvcRootPath string,
 ) *KeyspaceGroupManager {
 	return NewKeyspaceGroupManager(
-		suite.ctx, tsoServiceID, suite.etcdClient,
+		suite.ctx, tsoServiceID, suite.etcdClient, nil,
 		electionNamePrefix, legacySvcRootPath, tsoSvcRootPath,
 		suite.cfg)
 }
@@ -546,7 +546,7 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 // runTestLoadMultipleKeyspaceGroupsAssignment tests the loading of multiple keyspace group assignment.
 func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	re *require.Assertions,
-	numberOfKeypaceGroupsToAdd int,
+	numberOfKeyspaceGroupsToAdd int,
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
 	probabilityAssignToMe int, // percentage of assigning keyspace groups to this host/pod
 ) {
@@ -558,14 +558,14 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	step := 30
 	mux := sync.Mutex{}
 	wg := sync.WaitGroup{}
-	for i := 0; i < numberOfKeypaceGroupsToAdd; i += step {
+	for i := 0; i < numberOfKeyspaceGroupsToAdd; i += step {
 		wg.Add(1)
 		go func(startID int) {
 			defer wg.Done()
 
 			endID := startID + step
-			if endID > numberOfKeypaceGroupsToAdd {
-				endID = numberOfKeypaceGroupsToAdd
+			if endID > numberOfKeyspaceGroupsToAdd {
+				endID = numberOfKeyspaceGroupsToAdd
 			}
 
 			randomGen := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -593,7 +593,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	re.NoError(err)
 
 	// If no keyspace group is assigned to this host/pod, the default keyspace group should be initialized.
-	if numberOfKeypaceGroupsToAdd <= 0 {
+	if numberOfKeyspaceGroupsToAdd <= 0 {
 		expectedGroupIDs = append(expectedGroupIDs, mcsutils.DefaultKeyspaceGroupID)
 	}
 

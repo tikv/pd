@@ -193,7 +193,7 @@ func (lta *LocalTSOAllocator) isSameAllocatorLeader(leader *pdpb.Member) bool {
 
 // CheckAllocatorLeader checks who is the current Local TSO Allocator leader, and returns true if it is needed to check later.
 func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool) {
-	if err := lta.allocatorManager.member.PrecheckLeader(); err != nil {
+	if err := lta.allocatorManager.member.PreCheckLeader(); err != nil {
 		log.Error("no etcd leader, check local tso allocator leader later",
 			zap.String("dc-location", lta.timestampOracle.dcLocation), errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
