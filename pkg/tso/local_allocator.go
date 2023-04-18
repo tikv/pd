@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -175,6 +176,7 @@ func (lta *LocalTSOAllocator) CampaignAllocatorLeader(leaseTimeout int64, cmps .
 
 // KeepAllocatorLeader is used to keep the PD leader's leadership.
 func (lta *LocalTSOAllocator) KeepAllocatorLeader(ctx context.Context) {
+	defer logutil.LogPanic()
 	lta.leadership.Keep(ctx)
 }
 
@@ -191,7 +193,7 @@ func (lta *LocalTSOAllocator) isSameAllocatorLeader(leader *pdpb.Member) bool {
 
 // CheckAllocatorLeader checks who is the current Local TSO Allocator leader, and returns true if it is needed to check later.
 func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool) {
-	if err := lta.allocatorManager.member.PrecheckLeader(); err != nil {
+	if err := lta.allocatorManager.member.PreCheckLeader(); err != nil {
 		log.Error("no etcd leader, check local tso allocator leader later",
 			zap.String("dc-location", lta.timestampOracle.dcLocation), errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)

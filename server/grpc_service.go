@@ -224,7 +224,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			}
 
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
-			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory, doneCh, errCh)
+			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory, doneCh, errCh, s.updateServicePrimaryAddrCh)
 			continue
 		}
 
@@ -560,6 +560,7 @@ func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 	}
 	done := make(chan error, 1)
 	go func() {
+		defer logutil.LogPanic()
 		done <- b.stream.SendAndClose(bucket)
 	}()
 	select {
@@ -598,7 +599,10 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 		return io.EOF
 	}
 	done := make(chan error, 1)
-	go func() { done <- s.stream.Send(m) }()
+	go func() {
+		defer logutil.LogPanic()
+		done <- s.stream.Send(m)
+	}()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -1711,6 +1715,7 @@ func (s *GrpcServer) createHeartbeatForwardStream(client *grpc.ClientConn) (pdpb
 }
 
 func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
 	defer close(errCh)
 	for {
 		resp, err := forwardStream.Recv()
@@ -1735,6 +1740,7 @@ func (s *GrpcServer) createReportBucketsForwardStream(client *grpc.ClientConn) (
 }
 
 func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
 	defer close(errCh)
 	for {
 		resp, err := forwardStream.CloseAndRecv()
@@ -1751,6 +1757,7 @@ func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient
 
 // TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
 func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	defer logutil.LogPanic()
 	select {
 	case <-done:
 		return
@@ -1774,7 +1781,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
 			KeyspaceId:      utils.DefaultKeyspaceID,
-			KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
+			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
 		},
 		Count: 1,
 	})

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package handlers_test
+package handlers
 
 import (
 	"bytes"
@@ -29,8 +29,6 @@ import (
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
-
-const keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
 
 type keyspaceGroupTestSuite struct {
 	suite.Suite
@@ -164,22 +162,23 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	kg1 := suite.mustLoadKeyspaceGroupByID(1)
 	suite.Equal(uint32(1), kg1.ID)
 	suite.Equal([]uint32{333}, kg1.Keyspaces)
-	suite.True(kg1.InSplit)
-	suite.Empty(kg1.SplitFrom)
+	suite.True(kg1.IsSplitSource())
+	suite.Equal(kg1.ID, kg1.SplitSource())
 	// Check keyspace group 2.
 	kg2 := suite.mustLoadKeyspaceGroupByID(2)
 	suite.Equal(uint32(2), kg2.ID)
 	suite.Equal([]uint32{111, 222}, kg2.Keyspaces)
-	suite.True(kg2.InSplit)
-	suite.Equal(kg1.ID, kg2.SplitFrom)
+	suite.True(kg2.IsSplitTarget())
+	suite.Equal(kg1.ID, kg2.SplitSource())
 	// They should have the same user kind and members.
 	suite.Equal(kg1.UserKind, kg2.UserKind)
 	suite.Equal(kg1.Members, kg2.Members)
 	// Finish the split and check the split state.
-	suite.mustFinishSplitKeyspaceGroup(2)
-	kg2 = suite.mustLoadKeyspaceGroupByID(2)
-	suite.False(kg2.InSplit)
-	suite.Equal(kg1.ID, kg2.SplitFrom)
+	MustFinishSplitKeyspaceGroup(suite.Require(), suite.server, 2)
+	kg1 = MustLoadKeyspaceGroupByID(suite.Require(), suite.server, 1)
+	suite.False(kg1.IsSplitting())
+	kg2 = MustLoadKeyspaceGroupByID(suite.Require(), suite.server, 2)
+	suite.False(kg2.IsSplitting())
 }
 
 func (suite *keyspaceGroupTestSuite) sendLoadKeyspaceGroupRequest(token, limit string) []*endpoint.KeyspaceGroup {
