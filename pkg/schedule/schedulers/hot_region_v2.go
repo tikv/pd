@@ -86,8 +86,10 @@ func (bs *balanceSolver) pickCheckPolicyV2() {
 	switch {
 	case bs.resourceTy == writeLeader:
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
+		bs.checkHistoryLoadsByPriority = bs.checkHistoryByPriorityAndToleranceFirstOnly
 	default:
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAnyOf
+		bs.checkHistoryLoadsByPriority = bs.checkHistoryByPriorityAndToleranceAnyOf
 	}
 }
 
