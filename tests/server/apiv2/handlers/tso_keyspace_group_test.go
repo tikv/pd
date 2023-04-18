@@ -15,11 +15,7 @@
 package handlers
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"testing"
 
@@ -70,8 +66,7 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 			UserKind: endpoint.Standard.String(),
 		},
 	}}
-	code := suite.tryCreateKeyspaceGroup(kgs)
-	re.Equal(http.StatusOK, code)
+	MustCreateKeyspaceGroup(re, suite.server, kgs)
 
 	// miss user kind, use default value.
 	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -79,8 +74,7 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 			ID: uint32(3),
 		},
 	}}
-	code = suite.tryCreateKeyspaceGroup(kgs)
-	re.Equal(http.StatusOK, code)
+	MustCreateKeyspaceGroup(re, suite.server, kgs)
 
 	// invalid user kind.
 	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -89,8 +83,7 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 			UserKind: "invalid",
 		},
 	}}
-	code = suite.tryCreateKeyspaceGroup(kgs)
-	re.Equal(http.StatusBadRequest, code)
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusBadRequest)
 
 	// miss ID.
 	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -98,8 +91,7 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 			UserKind: endpoint.Standard.String(),
 		},
 	}}
-	code = suite.tryCreateKeyspaceGroup(kgs)
-	re.Equal(http.StatusInternalServerError, code)
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusInternalServerError)
 
 	// invalid ID.
 	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -108,8 +100,7 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 			UserKind: endpoint.Standard.String(),
 		},
 	}}
-	code = suite.tryCreateKeyspaceGroup(kgs)
-	re.Equal(http.StatusBadRequest, code)
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusBadRequest)
 
 	// repeated ID.
 	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -118,11 +109,11 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 			UserKind: endpoint.Standard.String(),
 		},
 	}}
-	code = suite.tryCreateKeyspaceGroup(kgs)
-	re.Equal(http.StatusInternalServerError, code)
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusInternalServerError)
 }
 
 func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
+	re := suite.Require()
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
 			ID:       uint32(1),
@@ -134,13 +125,13 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 		},
 	}}
 
-	code := suite.tryCreateKeyspaceGroup(kgs)
-	suite.Equal(http.StatusOK, code)
-	resp := suite.sendLoadKeyspaceGroupRequest("0", "0")
-	suite.Len(resp, 3)
+	MustCreateKeyspaceGroup(re, suite.server, kgs)
+	resp := sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	re.Len(resp, 3)
 }
 
 func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
+	re := suite.Require()
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
 			ID:        uint32(1),
@@ -149,102 +140,34 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 		},
 	}}
 
-	suite.tryCreateKeyspaceGroup(kgs)
-	resp := suite.sendLoadKeyspaceGroupRequest("0", "0")
-	suite.Len(resp, 2)
-	suite.mustSplitKeyspaceGroup(1, &handlers.SplitKeyspaceGroupByIDParams{
+	MustCreateKeyspaceGroup(re, suite.server, kgs)
+	resp := sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	re.Len(resp, 2)
+	MustSplitKeyspaceGroup(re, suite.server, 1, &handlers.SplitKeyspaceGroupByIDParams{
 		NewID:     uint32(2),
 		Keyspaces: []uint32{111, 222},
 	})
-	resp = suite.sendLoadKeyspaceGroupRequest("0", "0")
-	suite.Len(resp, 3)
+	resp = sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	re.Len(resp, 3)
 	// Check keyspace group 1.
-	kg1 := suite.mustLoadKeyspaceGroupByID(1)
-	suite.Equal(uint32(1), kg1.ID)
-	suite.Equal([]uint32{333}, kg1.Keyspaces)
-	suite.True(kg1.IsSplitSource())
-	suite.Equal(kg1.ID, kg1.SplitSource())
+	kg1 := MustLoadKeyspaceGroupByID(re, suite.server, 1)
+	re.Equal(uint32(1), kg1.ID)
+	re.Equal([]uint32{333}, kg1.Keyspaces)
+	re.True(kg1.IsSplitSource())
+	re.Equal(kg1.ID, kg1.SplitSource())
 	// Check keyspace group 2.
-	kg2 := suite.mustLoadKeyspaceGroupByID(2)
-	suite.Equal(uint32(2), kg2.ID)
-	suite.Equal([]uint32{111, 222}, kg2.Keyspaces)
-	suite.True(kg2.IsSplitTarget())
-	suite.Equal(kg1.ID, kg2.SplitSource())
+	kg2 := MustLoadKeyspaceGroupByID(re, suite.server, 2)
+	re.Equal(uint32(2), kg2.ID)
+	re.Equal([]uint32{111, 222}, kg2.Keyspaces)
+	re.True(kg2.IsSplitTarget())
+	re.Equal(kg1.ID, kg2.SplitSource())
 	// They should have the same user kind and members.
-	suite.Equal(kg1.UserKind, kg2.UserKind)
-	suite.Equal(kg1.Members, kg2.Members)
+	re.Equal(kg1.UserKind, kg2.UserKind)
+	re.Equal(kg1.Members, kg2.Members)
 	// Finish the split and check the split state.
-	MustFinishSplitKeyspaceGroup(suite.Require(), suite.server, 2)
-	kg1 = MustLoadKeyspaceGroupByID(suite.Require(), suite.server, 1)
-	suite.False(kg1.IsSplitting())
-	kg2 = MustLoadKeyspaceGroupByID(suite.Require(), suite.server, 2)
-	suite.False(kg2.IsSplitting())
-}
-
-func (suite *keyspaceGroupTestSuite) sendLoadKeyspaceGroupRequest(token, limit string) []*endpoint.KeyspaceGroup {
-	// Construct load range request.
-	httpReq, err := http.NewRequest(http.MethodGet, suite.server.GetAddr()+keyspaceGroupsPrefix, nil)
-	suite.NoError(err)
-	query := httpReq.URL.Query()
-	query.Add("page_token", token)
-	query.Add("limit", limit)
-	httpReq.URL.RawQuery = query.Encode()
-	// Send request.
-	httpResp, err := dialClient.Do(httpReq)
-	suite.NoError(err)
-	defer httpResp.Body.Close()
-	suite.Equal(http.StatusOK, httpResp.StatusCode)
-	// Receive & decode response.
-	data, err := io.ReadAll(httpResp.Body)
-	suite.NoError(err)
-	var resp []*endpoint.KeyspaceGroup
-	suite.NoError(json.Unmarshal(data, &resp))
-	return resp
-}
-
-func (suite *keyspaceGroupTestSuite) mustLoadKeyspaceGroupByID(id uint32) *endpoint.KeyspaceGroup {
-	httpReq, err := http.NewRequest(http.MethodGet, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), nil)
-	suite.NoError(err)
-	resp, err := dialClient.Do(httpReq)
-	suite.NoError(err)
-	defer resp.Body.Close()
-	suite.Equal(http.StatusOK, resp.StatusCode)
-	data, err := io.ReadAll(resp.Body)
-	suite.NoError(err)
-	var kg endpoint.KeyspaceGroup
-	suite.NoError(json.Unmarshal(data, &kg))
-	return &kg
-}
-
-func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(request *handlers.CreateKeyspaceGroupParams) int {
-	data, err := json.Marshal(request)
-	suite.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+keyspaceGroupsPrefix, bytes.NewBuffer(data))
-	suite.NoError(err)
-	resp, err := dialClient.Do(httpReq)
-	suite.NoError(err)
-	defer resp.Body.Close()
-	return resp.StatusCode
-}
-
-func (suite *keyspaceGroupTestSuite) mustSplitKeyspaceGroup(id uint32, request *handlers.SplitKeyspaceGroupByIDParams) {
-	data, err := json.Marshal(request)
-	suite.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/split", id), bytes.NewBuffer(data))
-	suite.NoError(err)
-	// Send request.
-	resp, err := dialClient.Do(httpReq)
-	suite.NoError(err)
-	defer resp.Body.Close()
-	suite.Equal(http.StatusOK, resp.StatusCode)
-}
-
-func (suite *keyspaceGroupTestSuite) mustFinishSplitKeyspaceGroup(id uint32) {
-	httpReq, err := http.NewRequest(http.MethodDelete, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/split", id), nil)
-	suite.NoError(err)
-	// Send request.
-	resp, err := dialClient.Do(httpReq)
-	suite.NoError(err)
-	defer resp.Body.Close()
-	suite.Equal(http.StatusOK, resp.StatusCode)
+	MustFinishSplitKeyspaceGroup(re, suite.server, 2)
+	kg1 = MustLoadKeyspaceGroupByID(re, suite.server, 1)
+	re.False(kg1.IsSplitting())
+	kg2 = MustLoadKeyspaceGroupByID(re, suite.server, 2)
+	re.False(kg2.IsSplitting())
 }
