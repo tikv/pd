@@ -150,6 +150,8 @@ func (h *HotBucketCache) CheckAsync(task flowBucketsItemTask) bool {
 }
 
 func (h *HotBucketCache) schedule() {
+	defer logutil.LogPanic()
+
 	for {
 		select {
 		case <-h.ctx.Done():

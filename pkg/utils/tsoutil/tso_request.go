@@ -141,7 +141,7 @@ func (r *PDProtoRequest) getCount() uint32 {
 // count defins the count of timestamps to retrieve.
 func (r *PDProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
-		utils.DefaultKeyspaceID, utils.DefaultKeySpaceGroupID, r.request.GetDcLocation())
+		utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID, r.request.GetDcLocation())
 }
 
 // postProcess sends the response back to the sender of the request
