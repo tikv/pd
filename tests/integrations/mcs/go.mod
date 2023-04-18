@@ -182,4 +182,4 @@ require (
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
 
-replace github.com/pingcap/kvproto => github.com/binshi-bing/kvproto v0.0.0-20230414013749-4846a6711e9d
+replace github.com/pingcap/kvproto => github.com/binshi-bing/kvproto v0.0.0-20230418044759-0c29db42cc3b

@@ -205,4 +205,4 @@ replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
 
-replace github.com/pingcap/kvproto => github.com/binshi-bing/kvproto v0.0.0-20230414013749-4846a6711e9d
+replace github.com/pingcap/kvproto => github.com/binshi-bing/kvproto v0.0.0-20230418044759-0c29db42cc3b
