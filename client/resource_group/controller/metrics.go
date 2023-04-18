@@ -38,7 +38,7 @@ var (
 			Namespace: namespace,
 			Subsystem: requestSubsystem,
 			Name:      "success",
-			Buckets:   prometheus.ExponentialBuckets(0.001, 4, 8), // 0.001 ~ 40.96
+			Buckets:   []float64{.005, .01, .05, .1, .5, 1, 5, 10, 20, 30}, // 0.005 ~ 30
 			Help:      "Bucketed histogram of wait duration of successful request.",
 		}, []string{resourceGroupNameLabel})
 
