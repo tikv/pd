@@ -184,7 +184,7 @@ func MustCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, r
 	re.Equal(http.StatusOK, code)
 }
 
-// FailCreateKeyspaceGroup fails to create a keyspace group with HTTP API.
+// FailCreateKeyspaceGroupWithCode fails to create a keyspace group with HTTP API.
 func FailCreateKeyspaceGroupWithCode(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceGroupParams, expect int) {
 	code := tryCreateKeyspaceGroup(re, server, request)
 	re.Equal(expect, code)
