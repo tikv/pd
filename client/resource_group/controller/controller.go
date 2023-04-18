@@ -98,7 +98,7 @@ type ResourceGroupsController struct {
 	calculators []ResourceCalculator
 
 	mutex           sync.Mutex         // used for the `resourceCounter`
-	resourceCounter map[string]Counter // resourceGroupName -> counter
+	resourceCounter map[string]*Counter // resourceGroupName -> counter
 
 	// When a signal is received, it means the number of available token is low.
 	lowTokenNotifyChan chan struct{}
@@ -151,7 +151,7 @@ func NewResourceGroupController(
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
-		resourceCounter:       make(map[string]Counter),
+		resourceCounter:       make(map[string]*Counter),
 	}
 	for _, opt := range opts {
 		opt(controller)
@@ -459,15 +459,17 @@ func (c *ResourceGroupsController) OnRequestWait(
 	defer c.mutex.Unlock()
 	m, ok := c.resourceCounter[resourceGroupName]
 	if !ok {
-		m = Counter{
+		m = &Counter{
 			storeCounter:  make(map[uint64]Delta),
 			globalCounter: Delta{},
 		}
 		c.resourceCounter[resourceGroupName] = m
 	}
-	delta := Delta{
-		WriteBytes: m.globalCounter.WriteBytes - m.storeCounter[info.StoreID()].WriteBytes,
-		CpuTime:    m.globalCounter.CpuTime - m.storeCounter[info.StoreID()].CpuTime,
+
+	delta := Delta{}
+	if counter, exist := m.storeCounter[info.StoreID()]; exist {
+		delta.WriteBytes = m.globalCounter.WriteBytes - counter.WriteBytes
+		delta.CpuTime=    m.globalCounter.CpuTime - counter.CpuTime
 	}
 	// More accurately, it should be reset when the request succeed. But it would cause all concurrent requests piggyback large delta which inflates penalty.
 	// So here resets it directly as failure is rare.
@@ -485,16 +487,20 @@ func (c *ResourceGroupsController) OnResponse(
 	if resp.Succeed() {
 		m, ok := c.resourceCounter[resourceGroupName]
 		if !ok {
-			m = Counter{
+			m = &Counter{
 				storeCounter:  make(map[uint64]Delta),
 				globalCounter: Delta{},
 			}
 			c.resourceCounter[resourceGroupName] = m
 		}
+		storeCounter :=m.storeCounter[req.StoreID()]
 		if req.IsWrite() {
 			m.globalCounter.WriteBytes += req.WriteBytes()
+			storeCounter.WriteBytes += req.WriteBytes()
 		}
 		m.globalCounter.CpuTime += resp.KVCPU()
+		storeCounter.CpuTime += resp.KVCPU()
+		m.storeCounter[req.StoreID()] = storeCounter
 	}
 	c.mutex.Unlock()
 

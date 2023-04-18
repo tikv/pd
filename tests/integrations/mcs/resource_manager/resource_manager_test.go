@@ -561,14 +561,23 @@ func (suite *resourceManagerClientTestSuite) TestResourceDelta() {
 	_, err = c.OnResponse(resourceGroupName, req2, resp2)
 	re.NoError(err)
 
-	// from different group, should be zero
-	resourceGroupName = suite.initGroups[2].Name
-	req3 := controller.NewTestRequestInfo(true, 50, 1 /* store2 */)
+	// from new store, should be zero
+	req3 := controller.NewTestRequestInfo(true, 0, 3 /* store3 */)
 	resp3 := controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, delta, err = c.OnRequestWait(suite.ctx, resourceGroupName, req3)
 	re.NoError(err)
 	re.Equal(delta.WriteBytes, uint64(0))
 	_, err = c.OnResponse(resourceGroupName, req3, resp3)
+	re.NoError(err)
+
+	// from different group, should be zero
+	resourceGroupName = suite.initGroups[2].Name
+	req4 := controller.NewTestRequestInfo(true, 50, 1 /* store2 */)
+	resp4 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, delta, err = c.OnRequestWait(suite.ctx, resourceGroupName, req4)
+	re.NoError(err)
+	re.Equal(delta.WriteBytes, uint64(0))
+	_, err = c.OnResponse(resourceGroupName, req4, resp4)
 	re.NoError(err)
 }
 
