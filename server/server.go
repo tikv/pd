@@ -279,9 +279,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
-	failpoint.Inject("useGlobalRegistry", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("useGlobalRegistry")); _err_ == nil {
 		s.registry = registry.ServerServiceRegistry
-	})
+	}
 	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the micro services REST path.
@@ -353,9 +353,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 			}
 		}
 	}
-	failpoint.Inject("memberNil", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("memberNil")); _err_ == nil {
 		time.Sleep(1500 * time.Millisecond)
-	})
+	}
 	s.member = member.NewMember(etcd, s.client, etcdServerID)
 	return nil
 }
@@ -704,7 +704,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
-	failpoint.Inject("raftclusterIsBusy", func() {})
+	failpoint.Eval(_curpkg_("raftclusterIsBusy"))
 	s.cluster.Stop()
 }
 
@@ -1485,11 +1485,11 @@ func (s *Server) campaignLeader() {
 		}
 		defer func() {
 			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-			failpoint.Inject("updateAfterResetTSO", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("updateAfterResetTSO")); _err_ == nil {
 				if err = allocator.UpdateTSO(); err != nil {
 					panic(err)
 				}
-			})
+			}
 		}()
 	}
 	if err := s.reloadConfigFromKV(); err != nil {

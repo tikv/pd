@@ -98,9 +98,9 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	rmc.RequestUnit.Adjust()
 
 	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
-	failpoint.Inject("enableDegradedMode", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("enableDegradedMode")); _err_ == nil {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
-	})
+	}
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of

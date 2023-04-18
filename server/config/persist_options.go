@@ -510,6 +510,11 @@ func (o *PersistOptions) GetStoreLimitMode() string {
 	return o.GetScheduleConfig().StoreLimitMode
 }
 
+// GetStoreLimitVersion returns the limit version of store.
+func (o *PersistOptions) GetStoreLimitVersion() string {
+	return o.GetScheduleConfig().StoreLimitVersion
+}
+
 // GetTolerantSizeRatio gets the tolerant size ratio.
 func (o *PersistOptions) GetTolerantSizeRatio() float64 {
 	return o.GetScheduleConfig().TolerantSizeRatio
@@ -734,9 +739,9 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 		ClusterVersion:  *o.GetClusterVersion(),
 	}
 	err := storage.SaveConfig(cfg)
-	failpoint.Inject("persistFail", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("persistFail")); _err_ == nil {
 		err = errors.New("fail to persist")
-	})
+	}
 	return err
 }
 

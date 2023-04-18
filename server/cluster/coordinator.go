@@ -157,9 +157,9 @@ func (c *coordinator) patrolRegions() {
 			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
 			start = time.Now()
 		}
-		failpoint.Inject("break-patrol", func() {
-			failpoint.Break()
-		})
+		if _, _err_ := failpoint.Eval(_curpkg_("break-patrol")); _err_ == nil {
+			break
+		}
 	}
 }
 
@@ -313,9 +313,9 @@ func (c *coordinator) runUntilStop() {
 
 func (c *coordinator) run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
-	failpoint.Inject("changeCoordinatorTicker", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("changeCoordinatorTicker")); _err_ == nil {
 		ticker = time.NewTicker(100 * time.Millisecond)
-	})
+	}
 	defer ticker.Stop()
 	log.Info("coordinator starts to collect cluster information")
 	for {

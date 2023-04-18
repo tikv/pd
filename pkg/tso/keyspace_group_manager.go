@@ -377,18 +377,18 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 	for ; i < kgm.loadFromEtcdMaxRetryTimes; i++ {
 		resp, err = etcdutil.EtcdKVGet(kgm.etcdClient, startKey, opOption...)
 
-		failpoint.Inject("delayLoadKeyspaceGroups", func(val failpoint.Value) {
+		if val, _err_ := failpoint.Eval(_curpkg_("delayLoadKeyspaceGroups")); _err_ == nil {
 			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
 				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
 			}
-		})
+		}
 
-		failpoint.Inject("loadKeyspaceGroupsTemporaryFail", func(val failpoint.Value) {
+		if val, _err_ := failpoint.Eval(_curpkg_("loadKeyspaceGroupsTemporaryFail")); _err_ == nil {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
 				err = errors.New("fail to read from etcd")
-				failpoint.Continue()
+				continue
 			}
-		})
+		}
 
 		if err == nil && resp != nil {
 			break

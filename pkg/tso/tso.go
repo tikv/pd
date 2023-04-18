@@ -149,9 +149,9 @@ func (t *timestampOracle) getTimestampPath() string {
 func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	tsoCounter.WithLabelValues("sync", t.dcLocation).Inc()
 
-	failpoint.Inject("delaySyncTimestamp", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("delaySyncTimestamp")); _err_ == nil {
 		time.Sleep(time.Second)
-	})
+	}
 
 	last, err := t.storage.LoadTimestamp(t.ltsPath)
 	if err != nil {
@@ -159,12 +159,12 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	}
 
 	next := time.Now()
-	failpoint.Inject("fallBackSync", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fallBackSync")); _err_ == nil {
 		next = next.Add(time.Hour)
-	})
-	failpoint.Inject("systemTimeSlow", func() {
+	}
+	if _, _err_ := failpoint.Eval(_curpkg_("systemTimeSlow")); _err_ == nil {
 		next = next.Add(-time.Hour)
-	})
+	}
 	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubRealTimeByWallClock(next, last) < UpdateTimestampGuard {
@@ -275,12 +275,12 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	tsoGap.WithLabelValues(t.dcLocation).Set(float64(time.Since(prevPhysical).Milliseconds()))
 
 	now := time.Now()
-	failpoint.Inject("fallBackUpdate", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fallBackUpdate")); _err_ == nil {
 		now = now.Add(time.Hour)
-	})
-	failpoint.Inject("systemTimeSlow", func() {
+	}
+	if _, _err_ := failpoint.Eval(_curpkg_("systemTimeSlow")); _err_ == nil {
 		now = now.Add(-time.Hour)
-	})
+	}
 
 	tsoCounter.WithLabelValues("save", t.dcLocation).Inc()
 

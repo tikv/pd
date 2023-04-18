@@ -15,7 +15,11 @@
 package storelimit
 
 import (
+	"container/list"
+	"context"
+	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -41,8 +45,8 @@ func TestStoreLimit(t *testing.T) {
 func TestSlidingWindow(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	capacity := int64(10)
-	s := NewSlidingWindows(float64(capacity))
+	capacity := int64(defaultWindowSize)
+	s := NewSlidingWindows()
 	re.Len(s.windows, int(constant.PriorityLevelLen))
 	// capacity:[10, 10, 10, 10]
 	for i, v := range s.windows {
@@ -61,23 +65,23 @@ func TestSlidingWindow(t *testing.T) {
 
 	// case 1: it will occupy the normal window size not the core.High window.
 	re.True(s.Take(capacity, SendSnapshot, constant.High))
-	re.EqualValues(capacity, s.GetUsed())
+	re.EqualValues([]int64{capacity, 0, 0, 0}, s.GetUsed())
 	re.EqualValues(0, s.windows[constant.High].getUsed())
 	s.Ack(capacity, SendSnapshot)
-	re.EqualValues(s.GetUsed(), 0)
+	re.EqualValues([]int64{0, 0, 0, 0}, s.GetUsed())
 
 	// case 2: it will occupy the core.High window size if the normal window is full.
 	capacity = 2000
-	s.Reset(float64(capacity), SendSnapshot)
+	s.set(float64(capacity), SendSnapshot)
 	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Low))
 	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Low))
 	re.False(s.Take(capacity, SendSnapshot, constant.Low))
 	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
 	re.False(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
-	re.EqualValues(s.GetUsed(), capacity+capacity+capacity-minSnapSize*3)
+	re.EqualValues([]int64{capacity + capacity - minSnapSize*2, capacity - minSnapSize, 0, 0}, s.GetUsed())
 	s.Ack(capacity-minSnapSize, SendSnapshot)
 	s.Ack(capacity-minSnapSize, SendSnapshot)
-	re.Equal(s.GetUsed(), capacity-minSnapSize)
+	re.Equal([]int64{capacity - minSnapSize, 0, 0, 0}, s.GetUsed())
 
 	// case 3: skip the type is not the SendSnapshot
 	for i := 0; i < 10; i++ {
@@ -107,4 +111,80 @@ func TestWindow(t *testing.T) {
 	re.True(s.take(minSnapSize))
 	re.EqualValues(s.ack(minSnapSize*2), minSnapSize)
 	re.EqualValues(s.getUsed(), 0)
+}
+
+func TestFeedback(t *testing.T) {
+	t.Parallel()
+	s := NewSlidingWindows()
+	re := require.New(t)
+	type SnapshotStats struct {
+		total     float64
+		Remaining int64
+		Start     time.Time
+	}
+	// region size is 10GB,snapshot write limit is 100MB/s
+	// the best strategy is that the tikv executing queue equals the wait.
+	regionSize, limit, wait := int64(10000), int64(100), int64(3)
+	iter := 100
+	ops := make(chan int64, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// generate the operator
+	go func() {
+		for {
+			if s.Available(regionSize, SendSnapshot, constant.Low) && iter > 0 {
+				iter--
+				s.Take(regionSize, SendSnapshot, constant.Low)
+				size := regionSize - rand.Int63n(regionSize/10)
+				ops <- size
+			}
+			if iter == 0 {
+				cancel()
+				return
+			}
+		}
+	}()
+
+	// receive the operator
+	queue := list.List{}
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case op := <-ops:
+			stats := &SnapshotStats{
+				total:     float64(op / limit),
+				Remaining: op,
+				Start:     time.Now(),
+			}
+			queue.PushBack(stats)
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			first := queue.Front()
+			if first == nil {
+				continue
+			}
+			stats := first.Value.(*SnapshotStats)
+			if stats.Remaining > 0 {
+				stats.Remaining -= limit
+				continue
+			}
+			cost := time.Since(stats.Start).Seconds() * 1000
+			exec := stats.total
+			if exec < 5 {
+				exec = 5
+			}
+			err := exec*float64(wait) - cost
+			queue.Remove(first)
+			s.Feedback(err)
+			if iter < 5 {
+				re.Greater(float64(s.GetCap()), float64(regionSize*(wait-1))*0.9)
+				re.Less(float64(s.GetCap()), float64(regionSize*wait))
+			}
+			s.Ack(regionSize, SendSnapshot)
+		}
+	}
+
+	<-ctx.Done()
 }
