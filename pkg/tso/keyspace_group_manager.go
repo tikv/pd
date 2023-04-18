@@ -55,7 +55,7 @@ const (
 	defaultLoadKeyspaceGroupsBatchSize = int64(400)
 	defaultLoadFromEtcdRetryInterval   = 500 * time.Millisecond
 	defaultLoadFromEtcdMaxRetryTimes   = int(defaultLoadKeyspaceGroupsTimeout / defaultLoadFromEtcdRetryInterval)
-	watchKEtcdChangeRetryInterval      = 1 * time.Second
+	watchEtcdChangeRetryInterval       = 1 * time.Second
 )
 
 type state struct {
@@ -86,6 +86,7 @@ func (s *state) deinitialize() {
 		if am != nil {
 			wg.Add(1)
 			go func(am *AllocatorManager) {
+				defer logutil.LogPanic()
 				defer wg.Done()
 				am.close()
 				log.Info("keyspace group closed", zap.Uint32("keyspace-group-id", am.kgID))
@@ -281,6 +282,8 @@ func (kgm *KeyspaceGroupManager) Close() {
 }
 
 func (kgm *KeyspaceGroupManager) checkInitProgress(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	defer logutil.LogPanic()
+
 	select {
 	case <-done:
 		return
@@ -418,7 +421,7 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 	return revision, kgs, resp.More, nil
 }
 
-// startKeyspaceGroupsMetaWatchLoop Repeatedly watches any change in keyspace group membership/distribution
+// startKeyspaceGroupsMetaWatchLoop repeatedly watches any change in keyspace group membership/distribution
 // and apply the change dynamically.
 func (kgm *KeyspaceGroupManager) startKeyspaceGroupsMetaWatchLoop(revision int64) {
 	defer logutil.LogPanic()
@@ -434,11 +437,11 @@ func (kgm *KeyspaceGroupManager) startKeyspaceGroupsMetaWatchLoop(revision int64
 
 		nextRevision, err := kgm.watchKeyspaceGroupsMetaChange(revision)
 		if err != nil {
-			log.Error("watcher canceled unexpectedly. Will start a new watcher after a while",
+			log.Error("watcher canceled unexpectedly and a new watcher will start after a while",
 				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(watchKEtcdChangeRetryInterval)),
+				zap.Time("retry-at", time.Now().Add(watchEtcdChangeRetryInterval)),
 				zap.Error(err))
-			time.Sleep(watchKEtcdChangeRetryInterval)
+			time.Sleep(watchEtcdChangeRetryInterval)
 		}
 	}
 }

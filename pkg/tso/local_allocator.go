@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -175,6 +176,7 @@ func (lta *LocalTSOAllocator) CampaignAllocatorLeader(leaseTimeout int64, cmps .
 
 // KeepAllocatorLeader is used to keep the PD leader's leadership.
 func (lta *LocalTSOAllocator) KeepAllocatorLeader(ctx context.Context) {
+	defer logutil.LogPanic()
 	lta.leadership.Keep(ctx)
 }
 

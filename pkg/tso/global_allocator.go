@@ -475,6 +475,7 @@ func (gta *GlobalTSOAllocator) Reset() {
 }
 
 func (gta *GlobalTSOAllocator) primaryElectionLoop() {
+	defer logutil.LogPanic()
 	defer gta.wg.Done()
 
 	for {

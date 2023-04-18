@@ -940,6 +940,8 @@ func (am *AllocatorManager) GetLocalTSOSuffixPath(dcLocation string) string {
 // 2. If all PD servers with dc-location="dc-1" are down, then the other PD servers
 // of DC could be elected.
 func (am *AllocatorManager) PriorityChecker() {
+	defer logutil.LogPanic()
+
 	serverID := am.member.ID()
 	myServerDCLocation := am.getServerDCLocation(serverID)
 	// Check all Local TSO Allocator followers to see if their priorities is higher than the leaders
