@@ -1350,12 +1350,6 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 		return nil
 	}
 
-	srcStoreID := bs.cur.srcStore.GetID()
-	dstStoreID := bs.cur.dstStore.GetID()
-	sourceLabel := strconv.FormatUint(srcStoreID, 10)
-	targetLabel := strconv.FormatUint(dstStoreID, 10)
-	dim := bs.rankToDimString()
-
 	splitRegions := make([]*core.RegionInfo, 0)
 	if bs.opTy == movePeer {
 		for _, region := range []*core.RegionInfo{bs.cur.region, bs.cur.revertRegion} {
@@ -1371,6 +1365,12 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	if len(splitRegions) > 0 {
 		return bs.createSplitOperator(splitRegions)
 	}
+
+	srcStoreID := bs.cur.srcStore.GetID()
+	dstStoreID := bs.cur.dstStore.GetID()
+	sourceLabel := strconv.FormatUint(srcStoreID, 10)
+	targetLabel := strconv.FormatUint(dstStoreID, 10)
+	dim := bs.rankToDimString()
 
 	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
 	switch bs.rwTy {
@@ -1455,7 +1455,7 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 			operators = append(operators, op)
 		} else {
 			log.Error("fail to create split operator",
-				zap.Int("resource-type", int(bs.resourceTy)),
+				zap.Stringer("resource-type", bs.resourceTy),
 				errs.ZapError(err))
 		}
 	}
@@ -1638,6 +1638,22 @@ const (
 	readLeader
 	resourceTypeLen
 )
+
+// String implements fmt.Stringer interface.
+func (ty resourceType) String() string {
+	switch ty {
+	case writePeer:
+		return "write-peer"
+	case writeLeader:
+		return "write-leader"
+	case readPeer:
+		return "read-peer"
+	case readLeader:
+		return "read-leader"
+	default:
+		return ""
+	}
+}
 
 func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
 	switch rwTy {

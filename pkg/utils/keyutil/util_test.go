@@ -103,20 +103,13 @@ func TestBetween(t *testing.T) {
 		{
 			[]byte("a"),
 			[]byte("c"),
-			[]byte("b"),
-			true,
+			[]byte("c"),
+			false,
 		},
 		{
 			[]byte("a"),
 			[]byte(""),
 			[]byte("b"),
-			true,
-		},
-		{
-			[]byte("a"),
-			[]byte(""),
-			[]byte("b"),
-
 			true,
 		},
 		{
