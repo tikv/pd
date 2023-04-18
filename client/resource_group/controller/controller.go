@@ -97,8 +97,8 @@ type ResourceGroupsController struct {
 
 	calculators []ResourceCalculator
 
-	mutex         sync.Mutex                  // used for the `resourceDelta`
-	resourceDelta map[string]map[uint64]Delta // resourceGroupName -> storeID -> delta
+	mutex           sync.Mutex         // used for the `resourceCounter`
+	resourceCounter map[string]Counter // resourceGroupName -> counter
 
 	// When a signal is received, it means the number of available token is low.
 	lowTokenNotifyChan chan struct{}
@@ -115,6 +115,11 @@ type ResourceGroupsController struct {
 		// Currently, we don't do multiple `AcquireTokenBuckets`` at the same time, so there are no concurrency problems with `currentRequests`.
 		currentRequests []*rmpb.TokenBucketRequest
 	}
+}
+
+type Counter struct {
+	storeCounter  map[uint64]Delta // storeID -> delta
+	globalCounter Delta
 }
 
 // Delta records resource usage on all stores between two adjacent requests on same store.
@@ -146,7 +151,7 @@ func NewResourceGroupController(
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
-		resourceDelta:         make(map[string]map[uint64]Delta),
+		resourceCounter:       make(map[string]Counter),
 	}
 	for _, opt := range opts {
 		opt(controller)
@@ -452,15 +457,21 @@ func (c *ResourceGroupsController) OnRequestWait(
 
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	m, ok := c.resourceDelta[resourceGroupName]
+	m, ok := c.resourceCounter[resourceGroupName]
 	if !ok {
-		m = make(map[uint64]Delta)
-		c.resourceDelta[resourceGroupName] = m
+		m = Counter{
+			storeCounter:  make(map[uint64]Delta),
+			globalCounter: Delta{},
+		}
+		c.resourceCounter[resourceGroupName] = m
 	}
-	delta := m[info.StoreID()]
+	delta := Delta{
+		WriteBytes: m.globalCounter.WriteBytes - m.storeCounter[info.StoreID()].WriteBytes,
+		CpuTime:    m.globalCounter.CpuTime - m.storeCounter[info.StoreID()].CpuTime,
+	}
 	// More accurately, it should be reset when the request succeed. But it would cause all concurrent requests piggyback large delta which inflates penalty.
 	// So here resets it directly as failure is rare.
-	m[info.StoreID()] = Delta{}
+	m.storeCounter[info.StoreID()] = m.globalCounter
 
 	return consumption, delta, nil
 }
@@ -472,21 +483,18 @@ func (c *ResourceGroupsController) OnResponse(
 	// record resource delta
 	c.mutex.Lock()
 	if resp.Succeed() {
-		m, ok := c.resourceDelta[resourceGroupName]
+		m, ok := c.resourceCounter[resourceGroupName]
 		if !ok {
-			m = make(map[uint64]Delta)
-			c.resourceDelta[resourceGroupName] = m
-		}
-		for id, delta := range m {
-			if req.StoreID() == id {
-				continue
+			m = Counter{
+				storeCounter:  make(map[uint64]Delta),
+				globalCounter: Delta{},
 			}
-			if req.IsWrite() {
-				delta.WriteBytes += req.WriteBytes()
-			}
-			delta.CpuTime += resp.KVCPU()
-			m[id] = delta
+			c.resourceCounter[resourceGroupName] = m
 		}
+		if req.IsWrite() {
+			m.globalCounter.WriteBytes += req.WriteBytes()
+		}
+		m.globalCounter.CpuTime += resp.KVCPU()
 	}
 	c.mutex.Unlock()
 
