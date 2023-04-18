@@ -146,7 +146,9 @@ func TestRetryBootstrap(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/saveRegionFailed", `return(true)`))
 	leaderServer := cluster.GetServer(leader)
 	re.NoError(leaderServer.BootstrapCluster())
-
+	// First re-bootstrap should be success.
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/saveRegionFailed"))
 	re.NoError(leaderServer.BootstrapCluster())
+	// Second re-bootstrap should be failed.
+	re.Error(leaderServer.BootstrapCluster())
 }

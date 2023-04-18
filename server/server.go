@@ -672,8 +672,11 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		// When etcd duration exceed gRPC context deadline, but still completes the txn write to etcd.
 		// The region meta is not written to LevelDB due to the error returned.
 		// Need to check the synchronization status of etcd and leveldb.
-		if ok, err := s.storage.LoadRegion(req.GetRegion().GetId(), &metapb.Region{}); !ok && err != nil {
+		if ok, err := s.storage.LoadRegion(req.GetRegion().GetId(), &metapb.Region{}); ok && err == nil {
 			log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
+			return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
+		} else if err != nil {
+			log.Warn("check the synchronization status of etcd and leveldb meet loading region failed", zap.Uint64("cluster-id", clusterID), errs.ZapError(err))
 			return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
 		}
 	}
