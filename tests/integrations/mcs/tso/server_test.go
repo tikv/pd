@@ -15,8 +15,11 @@
 package tso
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -344,4 +347,37 @@ func TestAdvertiseAddr(t *testing.T) {
 
 	tsoServerConf := s.GetConfig()
 	re.Equal(u, tsoServerConf.AdvertiseListenAddr)
+}
+
+func TestMetrics(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	leader := cluster.GetServer(leaderName)
+
+	u := tempurl.Alloc()
+	s, cleanup := mcs.StartSingleTSOTestServer(ctx, re, leader.GetAddr(), u)
+	defer cleanup()
+
+	resp, err := http.Get(s.GetConfig().GetAdvertiseListenAddr() + "/metrics")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	respString, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	reader := bytes.NewReader(respString)
+	gzipReader, err := gzip.NewReader(reader)
+	re.NoError(err)
+	output, err := io.ReadAll(gzipReader)
+	re.NoError(err)
+	re.Contains(string(output), "tso_server_info")
 }
