@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
 
@@ -87,4 +89,62 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal(4, stats.LabelCounter["host:h1"])
 	re.Equal(4, stats.LabelCounter["host:h2"])
 	re.Equal(2, stats.LabelCounter["zone:unknown"])
+}
+
+func TestSummaryStoreInfos(t *testing.T) {
+	re := require.New(t)
+	rw := Read
+	kind := constant.LeaderKind
+	collector := newTikvCollector()
+	storeHistoryLoad := NewStoreHistoryLoads(DimLen)
+	storeInfos := make(map[uint64]*StoreSummaryInfo)
+	storeLoads := make(map[uint64][]float64)
+	for _, storeID := range []int{1, 3} {
+		storeInfos[uint64(storeID)] = &StoreSummaryInfo{
+			isTiFlash: false,
+			StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: "mock://tikv" + strconv.Itoa(storeID)}, core.SetLastHeartbeatTS(time.Now())),
+		}
+		storeLoads[uint64(storeID)] = []float64{1, 2, 0, 0, 5}
+		for i, v := range storeLoads[uint64(storeID)] {
+			storeLoads[uint64(storeID)][i] = v * float64(storeID)
+		}
+	}
+
+	// case 1: put one element into history load
+	details := summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
+	re.Len(details, 2)
+	re.Empty(details[0].LoadPred.Current.HistoryLoads)
+	re.Empty(details[1].LoadPred.Current.HistoryLoads)
+	expectHistoryLoads := []float64{1, 2, 5}
+	for _, storeID := range []uint64{1, 3} {
+		loads := storeHistoryLoad.Get(storeID, rw, kind)
+		for i := 0; i < len(loads); i++ {
+			for j := 0; j < len(loads[0]); j++ {
+				re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
+			}
+		}
+	}
+
+	// case 2: put two elements into history load
+	historySampleInterval = 0
+	for i := 1; i < 10; i++ {
+		details = summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
+		expect := []float64{2, 4, 10}
+		for _, detail := range details {
+			loads := detail.LoadPred.Current.HistoryLoads
+			re.Len(loads[0], i)
+			storeID := detail.GetID()
+			for i := 0; i < len(loads); i++ {
+				for j := 0; j < len(loads[0]); j++ {
+					re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
+				}
+			}
+
+			for i, loads := range detail.LoadPred.Expect.HistoryLoads {
+				for _, load := range loads {
+					re.Equal(load, expect[i])
+				}
+			}
+		}
+	}
 }

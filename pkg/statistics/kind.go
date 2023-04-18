@@ -170,6 +170,7 @@ type RWType int
 const (
 	Write RWType = iota
 	Read
+	RWTypeLen
 )
 
 func (rw RWType) String() string {
