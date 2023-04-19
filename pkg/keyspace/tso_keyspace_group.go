@@ -37,8 +37,8 @@ import (
 
 const (
 	defaultBalancerPolicy = balancer.PolicyRoundRobin
-	allocNodeTimeout      = 1 * time.Second
-	allocNodeInterval     = 10 * time.Millisecond
+	allocNodesTimeout     = 1 * time.Second
+	allocNodesInterval    = 10 * time.Millisecond
 	// TODO: move it to etcdutil
 	watchEtcdChangeRetryInterval = 1 * time.Second
 	maxRetryTimes                = 25
@@ -112,6 +112,14 @@ func (m *GroupManager) Bootstrap() error {
 
 	m.Lock()
 	defer m.Unlock()
+
+	// If the etcd client is not nil, start the watch loop.
+	if m.client != nil {
+		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
+		m.wg.Add(1)
+		go m.startWatchLoop()
+	}
+
 	// Ignore the error if default keyspace group already exists in the storage (e.g. PD restart/recover).
 	err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup}, false)
 	if err != nil && err != ErrKeyspaceGroupExists {
@@ -124,15 +132,15 @@ func (m *GroupManager) Bootstrap() error {
 		return err
 	}
 	for _, group := range groups {
+		if group.ID == utils.DefaultKeyspaceGroupID {
+			if len(group.Members) == 0 {
+				// The default keyspace group should have one replica at least.
+				m.wg.Add(1)
+				go m.allocNodesForDefaultKeyspaceGroup(1)
+			}
+		}
 		userKind := endpoint.StringUserKind(group.UserKind)
 		m.groups[userKind].Put(group)
-	}
-
-	// If the etcd client is not nil, start the watch loop.
-	if m.client != nil {
-		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
-		m.wg.Add(1)
-		go m.startWatchLoop()
 	}
 	return nil
 }
@@ -141,6 +149,29 @@ func (m *GroupManager) Bootstrap() error {
 func (m *GroupManager) Close() {
 	m.cancel()
 	m.wg.Wait()
+}
+
+func (m *GroupManager) allocNodesForDefaultKeyspaceGroup(replica int) {
+	defer logutil.LogPanic()
+	defer m.wg.Done()
+	ticker := time.NewTicker(retryInterval)
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		kg, err := m.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+		if err == nil && kg != nil && len(kg.Members) >= replica {
+			return
+		}
+		nodes, err := m.AllocNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, replica)
+		if err == nil && len(nodes) == replica {
+			log.Info("alloc nodes for default keyspace group", zap.Reflect("nodes", nodes))
+			return
+		}
+		log.Warn("failed to alloc nodes for default keyspace group", zap.Error(err))
+	}
 }
 
 func (m *GroupManager) startWatchLoop() {
@@ -590,14 +621,19 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 
 // GetNodesNum returns the number of nodes.
 func (m *GroupManager) GetNodesNum() int {
+	if m.nodesBalancer == nil {
+		return 0
+	}
 	return m.nodesBalancer.Len()
 }
 
 // AllocNodesForKeyspaceGroup allocates nodes for the keyspace group.
 func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]endpoint.KeyspaceGroupMember, error) {
-	ctx, cancel := context.WithTimeout(m.ctx, allocNodeTimeout)
+	m.Lock()
+	defer m.Unlock()
+	ctx, cancel := context.WithTimeout(m.ctx, allocNodesTimeout)
 	defer cancel()
-	ticker := time.NewTicker(allocNodeInterval)
+	ticker := time.NewTicker(allocNodesInterval)
 	defer ticker.Stop()
 	nodes := make([]endpoint.KeyspaceGroupMember, 0, replica)
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
@@ -612,6 +648,9 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]end
 		for _, member := range kg.Members {
 			exists[member.Address] = struct{}{}
 			nodes = append(nodes, member)
+		}
+		if len(exists) >= replica {
+			return nil
 		}
 		for len(exists) < replica {
 			select {
@@ -640,4 +679,36 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]end
 		return nil, err
 	}
 	return nodes, nil
+}
+
+// SetNodesForKeyspaceGroup sets the nodes for the keyspace group.
+func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error {
+	m.Lock()
+	defer m.Unlock()
+	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		kg, err := m.store.LoadKeyspaceGroup(txn, id)
+		if err != nil {
+			return err
+		}
+		if kg == nil {
+			return ErrKeyspaceGroupNotExists
+		}
+		members := make([]endpoint.KeyspaceGroupMember, 0, len(nodes))
+		for _, node := range nodes {
+			members = append(members, endpoint.KeyspaceGroupMember{Address: node})
+		}
+		kg.Members = members
+		return m.store.SaveKeyspaceGroup(txn, kg)
+	})
+}
+
+// IsExistNode checks if the node exists.
+func (m *GroupManager) IsExistNode(addr string) bool {
+	nodes := m.nodesBalancer.GetAll()
+	for _, node := range nodes {
+		if node == addr {
+			return true
+		}
+	}
+	return false
 }
