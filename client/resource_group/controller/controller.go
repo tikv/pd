@@ -38,6 +38,7 @@ const (
 	retryInterval           = 50 * time.Millisecond
 	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
+	trickleReserveDuration  = 1250 * time.Millisecond
 )
 
 type selectType int
@@ -763,7 +764,10 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 	failpoint.Inject("acceleratedReportingPeriod", func() {
 		timeSinceLastRequest = extendedReportingPeriodFactor * defaultTargetPeriod
 	})
-	if timeSinceLastRequest >= defaultTargetPeriod {
+	// Due to `gc.run.lastRequestTime` update operations late in this logic,
+	// so `timeSinceLastRequest` is less than defaultGroupStateUpdateInterval a little bit, lead to actual report period is greater than defaultTargetPeriod.
+	// Add defaultGroupStateUpdateInterval/2 as duration buffer to avoid it.
+	if timeSinceLastRequest+defaultGroupStateUpdateInterval/2 >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
 		}
@@ -882,9 +886,9 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		deadline := gc.run.now.Add(trickleDuration)
 		cfg.NewRate = float64(bucket.GetSettings().FillRate) + granted/trickleDuration.Seconds()
 
-		timerDuration := trickleDuration - time.Second
+		timerDuration := trickleDuration - trickleReserveDuration
 		if timerDuration <= 0 {
-			timerDuration = (trickleDuration + time.Second) / 2
+			timerDuration = (trickleDuration + trickleReserveDuration) / 2
 		}
 		counter.notify.mu.Lock()
 		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
