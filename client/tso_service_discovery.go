@@ -516,8 +516,9 @@ func (c *tsoServiceDiscovery) getTSOServer() (string, error) {
 
 	// Pick a TSO server in a round-robin way.
 	len := len(c.tsoServerDiscovery.addrs)
+	c.tsoServerDiscovery.selectIdx++
 	tsoServerAddr := c.tsoServerDiscovery.addrs[rand.Intn(c.tsoServerDiscovery.selectIdx)]
-	c.tsoServerDiscovery.selectIdx = (c.tsoServerDiscovery.selectIdx + 1) % len
+	c.tsoServerDiscovery.selectIdx %= len
 	if _, err := c.GetOrCreateGRPCConn(tsoServerAddr); err != nil {
 		log.Warn("[tso] failed to connect the tso server",
 			zap.String("tso-server", tsoServerAddr), errs.ZapError(err))
