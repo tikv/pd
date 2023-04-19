@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -143,6 +144,7 @@ func (m *GroupManager) Close() {
 }
 
 func (m *GroupManager) startWatchLoop() {
+	defer logutil.LogPanic()
 	defer m.wg.Done()
 	ctx, cancel := context.WithCancel(m.ctx)
 	defer cancel()
