@@ -209,11 +209,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode = true
-				c.applyDegradedMode()
+				c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				log.Warn("[resource group controller] enter degraded mode")
 			case resp := <-c.tokenResponseChan:
 				if resp != nil {
-					c.updateRunState()
+					c.executeOnAllGroups((*groupCostController).updateRunState)
 					c.handleTokenBucketResponse(resp)
 				}
 				c.run.currentRequests = nil
@@ -222,22 +222,22 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					log.Error("[resource group controller] clean up resource groups failed", zap.Error(err))
 				}
 			case <-stateUpdateTicker.C:
-				c.updateRunState()
-				c.updateAvgRequestResourcePerSec()
+				c.executeOnAllGroups((*groupCostController).updateRunState)
+				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
 				if len(c.run.currentRequests) == 0 {
 					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, periodicReport /* select resource groups which should be reported periodically */)
 				}
 			case <-c.lowTokenNotifyChan:
-				c.updateRunState()
-				c.updateAvgRequestResourcePerSec()
+				c.executeOnAllGroups((*groupCostController).updateRunState)
+				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
 				if len(c.run.currentRequests) == 0 {
 					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */)
 				}
 				if c.run.inDegradedMode {
-					c.applyDegradedMode()
+					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				}
 			case <-emergencyTokenAcquisitionTicker.C:
-				c.resetEmergencyTokenAcquisition()
+				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			case gc := <-c.tokenBucketUpdateChan:
 				now := gc.run.now
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx, now)
@@ -325,34 +325,9 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 	return nil
 }
 
-func (c *ResourceGroupsController) updateRunState() {
+func (c *ResourceGroupsController) executeOnAllGroups(f func(controller *groupCostController)) {
 	c.groupsController.Range(func(name, value any) bool {
-		gc := value.(*groupCostController)
-		gc.updateRunState()
-		return true
-	})
-}
-
-func (c *ResourceGroupsController) applyDegradedMode() {
-	c.groupsController.Range(func(name, value any) bool {
-		gc := value.(*groupCostController)
-		gc.applyDegradedMode()
-		return true
-	})
-}
-
-func (c *ResourceGroupsController) updateAvgRequestResourcePerSec() {
-	c.groupsController.Range(func(name, value any) bool {
-		gc := value.(*groupCostController)
-		gc.updateAvgRequestResourcePerSec()
-		return true
-	})
-}
-
-func (c *ResourceGroupsController) resetEmergencyTokenAcquisition() {
-	c.groupsController.Range(func(name, value any) bool {
-		gc := value.(*groupCostController)
-		gc.resetEmergencyTokenAcquisition()
+		f(value.(*groupCostController))
 		return true
 	})
 }

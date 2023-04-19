@@ -19,6 +19,7 @@ import (
 
 	"github.com/smallnest/chanx"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const chanMaxLength = 6000000
@@ -129,6 +130,8 @@ func (w *HotCache) ResetMetrics() {
 }
 
 func (w *HotCache) updateItems(queue *chanx.UnboundedChan[FlowItemTask], runTask func(task FlowItemTask)) {
+	defer logutil.LogPanic()
+
 	for {
 		select {
 		case <-w.ctx.Done():

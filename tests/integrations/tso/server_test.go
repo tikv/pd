@@ -107,9 +107,9 @@ func (suite *tsoServerTestSuite) getClusterID() uint64 {
 func (suite *tsoServerTestSuite) resetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) {
 	var err error
 	if suite.legacy {
-		err = suite.pdLeaderServer.GetServer().GetHandler().ResetTS(ts, ignoreSmaller, skipUpperBoundCheck)
+		err = suite.pdLeaderServer.GetServer().GetHandler().ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0)
 	} else {
-		err = suite.tsoServer.GetHandler().ResetTS(ts, ignoreSmaller, skipUpperBoundCheck)
+		err = suite.tsoServer.GetHandler().ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0)
 	}
 	// Only this error is acceptable.
 	if err != nil {
