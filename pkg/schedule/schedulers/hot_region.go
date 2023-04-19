@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -1444,13 +1443,6 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 			return
 		}
 		if op, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err == nil {
-			op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
-			op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
-			keys := make([]string, len(splitKey))
-			for i, key := range splitKey {
-				keys[i] += core.HexRegionKeyStr(key)
-			}
-			op.AdditionalInfos["hot-keys"] = strings.Join(keys, ",")
 			hotSchedulerSplitSuccessCounter.Inc()
 			operators = append(operators, op)
 		} else {
