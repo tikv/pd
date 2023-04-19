@@ -533,7 +533,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	_, err = c.OnResponse(resourceGroupName, req, resp)
 	re.NoError(err)
 
-	// failed request, shouldn't be counted in penalty 
+	// failed request, shouldn't be counted in penalty
 	req = controller.NewTestRequestInfo(true, 20, 1 /* store1 */)
 	resp = controller.NewTestResponseInfo(0, time.Duration(0), false)
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
@@ -558,7 +558,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req2)
 	re.NoError(err)
 	re.Equal(penalty.WriteBytes, float64(60))
-	re.InEpsilon(penalty.TotalCpuTimeMs, 10.0 / 1000.0 / 1000.0, 1e-6)
+	re.InEpsilon(penalty.TotalCpuTimeMs, 10.0/1000.0/1000.0, 1e-6)
 	_, err = c.OnResponse(resourceGroupName, req2, resp2)
 	re.NoError(err)
 
