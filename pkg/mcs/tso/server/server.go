@@ -219,6 +219,9 @@ func (s *Server) IsKeyspaceServing(keyspaceID, keyspaceGroupID uint32) bool {
 		log.Error("failed to get election member", errs.ZapError(err))
 		return false
 	}
+	if member == nil {
+		return false
+	}
 	return member.IsLeader()
 }
 

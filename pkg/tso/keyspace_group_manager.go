@@ -727,6 +727,9 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(
 	if err != nil {
 		return nil, err
 	}
+	if am == nil {
+		return nil, nil
+	}
 	return am.getMember(), nil
 }
 

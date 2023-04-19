@@ -134,10 +134,10 @@ func (m *GroupManager) Bootstrap() error {
 	}
 	for _, group := range groups {
 		if group.ID == utils.DefaultKeyspaceGroupID {
-			if len(group.Members) == 0 {
+			if len(group.Members) == 0 && m.client != nil {
 				// The default keyspace group should have one replica at least.
 				m.wg.Add(1)
-				go m.allocNodesForDefaultKeyspaceGroup(1)
+				go m.allocNodesForDefaultKeyspaceGroup()
 			}
 		}
 		userKind := endpoint.StringUserKind(group.UserKind)
@@ -152,26 +152,27 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
-func (m *GroupManager) allocNodesForDefaultKeyspaceGroup(replica int) {
+func (m *GroupManager) allocNodesForDefaultKeyspaceGroup() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 	ticker := time.NewTicker(allocNodesForDefaultKeyspaceGroupInterval)
+	defer ticker.Stop()
 	for {
-		kg, err := m.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
-		if err == nil && kg != nil && len(kg.Members) >= replica {
-			return
-		}
-		nodes, err := m.AllocNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, replica)
-		if err == nil && len(nodes) == replica {
-			log.Info("alloc nodes for default keyspace group", zap.Reflect("nodes", nodes))
-			return
-		}
-		log.Warn("failed to alloc nodes for default keyspace group", zap.Error(err))
 		select {
 		case <-m.ctx.Done():
 			return
 		case <-ticker.C:
 		}
+		kg, err := m.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+		replica := m.GetNodesNum()
+		if err == nil && kg != nil && len(kg.Members) >= replica {
+			continue
+		}
+		nodes, err := m.AllocNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, replica)
+		if err == nil && len(nodes) == replica {
+			log.Info("alloc nodes for default keyspace group", zap.Reflect("nodes", nodes))
+		}
+		log.Warn("failed to alloc nodes for default keyspace group", zap.Error(err))
 	}
 }
 
@@ -185,12 +186,9 @@ func (m *GroupManager) startWatchLoop() {
 		revision int64
 		err      error
 	)
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(retryInterval):
-		}
 		resp, err = etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
 		if err == nil {
 			revision = resp.Header.Revision
@@ -205,6 +203,11 @@ func (m *GroupManager) startWatchLoop() {
 			break
 		}
 		log.Warn("failed to get tso service addrs from etcd and will retry", zap.Error(err))
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 	if err != nil || revision == 0 {
 		log.Warn("failed to get tso service addrs from etcd finally when loading", zap.Error(err))
