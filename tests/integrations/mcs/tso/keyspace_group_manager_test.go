@@ -24,7 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/testutil"
+	"github.com/tikv/pd/pkg/election"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -47,6 +49,7 @@ type tsoKeyspaceGroupManagerTestSuite struct {
 	// pdLeaderServer is the leader server of the PD cluster.
 	pdLeaderServer *tests.TestServer
 	// tsoServer is the TSO service provider.
+	// TODO: use TSO cluster instead.
 	tsoServer        *tso.Server
 	tsoServerCleanup func()
 	tsoClientConn    *grpc.ClientConn
@@ -86,6 +89,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -129,6 +133,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 		return err == nil && tsoutil.CompareTimestamp(splitTS, &pdpb.Timestamp{}) > 0
 	})
 	re.Greater(tsoutil.CompareTimestamp(splitTS, ts), 0)
+	// Finish the split.
+	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, 2)
 }
 
 func request(
@@ -150,4 +156,73 @@ func request(
 	defer tsoClient.CloseSend()
 	re.NoError(tsoClient.Send(req))
 	return tsoClient.Recv()
+}
+
+func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
+	for _, group := range handlersutil.MustLoadKeyspaceGroups(re, server, "0", "0") {
+		handlersutil.MustDeleteKeyspaceGroup(re, server, group.ID)
+	}
+}
+
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection() {
+	re := suite.Require()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
+	// Create the keyspace group 1 with keyspaces [111, 222, 333].
+	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:        1,
+				UserKind:  endpoint.Standard.String(),
+				Members:   []endpoint.KeyspaceGroupMember{{Address: suite.tsoServer.GetAddr()}},
+				Keyspaces: []uint32{111, 222, 333},
+			},
+		},
+	})
+	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 1)
+	re.Equal(uint32(1), kg1.ID)
+	re.Equal([]uint32{111, 222, 333}, kg1.Keyspaces)
+	re.False(kg1.IsSplitting())
+	// Split the keyspace group 1 to 2.
+	handlersutil.MustSplitKeyspaceGroup(re, suite.pdLeaderServer, 1, &handlers.SplitKeyspaceGroupByIDParams{
+		NewID:     2,
+		Keyspaces: []uint32{222, 333},
+	})
+	kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
+	re.Equal(uint32(2), kg2.ID)
+	re.Equal([]uint32{222, 333}, kg2.Keyspaces)
+	re.True(kg2.IsSplitTarget())
+	// Check the leadership.
+	tam1, err := suite.tsoServer.GetTSOAllocatorManager(1)
+	re.NoError(err)
+	re.NotNil(tam1)
+	tam2, err := suite.tsoServer.GetTSOAllocatorManager(2)
+	re.NoError(err)
+	re.NotNil(tam2)
+	member1 := tam1.GetMember()
+	re.NotNil(member1)
+	member2 := tam2.GetMember()
+	re.NotNil(member2)
+	// Wait for the leader of the keyspace group 1 and 2 to be elected.
+	testutil.Eventually(re, func() bool {
+		return len(member1.GetLeaderListenUrls()) > 0 && len(member2.GetLeaderListenUrls()) > 0
+	})
+	// Check if the leader of the keyspace group 1 and 2 are the same.
+	re.Equal(member1.GetLeaderListenUrls(), member2.GetLeaderListenUrls())
+	// Resign and block the leader of the keyspace group 1 from being elected.
+	member1.(*member.Participant).SetCampaignChecker(func(*election.Leadership) bool {
+		return false
+	})
+	member1.ResetLeader()
+	// The leader of the keyspace group 2 should be resigned also.
+	testutil.Eventually(re, func() bool {
+		return member2.IsLeader() == false
+	})
+	// Check if the leader of the keyspace group 1 and 2 are the same again.
+	member1.(*member.Participant).SetCampaignChecker(nil)
+	testutil.Eventually(re, func() bool {
+		return len(member1.GetLeaderListenUrls()) > 0 && len(member2.GetLeaderListenUrls()) > 0
+	})
+	re.Equal(member1.GetLeaderListenUrls(), member2.GetLeaderListenUrls())
+	// Finish the split.
+	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, 2)
 }

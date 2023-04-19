@@ -131,7 +131,8 @@ func mustLoadKeyspaces(re *require.Assertions, server *tests.TestServer, name st
 	return meta.KeyspaceMeta
 }
 
-func sendLoadKeyspaceGroupRequest(re *require.Assertions, server *tests.TestServer, token, limit string) []*endpoint.KeyspaceGroup {
+// MustLoadKeyspaceGroups loads all keyspace groups from the server.
+func MustLoadKeyspaceGroups(re *require.Assertions, server *tests.TestServer, token, limit string) []*endpoint.KeyspaceGroup {
 	// Construct load range request.
 	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix, nil)
 	re.NoError(err)
@@ -188,6 +189,16 @@ func MustCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, r
 func FailCreateKeyspaceGroupWithCode(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceGroupParams, expect int) {
 	code := tryCreateKeyspaceGroup(re, server, request)
 	re.Equal(expect, code)
+}
+
+// MustDeleteKeyspaceGroup deletes a keyspace group with HTTP API.
+func MustDeleteKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id uint32) {
+	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), nil)
+	re.NoError(err)
+	resp, err := dialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
 }
 
 // MustSplitKeyspaceGroup updates a keyspace group with HTTP API.

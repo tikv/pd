@@ -48,9 +48,9 @@ type Participant struct {
 	// leader key when this participant is successfully elected as the leader of
 	// the group. Every write will use it to check the leadership.
 	memberValue string
-	// preCampaignChecker is called before the campaign. If it returns false, the
-	// campaign will be skipped.
-	preCampaignChecker leadershipCheckFunc
+	// campaignChecker is used to check whether the additional constraints for a
+	// campaign are satisfied. If it returns false, the campaign will fail.
+	campaignChecker leadershipCheckFunc
 }
 
 // NewParticipant create a new Participant.
@@ -109,7 +109,11 @@ func (m *Participant) Client() *clientv3.Client {
 // IsLeader returns whether the participant is the leader or not by checking its leadership's
 // lease and leader info.
 func (m *Participant) IsLeader() bool {
-	return m.leadership.Check() && m.GetLeader().GetId() == m.member.GetId()
+	// Check the leadership itself first.
+	isLeader := m.leadership.Check() && m.GetLeader().GetId() == m.member.GetId()
+	// Check if the campaign checker is still satisfied.
+	campaignChecked := m.campaignChecker == nil || m.campaignChecker(m.leadership)
+	return isLeader && campaignChecked
 }
 
 // IsLeaderElected returns true if the leader exists; otherwise false
@@ -167,8 +171,8 @@ func (m *Participant) GetLeadership() *election.Leadership {
 
 // CampaignLeader is used to campaign the leadership and make it become a leader.
 func (m *Participant) CampaignLeader(leaseTimeout int64) error {
-	if m.preCampaignChecker != nil && !m.preCampaignChecker(m.leadership) {
-		return errs.ErrPreCheckCampaign
+	if m.campaignChecker != nil && !m.campaignChecker(m.leadership) {
+		return errs.ErrCheckCampaign
 	}
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
@@ -337,7 +341,7 @@ func (m *Participant) GetLeaderPriority(id uint64) (int, error) {
 	return int(priority), nil
 }
 
-// SetPreCampaignChecker sets the pre-campaign checker.
-func (m *Participant) SetPreCampaignChecker(checker leadershipCheckFunc) {
-	m.preCampaignChecker = checker
+// SetCampaignChecker sets the pre-campaign checker.
+func (m *Participant) SetCampaignChecker(checker leadershipCheckFunc) {
+	m.campaignChecker = checker
 }
