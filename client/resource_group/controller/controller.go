@@ -125,7 +125,7 @@ type Counter struct {
 // Delta records resource usage on all stores between two adjacent requests on same store.
 type Delta struct {
 	WriteBytes uint64
-	CpuTime    time.Duration
+	CPUTime    time.Duration
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -469,7 +469,7 @@ func (c *ResourceGroupsController) OnRequestWait(
 	delta := Delta{}
 	if counter, exist := m.storeCounter[info.StoreID()]; exist {
 		delta.WriteBytes = m.globalCounter.WriteBytes - counter.WriteBytes
-		delta.CpuTime = m.globalCounter.CpuTime - counter.CpuTime
+		delta.CPUTime = m.globalCounter.CPUTime - counter.CPUTime
 	}
 	// More accurately, it should be reset when the request succeed. But it would cause all concurrent requests piggyback large delta which inflates penalty.
 	// So here resets it directly as failure is rare.
@@ -498,8 +498,8 @@ func (c *ResourceGroupsController) OnResponse(
 			m.globalCounter.WriteBytes += req.WriteBytes()
 			storeCounter.WriteBytes += req.WriteBytes()
 		}
-		m.globalCounter.CpuTime += resp.KVCPU()
-		storeCounter.CpuTime += resp.KVCPU()
+		m.globalCounter.CPUTime += resp.KVCPU()
+		storeCounter.CPUTime += resp.KVCPU()
 		m.storeCounter[req.StoreID()] = storeCounter
 	}
 	c.mutex.Unlock()

@@ -520,7 +520,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceDelta() {
 	_, delta, err := c.OnRequestWait(suite.ctx, resourceGroupName, req)
 	re.NoError(err)
 	re.Equal(delta.WriteBytes, uint64(0))
-	re.Equal(delta.CpuTime, time.Duration(0))
+	re.Equal(delta.CPUTime, time.Duration(0))
 	_, err = c.OnResponse(resourceGroupName, req, resp)
 	re.NoError(err)
 
@@ -529,7 +529,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceDelta() {
 	_, delta, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
 	re.NoError(err)
 	re.Equal(delta.WriteBytes, uint64(0))
-	re.Equal(delta.CpuTime, time.Duration(0))
+	re.Equal(delta.CPUTime, time.Duration(0))
 	_, err = c.OnResponse(resourceGroupName, req, resp)
 	re.NoError(err)
 
@@ -539,7 +539,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceDelta() {
 	_, delta, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
 	re.NoError(err)
 	re.Equal(delta.WriteBytes, uint64(0))
-	re.Equal(delta.CpuTime, time.Duration(0))
+	re.Equal(delta.CPUTime, time.Duration(0))
 	_, err = c.OnResponse(resourceGroupName, req, resp)
 	re.NoError(err)
 
