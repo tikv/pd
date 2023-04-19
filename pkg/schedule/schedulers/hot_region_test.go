@@ -2731,7 +2731,7 @@ func TestExpect(t *testing.T) {
 		testCase.initFunc(bs)
 		re.Equal(testCase.allow, bs.checkSrcByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
 		re.Equal(testCase.allow, bs.checkDstByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
-		re.Equal(testCase.allow, bs.checkSrcHistoryLoadByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
+		re.Equal(testCase.allow, bs.checkSrcHistoryLoadsByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
 		re.Equal(testCase.allow, bs.checkDstHistoryLoadsByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
 	}
 }

@@ -253,6 +253,7 @@ var (
 
 // StoreHistoryLoads records the history load of a store.
 type StoreHistoryLoads struct {
+	// loads[read/write][leader/follower]-->[store id]-->history load
 	loads [RWTypeLen][constant.ResourceKindLen]map[uint64]*storeHistoryLoad
 	dim   int
 }
@@ -293,9 +294,11 @@ func (s *StoreHistoryLoads) Get(storeID uint64, rwTp RWType, kind constant.Resou
 
 type storeHistoryLoad struct {
 	update time.Time
-	loads  [][]float64
-	size   int
-	count  int
+	// loads is a circular buffer.
+	// [dim] --> [1,2,3...]
+	loads [][]float64
+	size  int
+	count int
 }
 
 func newStoreHistoryLoad(size int, dim int) *storeHistoryLoad {
@@ -305,8 +308,11 @@ func newStoreHistoryLoad(size int, dim int) *storeHistoryLoad {
 	}
 }
 
+// add adds the store load to the history.
+// eg. add([1,2,3]) --> [][]float64{{1}, {2}, {3}}
 func (s *storeHistoryLoad) add(loads []float64) {
-	if time.Since(s.update) < historySampleInterval || s.size == 0 {
+	// reject if the loads length is not equal to the dimension.
+	if time.Since(s.update) < historySampleInterval || s.size == 0 || len(loads) != len(s.loads) {
 		return
 	}
 	if s.count == 0 {
