@@ -37,12 +37,13 @@ const (
 
 	// DefaultKeyspaceID is the default key space id.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap and reserved for users who haven't been assigned keyspace.
+	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap
+	// and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
 
-	// DefaultKeySpaceGroupID is the default key space group id.
+	// DefaultKeyspaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
-	DefaultKeySpaceGroupID = uint32(0)
+	DefaultKeyspaceGroupID = uint32(0)
 
 	// APIServiceName is the name of api server.
 	APIServiceName = "api"

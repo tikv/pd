@@ -15,8 +15,11 @@
 package tso
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -27,7 +30,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
@@ -232,52 +234,45 @@ func (suite *APIServerForwardTestSuite) TearDownSuite() {
 func (suite *APIServerForwardTestSuite) TestForwardTSORelated() {
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO()
-	// can use the tso-related interface with tso server
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
-	serverMap := make(map[string]bs.Server)
-	serverMap[s.GetAddr()] = s
-	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	tc, err := mcs.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	suite.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(suite.Require())
 	suite.checkAvailableTSO()
-	cleanup()
 }
 
 func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
-	serverMap := make(map[string]bs.Server)
-	for i := 0; i < 3; i++ {
-		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup()
-		serverMap[s.GetAddr()] = s
-	}
-	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	re := suite.Require()
+
+	tc, err := mcs.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
 
 	// can use the tso-related interface with new primary
 	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
-	suite.True(exist)
-	serverMap[oldPrimary].Close()
-	delete(serverMap, oldPrimary)
+	re.True(exist)
+	tc.DestroyServer(oldPrimary)
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
-	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	tc.WaitForDefaultPrimaryServing(re)
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
-	suite.True(exist)
-	suite.NotEqual(oldPrimary, primary)
+	re.True(exist)
+	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO()
 
 	// can use the tso-related interface with old primary again
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, oldPrimary)
-	defer cleanup()
-	serverMap[oldPrimary] = s
+	tc.AddServer(oldPrimary)
 	suite.checkAvailableTSO()
-	for addr, s := range serverMap {
+	for addr := range tc.GetServers() {
 		if addr != oldPrimary {
-			s.Close()
-			delete(serverMap, addr)
+			tc.DestroyServer(addr)
 		}
 	}
-	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	tc.WaitForDefaultPrimaryServing(re)
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
 	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
-	suite.True(exist)
-	suite.Equal(oldPrimary, primary)
+	re.True(exist)
+	re.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO()
 }
 
@@ -344,4 +339,37 @@ func TestAdvertiseAddr(t *testing.T) {
 
 	tsoServerConf := s.GetConfig()
 	re.Equal(u, tsoServerConf.AdvertiseListenAddr)
+}
+
+func TestMetrics(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	leader := cluster.GetServer(leaderName)
+
+	u := tempurl.Alloc()
+	s, cleanup := mcs.StartSingleTSOTestServer(ctx, re, leader.GetAddr(), u)
+	defer cleanup()
+
+	resp, err := http.Get(s.GetConfig().GetAdvertiseListenAddr() + "/metrics")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	respString, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	reader := bytes.NewReader(respString)
+	gzipReader, err := gzip.NewReader(reader)
+	re.NoError(err)
+	output, err := io.ReadAll(gzipReader)
+	re.NoError(err)
+	re.Contains(string(output), "tso_server_info")
 }

@@ -75,8 +75,8 @@ var _ tso.ElectionMember = (*member.Participant)(nil)
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
-	// Server state. 0 is not serving, 1 is serving.
-	isServing int64
+	// Server state. 0 is not running, 1 is running.
+	isRunning int64
 	// Server start timestamp
 	startTimestamp int64
 
@@ -111,7 +111,10 @@ type Server struct {
 
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
-	startCallbacks  []func()
+	startCallbacks []func()
+
+	// for service registry
+	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 }
 
@@ -157,7 +160,7 @@ func (s *Server) Run() error {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
+	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
 		// server is already closed
 		return
 	}
@@ -200,13 +203,36 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return atomic.LoadInt64(&s.isServing) == 1 && s.keyspaceGroupManager.GetElectionMember(mcsutils.DefaultKeySpaceGroupID).IsLeader()
+	return s.IsKeyspaceServing(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+}
+
+// IsKeyspaceServing returns whether the server is the primary of the given keyspace.
+// TODO: update basicserver interface to support keyspace.
+func (s *Server) IsKeyspaceServing(keyspaceID, keyspaceGroupID uint32) bool {
+	if atomic.LoadInt64(&s.isRunning) == 0 {
+		return false
+	}
+
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		keyspaceID, keyspaceGroupID)
+	if err != nil {
+		log.Error("failed to get election member", errs.ZapError(err))
+		return false
+	}
+	return member.IsLeader()
 }
 
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
 // The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
-	return s.keyspaceGroupManager.GetElectionMember(mcsutils.DefaultKeySpaceGroupID).GetLeaderListenUrls()
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+	if err != nil {
+		log.Error("failed to get election member", errs.ZapError(err))
+		return nil
+	}
+
+	return member.GetLeaderListenUrls()
 }
 
 // AddServiceReadyCallback implements basicserver.
@@ -225,12 +251,12 @@ func (s *Server) ClusterID() uint64 {
 
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
-	return atomic.LoadInt64(&s.isServing) == 0
+	return atomic.LoadInt64(&s.isRunning) == 0
 }
 
 // GetTSOAllocatorManager returns the manager of TSO Allocator.
-func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.keyspaceGroupManager.GetAllocatorManager(mcsutils.DefaultKeySpaceGroupID)
+func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorManager, error) {
+	return s.keyspaceGroupManager.GetAllocatorManager(keyspaceGroupID)
 }
 
 // IsLocalRequest checks if the forwarded host is the current host
@@ -415,12 +441,16 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 
+	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	defaultKsgStorageTSRootPath := path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	legacySvcRootPath := path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
 	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
+	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
-		s.serverLoopCtx, s.etcdClient, s.listenURL.Host, defaultKsgStorageTSRootPath, tsoSvcRootPath, s.cfg)
-	s.keyspaceGroupManager.Initialize()
+		s.serverLoopCtx, s.serviceID, s.etcdClient, s.httpClient, s.listenURL.Host, legacySvcRootPath, tsoSvcRootPath, s.cfg)
+	if err := s.keyspaceGroupManager.Initialize(); err != nil {
+		return err
+	}
 
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.service = &Service{Server: s}
@@ -448,8 +478,7 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
-	serializedEntry, err := entry.Serialize()
+	serializedEntry, err := s.serviceID.Serialize()
 	if err != nil {
 		return err
 	}
@@ -460,7 +489,7 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 
-	atomic.StoreInt64(&s.isServing, 1)
+	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
 }
 

@@ -15,6 +15,8 @@
 package resourcemanager_test
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -91,5 +93,21 @@ func TestResourceManagerServer(t *testing.T) {
 		respString, err := io.ReadAll(resp.Body)
 		re.NoError(err)
 		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"r_u\":{\"state\":{\"initialized\":false}}},\"priority\":0}", string(respString))
+	}
+
+	// Test metrics handler
+	{
+		resp, err := http.Get(addr + "/metrics")
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
+		respString, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		reader := bytes.NewReader(respString)
+		gzipReader, err := gzip.NewReader(reader)
+		re.NoError(err)
+		output, err := io.ReadAll(gzipReader)
+		re.NoError(err)
+		re.Contains(string(output), "resource_manager_server_info")
 	}
 }

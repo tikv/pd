@@ -18,6 +18,7 @@ import (
 	"context"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -96,15 +97,19 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	re.Equal(addr, returnedEntry.ServiceAddr)
 
 	// test primary when only one server
+	expectedPrimary := mcs.WaitForPrimaryServing(suite.Require(), map[string]bs.Server{addr: s})
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
-	re.Equal(primary, addr)
+	re.Equal(primary, expectedPrimary)
 
 	// test API server discovery after unregister
 	cleanup()
 	endpoints, err = discovery.Discover(client, suite.clusterID, serviceName)
 	re.NoError(err)
 	re.Empty(endpoints)
+	testutil.Eventually(re, func() bool {
+		return !s.IsServing()
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 }
 
 func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {

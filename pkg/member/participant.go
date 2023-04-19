@@ -31,6 +31,8 @@ import (
 	"go.uber.org/zap"
 )
 
+type leadershipCheckFunc func(*election.Leadership) bool
+
 // Participant is used for the election related logic. Compared to its counterpart
 // EmbeddedEtcdMember, Participant relies on etcd for election, but it's decoupled
 // from the embedded etcd. It implements Member interface.
@@ -46,6 +48,9 @@ type Participant struct {
 	// leader key when this participant is successfully elected as the leader of
 	// the group. Every write will use it to check the leadership.
 	memberValue string
+	// preCampaignChecker is called before the campaign. If it returns false, the
+	// campaign will be skipped.
+	preCampaignChecker leadershipCheckFunc
 }
 
 // NewParticipant create a new Participant.
@@ -162,6 +167,9 @@ func (m *Participant) GetLeadership() *election.Leadership {
 
 // CampaignLeader is used to campaign the leadership and make it become a leader.
 func (m *Participant) CampaignLeader(leaseTimeout int64) error {
+	if m.preCampaignChecker != nil && !m.preCampaignChecker(m.leadership) {
+		return errs.ErrPreCheckCampaign
+	}
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
@@ -170,9 +178,9 @@ func (m *Participant) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// PrecheckLeader does some pre-check before checking whether or not it's the leader.
+// PreCheckLeader does some pre-check before checking whether or not it's the leader.
 // It returns true if it passes the pre-check, false otherwise.
-func (m *Participant) PrecheckLeader() error {
+func (m *Participant) PreCheckLeader() error {
 	// No specific thing to check. Returns no error.
 	return nil
 }
@@ -194,7 +202,7 @@ func (m *Participant) getPersistentLeader() (*tsopb.Participant, int64, error) {
 // CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
 // otherwise returns a bool which indicates if it is needed to check later.
 func (m *Participant) CheckLeader() (ElectionLeader, bool) {
-	if err := m.PrecheckLeader(); err != nil {
+	if err := m.PreCheckLeader(); err != nil {
 		log.Error("failed to pass pre-check, check the leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
 		time.Sleep(200 * time.Millisecond)
 		return nil, true
@@ -327,4 +335,9 @@ func (m *Participant) GetLeaderPriority(id uint64) (int, error) {
 		return 0, errs.ErrStrconvParseInt.Wrap(err).GenWithStackByCause()
 	}
 	return int(priority), nil
+}
+
+// SetPreCampaignChecker sets the pre-campaign checker.
+func (m *Participant) SetPreCampaignChecker(checker leadershipCheckFunc) {
+	m.preCampaignChecker = checker
 }
