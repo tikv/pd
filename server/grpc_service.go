@@ -1789,7 +1789,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	ts, err := forwardStream.Recv()
 	if err != nil {
 		log.Error("get global tso from tso service primary addr failed", zap.Error(err), zap.String("tso", forwardedHost))
-		if strings.Contains(err.Error(), "transport is closing") {
+		if strings.Contains(err.Error(), codes.Unavailable.String()) {
 			s.tsoClientPool.Lock()
 			delete(s.tsoClientPool.clients, forwardedHost)
 			s.tsoClientPool.Unlock()
