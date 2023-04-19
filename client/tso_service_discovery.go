@@ -99,8 +99,8 @@ type tsoServiceDiscovery struct {
 	metacli    MetaStorageClient
 	clusterID  uint64
 	keyspaceID uint32
-	// apiSvcUrls is the API service addresses
-	apiSvcUrls []string
+	// apiSvcURLs is the API service addresses
+	apiSvcURLs []string
 
 	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
 	// the default keyspace group
@@ -144,7 +144,7 @@ func newTSOServiceDiscovery(
 		metacli:           metacli,
 		keyspaceID:        keyspaceID,
 		clusterID:         clusterID,
-		apiSvcUrls:        apiSvcUrls,
+		apiSvcURLs:        apiSvcUrls,
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),

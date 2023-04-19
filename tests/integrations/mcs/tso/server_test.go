@@ -276,28 +276,37 @@ func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 
+	fmt.Println("After default primary serving !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
 	// can use the tso-related interface with new primary
 	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
 	re.True(exist)
 	tc.DestroyServer(oldPrimary)
+	fmt.Println("After destroying first primary !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! oldPrimary= " + oldPrimary)
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
 	tc.WaitForDefaultPrimaryServing(re)
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	fmt.Println("After waiting for new primary serving !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! newPrimary= " + primary)
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO()
 
+	fmt.Println("before adding back the old primary !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! oldPrimary= " + oldPrimary)
 	// can use the tso-related interface with old primary again
 	tc.AddServer(oldPrimary)
 	suite.checkAvailableTSO()
+	fmt.Println("after adding back the old primary !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! oldPrimary= " + oldPrimary)
 	for addr := range tc.GetServers() {
 		if addr != oldPrimary {
 			tc.DestroyServer(addr)
+			fmt.Println("after destroying !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! addr= " + addr)
 		}
 	}
+	fmt.Println("Before waiting for the primary serving !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! primary= " + oldPrimary)
 	tc.WaitForDefaultPrimaryServing(re)
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
 	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	fmt.Println("After waiting for the primary serving !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! primary= " + oldPrimary)
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO()
