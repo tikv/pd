@@ -16,8 +16,8 @@ package schedulers
 
 import (
 	"encoding/hex"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"math"
-	"strings"
 	"testing"
 	"time"
 
@@ -235,13 +235,12 @@ func TestSplitBuckets(t *testing.T) {
 	re.Equal(1, len(ops))
 	op := ops[0]
 	re.Equal(splitBucket, op.Desc())
-	keys, ok := op.AdditionalInfos["hot-keys"]
-	re.True(ok)
-
 	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
-	for i, key := range strings.Split(keys, ",") {
-		re.Equal(core.HexRegionKeyStr(expectKeys[i]), key)
-	}
+	expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
+	re.NoError(err)
+	expectOp.GetCreateTime()
+	re.Equal(expectOp.Brief(), op.Brief())
+	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
 }
 
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
