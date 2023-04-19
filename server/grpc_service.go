@@ -20,6 +20,7 @@ import (
 	"io"
 	"path"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -1787,7 +1788,12 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	})
 	ts, err := forwardStream.Recv()
 	if err != nil {
-		log.Error("get global tso from tso server failed", zap.Error(err))
+		log.Error("get global tso from tso service primary addr failed", zap.Error(err), zap.String("tso", forwardedHost))
+		if strings.Contains(err.Error(), "transport is closing") {
+			s.tsoClientPool.Lock()
+			delete(s.tsoClientPool.clients, forwardedHost)
+			s.tsoClientPool.Unlock()
+		}
 		return pdpb.Timestamp{}, err
 	}
 	return *ts.GetTimestamp(), nil
