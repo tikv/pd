@@ -189,18 +189,18 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		emergencyTokenAcquisitionTicker := time.NewTicker(defaultTargetPeriod)
 		defer emergencyTokenAcquisitionTicker.Stop()
 
-		if _, _err_ := failpoint.Eval(_curpkg_("fastCleanup")); _err_ == nil {
+		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Stop()
 			cleanupTicker = time.NewTicker(100 * time.Millisecond)
 			// because of checking `gc.run.consumption` in cleanupTicker,
 			// so should also change the stateUpdateTicker.
 			stateUpdateTicker.Stop()
 			stateUpdateTicker = time.NewTicker(200 * time.Millisecond)
-		}
-		if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+		})
+		failpoint.Inject("acceleratedReportingPeriod", func() {
 			stateUpdateTicker.Stop()
 			stateUpdateTicker = time.NewTicker(time.Millisecond * 100)
-		}
+		})
 
 		for {
 			select {
@@ -734,18 +734,18 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+	failpoint.Inject("acceleratedReportingPeriod", func() {
 		deltaDuration = 100 * time.Millisecond
-	}
+	})
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedSpeedTrend")); _err_ == nil {
+	failpoint.Inject("acceleratedSpeedTrend", func() {
 		if delta > 0 {
 			counter.avgRUPerSec = 1000
 		} else {
 			counter.avgRUPerSec = 0
 		}
-	}
+	})
 	counter.avgLastTime = gc.run.now
 	counter.avgRUPerSecLastRU = new
 	return true
@@ -756,9 +756,9 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 		return true
 	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+	failpoint.Inject("acceleratedReportingPeriod", func() {
 		timeSinceLastRequest = extendedReportingPeriodFactor * defaultTargetPeriod
-	}
+	})
 	if timeSinceLastRequest >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
@@ -825,9 +825,9 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		fillRate := counter.getTokenBucketFunc().Settings.FillRate
 		cfg.NewBurst = int64(fillRate)
 		cfg.NewRate = float64(fillRate)
-		if _, _err_ := failpoint.Eval(_curpkg_("degradedModeRU")); _err_ == nil {
+		failpoint.Inject("degradedModeRU", func() {
 			cfg.NewRate = 99999999
-		}
+		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("resource group", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
 	}
