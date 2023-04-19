@@ -85,11 +85,14 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 }
 
+func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownTest() {
+	cleanupKeyspaceGroups(suite.Require(), suite.pdLeaderServer)
+}
+
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -166,7 +169,6 @@ func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection() {
 	re := suite.Require()
-	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
