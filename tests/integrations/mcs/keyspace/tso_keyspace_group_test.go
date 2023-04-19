@@ -269,7 +269,7 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	mcs.WaitForPrimaryServing(suite.Require(), nodes)
 
 	// the default keyspace group is exist.
-	time.Sleep(1 * time.Second)
+	time.Sleep(2 * time.Second)
 	kg, code := suite.tryGetKeyspaceGroup(utils.DefaultKeyspaceGroupID)
 	suite.Equal(http.StatusOK, code)
 	suite.Equal(utils.DefaultKeyspaceGroupID, kg.ID)

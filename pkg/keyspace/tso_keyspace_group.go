@@ -36,9 +36,10 @@ import (
 )
 
 const (
-	defaultBalancerPolicy = balancer.PolicyRoundRobin
-	allocNodesTimeout     = 1 * time.Second
-	allocNodesInterval    = 10 * time.Millisecond
+	defaultBalancerPolicy                     = balancer.PolicyRoundRobin
+	allocNodesForDefaultKeyspaceGroupInterval = 1 * time.Second
+	allocNodesTimeout                         = 1 * time.Second
+	allocNodesInterval                        = 10 * time.Millisecond
 	// TODO: move it to etcdutil
 	watchEtcdChangeRetryInterval = 1 * time.Second
 	maxRetryTimes                = 25
@@ -154,13 +155,8 @@ func (m *GroupManager) Close() {
 func (m *GroupManager) allocNodesForDefaultKeyspaceGroup(replica int) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
-	ticker := time.NewTicker(retryInterval)
+	ticker := time.NewTicker(allocNodesForDefaultKeyspaceGroupInterval)
 	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-ticker.C:
-		}
 		kg, err := m.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 		if err == nil && kg != nil && len(kg.Members) >= replica {
 			return
@@ -171,6 +167,11 @@ func (m *GroupManager) allocNodesForDefaultKeyspaceGroup(replica int) {
 			return
 		}
 		log.Warn("failed to alloc nodes for default keyspace group", zap.Error(err))
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -252,7 +253,7 @@ func (m *GroupManager) watchServiceAddrs(ctx context.Context, revision int64) (i
 			for _, event := range wresp.Events {
 				s := &discovery.ServiceRegistryEntry{}
 				if err := json.Unmarshal(event.Kv.Value, s); err != nil {
-					log.Warn("failed to unmarshal service registry entry", zap.Error(err))
+					log.Warn("failed to unmarshal service registry entry", zap.Error(err), zap.ByteString("value", event.Kv.Value))
 				}
 				switch event.Type {
 				case clientv3.EventTypePut:
