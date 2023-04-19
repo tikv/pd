@@ -346,7 +346,7 @@ func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
 	mustRegionHeartbeat(re, suite.svr, r5)
 	body := fmt.Sprintf(`[{"start_key":"%s", "end_key": "%s"}, {"start_key":"%s", "end_key": "%s"}]`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
 
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/batch-accelerate-schedule", suite.urlPrefix), []byte(body), tu.StatusOK(re))
+	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", suite.urlPrefix), []byte(body), tu.StatusOK(re))
 	suite.NoError(err)
 	idList := suite.svr.GetRaftCluster().GetSuspectRegions()
 	suite.Len(idList, 4)
