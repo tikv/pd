@@ -149,6 +149,10 @@ func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode"))
 }
 
+func (suite *resourceManagerClientTestSuite) TearDownTest() {
+	suite.cleanupResourceGroups()
+}
+
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
 	cli := suite.client
 	groups, err := cli.ListResourceGroups(suite.ctx)
@@ -356,7 +360,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 			break
 		}
 	}
-	suite.cleanupResourceGroups()
 	controller.Stop()
 }
 
@@ -489,7 +492,6 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	re.Less(duration, 100*time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend"))
-	suite.cleanupResourceGroups()
 	controller.Stop()
 }
 
@@ -646,7 +648,6 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		checkFunc(gresp, groups[0])
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/fastPersist"))
-	suite.cleanupResourceGroups()
 }
 
 func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
@@ -902,9 +903,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 		re.NotNil(getResp)
 		re.Equal(group.RUSettings.RU.Settings.FillRate, getResp.RUSettings.RU.Settings.FillRate)
 	}
-
-	// Cleanup the resource group.
-	suite.cleanupResourceGroups()
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMode() {
@@ -963,7 +961,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 	controller.Stop()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU"))
-	suite.cleanupResourceGroups()
 }
 
 func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
@@ -1045,5 +1042,4 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
 	controller.Stop()
-	suite.cleanupResourceGroups()
 }
