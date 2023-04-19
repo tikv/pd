@@ -278,6 +278,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 	kgm.wg.Add(1)
 	go kgm.startKeyspaceGroupsMetaWatchLoop(watchStartRevision)
 
+	log.Info("keyspace group manager initialized")
 	return nil
 }
 
@@ -515,6 +516,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 func (kgm *KeyspaceGroupManager) isAssignedToMe(group *endpoint.KeyspaceGroup) bool {
 	// If the default keyspace group isn't assigned to any tso node/pod, assign it to everyone.
 	if group.ID == mcsutils.DefaultKeyspaceGroupID && len(group.Members) == 0 {
+		group.Members = []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}}
 		return true
 	}
 
@@ -534,10 +536,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		return
 	}
 
-	// Not assigned to me. If this host/pod owns this keyspace group, it should resign.
 	if !kgm.isAssignedToMe(group) {
 		// Not assigned to me. If this host/pod owns a replica of this keyspace group,
-		// it should resign the election membership.
+		// it should resign the election membership now.
 		kgm.resignElectionMembership(group)
 		return
 	}

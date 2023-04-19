@@ -83,7 +83,18 @@ func (k *keyspaceGroupSvcDiscovery) update(
 	return
 }
 
+// tsoServerDiscovery is for discovering the serving endpoints of the TSO servers
+// TODO: dynamically update the TSO server addresses in the case of TSO server failover
+// and scale-out/in.
+type tsoServerDiscovery struct {
+	sync.RWMutex
+	addrs []string
+	// used for round-robin load balancing
+	selectIdx int
+}
+
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
+
 type tsoServiceDiscovery struct {
 	metacli    MetaStorageClient
 	clusterID  uint64
@@ -94,10 +105,8 @@ type tsoServiceDiscovery struct {
 	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
 	// the default keyspace group
 	defaultDiscoveryKey string
-	// tsoSrvAddrs is the TSO server addresses
-	// TODO: dynamically update the TSO server addresses in the case of TSO server failover
-	// and scale-out/in.
-	tsoSrvAddrs []string
+	// tsoServersDiscovery is for discovering the serving endpoints of the TSO servers
+	*tsoServerDiscovery
 
 	// keyspaceGroupSD is for discovering the serving endpoints of the keyspace group
 	keyspaceGroupSD *keyspaceGroupSvcDiscovery
@@ -136,18 +145,18 @@ func newTSOServiceDiscovery(
 		keyspaceID:        keyspaceID,
 		clusterID:         clusterID,
 		apiSvcUrls:        apiSvcUrls,
-		tsoSrvAddrs:       make([]string, 0),
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
 	}
-	// Start with the default keyspace group. The actual keyspace group, to which the keyspace belongs,
-	// will be discovered later.
 	c.keyspaceGroupSD = &keyspaceGroupSvcDiscovery{
 		primaryAddr:    "",
 		secondaryAddrs: make([]string, 0),
 		addrs:          make([]string, 0),
 	}
+	c.tsoServerDiscovery = &tsoServerDiscovery{addrs: make([]string, 0)}
+	// Start with the default keyspace group. The actual keyspace group, to which the keyspace belongs,
+	// will be discovered later.
 	c.defaultDiscoveryKey = fmt.Sprintf(tsoSvcDiscoveryFormat, clusterID, defaultKeySpaceGroupID)
 
 	log.Info("created tso service discovery",
@@ -160,12 +169,7 @@ func newTSOServiceDiscovery(
 
 // Init initialize the concrete client underlying
 func (c *tsoServiceDiscovery) Init() error {
-	maxRetryTimes := c.option.maxRetryTimes
-	if err := c.retry(maxRetryTimes, initRetryInterval, c.updateTSOServers); err != nil {
-		c.cancel()
-		return err
-	}
-	if err := c.retry(maxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+	if err := c.retry(c.option.maxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 		c.cancel()
 		return err
 	}
@@ -357,27 +361,13 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 	return nil
 }
 
-func (c *tsoServiceDiscovery) updateTSOServers() error {
-	// TODO: discover all registered TSO servers instead of just the servers serving
-	// the default keyspace group.
-	tsoSrvAddrs, err := c.getDefaultGroupSvcAddrs()
-	if err != nil {
-		return err
-	}
-	if len(tsoSrvAddrs) == 0 {
-		return errors.New("no tso server address found")
-	}
-	c.tsoSrvAddrs = tsoSrvAddrs
-	return nil
-}
-
-func (c *tsoServiceDiscovery) updateMember() error {
-	var tsoServerAddr string
-
+func (c *tsoServiceDiscovery) updateMember() (err error) {
 	// The keyspace membership or the primary serving address of the keyspace group, to which this
 	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
 	// If there are known tso servers serving this keyspace, we start with them; otherwise, we start
 	// with any tso server.
+
+	var tsoServerAddr string
 
 	// If there are known tso servers serving this keyspace, we start by randomly choosing one of them.
 	c.keyspaceGroupSD.RLock()
@@ -387,11 +377,11 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	}
 	c.keyspaceGroupSD.RUnlock()
 
-	// If there is no known tso server serving this keyspace, we start with any tso server randomly.
-	if len(tsoServerAddr) == 0 {
-		// The length of c.tsoSrvAddrs must be greater than 0 at this moment, otherwise the
-		// initialization failed.
-		tsoServerAddr = c.tsoSrvAddrs[rand.Intn(len(c.tsoSrvAddrs))]
+	// If there is no known tso server serving this keyspace, we pick one of the tso servers.
+	if len(tsoServerAddr) < 1 {
+		if tsoServerAddr, err = c.getTSOServer(); err != nil {
+			return err
+		}
 	}
 
 	// Query the keyspace group info from the tso server by the keyspace ID. The server side will return
@@ -503,4 +493,36 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 	}
 
 	return resp.KeyspaceGroup, nil
+}
+
+func (c *tsoServiceDiscovery) getTSOServer() (string, error) {
+	c.tsoServerDiscovery.Lock()
+	defer c.tsoServerDiscovery.Unlock()
+
+	if len(c.tsoServerDiscovery.addrs) == 0 {
+		// TODO: discover all registered TSO servers instead of just the servers serving
+		// the default keyspace group.
+		addrs, err := c.getDefaultGroupSvcAddrs()
+		if err != nil {
+			return "", err
+		}
+		if len(addrs) == 0 {
+			return "", errors.New("no tso server address found")
+		}
+
+		c.tsoServerDiscovery.addrs = addrs
+		c.tsoServerDiscovery.selectIdx = 0
+	}
+
+	// Pick a TSO server in a round-robin way.
+	len := len(c.tsoServerDiscovery.addrs)
+	tsoServerAddr := c.tsoServerDiscovery.addrs[rand.Intn(c.tsoServerDiscovery.selectIdx)]
+	c.tsoServerDiscovery.selectIdx = (c.tsoServerDiscovery.selectIdx + 1) % len
+	if _, err := c.GetOrCreateGRPCConn(tsoServerAddr); err != nil {
+		log.Warn("[tso] failed to connect the tso server",
+			zap.String("tso-server", tsoServerAddr), errs.ZapError(err))
+		return "", err
+	}
+
+	return tsoServerAddr, nil
 }

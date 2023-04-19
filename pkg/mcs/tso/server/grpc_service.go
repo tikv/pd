@@ -170,7 +170,8 @@ func (s *Service) FindGroupByKeyspaceID(
 				tsopb.ErrorType_UNKNOWN, "keyspace group not found", keyspaceGroupID),
 		}, nil
 	}
-	var members []*tsopb.KeyspaceGroupMember
+
+	members := make([]*tsopb.KeyspaceGroupMember, 0, len(keyspaceGroup.Members))
 	for _, member := range keyspaceGroup.Members {
 		members = append(members, &tsopb.KeyspaceGroupMember{
 			Address: member.Address,

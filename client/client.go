@@ -614,7 +614,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req.dcLocation = dcLocation
 
 	if tsoClient == nil {
-		req.done <- errs.ErrClientGetTSO
+		req.done <- errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
 		return req
 	}
 
