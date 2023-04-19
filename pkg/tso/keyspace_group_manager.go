@@ -816,7 +816,16 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 
 const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
+// Put the code below into the critical section to prevent from sending too many HTTP requests.
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
+	kgm.Lock()
+	defer kgm.Unlock()
+	// Check if the keyspace group is in split state.
+	splitGroup := kgm.kgs[id]
+	if !splitGroup.IsSplitTarget() {
+		return nil
+	}
+	// Check if the HTTP client is initialized.
 	if kgm.httpClient == nil {
 		return nil
 	}
@@ -832,5 +841,8 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 			zap.Int("status-code", statusCode))
 		return errs.ErrSendRequest.FastGenByArgs()
 	}
+	// Pre-update the split keyspace group split state in memory.
+	splitGroup.SplitState = nil
+	kgm.kgs[id] = splitGroup
 	return nil
 }
