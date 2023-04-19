@@ -235,6 +235,15 @@ func (s *Server) GetLeaderListenUrls() []string {
 	return member.GetLeaderListenUrls()
 }
 
+// GetMember returns the election member of the given keyspace and keyspace group.
+func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMember, error) {
+	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+	if err != nil {
+		return nil, err
+	}
+	return member, nil
+}
+
 // AddServiceReadyCallback implements basicserver.
 // It adds callbacks when it's ready for providing tso service.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
