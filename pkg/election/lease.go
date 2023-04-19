@@ -95,6 +95,8 @@ func (l *lease) IsExpired() bool {
 
 // KeepAlive auto renews the lease and update expireTime.
 func (l *lease) KeepAlive(ctx context.Context) {
+	defer logutil.LogPanic()
+
 	if l == nil {
 		return
 	}

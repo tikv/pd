@@ -37,12 +37,12 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start,
 	manager := server.GetKeyspaceManager()
 	for i := 0; i < count; i++ {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name: fmt.Sprintf("test_keyspace%d", start+i),
+			Name: fmt.Sprintf("test_keyspace_%d", start+i),
 			Config: map[string]string{
 				testConfig1: "100",
 				testConfig2: "200",
 			},
-			Now: now,
+			CreateTime: now,
 		})
 		re.NoError(err)
 	}
@@ -120,9 +120,9 @@ func (suite *clientTestSuite) TestWatchKeyspaces() {
 func mustCreateKeyspaceAtState(re *require.Assertions, server *server.Server, index int, state keyspacepb.KeyspaceState) *keyspacepb.KeyspaceMeta {
 	manager := server.GetKeyspaceManager()
 	meta, err := manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:   fmt.Sprintf("test_keyspace%d", index),
-		Config: nil,
-		Now:    0, // Use 0 to indicate unchanged keyspace.
+		Name:       fmt.Sprintf("test_keyspace_%d", index),
+		Config:     nil,
+		CreateTime: 0, // Use 0 to indicate unchanged keyspace.
 	})
 	re.NoError(err)
 	switch state {

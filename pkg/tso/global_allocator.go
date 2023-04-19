@@ -16,12 +16,12 @@ package tso
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -380,7 +380,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 				if syncMaxTSResp.rpcRes.GetHeader().GetError() != nil {
 					log.Error("sync max ts rpc failed, got an error",
 						zap.String("local-allocator-leader-url", leaderConn.Target()),
-						errs.ZapError(errors.Errorf("%s", syncMaxTSResp.rpcRes.GetHeader().GetError().String())))
+						errs.ZapError(errors.New(syncMaxTSResp.rpcRes.GetHeader().GetError().String())))
 					return
 				}
 			}(ctx, leaderConn, respCh)
@@ -475,6 +475,7 @@ func (gta *GlobalTSOAllocator) Reset() {
 }
 
 func (gta *GlobalTSOAllocator) primaryElectionLoop() {
+	defer logutil.LogPanic()
 	defer gta.wg.Done()
 
 	for {
@@ -503,8 +504,11 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 func (gta *GlobalTSOAllocator) campaignLeader() {
 	log.Info("start to campaign the primary", zap.String("campaign-tso-primary-name", gta.member.Name()))
 	if err := gta.am.member.CampaignLeader(gta.am.leaderLease); err != nil {
-		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
+		if errors.Is(err, errs.ErrEtcdTxnConflict) {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
+				zap.String("campaign-tso-primary-name", gta.member.Name()))
+		} else if errors.Is(err, errs.ErrPreCheckCampaign) {
+			log.Info("campaign tso primary meets error due to pre-check campaign failed, the tso keyspace group may be in split",
 				zap.String("campaign-tso-primary-name", gta.member.Name()))
 		} else {
 			log.Error("campaign tso primary meets error due to etcd error",
@@ -543,6 +547,11 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	}()
 
 	gta.member.EnableLeader()
+	defer resetLeaderOnce.Do(func() {
+		cancel()
+		gta.member.ResetLeader()
+	})
+
 	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
 	// go gta.tsoAllocatorManager.ClusterDCLocationChecker()
 	log.Info("tso primary is ready to serve", zap.String("tso-primary-name", gta.member.Name()))

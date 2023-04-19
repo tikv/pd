@@ -84,6 +84,10 @@ func (conf *evictSlowTrendSchedulerConfig) candidate() uint64 {
 	return conf.evictCandidate
 }
 
+func (conf *evictSlowTrendSchedulerConfig) captureTS() time.Time {
+	return conf.candidateCaptureTime
+}
+
 func (conf *evictSlowTrendSchedulerConfig) candidateCapturedSecs() uint64 {
 	return uint64(time.Since(conf.candidateCaptureTime).Seconds())
 }
@@ -237,7 +241,8 @@ func (s *evictSlowTrendScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.cancel:too-faster").Inc()
 		return ops, nil
 	}
-	if !checkStoresAreUpdated(cluster, slowStore) {
+	slowStoreRecordTS := s.conf.captureTS()
+	if !checkStoresAreUpdated(cluster, slowStoreID, slowStoreRecordTS) {
 		log.Info("slow store candidate waiting for other stores to update heartbeats",
 			zap.Uint64("store-id", slowStoreID))
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.wait").Inc()
@@ -322,18 +327,17 @@ func chooseEvictCandidate(cluster schedule.Cluster) (slowStore *core.StoreInfo) 
 	}
 
 	storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
-	log.Info("evict-slow-trend-scheduler canptured candidate", zap.Uint64("store-id", store.GetID()))
+	log.Info("evict-slow-trend-scheduler captured candidate", zap.Uint64("store-id", store.GetID()))
 	return store
 }
 
-func checkStoresAreUpdated(cluster schedule.Cluster, baseline *core.StoreInfo) bool {
+func checkStoresAreUpdated(cluster schedule.Cluster, slowStoreID uint64, slowStoreRecordTS time.Time) bool {
 	stores := cluster.GetStores()
 	if len(stores) <= 1 {
 		return false
 	}
 	expected := (len(stores) + 1) / 2
 	updatedStores := 0
-	baselineTS := baseline.GetLastHeartbeatTS()
 	for _, store := range stores {
 		if store.IsRemoved() {
 			updatedStores += 1
@@ -343,11 +347,11 @@ func checkStoresAreUpdated(cluster schedule.Cluster, baseline *core.StoreInfo) b
 			updatedStores += 1
 			continue
 		}
-		if store.GetID() == baseline.GetID() {
+		if store.GetID() == slowStoreID {
 			updatedStores += 1
 			continue
 		}
-		if baselineTS.Before(store.GetLastHeartbeatTS()) {
+		if slowStoreRecordTS.Before(store.GetLastHeartbeatTS()) {
 			updatedStores += 1
 		}
 	}

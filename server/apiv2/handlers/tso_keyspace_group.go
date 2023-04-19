@@ -35,6 +35,7 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router.GET("", GetKeyspaceGroups)
 	router.GET("/:id", GetKeyspaceGroupByID)
 	router.DELETE("/:id", DeleteKeyspaceGroupByID)
+	router.POST("/:id/alloc", AllocNodeForKeyspaceGroup)
 	router.POST("/:id/split", SplitKeyspaceGroupByID)
 	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
 }
@@ -55,6 +56,12 @@ func CreateKeyspaceGroups(c *gin.Context) {
 	for _, keyspaceGroup := range createParams.KeyspaceGroups {
 		if !isValid(keyspaceGroup.ID) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+			return
+		}
+		if keyspaceGroup.UserKind == "" {
+			keyspaceGroup.UserKind = endpoint.Basic.String()
+		} else if !endpoint.IsUserKindValid(keyspaceGroup.UserKind) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "invalid user kind")
 			return
 		}
 	}
@@ -183,6 +190,48 @@ func FinishSplitKeyspaceByID(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
+// AllocNodeForKeyspaceGroupParams defines the params for allocating nodes for keyspace groups.
+type AllocNodeForKeyspaceGroupParams struct {
+	Replica int `json:"replica"`
+}
+
+// AllocNodeForKeyspaceGroup allocates nodes for keyspace group.
+func AllocNodeForKeyspaceGroup(c *gin.Context) {
+	id, err := validateKeyspaceGroupID(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceGroupManager()
+	allocParams := &AllocNodeForKeyspaceGroupParams{}
+	err = c.BindJSON(allocParams)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		return
+	}
+	if manager.GetNodesNum() < allocParams.Replica || allocParams.Replica < 1 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [1, nodes_num]")
+		return
+	}
+	keyspaceGroup, err := manager.GetKeyspaceGroupByID(id)
+	if err != nil || keyspaceGroup == nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "keyspace group does not exist")
+		return
+	}
+	if len(keyspaceGroup.Members) >= allocParams.Replica {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "existed replica is larger than the new replica")
+		return
+	}
+	// get the nodes
+	nodes, err := manager.AllocNodesForKeyspaceGroup(id, allocParams.Replica)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, nodes)
+}
+
 func validateKeyspaceGroupID(c *gin.Context) (uint32, error) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
@@ -195,5 +244,5 @@ func validateKeyspaceGroupID(c *gin.Context) (uint32, error) {
 }
 
 func isValid(id uint32) bool {
-	return id >= utils.DefaultKeySpaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
+	return id >= utils.DefaultKeyspaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
 }

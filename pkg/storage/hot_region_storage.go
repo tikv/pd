@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
@@ -162,6 +163,8 @@ func NewHotRegionsStorage(
 
 // Delete hot region whose update_time is smaller than time.Now() minus remain day in the background.
 func (h *HotRegionStorage) backgroundDelete() {
+	defer logutil.LogPanic()
+
 	// make delete happened in defaultDeleteTime clock.
 	now := time.Now()
 	next := time.Date(now.Year(), now.Month(), now.Day(), defaultDeleteTime, 0, 0, 0, now.Location())
@@ -198,6 +201,8 @@ func (h *HotRegionStorage) backgroundDelete() {
 
 // Write hot_region info into db in the background.
 func (h *HotRegionStorage) backgroundFlush() {
+	defer logutil.LogPanic()
+
 	interval := h.getCurInterval()
 	ticker := time.NewTicker(interval)
 	defer func() {
