@@ -530,13 +530,13 @@ func (bs *balanceSolver) pickCheckPolicyV1() {
 	switch {
 	case bs.resourceTy == writeLeader:
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
-		bs.checkHistoryLoadsByPriority = bs.checkHistoryByPriorityAndToleranceFirstOnly
+		bs.checkHistoryLoadsByPriority = bs.checkHistoryLoadsByPriorityAndToleranceFirstOnly
 	case bs.sche.conf.IsStrictPickingStoreEnabled():
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAllOf
 		bs.checkHistoryLoadsByPriority = bs.checkHistoryLoadsByPriorityAndToleranceAllOf
 	default:
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
-		bs.checkHistoryLoadsByPriority = bs.checkHistoryByPriorityAndToleranceFirstOnly
+		bs.checkHistoryLoadsByPriority = bs.checkHistoryLoadsByPriorityAndToleranceFirstOnly
 	}
 }
 
@@ -791,7 +791,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			continue
 		}
 
-		if !bs.checkSrcHistoryLoadByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
+		if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
 			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
@@ -807,7 +807,7 @@ func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *sta
 	})
 }
 
-func (bs *balanceSolver) checkSrcHistoryLoadByPriorityAndTolerance(current, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
+func (bs *balanceSolver) checkSrcHistoryLoadsByPriorityAndTolerance(current, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
 	if len(current.HistoryLoads) == 0 {
 		return true
 	}
@@ -1088,7 +1088,7 @@ func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(loads []float64, f
 	return f(bs.firstPriority)
 }
 
-func (bs *balanceSolver) checkHistoryByPriorityAndToleranceFirstOnly(_ [][]float64, f func(int) bool) bool {
+func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceFirstOnly(_ [][]float64, f func(int) bool) bool {
 	return f(bs.firstPriority)
 }
 
