@@ -224,7 +224,31 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 
 	var sig os.Signal
 	go func() {
-		sig = <-sc
+	SignalHandler:
+		for {
+			select {
+			case sig = <-sc:
+				log.Info("Received a signal", zap.String("signal", sig.String()))
+				if svr.GetMember().IsLeader() {
+					log.Info("Transferring leadership due to signal", zap.String("signal", sig.String()))
+					err := svr.GetMember().ResignEtcdLeader(context.TODO(), svr.Name(), "")
+					if err != nil {
+						log.Error("Failed to transfer leadership", zap.String("signal", sig.String()))
+					} else {
+						log.Info("Transferred leadership")
+					}
+				}
+				switch sig {
+				case syscall.SIGHUP:
+					log.Info("got SIGHUP, waiting for next signal")
+
+				// Don't exit
+				default:
+					log.Info("Exit signal handler")
+					break SignalHandler
+				}
+			}
+		}
 		cancel()
 	}()
 
