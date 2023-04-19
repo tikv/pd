@@ -1074,7 +1074,6 @@ func (gc *groupCostController) onRequestWait(
 	}
 
 	gc.mu.Lock()
-	defer gc.mu.Unlock()
 	// calculate the penalty of the store
 	penalty := &rmpb.Consumption{}
 	if storeCounter, exist := gc.mu.storeCounter[info.StoreID()]; exist {
@@ -1086,6 +1085,7 @@ func (gc *groupCostController) onRequestWait(
 	// More accurately, it should be reset when the request succeed. But it would cause all concurrent requests piggyback large delta which inflates penalty.
 	// So here resets it directly as failure is rare.
 	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
+	gc.mu.Unlock()
 
 	return delta, penalty, nil
 }
@@ -1114,21 +1114,17 @@ func (gc *groupCostController) onResponse(
 		}
 	}
 
-	{
-		gc.mu.Lock()
-		defer gc.mu.Unlock()
-
-		// record the consumption of the request
-		add(gc.mu.consumption, delta)
-
-		// record the consumption of the request by store
-		// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
-		for _, calc := range gc.calculators {
-			calc.BeforeKVRequest(delta, req)
-		}
-		add(gc.mu.storeCounter[req.StoreID()], delta)
-		add(gc.mu.globalCounter, delta)
+	gc.mu.Lock()
+	// record the consumption of the request
+	add(gc.mu.consumption, delta)
+	// record the consumption of the request by store
+	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
+	for _, calc := range gc.calculators {
+		calc.BeforeKVRequest(delta, req)
 	}
+	add(gc.mu.storeCounter[req.StoreID()], delta)
+	add(gc.mu.globalCounter, delta)
+	gc.mu.Unlock()
 
 	return delta, nil
 }
