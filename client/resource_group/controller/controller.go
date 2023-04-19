@@ -29,7 +29,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -1077,16 +1076,16 @@ func (gc *groupCostController) onRequestWait(
 	gc.mu.Lock()
 	defer gc.mu.Unlock()
 	// calculate the penalty of the store
-	var penalty *rmpb.Consumption
+	penalty := &rmpb.Consumption{}
 	if storeCounter, exist := gc.mu.storeCounter[info.StoreID()]; exist {
-		penalty = typeutil.DeepClone(gc.mu.globalCounter, func() *rmpb.Consumption { return &rmpb.Consumption{} })
+		*penalty = *gc.mu.globalCounter
 		sub(penalty, storeCounter)
 	} else {
-		penalty = &rmpb.Consumption{}
+		gc.mu.storeCounter[info.StoreID()] = &rmpb.Consumption{}
 	}
 	// More accurately, it should be reset when the request succeed. But it would cause all concurrent requests piggyback large delta which inflates penalty.
 	// So here resets it directly as failure is rare.
-	gc.mu.storeCounter[info.StoreID()] = typeutil.DeepClone(gc.mu.globalCounter, func() *rmpb.Consumption { return &rmpb.Consumption{} })
+	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 
 	return delta, penalty, nil
 }

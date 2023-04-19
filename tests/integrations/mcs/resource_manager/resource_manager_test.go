@@ -493,7 +493,7 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	controller.Stop()
 }
 
-func (suite *resourceManagerClientTestSuite) TestResourceDelta() {
+func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	re := suite.Require()
 	cli := suite.client
 
