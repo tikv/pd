@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -157,33 +158,42 @@ func (s *Service) FindGroupByKeyspaceID(
 	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
 ) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
 	keyspaceID := request.GetKeyspaceId()
-	curKeyspaceGroup, curKeyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	am, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
 	if err != nil {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
-			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), curKeyspaceGroupID),
+			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
 		}, nil
 	}
-	if curKeyspaceGroup == nil {
+	if keyspaceGroup == nil {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: s.wrapErrorToHeader(
-				tsopb.ErrorType_UNKNOWN, "keyspace group not found", curKeyspaceGroupID),
+				tsopb.ErrorType_UNKNOWN, "keyspace group not found", keyspaceGroupID),
 		}, nil
 	}
-	var respMembers []*tsopb.KeyspaceGroupMember
-	for _, member := range curKeyspaceGroup.Members {
-		respMembers = append(respMembers, &tsopb.KeyspaceGroupMember{
+	var members []*tsopb.KeyspaceGroupMember
+	for _, member := range keyspaceGroup.Members {
+		members = append(members, &tsopb.KeyspaceGroupMember{
 			Address: member.Address,
+			// TODO: watch the keyspace groups' primary serving address changes
+			// to get the latest primary serving addresses of all keyspace groups.
+			IsPrimary: strings.EqualFold(member.Address, am.GetLeaderAddr()),
 		})
 	}
 
+	var splitState *tsopb.SplitState
+	if keyspaceGroup.SplitState != nil {
+		splitState = &tsopb.SplitState{
+			SplitSource: keyspaceGroup.SplitState.SplitSource,
+		}
+	}
+
 	return &tsopb.FindGroupByKeyspaceIDResponse{
-		Header: s.header(curKeyspaceGroupID),
+		Header: s.header(keyspaceGroupID),
 		KeyspaceGroup: &tsopb.KeyspaceGroup{
-			Id:        curKeyspaceGroupID,
-			UserKind:  curKeyspaceGroup.UserKind,
-			InSplit:   curKeyspaceGroup.InSplit,
-			SplitFrom: curKeyspaceGroup.SplitFrom,
-			Members:   respMembers,
+			Id:        keyspaceGroupID,
+			UserKind:  keyspaceGroup.UserKind,
+			SplitStat: splitState,
+			Members:   members,
 		},
 	}, nil
 }

@@ -613,7 +613,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	oldGroup, newGroup *endpoint.KeyspaceGroup, updateWithLock bool,
 ) {
 	var (
-		oldKeyspaces []uint32
+		oldKeyspaces           []uint32
 		oldKeyspaceLookupTable map[uint32]struct{}
 	)
 
@@ -700,7 +700,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 
 	if groupID == mcsutils.DefaultKeyspaceGroupID {
 		log.Info("removed default keyspace group meta config from the storage. " +
-			"now every tso node/pod will initialize it")	
+			"now every tso node/pod will initialize it")
 		group := &endpoint.KeyspaceGroup{
 			ID:        mcsutils.DefaultKeyspaceGroupID,
 			Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
@@ -766,13 +766,13 @@ func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) (*A
 // FindGroupByKeyspaceID returns the keyspace group that contains the keyspace with the given ID.
 func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	keyspaceID uint32,
-) (*endpoint.KeyspaceGroup, uint32, error) {
-	_, curKeyspaceGroup, curKeyspaceGroupID, err :=
+) (*AllocatorManager, *endpoint.KeyspaceGroup, uint32, error) {
+	curAM, curKeyspaceGroup, curKeyspaceGroupID, err :=
 		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, mcsutils.DefaultKeyspaceGroupID)
 	if err != nil {
-		return nil, curKeyspaceGroupID, err
+		return nil, nil, curKeyspaceGroupID, err
 	}
-	return curKeyspaceGroup, curKeyspaceGroupID, nil
+	return curAM, curKeyspaceGroup, curKeyspaceGroupID, nil
 }
 
 // GetElectionMember returns the election member of the given keyspace group
