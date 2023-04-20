@@ -120,8 +120,9 @@ func (m *GroupManager) Bootstrap() error {
 	if m.client != nil {
 		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
 		m.serviceRegistryMap = make(map[string]string)
-		m.wg.Add(1)
+		m.wg.Add(2)
 		go m.startWatchLoop()
+		go m.allocDefaultNodesForKeyspaceGroup()
 	}
 
 	// Ignore the error if default keyspace group already exists in the storage (e.g. PD restart/recover).
@@ -136,13 +137,6 @@ func (m *GroupManager) Bootstrap() error {
 		return err
 	}
 	for _, group := range groups {
-		if group.ID == utils.DefaultKeyspaceGroupID {
-			if len(group.Members) == 0 && m.client != nil {
-				// The default keyspace group should have one replica at least.
-				m.wg.Add(1)
-				go m.allocNodesForDefaultKeyspaceGroup()
-			}
-		}
 		userKind := endpoint.StringUserKind(group.UserKind)
 		m.groups[userKind].Put(group)
 	}
@@ -155,7 +149,7 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
-func (m *GroupManager) allocNodesForDefaultKeyspaceGroup() {
+func (m *GroupManager) allocDefaultNodesForKeyspaceGroup() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 	ticker := time.NewTicker(allocNodesForDefaultKeyspaceGroupInterval)
@@ -166,16 +160,32 @@ func (m *GroupManager) allocNodesForDefaultKeyspaceGroup() {
 			return
 		case <-ticker.C:
 		}
-		kg, err := m.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
-		nodes := m.nodesBalancer.GetAll()
-		if err == nil && kg != nil && equalMembers(kg.Members, nodes) {
+		countOfNodes := m.GetNodesCount()
+		if countOfNodes < utils.KeyspaceGroupDefaultReplicaCount {
+			log.Info("the count of nodes is not enough to allocate the default keyspace group", zap.Int("count", countOfNodes))
 			continue
 		}
-		err = m.SetNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, nodes)
-		if err == nil {
-			log.Info("alloc nodes for default keyspace group", zap.Reflect("nodes", nodes))
-		} else {
-			log.Warn("failed to alloc nodes for default keyspace group", zap.Error(err))
+		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
+		if err != nil {
+			log.Error("failed to load the default keyspace group", zap.Error(err))
+			continue
+		}
+		withError := false
+		for _, group := range groups {
+			if len(group.Members) < utils.KeyspaceGroupDefaultReplicaCount {
+				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, utils.KeyspaceGroupDefaultReplicaCount)
+				if err != nil {
+					withError = true
+					log.Error("failed to alloc default nodes for keyspace group", zap.Error(err))
+					continue
+				}
+				log.Info("alloc default nodes for keyspace group", zap.Int("count", len(nodes)))
+				group.Members = nodes
+			}
+		}
+		if !withError {
+			// all keyspace groups have equal or more than default replica count
+			return
 		}
 	}
 }
@@ -731,20 +741,4 @@ func (m *GroupManager) IsExistNode(addr string) bool {
 		}
 	}
 	return false
-}
-
-func equalMembers(a []endpoint.KeyspaceGroupMember, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	isExist := make(map[string]struct{}, len(b))
-	for _, node := range b {
-		isExist[node] = struct{}{}
-	}
-	for _, member := range a {
-		if _, ok := isExist[member.Address]; !ok {
-			return false
-		}
-	}
-	return true
 }

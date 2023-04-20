@@ -242,7 +242,7 @@ func (suite *APIServerForwardTestSuite) TestForwardTSORelated() {
 func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 	re := suite.Require()
 
-	tc, err := mcs.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
+	tc, err := mcs.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)

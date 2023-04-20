@@ -211,8 +211,8 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < 1 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [1, nodes_num]")
+	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < utils.KeyspaceGroupDefaultReplicaCount {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [2, nodes_num]")
 		return
 	}
 	keyspaceGroup, err := manager.GetKeyspaceGroupByID(id)
@@ -254,18 +254,18 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	// check keyspace group whether exist
+	// check if keyspace group exists
 	keyspaceGroup, err := manager.GetKeyspaceGroupByID(id)
 	if err != nil || keyspaceGroup == nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "keyspace group does not exist")
 		return
 	}
-	// check nodes whether empty
-	if len(setParams.Nodes) == 0 {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid empty nodes")
+	// check if nodes is less than default replica count
+	if len(setParams.Nodes) < utils.KeyspaceGroupDefaultReplicaCount {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid num of nodes")
 		return
 	}
-	// check nodes whether exist
+	// check if node exists
 	for _, node := range setParams.Nodes {
 		if !manager.IsExistNode(node) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "node does not exist")
