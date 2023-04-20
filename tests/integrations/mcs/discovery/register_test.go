@@ -16,7 +16,9 @@ package register_test
 
 import (
 	"context"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -39,6 +41,7 @@ type serverRegisterTestSuite struct {
 	cancel           context.CancelFunc
 	cluster          *tests.TestCluster
 	pdLeader         *tests.TestServer
+	clusterID        string
 	backendEndpoints string
 }
 
@@ -59,6 +62,7 @@ func (suite *serverRegisterTestSuite) SetupSuite() {
 
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
+	suite.clusterID = strconv.FormatUint(suite.pdLeader.GetClusterID(), 10)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 }
 
@@ -84,24 +88,28 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 	addr := s.GetAddr()
 	client := suite.pdLeader.GetEtcdClient()
-
 	// test API server discovery
-	endpoints, err := discovery.Discover(client, serviceName)
+
+	endpoints, err := discovery.Discover(client, suite.clusterID, serviceName)
 	re.NoError(err)
 	returnedEntry := &discovery.ServiceRegistryEntry{}
 	returnedEntry.Deserialize([]byte(endpoints[0]))
 	re.Equal(addr, returnedEntry.ServiceAddr)
 
 	// test primary when only one server
+	expectedPrimary := mcs.WaitForPrimaryServing(suite.Require(), map[string]bs.Server{addr: s})
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
-	re.Equal(primary, addr)
+	re.Equal(primary, expectedPrimary)
 
 	// test API server discovery after unregister
 	cleanup()
-	endpoints, err = discovery.Discover(client, serviceName)
+	endpoints, err = discovery.Discover(client, suite.clusterID, serviceName)
 	re.NoError(err)
 	re.Empty(endpoints)
+	testutil.Eventually(re, func() bool {
+		return !s.IsServing()
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 }
 
 func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
@@ -134,7 +142,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	expectedPrimary = mcs.WaitForPrimaryServing(suite.Require(), serverMap)
 	// test API server discovery
 	client := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(client, serviceName)
+	endpoints, err := discovery.Discover(client, suite.clusterID, serviceName)
 	re.NoError(err)
 	re.Len(endpoints, serverNum-1)
 

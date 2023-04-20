@@ -24,6 +24,8 @@ const (
 	minSnapSize = 10
 )
 
+var _ StoreLimit = &SlidingWindows{}
+
 // SlidingWindows is a multi sliding windows
 type SlidingWindows struct {
 	mu      syncutil.RWMutex
@@ -42,11 +44,6 @@ func NewSlidingWindows(cap float64) *SlidingWindows {
 	return &SlidingWindows{
 		windows: windows,
 	}
-}
-
-// Cap returns the capacity of the sliding windows.
-func (s *SlidingWindows) Cap(typ Type) float64 {
-	return float64(s.windows[typ].capacity)
 }
 
 // Reset resets the capacity of the sliding windows.
@@ -112,7 +109,10 @@ func (s *SlidingWindows) Take(token int64, typ Type, level constant.PriorityLeve
 // Ack indicates that some executing operator has been finished.
 // The order of refilling windows is from high to low.
 // It will refill the highest window first.
-func (s *SlidingWindows) Ack(token int64) {
+func (s *SlidingWindows) Ack(token int64, typ Type) {
+	if typ != SendSnapshot {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := constant.PriorityLevelLen - 1; i >= 0; i-- {

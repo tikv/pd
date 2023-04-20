@@ -25,7 +25,6 @@ import (
 	"github.com/pkg/errors"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -131,16 +130,19 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 			return status.Errorf(codes.Unknown, "server not started")
 		}
 		if request.GetHeader().GetClusterId() != s.clusterID {
-			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
+			return status.Errorf(
+				codes.FailedPrecondition, "mismatch cluster id, need %d but got %d",
+				s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.keyspaceGroupManager.HandleTSORequest(utils.DefaultKeySpaceGroupID, request.GetDcLocation(), count)
+		ts, keyspaceGroupBelongTo, err := s.keyspaceGroupManager.HandleTSORequest(
+			request.Header.KeyspaceId, request.Header.KeyspaceGroupId, request.GetDcLocation(), count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		response := &tsopb.TsoResponse{
-			Header:    s.header(),
+			Header:    s.header(keyspaceGroupBelongTo),
 			Timestamp: &ts,
 			Count:     count,
 		}
@@ -150,23 +152,24 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 	}
 }
 
-func (s *Service) header() *tsopb.ResponseHeader {
+func (s *Service) header(keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
 	if s.clusterID == 0 {
-		return s.wrapErrorToHeader(tsopb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+		return s.wrapErrorToHeader(
+			tsopb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready", keyspaceGroupBelongTo)
 	}
-	return &tsopb.ResponseHeader{ClusterId: s.clusterID}
+	return &tsopb.ResponseHeader{ClusterId: s.clusterID, KeyspaceGroupId: keyspaceGroupBelongTo}
 }
 
-func (s *Service) wrapErrorToHeader(errorType tsopb.ErrorType, message string) *tsopb.ResponseHeader {
-	return s.errorHeader(&tsopb.Error{
-		Type:    errorType,
-		Message: message,
-	})
+func (s *Service) wrapErrorToHeader(
+	errorType tsopb.ErrorType, message string, keyspaceGroupBelongTo uint32,
+) *tsopb.ResponseHeader {
+	return s.errorHeader(&tsopb.Error{Type: errorType, Message: message}, keyspaceGroupBelongTo)
 }
 
-func (s *Service) errorHeader(err *tsopb.Error) *tsopb.ResponseHeader {
+func (s *Service) errorHeader(err *tsopb.Error, keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
 	return &tsopb.ResponseHeader{
-		ClusterId: s.clusterID,
-		Error:     err,
+		ClusterId:       s.clusterID,
+		Error:           err,
+		KeyspaceGroupId: keyspaceGroupBelongTo,
 	}
 }

@@ -57,14 +57,14 @@ func TestSlidingWindow(t *testing.T) {
 	re.True(s.Available(capacity, SendSnapshot, constant.Low))
 	re.True(s.Take(capacity, SendSnapshot, constant.Low))
 	re.False(s.Available(capacity, SendSnapshot, constant.Low))
-	s.Ack(capacity)
+	s.Ack(capacity, SendSnapshot)
 	re.True(s.Available(capacity, SendSnapshot, constant.Low))
 
 	// case 1: it will occupy the normal window size not the core.High window.
 	re.True(s.Take(capacity, SendSnapshot, constant.High))
 	re.EqualValues(capacity, s.GetUsed())
 	re.EqualValues(0, s.windows[constant.High].getUsed())
-	s.Ack(capacity)
+	s.Ack(capacity, SendSnapshot)
 	re.EqualValues(s.GetUsed(), 0)
 
 	// case 2: it will occupy the core.High window size if the normal window is full.
@@ -76,8 +76,8 @@ func TestSlidingWindow(t *testing.T) {
 	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
 	re.False(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
 	re.EqualValues(s.GetUsed(), capacity+capacity+capacity-minSnapSize*3)
-	s.Ack(capacity - minSnapSize)
-	s.Ack(capacity - minSnapSize)
+	s.Ack(capacity-minSnapSize, SendSnapshot)
+	s.Ack(capacity-minSnapSize, SendSnapshot)
 	re.Equal(s.GetUsed(), capacity-minSnapSize)
 
 	// case 3: skip the type is not the SendSnapshot

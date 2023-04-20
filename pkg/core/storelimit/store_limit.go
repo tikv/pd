@@ -81,6 +81,9 @@ func NewStoreRateLimit(ratePerSec float64) StoreLimit {
 	}
 }
 
+// Ack does nothing.
+func (l *StoreRateLimit) Ack(_ int64, _ Type) {}
+
 // Available returns the number of available tokens.
 // notice that the priority level is not used.
 func (l *StoreRateLimit) Available(cost int64, typ Type, _ constant.PriorityLevel) bool {
@@ -90,8 +93,8 @@ func (l *StoreRateLimit) Available(cost int64, typ Type, _ constant.PriorityLeve
 	return l.limits[typ].Available(cost)
 }
 
-// Cap returns the capacity of the store limit.
-func (l *StoreRateLimit) Cap(typ Type) float64 {
+// Rate returns the capacity of the store limit.
+func (l *StoreRateLimit) Rate(typ Type) float64 {
 	if l.limits[typ] == nil {
 		return 0.0
 	}

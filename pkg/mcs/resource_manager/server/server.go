@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -51,8 +52,8 @@ import (
 
 // Server is the resource manager server, and it implements bs.Server.
 type Server struct {
-	// Server state. 0 is not serving, 1 is serving.
-	isServing int64
+	// Server state. 0 is not running, 1 is running.
+	isRunning int64
 
 	ctx              context.Context
 	serverLoopCtx    context.Context
@@ -195,7 +196,7 @@ func (s *Server) campaignLeader() {
 
 // Close closes the server.
 func (s *Server) Close() {
-	if !atomic.CompareAndSwapInt64(&s.isServing, 1, 0) {
+	if !atomic.CompareAndSwapInt64(&s.isRunning, 1, 0) {
 		// server is already closed
 		return
 	}
@@ -246,7 +247,7 @@ func (s *Server) IsServing() bool {
 
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
-	return s != nil && atomic.LoadInt64(&s.isServing) == 0
+	return s != nil && atomic.LoadInt64(&s.isRunning) == 0
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
@@ -399,17 +400,18 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.ListenAddr}
+	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	serializedEntry, err := entry.Serialize()
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, utils.ResourceManagerServiceName, s.cfg.ListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, strconv.FormatUint(s.clusterID, 10),
+		utils.ResourceManagerServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
 		log.Error("failed to regiser the service", zap.String("service-name", utils.ResourceManagerServiceName), errs.ZapError(err))
 		return err
 	}
-	atomic.StoreInt64(&s.isServing, 1)
+	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
 }
 

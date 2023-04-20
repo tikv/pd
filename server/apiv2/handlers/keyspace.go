@@ -25,9 +25,9 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
-	"github.com/tikv/pd/server/keyspace"
 )
 
 // RegisterKeyspace register keyspace related handlers to router paths.
@@ -60,7 +60,7 @@ type CreateKeyspaceParams struct {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/keyspaces [post]
 func CreateKeyspace(c *gin.Context) {
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	createParams := &CreateKeyspaceParams{}
 	err := c.BindJSON(createParams)
@@ -91,7 +91,7 @@ func CreateKeyspace(c *gin.Context) {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/keyspaces/{name} [get]
 func LoadKeyspace(c *gin.Context) {
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	name := c.Param("name")
 	meta, err := manager.LoadKeyspace(name)
@@ -117,7 +117,7 @@ func LoadKeyspaceByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, "invalid keyspace id")
 		return
 	}
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	meta, err := manager.LoadKeyspaceByID(uint32(id))
 	if err != nil {
@@ -127,18 +127,18 @@ func LoadKeyspaceByID(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
 
-// parseLoadAllQuery parses LoadAllKeyspaces' query parameters.
+// parseLoadAllQuery parses LoadAllKeyspaces'/GetKeyspaceGroups' query parameters.
 // page_token:
-// The keyspace id of the scan start. If not set, scan from keyspace with id 1.
-// It's string of spaceID of the previous scan result's last element (next_page_token).
+// The keyspace/keyspace group id of the scan start. If not set, scan from keyspace/keyspace group with id 1.
+// It's string of ID of the previous scan result's last element (next_page_token).
 // limit:
-// The maximum number of keyspace metas to return. If not set, no limit is posed.
-// Every scan scans limit + 1 keyspaces (if limit != 0), the extra scanned keyspace
+// The maximum number of keyspace metas/keyspace groups to return. If not set, no limit is posed.
+// Every scan scans limit + 1 keyspaces/keyspace groups (if limit != 0), the extra scanned keyspace/keyspace group
 // is to check if there's more, and used to set next_page_token in response.
 func parseLoadAllQuery(c *gin.Context) (scanStart uint32, scanLimit int, err error) {
 	pageToken, set := c.GetQuery("page_token")
 	if !set || pageToken == "" {
-		// If pageToken is empty or unset, then scan from spaceID of 1.
+		// If pageToken is empty or unset, then scan from ID of 1.
 		scanStart = 0
 	} else {
 		scanStart64, err := strconv.ParseUint(pageToken, 10, 32)
@@ -185,7 +185,7 @@ type LoadAllKeyspacesResponse struct {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/keyspaces [get]
 func LoadAllKeyspaces(c *gin.Context) {
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	scanStart, scanLimit, err := parseLoadAllQuery(c)
 	if err != nil {
@@ -246,7 +246,7 @@ type UpdateConfigParams struct {
 //
 // Router /keyspaces/{name}/config [patch]
 func UpdateKeyspaceConfig(c *gin.Context) {
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	name := c.Param("name")
 	configParams := &UpdateConfigParams{}
@@ -303,7 +303,7 @@ type UpdateStateParam struct {
 //
 // Router /keyspaces/{name}/state [put]
 func UpdateKeyspaceState(c *gin.Context) {
-	svr := c.MustGet("server").(*server.Server)
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
 	name := c.Param("name")
 	param := &UpdateStateParam{}

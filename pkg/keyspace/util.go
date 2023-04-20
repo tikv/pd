@@ -15,6 +15,7 @@
 package keyspace
 
 import (
+	"container/heap"
 	"encoding/binary"
 	"encoding/hex"
 	"regexp"
@@ -38,10 +39,20 @@ var (
 	// ErrKeyspaceNotFound is used to indicate target keyspace does not exist.
 	ErrKeyspaceNotFound = errors.New("keyspace does not exist")
 	// ErrKeyspaceExists indicates target keyspace already exists.
-	// Used when creating a new keyspace.
-	ErrKeyspaceExists   = errors.New("keyspace already exists")
-	errModifyDefault    = errors.New("cannot modify default keyspace's state")
-	errIllegalOperation = errors.New("unknown operation")
+	// It's used when creating a new keyspace.
+	ErrKeyspaceExists = errors.New("keyspace already exists")
+	// ErrKeyspaceGroupExists indicates target keyspace group already exists.
+	ErrKeyspaceGroupExists = errors.New("keyspace group already exists")
+	// ErrKeyspaceGroupNotFound is used to indicate target keyspace group does not exist.
+	ErrKeyspaceGroupNotFound = errors.New("keyspace group does not exist")
+	// ErrKeyspaceGroupInSplit is used to indicate target keyspace group is in split state.
+	ErrKeyspaceGroupInSplit = errors.New("keyspace group is in split state")
+	// ErrKeyspaceGroupNotInSplit is used to indicate target keyspace group is not in split state.
+	ErrKeyspaceGroupNotInSplit = errors.New("keyspace group is not in split state")
+	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
+	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
+	errModifyDefault              = errors.New("cannot modify default keyspace's state")
+	errIllegalOperation           = errors.New("unknown operation")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
@@ -146,4 +157,99 @@ func makeLabelRule(id uint32) *labeler.LabelRule {
 		RuleType: labeler.KeyRange,
 		Data:     makeKeyRanges(id),
 	}
+}
+
+// indexedHeap is a heap with index.
+type indexedHeap struct {
+	items []*endpoint.KeyspaceGroup
+	// keyspace group id -> position in items
+	index map[uint32]int
+}
+
+func newIndexedHeap(hint int) *indexedHeap {
+	return &indexedHeap{
+		items: make([]*endpoint.KeyspaceGroup, 0, hint),
+		index: map[uint32]int{},
+	}
+}
+
+// Implementing heap.Interface.
+func (hp *indexedHeap) Len() int {
+	return len(hp.items)
+}
+
+// Implementing heap.Interface.
+func (hp *indexedHeap) Less(i, j int) bool {
+	// Gives the keyspace group with the least number of keyspaces first
+	return len(hp.items[j].Keyspaces) > len(hp.items[i].Keyspaces)
+}
+
+// Implementing heap.Interface.
+func (hp *indexedHeap) Swap(i, j int) {
+	lid := hp.items[i].ID
+	rid := hp.items[j].ID
+	hp.items[i], hp.items[j] = hp.items[j], hp.items[i]
+	hp.index[lid] = j
+	hp.index[rid] = i
+}
+
+// Implementing heap.Interface.
+func (hp *indexedHeap) Push(x interface{}) {
+	item := x.(*endpoint.KeyspaceGroup)
+	hp.index[item.ID] = hp.Len()
+	hp.items = append(hp.items, item)
+}
+
+// Implementing heap.Interface.
+func (hp *indexedHeap) Pop() interface{} {
+	l := hp.Len()
+	item := hp.items[l-1]
+	hp.items = hp.items[:l-1]
+	delete(hp.index, item.ID)
+	return item
+}
+
+// Top returns the top item.
+func (hp *indexedHeap) Top() *endpoint.KeyspaceGroup {
+	if hp.Len() <= 0 {
+		return nil
+	}
+	return hp.items[0]
+}
+
+// Get returns item with the given ID.
+func (hp *indexedHeap) Get(id uint32) *endpoint.KeyspaceGroup {
+	idx, ok := hp.index[id]
+	if !ok {
+		return nil
+	}
+	item := hp.items[idx]
+	return item
+}
+
+// GetAll returns all the items.
+func (hp *indexedHeap) GetAll() []*endpoint.KeyspaceGroup {
+	all := make([]*endpoint.KeyspaceGroup, len(hp.items))
+	copy(all, hp.items)
+	return all
+}
+
+// Put inserts item or updates the old item if it exists.
+func (hp *indexedHeap) Put(item *endpoint.KeyspaceGroup) (isUpdate bool) {
+	if idx, ok := hp.index[item.ID]; ok {
+		hp.items[idx] = item
+		heap.Fix(hp, idx)
+		return true
+	}
+	heap.Push(hp, item)
+	return false
+}
+
+// Remove deletes item by ID and returns it.
+func (hp *indexedHeap) Remove(id uint32) *endpoint.KeyspaceGroup {
+	if idx, ok := hp.index[id]; ok {
+		item := heap.Remove(hp, idx)
+		return item.(*endpoint.KeyspaceGroup)
+	}
+	return nil
 }

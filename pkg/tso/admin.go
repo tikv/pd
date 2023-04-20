@@ -25,7 +25,7 @@ import (
 
 // Handler defines the common behaviors of a basic tso handler.
 type Handler interface {
-	ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) error
+	ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, keyspaceGroupID uint32) error
 }
 
 // AdminHandler wrap the basic tso handler to provide http service.
@@ -93,7 +93,7 @@ func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 		ignoreSmaller, skipUpperBoundCheck = true, true
 	}
 
-	if err = handler.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck); err != nil {
+	if err = handler.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0); err != nil {
 		if err == errs.ErrServerNotStarted {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {

@@ -17,6 +17,7 @@ package endpoint
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -49,9 +50,12 @@ const (
 	resourceGroupStatesPath   = "states"
 	controllerConfigPath      = "controller"
 	// tso storage endpoint has prefix `tso`
-	microserviceKey = "microservice"
+	microserviceKey = "ms"
 	tsoServiceKey   = utils.TSOServiceName
 	timestampKey    = "timestamp"
+
+	tsoKeyspaceGroupPrefix     = "tso/keyspace_groups"
+	keyspaceGroupMembershipKey = "membership"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
@@ -222,4 +226,37 @@ func KeyspaceIDAlloc() string {
 // Width of the padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
 func encodeKeyspaceID(spaceID uint32) string {
 	return fmt.Sprintf("%08d", spaceID)
+}
+
+// KeyspaceGroupIDPrefix returns the prefix of keyspace group id.
+// Path: tso/keyspace_groups/membership
+func KeyspaceGroupIDPrefix() string {
+	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey)
+}
+
+// KeyspaceGroupIDPath returns the path to keyspace id from the given name.
+// Path: tso/keyspace_groups/membership/{id}
+func KeyspaceGroupIDPath(id uint32) string {
+	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey, encodeKeyspaceGroupID(id))
+}
+
+// ExtractKeyspaceGroupIDFromPath extracts keyspace group id from the given path, which contains
+// the pattern of `tso/keyspace_groups/membership/(\d{5})$`.
+func ExtractKeyspaceGroupIDFromPath(path string) (uint32, error) {
+	pattern := strings.Join([]string{KeyspaceGroupIDPrefix(), `(\d{5})$`}, "/")
+	re := regexp.MustCompile(pattern)
+	match := re.FindStringSubmatch(path)
+	if match == nil {
+		return 0, fmt.Errorf("invalid keyspace group id path: %s", path)
+	}
+	id, err := strconv.ParseUint(match[1], 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse keyspace group ID: %v", err)
+	}
+	return uint32(id), nil
+}
+
+// encodeKeyspaceGroupID from uint32 to string.
+func encodeKeyspaceGroupID(groupID uint32) string {
+	return fmt.Sprintf("%05d", groupID)
 }
