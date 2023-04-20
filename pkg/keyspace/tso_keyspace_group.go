@@ -96,8 +96,9 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 		client:           client,
 		tsoServiceKey:    key,
 		tsoServiceEndKey: clientv3.GetPrefixRangeEnd(key) + "/",
-		policy:           defaultBalancerPolicy,
 		groups:           groups,
+		nodesBalancer:    balancer.GenByPolicy[string](defaultBalancerPolicy),
+		serviceRegistryMap: make(map[string]string),
 	}
 }
 
@@ -118,8 +119,6 @@ func (m *GroupManager) Bootstrap() error {
 
 	// If the etcd client is not nil, start the watch loop.
 	if m.client != nil {
-		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
-		m.serviceRegistryMap = make(map[string]string)
 		m.wg.Add(2)
 		go m.startWatchLoop()
 		go m.allocDefaultNodesForKeyspaceGroup()
