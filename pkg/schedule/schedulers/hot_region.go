@@ -1442,14 +1442,15 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 			hotSchedulerNotFoundSplitKeysCounter.Inc()
 			return
 		}
-		if op, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey); err == nil {
-			hotSchedulerSplitSuccessCounter.Inc()
-			operators = append(operators, op)
-		} else {
+		op, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey)
+		if err != nil {
 			log.Error("fail to create split operator",
 				zap.Stringer("resource-type", bs.resourceTy),
 				errs.ZapError(err))
+			return
 		}
+		hotSchedulerSplitSuccessCounter.Inc()
+		operators = append(operators, op)
 	}
 
 	for _, region := range regions {
