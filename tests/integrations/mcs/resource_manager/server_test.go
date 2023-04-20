@@ -15,8 +15,6 @@
 package resourcemanager_test
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -101,13 +99,8 @@ func TestResourceManagerServer(t *testing.T) {
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
-		respString, err := io.ReadAll(resp.Body)
+		respBytes, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		reader := bytes.NewReader(respString)
-		gzipReader, err := gzip.NewReader(reader)
-		re.NoError(err)
-		output, err := io.ReadAll(gzipReader)
-		re.NoError(err)
-		re.Contains(string(output), "resource_manager_server_info")
+		re.Contains(string(respBytes), "resource_manager_server_info")
 	}
 }
