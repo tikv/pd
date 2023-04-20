@@ -223,6 +223,7 @@ func (c *coordinator) checkPriorityRegions() {
 // The regions of new version key range and old version key range would be placed into
 // the suspect regions map
 func (c *coordinator) checkSuspectRanges() {
+	defer logutil.LogPanic()
 	defer c.wg.Done()
 	log.Info("coordinator begins to check suspect key ranges")
 	ticker := time.NewTicker(checkSuspectRangesInterval)

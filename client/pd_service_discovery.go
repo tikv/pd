@@ -18,6 +18,7 @@ import (
 	"context"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -217,12 +218,15 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 			failpoint.Continue()
 		})
 		if err := c.updateMember(); err != nil {
-			log.Error("[pd] failed to update member", errs.ZapError(err))
+			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetURLs()), errs.ZapError(err))
 		}
 	}
 }
 
 func (c *pdServiceDiscovery) updateServiceModeLoop() {
+	failpoint.Inject("skipUpdateServiceMode", func() {
+		failpoint.Return()
+	})
 	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -357,20 +361,20 @@ func (c *pdServiceDiscovery) initClusterID() error {
 	defer cancel()
 	clusterID := uint64(0)
 	for _, url := range c.GetURLs() {
-		clusterInfo, err := c.getClusterInfo(ctx, url, c.option.timeout)
-		if err != nil || clusterInfo.GetHeader() == nil {
+		members, err := c.getMembers(ctx, url, c.option.timeout)
+		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", url), errs.ZapError(err))
 			continue
 		}
 		if clusterID == 0 {
-			clusterID = clusterInfo.GetHeader().GetClusterId()
+			clusterID = members.GetHeader().GetClusterId()
 			continue
 		}
 		failpoint.Inject("skipClusterIDCheck", func() {
 			failpoint.Continue()
 		})
 		// All URLs passed in should have the same cluster ID.
-		if clusterInfo.GetHeader().GetClusterId() != clusterID {
+		if members.GetHeader().GetClusterId() != clusterID {
 			return errors.WithStack(errUnmatchedClusterID)
 		}
 	}
@@ -386,8 +390,15 @@ func (c *pdServiceDiscovery) updateServiceMode() {
 	leaderAddr := c.getLeaderAddr()
 	if len(leaderAddr) > 0 {
 		clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
+		// If the method is not supported, we set it to pd mode.
 		if err != nil {
-			log.Warn("[pd] failed to get cluster info for the leader", zap.String("leader-addr", leaderAddr), errs.ZapError(err))
+			// TODO: it's a hack way to solve the compatibility issue.
+			// we need to remove this after all maintained version supports the method.
+			if strings.Contains(err.Error(), "Unimplemented") {
+				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+			} else {
+				log.Warn("[pd] failed to get cluster info for the leader", zap.String("leader-addr", leaderAddr), errs.ZapError(err))
+			}
 			return
 		}
 		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
@@ -442,7 +453,7 @@ func (c *pdServiceDiscovery) updateMember() error {
 		// the error of `switchTSOAllocatorLeader` will be returned.
 		return errTSO
 	}
-	return errs.ErrClientGetMember.FastGenByArgs(c.GetURLs())
+	return errs.ErrClientGetMember.FastGenByArgs()
 }
 
 func (c *pdServiceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {

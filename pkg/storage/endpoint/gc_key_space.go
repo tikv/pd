@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -77,6 +78,8 @@ func (se *StorageEndpoint) LoadServiceSafePoint(spaceID, serviceID string) (*Ser
 	}
 	if ssp.ExpiredAt < time.Now().Unix() {
 		go func() {
+			defer logutil.LogPanic()
+
 			if err = se.Remove(key); err != nil {
 				log.Error("remove expired key meet error", zap.String("key", key), errs.ZapError(err))
 			}
@@ -124,6 +127,8 @@ func (se *StorageEndpoint) LoadMinServiceSafePoint(spaceID string, now time.Time
 	})
 	// remove expired keys asynchronously
 	go func() {
+		defer logutil.LogPanic()
+
 		for _, key := range expiredKeys {
 			if err = se.Remove(key); err != nil {
 				log.Error("remove expired key meet error", zap.String("key", key), errs.ZapError(err))

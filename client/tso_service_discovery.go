@@ -49,7 +49,7 @@ type tsoServiceDiscovery struct {
 	clusterID  uint64
 	keyspaceID uint32
 	urls       atomic.Value // Store as []string
-	// primary key is the etcd path used for discoverying the serving endpoint of this keyspace
+	// primary key is the etcd path used for discovering the serving endpoint of this keyspace
 	primaryKey string
 	// TSO Primary URL
 	primary atomic.Value // Store as string
@@ -61,7 +61,7 @@ type tsoServiceDiscovery struct {
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
 	// localAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
-	// The input is a map {DC Localtion -> Leader Addr}
+	// The input is a map {DC Location -> Leader Addr}
 	localAllocPrimariesUpdatedCb tsoLocalServAddrsUpdatedFunc
 	// globalAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
 	globalAllocPrimariesUpdatedCb tsoGlobalServAddrUpdatedFunc
@@ -186,7 +186,7 @@ func (c *tsoServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	return nil
 }
 
-// GetClientConns returns the mapping {addr -> a gRPC connectio}
+// GetClientConns returns the mapping {addr -> a gRPC connection}
 func (c *tsoServiceDiscovery) GetClientConns() *sync.Map {
 	return &c.clientConns
 }
@@ -209,7 +209,7 @@ func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
-// ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in ervice endpoints.
+// ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in service endpoints.
 func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
 	case c.checkMembershipCh <- struct{}{}:

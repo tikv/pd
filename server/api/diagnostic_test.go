@@ -81,7 +81,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.NoError(err)
 
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, cfg))
-	suite.False(cfg.Schedule.EnableDiagnostic)
+	suite.True(cfg.Schedule.EnableDiagnostic)
 
 	ms := map[string]interface{}{
 		"enable-diagnostic": "true",

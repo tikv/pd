@@ -89,7 +89,7 @@ func (s *randomMergeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 	randomMergeCounter.Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
-		FilterSource(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true}).
+		FilterSource(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true, OperatorLevel: constant.Low}).
 		RandomPick()
 	if store == nil {
 		randomMergeNoSourceStoreCounter.Inc()

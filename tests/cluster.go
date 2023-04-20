@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
@@ -44,7 +45,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-	"github.com/tikv/pd/server/keyspace"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -710,6 +710,20 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 		return nil, err
 	}
 	s, err := NewTestServer(ctx, conf)
+	if err != nil {
+		return nil, err
+	}
+	c.servers[conf.Name] = s
+	return s, nil
+}
+
+// JoinAPIServer is used to add a new TestAPIServer into the cluster.
+func (c *TestCluster) JoinAPIServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
+	conf, err := c.config.Join().Generate(opts...)
+	if err != nil {
+		return nil, err
+	}
+	s, err := NewTestAPIServer(ctx, conf)
 	if err != nil {
 		return nil, err
 	}

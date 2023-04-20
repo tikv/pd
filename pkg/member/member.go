@@ -173,8 +173,8 @@ func (m *EmbeddedEtcdMember) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// PrecheckLeader does some pre-check before checking whether or not it's the leader.
-func (m *EmbeddedEtcdMember) PrecheckLeader() error {
+// PreCheckLeader does some pre-check before checking whether or not it's the leader.
+func (m *EmbeddedEtcdMember) PreCheckLeader() error {
 	if m.GetEtcdLeader() == 0 {
 		return errs.ErrEtcdLeaderNotFound
 	}
@@ -198,7 +198,7 @@ func (m *EmbeddedEtcdMember) getPersistentLeader() (*pdpb.Member, int64, error) 
 // CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
 // otherwise returns a bool which indicates if it is needed to check later.
 func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
-	if err := m.PrecheckLeader(); err != nil {
+	if err := m.PreCheckLeader(); err != nil {
 		log.Error("failed to pass pre-check, check pd leader later", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, true

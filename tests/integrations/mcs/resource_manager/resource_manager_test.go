@@ -102,6 +102,32 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 				},
 			},
 		},
+		{
+			Name: "test3",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   100,
+						BurstLimit: 5000000,
+					},
+					Tokens: 5000000,
+				},
+			},
+		},
+		{
+			Name: "test4",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   1000,
+						BurstLimit: 5000000,
+					},
+					Tokens: 5000000,
+				},
+			},
+		},
 	}
 }
 
@@ -437,7 +463,32 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 			break
 		}
 	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod", "return(true)"))
+
+	resourceGroupName2 := suite.initGroups[2].Name
+	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 100000, times: 1, waitDuration: 0}
+	wreq := tcs.makeWriteRequest()
+	_, err := controller.OnRequestWait(suite.ctx, resourceGroupName2, wreq)
+	re.NoError(err)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend", "return(true)"))
+	resourceGroupName3 := suite.initGroups[3].Name
+	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 1000, times: 1, waitDuration: 0}
+	wreq = tcs.makeWriteRequest()
+	_, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+	re.NoError(err)
+	time.Sleep(110 * time.Millisecond)
+	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 10, times: 1010, waitDuration: 0}
+	duration := time.Duration(0)
+	for i := 0; i < tcs.times; i++ {
+		wreq = tcs.makeWriteRequest()
+		startTime := time.Now()
+		_, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+		duration += time.Since(startTime)
+		re.NoError(err)
+	}
+	re.Less(duration, 100*time.Millisecond)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend"))
 	suite.cleanupResourceGroups()
 	controller.Stop()
 }

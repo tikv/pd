@@ -16,6 +16,8 @@ package filter
 
 import (
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/slice"
@@ -163,4 +165,30 @@ func (f *regionWitnessFilter) Select(region *core.RegionInfo) *plan.Status {
 		return statusRegionWitnessPeer
 	}
 	return statusOK
+}
+
+// SnapshotSenderFilter filer the region who's leader store reaches the limit.
+type SnapshotSenderFilter struct {
+	senders map[uint64]struct{}
+}
+
+// NewSnapshotSendFilter returns creates a RegionFilter that filters regions with witness peer on the specific store.
+// level should be set as same with the operator priority level.
+func NewSnapshotSendFilter(stores []*core.StoreInfo, level constant.PriorityLevel) RegionFilter {
+	senders := make(map[uint64]struct{})
+	for _, store := range stores {
+		if store.IsAvailable(storelimit.SendSnapshot, level) && !store.IsBusy() {
+			senders[store.GetID()] = struct{}{}
+		}
+	}
+	return &SnapshotSenderFilter{senders: senders}
+}
+
+// Select returns ok if the region leader in the senders.
+func (f *SnapshotSenderFilter) Select(region *core.RegionInfo) *plan.Status {
+	leaderStoreID := region.GetLeader().GetStoreId()
+	if _, ok := f.senders[leaderStoreID]; ok {
+		return statusOK
+	}
+	return statusRegionLeaderSendSnapshotThrottled
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -63,6 +64,8 @@ func camelCaseToSnakeCase(str string) string {
 
 // prometheusPushClient pushes metrics to Prometheus Pushgateway.
 func prometheusPushClient(job, addr string, interval time.Duration) {
+	defer logutil.LogPanic()
+
 	pusher := push.New(addr, job).
 		Gatherer(prometheus.DefaultGatherer).
 		Grouping("instance", instanceName())
