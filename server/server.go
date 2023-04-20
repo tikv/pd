@@ -1820,7 +1820,7 @@ func (s *Server) watchServicePrimaryAddr(ctx context.Context, serviceName string
 					s.servicePrimaryMap.Delete(serviceName)
 				}
 			}
-			revision = wresp.Header.Revision
+			revision = wresp.Header.Revision + 1
 		}
 	}
 }
