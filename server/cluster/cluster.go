@@ -275,7 +275,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 	if s.IsAPIServiceMode() {
-		err = c.keyspaceGroupManager.Bootstrap()
+		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
 			return err
 		}

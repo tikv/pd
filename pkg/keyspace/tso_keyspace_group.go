@@ -101,7 +101,7 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 }
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
-func (m *GroupManager) Bootstrap() error {
+func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	// Force the membership restriction that the default keyspace must belong to default keyspace group.
 	// Have no information to specify the distribution of the default keyspace group replicas, so just
 	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica
@@ -135,7 +135,7 @@ func (m *GroupManager) Bootstrap() error {
 		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
 		m.serviceRegistryMap = make(map[string]string)
 		m.wg.Add(1)
-		go m.startWatchLoop()
+		go m.startWatchLoop(ctx)
 	}
 	return nil
 }
@@ -146,10 +146,10 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
-func (m *GroupManager) startWatchLoop() {
+func (m *GroupManager) startWatchLoop(parentCtx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
-	ctx, cancel := context.WithCancel(m.ctx)
+	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 	var (
 		resp     *clientv3.GetResponse
