@@ -211,7 +211,7 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	if manager.GetNodesNum() < allocParams.Replica || allocParams.Replica < 1 {
+	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < 1 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [1, nodes_num]")
 		return
 	}

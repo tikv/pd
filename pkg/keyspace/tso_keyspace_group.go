@@ -639,8 +639,8 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 	return nil
 }
 
-// GetNodesNum returns the number of nodes.
-func (m *GroupManager) GetNodesNum() int {
+// GetNodesCount returns the count of nodes.
+func (m *GroupManager) GetNodesCount() int {
 	if m.nodesBalancer == nil {
 		return 0
 	}
@@ -648,14 +648,14 @@ func (m *GroupManager) GetNodesNum() int {
 }
 
 // AllocNodesForKeyspaceGroup allocates nodes for the keyspace group.
-func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]endpoint.KeyspaceGroupMember, error) {
+func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount int) ([]endpoint.KeyspaceGroupMember, error) {
 	m.Lock()
 	defer m.Unlock()
 	ctx, cancel := context.WithTimeout(m.ctx, allocNodesTimeout)
 	defer cancel()
 	ticker := time.NewTicker(allocNodesInterval)
 	defer ticker.Stop()
-	nodes := make([]endpoint.KeyspaceGroupMember, 0, replica)
+	nodes := make([]endpoint.KeyspaceGroupMember, 0, desiredReplicaCount)
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		kg, err := m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
@@ -669,17 +669,17 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]end
 			exists[member.Address] = struct{}{}
 			nodes = append(nodes, member)
 		}
-		if len(exists) >= replica {
+		if len(exists) >= desiredReplicaCount {
 			return nil
 		}
-		for len(exists) < replica {
+		for len(exists) < desiredReplicaCount {
 			select {
 			case <-ctx.Done():
 				return nil
 			case <-ticker.C:
 			}
-			num := m.GetNodesNum()
-			if num < replica || num == 0 { // double check
+			countOfNodes := m.GetNodesCount()
+			if countOfNodes < desiredReplicaCount || countOfNodes == 0 { // double check
 				return ErrNoAvailableNode
 			}
 			addr := m.nodesBalancer.Next()
