@@ -485,6 +485,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 						log.Warn("failed to unmarshal keyspace group",
 							zap.Uint32("keyspace-group-id", groupID),
 							zap.Error(errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()))
+						break
 					}
 					kgm.updateKeyspaceGroup(group)
 				case clientv3.EventTypeDelete:
@@ -499,7 +500,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 					}
 				}
 			}
-			revision = wresp.Header.Revision
+			revision = wresp.Header.Revision + 1
 		}
 
 		select {
