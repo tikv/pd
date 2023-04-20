@@ -16,9 +16,11 @@ package handlers
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -64,8 +66,50 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 			UserKind: endpoint.Standard.String(),
 		},
 	}}
-
 	MustCreateKeyspaceGroup(re, suite.server, kgs)
+
+	// miss user kind, use default value.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID: uint32(3),
+		},
+	}}
+	MustCreateKeyspaceGroup(re, suite.server, kgs)
+
+	// invalid user kind.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(4),
+			UserKind: "invalid",
+		},
+	}}
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusBadRequest)
+
+	// miss ID.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusInternalServerError)
+
+	// invalid ID.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       utils.MaxKeyspaceGroupCount + 1,
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusBadRequest)
+
+	// repeated ID.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(2),
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusInternalServerError)
 }
 
 func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
@@ -82,7 +126,7 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 	}}
 
 	MustCreateKeyspaceGroup(re, suite.server, kgs)
-	resp := sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	resp := MustLoadKeyspaceGroups(re, suite.server, "0", "0")
 	re.Len(resp, 3)
 }
 
@@ -97,13 +141,13 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	}}
 
 	MustCreateKeyspaceGroup(re, suite.server, kgs)
-	resp := sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	resp := MustLoadKeyspaceGroups(re, suite.server, "0", "0")
 	re.Len(resp, 2)
 	MustSplitKeyspaceGroup(re, suite.server, 1, &handlers.SplitKeyspaceGroupByIDParams{
 		NewID:     uint32(2),
 		Keyspaces: []uint32{111, 222},
 	})
-	resp = sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	resp = MustLoadKeyspaceGroups(re, suite.server, "0", "0")
 	re.Len(resp, 3)
 	// Check keyspace group 1.
 	kg1 := MustLoadKeyspaceGroupByID(re, suite.server, 1)
