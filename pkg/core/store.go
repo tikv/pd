@@ -106,9 +106,25 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store := *s
 	store.meta = typeutil.DeepClone(s.meta, StoreFactory)
 	for _, opt := range opts {
-		opt(&store)
+		if opt != nil {
+			opt(&store)
+		}
 	}
 	return &store
+}
+
+// LimitVersion returns the limit version of the store.
+func (s *StoreInfo) LimitVersion() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.limiter.Version()
+}
+
+// Feedback is used to update the store's limit.
+func (s *StoreInfo) Feedback(e float64) {
+	if limit := s.limiter; limit != nil {
+		limit.Feedback(e)
+	}
 }
 
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
