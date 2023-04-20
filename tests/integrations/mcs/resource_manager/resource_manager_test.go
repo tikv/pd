@@ -149,6 +149,10 @@ func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode"))
 }
 
+func (suite *resourceManagerClientTestSuite) TearDownTest() {
+	suite.cleanupResourceGroups()
+}
+
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups() {
 	cli := suite.client
 	groups, err := cli.ListResourceGroups(suite.ctx)
@@ -258,11 +262,11 @@ type tokenConsumptionPerSecond struct {
 }
 
 func (t tokenConsumptionPerSecond) makeReadRequest() *controller.TestRequestInfo {
-	return controller.NewTestRequestInfo(false, 0)
+	return controller.NewTestRequestInfo(false, 0, 0)
 }
 
 func (t tokenConsumptionPerSecond) makeWriteRequest() *controller.TestRequestInfo {
-	return controller.NewTestRequestInfo(true, uint64(t.wruTokensAtATime-1))
+	return controller.NewTestRequestInfo(true, uint64(t.wruTokensAtATime-1), 0)
 }
 
 func (t tokenConsumptionPerSecond) makeReadResponse() *controller.TestResponseInfo {
@@ -340,9 +344,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
 				startTime := time.Now()
-				_, err := controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
+				_, _, err := controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
 				re.NoError(err)
-				_, err = controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
+				_, _, err = controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
 				re.NoError(err)
 				sum += time.Since(startTime)
 				controller.OnResponse(cas.resourceGroupName, rreq, rres)
@@ -356,7 +360,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 			break
 		}
 	}
-	suite.cleanupResourceGroups()
 	controller.Stop()
 }
 
@@ -408,9 +411,9 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 		wreq := tcs.makeWriteRequest()
 		rres := tcs.makeReadResponse()
 		wres := tcs.makeWriteResponse()
-		_, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+		_, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
 		re.NoError(err)
-		_, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+		_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
 		re.NoError(err)
 		controller.OnResponse(resourceGroupName, rreq, rres)
 		controller.OnResponse(resourceGroupName, wreq, wres)
@@ -447,9 +450,9 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
 				startTime := time.Now()
-				_, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+				_, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
 				re.NoError(err)
-				_, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+				_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
 				re.NoError(err)
 				sum += time.Since(startTime)
 				controller.OnResponse(resourceGroupName, rreq, rres)
@@ -467,14 +470,14 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	resourceGroupName2 := suite.initGroups[2].Name
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 100000, times: 1, waitDuration: 0}
 	wreq := tcs.makeWriteRequest()
-	_, err := controller.OnRequestWait(suite.ctx, resourceGroupName2, wreq)
+	_, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName2, wreq)
 	re.NoError(err)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend", "return(true)"))
 	resourceGroupName3 := suite.initGroups[3].Name
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 1000, times: 1, waitDuration: 0}
 	wreq = tcs.makeWriteRequest()
-	_, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+	_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
 	re.NoError(err)
 	time.Sleep(110 * time.Millisecond)
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 10, times: 1010, waitDuration: 0}
@@ -482,15 +485,103 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	for i := 0; i < tcs.times; i++ {
 		wreq = tcs.makeWriteRequest()
 		startTime := time.Now()
-		_, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+		_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
 		duration += time.Since(startTime)
 		re.NoError(err)
 	}
 	re.Less(duration, 100*time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend"))
-	suite.cleanupResourceGroups()
 	controller.Stop()
+}
+
+func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
+	re := suite.Require()
+	cli := suite.client
+
+	for _, group := range suite.initGroups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+
+	cfg := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+		CPUMsCost:        1,
+	}
+	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
+	c.Start(suite.ctx)
+
+	resourceGroupName := suite.initGroups[1].Name
+	// init
+	req := controller.NewTestRequestInfo(false, 0, 2 /* store2 */)
+	resp := controller.NewTestResponseInfo(0, time.Duration(30), true)
+	_, penalty, err := c.OnRequestWait(suite.ctx, resourceGroupName, req)
+	re.NoError(err)
+	re.Equal(penalty.WriteBytes, float64(0))
+	re.Equal(penalty.TotalCpuTimeMs, 0.0)
+	_, err = c.OnResponse(resourceGroupName, req, resp)
+	re.NoError(err)
+
+	req = controller.NewTestRequestInfo(true, 60, 1 /* store1 */)
+	resp = controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
+	re.NoError(err)
+	re.Equal(penalty.WriteBytes, float64(0))
+	re.Equal(penalty.TotalCpuTimeMs, 0.0)
+	_, err = c.OnResponse(resourceGroupName, req, resp)
+	re.NoError(err)
+
+	// failed request, shouldn't be counted in penalty
+	req = controller.NewTestRequestInfo(true, 20, 1 /* store1 */)
+	resp = controller.NewTestResponseInfo(0, time.Duration(0), false)
+	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
+	re.NoError(err)
+	re.Equal(penalty.WriteBytes, float64(0))
+	re.Equal(penalty.TotalCpuTimeMs, 0.0)
+	_, err = c.OnResponse(resourceGroupName, req, resp)
+	re.NoError(err)
+
+	// from same store, should be zero
+	req1 := controller.NewTestRequestInfo(false, 0, 1 /* store1 */)
+	resp1 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req1)
+	re.NoError(err)
+	re.Equal(penalty.WriteBytes, float64(0))
+	_, err = c.OnResponse(resourceGroupName, req1, resp1)
+	re.NoError(err)
+
+	// from different store, should be non-zero
+	req2 := controller.NewTestRequestInfo(true, 50, 2 /* store2 */)
+	resp2 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req2)
+	re.NoError(err)
+	re.Equal(penalty.WriteBytes, float64(60))
+	re.InEpsilon(penalty.TotalCpuTimeMs, 10.0/1000.0/1000.0, 1e-6)
+	_, err = c.OnResponse(resourceGroupName, req2, resp2)
+	re.NoError(err)
+
+	// from new store, should be zero
+	req3 := controller.NewTestRequestInfo(true, 0, 3 /* store3 */)
+	resp3 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req3)
+	re.NoError(err)
+	re.Equal(penalty.WriteBytes, float64(0))
+	_, err = c.OnResponse(resourceGroupName, req3, resp3)
+	re.NoError(err)
+
+	// from different group, should be zero
+	resourceGroupName = suite.initGroups[2].Name
+	req4 := controller.NewTestRequestInfo(true, 50, 1 /* store2 */)
+	resp4 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req4)
+	re.NoError(err)
+	re.Equal(penalty.WriteBytes, float64(0))
+	_, err = c.OnResponse(resourceGroupName, req4, resp4)
+	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
@@ -557,7 +648,6 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		checkFunc(gresp, groups[0])
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/fastPersist"))
-	suite.cleanupResourceGroups()
 }
 
 func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
@@ -813,9 +903,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover()
 		re.NotNil(getResp)
 		re.Equal(group.RUSettings.RU.Settings.FillRate, getResp.RUSettings.RU.Settings.FillRate)
 	}
-
-	// Cleanup the resource group.
-	suite.cleanupResourceGroups()
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMode() {
@@ -874,7 +961,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 	controller.Stop()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU"))
-	suite.cleanupResourceGroups()
 }
 
 func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
@@ -956,5 +1042,4 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
 	controller.Stop()
-	suite.cleanupResourceGroups()
 }

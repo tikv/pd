@@ -508,10 +508,10 @@ func (c *client) checkLeaderHealth(ctx context.Context) {
 		healthCli := healthpb.NewHealthClient(client)
 		resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
 		rpcErr, ok := status.FromError(err)
-		if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork1")); _err_ == nil {
+		failpoint.Inject("unreachableNetwork1", func() {
 			resp = nil
 			err = status.New(codes.Unavailable, "unavailable").Err()
-		}
+		})
 		if (ok && isNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
 		} else {

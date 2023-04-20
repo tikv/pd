@@ -279,9 +279,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
-	if _, _err_ := failpoint.Eval(_curpkg_("useGlobalRegistry")); _err_ == nil {
+	failpoint.Inject("useGlobalRegistry", func() {
 		s.registry = registry.ServerServiceRegistry
-	}
+	})
 	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the micro services REST path.
@@ -353,9 +353,9 @@ func (s *Server) startEtcd(ctx context.Context) error {
 			}
 		}
 	}
-	if _, _err_ := failpoint.Eval(_curpkg_("memberNil")); _err_ == nil {
+	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
-	}
+	})
 	s.member = member.NewMember(etcd, s.client, etcdServerID)
 	return nil
 }
@@ -441,7 +441,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Step:      keyspace.AllocStep,
 	})
 	if s.IsAPIServiceMode() {
-		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage)
+		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, s.clusterID)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -478,6 +478,9 @@ func (s *Server) Close() {
 	log.Info("closing server")
 
 	s.stopServerLoop()
+	if s.IsAPIServiceMode() {
+		s.keyspaceGroupManager.Close()
+	}
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
@@ -704,7 +707,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
-	failpoint.Eval(_curpkg_("raftclusterIsBusy"))
+	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
 }
 
@@ -1485,11 +1488,11 @@ func (s *Server) campaignLeader() {
 		}
 		defer func() {
 			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-			if _, _err_ := failpoint.Eval(_curpkg_("updateAfterResetTSO")); _err_ == nil {
+			failpoint.Inject("updateAfterResetTSO", func() {
 				if err = allocator.UpdateTSO(); err != nil {
 					panic(err)
 				}
-			}
+			})
 		}()
 	}
 	if err := s.reloadConfigFromKV(); err != nil {

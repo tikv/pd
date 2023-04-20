@@ -35,6 +35,7 @@ type RequestUnit float64
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
+	StoreID() uint64
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
