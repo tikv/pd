@@ -16,14 +16,33 @@ package keyspace
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/balancer"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
+)
+
+const (
+	defaultBalancerPolicy = balancer.PolicyRoundRobin
+	allocNodeTimeout      = 1 * time.Second
+	allocNodeInterval     = 10 * time.Millisecond
+	// TODO: move it to etcdutil
+	watchEtcdChangeRetryInterval = 1 * time.Second
+	maxRetryTimes                = 25
+	retryInterval                = 100 * time.Millisecond
 )
 
 const (
@@ -33,26 +52,51 @@ const (
 
 // GroupManager is the manager of keyspace group related data.
 type GroupManager struct {
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 	// the lock for the groups
 	sync.RWMutex
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
+
 	// store is the storage for keyspace group related information.
 	store endpoint.KeyspaceGroupStorage
+
+	client *clientv3.Client
+
+	// tsoServiceKey is the path of TSO service in etcd.
+	tsoServiceKey string
+	// tsoServiceEndKey is the end key of TSO service in etcd.
+	tsoServiceEndKey string
+
+	policy balancer.Policy
+
+	// TODO: add user kind with different balancer
+	// when we ensure where the correspondence between tso node and user kind will be found
+	nodesBalancer balancer.Balancer[string]
+	// serviceRegistryMap stores the mapping from the service registry key to the service address.
+	serviceRegistryMap map[string]string
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
-func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupStorage) *GroupManager {
+func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupStorage, client *clientv3.Client, clusterID uint64) *GroupManager {
+	ctx, cancel := context.WithCancel(ctx)
+	key := discovery.TSOPath(clusterID)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
 	for i := 0; i < int(endpoint.UserKindCount); i++ {
 		groups[endpoint.UserKind(i)] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
 	}
 	return &GroupManager{
-		ctx:    ctx,
-		store:  store,
-		groups: groups,
+		ctx:              ctx,
+		cancel:           cancel,
+		store:            store,
+		client:           client,
+		tsoServiceKey:    key,
+		tsoServiceEndKey: clientv3.GetPrefixRangeEnd(key) + "/",
+		policy:           defaultBalancerPolicy,
+		groups:           groups,
 	}
 }
 
@@ -86,7 +130,123 @@ func (m *GroupManager) Bootstrap() error {
 		m.groups[userKind].Put(group)
 	}
 
+	// If the etcd client is not nil, start the watch loop.
+	if m.client != nil {
+		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
+		m.serviceRegistryMap = make(map[string]string)
+		m.wg.Add(1)
+		go m.startWatchLoop()
+	}
 	return nil
+}
+
+// Close closes the manager.
+func (m *GroupManager) Close() {
+	m.cancel()
+	m.wg.Wait()
+}
+
+func (m *GroupManager) startWatchLoop() {
+	defer logutil.LogPanic()
+	defer m.wg.Done()
+	ctx, cancel := context.WithCancel(m.ctx)
+	defer cancel()
+	var (
+		resp     *clientv3.GetResponse
+		revision int64
+		err      error
+	)
+	for i := 0; i < maxRetryTimes; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryInterval):
+		}
+		resp, err = etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
+		if err == nil {
+			revision = resp.Header.Revision
+			for _, item := range resp.Kvs {
+				s := &discovery.ServiceRegistryEntry{}
+				if err := json.Unmarshal(item.Value, s); err != nil {
+					log.Warn("failed to unmarshal service registry entry", zap.Error(err))
+					continue
+				}
+				m.nodesBalancer.Put(s.ServiceAddr)
+				m.serviceRegistryMap[string(item.Key)] = s.ServiceAddr
+			}
+			break
+		}
+		log.Warn("failed to get tso service addrs from etcd and will retry", zap.Error(err))
+	}
+	if err != nil || revision == 0 {
+		log.Warn("failed to get tso service addrs from etcd finally when loading", zap.Error(err))
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		nextRevision, err := m.watchServiceAddrs(ctx, revision)
+		if err != nil {
+			log.Error("watcher canceled unexpectedly and a new watcher will start after a while",
+				zap.Int64("next-revision", nextRevision),
+				zap.Time("retry-at", time.Now().Add(watchEtcdChangeRetryInterval)),
+				zap.Error(err))
+			revision = nextRevision
+			time.Sleep(watchEtcdChangeRetryInterval)
+		}
+	}
+}
+
+func (m *GroupManager) watchServiceAddrs(ctx context.Context, revision int64) (int64, error) {
+	watcher := clientv3.NewWatcher(m.client)
+	defer watcher.Close()
+	for {
+	WatchChan:
+		watchChan := watcher.Watch(ctx, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey), clientv3.WithRev(revision))
+		select {
+		case <-ctx.Done():
+			return revision, nil
+		case wresp := <-watchChan:
+			if wresp.CompactRevision != 0 {
+				log.Warn("required revision has been compacted, the watcher will watch again with the compact revision",
+					zap.Int64("required-revision", revision),
+					zap.Int64("compact-revision", wresp.CompactRevision))
+				revision = wresp.CompactRevision
+				goto WatchChan
+			}
+			if wresp.Err() != nil {
+				log.Error("watch is canceled or closed",
+					zap.Int64("required-revision", revision),
+					zap.Error(wresp.Err()))
+				return revision, wresp.Err()
+			}
+			for _, event := range wresp.Events {
+				switch event.Type {
+				case clientv3.EventTypePut:
+					s := &discovery.ServiceRegistryEntry{}
+					if err := json.Unmarshal(event.Kv.Value, s); err != nil {
+						log.Warn("failed to unmarshal service registry entry",
+							zap.String("event-kv-key", string(event.Kv.Key)), zap.Error(err))
+						break
+					}
+					m.nodesBalancer.Put(s.ServiceAddr)
+					m.serviceRegistryMap[string(event.Kv.Key)] = s.ServiceAddr
+				case clientv3.EventTypeDelete:
+					key := string(event.Kv.Key)
+					if serviceAddr, ok := m.serviceRegistryMap[key]; ok {
+						delete(m.serviceRegistryMap, key)
+						m.nodesBalancer.Delete(serviceAddr)
+					} else {
+						log.Warn("can't retrieve service addr from service registry map",
+							zap.String("event-kv-key", key))
+					}
+				}
+			}
+			revision = wresp.Header.Revision + 1
+		}
+	}
 }
 
 // CreateKeyspaceGroups creates keyspace groups.
@@ -327,7 +487,7 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 			return err
 		}
 		if splitSourceKg == nil {
-			return ErrKeyspaceGroupNotFound
+			return ErrKeyspaceGroupNotExists
 		}
 		// A keyspace group can not take part in multiple split processes.
 		if splitSourceKg.IsSplitting() {
@@ -406,7 +566,7 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 			return err
 		}
 		if splitTargetKg == nil {
-			return ErrKeyspaceGroupNotFound
+			return ErrKeyspaceGroupNotExists
 		}
 		// Check if it's in the split state.
 		if !splitTargetKg.IsSplitTarget() {
@@ -418,7 +578,7 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 			return err
 		}
 		if splitSourceKg == nil {
-			return ErrKeyspaceGroupNotFound
+			return ErrKeyspaceGroupNotExists
 		}
 		if !splitSourceKg.IsSplitSource() {
 			return ErrKeyspaceGroupNotInSplit
@@ -441,4 +601,58 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 	m.groups[endpoint.StringUserKind(splitTargetKg.UserKind)].Put(splitTargetKg)
 	m.groups[endpoint.StringUserKind(splitSourceKg.UserKind)].Put(splitSourceKg)
 	return nil
+}
+
+// GetNodesNum returns the number of nodes.
+func (m *GroupManager) GetNodesNum() int {
+	return m.nodesBalancer.Len()
+}
+
+// AllocNodesForKeyspaceGroup allocates nodes for the keyspace group.
+func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]endpoint.KeyspaceGroupMember, error) {
+	ctx, cancel := context.WithTimeout(m.ctx, allocNodeTimeout)
+	defer cancel()
+	ticker := time.NewTicker(allocNodeInterval)
+	defer ticker.Stop()
+	nodes := make([]endpoint.KeyspaceGroupMember, 0, replica)
+	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		kg, err := m.store.LoadKeyspaceGroup(txn, id)
+		if err != nil {
+			return err
+		}
+		if kg == nil {
+			return ErrKeyspaceGroupNotExists
+		}
+		exists := make(map[string]struct{})
+		for _, member := range kg.Members {
+			exists[member.Address] = struct{}{}
+			nodes = append(nodes, member)
+		}
+		for len(exists) < replica {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+			}
+			num := m.GetNodesNum()
+			if num < replica || num == 0 { // double check
+				return ErrNoAvailableNode
+			}
+			addr := m.nodesBalancer.Next()
+			if addr == "" {
+				return ErrNoAvailableNode
+			}
+			if _, ok := exists[addr]; ok {
+				continue
+			}
+			exists[addr] = struct{}{}
+			nodes = append(nodes, endpoint.KeyspaceGroupMember{Address: addr})
+		}
+		kg.Members = nodes
+		return m.store.SaveKeyspaceGroup(txn, kg)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return nodes, nil
 }

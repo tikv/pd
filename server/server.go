@@ -441,7 +441,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Step:      keyspace.AllocStep,
 	})
 	if s.IsAPIServiceMode() {
-		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage)
+		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, s.clusterID)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
@@ -478,6 +478,9 @@ func (s *Server) Close() {
 	log.Info("closing server")
 
 	s.stopServerLoop()
+	if s.IsAPIServiceMode() {
+		s.keyspaceGroupManager.Close()
+	}
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
@@ -1817,7 +1820,7 @@ func (s *Server) watchServicePrimaryAddr(ctx context.Context, serviceName string
 					s.servicePrimaryMap.Delete(serviceName)
 				}
 			}
-			revision = wresp.Header.Revision
+			revision = wresp.Header.Revision + 1
 		}
 	}
 }

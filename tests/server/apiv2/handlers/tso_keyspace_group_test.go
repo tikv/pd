@@ -16,9 +16,11 @@ package handlers
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -64,8 +66,50 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 			UserKind: endpoint.Standard.String(),
 		},
 	}}
-
 	MustCreateKeyspaceGroup(re, suite.server, kgs)
+
+	// miss user kind, use default value.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID: uint32(3),
+		},
+	}}
+	MustCreateKeyspaceGroup(re, suite.server, kgs)
+
+	// invalid user kind.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(4),
+			UserKind: "invalid",
+		},
+	}}
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusBadRequest)
+
+	// miss ID.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusInternalServerError)
+
+	// invalid ID.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       utils.MaxKeyspaceGroupCount + 1,
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusBadRequest)
+
+	// repeated ID.
+	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(2),
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	FailCreateKeyspaceGroupWithCode(re, suite.server, kgs, http.StatusInternalServerError)
 }
 
 func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
