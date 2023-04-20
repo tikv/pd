@@ -169,9 +169,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		if err == io.EOF {
 			return nil
 		}
-		if _, _err_ := failpoint.Eval(_curpkg_("acquireFailed")); _err_ == nil {
+		failpoint.Inject("acquireFailed", func() {
 			err = errors.New("error")
-		}
+		})
 		if err != nil {
 			return errors.WithStack(err)
 		}

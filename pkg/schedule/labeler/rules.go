@@ -75,11 +75,11 @@ type LabelRulePatch struct {
 }
 
 func (l *RegionLabel) expireBefore(t time.Time) bool {
-	if _, _err_ := failpoint.Eval(_curpkg_("regionLabelExpireSub1Minute")); _err_ == nil {
+	failpoint.Inject("regionLabelExpireSub1Minute", func() {
 		if l.expire != nil {
 			*l.expire = l.expire.Add(-time.Minute)
 		}
-	}
+	})
 	if l.expire == nil {
 		return false
 	}

@@ -38,6 +38,7 @@ const (
 	retryInterval           = 50 * time.Millisecond
 	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
+	trickleReserveDuration  = 1250 * time.Millisecond
 )
 
 type selectType int
@@ -50,7 +51,7 @@ const (
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
-	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, error)
+	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, *rmpb.Consumption, error)
 	// OnResponse is used to consume tokens after receiving response
 	OnResponse(resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, error)
 }
@@ -189,18 +190,18 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		emergencyTokenAcquisitionTicker := time.NewTicker(defaultTargetPeriod)
 		defer emergencyTokenAcquisitionTicker.Stop()
 
-		if _, _err_ := failpoint.Eval(_curpkg_("fastCleanup")); _err_ == nil {
+		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Stop()
 			cleanupTicker = time.NewTicker(100 * time.Millisecond)
 			// because of checking `gc.run.consumption` in cleanupTicker,
 			// so should also change the stateUpdateTicker.
 			stateUpdateTicker.Stop()
 			stateUpdateTicker = time.NewTicker(200 * time.Millisecond)
-		}
-		if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+		})
+		failpoint.Inject("acceleratedReportingPeriod", func() {
 			stateUpdateTicker.Stop()
 			stateUpdateTicker = time.NewTicker(time.Millisecond * 100)
-		}
+		})
 
 		for {
 			select {
@@ -404,11 +405,11 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 // OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
-) (*rmpb.Consumption, error) {
+) (*rmpb.Consumption, *rmpb.Consumption, error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
 		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
-		return nil, err
+		return nil, nil, err
 	}
 	return gc.onRequestWait(ctx, info)
 }
@@ -440,7 +441,9 @@ type groupCostController struct {
 
 	mu struct {
 		sync.Mutex
-		consumption *rmpb.Consumption
+		consumption   *rmpb.Consumption
+		storeCounter  map[uint64]*rmpb.Consumption
+		globalCounter *rmpb.Consumption
 	}
 
 	// fast path to make once token limit with un-limit burst.
@@ -548,6 +551,8 @@ func newGroupCostController(
 	}
 
 	gc.mu.consumption = &rmpb.Consumption{}
+	gc.mu.storeCounter = make(map[uint64]*rmpb.Consumption)
+	gc.mu.globalCounter = &rmpb.Consumption{}
 	return gc, nil
 }
 
@@ -734,18 +739,18 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+	failpoint.Inject("acceleratedReportingPeriod", func() {
 		deltaDuration = 100 * time.Millisecond
-	}
+	})
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedSpeedTrend")); _err_ == nil {
+	failpoint.Inject("acceleratedSpeedTrend", func() {
 		if delta > 0 {
 			counter.avgRUPerSec = 1000
 		} else {
 			counter.avgRUPerSec = 0
 		}
-	}
+	})
 	counter.avgLastTime = gc.run.now
 	counter.avgRUPerSecLastRU = new
 	return true
@@ -756,10 +761,13 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 		return true
 	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+	failpoint.Inject("acceleratedReportingPeriod", func() {
 		timeSinceLastRequest = extendedReportingPeriodFactor * defaultTargetPeriod
-	}
-	if timeSinceLastRequest >= defaultTargetPeriod {
+	})
+	// Due to `gc.run.lastRequestTime` update operations late in this logic,
+	// so `timeSinceLastRequest` is less than defaultGroupStateUpdateInterval a little bit, lead to actual report period is greater than defaultTargetPeriod.
+	// Add defaultGroupStateUpdateInterval/2 as duration buffer to avoid it.
+	if timeSinceLastRequest+defaultGroupStateUpdateInterval/2 >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
 		}
@@ -825,9 +833,9 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		fillRate := counter.getTokenBucketFunc().Settings.FillRate
 		cfg.NewBurst = int64(fillRate)
 		cfg.NewRate = float64(fillRate)
-		if _, _err_ := failpoint.Eval(_curpkg_("degradedModeRU")); _err_ == nil {
+		failpoint.Inject("degradedModeRU", func() {
 			cfg.NewRate = 99999999
-		}
+		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("resource group", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
 	}
@@ -878,9 +886,9 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		deadline := gc.run.now.Add(trickleDuration)
 		cfg.NewRate = float64(bucket.GetSettings().FillRate) + granted/trickleDuration.Seconds()
 
-		timerDuration := trickleDuration - time.Second
+		timerDuration := trickleDuration - trickleReserveDuration
 		if timerDuration <= 0 {
-			timerDuration = (trickleDuration + time.Second) / 2
+			timerDuration = (trickleDuration + trickleReserveDuration) / 2
 		}
 		counter.notify.mu.Lock()
 		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
@@ -991,14 +999,16 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 
 func (gc *groupCostController) onRequestWait(
 	ctx context.Context, info RequestInfo,
-) (*rmpb.Consumption, error) {
+) (*rmpb.Consumption, *rmpb.Consumption, error) {
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
+
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
+
 	if !gc.burstable.Load() {
 		var err error
 		now := time.Now()
@@ -1036,12 +1046,27 @@ func (gc *groupCostController) onRequestWait(
 			gc.mu.Lock()
 			sub(gc.mu.consumption, delta)
 			gc.mu.Unlock()
-			return nil, err
+			return nil, nil, err
 		} else {
 			gc.successfulRequestDuration.Observe(d.Seconds())
 		}
 	}
-	return delta, nil
+
+	gc.mu.Lock()
+	// Calculate the penalty of the store
+	penalty := &rmpb.Consumption{}
+	if storeCounter, exist := gc.mu.storeCounter[info.StoreID()]; exist {
+		*penalty = *gc.mu.globalCounter
+		sub(penalty, storeCounter)
+	} else {
+		gc.mu.storeCounter[info.StoreID()] = &rmpb.Consumption{}
+	}
+	// More accurately, it should be reset when the request succeed. But it would cause all concurrent requests piggyback large delta which inflates penalty.
+	// So here resets it directly as failure is rare.
+	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
+	gc.mu.Unlock()
+
+	return delta, penalty, nil
 }
 
 func (gc *groupCostController) onResponse(
@@ -1067,9 +1092,21 @@ func (gc *groupCostController) onResponse(
 			}
 		}
 	}
+
 	gc.mu.Lock()
+	// Record the consumption of the request
 	add(gc.mu.consumption, delta)
+	// Record the consumption of the request by store
+	count := &rmpb.Consumption{}
+	*count = *delta
+	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
+	for _, calc := range gc.calculators {
+		calc.BeforeKVRequest(count, req)
+	}
+	add(gc.mu.storeCounter[req.StoreID()], count)
+	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
+
 	return delta, nil
 }
 

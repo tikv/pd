@@ -97,7 +97,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 	kvCalculator := gc.getKVCalculator()
 	for idx, testCase := range testCases {
 		caseNum := fmt.Sprintf("case %d", idx)
-		consumption, err := gc.onRequestWait(context.TODO(), testCase.req)
+		consumption, _, err := gc.onRequestWait(context.TODO(), testCase.req)
 		re.NoError(err, caseNum)
 		expectedConsumption := &rmpb.Consumption{}
 		if testCase.req.IsWrite() {

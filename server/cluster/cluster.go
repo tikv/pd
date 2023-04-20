@@ -96,7 +96,7 @@ const (
 	preparingAction         = "preparing"
 	gcTunerCheckCfgInterval = 10 * time.Second
 
-	// minTolerateDurationSec is the minimum duration that a store can tolerate.
+	// minSnapshotDurationSec is the minimum duration that a store can tolerate.
 	// It should enlarge the limiter if the snapshot's duration is less than this value.
 	minSnapshotDurationSec = 5
 )
@@ -499,9 +499,9 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
-	if _, _err_ := failpoint.Eval(_curpkg_("highFrequencyClusterJobs")); _err_ == nil {
+	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker = time.NewTicker(time.Microsecond)
-	}
+	})
 
 	defer ticker.Stop()
 
@@ -523,9 +523,9 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
-	if _, _err_ := failpoint.Eval(_curpkg_("highFrequencyClusterJobs")); _err_ == nil {
+	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker = time.NewTicker(2 * time.Second)
-	}
+	})
 	defer ticker.Stop()
 
 	for {
@@ -854,14 +854,14 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
-	var op core.StoreCreateOption
+	var opt core.StoreCreateOption
 	if limit == nil || limit.Version() != version {
 		if version == storelimit.VersionV2 {
 			limit = storelimit.NewSlidingWindows()
 		} else {
 			limit = storelimit.NewStoreRateLimit(0.0)
 		}
-		op = core.SetStoreLimit(limit)
+		opt = core.SetStoreLimit(limit)
 	}
 
 	nowTime := time.Now()
@@ -869,12 +869,12 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
 	if needAwaken, slowStoreIDs := c.NeedAwakenAllRegionsInStore(storeID); needAwaken {
 		log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
-		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime), op)
+		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime), opt)
 		resp.AwakenRegions = &pdpb.AwakenRegions{
 			AbnormalStores: slowStoreIDs,
 		}
 	} else {
-		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), op)
+		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), opt)
 	}
 
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
@@ -936,12 +936,20 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
 	for _, stat := range stats.GetSnapshotStats() {
-		// the duration of snapshot is the sum between the send and generate snapshot.
+		// the duration of snapshot is the sum between to send and generate snapshot.
 		// notice: to enlarge the limit in time, we reset the executing duration when it less than the minSnapshotDurationSec.
 		dur := stat.GetSendDurationSec() + stat.GetGenerateDurationSec()
 		if dur < minSnapshotDurationSec {
 			dur = minSnapshotDurationSec
 		}
+		// This error is the diff between the executing duration and the waiting duration.
+		// The waiting duration is the total duration minus the executing duration.
+		// so e=waiting_duration-executing_duration=total_duration-executing_duration-executing_duration=total_duration-2*executing_duration
+		// Eg: the total duration is 20s, the executing duration is 10s, the error is 0s.
+		// Eg: the total duration is 20s, the executing duration is 8s, the error is -4s.
+		// Eg: the total duration is 10s, the executing duration is 12s, the error is 4s.
+		// if error is positive, it means the mot time cost in executing, pd should send more snapshot to this tikv.
+		// if error is negative, it means the most time cost in waiting, pd should send less snapshot to this tikv.
 		e := int64(dur)*2 - int64(stat.GetTotalDurationSec())
 		store.Feedback(float64(e))
 	}
@@ -968,9 +976,9 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 			versionNotMatchCounter.Inc()
 			return nil
 		}
-		if _, _err_ := failpoint.Eval(_curpkg_("concurrentBucketHeartbeat")); _err_ == nil {
+		failpoint.Inject("concurrentBucketHeartbeat", func() {
 			time.Sleep(500 * time.Millisecond)
-		}
+		})
 		if ok := region.UpdateBuckets(buckets, old); ok {
 			return nil
 		}
@@ -1018,15 +1026,15 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		return nil
 	}
 
-	if _, _err_ := failpoint.Eval(_curpkg_("concurrentRegionHeartbeat")); _err_ == nil {
+	failpoint.Inject("concurrentRegionHeartbeat", func() {
 		time.Sleep(500 * time.Millisecond)
-	}
+	})
 
 	var overlaps []*core.RegionInfo
 	if saveCache {
-		if _, _err_ := failpoint.Eval(_curpkg_("decEpoch")); _err_ == nil {
+		failpoint.Inject("decEpoch", func() {
 			region = region.Clone(core.SetRegionConfVer(2), core.SetRegionVersion(2))
-		}
+		})
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
@@ -2194,9 +2202,9 @@ func (c *RaftCluster) onStoreVersionChangeLocked() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	if _, _err_ := failpoint.Eval(_curpkg_("versionChangeConcurrency")); _err_ == nil {
+	failpoint.Inject("versionChangeConcurrency", func() {
 		time.Sleep(500 * time.Millisecond)
-	}
+	})
 	if minVersion == nil || clusterVersion.Equal(*minVersion) {
 		return
 	}

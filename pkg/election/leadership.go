@@ -186,7 +186,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// In this case, use the compact revision to re-watch the key.
 	for {
-		failpoint.Eval(_curpkg_("delayWatcher"))
+		failpoint.Inject("delayWatcher", nil)
 		rch := watcher.Watch(ctx, ls.leaderKey, clientv3.WithRev(revision))
 		for wresp := range rch {
 			// meet compacted error, use the compact revision.

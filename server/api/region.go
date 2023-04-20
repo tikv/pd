@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
@@ -290,12 +291,12 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 			}
 		}
 	}
-	if val, _err_ := failpoint.Eval(_curpkg_("mockPending")); _err_ == nil {
+	failpoint.Inject("mockPending", func(val failpoint.Value) {
 		aok, ok := val.(bool)
 		if ok && aok {
 			state = "PENDING"
 		}
-	}
+	})
 	h.rd.JSON(w, http.StatusOK, state)
 }
 
@@ -836,6 +837,61 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
 }
 
+// @Tags     region
+// @Summary  Accelerate regions scheduling in given ranges, only receive hex format for keys
+// @Accept   json
+// @Param    body   body   object   true   "json params"
+// @Param    limit  query  integer  false  "Limit count"  default(256)
+// @Produce  json
+// @Success  200  {string}  string  "Accelerate regions scheduling in given ranges [startKey1, endKey1), [startKey2, endKey2), ..."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/accelerate-schedule/batch [post]
+func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	var input []map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	limit := 256
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+	var msgBuilder strings.Builder
+	msgBuilder.Grow(128)
+	msgBuilder.WriteString("Accelerate regions scheduling in given ranges: ")
+	var regions []*core.RegionInfo
+	for _, rg := range input {
+		startKey, rawStartKey, err := apiutil.ParseKey("start_key", rg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		endKey, rawEndKey, err := apiutil.ParseKey("end_key", rg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		regions = append(regions, rc.ScanRegions(startKey, endKey, limit)...)
+		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
+	}
+	if len(regions) > 0 {
+		regionsIDList := make([]uint64, 0, len(regions))
+		for _, region := range regions {
+			regionsIDList = append(regionsIDList, region.GetID())
+		}
+		rc.AddSuspectRegions(regionsIDList...)
+	}
+	h.rd.Text(w, http.StatusOK, msgBuilder.String())
+}
+
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
 	rc := getCluster(r)
 	limit := defaultRegionLimit
@@ -973,13 +1029,13 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 	percentage, newRegionsID := rc.GetRegionSplitter().SplitRegions(r.Context(), splitKeys, retryLimit)
 	s.ProcessedPercentage = percentage
 	s.NewRegionsID = newRegionsID
-	if val, _err_ := failpoint.Eval(_curpkg_("splitResponses")); _err_ == nil {
+	failpoint.Inject("splitResponses", func(val failpoint.Value) {
 		rawID, ok := val.(int)
 		if ok {
 			s.ProcessedPercentage = 100
 			s.NewRegionsID = []uint64{uint64(rawID)}
 		}
-	}
+	})
 	h.rd.JSON(w, http.StatusOK, &s)
 }
 

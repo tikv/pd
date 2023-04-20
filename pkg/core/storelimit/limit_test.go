@@ -118,12 +118,13 @@ func TestFeedback(t *testing.T) {
 	re := require.New(t)
 	type SnapshotStats struct {
 		total     float64
-		Remaining int64
-		Start     time.Time
+		remaining int64
+		size      int64
+		start     time.Time
 	}
-	// region size is 10GB,snapshot write limit is 100MB/s
+	// region size is 10GB, snapshot write limit is 100MB/s and the snapshot concurrency is 3.
 	// the best strategy is that the tikv executing queue equals the wait.
-	regionSize, limit, wait := int64(10000), int64(100), int64(3)
+	regionSize, limit, wait := int64(10000), int64(100), int64(4)
 	iter := 100
 	ops := make(chan int64, 10)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -133,8 +134,8 @@ func TestFeedback(t *testing.T) {
 		for {
 			if s.Available(regionSize, SendSnapshot, constant.Low) && iter > 0 {
 				iter--
-				s.Take(regionSize, SendSnapshot, constant.Low)
 				size := regionSize - rand.Int63n(regionSize/10)
+				s.Take(size, SendSnapshot, constant.Low)
 				ops <- size
 			}
 			if iter == 0 {
@@ -146,15 +147,18 @@ func TestFeedback(t *testing.T) {
 
 	// receive the operator
 	queue := list.List{}
-	ticker := time.NewTicker(time.Millisecond)
+	tick := time.Microsecond * 100
+	speed := time.Second / tick
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	for {
 		select {
 		case op := <-ops:
 			stats := &SnapshotStats{
 				total:     float64(op / limit),
-				Remaining: op,
-				Start:     time.Now(),
+				remaining: op,
+				size:      op,
+				start:     time.Now(),
 			}
 			queue.PushBack(stats)
 		case <-ctx.Done():
@@ -165,11 +169,11 @@ func TestFeedback(t *testing.T) {
 				continue
 			}
 			stats := first.Value.(*SnapshotStats)
-			if stats.Remaining > 0 {
-				stats.Remaining -= limit
+			if stats.remaining > 0 {
+				stats.remaining -= limit
 				continue
 			}
-			cost := time.Since(stats.Start).Seconds() * 1000
+			cost := time.Since(stats.start).Seconds() * float64(speed)
 			exec := stats.total
 			if exec < 5 {
 				exec = 5
@@ -178,12 +182,10 @@ func TestFeedback(t *testing.T) {
 			queue.Remove(first)
 			s.Feedback(err)
 			if iter < 5 {
-				re.Greater(float64(s.GetCap()), float64(regionSize*(wait-1))*0.9)
+				re.Greater(float64(s.GetCap()), float64(regionSize*(wait-2)))
 				re.Less(float64(s.GetCap()), float64(regionSize*wait))
 			}
-			s.Ack(regionSize, SendSnapshot)
+			s.Ack(stats.size, SendSnapshot)
 		}
 	}
-
-	<-ctx.Done()
 }
