@@ -37,25 +37,26 @@ var (
 			Help:      "Indicate the resource manager server info, and the value is the start timestamp (s).",
 		}, []string{"version", "hash"})
 	// RU cost metrics.
+	// `sum` is added to the name to maintain compatibility with the previous use of histogram.
 	readRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
-			Name:      "read_request_unit",
+			Name:      "read_request_unit_sum",
 			Help:      "Counter of the read request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
 	writeRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
-			Name:      "write_request_unit",
+			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
 	sqlLayerRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
-			Name:      "sql_layer_request_unit",
+			Name:      "sql_layer_request_unit_sum",
 			Help:      "The number of the sql layer request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
 
@@ -64,28 +65,28 @@ var (
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
-			Name:      "read_byte",
+			Name:      "read_byte_sum",
 			Help:      "Counter of the read byte cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
 	writeByteCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
-			Name:      "write_byte",
+			Name:      "write_byte_sum",
 			Help:      "Counter of the write byte cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
 	kvCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
-			Name:      "kv_cpu_time_ms",
+			Name:      "kv_cpu_time_ms_sum",
 			Help:      "Counter of the KV CPU time cost in milliseconds for all resource groups.",
 		}, []string{resourceGroupNameLabel})
 	sqlCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
-			Name:      "sql_cpu_time_ms",
+			Name:      "sql_cpu_time_ms_sum",
 			Help:      "Counter of the SQL CPU time cost in milliseconds for all resource groups.",
 		}, []string{resourceGroupNameLabel})
 	requestCount = prometheus.NewCounterVec(
