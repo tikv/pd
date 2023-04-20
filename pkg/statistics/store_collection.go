@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/server/config"
 )
@@ -117,7 +118,8 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		cap := limit.GetCap()
 		storeStatusGauge.WithLabelValues(storeAddress, id, "windows_size").Set(float64(cap))
 		for i, use := range limit.GetUsed() {
-			storeStatusGauge.WithLabelValues(storeAddress, id, "windows_used_level_"+strconv.Itoa(i)).Set(float64(use))
+			priority := constant.PriorityLevel(i).String()
+			storeStatusGauge.WithLabelValues(storeAddress, id, "windows_used_level_"+priority).Set(float64(use))
 		}
 	}
 
