@@ -114,7 +114,6 @@ func TestWindow(t *testing.T) {
 }
 
 func TestFeedback(t *testing.T) {
-	t.Parallel()
 	s := NewSlidingWindows()
 	re := require.New(t)
 	type SnapshotStats struct {
