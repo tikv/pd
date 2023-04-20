@@ -76,6 +76,8 @@ type GroupManager struct {
 	// TODO: add user kind with different balancer
 	// when we ensure where the correspondence between tso node and user kind will be found
 	nodesBalancer balancer.Balancer[string]
+	// serviceRegistryMap stores the mapping from the service registry key to the service address.
+	serviceRegistryMap map[string]string
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
@@ -131,6 +133,7 @@ func (m *GroupManager) Bootstrap() error {
 	// If the etcd client is not nil, start the watch loop.
 	if m.client != nil {
 		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
+		m.serviceRegistryMap = make(map[string]string)
 		m.wg.Add(1)
 		go m.startWatchLoop()
 	}
@@ -169,6 +172,7 @@ func (m *GroupManager) startWatchLoop() {
 					continue
 				}
 				m.nodesBalancer.Put(s.ServiceAddr)
+				m.serviceRegistryMap[string(item.Key)] = s.ServiceAddr
 			}
 			break
 		}
@@ -219,17 +223,28 @@ func (m *GroupManager) watchServiceAddrs(ctx context.Context, revision int64) (i
 				return revision, wresp.Err()
 			}
 			for _, event := range wresp.Events {
-				s := &discovery.ServiceRegistryEntry{}
-				if err := json.Unmarshal(event.Kv.Value, s); err != nil {
-					log.Warn("failed to unmarshal service registry entry", zap.Error(err))
-				}
 				switch event.Type {
 				case clientv3.EventTypePut:
+					s := &discovery.ServiceRegistryEntry{}
+					if err := json.Unmarshal(event.Kv.Value, s); err != nil {
+						log.Warn("failed to unmarshal service registry entry",
+							zap.String("event-kv-key", string(event.Kv.Key)), zap.Error(err))
+						break
+					}
 					m.nodesBalancer.Put(s.ServiceAddr)
+					m.serviceRegistryMap[string(event.Kv.Key)] = s.ServiceAddr
 				case clientv3.EventTypeDelete:
-					m.nodesBalancer.Delete(s.ServiceAddr)
+					key := string(event.Kv.Key)
+					if serviceAddr, ok := m.serviceRegistryMap[key]; ok {
+						delete(m.serviceRegistryMap, key)
+						m.nodesBalancer.Delete(serviceAddr)
+					} else {
+						log.Warn("can't retrieve service addr from service registry map",
+							zap.String("event-kv-key", key))
+					}
 				}
 			}
+			revision = wresp.Header.Revision + 1
 		}
 	}
 }

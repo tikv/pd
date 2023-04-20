@@ -126,7 +126,7 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 	}}
 
 	MustCreateKeyspaceGroup(re, suite.server, kgs)
-	resp := sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	resp := MustLoadKeyspaceGroups(re, suite.server, "0", "0")
 	re.Len(resp, 3)
 }
 
@@ -141,13 +141,13 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	}}
 
 	MustCreateKeyspaceGroup(re, suite.server, kgs)
-	resp := sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	resp := MustLoadKeyspaceGroups(re, suite.server, "0", "0")
 	re.Len(resp, 2)
 	MustSplitKeyspaceGroup(re, suite.server, 1, &handlers.SplitKeyspaceGroupByIDParams{
 		NewID:     uint32(2),
 		Keyspaces: []uint32{111, 222},
 	})
-	resp = sendLoadKeyspaceGroupRequest(re, suite.server, "0", "0")
+	resp = MustLoadKeyspaceGroups(re, suite.server, "0", "0")
 	re.Len(resp, 3)
 	// Check keyspace group 1.
 	kg1 := MustLoadKeyspaceGroupByID(re, suite.server, 1)

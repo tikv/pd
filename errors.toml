@@ -481,6 +481,11 @@ error = '''
 init file log error, %s
 '''
 
+["PD:member:ErrCheckCampaign"]
+error = '''
+check campaign failed
+'''
+
 ["PD:member:ErrEtcdLeaderNotFound"]
 error = '''
 etcd leader not found
@@ -489,11 +494,6 @@ etcd leader not found
 ["PD:member:ErrMarshalLeader"]
 error = '''
 marshal leader failed
-'''
-
-["PD:member:ErrPreCheckCampaign"]
-error = '''
-pre-check campaign failed
 '''
 
 ["PD:netstat:ErrNetstatTCPSocks"]
