@@ -117,10 +117,10 @@ func TestFeedback(t *testing.T) {
 	s := NewSlidingWindows()
 	re := require.New(t)
 	type SnapshotStats struct {
-		total     float64
+		total     int64
 		remaining int64
 		size      int64
-		start     time.Time
+		start     int64
 	}
 	// region size is 10GB, snapshot write limit is 100MB/s and the snapshot concurrency is 3.
 	// the best strategy is that the tikv executing queue equals the wait.
@@ -147,23 +147,26 @@ func TestFeedback(t *testing.T) {
 
 	// receive the operator
 	queue := list.List{}
-	tick := time.Microsecond * 100
-	speed := time.Second / tick
-	ticker := time.NewTicker(tick)
+	interval := time.Microsecond * 100
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+
+	// tick is the time that the snapshot has been executed.
+	tick := int64(0)
 	for {
 		select {
 		case op := <-ops:
 			stats := &SnapshotStats{
-				total:     float64(op / limit),
+				total:     op / limit,
 				remaining: op,
 				size:      op,
-				start:     time.Now(),
+				start:     tick,
 			}
 			queue.PushBack(stats)
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			tick++
 			first := queue.Front()
 			if first == nil {
 				continue
@@ -173,14 +176,14 @@ func TestFeedback(t *testing.T) {
 				stats.remaining -= limit
 				continue
 			}
-			cost := time.Since(stats.start).Seconds() * float64(speed)
+			cost := tick - stats.start
 			exec := stats.total
 			if exec < 5 {
 				exec = 5
 			}
-			err := exec*float64(wait) - cost
+			err := exec*wait - cost
 			queue.Remove(first)
-			s.Feedback(err)
+			s.Feedback(float64(err))
 			if iter < 5 {
 				re.Greater(float64(s.GetCap()), float64(regionSize*(wait-2)))
 				re.Less(float64(s.GetCap()), float64(regionSize*wait))

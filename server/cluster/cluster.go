@@ -948,7 +948,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		// Eg: the total duration is 20s, the executing duration is 10s, the error is 0s.
 		// Eg: the total duration is 20s, the executing duration is 8s, the error is -4s.
 		// Eg: the total duration is 10s, the executing duration is 12s, the error is 4s.
-		// if error is positive, it means the mot time cost in executing, pd should send more snapshot to this tikv.
+		// if error is positive, it means the most time cost in executing, pd should send more snapshot to this tikv.
 		// if error is negative, it means the most time cost in waiting, pd should send less snapshot to this tikv.
 		e := int64(dur)*2 - int64(stat.GetTotalDurationSec())
 		store.Feedback(float64(e))
