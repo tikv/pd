@@ -944,7 +944,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		}
 		// This error is the diff between the executing duration and the waiting duration.
 		// The waiting duration is the total duration minus the executing duration.
-		// so e=waiting_duration-executing_duration=total_duration-executing_duration-executing_duration=total_duration-2*executing_duration
+		// so e=executing_duration-waiting_duration=executing_duration-(total_duration-executing_duration)=2*executing_duration-total_duration
 		// Eg: the total duration is 20s, the executing duration is 10s, the error is 0s.
 		// Eg: the total duration is 20s, the executing duration is 8s, the error is -4s.
 		// Eg: the total duration is 10s, the executing duration is 12s, the error is 4s.
