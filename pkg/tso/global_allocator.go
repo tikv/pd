@@ -507,7 +507,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		if errors.Is(err, errs.ErrEtcdTxnConflict) {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
 				zap.String("campaign-tso-primary-name", gta.member.Name()))
-		} else if errors.Is(err, errs.ErrPreCheckCampaign) {
+		} else if errors.Is(err, errs.ErrCheckCampaign) {
 			log.Info("campaign tso primary meets error due to pre-check campaign failed, the tso keyspace group may be in split",
 				zap.String("campaign-tso-primary-name", gta.member.Name()))
 		} else {

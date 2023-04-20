@@ -18,6 +18,7 @@ import (
 	"context"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -106,6 +107,9 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	endpoints, err = discovery.Discover(client, suite.clusterID, serviceName)
 	re.NoError(err)
 	re.Empty(endpoints)
+	testutil.Eventually(re, func() bool {
+		return !s.IsServing()
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 }
 
 func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
