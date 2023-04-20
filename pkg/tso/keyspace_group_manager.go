@@ -349,7 +349,13 @@ func (kgm *KeyspaceGroupManager) initAssignment(
 			}
 
 			if group.ID == mcsutils.DefaultKeyspaceGroupID {
-				defaultKGConfigured = true
+				if len(group.Members) > 0 {
+					defaultKGConfigured = true
+				} else {
+					log.Warn("We configured the default keyspace group but no members/distribution specified. " + 
+						"Ingore it for now and fallback to the way of every tso node/pod owning a replica")
+					continue
+				}
 			}
 
 			kgm.updateKeyspaceGroup(group)
@@ -514,12 +520,6 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 }
 
 func (kgm *KeyspaceGroupManager) isAssignedToMe(group *endpoint.KeyspaceGroup) bool {
-	// If the default keyspace group isn't assigned to any tso node/pod, assign it to everyone.
-	if group.ID == mcsutils.DefaultKeyspaceGroupID && len(group.Members) == 0 {
-		group.Members = []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}}
-		return true
-	}
-
 	for _, member := range group.Members {
 		if member.Address == kgm.tsoServiceID.ServiceAddr {
 			return true
