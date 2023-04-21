@@ -349,13 +349,7 @@ func (kgm *KeyspaceGroupManager) initAssignment(
 			}
 
 			if group.ID == mcsutils.DefaultKeyspaceGroupID {
-				if len(group.Members) > 0 {
-					defaultKGConfigured = true
-				} else {
-					log.Warn("configured the default keyspace group but no members/distribution specified. " +
-						"ignore it for now and fallback to the way of every tso node/pod owning a replica")
-					continue
-				}
+				defaultKGConfigured = true
 			}
 
 			kgm.updateKeyspaceGroup(group)
@@ -536,6 +530,14 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		return
 	}
 
+	// If the default keyspace group isn't assigned to any tso node/pod, assign it to everyone.
+	if group.ID == mcsutils.DefaultKeyspaceGroupID && len(group.Members) == 0 {
+		log.Warn("configured the default keyspace group but no members/distribution specified. " +
+			"ignore it for now and fallback to the way of every tso node/pod owning a replica")
+		// TODO: fill members with all tso nodes/pods.
+		group.Members = []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}}
+	}
+
 	if !kgm.isAssignedToMe(group) {
 		// Not assigned to me. If this host/pod owns a replica of this keyspace group,
 		// it should resign the election membership now.
@@ -543,7 +545,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		return
 	}
 
-	// If the keyspace group is already initialized, just update the meta.
+	// If this host is already assigned a replica of this keyspace group, that is to is already initialized, just update the meta.
 	if oldAM, oldGroup := kgm.getKeyspaceGroupMeta(group.ID); oldAM != nil {
 		log.Info("keyspace group already initialized, so update meta only",
 			zap.Uint32("keyspace-group-id", group.ID))
