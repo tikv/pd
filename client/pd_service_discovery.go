@@ -328,9 +328,9 @@ func (c *pdServiceDiscovery) GetServiceURLs() []string {
 	return c.urls.Load().([]string)
 }
 
-// Clear all failures since we only count consecutive failures returns the grpc
-// client connection of the serving endpoint which is the leader in a quorum-based
-// cluster or the primary in a primary/secondary configured cluster.
+// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
+// which is the leader in a quorum-based cluster or the primary in a primary/secondary
+// configured cluster.
 func (c *pdServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	if cc, ok := c.clientConns.Load(c.getLeaderAddr()); ok {
 		return cc.(*grpc.ClientConn)

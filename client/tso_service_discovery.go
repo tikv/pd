@@ -89,8 +89,8 @@ func (k *keyspaceGroupSvcDiscovery) update(
 }
 
 func (k *keyspaceGroupSvcDiscovery) getServer() string {
-	k.RLock()
-	defer k.RUnlock()
+	k.Lock()
+	defer k.Unlock()
 	// If we have tried all the serving addresses for this keyspace group, we should
 	// return an empty address and let the caller to try other tso servers.
 	if len(k.addrs) == 0 || k.failureCount >= len(k.addrs) {
