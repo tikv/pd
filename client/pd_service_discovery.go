@@ -188,7 +188,7 @@ func (c *pdServiceDiscovery) Init() error {
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
 	if err := c.checkServiceModeChanged(); err != nil {
-		return err
+		log.Warn("[pd] failed to check service mode. will check later", zap.Error(err))
 	}
 
 	c.wg.Add(2)
@@ -258,6 +258,7 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 		if err := c.checkServiceModeChanged(); err != nil {
 			log.Error("[pd] failed to update service mode",
 				zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
+			c.checkServiceModeChanged() // check if the leader changed
 		}
 	}
 }
@@ -294,9 +295,7 @@ func (c *pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
 }
 
 // DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
-func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) []string {
-	var urls []string
-
+func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) (urls []string) {
 	switch svcType {
 	case apiService:
 		urls = c.GetServiceURLs()
@@ -313,7 +312,6 @@ func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) []string 
 			urls = clusterInfo.TsoUrls
 		} else {
 			log.Error("[pd] failed to get leader addr")
-			c.CheckMemberChanged()
 		}
 	default:
 		panic("invalid service type")
@@ -447,27 +445,23 @@ func (c *pdServiceDiscovery) initClusterID() error {
 
 func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 	leaderAddr := c.getLeaderAddr()
-	if len(leaderAddr) > 0 {
-		clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
-		// If the method is not supported, we set it to pd mode.
-		if err != nil {
-			// TODO: it's a hack way to solve the compatibility issue.
-			// we need to remove this after all maintained version supports the method.
-			if strings.Contains(err.Error(), "Unimplemented") {
-				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
-			} else {
-				log.Warn("[pd] failed to get cluster info for the leader",
-					zap.String("leader-addr", leaderAddr), errs.ZapError(err))
-				c.CheckMemberChanged() // check if the leader is changed
-			}
-			return err
-		}
-		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
-	} else {
-		log.Warn("[pd] no leader found")
-		c.CheckMemberChanged() // check if the leader is changed
+	if len(leaderAddr) == 0 {
 		return errors.New("no leader found")
 	}
+
+	clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
+	if err != nil {
+		if strings.Contains(err.Error(), "Unimplemented") {
+			// If the method is not supported, we set it to pd mode.
+			// TODO: it's a hack way to solve the compatibility issue.
+			// we need to remove this after all maintained version supports the method.
+			c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+			return nil
+		}
+		return err
+	}
+
+	c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
 	return nil
 }
 
