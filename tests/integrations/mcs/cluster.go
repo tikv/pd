@@ -91,6 +91,11 @@ func (tc *TestTSOCluster) DestroyServer(addr string) {
 	delete(tc.servers, addr)
 }
 
+// ResignPrimary resigns the primary TSO server.
+func (tc *TestTSOCluster) ResignPrimary() {
+	tc.GetPrimary(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID).ResignPrimary()
+}
+
 // GetPrimary returns the primary TSO server.
 func (tc *TestTSOCluster) GetPrimary(keyspaceID, keyspaceGroupID uint32) *tso.Server {
 	for _, server := range tc.servers {
