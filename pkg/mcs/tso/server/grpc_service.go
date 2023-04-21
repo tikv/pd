@@ -191,10 +191,10 @@ func (s *Service) FindGroupByKeyspaceID(
 	return &tsopb.FindGroupByKeyspaceIDResponse{
 		Header: s.header(keyspaceGroupID),
 		KeyspaceGroup: &tsopb.KeyspaceGroup{
-			Id:        keyspaceGroupID,
-			UserKind:  keyspaceGroup.UserKind,
-			SplitStat: splitState,
-			Members:   members,
+			Id:         keyspaceGroupID,
+			UserKind:   keyspaceGroup.UserKind,
+			SplitState: splitState,
+			Members:    members,
 		},
 	}, nil
 }

@@ -108,9 +108,11 @@ func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoR
 		}, nil
 	}
 
+	var tsoServiceAddrs []string
 	svcModes := make([]pdpb.ServiceMode, 0)
 	if s.IsAPIServiceMode() {
 		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
+		tsoServiceAddrs = s.keyspaceGroupManager.GetTSOServiceAddrs()
 	} else {
 		svcModes = append(svcModes, pdpb.ServiceMode_PD_SVC_MODE)
 	}
@@ -118,6 +120,7 @@ func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoR
 	return &pdpb.GetClusterInfoResponse{
 		Header:       s.header(),
 		ServiceModes: svcModes,
+		TsoUrls:      tsoServiceAddrs,
 	}, nil
 }
 

@@ -352,8 +352,8 @@ func (kgm *KeyspaceGroupManager) initAssignment(
 				if len(group.Members) > 0 {
 					defaultKGConfigured = true
 				} else {
-					log.Warn("We configured the default keyspace group but no members/distribution specified. " + 
-						"Ingore it for now and fallback to the way of every tso node/pod owning a replica")
+					log.Warn("configured the default keyspace group but no members/distribution specified. " +
+						"ignore it for now and fallback to the way of every tso node/pod owning a replica")
 					continue
 				}
 			}

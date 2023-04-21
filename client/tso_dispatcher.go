@@ -619,7 +619,7 @@ func (c *tsoClient) tryConnectToTSO(
 // or of keyspace group primary/secondaries.
 func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 	var (
-		addrs          = c.svcDiscovery.GetURLs()
+		addrs          = c.svcDiscovery.GetServiceURLs()
 		streamBuilders = make(map[string]tsoStreamBuilder, len(addrs))
 		cc             *grpc.ClientConn
 		err            error
