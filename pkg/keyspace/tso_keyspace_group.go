@@ -309,6 +309,9 @@ func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceG
 
 // GetTSOServiceAddrs gets all TSO service addresses.
 func (m *GroupManager) GetTSOServiceAddrs() []string {
+	if m == nil || m.nodesBalancer == nil {
+		return nil
+	}
 	return m.nodesBalancer.GetAll()
 }
 
