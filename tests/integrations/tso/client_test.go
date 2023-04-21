@@ -183,7 +183,8 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 
 	ctx, cancel := context.WithCancel(suite.ctx)
 	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber + 1)
+	checkTSO(ctx, re, &wg, suite.backendEndpoints)
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		n := r.Intn(2) + 1
@@ -196,10 +197,9 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 			re.NoError(err)
 			suite.cluster.WaitLeader()
 		}
+		time.Sleep(time.Duration(n) * time.Second)
 		cancel()
 	}()
-
-	checkTSO(ctx, re, &wg, suite.backendEndpoints)
 	wg.Wait()
 }
 
@@ -210,7 +210,8 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 
 	ctx, cancel := context.WithCancel(suite.ctx)
 	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber + 1)
+	checkTSO(ctx, re, &wg, suite.backendEndpoints)
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		n := r.Intn(2) + 1
@@ -220,10 +221,9 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 		} else {
 			suite.cluster.GetServer(suite.cluster.GetLeader()).GetServer().Close()
 		}
+		time.Sleep(time.Duration(n) * time.Second)
 		cancel()
 	}()
-
-	checkTSO(ctx, re, &wg, suite.backendEndpoints)
 	wg.Wait()
 	suite.TearDownSuite()
 	suite.SetupSuite()
@@ -260,7 +260,8 @@ func TestMixedTSODeployment(t *testing.T) {
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber + 1)
+	checkTSO(ctx1, re, &wg, backendEndpoints)
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 2; i++ {
@@ -271,32 +272,32 @@ func TestMixedTSODeployment(t *testing.T) {
 		}
 		cancel1()
 	}()
-	checkTSO(ctx1, re, &wg, backendEndpoints)
 	wg.Wait()
 }
 
 func checkTSO(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, backendEndpoints string) {
+	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
 			cli := mcs.SetupClientWithKeyspace(ctx, re, strings.Split(backendEndpoints, ","))
 			var ts, lastTS uint64
 			for {
-				physical, logical, err := cli.GetTS(ctx)
-				// omit the error check since there are many kinds of errors
-				if err == nil {
-					ts = tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
-					lastTS = ts
-				}
 				select {
 				case <-ctx.Done():
-					physical, logical, _ := cli.GetTS(ctx)
-					ts = tsoutil.ComposeTS(physical, logical)
-					re.Less(lastTS, ts)
+					// Make sure the lastTS is not empty
+					re.NotEmpty(lastTS)
 					return
 				default:
 				}
+				physical, logical, err := cli.GetTS(ctx)
+				// omit the error check since there are many kinds of errors
+				if err != nil {
+					continue
+				}
+				ts = tsoutil.ComposeTS(physical, logical)
+				re.Less(lastTS, ts)
+				lastTS = ts
 			}
 		}()
 	}
