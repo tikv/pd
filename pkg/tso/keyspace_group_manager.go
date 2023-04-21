@@ -541,7 +541,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	if !kgm.isAssignedToMe(group) {
 		// Not assigned to me. If this host/pod owns a replica of this keyspace group,
 		// it should resign the election membership now.
-		kgm.resignElectionMembership(group)
+		kgm.exitElectionMembership(group)
 		return
 	}
 
@@ -737,9 +737,9 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 	}
 }
 
-// resignElectionMembership resigns the election membership of the given keyspace group by
+// exitElectionMembership exits the election membership of the given keyspace group by
 // deinitializing the allocator manager, but still keeps the keyspace group info.
-func (kgm *KeyspaceGroupManager) resignElectionMembership(group *endpoint.KeyspaceGroup) {
+func (kgm *KeyspaceGroupManager) exitElectionMembership(group *endpoint.KeyspaceGroup) {
 	log.Info("resign election membership", zap.Uint32("keyspace-group-id", group.ID))
 
 	kgm.Lock()
