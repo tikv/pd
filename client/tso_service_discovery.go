@@ -134,6 +134,8 @@ func (t *tsoServerDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
 			return "", errors.New("no tso server address found")
 		}
 
+		log.Info("update tso server addresses", zap.Strings("addrs", addrs))
+
 		t.addrs = addrs
 		t.selectIdx = 0
 		t.failureCount = 0
@@ -233,6 +235,9 @@ func newTSOServiceDiscovery(
 
 // Init initialize the concrete client underlying
 func (c *tsoServiceDiscovery) Init() error {
+	log.Info("initializing tso service discovery",
+		zap.Int("max-retry-times", c.option.maxRetryTimes),
+		zap.Duration("retry-interval", initRetryInterval))
 	if err := c.retry(c.option.maxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 		c.cancel()
 		return err
