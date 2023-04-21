@@ -152,9 +152,8 @@ func TestRuleFitFilter(t *testing.T) {
 
 func TestSendStateFilter(t *testing.T) {
 	re := require.New(t)
-	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SetStoreLimit(storelimit.NewSlidingWindows(1000)))
+	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SetStoreLimit(storelimit.NewSlidingWindows()))
 	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
-
 	snapshotFilter := NewSnapshotSendFilter([]*core.StoreInfo{store}, constant.Medium)
 	re.NotNil(SelectOneRegion([]*core.RegionInfo{region}, nil, snapshotFilter))
 	re.True(store.GetStoreLimit().Take(1000, storelimit.SendSnapshot, constant.Medium))

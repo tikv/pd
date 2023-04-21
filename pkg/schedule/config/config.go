@@ -80,6 +80,7 @@ type Config interface {
 	CheckLabelProperty(string, []*metapb.StoreLabel) bool
 	IsDebugMetricsEnabled() bool
 	GetClusterVersion() *semver.Version
+	GetStoreLimitVersion() string
 	// for test purpose
 	SetPlacementRuleEnabled(bool)
 	SetSplitMergeInterval(time.Duration)

@@ -50,6 +50,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	defer cancel()
 
 	_, opt, err := newTestScheduleConfig()
+	opt.GetScheduleConfig().StoreLimitVersion = "v2"
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 
@@ -84,6 +85,7 @@ func TestStoreHeartbeat(t *testing.T) {
 		s := cluster.GetStore(store.GetID())
 		re.NotEqual(int64(0), s.GetLastHeartbeatTS().UnixNano())
 		re.Equal(req.GetStats(), s.GetStoreStats())
+		re.Equal("v2", cluster.GetStore(1).GetStoreLimit().Version())
 
 		storeMetasAfterHeartbeat = append(storeMetasAfterHeartbeat, s.GetMeta())
 	}
@@ -129,9 +131,11 @@ func TestStoreHeartbeat(t *testing.T) {
 		},
 		PeerStats: []*pdpb.PeerStat{},
 	}
+	cluster.opt.GetScheduleConfig().StoreLimitVersion = "v1"
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+	re.Equal("v1", cluster.GetStore(1).GetStoreLimit().Version())
 	time.Sleep(20 * time.Millisecond)
 	storeStats := cluster.hotStat.RegionStats(statistics.Read, 3)
 	re.Len(storeStats[1], 1)
