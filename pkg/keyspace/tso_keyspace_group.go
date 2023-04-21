@@ -164,7 +164,7 @@ func (m *GroupManager) startWatchLoop() {
 		}
 		resp, err = etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
 		if err == nil {
-			revision = resp.Header.Revision
+			revision = resp.Header.Revision + 1
 			for _, item := range resp.Kvs {
 				s := &discovery.ServiceRegistryEntry{}
 				if err := json.Unmarshal(item.Value, s); err != nil {
