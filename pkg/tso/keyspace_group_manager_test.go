@@ -125,7 +125,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 // TestLoadKeyspaceGroupsAssignment tests the loading of the keyspace group assignment.
 func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsAssignment() {
 	re := suite.Require()
-	maxCountInUse := int(mcsutils.MaxKeyspaceGroupCountInUse)
+	maxCountInUse := 512
 	// Test loading of empty keyspace group assignment.
 	suite.runTestLoadKeyspaceGroupsAssignment(re, 0, 0, 100)
 	// Test loading of single keyspace group assignment.
