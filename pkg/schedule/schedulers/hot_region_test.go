@@ -195,6 +195,7 @@ func newTestRegion(id uint64) *core.RegionInfo {
 func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
+	statistics.HistorySampleDuration = 0
 	statisticsInterval = 0
 	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
 	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
