@@ -62,11 +62,11 @@ func (tc *TestTSOCluster) AddServer(addr string) error {
 	if err != nil {
 		return err
 	}
-	err = initLogger(generatedCfg)
+	err = InitLogger(generatedCfg)
 	if err != nil {
 		return err
 	}
-	server, cleanup, err := newTSOTestServer(tc.ctx, generatedCfg)
+	server, cleanup, err := NewTSOTestServer(tc.ctx, generatedCfg)
 	if err != nil {
 		return err
 	}
