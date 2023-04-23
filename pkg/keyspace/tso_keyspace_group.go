@@ -72,8 +72,6 @@ type GroupManager struct {
 	// tsoServiceEndKey is the end key of TSO service in etcd.
 	tsoServiceEndKey string
 
-	policy balancer.Policy
-
 	// TODO: add user kind with different balancer
 	// when we ensure where the correspondence between tso node and user kind will be found
 	nodesBalancer balancer.Balancer[string]
@@ -162,7 +160,6 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 		}
 		countOfNodes := m.GetNodesCount()
 		if countOfNodes < utils.KeyspaceGroupDefaultReplicaCount {
-			log.Info("the count of nodes is not enough to allocate the default keyspace group", zap.Int("count", countOfNodes))
 			continue
 		}
 		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
