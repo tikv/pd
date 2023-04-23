@@ -258,16 +258,9 @@ func (c *RaftCluster) InitCluster(
 
 // Start starts a cluster.
 func (c *RaftCluster) Start(s Server) error {
-	// This is the most common case, so we use a fast path to avoid the lock.
-	if c.IsRunning() {
-		log.Warn("raft cluster has already been started")
-		return nil
-	}
-
 	c.Lock()
 	defer c.Unlock()
 
-	// Double-check with lock to avoid duplicate start
 	if c.IsRunning() {
 		log.Warn("raft cluster has already been started")
 		return nil
