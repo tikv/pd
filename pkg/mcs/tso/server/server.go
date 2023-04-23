@@ -244,6 +244,17 @@ func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMemb
 	return member, nil
 }
 
+// ResignPrimary resigns the primary of the given keyspace and keyspace group.
+func (s *Server) ResignPrimary() error {
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+	if err != nil {
+		return err
+	}
+	member.ResetLeader()
+	return nil
+}
+
 // AddServiceReadyCallback implements basicserver.
 // It adds callbacks when it's ready for providing tso service.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
@@ -456,7 +467,7 @@ func (s *Server) startServer() (err error) {
 	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
 	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
-		s.serverLoopCtx, s.serviceID, s.etcdClient, s.httpClient, s.listenURL.Host, legacySvcRootPath, tsoSvcRootPath, s.cfg)
+		s.serverLoopCtx, s.serviceID, s.etcdClient, s.httpClient, s.cfg.AdvertiseListenAddr, legacySvcRootPath, tsoSvcRootPath, s.cfg)
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}

@@ -62,11 +62,11 @@ func (tc *TestTSOCluster) AddServer(addr string) error {
 	if err != nil {
 		return err
 	}
-	err = initLogger(generatedCfg)
+	err = InitLogger(generatedCfg)
 	if err != nil {
 		return err
 	}
-	server, cleanup, err := newTSOTestServer(tc.ctx, generatedCfg)
+	server, cleanup, err := NewTSOTestServer(tc.ctx, generatedCfg)
 	if err != nil {
 		return err
 	}
@@ -89,6 +89,11 @@ func (tc *TestTSOCluster) DestroyServer(addr string) {
 	tc.cleanupFuncs[addr]()
 	delete(tc.cleanupFuncs, addr)
 	delete(tc.servers, addr)
+}
+
+// ResignPrimary resigns the primary TSO server.
+func (tc *TestTSOCluster) ResignPrimary() {
+	tc.GetPrimary(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID).ResignPrimary()
 }
 
 // GetPrimary returns the primary TSO server.

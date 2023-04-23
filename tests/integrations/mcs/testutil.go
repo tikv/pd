@@ -34,7 +34,8 @@ import (
 
 var once sync.Once
 
-func initLogger(cfg *tso.Config) (err error) {
+// InitLogger initializes the logger for test.
+func InitLogger(cfg *tso.Config) (err error) {
 	once.Do(func() {
 		// Setup the logger.
 		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
@@ -88,10 +89,10 @@ func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	re.NoError(err)
 
 	// Setup the logger.
-	err = initLogger(cfg)
+	err = InitLogger(cfg)
 	re.NoError(err)
 
-	s, cleanup, err := newTSOTestServer(ctx, cfg)
+	s, cleanup, err := NewTSOTestServer(ctx, cfg)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return !s.IsClosed()
@@ -100,7 +101,8 @@ func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	return s, cleanup
 }
 
-func newTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testutil.CleanupFunc, error) {
+// NewTSOTestServer creates a tso server with given config for testing.
+func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testutil.CleanupFunc, error) {
 	s := tso.CreateServer(ctx, cfg)
 	if err := s.Run(); err != nil {
 		return nil, nil, err
