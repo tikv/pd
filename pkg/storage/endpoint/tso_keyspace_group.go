@@ -60,6 +60,16 @@ func (k UserKind) String() string {
 	return "unknown UserKind"
 }
 
+// IsUserKindValid checks if the user kind is valid.
+func IsUserKindValid(kind string) bool {
+	switch kind {
+	case Basic.String(), Standard.String(), Enterprise.String():
+		return true
+	default:
+		return false
+	}
+}
+
 // KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
 type KeyspaceGroupMember struct {
 	Address string `json:"address"`

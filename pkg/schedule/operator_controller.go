@@ -878,8 +878,9 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
 		return nil
 	}
-
-	limit := s.GetStoreLimit()
-	limit.Reset(ratePerSec, limitType)
-	return limit
+	// The other limits do not need to update by config exclude StoreRateLimit.
+	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok && limit.Rate(limitType) != ratePerSec {
+		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
+	}
+	return s.GetStoreLimit()
 }

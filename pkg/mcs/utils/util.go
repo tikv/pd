@@ -16,11 +16,12 @@ package utils
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -50,8 +51,11 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 }
 
 // PromHandler is a handler to get prometheus metrics.
-func PromHandler(handler http.Handler) gin.HandlerFunc {
+func PromHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		handler.ServeHTTP(c.Writer, c.Request)
+		// register promhttp.HandlerOpts DisableCompression
+		promhttp.InstrumentMetricHandler(prometheus.DefaultRegisterer, promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
+			DisableCompression: true,
+		})).ServeHTTP(c.Writer, c.Request)
 	}
 }
