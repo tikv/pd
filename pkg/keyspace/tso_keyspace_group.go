@@ -36,10 +36,10 @@ import (
 )
 
 const (
-	defaultBalancerPolicy                     = balancer.PolicyRoundRobin
-	allocNodesForDefaultKeyspaceGroupInterval = 1 * time.Second
-	allocNodesTimeout                         = 1 * time.Second
-	allocNodesInterval                        = 10 * time.Millisecond
+	defaultBalancerPolicy              = balancer.PolicyRoundRobin
+	allocNodesToKeyspaceGroupsInterval = 1 * time.Second
+	allocNodesTimeout                  = 1 * time.Second
+	allocNodesInterval                 = 10 * time.Millisecond
 	// TODO: move it to etcdutil
 	watchEtcdChangeRetryInterval = 1 * time.Second
 	maxRetryTimes                = 25
@@ -90,14 +90,14 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 		groups[endpoint.UserKind(i)] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
 	}
 	return &GroupManager{
-		ctx:              ctx,
-		cancel:           cancel,
-		store:            store,
-		client:           client,
-		tsoServiceKey:    key,
-		tsoServiceEndKey: clientv3.GetPrefixRangeEnd(key) + "/",
-		groups:           groups,
-		nodesBalancer:    balancer.GenByPolicy[string](defaultBalancerPolicy),
+		ctx:                ctx,
+		cancel:             cancel,
+		store:              store,
+		client:             client,
+		tsoServiceKey:      key,
+		tsoServiceEndKey:   clientv3.GetPrefixRangeEnd(key) + "/",
+		groups:             groups,
+		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
 		serviceRegistryMap: make(map[string]string),
 	}
 }
@@ -121,7 +121,7 @@ func (m *GroupManager) Bootstrap() error {
 	if m.client != nil {
 		m.wg.Add(2)
 		go m.startWatchLoop()
-		go m.allocDefaultNodesForKeyspaceGroup()
+		go m.allocNodesToAllKeyspaceGroups()
 	}
 
 	// Ignore the error if default keyspace group already exists in the storage (e.g. PD restart/recover).
@@ -148,10 +148,10 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
-func (m *GroupManager) allocDefaultNodesForKeyspaceGroup() {
+func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
-	ticker := time.NewTicker(allocNodesForDefaultKeyspaceGroupInterval)
+	ticker := time.NewTicker(allocNodesToKeyspaceGroupsInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -166,7 +166,7 @@ func (m *GroupManager) allocDefaultNodesForKeyspaceGroup() {
 		}
 		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
 		if err != nil {
-			log.Error("failed to load the default keyspace group", zap.Error(err))
+			log.Error("failed to load the all keyspace group", zap.Error(err))
 			continue
 		}
 		withError := false
@@ -175,10 +175,9 @@ func (m *GroupManager) allocDefaultNodesForKeyspaceGroup() {
 				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, utils.KeyspaceGroupDefaultReplicaCount)
 				if err != nil {
 					withError = true
-					log.Error("failed to alloc default nodes for keyspace group", zap.Error(err))
+					log.Error("failed to alloc nodes for keyspace group", zap.Error(err))
 					continue
 				}
-				log.Info("alloc default nodes for keyspace group", zap.Int("count", len(nodes)))
 				group.Members = nodes
 			}
 		}
@@ -707,6 +706,7 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 	if err != nil {
 		return nil, err
 	}
+	log.Info("alloc nodes for keyspace group", zap.Uint32("id", id), zap.Reflect("nodes", nodes))
 	return nodes, nil
 }
 
