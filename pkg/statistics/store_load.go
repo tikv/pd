@@ -328,13 +328,5 @@ func (s *storeHistoryLoad) add(loads []float64) {
 }
 
 func (s *storeHistoryLoad) get() [][]float64 {
-	if s.count < s.size {
-		loads := make([][]float64, len(s.loads))
-		for i := range s.loads {
-			loads[i] = make([]float64, s.count)
-			copy(loads[i], s.loads[i][:s.count])
-		}
-		return loads
-	}
 	return s.loads
 }

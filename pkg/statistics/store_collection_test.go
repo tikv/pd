@@ -120,29 +120,34 @@ func TestSummaryStoreInfos(t *testing.T) {
 		loads := storeHistoryLoad.Get(storeID, rw, kind)
 		for i := 0; i < len(loads); i++ {
 			for j := 0; j < len(loads[0]); j++ {
-				re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
+				if loads[i][j] != 0 {
+					re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
+				}
 			}
 		}
 	}
 
-	// case 2: put two elements into history load
+	// case 2: put many elements into history load
 	historySampleInterval = 0
 	for i := 1; i < 10; i++ {
 		details = summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
 		expect := []float64{2, 4, 10}
 		for _, detail := range details {
 			loads := detail.LoadPred.Current.HistoryLoads
-			re.Len(loads[0], i)
 			storeID := detail.GetID()
 			for i := 0; i < len(loads); i++ {
 				for j := 0; j < len(loads[0]); j++ {
-					re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
+					if loads[i][j] != 0 {
+						re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
+					}
 				}
 			}
 
 			for i, loads := range detail.LoadPred.Expect.HistoryLoads {
 				for _, load := range loads {
-					re.Equal(load, expect[i])
+					if load != 0 {
+						re.Equal(load, expect[i])
+					}
 				}
 			}
 		}
