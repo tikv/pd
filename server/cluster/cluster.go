@@ -608,9 +608,9 @@ func (c *RaftCluster) Stop() {
 		c.Unlock()
 		return
 	}
+	c.running = false
 	c.coordinator.stop()
 	c.cancel()
-	c.running = false
 	c.Unlock()
 
 	c.wg.Wait()
