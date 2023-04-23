@@ -127,7 +127,7 @@ func TestFeedback(t *testing.T) {
 	// region size is 10GB, snapshot write limit is 100MB/s and the snapshot concurrency is 3.
 	// the best strategy is that the tikv executing queue equals the wait.
 	const regionSize, limit, wait = int64(10000), int64(100), int64(4)
-	var iter atomic.Int32 
+	var iter atomic.Int32
 	iter.Store(100)
 	ops := make(chan int64, 10)
 	ctx, cancel := context.WithCancel(context.Background())
