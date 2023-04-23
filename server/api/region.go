@@ -867,7 +867,7 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter
 	var msgBuilder strings.Builder
 	msgBuilder.Grow(128)
 	msgBuilder.WriteString("Accelerate regions scheduling in given ranges: ")
-	var regions []*core.RegionInfo
+	regionsIDSet := make(map[uint64]struct{})
 	for _, rg := range input {
 		startKey, rawStartKey, err := apiutil.ParseKey("start_key", rg)
 		if err != nil {
@@ -879,13 +879,16 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		regions = append(regions, rc.ScanRegions(startKey, endKey, limit)...)
+		regions := rc.ScanRegions(startKey, endKey, limit)
+		for _, region := range regions {
+			regionsIDSet[region.GetID()] = struct{}{}
+		}
 		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
 	}
-	if len(regions) > 0 {
-		regionsIDList := make([]uint64, 0, len(regions))
-		for _, region := range regions {
-			regionsIDList = append(regionsIDList, region.GetID())
+	if len(regionsIDSet) > 0 {
+		regionsIDList := make([]uint64, 0, len(regionsIDSet))
+		for id := range regionsIDSet {
+			regionsIDList = append(regionsIDList, id)
 		}
 		rc.AddSuspectRegions(regionsIDList...)
 	}
