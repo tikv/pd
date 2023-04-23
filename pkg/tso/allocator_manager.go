@@ -294,7 +294,8 @@ func (am *AllocatorManager) close() {
 	log.Info("closed the allocator manager")
 }
 
-func (am *AllocatorManager) getMember() ElectionMember {
+// GetMember returns the ElectionMember of this AllocatorManager.
+func (am *AllocatorManager) GetMember() ElectionMember {
 	return am.member
 }
 

@@ -33,7 +33,7 @@ func NewOpInfluence() *OpInfluence {
 }
 
 // Add adds another influence.
-func (m OpInfluence) Add(other *OpInfluence) {
+func (m *OpInfluence) Add(other *OpInfluence) {
 	for id, v := range other.StoresInfluence {
 		m.GetStoreInfluence(id).add(v)
 	}

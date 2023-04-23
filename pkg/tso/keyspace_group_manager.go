@@ -415,7 +415,7 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 	}
 
 	if resp.Header != nil {
-		revision = resp.Header.Revision
+		revision = resp.Header.Revision + 1
 	}
 
 	return revision, kgs, resp.More, nil
@@ -485,6 +485,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 						log.Warn("failed to unmarshal keyspace group",
 							zap.Uint32("keyspace-group-id", groupID),
 							zap.Error(errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()))
+						break
 					}
 					kgm.updateKeyspaceGroup(group)
 				case clientv3.EventTypeDelete:
@@ -499,7 +500,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 					}
 				}
 			}
-			revision = wresp.Header.Revision
+			revision = wresp.Header.Revision + 1
 		}
 
 		select {
@@ -574,8 +575,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 				zap.Uint32("source", splitSource))
 			return
 		}
-		participant.SetPreCampaignChecker(func(leadership *election.Leadership) bool {
-			return splitSourceAM.getMember().IsLeader()
+		participant.SetCampaignChecker(func(leadership *election.Leadership) bool {
+			return splitSourceAM.GetMember().IsLeader()
 		})
 	}
 	// Only the default keyspace group uses the legacy service root path for LoadTimestamp/SyncTimestamp.
@@ -672,7 +673,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	}
 	// Check if the split is completed.
 	if oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
-		kgm.ams[groupID].getMember().(*member.Participant).SetPreCampaignChecker(nil)
+		kgm.ams[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
 	}
 	kgm.kgs[groupID] = newGroup
 }
@@ -727,7 +728,7 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(
 	if err != nil {
 		return nil, err
 	}
-	return am.getMember(), nil
+	return am.GetMember(), nil
 }
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
