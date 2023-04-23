@@ -103,7 +103,7 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 }
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
-func (m *GroupManager) Bootstrap() error {
+func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	// Force the membership restriction that the default keyspace must belong to default keyspace group.
 	// Have no information to specify the distribution of the default keyspace group replicas, so just
 	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica
@@ -120,7 +120,7 @@ func (m *GroupManager) Bootstrap() error {
 	// If the etcd client is not nil, start the watch loop.
 	if m.client != nil {
 		m.wg.Add(2)
-		go m.startWatchLoop()
+		go m.startWatchLoop(ctx)
 		go m.allocNodesToAllKeyspaceGroups()
 	}
 
@@ -139,6 +139,7 @@ func (m *GroupManager) Bootstrap() error {
 		userKind := endpoint.StringUserKind(group.UserKind)
 		m.groups[userKind].Put(group)
 	}
+
 	return nil
 }
 
@@ -188,10 +189,10 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 	}
 }
 
-func (m *GroupManager) startWatchLoop() {
+func (m *GroupManager) startWatchLoop(parentCtx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
-	ctx, cancel := context.WithCancel(m.ctx)
+	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 	var (
 		resp     *clientv3.GetResponse
@@ -203,7 +204,7 @@ func (m *GroupManager) startWatchLoop() {
 	for i := 0; i < maxRetryTimes; i++ {
 		resp, err = etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
 		if err == nil {
-			revision = resp.Header.Revision
+			revision = resp.Header.Revision + 1
 			for _, item := range resp.Kvs {
 				s := &discovery.ServiceRegistryEntry{}
 				if err := json.Unmarshal(item.Value, s); err != nil {

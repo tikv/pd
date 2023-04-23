@@ -415,7 +415,7 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 	}
 
 	if resp.Header != nil {
-		revision = resp.Header.Revision
+		revision = resp.Header.Revision + 1
 	}
 
 	return revision, kgs, resp.More, nil

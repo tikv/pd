@@ -136,6 +136,16 @@ func TestConfig(t *testing.T) {
 	re.Equal(20*10000, int(svr.GetScheduleConfig().MaxMergeRegionKeys))
 	re.Equal(20*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
 
+	// set store limit v2
+	args = []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal("v2", svr.GetScheduleConfig().StoreLimitVersion)
+	args = []string{"-u", pdAddr, "config", "set", "store-limit-version", "v1"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal("v1", svr.GetScheduleConfig().StoreLimitVersion)
+
 	// config show replication
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
