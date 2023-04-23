@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package gctuner
 
 import (
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +27,7 @@ var testHeap []byte
 
 func TestTuner(t *testing.T) {
 	EnableGOGCTuner.Store(true)
-	memLimit := uint64(1000 * 1024 * 1024) // 1000 MB
+	memLimit := uint64(1000 * units.MiB) // 1000 MB
 	threshold := memLimit / 2
 	tn := newTuner(threshold)
 	require.Equal(t, threshold, tn.threshold.Load())
@@ -80,7 +82,7 @@ func TestTuner(t *testing.T) {
 }
 
 func TestCalcGCPercent(t *testing.T) {
-	const gb = 1024 * 1024 * 1024
+	const gb = units.GiB
 	// use default value when invalid params
 	require.Equal(t, defaultGCPercent, calcGCPercent(0, 0))
 	require.Equal(t, defaultGCPercent, calcGCPercent(0, 1))
