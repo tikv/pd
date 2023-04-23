@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -134,7 +133,7 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running            atomic.Bool
+	running            bool
 	meta               *metapb.Cluster
 	storeConfigManager *config.StoreConfigManager
 	storage            storage.Storage
@@ -261,7 +260,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.Lock()
 	defer c.Unlock()
 
-	if c.IsRunning() {
+	if c.running {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
@@ -317,7 +316,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 
-	c.running.Store(true)
+	c.running = true
 	return nil
 }
 
@@ -605,26 +604,31 @@ func (c *RaftCluster) runReplicationMode() {
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
 	c.Lock()
-	if !c.running.CompareAndSwap(true, false) {
+	if !c.running {
 		c.Unlock()
 		return
 	}
-
 	c.coordinator.stop()
 	c.cancel()
+	c.running = false
 	c.Unlock()
+
 	c.wg.Wait()
 	log.Info("raftcluster is stopped")
 }
 
 // IsRunning return if the cluster is running.
 func (c *RaftCluster) IsRunning() bool {
-	return c.running.Load()
+	c.RLock()
+	defer c.RUnlock()
+	return c.running
 }
 
 // Context returns the context of RaftCluster.
 func (c *RaftCluster) Context() context.Context {
-	if c.running.Load() {
+	c.RLock()
+	defer c.RUnlock()
+	if c.running {
 		return c.ctx
 	}
 	return nil
