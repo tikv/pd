@@ -123,6 +123,32 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}
 }
 
+func (suite *tsoServerTestSuite) TestPariticipantStartWithAdvertiseListenAddr() {
+	re := suite.Require()
+
+	cfg := tso.NewConfig()
+	cfg.BackendEndpoints = suite.backendEndpoints
+	cfg.ListenAddr = tempurl.Alloc()
+	cfg.AdvertiseListenAddr = tempurl.Alloc()
+	cfg, err := tso.GenerateConfig(cfg)
+	re.NoError(err)
+
+	// Setup the logger.
+	err = mcs.InitLogger(cfg)
+	re.NoError(err)
+
+	s, cleanup, err := mcs.NewTSOTestServer(suite.ctx, cfg)
+	re.NoError(err)
+	defer cleanup()
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	member, err := s.GetMember(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.Equal(fmt.Sprintf("%s-%05d", cfg.AdvertiseListenAddr, utils.DefaultKeyspaceGroupID), member.Name())
+}
+
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
 	checkTSOPath(re, true /*isAPIServiceMode*/)
