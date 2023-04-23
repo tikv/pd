@@ -20,6 +20,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -111,6 +113,16 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.RegionCount += store.GetRegionCount()
 	s.LeaderCount += store.GetLeaderCount()
 	s.WitnessCount += store.GetWitnessCount()
+	limit, ok := store.GetStoreLimit().(*storelimit.SlidingWindows)
+	if ok {
+		cap := limit.GetCap()
+		storeStatusGauge.WithLabelValues(storeAddress, id, "windows_size").Set(float64(cap))
+		for i, use := range limit.GetUsed() {
+			priority := constant.PriorityLevel(i).String()
+			storeStatusGauge.WithLabelValues(storeAddress, id, "windows_used_level_"+priority).Set(float64(use))
+		}
+	}
+
 	// TODO: pre-allocate gauge metrics
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetRegionScoreFormulaVersion(), s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderSchedulePolicy(), 0))

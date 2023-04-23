@@ -25,6 +25,7 @@ import (
 	"github.com/joho/godotenv"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	rmserver "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 )
@@ -75,6 +76,7 @@ func NewService(srv *rmserver.Service) *Service {
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
+	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
 		manager:          manager,

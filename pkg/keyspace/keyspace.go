@@ -81,8 +81,8 @@ type CreateKeyspaceRequest struct {
 	// Using an existing name will result in error.
 	Name   string
 	Config map[string]string
-	// Now is the timestamp used to record creation time.
-	Now int64
+	// CreateTime is the timestamp used to record creation time.
+	CreateTime int64
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
@@ -110,7 +110,7 @@ func (manager *Manager) Bootstrap() error {
 		return err
 	}
 	now := time.Now().Unix()
-	defaultKeyspaceMata := &keyspacepb.KeyspaceMeta{
+	defaultKeyspaceMeta := &keyspacepb.KeyspaceMeta{
 		Id:             DefaultKeyspaceID,
 		Name:           DefaultKeyspaceName,
 		State:          keyspacepb.KeyspaceState_ENABLED,
@@ -122,14 +122,14 @@ func (manager *Manager) Bootstrap() error {
 	if err != nil {
 		return err
 	}
-	defaultKeyspaceMata.Config = config
-	err = manager.saveNewKeyspace(defaultKeyspaceMata)
+	defaultKeyspaceMeta.Config = config
+	err = manager.saveNewKeyspace(defaultKeyspaceMeta)
 	// It's possible that default keyspace already exists in the storage (e.g. PD restart/recover),
 	// so we ignore the keyspaceExists error.
 	if err != nil && err != ErrKeyspaceExists {
 		return err
 	}
-	if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], defaultKeyspaceMata.GetId(), opAdd); err != nil {
+	if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], defaultKeyspaceMeta.GetId(), opAdd); err != nil {
 		return err
 	}
 	// Initialize pre-alloc keyspace.
@@ -140,9 +140,9 @@ func (manager *Manager) Bootstrap() error {
 			return err
 		}
 		req := &CreateKeyspaceRequest{
-			Name:   keyspaceName,
-			Now:    now,
-			Config: config,
+			Name:       keyspaceName,
+			CreateTime: now,
+			Config:     config,
 		}
 		keyspace, err := manager.CreateKeyspace(req)
 		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
@@ -190,8 +190,8 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		Id:             newID,
 		Name:           request.Name,
 		State:          keyspacepb.KeyspaceState_ENABLED,
-		CreatedAt:      request.Now,
-		StateChangedAt: request.Now,
+		CreatedAt:      request.CreateTime,
+		StateChangedAt: request.CreateTime,
 		Config:         request.Config,
 	}
 	err = manager.saveNewKeyspace(keyspace)

@@ -23,6 +23,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
@@ -80,6 +81,7 @@ func NewService(srv *tsoserver.Service) *Service {
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
+	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
 		srv:              srv,

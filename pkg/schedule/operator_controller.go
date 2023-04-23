@@ -511,6 +511,20 @@ func (oc *OperatorController) addOperatorLocked(op *operator.Operator) bool {
 	return true
 }
 
+func (oc *OperatorController) ack(op *operator.Operator) {
+	opInfluence := NewTotalOpInfluence([]*operator.Operator{op}, oc.cluster)
+	for storeID := range opInfluence.StoresInfluence {
+		for _, v := range storelimit.TypeNameValue {
+			limiter := oc.getOrCreateStoreLimit(storeID, v)
+			if limiter == nil {
+				return
+			}
+			cost := opInfluence.GetStoreInfluence(storeID).GetStepCost(v)
+			limiter.Ack(cost, v)
+		}
+	}
+}
+
 // RemoveOperator removes a operator from the running operators.
 func (oc *OperatorController) RemoveOperator(op *operator.Operator, extraFields ...zap.Field) bool {
 	oc.Lock()
@@ -540,6 +554,7 @@ func (oc *OperatorController) removeOperatorLocked(op *operator.Operator) bool {
 		delete(oc.operators, regionID)
 		oc.updateCounts(oc.operators)
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
+		oc.ack(op)
 		return true
 	}
 	return false
@@ -745,9 +760,7 @@ func (oc *OperatorController) GetFastOpInfluence(cluster Cluster, influence oper
 // AddOpInfluence add operator influence for cluster
 func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster Cluster) {
 	region := cluster.GetRegion(op.RegionID())
-	if region != nil {
-		op.TotalInfluence(influence, region)
-	}
+	op.TotalInfluence(influence, region)
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
@@ -865,8 +878,9 @@ func (oc *OperatorController) getOrCreateStoreLimit(storeID uint64, limitType st
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
 		return nil
 	}
-
-	limit := s.GetStoreLimit()
-	limit.Reset(ratePerSec, limitType)
-	return limit
+	// The other limits do not need to update by config exclude StoreRateLimit.
+	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok && limit.Rate(limitType) != ratePerSec {
+		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
+	}
+	return s.GetStoreLimit()
 }
