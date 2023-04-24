@@ -87,7 +87,7 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 	for i := 0; i < int(endpoint.UserKindCount); i++ {
 		groups[endpoint.UserKind(i)] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
 	}
-	return &GroupManager{
+	m := &GroupManager{
 		ctx:                ctx,
 		cancel:             cancel,
 		store:              store,
@@ -98,6 +98,16 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
 		serviceRegistryMap: make(map[string]string),
 	}
+
+	// If the etcd client is not nil, start the watch loop for the registered tso servers.
+	// The PD(TSO) Client relies on this info to discover tso servers.
+	if m.client != nil {
+		log.Info("start the watch loop for tso service discovery")
+		m.wg.Add(1)
+		go m.startWatchLoop(ctx)
+	}
+
+	return m
 }
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
@@ -117,8 +127,7 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 
 	// If the etcd client is not nil, start the watch loop.
 	if m.client != nil {
-		m.wg.Add(2)
-		go m.startWatchLoop(ctx)
+		m.wg.Add(1)
 		go m.allocNodesToAllKeyspaceGroups()
 	}
 

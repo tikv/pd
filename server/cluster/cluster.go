@@ -273,12 +273,14 @@ func (c *RaftCluster) Start(s Server) error {
 	if cluster == nil {
 		return nil
 	}
+
 	if s.IsAPIServiceMode() {
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
 			return err
 		}
 	}
+
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())

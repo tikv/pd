@@ -302,7 +302,6 @@ func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) (urls []s
 	case tsoService:
 		leaderAddr := c.getLeaderAddr()
 		if len(leaderAddr) > 0 {
-			log.Info("[pd] get leader addr", zap.String("leader-addr", leaderAddr))
 			clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
 			if err != nil {
 				log.Error("[pd] failed to get cluster info",

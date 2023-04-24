@@ -239,6 +239,7 @@ func (c *tsoServiceDiscovery) Init() error {
 		zap.Int("max-retry-times", c.option.maxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
 	if err := c.retry(c.option.maxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+		log.Error("failed to update member. initialization failed.", zap.Error(err))
 		c.cancel()
 		return err
 	}
@@ -390,7 +391,11 @@ func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 // a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	c.apiSvcDiscovery.CheckMemberChanged()
-	return c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember)
+	if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
+		log.Error("[tso] failed to update member", errs.ZapError(err))
+		return err
+	}
+	return nil
 }
 
 // AddServingAddrSwitchedCallback adds callbacks which will be called when the primary in
