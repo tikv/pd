@@ -195,6 +195,9 @@ type KeyspaceGroupManager struct {
 	loadKeyspaceGroupsTimeout   time.Duration
 	loadKeyspaceGroupsBatchSize int64
 	loadFromEtcdMaxRetryTimes   int
+
+	// groupUpdateRetryList is the list of keyspace groups which failed to update and need to retry.
+	groupUpdateRetryList map[uint32]*endpoint.KeyspaceGroup
 }
 
 // NewKeyspaceGroupManager creates a new Keyspace Group Manager.
@@ -228,6 +231,7 @@ func NewKeyspaceGroupManager(
 		loadKeyspaceGroupsTimeout:   defaultLoadKeyspaceGroupsTimeout,
 		loadKeyspaceGroupsBatchSize: defaultLoadKeyspaceGroupsBatchSize,
 		loadFromEtcdMaxRetryTimes:   defaultLoadFromEtcdMaxRetryTimes,
+		groupUpdateRetryList:        make(map[uint32]*endpoint.KeyspaceGroup),
 	}
 	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
@@ -500,6 +504,11 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 					}
 				}
 			}
+			// Retry the groups that are not initialized successfully before.
+			for id, group := range kgm.groupUpdateRetryList {
+				delete(kgm.groupUpdateRetryList, id)
+				kgm.updateKeyspaceGroup(group)
+			}
 			revision = wresp.Header.Revision + 1
 		}
 
@@ -566,13 +575,15 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	if group.IsSplitTarget() {
 		splitSource := group.SplitSource()
 		log.Info("keyspace group is in split",
-			zap.Uint32("keyspace-group-id", group.ID),
+			zap.Uint32("target", group.ID),
 			zap.Uint32("source", splitSource))
 		splitSourceAM, _ := kgm.getKeyspaceGroupMeta(splitSource)
 		if splitSourceAM == nil {
-			// TODO: guarantee that the split source keyspace group is initialized before.
 			log.Error("the split source keyspace group is not initialized",
+				zap.Uint32("target", group.ID),
 				zap.Uint32("source", splitSource))
+			// Put the group into the retry list to retry later.
+			kgm.groupUpdateRetryList[group.ID] = group
 			return
 		}
 		participant.SetCampaignChecker(func(leadership *election.Leadership) bool {

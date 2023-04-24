@@ -424,9 +424,10 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 			oldTSOSvcDiscovery.Close()
 		}
 	}
+	oldMode := c.serviceMode
 	c.serviceMode = newMode
 	log.Info("[pd] service mode changed",
-		zap.String("old-mode", c.serviceMode.String()),
+		zap.String("old-mode", oldMode.String()),
 		zap.String("new-mode", newMode.String()))
 }
 

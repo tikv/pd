@@ -18,6 +18,7 @@ import (
 	"container/list"
 	"context"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -125,21 +126,22 @@ func TestFeedback(t *testing.T) {
 	}
 	// region size is 10GB, snapshot write limit is 100MB/s and the snapshot concurrency is 3.
 	// the best strategy is that the tikv executing queue equals the wait.
-	regionSize, limit, wait := int64(10000), int64(100), int64(4)
-	iter := 100
+	const regionSize, limit, wait = int64(10000), int64(100), int64(4)
+	var iter atomic.Int32
+	iter.Store(100)
 	ops := make(chan int64, 10)
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// generate the operator
 	go func() {
 		for {
-			if s.Available(regionSize, SendSnapshot, constant.Low) && iter > 0 {
-				iter--
+			if s.Available(regionSize, SendSnapshot, constant.Low) && iter.Load() > 0 {
+				iter.Add(-1)
 				size := regionSize - rand.Int63n(regionSize/10)
 				s.Take(size, SendSnapshot, constant.Low)
 				ops <- size
 			}
-			if iter == 0 {
+			if iter.Load() == 0 {
 				cancel()
 				return
 			}
@@ -185,7 +187,7 @@ func TestFeedback(t *testing.T) {
 			err := exec*wait - cost
 			queue.Remove(first)
 			s.Feedback(float64(err))
-			if iter < 5 {
+			if iter.Load() < 5 {
 				re.Greater(float64(s.GetCap()), float64(regionSize*(wait-2)))
 				re.Less(float64(s.GetCap()), float64(regionSize*wait))
 			}
