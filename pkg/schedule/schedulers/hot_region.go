@@ -463,6 +463,7 @@ type balanceSolver struct {
 	minorDecRatio float64
 	maxPeerNum    int
 	minHotDegree  int
+	isRaftKV2     bool
 
 	firstPriorityV2Ratios  *rankV2Ratios
 	secondPriorityV2Ratios *rankV2Ratios
@@ -517,6 +518,7 @@ func (bs *balanceSolver) init() {
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
+	bs.isRaftKV2 = bs.GetStoreConfig().IsRaftKV2()
 
 	switch bs.sche.conf.GetRankFormulaVersion() {
 	case "v1":
@@ -798,11 +800,14 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			hotSchedulerResultCounter.WithLabelValues("src-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
-
-		if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
-			continue
+		// only raftkv2 needs to check the history loads.
+		if bs.isRaftKV2 {
+			if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
+				hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+				continue
+			}
 		}
+
 		ret[id] = detail
 		hotSchedulerResultCounter.WithLabelValues("src-store-succ-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 	}
@@ -1028,10 +1033,14 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 				hotSchedulerResultCounter.WithLabelValues("dst-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
-			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
-				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
-				continue
+			// only raftkv2 needs to check history loads
+			if bs.isRaftKV2 {
+				if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
+					hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+					continue
+				}
 			}
+
 			hotSchedulerResultCounter.WithLabelValues("dst-store-succ-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			ret[id] = detail
 		}
