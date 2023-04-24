@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/log"
@@ -235,14 +236,19 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 					if err != nil {
 						log.Error("Failed to transfer leadership", zap.String("signal", sig.String()))
 					} else {
-						log.Info("Transferred leadership")
+						for i := 0; svr.GetMember().IsLeader() && i < 30; i++ {
+							time.Sleep(1 * time.Second)
+						}
+						if svr.GetMember().IsLeader() {
+							log.Error("timeout to transfer leadership", zap.String("signal", sig.String()))
+						} else {
+							log.Info("Transferred leadership")
+						}
 					}
 				}
 				switch sig {
 				case syscall.SIGHUP:
 					log.Info("got SIGHUP, waiting for next signal")
-
-				// Don't exit
 				default:
 					log.Info("Exit signal handler")
 					break SignalHandler
