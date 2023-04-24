@@ -22,7 +22,6 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/tso"
@@ -82,7 +81,7 @@ func NewService(srv *tsoserver.Service) *Service {
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
-	apiHandlerEngine.GET("metrics", utils.PromHandler(promhttp.Handler()))
+	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
 		srv:              srv,

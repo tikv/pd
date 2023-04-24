@@ -76,6 +76,8 @@ type GroupManager struct {
 	// TODO: add user kind with different balancer
 	// when we ensure where the correspondence between tso node and user kind will be found
 	nodesBalancer balancer.Balancer[string]
+	// serviceRegistryMap stores the mapping from the service registry key to the service address.
+	serviceRegistryMap map[string]string
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
@@ -99,7 +101,7 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 }
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
-func (m *GroupManager) Bootstrap() error {
+func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	// Force the membership restriction that the default keyspace must belong to default keyspace group.
 	// Have no information to specify the distribution of the default keyspace group replicas, so just
 	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica
@@ -131,8 +133,9 @@ func (m *GroupManager) Bootstrap() error {
 	// If the etcd client is not nil, start the watch loop.
 	if m.client != nil {
 		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
+		m.serviceRegistryMap = make(map[string]string)
 		m.wg.Add(1)
-		go m.startWatchLoop()
+		go m.startWatchLoop(ctx)
 	}
 	return nil
 }
@@ -143,10 +146,10 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
-func (m *GroupManager) startWatchLoop() {
+func (m *GroupManager) startWatchLoop(parentCtx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
-	ctx, cancel := context.WithCancel(m.ctx)
+	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 	var (
 		resp     *clientv3.GetResponse
@@ -161,7 +164,7 @@ func (m *GroupManager) startWatchLoop() {
 		}
 		resp, err = etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
 		if err == nil {
-			revision = resp.Header.Revision
+			revision = resp.Header.Revision + 1
 			for _, item := range resp.Kvs {
 				s := &discovery.ServiceRegistryEntry{}
 				if err := json.Unmarshal(item.Value, s); err != nil {
@@ -169,6 +172,7 @@ func (m *GroupManager) startWatchLoop() {
 					continue
 				}
 				m.nodesBalancer.Put(s.ServiceAddr)
+				m.serviceRegistryMap[string(item.Key)] = s.ServiceAddr
 			}
 			break
 		}
@@ -219,17 +223,28 @@ func (m *GroupManager) watchServiceAddrs(ctx context.Context, revision int64) (i
 				return revision, wresp.Err()
 			}
 			for _, event := range wresp.Events {
-				s := &discovery.ServiceRegistryEntry{}
-				if err := json.Unmarshal(event.Kv.Value, s); err != nil {
-					log.Warn("failed to unmarshal service registry entry", zap.Error(err))
-				}
 				switch event.Type {
 				case clientv3.EventTypePut:
+					s := &discovery.ServiceRegistryEntry{}
+					if err := json.Unmarshal(event.Kv.Value, s); err != nil {
+						log.Warn("failed to unmarshal service registry entry",
+							zap.String("event-kv-key", string(event.Kv.Key)), zap.Error(err))
+						break
+					}
 					m.nodesBalancer.Put(s.ServiceAddr)
+					m.serviceRegistryMap[string(event.Kv.Key)] = s.ServiceAddr
 				case clientv3.EventTypeDelete:
-					m.nodesBalancer.Delete(s.ServiceAddr)
+					key := string(event.Kv.Key)
+					if serviceAddr, ok := m.serviceRegistryMap[key]; ok {
+						delete(m.serviceRegistryMap, key)
+						m.nodesBalancer.Delete(serviceAddr)
+					} else {
+						log.Warn("can't retrieve service addr from service registry map",
+							zap.String("event-kv-key", key))
+					}
 				}
 			}
+			revision = wresp.Header.Revision + 1
 		}
 	}
 }

@@ -195,6 +195,9 @@ type KeyspaceGroupManager struct {
 	loadKeyspaceGroupsTimeout   time.Duration
 	loadKeyspaceGroupsBatchSize int64
 	loadFromEtcdMaxRetryTimes   int
+
+	// groupUpdateRetryList is the list of keyspace groups which failed to update and need to retry.
+	groupUpdateRetryList map[uint32]*endpoint.KeyspaceGroup
 }
 
 // NewKeyspaceGroupManager creates a new Keyspace Group Manager.
@@ -228,6 +231,7 @@ func NewKeyspaceGroupManager(
 		loadKeyspaceGroupsTimeout:   defaultLoadKeyspaceGroupsTimeout,
 		loadKeyspaceGroupsBatchSize: defaultLoadKeyspaceGroupsBatchSize,
 		loadFromEtcdMaxRetryTimes:   defaultLoadFromEtcdMaxRetryTimes,
+		groupUpdateRetryList:        make(map[uint32]*endpoint.KeyspaceGroup),
 	}
 	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
@@ -415,7 +419,7 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 	}
 
 	if resp.Header != nil {
-		revision = resp.Header.Revision
+		revision = resp.Header.Revision + 1
 	}
 
 	return revision, kgs, resp.More, nil
@@ -485,6 +489,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 						log.Warn("failed to unmarshal keyspace group",
 							zap.Uint32("keyspace-group-id", groupID),
 							zap.Error(errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()))
+						break
 					}
 					kgm.updateKeyspaceGroup(group)
 				case clientv3.EventTypeDelete:
@@ -499,7 +504,12 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 					}
 				}
 			}
-			revision = wresp.Header.Revision
+			// Retry the groups that are not initialized successfully before.
+			for id, group := range kgm.groupUpdateRetryList {
+				delete(kgm.groupUpdateRetryList, id)
+				kgm.updateKeyspaceGroup(group)
+			}
+			revision = wresp.Header.Revision + 1
 		}
 
 		select {
@@ -565,17 +575,19 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	if group.IsSplitTarget() {
 		splitSource := group.SplitSource()
 		log.Info("keyspace group is in split",
-			zap.Uint32("keyspace-group-id", group.ID),
+			zap.Uint32("target", group.ID),
 			zap.Uint32("source", splitSource))
 		splitSourceAM, _ := kgm.getKeyspaceGroupMeta(splitSource)
 		if splitSourceAM == nil {
-			// TODO: guarantee that the split source keyspace group is initialized before.
 			log.Error("the split source keyspace group is not initialized",
+				zap.Uint32("target", group.ID),
 				zap.Uint32("source", splitSource))
+			// Put the group into the retry list to retry later.
+			kgm.groupUpdateRetryList[group.ID] = group
 			return
 		}
-		participant.SetPreCampaignChecker(func(leadership *election.Leadership) bool {
-			return splitSourceAM.getMember().IsLeader()
+		participant.SetCampaignChecker(func(leadership *election.Leadership) bool {
+			return splitSourceAM.GetMember().IsLeader()
 		})
 	}
 	// Only the default keyspace group uses the legacy service root path for LoadTimestamp/SyncTimestamp.
@@ -672,7 +684,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	}
 	// Check if the split is completed.
 	if oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
-		kgm.ams[groupID].getMember().(*member.Participant).SetPreCampaignChecker(nil)
+		kgm.ams[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
 	}
 	kgm.kgs[groupID] = newGroup
 }
@@ -727,7 +739,7 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(
 	if err != nil {
 		return nil, err
 	}
-	return am.getMember(), nil
+	return am.GetMember(), nil
 }
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
