@@ -26,16 +26,19 @@ import (
 	"go.uber.org/zap"
 )
 
-// HTTP headers.
 const (
+	// ServiceAllowDirectHandle is the header key to allow direct handle.
 	ServiceAllowDirectHandle = "service-allow-direct-handle"
-	ServiceRedirectorHeader  = "service-redirector"
+	// ServiceRedirectorHeader is the header key to indicate the request is redirected.
+	ServiceRedirectorHeader = "service-redirector"
+	// ServiceContextKey is the key to get service server from gin.Context.
+	ServiceContextKey = "service"
 )
 
 // ServiceRedirector is a middleware to redirect the request to the right place.
 func ServiceRedirector() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		svr := c.MustGet("service").(bs.Server)
+		svr := c.MustGet(ServiceContextKey).(bs.Server)
 		allowDirectHandle := len(c.Request.Header.Get(ServiceAllowDirectHandle)) > 0
 		isServing := svr.IsServing()
 		if allowDirectHandle || isServing {
