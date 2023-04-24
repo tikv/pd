@@ -264,7 +264,7 @@ func (s *Server) initClient() error {
 	if err != nil {
 		return err
 	}
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClientsWithMultiEndpoint(tlsConfig, []url.URL(u))
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL(u)[0])
 	return err
 }
 
