@@ -318,8 +318,22 @@ func (r *RegionStatistics) Collect() {
 
 // Reset resets the metrics of the regions' status.
 func (r *RegionStatistics) Reset() {
-	regionStatusGauge.Reset()
-	offlineRegionStatusGauge.Reset()
+	regionMissPeerRegionCounter.Set(0)
+	regionExtraPeerRegionCounter.Set(0)
+	regionDownPeerRegionCounter.Set(0)
+	regionPendingPeerRegionCounter.Set(0)
+	regionLearnerPeerRegionCounter.Set(0)
+	regionEmptyRegionCounter.Set(0)
+	regionOversizedRegionCounter.Set(0)
+	regionUndersizedRegionCounter.Set(0)
+	regionWitnesssLeaderRegionCounter.Set(0)
+
+	offlineMissPeerRegionCounter.Set(0)
+	offlineExtraPeerRegionCounter.Set(0)
+	offlineDownPeerRegionCounter.Set(0)
+	offlinePendingPeerRegionCounter.Set(0)
+	offlineLearnerPeerRegionCounter.Set(0)
+	offlineOfflinePeerRegionCounter.Set(0)
 }
 
 // LabelStatistics is the statistics of the level of labels.
