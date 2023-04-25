@@ -230,6 +230,7 @@ func summaryStoresLoadByEngine(
 		expectLoads[i] = allStoreLoadSum[i] / float64(allStoreCount)
 	}
 
+	// todo: remove some the max value or min value to avoid the effect of extreme value.
 	expectHistoryLoads := make([][]float64, DimLen)
 	for i := range allStoreHistoryLoadSum {
 		expectHistoryLoads[i] = make([]float64, len(allStoreHistoryLoadSum[i]))
