@@ -26,6 +26,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/pkg/election"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
@@ -83,6 +84,47 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownTest() {
 func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
 	for _, group := range handlersutil.MustLoadKeyspaceGroups(re, server, "0", "0") {
 		handlersutil.MustDeleteKeyspaceGroup(re, server, group.ID)
+	}
+}
+
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeyspaceGroup() {
+	// There is only default keyspace group. All keyspaces which have not been assigned to
+	// any keyspace group will be served by the default keyspace group; otherwise,
+	// they won't be served by any keyspace group.
+	re := suite.Require()
+	testutil.Eventually(re, func() bool {
+		for _, server := range suite.tsoCluster.GetServers() {
+			allServed := true
+			for _, keyspaceID := range []uint32{0, 1, 2} {
+				if server.IsKeyspaceServing(keyspaceID, mcsutils.DefaultKeyspaceGroupID) {
+					tam, err := server.GetTSOAllocatorManager(mcsutils.DefaultKeyspaceGroupID)
+					re.NoError(err)
+					re.NotNil(tam)
+				} else {
+					allServed = false
+				}
+			}
+			return allServed
+		}
+		return false
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// All keyspaces which have been assigned to any keyspace group before, except default
+	// keyspace, won't be served at this time. Default keyspace will be served by default
+	// keyspace group all the time.
+	for _, server := range suite.tsoCluster.GetServers() {
+		server.IsKeyspaceServing(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+		for _, keyspaceGroupID := range []uint32{1, 2, 3} {
+			server.IsKeyspaceServing(mcsutils.DefaultKeyspaceID, keyspaceGroupID)
+			server.IsKeyspaceServing(mcsutils.DefaultKeyspaceID, keyspaceGroupID)
+			for _, keyspaceID := range []uint32{1, 2, 3} {
+				if server.IsKeyspaceServing(keyspaceID, keyspaceGroupID) {
+					tam, err := server.GetTSOAllocatorManager(keyspaceGroupID)
+					re.NoError(err)
+					re.NotNil(tam)
+				}
+			}
+		}
 	}
 }
 
