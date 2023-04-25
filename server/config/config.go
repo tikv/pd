@@ -969,7 +969,6 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-leader"},
 	{Type: "balance-witness"},
 	{Type: "hot-region"},
-	{Type: "split-bucket"},
 	{Type: "transfer-witness-leader"},
 }
 

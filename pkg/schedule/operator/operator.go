@@ -103,6 +103,11 @@ func (o *Operator) String() string {
 	return s
 }
 
+// Brief returns the operator's short brief.
+func (o *Operator) Brief() string {
+	return o.brief
+}
+
 // MarshalJSON serializes custom types to JSON.
 func (o *Operator) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + o.String() + `"`), nil
