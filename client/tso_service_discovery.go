@@ -60,10 +60,6 @@ type keyspaceGroupSvcDiscovery struct {
 	secondaryAddrs []string
 	// addrs are the primary/secondary serving addresses
 	addrs []string
-	// used for round-robin load balancing when communicating with serving addresses
-	selectIdx int
-	// failureCount counts the consecutive failures for communicating with serving addresses
-	failureCount int
 }
 
 func (k *keyspaceGroupSvcDiscovery) update(
@@ -88,30 +84,6 @@ func (k *keyspaceGroupSvcDiscovery) update(
 	return
 }
 
-func (k *keyspaceGroupSvcDiscovery) getServer() string {
-	k.Lock()
-	defer k.Unlock()
-	// If we have tried all the serving addresses for this keyspace group, we should
-	// return an empty address and let the caller to try other tso servers.
-	if len(k.addrs) == 0 || k.failureCount >= len(k.addrs) {
-		return ""
-	}
-	server := k.addrs[k.selectIdx]
-	k.selectIdx = (k.selectIdx + 1) % len(k.addrs)
-	return server
-}
-
-func (k *keyspaceGroupSvcDiscovery) countFailure(err error) {
-	k.Lock()
-	defer k.Unlock()
-	if err != nil {
-		k.failureCount++
-	} else {
-		// Clear all failures since we only count consecutive failures
-		k.failureCount = 0
-	}
-}
-
 // tsoServerDiscovery is for discovering the serving endpoints of the TSO servers
 // TODO: dynamically update the TSO server addresses in the case of TSO server failover
 // and scale-out/in.
@@ -128,7 +100,7 @@ func (t *tsoServerDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
 	t.Lock()
 	defer t.Unlock()
 
-	if len(t.addrs) == 0 || t.failureCount > 0 {
+	if len(t.addrs) == 0 || t.failureCount == len(t.addrs) {
 		addrs := sd.DiscoverMicroservice(tsoService)
 		if len(addrs) == 0 {
 			return "", errors.New("no tso server address found")
@@ -149,15 +121,16 @@ func (t *tsoServerDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
 	return tsoServerAddr, nil
 }
 
-func (t *tsoServerDiscovery) countFailure(err error) {
+func (t *tsoServerDiscovery) countFailure() {
 	t.Lock()
 	defer t.Unlock()
-	if err != nil {
-		t.failureCount++
-	} else {
-		// Clear all failures since we only count consecutive failures
-		t.failureCount = 0
-	}
+	t.failureCount++
+}
+
+func (t *tsoServerDiscovery) resetFailure() {
+	t.Lock()
+	defer t.Unlock()
+	t.failureCount = 0
 }
 
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
@@ -297,6 +270,9 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 			log.Info("[tso] exit check member loop")
 			return
 		}
+		// Make sure tsoQueryRetryMaxTimes * tsoQueryRetryInterval is far less than memberUpdateInterval,
+		// so that we can speed up the process of tso service discovery when failover happens on the
+		// tso service side and also ensures it won't call updateMember too frequently during normal time.
 		if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
@@ -451,26 +427,23 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 	return nil
 }
 
-func (c *tsoServiceDiscovery) updateMember() (err error) {
+func (c *tsoServiceDiscovery) updateMember() error {
 	// The keyspace membership or the primary serving address of the keyspace group, to which this
 	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
-	// If there are known healthy tso servers serving this keyspace, we start with them; otherwise,
-	// we start with any healthy tso server.
-	var keyspaceGroup *tsopb.KeyspaceGroup
-	tsoServerAddr := c.keyspaceGroupSD.getServer()
-	if len(tsoServerAddr) > 0 {
-		keyspaceGroup, err = c.findGroupByKeyspaceID(c.keyspaceID, tsoServerAddr, updateMemberTimeout)
-		c.keyspaceGroupSD.countFailure(err)
-	} else {
-		if tsoServerAddr, err = c.getTSOServer(c.apiSvcDiscovery); err != nil {
-			return err
-		}
-		keyspaceGroup, err = c.findGroupByKeyspaceID(c.keyspaceID, tsoServerAddr, updateMemberTimeout)
-		c.tsoServerDiscovery.countFailure(err)
-	}
+	tsoServerAddr, err := c.tsoServerDiscovery.getTSOServer(c.apiSvcDiscovery)
 	if err != nil {
+		log.Error("[tso] failed to get tso server", errs.ZapError(err))
 		return err
 	}
+	keyspaceGroup, err := c.findGroupByKeyspaceID(c.keyspaceID, tsoServerAddr, updateMemberTimeout)
+	if err != nil {
+		c.tsoServerDiscovery.countFailure()
+		log.Error("[tso] failed to find the keyspace group", errs.ZapError(err))
+		return err
+	}
+	c.tsoServerDiscovery.resetFailure()
+
+	log.Info("[tso] update keyspace group", zap.String("keyspace-group", keyspaceGroup.String()))
 
 	// Initialize the all types of serving addresses from the returned keyspace group info.
 	primaryAddr := ""
@@ -535,7 +508,6 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 			},
 			KeyspaceId: keyspaceID,
 		})
-
 	if err != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			err, cc.Target(), cc.GetState().String())

@@ -214,7 +214,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		n := r.Intn(2) + 1
+		n := r.Intn(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
 			suite.tsoCluster.WaitForDefaultPrimaryServing(re).Close()
