@@ -137,6 +137,9 @@ func (s *state) getAMWithMembershipCheck(
 	// The keyspace doesn't belong to any keyspace group, so return the default keyspace group.
 	// It's for migrating the existing keyspaces which have no keyspace group assigned, so the
 	// the default keyspace group is used to serve the keyspaces.
+	if s.ams[mcsutils.DefaultKeyspaceGroupID] == nil {
+		return nil, mcsutils.DefaultKeyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+	}
 	return s.ams[mcsutils.DefaultKeyspaceGroupID], mcsutils.DefaultKeyspaceGroupID, nil
 }
 
