@@ -47,6 +47,14 @@ const (
 	LeaderKind ResourceKind = iota
 	// RegionKind indicates the region kind resource
 	RegionKind
+<<<<<<< HEAD:server/core/kind.go
+=======
+	// WitnessKind indicates the witness kind resource
+	WitnessKind
+
+	// ResourceKindLen represents the ResourceKind count
+	ResourceKindLen
+>>>>>>> 4f87e9da8 (scheduler: cache history loads in hot region scheduler (#6314)):pkg/core/constant/kind.go
 )
 
 func (k ResourceKind) String() string {

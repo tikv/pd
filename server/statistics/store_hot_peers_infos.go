@@ -74,12 +74,14 @@ func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, re
 	stLoadInfosAsLeader := SummaryStoresLoad(
 		stInfos,
 		storesLoads,
+		nil,
 		regionStats,
 		isTraceRegionFlow,
 		typ, core.LeaderKind)
 	stLoadInfosAsPeer := SummaryStoresLoad(
 		stInfos,
 		storesLoads,
+		nil,
 		regionStats,
 		isTraceRegionFlow,
 		typ, core.RegionKind)
@@ -104,6 +106,7 @@ func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, re
 func SummaryStoresLoad(
 	storeInfos map[uint64]*StoreSummaryInfo,
 	storesLoads map[uint64][]float64,
+	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
 	isTraceRegionFlow bool,
 	rwTy RWType,
@@ -115,6 +118,7 @@ func SummaryStoresLoad(
 	tikvLoadDetail := summaryStoresLoadByEngine(
 		storeInfos,
 		storesLoads,
+		storesHistoryLoads,
 		storeHotPeers,
 		rwTy, kind,
 		newTikvCollector(),
@@ -122,6 +126,7 @@ func SummaryStoresLoad(
 	tiflashLoadDetail := summaryStoresLoadByEngine(
 		storeInfos,
 		storesLoads,
+		storesHistoryLoads,
 		storeHotPeers,
 		rwTy, kind,
 		newTiFlashCollector(isTraceRegionFlow),
@@ -136,6 +141,7 @@ func SummaryStoresLoad(
 func summaryStoresLoadByEngine(
 	storeInfos map[uint64]*StoreSummaryInfo,
 	storesLoads map[uint64][]float64,
+	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
 	rwTy RWType,
 	kind core.ResourceKind,
@@ -143,6 +149,7 @@ func summaryStoresLoadByEngine(
 ) []*StoreLoadDetail {
 	loadDetail := make([]*StoreLoadDetail, 0, len(storeInfos))
 	allStoreLoadSum := make([]float64, DimLen)
+	allStoreHistoryLoadSum := make([][]float64, DimLen)
 	allStoreCount := 0
 	allHotPeersCount := 0
 
@@ -174,8 +181,22 @@ func summaryStoresLoadByEngine(
 			ty = "query-rate-" + rwTy.String() + "-" + kind.String()
 			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[QueryDim])
 		}
-
 		loads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
+
+		var historyLoads [][]float64
+		if storesHistoryLoads != nil {
+			historyLoads = storesHistoryLoads.Get(id, rwTy, kind)
+			for i, loads := range historyLoads {
+				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
+					allStoreHistoryLoadSum[i] = make([]float64, len(loads))
+				}
+				for j, load := range loads {
+					allStoreHistoryLoadSum[i][j] += load
+				}
+			}
+			storesHistoryLoads.Add(id, rwTy, kind, loads)
+		}
+
 		for i := range allStoreLoadSum {
 			allStoreLoadSum[i] += loads[i]
 		}
@@ -184,8 +205,9 @@ func summaryStoresLoadByEngine(
 
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&StoreLoad{
-			Loads: loads,
-			Count: float64(len(hotPeers)),
+			Loads:        loads,
+			Count:        float64(len(hotPeers)),
+			HistoryLoads: historyLoads,
 		}).ToLoadPred(rwTy, info.PendingSum)
 
 		// Construct store load info.
@@ -206,6 +228,14 @@ func summaryStoresLoadByEngine(
 		expectLoads[i] = allStoreLoadSum[i] / float64(allStoreCount)
 	}
 
+	// todo: remove some the max value or min value to avoid the effect of extreme value.
+	expectHistoryLoads := make([][]float64, DimLen)
+	for i := range allStoreHistoryLoadSum {
+		expectHistoryLoads[i] = make([]float64, len(allStoreHistoryLoadSum[i]))
+		for j := range allStoreHistoryLoadSum[i] {
+			expectHistoryLoads[i][j] = allStoreHistoryLoadSum[i][j] / float64(allStoreCount)
+		}
+	}
 	stddevLoads := make([]float64, len(allStoreLoadSum))
 	if allHotPeersCount != 0 {
 		for _, detail := range loadDetail {
@@ -237,8 +267,9 @@ func summaryStoresLoadByEngine(
 		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[QueryDim])
 	}
 	expect := StoreLoad{
-		Loads: expectLoads,
-		Count: expectCount,
+		Loads:        expectLoads,
+		Count:        expectCount,
+		HistoryLoads: expectHistoryLoads,
 	}
 	stddev := StoreLoad{
 		Loads: stddevLoads,

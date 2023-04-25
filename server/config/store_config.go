@@ -121,6 +121,25 @@ func (c *StoreConfig) IsEnableRegionBucket() bool {
 	return c.Coprocessor.EnableRegionBucket
 }
 
+<<<<<<< HEAD
+=======
+// IsRaftKV2 returns true if the raft kv is v2.
+func (c *StoreConfig) IsRaftKV2() bool {
+	if c == nil {
+		return false
+	}
+	return c.Storage.Engine == raftStoreV2
+}
+
+// SetRegionBucketEnabled sets if the region bucket is enabled.
+func (c *StoreConfig) SetRegionBucketEnabled(enabled bool) {
+	if c == nil {
+		return
+	}
+	c.Coprocessor.EnableRegionBucket = enabled
+}
+
+>>>>>>> 4f87e9da8 (scheduler: cache history loads in hot region scheduler (#6314))
 // GetRegionBucketSize returns region bucket size if enable region buckets.
 func (c *StoreConfig) GetRegionBucketSize() uint64 {
 	if c == nil || !c.Coprocessor.EnableRegionBucket {

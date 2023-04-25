@@ -108,6 +108,11 @@ func TestParseConfig(t *testing.T) {
 	re.NoError(json.Unmarshal([]byte(body), &config))
 	m.update(&config)
 	re.Equal(uint64(96), config.GetRegionBucketSize())
+<<<<<<< HEAD
+=======
+	re.True(config.IsRaftKV2())
+	re.Equal(raftStoreV2, config.Storage.Engine)
+>>>>>>> 4f87e9da8 (scheduler: cache history loads in hot region scheduler (#6314))
 }
 
 func TestMergeCheck(t *testing.T) {

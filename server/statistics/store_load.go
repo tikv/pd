@@ -16,8 +16,14 @@ package statistics
 
 import (
 	"math"
+	"time"
 
+<<<<<<< HEAD:server/statistics/store_load.go
 	"github.com/tikv/pd/server/core"
+=======
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+>>>>>>> 4f87e9da8 (scheduler: cache history loads in hot region scheduler (#6314)):pkg/statistics/store_load.go
 )
 
 // StoreLoadDetail records store load information.
@@ -144,8 +150,9 @@ func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
 
 // StoreLoad records the current load.
 type StoreLoad struct {
-	Loads []float64
-	Count float64
+	Loads        []float64
+	Count        float64
+	HistoryLoads [][]float64
 }
 
 // ToLoadPred returns the current load and future predictive load.
@@ -239,4 +246,92 @@ func MaxLoad(a, b *StoreLoad) *StoreLoad {
 		Loads: loads,
 		Count: math.Max(a.Count, b.Count),
 	}
+}
+
+var (
+	// historySampleInterval is the sampling interval for history load.
+	historySampleInterval = 30 * time.Second
+	// HistorySampleDuration  is the duration for saving history load.
+	HistorySampleDuration = 5 * time.Minute
+	defaultSize           = 10
+)
+
+// StoreHistoryLoads records the history load of a store.
+type StoreHistoryLoads struct {
+	// loads[read/write][leader/follower]-->[store id]-->history load
+	loads [RWTypeLen][constant.ResourceKindLen]map[uint64]*storeHistoryLoad
+	dim   int
+}
+
+// NewStoreHistoryLoads creates a StoreHistoryLoads.
+func NewStoreHistoryLoads(dim int) *StoreHistoryLoads {
+	st := StoreHistoryLoads{dim: dim}
+	for i := RWType(0); i < RWTypeLen; i++ {
+		for j := constant.ResourceKind(0); j < constant.ResourceKindLen; j++ {
+			st.loads[i][j] = make(map[uint64]*storeHistoryLoad)
+		}
+	}
+	return &st
+}
+
+// Add adds the store load to the history.
+func (s *StoreHistoryLoads) Add(storeID uint64, rwTp RWType, kind constant.ResourceKind, loads []float64) {
+	load, ok := s.loads[rwTp][kind][storeID]
+	if !ok {
+		size := defaultSize
+		if historySampleInterval != 0 {
+			size = int(HistorySampleDuration / historySampleInterval)
+		}
+		load = newStoreHistoryLoad(size, s.dim)
+		s.loads[rwTp][kind][storeID] = load
+	}
+	load.add(loads)
+}
+
+// Get returns the store loads from the history, not one time point.
+func (s *StoreHistoryLoads) Get(storeID uint64, rwTp RWType, kind constant.ResourceKind) [][]float64 {
+	load, ok := s.loads[rwTp][kind][storeID]
+	if !ok {
+		return [][]float64{}
+	}
+	return load.get()
+}
+
+type storeHistoryLoad struct {
+	update time.Time
+	// loads is a circular buffer.
+	// [dim] --> [1,2,3...]
+	loads [][]float64
+	size  int
+	count int
+}
+
+func newStoreHistoryLoad(size int, dim int) *storeHistoryLoad {
+	return &storeHistoryLoad{
+		loads: make([][]float64, dim),
+		size:  size,
+	}
+}
+
+// add adds the store load to the history.
+// eg. add([1,2,3]) --> [][]float64{{1}, {2}, {3}}
+func (s *storeHistoryLoad) add(loads []float64) {
+	// reject if the loads length is not equal to the dimension.
+	if time.Since(s.update) < historySampleInterval || s.size == 0 || len(loads) != len(s.loads) {
+		return
+	}
+	if s.count == 0 {
+		for i := range s.loads {
+			s.loads[i] = make([]float64, s.size)
+		}
+	}
+	for i, v := range loads {
+		s.loads[i][s.count%s.size] = v
+	}
+	s.count++
+	s.update = time.Now()
+}
+
+func (s *storeHistoryLoad) get() [][]float64 {
+	return s.loads
 }
