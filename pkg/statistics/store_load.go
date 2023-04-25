@@ -249,6 +249,7 @@ var (
 	historySampleInterval = 30 * time.Second
 	// HistorySampleDuration  is the duration for saving history load.
 	HistorySampleDuration = 5 * time.Minute
+	defaultSize           = 10
 )
 
 // StoreHistoryLoads records the history load of a store.
@@ -273,7 +274,7 @@ func NewStoreHistoryLoads(dim int) *StoreHistoryLoads {
 func (s *StoreHistoryLoads) Add(storeID uint64, rwTp RWType, kind constant.ResourceKind, loads []float64) {
 	load, ok := s.loads[rwTp][kind][storeID]
 	if !ok {
-		size := 10
+		size := defaultSize
 		if historySampleInterval != 0 {
 			size = int(HistorySampleDuration / historySampleInterval)
 		}
