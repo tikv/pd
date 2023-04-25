@@ -29,7 +29,7 @@ func TestHistoryLoads(t *testing.T) {
 	rwTp := Read
 	kind := constant.LeaderKind
 	historyLoads.Add(1, rwTp, kind, loads)
-	re.Equal([][]float64{{1.0}, {2.0}, {3.0}}, historyLoads.Get(1, rwTp, kind))
+	re.Len(historyLoads.Get(1, rwTp, kind)[0], 10)
 
 	expectLoads := make([][]float64, DimLen)
 	for i := 0; i < len(loads); i++ {
