@@ -460,7 +460,15 @@ func TestScheduler(t *testing.T) {
 	checkSchedulerWithStatusCommand(nil, "paused", []string{
 		"balance-leader-scheduler",
 	})
-	checkSchedulerDescribeCommand("balance-leader-scheduler", "paused", "")
+	result := make(map[string]interface{})
+	testutil.Eventually(re, func() bool {
+		mightExec([]string{"-u", pdAddr, "scheduler", "describe", "balance-leader-scheduler"}, &result)
+		return len(result) != 0
+	}, testutil.WithTickInterval(50*time.Millisecond))
+
+	testutil.Eventually(re, func() bool {
+		return result["status"] == "paused" && result["summary"] == ""
+	}, testutil.WithTickInterval(50*time.Millisecond))
 
 	mustUsage([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler", "60"})
 	mustExec([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
