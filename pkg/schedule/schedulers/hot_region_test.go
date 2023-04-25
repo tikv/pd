@@ -533,7 +533,6 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		allowLeaderTiKVCount := aliveTiKVCount - 1 // store 5 with evict leader
 		aliveTiFlashCount := float64(aliveTiFlashLastID - aliveTiFlashStartID + 1)
 		tc.ObserveRegionsStats()
-		clearPendingInfluence(hb)
 		ops, _ := hb.Schedule(tc, false)
 		re.NotEmpty(ops)
 		re.True(
