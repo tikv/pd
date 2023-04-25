@@ -45,6 +45,7 @@ var (
 	regionsKeyPrefix        = "pd/api/v1/regions/key"
 	regionsSiblingPrefix    = "pd/api/v1/regions/sibling"
 	regionsRangeHolesPrefix = "pd/api/v1/regions/range-holes"
+	regionsKeyspacePrefix   = "pd/api/v1/regions/keyspace"
 	regionIDPrefix          = "pd/api/v1/region/id"
 	regionKeyPrefix         = "pd/api/v1/region/key"
 )
@@ -60,6 +61,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionWithCheckCommand())
 	r.AddCommand(NewRegionWithSiblingCommand())
 	r.AddCommand(NewRegionWithStoreCommand())
+	r.AddCommand(NewRegionWithKeyspaceCommand())
 	r.AddCommand(NewRegionsByKeysCommand())
 	r.AddCommand(NewRangesWithRangeHolesCommand())
 
@@ -458,6 +460,43 @@ func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions with the given storeID: %s\n", err)
+		return
+	}
+	cmd.Println(r)
+}
+
+// NewRegionWithKeyspaceCommand returns regions with keyspace subcommand of regionCmd
+func NewRegionWithKeyspaceCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "keyspace <subcommand>",
+		Short: "show region information of the given keyspace",
+	}
+	r.AddCommand(&cobra.Command{
+		Use:   "id <keyspace_id> <limit>",
+		Short: "show region information for the given keyspace id",
+		Run:   showRegionWithKeyspaceCommandFunc,
+	})
+	return r
+}
+
+func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 || len(args) > 2 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+
+	keyspaceID := args[0]
+	prefix := regionsKeyspacePrefix + "/id/" + keyspaceID
+	if len(args) == 2 {
+		if _, err := strconv.Atoi(args[1]); err != nil {
+			cmd.Println("limit should be a number")
+			return
+		}
+		prefix += "?limit=" + args[1]
+	}
+	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to get regions with the given keyspace: %s\n", err)
 		return
 	}
 	cmd.Println(r)
