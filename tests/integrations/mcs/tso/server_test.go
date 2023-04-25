@@ -174,6 +174,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	re.NoError(err)
 	leaderName := cluster.WaitLeader()
 	pdLeader := cluster.GetServer(leaderName)
+	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	re.NoError(pdLeader.BootstrapCluster())
 	client := pdLeader.GetEtcdClient()

@@ -314,8 +314,6 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
 func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd] create pd client with endpoints and keyspace", zap.Strings("pd-address", svrAddrs), zap.Uint32("keyspace-id", keyspaceID))
-
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
@@ -348,6 +346,49 @@ func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []st
 		return nil, err
 	}
 
+	return c, nil
+}
+
+// NewClientWithKeyspaceName creates a client with context and the specified keyspace name.
+func NewClientWithKeyspaceName(ctx context.Context, keyspace string, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+	log.Info("[pd] create pd client with endpoints and keyspace", zap.Strings("pd-address", svrAddrs), zap.String("keyspace", keyspace))
+
+	tlsCfg := &tlsutil.TLSConfig{
+		CAPath:   security.CAPath,
+		CertPath: security.CertPath,
+		KeyPath:  security.KeyPath,
+
+		SSLCABytes:   security.SSLCABytes,
+		SSLCertBytes: security.SSLCertBytes,
+		SSLKEYBytes:  security.SSLKEYBytes,
+	}
+
+	clientCtx, clientCancel := context.WithCancel(ctx)
+	c := &client{
+		updateTokenConnectionCh: make(chan struct{}, 1),
+		ctx:                     clientCtx,
+		cancel:                  clientCancel,
+		svrUrls:                 addrsToUrls(svrAddrs),
+		tlsCfg:                  tlsCfg,
+		option:                  newOption(),
+	}
+
+	// Inject the client options.
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, c.svrUrls, c.tlsCfg, c.option)
+	if err := c.setup(); err != nil {
+		c.cancel()
+		return nil, err
+	}
+	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
+	// Here we ignore ENTRY_NOT_FOUND error and it will set the keyspaceID to 0.
+	if err != nil && !strings.Contains(err.Error(), "ENTRY_NOT_FOUND") {
+		return nil, err
+	}
+	c.keyspaceID = keyspaceMeta.GetId()
 	return c, nil
 }
 

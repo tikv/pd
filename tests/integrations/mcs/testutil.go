@@ -27,7 +27,6 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -51,14 +50,7 @@ func InitLogger(cfg *tso.Config) (err error) {
 
 // SetupClientWithKeyspace creates a TSO client for test.
 func SetupClientWithKeyspace(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
-	cli, err := pd.NewClientWithKeyspace(ctx, utils.DefaultKeyspaceID, endpoints, pd.SecurityOption{}, opts...)
-	re.NoError(err)
-	return cli
-}
-
-// SetupClient creates a TSO client for test.
-func SetupClient(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
-	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
+	cli, err := pd.NewClientWithKeyspaceName(ctx, "", endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }
