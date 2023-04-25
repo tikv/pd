@@ -300,7 +300,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestWatchAndDynamicallyApplyChanges(
 	// in which keyspace group 3, 5 aren't served by this tso node/pod.
 	expectedLoadedGroups := []uint32{0, 1, 3, 4, 5}
 	testutil.Eventually(re, func() bool {
-		loadedGroups := collectAllLoadedKeyspaceGroupIDs(re, mgr)
+		loadedGroups := collectAllLoadedKeyspaceGroupIDs(mgr)
 		return reflect.DeepEqual(expectedLoadedGroups, loadedGroups)
 	})
 }
@@ -766,7 +766,7 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, kgm *KeyspaceGroupM
 	return ids
 }
 
-func collectAllLoadedKeyspaceGroupIDs(_ *require.Assertions, kgm *KeyspaceGroupManager) []uint32 {
+func collectAllLoadedKeyspaceGroupIDs(kgm *KeyspaceGroupManager) []uint32 {
 	kgm.RLock()
 	defer kgm.RUnlock()
 

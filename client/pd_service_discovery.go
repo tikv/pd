@@ -188,7 +188,7 @@ func (c *pdServiceDiscovery) Init() error {
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
 	if err := c.checkServiceModeChanged(); err != nil {
-		log.Warn("[pd] failed to check service mode. will check later", zap.Error(err))
+		log.Warn("[pd] failed to check service mode and will check later", zap.Error(err))
 	}
 
 	c.wg.Add(2)
@@ -258,7 +258,7 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 		if err := c.checkServiceModeChanged(); err != nil {
 			log.Error("[pd] failed to update service mode",
 				zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
-			c.checkServiceModeChanged() // check if the leader changed
+			c.ScheduleCheckMemberChanged() // check if the leader changed
 		}
 	}
 }
@@ -459,7 +459,9 @@ func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 		}
 		return err
 	}
-
+	if clusterInfo == nil || len(clusterInfo.ServiceModes) == 0 {
+		return errors.WithStack(errNoServiceModeReturned)
+	}
 	c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
 	return nil
 }

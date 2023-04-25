@@ -209,6 +209,8 @@ var (
 	errClosing = errors.New("[pd] closing")
 	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
 	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+	// errInvalidRespHeader is returned when the response doesn't contain service mode info unexpectedly.
+	errNoServiceModeReturned = errors.New("[pd] no service mode returned")
 )
 
 // ClientOption configures client.

@@ -111,7 +111,7 @@ func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupSt
 }
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
-func (m *GroupManager) Bootstrap(ctx context.Context) error {
+func (m *GroupManager) Bootstrap() error {
 	// Force the membership restriction that the default keyspace must belong to default keyspace group.
 	// Have no information to specify the distribution of the default keyspace group replicas, so just
 	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica

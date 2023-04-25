@@ -153,7 +153,7 @@ func (suite *tsoServerTestSuite) TestPariticipantStartWithAdvertiseListenAddr() 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
 	checkTSOPath(re, true /*isAPIServiceMode*/)
-	// checkTSOPath(re, false /*isAPIServiceMode*/)
+	checkTSOPath(re, false /*isAPIServiceMode*/)
 }
 
 func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {

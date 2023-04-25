@@ -504,6 +504,8 @@ func (c *tsoServiceDiscovery) updateMember() (err error) {
 		}
 	}
 
+	// Even if the primary address is empty, we still updated other returned info above, including the
+	// keyspace group info and the secondary addresses.
 	if len(primaryAddr) == 0 {
 		return errors.New("no primary address found")
 	}
