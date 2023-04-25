@@ -445,7 +445,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 
 	log.Info("[tso] update keyspace group", zap.String("keyspace-group", keyspaceGroup.String()))
 
-	// Initialize the all types of serving addresses from the returned keyspace group info.
+	// Initialize the serving addresses from the returned keyspace group info.
 	primaryAddr := ""
 	secondaryAddrs := make([]string, 0)
 	addrs := make([]string, 0, len(keyspaceGroup.Members))

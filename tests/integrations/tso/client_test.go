@@ -187,7 +187,10 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		n := r.Intn(2) + 1
+		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
+		// currently, the time to discover tso service is usually a little longer than 1s, compared
+		// to the previous time taken < 1s.
+		n := r.Intn(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
 			suite.tsoCluster.ResignPrimary()
@@ -214,7 +217,10 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		n := r.Intn(2) + 1
+		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
+		// currently, the time to discover tso service is usually a little longer than 1s, compared
+		// to the previous time taken < 1s.
+		n := r.Intn(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
 			suite.tsoCluster.WaitForDefaultPrimaryServing(re).Close()
