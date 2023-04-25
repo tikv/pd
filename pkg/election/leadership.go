@@ -117,7 +117,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
 	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(finalCmps...).
-		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(newLease.ID))).
+		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(newLease.ID.Load().(clientv3.LeaseID)))).
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {

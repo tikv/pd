@@ -203,7 +203,7 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 			_, _, err := client.GetTS(ctx)
 			return err == nil
 		})
-		// Transfer leader to trigger the TSO resetting.
+		// Resign leader to trigger the TSO resetting.
 		re.NoError(failpoint.Enable("github.com/tikv/pd/server/updateAfterResetTSO", "return(true)"))
 		oldLeaderName := suite.cluster.WaitLeader()
 		err := suite.cluster.GetServer(oldLeaderName).ResignLeader()
