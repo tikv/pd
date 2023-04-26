@@ -130,13 +130,17 @@ func (s *state) getAMWithMembershipCheck(
 		return nil, kgid, genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 	}
 
+	// The keyspace doesn't belong to any keyspace group but the keyspace has been assigned to a
+	// keyspace group before, which means the keyspace group hasn't initialized yet.
 	if keyspaceGroupID != mcsutils.DefaultKeyspaceGroupID {
 		return nil, keyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
 	}
 
-	// The keyspace doesn't belong to any keyspace group, so return the default keyspace group.
-	// It's for migrating the existing keyspaces which have no keyspace group assigned, so the
-	// the default keyspace group is used to serve the keyspaces.
+	// For migrating the existing keyspaces which have no keyspace group assigned as configured in the
+	// keyspace meta. All these keyspaces will be served by the default keyspace group.
+	if s.ams[mcsutils.DefaultKeyspaceGroupID] == nil {
+		return nil, mcsutils.DefaultKeyspaceGroupID, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
+	}
 	return s.ams[mcsutils.DefaultKeyspaceGroupID], mcsutils.DefaultKeyspaceGroupID, nil
 }
 
