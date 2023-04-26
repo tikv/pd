@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/balancer"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -56,6 +57,7 @@ type GroupManager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
 	// the lock for the groups
 	sync.RWMutex
 	// groups is the cache of keyspace group related information.
@@ -63,7 +65,10 @@ type GroupManager struct {
 	groups map[endpoint.UserKind]*indexedHeap
 
 	// store is the storage for keyspace group related information.
-	store endpoint.KeyspaceGroupStorage
+	store interface {
+		endpoint.KeyspaceGroupStorage
+		endpoint.KeyspaceStorage
+	}
 
 	client *clientv3.Client
 
@@ -77,10 +82,21 @@ type GroupManager struct {
 	nodesBalancer balancer.Balancer[string]
 	// serviceRegistryMap stores the mapping from the service registry key to the service address.
 	serviceRegistryMap map[string]string
+
+	// patrolKeyspaceAssignmentOnce is used to patrol all keyspaces and assign them to the keyspace groups.
+	patrolKeyspaceAssignmentOnce sync.Once
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
-func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupStorage, client *clientv3.Client, clusterID uint64) *GroupManager {
+func NewKeyspaceGroupManager(
+	ctx context.Context,
+	store interface {
+		endpoint.KeyspaceGroupStorage
+		endpoint.KeyspaceStorage
+	},
+	client *clientv3.Client,
+	clusterID uint64,
+) *GroupManager {
 	ctx, cancel := context.WithCancel(ctx)
 	key := discovery.TSOPath(clusterID)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
@@ -154,6 +170,31 @@ func (m *GroupManager) Bootstrap() error {
 func (m *GroupManager) Close() {
 	m.cancel()
 	m.wg.Wait()
+}
+
+// patrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
+func (m *GroupManager) patrolKeyspaceAssignment() (err error) {
+	m.patrolKeyspaceAssignmentOnce.Do(func() {
+		var keyspaces []*keyspacepb.KeyspaceMeta
+		keyspaces, err = m.store.LoadRangeKeyspace(utils.DefaultKeyspaceID, 0)
+		if err != nil {
+			return
+		}
+		config, err := m.GetKeyspaceConfigByKind(endpoint.Basic)
+		if err != nil {
+			return
+		}
+		for _, ks := range keyspaces {
+			if ks == nil {
+				continue
+			}
+			err = m.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], ks.GetId(), opAdd)
+			if err != nil {
+				return
+			}
+		}
+	})
+	return err
 }
 
 func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
@@ -535,11 +576,14 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 // SplitKeyspaceGroupByID splits the keyspace group by ID into a new keyspace group with the given new ID.
 // And the keyspaces in the old keyspace group will be moved to the new keyspace group.
 func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint32, keyspaces []uint32) error {
+	err := m.patrolKeyspaceAssignment()
+	if err != nil {
+		return err
+	}
 	var splitSourceKg, splitTargetKg *endpoint.KeyspaceGroup
 	m.Lock()
 	defer m.Unlock()
-	// TODO: avoid to split when the keyspaces is empty.
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+	if err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
 		// Load the old keyspace group first.
 		splitSourceKg, err = m.store.LoadKeyspaceGroup(txn, splitSourceID)
 		if err != nil {
