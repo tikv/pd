@@ -376,8 +376,6 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 	}
 }
 
-type etcdFunc func(*mvccpb.KeyValue) error
-
 const (
 	maxLoadRetryTimes            = 30
 	loadRetryInterval            = time.Millisecond * 100
@@ -385,7 +383,7 @@ const (
 )
 
 // StartWatchLoop starts a loop to watch the key.
-func (lw *LoopWatcher) StartWatchLoop(putFn, deleteFn etcdFunc, opts ...clientv3.OpOption) {
+func (lw *LoopWatcher) StartWatchLoop(putFn, deleteFn func(*mvccpb.KeyValue) error, opts ...clientv3.OpOption) {
 	defer logutil.LogPanic()
 	defer lw.wg.Done()
 	ctx, cancel := context.WithCancel(lw.ctx)
@@ -433,7 +431,7 @@ func (lw *LoopWatcher) StartWatchLoop(putFn, deleteFn etcdFunc, opts ...clientv3
 	}
 }
 
-func (lw *LoopWatcher) watch(ctx context.Context, revision int64, putFn, deleteFn etcdFunc, opts ...clientv3.OpOption) (nextRevision int64, err error) {
+func (lw *LoopWatcher) watch(ctx context.Context, revision int64, putFn, deleteFn func(*mvccpb.KeyValue) error, opts ...clientv3.OpOption) (nextRevision int64, err error) {
 	watcher := clientv3.NewWatcher(lw.client)
 	defer watcher.Close()
 
@@ -483,7 +481,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64, putFn, deleteF
 	}
 }
 
-func (lw *LoopWatcher) load(putFn etcdFunc, opts ...clientv3.OpOption) (nextRevision int64, err error) {
+func (lw *LoopWatcher) load(putFn func(*mvccpb.KeyValue) error, opts ...clientv3.OpOption) (nextRevision int64, err error) {
 	resp, err := EtcdKVGet(lw.client, lw.key, opts...)
 	if err != nil {
 		log.Error("load failed in watch loop", zap.String("name", lw.name),

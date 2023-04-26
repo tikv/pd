@@ -64,12 +64,12 @@ func (s *TSODispatcher) DispatchRequest(
 	tsoProtoFactory ProtoFactory,
 	doneCh <-chan struct{},
 	errCh chan<- error,
-	updateServicePrimaryAddrChs ...chan<- struct{}) {
+	callbacks ...func()) {
 	val, loaded := s.dispatchChs.LoadOrStore(req.getForwardedHost(), make(chan Request, maxMergeRequests))
 	reqCh := val.(chan Request)
 	if !loaded {
 		tsDeadlineCh := make(chan deadline, 1)
-		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh, updateServicePrimaryAddrChs...)
+		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh, callbacks...)
 		go watchTSDeadline(ctx, tsDeadlineCh)
 	}
 	reqCh <- req
@@ -84,7 +84,7 @@ func (s *TSODispatcher) dispatch(
 	tsDeadlineCh chan<- deadline,
 	doneCh <-chan struct{},
 	errCh chan<- error,
-	updateServicePrimaryAddrChs ...chan<- struct{}) {
+	callbacks ...func()) {
 	defer logutil.LogPanic()
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
@@ -111,7 +111,7 @@ func (s *TSODispatcher) dispatch(
 	defer cancel()
 
 	requests := make([]Request, maxMergeRequests+1)
-	needUpdateServicePrimaryAddr := len(updateServicePrimaryAddrChs) > 0 && updateServicePrimaryAddrChs[0] != nil
+	needUpdateServicePrimaryAddr := len(callbacks) > 0 && callbacks[0] != nil
 	for {
 		select {
 		case first := <-tsoRequestCh:
@@ -139,10 +139,7 @@ func (s *TSODispatcher) dispatch(
 					errs.ZapError(errs.ErrGRPCSend, err))
 				if needUpdateServicePrimaryAddr {
 					if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
-						select {
-						case updateServicePrimaryAddrChs[0] <- struct{}{}:
-						default:
-						}
+						callbacks[0]()
 					}
 				}
 				select {
