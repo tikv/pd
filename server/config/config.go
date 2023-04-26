@@ -672,6 +672,11 @@ type ScheduleConfig struct {
 	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
 	// A store's slowness must affected more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
 	SlowStoreEvictingAffectedStoreRatioThreshold float64 `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
+
+	// StoreLimitVersion is the version of store limit.
+	// v1: which is based on the region count by rate limit.
+	// v2: which is based on region size by window size.
+	StoreLimitVersion string `toml:"store-limit-version" json:"store-limit-version,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -726,6 +731,8 @@ const (
 	defaultMaxStorePreparingTime = 48 * time.Hour
 	// When a slow store affected more than 30% of total stores, it will trigger evicting.
 	defaultSlowStoreEvictingAffectedStoreRatioThreshold = 0.3
+
+	defaultStoreLimitVersion = "v1"
 )
 
 func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool) error {
@@ -777,6 +784,11 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("store-limit-mode") {
 		configutil.AdjustString(&c.StoreLimitMode, defaultStoreLimitMode)
 	}
+
+	if !meta.IsDefined("store-limit-version") {
+		configutil.AdjustString(&c.StoreLimitVersion, defaultStoreLimitVersion)
+	}
+
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
 	}
@@ -957,7 +969,6 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-leader"},
 	{Type: "balance-witness"},
 	{Type: "hot-region"},
-	{Type: "split-bucket"},
 	{Type: "transfer-witness-leader"},
 }
 

@@ -80,6 +80,7 @@ type Config interface {
 	CheckLabelProperty(string, []*metapb.StoreLabel) bool
 	IsDebugMetricsEnabled() bool
 	GetClusterVersion() *semver.Version
+	GetStoreLimitVersion() string
 	// for test purpose
 	SetPlacementRuleEnabled(bool)
 	SetSplitMergeInterval(time.Duration)
@@ -96,6 +97,7 @@ type StoreConfig interface {
 	CheckRegionSize(uint64, uint64) error
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool
+	IsRaftKV2() bool
 	// for test purpose
 	SetRegionBucketEnabled(bool)
 }

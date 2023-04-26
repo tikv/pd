@@ -460,7 +460,15 @@ func TestScheduler(t *testing.T) {
 	checkSchedulerWithStatusCommand(nil, "paused", []string{
 		"balance-leader-scheduler",
 	})
-	checkSchedulerDescribeCommand("balance-leader-scheduler", "paused", "")
+	result := make(map[string]interface{})
+	testutil.Eventually(re, func() bool {
+		mightExec([]string{"-u", pdAddr, "scheduler", "describe", "balance-leader-scheduler"}, &result)
+		return len(result) != 0
+	}, testutil.WithTickInterval(50*time.Millisecond))
+
+	testutil.Eventually(re, func() bool {
+		return result["status"] == "paused" && result["summary"] == ""
+	}, testutil.WithTickInterval(50*time.Millisecond))
 
 	mustUsage([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler", "60"})
 	mustExec([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
@@ -481,14 +489,4 @@ func TestScheduler(t *testing.T) {
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
 	checkSchedulerWithStatusCommand(nil, "disabled", nil)
-
-	// test split bucket scheduler
-	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "split-bucket-scheduler"}, nil)
-	re.Contains(echo, "\"degree\": 3")
-	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "split-bucket-scheduler", "set", "degree", "10"}, nil)
-	re.Contains(echo, "Success")
-	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "split-bucket-scheduler"}, nil)
-	re.Contains(echo, "\"degree\": 10")
-	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "split-bucket-scheduler"}, nil)
-	re.Contains(echo, "Success!")
 }

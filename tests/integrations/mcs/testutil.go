@@ -16,18 +16,38 @@ package mcs
 
 import (
 	"context"
+	"os"
+	"sync"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/pkg/errors"
-	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
-	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/utils/testutil"
-
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+var once sync.Once
+
+// InitLogger initializes the logger for test.
+func InitLogger(cfg *tso.Config) (err error) {
+	once.Do(func() {
+		// Setup the logger.
+		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+		if err != nil {
+			return
+		}
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+		// Flushing any buffered log entries.
+		log.Sync()
+	})
+	return err
+}
 
 // SetupClientWithKeyspace creates a TSO client for test.
 func SetupClientWithKeyspace(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
@@ -68,13 +88,30 @@ func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
 
-	s, cleanup, err := tso.NewTSOTestServer(ctx, re, cfg)
+	// Setup the logger.
+	err = InitLogger(cfg)
+	re.NoError(err)
+
+	s, cleanup, err := NewTSOTestServer(ctx, cfg)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return !s.IsClosed()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup
+}
+
+// NewTSOTestServer creates a tso server with given config for testing.
+func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testutil.CleanupFunc, error) {
+	s := tso.CreateServer(ctx, cfg)
+	if err := s.Run(); err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		s.Close()
+		os.RemoveAll(cfg.DataDir)
+	}
+	return s, cleanup, nil
 }
 
 // WaitForPrimaryServing waits for one of servers being elected to be the primary/leader

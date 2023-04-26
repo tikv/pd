@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -95,6 +94,10 @@ const (
 	removingAction          = "removing"
 	preparingAction         = "preparing"
 	gcTunerCheckCfgInterval = 10 * time.Second
+
+	// minSnapshotDurationSec is the minimum duration that a store can tolerate.
+	// It should enlarge the limiter if the snapshot's duration is less than this value.
+	minSnapshotDurationSec = 5
 )
 
 // Server is the interface for cluster.
@@ -130,7 +133,7 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running            atomic.Bool
+	running            bool
 	meta               *metapb.Cluster
 	storeConfigManager *config.StoreConfigManager
 	storage            storage.Storage
@@ -254,13 +257,13 @@ func (c *RaftCluster) InitCluster(
 
 // Start starts a cluster.
 func (c *RaftCluster) Start(s Server) error {
-	if c.IsRunning() {
+	c.Lock()
+	defer c.Unlock()
+
+	if c.running {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-
-	c.Lock()
-	defer c.Unlock()
 
 	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster(), s.GetKeyspaceGroupManager())
 	cluster, err := c.LoadClusterInfo()
@@ -271,7 +274,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 	if s.IsAPIServiceMode() {
-		err = c.keyspaceGroupManager.Bootstrap()
+		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
 			return err
 		}
@@ -313,7 +316,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 
-	c.running.Store(true)
+	c.running = true
 	return nil
 }
 
@@ -601,26 +604,31 @@ func (c *RaftCluster) runReplicationMode() {
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
 	c.Lock()
-	if !c.running.CompareAndSwap(true, false) {
+	if !c.running {
 		c.Unlock()
 		return
 	}
-
+	c.running = false
 	c.coordinator.stop()
 	c.cancel()
 	c.Unlock()
+
 	c.wg.Wait()
 	log.Info("raftcluster is stopped")
 }
 
 // IsRunning return if the cluster is running.
 func (c *RaftCluster) IsRunning() bool {
-	return c.running.Load()
+	c.RLock()
+	defer c.RUnlock()
+	return c.running
 }
 
 // Context returns the context of RaftCluster.
 func (c *RaftCluster) Context() context.Context {
-	if c.running.Load() {
+	c.RLock()
+	defer c.RUnlock()
+	if c.running {
 		return c.ctx
 	}
 	return nil
@@ -848,17 +856,29 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		return errors.Errorf("store %v not found", storeID)
 	}
 
+	limit := store.GetStoreLimit()
+	version := c.opt.GetStoreLimitVersion()
+	var opt core.StoreCreateOption
+	if limit == nil || limit.Version() != version {
+		if version == storelimit.VersionV2 {
+			limit = storelimit.NewSlidingWindows()
+		} else {
+			limit = storelimit.NewStoreRateLimit(0.0)
+		}
+		opt = core.SetStoreLimit(limit)
+	}
+
 	nowTime := time.Now()
 	var newStore *core.StoreInfo
 	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
 	if needAwaken, slowStoreIDs := c.NeedAwakenAllRegionsInStore(storeID); needAwaken {
 		log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
-		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime))
+		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime), opt)
 		resp.AwakenRegions = &pdpb.AwakenRegions{
 			AbnormalStores: slowStoreIDs,
 		}
 	} else {
-		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
+		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), opt)
 	}
 
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
@@ -919,7 +939,24 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
-
+	for _, stat := range stats.GetSnapshotStats() {
+		// the duration of snapshot is the sum between to send and generate snapshot.
+		// notice: to enlarge the limit in time, we reset the executing duration when it less than the minSnapshotDurationSec.
+		dur := stat.GetSendDurationSec() + stat.GetGenerateDurationSec()
+		if dur < minSnapshotDurationSec {
+			dur = minSnapshotDurationSec
+		}
+		// This error is the diff between the executing duration and the waiting duration.
+		// The waiting duration is the total duration minus the executing duration.
+		// so e=executing_duration-waiting_duration=executing_duration-(total_duration-executing_duration)=2*executing_duration-total_duration
+		// Eg: the total duration is 20s, the executing duration is 10s, the error is 0s.
+		// Eg: the total duration is 20s, the executing duration is 8s, the error is -4s.
+		// Eg: the total duration is 10s, the executing duration is 12s, the error is 4s.
+		// if error is positive, it means the most time cost in executing, pd should send more snapshot to this tikv.
+		// if error is negative, it means the most time cost in waiting, pd should send less snapshot to this tikv.
+		e := int64(dur)*2 - int64(stat.GetTotalDurationSec())
+		store.Feedback(float64(e))
+	}
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	return nil
@@ -2253,8 +2290,8 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 }
 
 // BucketsStats returns hot region's buckets stats.
-func (c *RaftCluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
-	task := buckets.NewCollectBucketStatsTask(degree)
+func (c *RaftCluster) BucketsStats(degree int, regions ...uint64) map[uint64][]*buckets.BucketStat {
+	task := buckets.NewCollectBucketStatsTask(degree, regions...)
 	if !c.hotBuckets.CheckAsync(task) {
 		return nil
 	}

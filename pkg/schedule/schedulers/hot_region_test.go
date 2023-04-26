@@ -22,6 +22,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -29,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -195,9 +197,51 @@ func newTestRegion(id uint64) *core.RegionInfo {
 func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
+	statistics.HistorySampleDuration = 0
 	statisticsInterval = 0
 	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
 	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
+}
+
+func TestSplitBuckets(t *testing.T) {
+	re := require.New(t)
+	statistics.Denoising = false
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tc.SetHotRegionCacheHitsThreshold(1)
+	defer cancel()
+	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	solve := newBalanceSolver(hb.(*hotScheduler), tc, statistics.Read, transferLeader)
+	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
+
+	// the hot range is [a,c],[e,f]
+	b := &metapb.Buckets{
+		RegionId:   1,
+		PeriodInMs: 1000,
+		Keys:       [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")},
+		Stats: &metapb.BucketStats{
+			ReadBytes:  []uint64{10 * units.KiB, 10 * units.KiB, 0, 10 * units.KiB, 10 * units.KiB},
+			ReadKeys:   []uint64{256, 256, 0, 256, 256},
+			ReadQps:    []uint64{0, 0, 0, 0, 0},
+			WriteBytes: []uint64{0, 0, 0, 0, 0},
+			WriteQps:   []uint64{0, 0, 0, 0, 0},
+			WriteKeys:  []uint64{0, 0, 0, 0, 0},
+		},
+	}
+
+	task := buckets.NewCheckPeerTask(b)
+	re.True(tc.HotBucketCache.CheckAsync(task))
+	time.Sleep(time.Millisecond * 10)
+	ops := solve.createSplitOperator([]*core.RegionInfo{region})
+	re.Equal(1, len(ops))
+	op := ops[0]
+	re.Equal(splitBucket, op.Desc())
+	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
+	expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
+	re.NoError(err)
+	expectOp.GetCreateTime()
+	re.Equal(expectOp.Brief(), op.Brief())
+	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
 }
 
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
@@ -520,11 +564,13 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		tikvKeysSum += float64(storesBytes[i]/100) / 10
 		tikvQuerySum += float64(storesBytes[i]/100) / 10
 	}
+
 	for i := uint64(1); i <= storeCount; i++ {
 		if i != downStoreID {
 			tc.UpdateStorageWrittenBytes(i, storesBytes[i])
 		}
 	}
+
 	{ // Check the load expect
 		aliveTiKVCount := float64(aliveTiKVLastID - aliveTiKVStartID + 1)
 		allowLeaderTiKVCount := aliveTiKVCount - 1 // store 5 with evict leader
@@ -1813,6 +1859,7 @@ func checkSortResult(re *require.Assertions, regions []uint64, hotPeers map[*sta
 
 func TestInfluenceByRWType(t *testing.T) {
 	re := require.New(t)
+	statistics.HistorySampleDuration = 0
 	originValue := schedulePeerPr
 	defer func() {
 		schedulePeerPr = originValue
@@ -2451,10 +2498,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV1,
 			strict:   true, // all of
 			load: &statistics.StoreLoad{ // all dims are higher than expect, allow schedule
-				Loads: []float64{2.0, 2.0, 2.0},
+				Loads:        []float64{2.0, 2.0, 2.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {2.0, 2.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: true,
@@ -2463,10 +2512,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV1,
 			strict:   true, // all of
 			load: &statistics.StoreLoad{ // all dims are higher than expect, but lower than expect*toleranceRatio, not allow schedule
-				Loads: []float64{2.0, 2.0, 2.0},
+				Loads:        []float64{2.0, 2.0, 2.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {2.0, 2.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc:          true,
 			toleranceRatio: 2.2,
@@ -2476,10 +2527,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV1,
 			strict:   true, // all of
 			load: &statistics.StoreLoad{ // only queryDim is lower, but the dim is no selected, allow schedule
-				Loads: []float64{2.0, 2.0, 1.0},
+				Loads:        []float64{2.0, 2.0, 1.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: true,
@@ -2488,10 +2541,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV1,
 			strict:   true, // all of
 			load: &statistics.StoreLoad{ // only keyDim is lower, and the dim is selected, not allow schedule
-				Loads: []float64{2.0, 1.0, 2.0},
+				Loads:        []float64{2.0, 1.0, 2.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: false,
@@ -2500,10 +2555,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV1,
 			strict:   false, // first only
 			load: &statistics.StoreLoad{ // keyDim is higher, and the dim is selected, allow schedule
-				Loads: []float64{1.0, 2.0, 1.0},
+				Loads:        []float64{1.0, 2.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: true,
@@ -2512,10 +2569,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV1,
 			strict:   false, // first only
 			load: &statistics.StoreLoad{ // although byteDim is higher, the dim is not first, not allow schedule
-				Loads: []float64{2.0, 1.0, 1.0},
+				Loads:        []float64{2.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{2.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: false,
@@ -2524,10 +2583,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV1,
 			strict:   false, // first only
 			load: &statistics.StoreLoad{ // although queryDim is higher, the dim is no selected, not allow schedule
-				Loads: []float64{1.0, 1.0, 2.0},
+				Loads:        []float64{1.0, 1.0, 2.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {2.0, 2.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: false,
@@ -2536,10 +2597,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV1,
 			strict:   false, // first only
 			load: &statistics.StoreLoad{ // all dims are lower than expect, not allow schedule
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{2.0, 2.0, 2.0},
+				Loads:        []float64{2.0, 2.0, 2.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {2.0, 2.0}},
 			},
 			isSrc: true,
 			allow: false,
@@ -2549,10 +2612,12 @@ func TestExpect(t *testing.T) {
 			strict:   true,
 			rs:       writeLeader,
 			load: &statistics.StoreLoad{ // only keyDim is higher, but write leader only consider the first priority
-				Loads: []float64{1.0, 2.0, 1.0},
+				Loads:        []float64{1.0, 2.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {2.0, 2.0}, {2.0, 2.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: true,
@@ -2562,10 +2627,27 @@ func TestExpect(t *testing.T) {
 			strict:   true,
 			rs:       writeLeader,
 			load: &statistics.StoreLoad{ // although byteDim is higher, the dim is not first, not allow schedule
-				Loads: []float64{2.0, 1.0, 1.0},
+				Loads:        []float64{2.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 1.0}, {2.0, 2.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
+			},
+			isSrc: true,
+			allow: false,
+		},
+		{
+			initFunc: (*balanceSolver).pickCheckPolicyV1,
+			strict:   true,
+			rs:       writeLeader,
+			load: &statistics.StoreLoad{ // history loads is not higher than the expected.
+				Loads:        []float64{2.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 2.0}, {1.0, 2.0}},
+			},
+			expect: &statistics.StoreLoad{
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 2.0}, {1.0, 2.0}, {1.0, 2.0}},
 			},
 			isSrc: true,
 			allow: false,
@@ -2575,10 +2657,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV2,
 			strict:   false, // any of
 			load: &statistics.StoreLoad{ // keyDim is higher, and the dim is selected, allow schedule
-				Loads: []float64{1.0, 2.0, 1.0},
+				Loads:        []float64{1.0, 2.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: true,
@@ -2587,10 +2671,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV2,
 			strict:   false, // any of
 			load: &statistics.StoreLoad{ // byteDim is higher, and the dim is selected, allow schedule
-				Loads: []float64{2.0, 1.0, 1.0},
+				Loads:        []float64{2.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: true,
@@ -2599,10 +2685,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV2,
 			strict:   false, // any of
 			load: &statistics.StoreLoad{ // although queryDim is higher, the dim is no selected, not allow schedule
-				Loads: []float64{1.0, 1.0, 2.0},
+				Loads:        []float64{1.0, 1.0, 2.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {2.0, 2.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: false,
@@ -2611,10 +2699,12 @@ func TestExpect(t *testing.T) {
 			initFunc: (*balanceSolver).pickCheckPolicyV2,
 			strict:   false, // any of
 			load: &statistics.StoreLoad{ // all dims are lower than expect, not allow schedule
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{2.0, 2.0, 2.0},
+				Loads:        []float64{2.0, 2.0, 2.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {2.0, 2.0}},
 			},
 			isSrc: true,
 			allow: false,
@@ -2624,10 +2714,12 @@ func TestExpect(t *testing.T) {
 			strict:   true,
 			rs:       writeLeader,
 			load: &statistics.StoreLoad{ // only keyDim is higher, but write leader only consider the first priority
-				Loads: []float64{1.0, 2.0, 1.0},
+				Loads:        []float64{1.0, 2.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: true,
@@ -2637,10 +2729,12 @@ func TestExpect(t *testing.T) {
 			strict:   true,
 			rs:       writeLeader,
 			load: &statistics.StoreLoad{ // although byteDim is higher, the dim is not first, not allow schedule
-				Loads: []float64{2.0, 1.0, 1.0},
+				Loads:        []float64{2.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			expect: &statistics.StoreLoad{
-				Loads: []float64{1.0, 1.0, 1.0},
+				Loads:        []float64{1.0, 1.0, 1.0},
+				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
 			},
 			isSrc: true,
 			allow: false,
@@ -2652,8 +2746,16 @@ func TestExpect(t *testing.T) {
 		for i, v := range src.Loads {
 			dst[i] = 3.0 - v
 		}
+		historyLoads := make([][]float64, len(src.HistoryLoads))
+		for i, dim := range src.HistoryLoads {
+			historyLoads[i] = make([]float64, len(dim))
+			for j, load := range dim {
+				historyLoads[i][j] = 3.0 - load
+			}
+		}
 		return &statistics.StoreLoad{
-			Loads: dst,
+			Loads:        dst,
+			HistoryLoads: historyLoads,
 		}
 	}
 
@@ -2672,6 +2774,8 @@ func TestExpect(t *testing.T) {
 		testCase.initFunc(bs)
 		re.Equal(testCase.allow, bs.checkSrcByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
 		re.Equal(testCase.allow, bs.checkDstByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
+		re.Equal(testCase.allow, bs.checkSrcHistoryLoadsByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
+		re.Equal(testCase.allow, bs.checkDstHistoryLoadsByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
 	}
 }
 

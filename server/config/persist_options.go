@@ -510,6 +510,11 @@ func (o *PersistOptions) GetStoreLimitMode() string {
 	return o.GetScheduleConfig().StoreLimitMode
 }
 
+// GetStoreLimitVersion returns the limit version of store.
+func (o *PersistOptions) GetStoreLimitVersion() string {
+	return o.GetScheduleConfig().StoreLimitVersion
+}
+
 // GetTolerantSizeRatio gets the tolerant size ratio.
 func (o *PersistOptions) GetTolerantSizeRatio() float64 {
 	return o.GetScheduleConfig().TolerantSizeRatio

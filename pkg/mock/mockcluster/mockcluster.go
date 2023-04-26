@@ -137,8 +137,8 @@ func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 }
 
 // BucketsStats returns hot region's buckets stats.
-func (mc *Cluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
-	task := buckets.NewCollectBucketStatsTask(degree)
+func (mc *Cluster) BucketsStats(degree int, regions ...uint64) map[uint64][]*buckets.BucketStat {
+	task := buckets.NewCollectBucketStatsTask(degree, regions...)
 	if !mc.HotBucketCache.CheckAsync(task) {
 		return nil
 	}

@@ -202,14 +202,19 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
-// TODO: support multiple keyspace groups
 func (s *Server) IsServing() bool {
+	return s.IsKeyspaceServing(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+}
+
+// IsKeyspaceServing returns whether the server is the primary of the given keyspace.
+// TODO: update basicserver interface to support keyspace.
+func (s *Server) IsKeyspaceServing(keyspaceID, keyspaceGroupID uint32) bool {
 	if atomic.LoadInt64(&s.isRunning) == 0 {
 		return false
 	}
 
 	member, err := s.keyspaceGroupManager.GetElectionMember(
-		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+		keyspaceID, keyspaceGroupID)
 	if err != nil {
 		log.Error("failed to get election member", errs.ZapError(err))
 		return false
@@ -228,6 +233,26 @@ func (s *Server) GetLeaderListenUrls() []string {
 	}
 
 	return member.GetLeaderListenUrls()
+}
+
+// GetMember returns the election member of the given keyspace and keyspace group.
+func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMember, error) {
+	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+	if err != nil {
+		return nil, err
+	}
+	return member, nil
+}
+
+// ResignPrimary resigns the primary of the given keyspace and keyspace group.
+func (s *Server) ResignPrimary() error {
+	member, err := s.keyspaceGroupManager.GetElectionMember(
+		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+	if err != nil {
+		return err
+	}
+	member.ResetLeader()
+	return nil
 }
 
 // AddServiceReadyCallback implements basicserver.
@@ -334,7 +359,7 @@ func (s *Server) initClient() error {
 	if err != nil {
 		return err
 	}
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClientsWithMultiEndpoint(tlsConfig, s.backendUrls)
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendUrls[0])
 	return err
 }
 
@@ -442,7 +467,7 @@ func (s *Server) startServer() (err error) {
 	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
 	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
-		s.serverLoopCtx, s.serviceID, s.etcdClient, s.listenURL.Host, legacySvcRootPath, tsoSvcRootPath, s.cfg)
+		s.serverLoopCtx, s.serviceID, s.etcdClient, s.httpClient, s.cfg.AdvertiseListenAddr, legacySvcRootPath, tsoSvcRootPath, s.cfg)
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}

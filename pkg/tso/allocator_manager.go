@@ -139,8 +139,8 @@ type ElectionMember interface {
 	GetDCLocationPathPrefix() string
 	// GetDCLocationPath returns the dc-location path of a member with the given member ID.
 	GetDCLocationPath(id uint64) string
-	// PrecheckLeader does some pre-check before checking whether it's the leader.
-	PrecheckLeader() error
+	// PreCheckLeader does some pre-check before checking whether it's the leader.
+	PreCheckLeader() error
 }
 
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
@@ -294,7 +294,8 @@ func (am *AllocatorManager) close() {
 	log.Info("closed the allocator manager")
 }
 
-func (am *AllocatorManager) getMember() ElectionMember {
+// GetMember returns the ElectionMember of this AllocatorManager.
+func (am *AllocatorManager) GetMember() ElectionMember {
 	return am.member
 }
 

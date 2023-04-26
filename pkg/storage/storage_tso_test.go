@@ -116,7 +116,7 @@ func TestTimestampTxn(t *testing.T) {
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
 	err = storage.SaveTimestamp(timestampKey, globalTS2)
-	re.NoError(err)
+	re.Error(err)
 
 	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)

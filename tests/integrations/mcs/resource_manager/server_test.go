@@ -92,4 +92,15 @@ func TestResourceManagerServer(t *testing.T) {
 		re.NoError(err)
 		re.Equal("{\"name\":\"pingcap\",\"mode\":1,\"r_u_settings\":{\"r_u\":{\"state\":{\"initialized\":false}}},\"priority\":0}", string(respString))
 	}
+
+	// Test metrics handler
+	{
+		resp, err := http.Get(addr + "/metrics")
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
+		respBytes, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		re.Contains(string(respBytes), "resource_manager_server_info")
+	}
 }
