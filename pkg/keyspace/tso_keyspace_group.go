@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/balancer"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -58,11 +57,13 @@ type GroupManager struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// the lock for the groups
 	sync.RWMutex
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
+	// patrolKeyspaceAssignmentOnce is used to indicate whether we have patrolled all keyspaces
+	// and assign them to the keyspace groups.
+	patrolKeyspaceAssignmentOnce bool
 
 	// store is the storage for keyspace group related information.
 	store interface {
@@ -82,9 +83,6 @@ type GroupManager struct {
 	nodesBalancer balancer.Balancer[string]
 	// serviceRegistryMap stores the mapping from the service registry key to the service address.
 	serviceRegistryMap map[string]string
-
-	// patrolKeyspaceAssignmentOnce is used to patrol all keyspaces and assign them to the keyspace groups.
-	patrolKeyspaceAssignmentOnce sync.Once
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
@@ -173,28 +171,35 @@ func (m *GroupManager) Close() {
 }
 
 // patrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
-func (m *GroupManager) patrolKeyspaceAssignment() (err error) {
-	m.patrolKeyspaceAssignmentOnce.Do(func() {
-		var keyspaces []*keyspacepb.KeyspaceMeta
-		keyspaces, err = m.store.LoadRangeKeyspace(utils.DefaultKeyspaceID, 0)
+func (m *GroupManager) patrolKeyspaceAssignment() error {
+	m.Lock()
+	defer m.Unlock()
+	if m.patrolKeyspaceAssignmentOnce {
+		return nil
+	}
+	keyspaces, err := m.store.LoadRangeKeyspace(utils.DefaultKeyspaceID, 0)
+	if err != nil {
+		return err
+	}
+	config, err := m.getKeyspaceConfigByKindLocked(endpoint.Basic)
+	if err != nil {
+		return err
+	}
+	for _, ks := range keyspaces {
+		if ks == nil {
+			continue
+		}
+		groupID, err := strconv.ParseUint(config[TSOKeyspaceGroupIDKey], 10, 64)
 		if err != nil {
-			return
+			return err
 		}
-		config, err := m.GetKeyspaceConfigByKind(endpoint.Basic)
+		err = m.updateKeyspaceForGroupLocked(endpoint.Basic, groupID, ks.GetId(), opAdd)
 		if err != nil {
-			return
+			return err
 		}
-		for _, ks := range keyspaces {
-			if ks == nil {
-				continue
-			}
-			err = m.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], ks.GetId(), opAdd)
-			if err != nil {
-				return
-			}
-		}
-	})
-	return err
+	}
+	m.patrolKeyspaceAssignmentOnce = true
+	return nil
 }
 
 func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
@@ -467,6 +472,10 @@ func (m *GroupManager) GetKeyspaceConfigByKind(userKind endpoint.UserKind) (map[
 	}
 	m.RLock()
 	defer m.RUnlock()
+	return m.getKeyspaceConfigByKindLocked(userKind)
+}
+
+func (m *GroupManager) getKeyspaceConfigByKindLocked(userKind endpoint.UserKind) (map[string]string, error) {
 	groups, ok := m.groups[userKind]
 	if !ok {
 		return map[string]string{}, errors.Errorf("user kind %s not found", userKind)
@@ -493,9 +502,13 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 
 	m.Lock()
 	defer m.Unlock()
-	kg := m.groups[userKind].Get(uint32(id))
+	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)
+}
+
+func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, groupID uint64, keyspaceID uint32, mutation int) error {
+	kg := m.groups[userKind].Get(uint32(groupID))
 	if kg == nil {
-		return errors.Errorf("keyspace group %d not found", id)
+		return errors.Errorf("keyspace group %d not found", groupID)
 	}
 	if kg.IsSplitting() {
 		return ErrKeyspaceGroupInSplit
