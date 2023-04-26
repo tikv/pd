@@ -608,13 +608,15 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 		if splitTargetKg != nil {
 			return ErrKeyspaceGroupExists
 		}
+		keyspaceNum := len(keyspaces)
+		sourceKeyspaceNum := len(splitSourceKg.Keyspaces)
 		// Check if the keyspaces are all in the old keyspace group.
-		if len(keyspaces) > len(splitSourceKg.Keyspaces) {
+		if keyspaceNum == 0 || keyspaceNum > sourceKeyspaceNum {
 			return ErrKeyspaceNotInKeyspaceGroup
 		}
 		var (
-			oldKeyspaceMap = make(map[uint32]struct{}, len(splitSourceKg.Keyspaces))
-			newKeyspaceMap = make(map[uint32]struct{}, len(keyspaces))
+			oldKeyspaceMap = make(map[uint32]struct{}, sourceKeyspaceNum)
+			newKeyspaceMap = make(map[uint32]struct{}, keyspaceNum)
 		)
 		for _, keyspace := range splitSourceKg.Keyspaces {
 			oldKeyspaceMap[keyspace] = struct{}{}
@@ -626,7 +628,7 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 			newKeyspaceMap[keyspace] = struct{}{}
 		}
 		// Get the split keyspace group for the old keyspace group.
-		splitKeyspaces := make([]uint32, 0, len(splitSourceKg.Keyspaces)-len(keyspaces))
+		splitKeyspaces := make([]uint32, 0, sourceKeyspaceNum-keyspaceNum)
 		for _, keyspace := range splitSourceKg.Keyspaces {
 			if _, ok := newKeyspaceMap[keyspace]; !ok {
 				splitKeyspaces = append(splitKeyspaces, keyspace)
