@@ -420,6 +420,13 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	re.Equal(uint32(0), kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
+	// Should succeed and get the meta of keyspace group 0, because keyspace 0
+	// belongs to group 0, though the specified group 1 doesn't exist.
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(0, 1)
+	re.NoError(err)
+	re.Equal(uint32(0), kgid)
+	re.NotNil(am)
+	re.NotNil(kg)
 	// Should fail because keyspace 3 isn't explicitly assigned to any keyspace
 	// group, and the specified group isn't the default keyspace group.
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 100)
@@ -427,14 +434,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	re.Equal(uint32(100), kgid)
 	re.Nil(am)
 	re.Nil(kg)
-	// Should fail but still be able to get the meta of keyspace group 0,
-	// because keyspace 0 belongs to group 0, though the specified group 1
-	// doesn't exist.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(0, 1)
-	re.Error(err)
-	re.Equal(uint32(0), kgid)
-	re.NotNil(am)
-	re.NotNil(kg)
 }
 
 // TestDefaultMembershipRestriction tests the restriction of default keyspace always
@@ -498,9 +497,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
-	// Should fail but still be able to get the keyspace group meta from the default keyspace group
+	// Should succeed and return the keyspace group meta from the default keyspace group
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(mcsutils.DefaultKeyspaceID, 3)
-	re.Error(err)
+	re.NoError(err)
 	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)

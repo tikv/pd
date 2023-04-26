@@ -247,9 +247,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient() {
-	// TODO: remove the skip after the client is able to support multi-keyspace-group.
-	suite.T().SkipNow()
-
 	re := suite.Require()
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
@@ -286,11 +283,22 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 				return
 			default:
 			}
-			physical, logical, err := tsoClient.GetTS(ctx)
-			re.NoError(err)
-			re.Greater(physical, lastPhysical)
-			re.Greater(logical, lastLogical)
-			lastPhysical, lastLogical = physical, logical
+
+			testutil.Eventually(re, func() bool {
+				select {
+				case <-ctx.Done():
+					return true
+				default:
+				}
+				physical, logical, err := tsoClient.GetTS(ctx)
+				if err != nil {
+					return false
+				}
+				re.GreaterOrEqual(physical, lastPhysical)
+				re.True(physical > lastPhysical || logical > lastLogical)
+				lastPhysical, lastLogical = physical, logical
+				return true
+			})
 		}
 	}()
 	// Split the keyspace group 1 to 2.
