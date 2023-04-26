@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -242,10 +243,14 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 			ID:        uint32(2),
 			UserKind:  endpoint.Standard.String(),
 			Keyspaces: []uint32{111, 222, 333},
+			Members:   make([]endpoint.KeyspaceGroupMember, utils.KeyspaceGroupDefaultReplicaCount),
 		},
 	}
 	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
 	re.NoError(err)
+	// split the keyspace group 1 to 4
+	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{333})
+	re.ErrorIs(err, ErrKeyspaceGroupNotEnoughReplicas)
 	// split the keyspace group 2 to 4
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{333})
 	re.NoError(err)

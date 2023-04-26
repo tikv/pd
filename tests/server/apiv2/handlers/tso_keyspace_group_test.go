@@ -137,6 +137,7 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 			ID:        uint32(1),
 			UserKind:  endpoint.Standard.String(),
 			Keyspaces: []uint32{111, 222, 333},
+			Members:   make([]endpoint.KeyspaceGroupMember, utils.KeyspaceGroupDefaultReplicaCount),
 		},
 	}}
 

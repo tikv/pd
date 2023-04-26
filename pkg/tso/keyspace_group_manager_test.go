@@ -874,11 +874,11 @@ func (suite *keyspaceGroupManagerTestSuite) TestGroupSplitUpdateRetry() {
 
 	events := []*etcdEvent{}
 	// Split target keyspace group event arrives first.
-	events = append(events, generateKeyspaceGroupPutEvent(2, []uint32{2}, []string{svcAddr}, &endpoint.SplitState{
+	events = append(events, generateKeyspaceGroupPutEvent(2, []uint32{2} /* Mock 2 replicas */, []string{svcAddr, svcAddr}, &endpoint.SplitState{
 		SplitSource: 1,
 	}))
 	// Split source keyspace group event arrives later.
-	events = append(events, generateKeyspaceGroupPutEvent(1, []uint32{1}, []string{svcAddr}, &endpoint.SplitState{
+	events = append(events, generateKeyspaceGroupPutEvent(1, []uint32{1}, []string{svcAddr, svcAddr}, &endpoint.SplitState{
 		SplitSource: 1,
 	}))
 

@@ -552,6 +552,10 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 		if splitSourceKg.IsSplitting() {
 			return ErrKeyspaceGroupInSplit
 		}
+		// Check if the source keyspace group has enough replicas.
+		if len(splitSourceKg.Members) < utils.KeyspaceGroupDefaultReplicaCount {
+			return ErrKeyspaceGroupNotEnoughReplicas
+		}
 		// Check if the new keyspace group already exists.
 		splitTargetKg, err = m.store.LoadKeyspaceGroup(txn, splitTargetID)
 		if err != nil {
@@ -687,6 +691,9 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 		if kg == nil {
 			return ErrKeyspaceGroupNotExists
 		}
+		if kg.IsSplitting() {
+			return ErrKeyspaceGroupInSplit
+		}
 		exists := make(map[string]struct{})
 		for _, member := range kg.Members {
 			exists[member.Address] = struct{}{}
@@ -736,6 +743,9 @@ func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error
 		}
 		if kg == nil {
 			return ErrKeyspaceGroupNotExists
+		}
+		if kg.IsSplitting() {
+			return ErrKeyspaceGroupInSplit
 		}
 		members := make([]endpoint.KeyspaceGroupMember, 0, len(nodes))
 		for _, node := range nodes {

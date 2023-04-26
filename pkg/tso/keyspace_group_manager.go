@@ -581,11 +581,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		log.Info("keyspace group is in split",
 			zap.Uint32("target", group.ID),
 			zap.Uint32("source", splitSource))
-		splitSourceAM, _ := kgm.getKeyspaceGroupMeta(splitSource)
-		if splitSourceAM == nil {
-			log.Error("the split source keyspace group is not initialized",
-				zap.Uint32("target", group.ID),
-				zap.Uint32("source", splitSource))
+		splitSourceAM, splitSourceGroup := kgm.getKeyspaceGroupMeta(splitSource)
+		if !validateSplit(splitSourceAM, group, splitSourceGroup) {
 			// Put the group into the retry list to retry later.
 			kgm.groupUpdateRetryList[group.ID] = group
 			return
@@ -617,6 +614,35 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	kgm.kgs[group.ID] = group
 	kgm.ams[group.ID] = am
 	kgm.Unlock()
+}
+
+// validateSplit checks whether the meta info of split keyspace group
+// to ensure that the split process could be continued.
+func validateSplit(
+	sourceAM *AllocatorManager,
+	targetGroup, sourceGroup *endpoint.KeyspaceGroup,
+) bool {
+	splitSourceID := targetGroup.SplitSource()
+	// Make sure that the split source keyspace group has been initialized.
+	if sourceAM == nil || sourceGroup == nil {
+		log.Error("the split source keyspace group is not initialized",
+			zap.Uint32("target", targetGroup.ID),
+			zap.Uint32("source", splitSourceID))
+		return false
+	}
+	// Since the target group is derived from the source group and both of them
+	// could not be modified during the split process, so we can only check the
+	// member count of the source group here.
+	memberCount := len(sourceGroup.Members)
+	if memberCount < mcsutils.KeyspaceGroupDefaultReplicaCount {
+		log.Error("the split source keyspace group does not have enough members",
+			zap.Uint32("target", targetGroup.ID),
+			zap.Uint32("source", splitSourceID),
+			zap.Int("member-count", memberCount),
+			zap.Int("replica-count", mcsutils.KeyspaceGroupDefaultReplicaCount))
+		return false
+	}
+	return true
 }
 
 // updateKeyspaceGroupMembership updates the keyspace lookup table for the given keyspace group.
