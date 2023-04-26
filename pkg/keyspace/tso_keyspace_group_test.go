@@ -324,11 +324,14 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 
 func (suite *keyspaceGroupTestSuite) TestPatrolKeyspaceAssignment() {
 	re := suite.Require()
+	// Force the patrol to run once.
+	suite.kgm.patrolKeyspaceAssignmentOnce = false
 	// Create a keyspace group without any keyspace.
 	err := suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{
 		{
 			ID:       uint32(1),
 			UserKind: endpoint.Basic.String(),
+			Members:  make([]endpoint.KeyspaceGroupMember, 2),
 		},
 	})
 	re.NoError(err)
