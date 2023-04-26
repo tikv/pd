@@ -88,9 +88,8 @@ func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeyspaceGroup() {
-	// There is only default keyspace group. All keyspaces which have not been assigned to
-	// any keyspace group will be served by the default keyspace group; otherwise,
-	// they won't be served by any keyspace group.
+	// There is only default keyspace group. Any keyspace, which hasn't been assigned to
+	// a keyspace group before, will be served by the default keyspace group.
 	re := suite.Require()
 	testutil.Eventually(re, func() bool {
 		for _, server := range suite.tsoCluster.GetServers() {
@@ -109,9 +108,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 		return false
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-	// All keyspaces which have been assigned to any keyspace group before, except default
-	// keyspace, won't be served at this time. Default keyspace will be served by default
-	// keyspace group all the time.
+	// Any keyspace that was assigned to a keyspace group before, except default keyspace,
+	// won't be served at this time. Default keyspace will be served by default keyspace group
+	// all the time.
 	for _, server := range suite.tsoCluster.GetServers() {
 		server.IsKeyspaceServing(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
 		for _, keyspaceGroupID := range []uint32{1, 2, 3} {

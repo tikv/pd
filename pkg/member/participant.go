@@ -78,7 +78,7 @@ func (m *Participant) InitInfo(name string, id uint64, rootPath string, leaderNa
 	m.rootPath = rootPath
 	m.leaderPath = path.Join(rootPath, leaderName)
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
-	log.Info("Participant joining election", zap.Stringer("participant-info", m.member), zap.String("leader-path", m.leaderPath))
+	log.Info("participant joining election", zap.Stringer("participant-info", m.member), zap.String("leader-path", m.leaderPath))
 }
 
 // ID returns the unique ID for this participant in the election group

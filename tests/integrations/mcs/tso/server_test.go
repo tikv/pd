@@ -77,6 +77,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	suite.NoError(suite.pdLeader.BootstrapCluster())
 }
 
 func (suite *tsoServerTestSuite) TearDownSuite() {
@@ -173,6 +174,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	re.NoError(err)
 	leaderName := cluster.WaitLeader()
 	pdLeader := cluster.GetServer(leaderName)
+	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
 	if isAPIServiceMode {

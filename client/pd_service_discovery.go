@@ -41,6 +41,13 @@ const (
 	updateMemberTimeout       = time.Second // Use a shorter timeout to recover faster from network isolation.
 )
 
+type serviceType int
+
+const (
+	apiService serviceType = iota
+	tsoService
+)
+
 // ServiceDiscovery defines the general interface for service discovery on a quorum-based cluster
 // or a primary/secondary configured cluster.
 type ServiceDiscovery interface {
@@ -50,8 +57,14 @@ type ServiceDiscovery interface {
 	Close()
 	// GetClusterID returns the ID of the cluster
 	GetClusterID() uint64
-	// GetURLs returns the URLs of the servers.
-	GetURLs() []string
+	// GetKeyspaceID returns the ID of the keyspace
+	GetKeyspaceID() uint32
+	// GetKeyspaceGroupID returns the ID of the keyspace group
+	GetKeyspaceGroupID() uint32
+	// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
+	DiscoverMicroservice(svcType serviceType) []string
+	// GetServiceURLs returns the URLs of the servers providing the service
+	GetServiceURLs() []string
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
 	// which is the leader in a quorum-based cluster or the primary in a primary/secondary
 	// configured cluster.
@@ -174,7 +187,9 @@ func (c *pdServiceDiscovery) Init() error {
 	}
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
-	c.updateServiceMode()
+	if err := c.checkServiceModeChanged(); err != nil {
+		log.Warn("[pd] failed to check service mode and will check later", zap.Error(err))
+	}
 
 	c.wg.Add(2)
 	go c.updateMemberLoop()
@@ -218,7 +233,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 			failpoint.Continue()
 		})
 		if err := c.updateMember(); err != nil {
-			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetURLs()), errs.ZapError(err))
+			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
 	}
 }
@@ -240,7 +255,11 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 			return
 		case <-ticker.C:
 		}
-		c.updateServiceMode()
+		if err := c.checkServiceModeChanged(); err != nil {
+			log.Error("[pd] failed to update service mode",
+				zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
+			c.ScheduleCheckMemberChanged() // check if the leader changed
+		}
 	}
 }
 
@@ -263,13 +282,50 @@ func (c *pdServiceDiscovery) GetClusterID() uint64 {
 	return c.clusterID
 }
 
-// GetURLs returns the URLs of the servers.
+// GetKeyspaceID returns the ID of the keyspace
+func (c *pdServiceDiscovery) GetKeyspaceID() uint32 {
+	// PD/API service only supports the default keyspace
+	return defaultKeyspaceID
+}
+
+// GetKeyspaceGroupID returns the ID of the keyspace group
+func (c *pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
+	// PD/API service only supports the default keyspace group
+	return defaultKeySpaceGroupID
+}
+
+// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
+func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) (urls []string) {
+	switch svcType {
+	case apiService:
+		urls = c.GetServiceURLs()
+	case tsoService:
+		leaderAddr := c.getLeaderAddr()
+		if len(leaderAddr) > 0 {
+			clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
+			if err != nil {
+				log.Error("[pd] failed to get cluster info",
+					zap.String("leader-addr", leaderAddr), errs.ZapError(err))
+				return nil
+			}
+			urls = clusterInfo.TsoUrls
+		} else {
+			log.Error("[pd] failed to get leader addr")
+		}
+	default:
+		panic("invalid service type")
+	}
+
+	return urls
+}
+
+// GetServiceURLs returns the URLs of the servers.
 // For testing use. It should only be called when the client is closed.
-func (c *pdServiceDiscovery) GetURLs() []string {
+func (c *pdServiceDiscovery) GetServiceURLs() []string {
 	return c.urls.Load().([]string)
 }
 
-// GetServingAddr returns the grpc client connection of the serving endpoint
+// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
 // which is the leader in a quorum-based cluster or the primary in a primary/secondary
 // configured cluster.
 func (c *pdServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
@@ -360,7 +416,7 @@ func (c *pdServiceDiscovery) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	clusterID := uint64(0)
-	for _, url := range c.GetURLs() {
+	for _, url := range c.GetServiceURLs() {
 		members, err := c.getMembers(ctx, url, c.option.timeout)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", url), errs.ZapError(err))
@@ -386,29 +442,32 @@ func (c *pdServiceDiscovery) initClusterID() error {
 	return nil
 }
 
-func (c *pdServiceDiscovery) updateServiceMode() {
+func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 	leaderAddr := c.getLeaderAddr()
-	if len(leaderAddr) > 0 {
-		clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
-		// If the method is not supported, we set it to pd mode.
-		if err != nil {
+	if len(leaderAddr) == 0 {
+		return errors.New("no leader found")
+	}
+
+	clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
+	if err != nil {
+		if strings.Contains(err.Error(), "Unimplemented") {
+			// If the method is not supported, we set it to pd mode.
 			// TODO: it's a hack way to solve the compatibility issue.
 			// we need to remove this after all maintained version supports the method.
-			if strings.Contains(err.Error(), "Unimplemented") {
-				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
-			} else {
-				log.Warn("[pd] failed to get cluster info for the leader", zap.String("leader-addr", leaderAddr), errs.ZapError(err))
-			}
-			return
+			c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+			return nil
 		}
-		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
-	} else {
-		log.Warn("[pd] no leader found")
+		return err
 	}
+	if clusterInfo == nil || len(clusterInfo.ServiceModes) == 0 {
+		return errors.WithStack(errNoServiceModeReturned)
+	}
+	c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
+	return nil
 }
 
 func (c *pdServiceDiscovery) updateMember() error {
-	for i, url := range c.GetURLs() {
+	for i, url := range c.GetServiceURLs() {
 		failpoint.Inject("skipFirstUpdateMember", func() {
 			if i == 0 {
 				failpoint.Continue()
@@ -424,7 +483,7 @@ func (c *pdServiceDiscovery) updateMember() error {
 		var errTSO error
 		if err == nil {
 			if members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
-				err = errs.ErrClientGetLeader.FastGenByArgs("leader address don't exist")
+				err = errs.ErrClientGetLeader.FastGenByArgs("leader address doesn't exist")
 			}
 			// Still need to update TsoAllocatorLeaders, even if there is no PD leader
 			errTSO = c.switchTSOAllocatorLeaders(members.GetTsoAllocatorLeaders())
@@ -501,7 +560,7 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 	}
 
 	sort.Strings(urls)
-	oldURLs := c.GetURLs()
+	oldURLs := c.GetServiceURLs()
 	// the url list is same.
 	if reflect.DeepEqual(oldURLs, urls) {
 		return

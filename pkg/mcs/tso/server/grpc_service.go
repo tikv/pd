@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -150,6 +151,52 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 			return errors.WithStack(err)
 		}
 	}
+}
+
+// FindGroupByKeyspaceID returns the keyspace group that the keyspace belongs to.
+func (s *Service) FindGroupByKeyspaceID(
+	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
+) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
+	keyspaceID := request.GetKeyspaceId()
+	am, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	if err != nil {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
+		}, nil
+	}
+	if keyspaceGroup == nil {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(
+				tsopb.ErrorType_UNKNOWN, "keyspace group not found", keyspaceGroupID),
+		}, nil
+	}
+
+	members := make([]*tsopb.KeyspaceGroupMember, 0, len(keyspaceGroup.Members))
+	for _, member := range keyspaceGroup.Members {
+		members = append(members, &tsopb.KeyspaceGroupMember{
+			Address: member.Address,
+			// TODO: watch the keyspace groups' primary serving address changes
+			// to get the latest primary serving addresses of all keyspace groups.
+			IsPrimary: strings.EqualFold(member.Address, am.GetLeaderAddr()),
+		})
+	}
+
+	var splitState *tsopb.SplitState
+	if keyspaceGroup.SplitState != nil {
+		splitState = &tsopb.SplitState{
+			SplitSource: keyspaceGroup.SplitState.SplitSource,
+		}
+	}
+
+	return &tsopb.FindGroupByKeyspaceIDResponse{
+		Header: s.header(keyspaceGroupID),
+		KeyspaceGroup: &tsopb.KeyspaceGroup{
+			Id:         keyspaceGroupID,
+			UserKind:   keyspaceGroup.UserKind,
+			SplitState: splitState,
+			Members:    members,
+		},
+	}, nil
 }
 
 func (s *Service) header(keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {

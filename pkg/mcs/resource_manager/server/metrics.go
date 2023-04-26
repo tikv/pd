@@ -14,9 +14,7 @@
 
 package server
 
-import (
-	"github.com/prometheus/client_golang/prometheus"
-)
+import "github.com/prometheus/client_golang/prometheus"
 
 const (
 	namespace              = "resource_manager"
@@ -39,65 +37,60 @@ var (
 			Help:      "Indicate the resource manager server info, and the value is the start timestamp (s).",
 		}, []string{"version", "hash"})
 	// RU cost metrics.
-	readRequestUnitCost = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	// `sum` is added to the name to maintain compatibility with the previous use of histogram.
+	readRequestUnitCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
-			Name:      "read_request_unit",
-			Help:      "Bucketed histogram of the read request unit cost for all resource groups.",
-			Buckets:   prometheus.ExponentialBuckets(1, 10, 5), // 1 ~ 100000
+			Name:      "read_request_unit_sum",
+			Help:      "Counter of the read request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
-	writeRequestUnitCost = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	writeRequestUnitCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
-			Name:      "write_request_unit",
-			Help:      "Bucketed histogram of the write request unit cost for all resource groups.",
-			Buckets:   prometheus.ExponentialBuckets(3, 10, 5), // 3 ~ 300000
+			Name:      "write_request_unit_sum",
+			Help:      "Counter of the write request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
-	sqlLayerRequestUnitCost = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
+	sqlLayerRequestUnitCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
-			Name:      "sql_layer_request_unit",
+			Name:      "sql_layer_request_unit_sum",
 			Help:      "The number of the sql layer request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
 
 	// Resource cost metrics.
-	readByteCost = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	readByteCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
-			Name:      "read_byte",
-			Help:      "Bucketed histogram of the read byte cost for all resource groups.",
-			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
+			Name:      "read_byte_sum",
+			Help:      "Counter of the read byte cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
-	writeByteCost = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	writeByteCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
-			Name:      "write_byte",
-			Help:      "Bucketed histogram of the write byte cost for all resource groups.",
-			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
+			Name:      "write_byte_sum",
+			Help:      "Counter of the write byte cost for all resource groups.",
 		}, []string{resourceGroupNameLabel})
-	kvCPUCost = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	kvCPUCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
-			Name:      "kv_cpu_time_ms",
-			Help:      "Bucketed histogram of the KV CPU time cost in milliseconds for all resource groups.",
-			Buckets:   prometheus.ExponentialBuckets(1, 10, 3), // 1 ~ 1000
+			Name:      "kv_cpu_time_ms_sum",
+			Help:      "Counter of the KV CPU time cost in milliseconds for all resource groups.",
 		}, []string{resourceGroupNameLabel})
-	sqlCPUCost = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	sqlCPUCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
-			Name:      "sql_cpu_time_ms",
-			Help:      "Bucketed histogram of the SQL CPU time cost in milliseconds for all resource groups.",
-			Buckets:   prometheus.ExponentialBuckets(1, 10, 3), // 1 ~ 1000
+			Name:      "sql_cpu_time_ms_sum",
+			Help:      "Counter of the SQL CPU time cost in milliseconds for all resource groups.",
 		}, []string{resourceGroupNameLabel})
-	requestCount = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
+	requestCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "request_count",

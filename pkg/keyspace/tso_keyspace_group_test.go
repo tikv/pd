@@ -48,7 +48,7 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	idAllocator := mockid.NewIDAllocator()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	suite.kg = NewKeyspaceManager(store, cluster, idAllocator, &mockConfig{}, suite.kgm)
-	suite.NoError(suite.kgm.Bootstrap(suite.ctx))
+	suite.NoError(suite.kgm.Bootstrap())
 }
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {

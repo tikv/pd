@@ -491,7 +491,9 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 			continue
 		}
 		if primary != nil {
-			log.Info("start to watch the primary", zap.Stringer("tso-primary", primary))
+			log.Info("start to watch the primary",
+				zap.String("campaign-tso-primary-name", gta.member.Name()),
+				zap.Stringer("tso-primary", primary))
 			// Watch will keep looping and never return unless the primary has changed.
 			primary.Watch(gta.ctx)
 			log.Info("the tso primary has changed, try to re-campaign a primary")

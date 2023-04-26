@@ -144,7 +144,7 @@ func TestClientLeaderChange(t *testing.T) {
 
 	// Check URL list.
 	cli.Close()
-	urls := innerCli.GetServiceDiscovery().GetURLs()
+	urls := innerCli.GetServiceDiscovery().GetServiceURLs()
 	sort.Strings(urls)
 	sort.Strings(endpoints)
 	re.Equal(endpoints, urls)
@@ -256,7 +256,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 	cli.Close()
 	for dcLocation, url := range getTSOAllocatorServingEndpointURLs(cli.(TSOAllocatorsGetter)) {
 		if dcLocation == tso.GlobalDCLocation {
-			urls := innerCli.GetServiceDiscovery().GetURLs()
+			urls := innerCli.GetServiceDiscovery().GetServiceURLs()
 			sort.Strings(urls)
 			sort.Strings(endpoints)
 			re.Equal(endpoints, urls)

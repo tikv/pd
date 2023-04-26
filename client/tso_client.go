@@ -48,7 +48,6 @@ type tsoRequest struct {
 	done       chan error
 	physical   int64
 	logical    int64
-	keyspaceID uint32
 	dcLocation string
 }
 
