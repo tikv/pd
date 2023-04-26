@@ -131,8 +131,10 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 	// The keyspace doesn't belong to this keyspace group, we should check if it belongs to any other
 	// keyspace groups, and return the correct keyspace group meta to the client.
 	if kgid, ok := s.keyspaceLookupTable[keyspaceID]; ok {
-		return s.ams[kgid], s.kgs[kgid], kgid,
-			genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
+		if s.ams[kgid] != nil {
+			return s.ams[kgid], s.kgs[kgid], kgid, nil
+		}
+		return nil, s.kgs[kgid], kgid, genNotServedErr(errs.ErrGetAllocatorManager, keyspaceGroupID)
 	}
 
 	// The keyspace doesn't belong to any keyspace group but the keyspace has been assigned to a
@@ -463,6 +465,7 @@ func (kgm *KeyspaceGroupManager) watchKeyspaceGroupsMetaChange(revision int64) (
 	defer watcher.Close()
 
 	ksgPrefix := strings.Join([]string{kgm.legacySvcRootPath, endpoint.KeyspaceGroupIDPrefix()}, "/")
+	log.Info("start to watch keyspace group meta change", zap.Int64("revision", revision), zap.String("prefix", ksgPrefix))
 
 	for {
 		watchChan := watcher.Watch(kgm.ctx, ksgPrefix, clientv3.WithPrefix(), clientv3.WithRev(revision))
@@ -840,7 +843,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
 	ts, err = am.HandleRequest(dcLocation, count)
-	return ts, keyspaceGroupID, err
+	return ts, curKeyspaceGroupID, err
 }
 
 func (kgm *KeyspaceGroupManager) checkKeySpaceGroupID(id uint32) error {
