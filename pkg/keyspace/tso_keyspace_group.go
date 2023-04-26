@@ -161,7 +161,8 @@ func (m *GroupManager) Bootstrap() error {
 		m.groups[userKind].Put(group)
 	}
 
-	return nil
+	// Load all the keyspaces from the storage and assign them to the respective keyspace groups.
+	return m.patrolKeyspaceAssignmentLocked()
 }
 
 // Close closes the manager.
@@ -170,10 +171,14 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
-// patrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
 func (m *GroupManager) patrolKeyspaceAssignment() error {
 	m.Lock()
 	defer m.Unlock()
+	return m.patrolKeyspaceAssignmentLocked()
+}
+
+// patrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
+func (m *GroupManager) patrolKeyspaceAssignmentLocked() error {
 	if m.patrolKeyspaceAssignmentOnce {
 		return nil
 	}
