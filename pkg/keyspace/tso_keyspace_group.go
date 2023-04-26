@@ -161,8 +161,7 @@ func (m *GroupManager) Bootstrap() error {
 		m.groups[userKind].Put(group)
 	}
 
-	// Load all the keyspaces from the storage and assign them to the respective keyspace groups.
-	return m.patrolKeyspaceAssignmentLocked()
+	return nil
 }
 
 // Close closes the manager.
@@ -171,14 +170,10 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
+// patrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
 func (m *GroupManager) patrolKeyspaceAssignment() error {
 	m.Lock()
 	defer m.Unlock()
-	return m.patrolKeyspaceAssignmentLocked()
-}
-
-// patrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
-func (m *GroupManager) patrolKeyspaceAssignmentLocked() error {
 	if m.patrolKeyspaceAssignmentOnce {
 		return nil
 	}
@@ -486,6 +481,9 @@ func (m *GroupManager) getKeyspaceConfigByKindLocked(userKind endpoint.UserKind)
 		return map[string]string{}, errors.Errorf("user kind %s not found", userKind)
 	}
 	kg := groups.Top()
+	if kg == nil {
+		return map[string]string{}, errors.Errorf("no keyspace group for user kind %s", userKind)
+	}
 	id := strconv.FormatUint(uint64(kg.ID), 10)
 	config := map[string]string{
 		UserKindKey:           userKind.String(),

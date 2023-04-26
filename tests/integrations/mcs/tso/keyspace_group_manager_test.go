@@ -83,6 +83,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownTest() {
 
 func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
 	for _, group := range handlersutil.MustLoadKeyspaceGroups(re, server, "0", "0") {
+		// Do not delete default keyspace group.
+		if group.ID == mcsutils.DefaultKeyspaceGroupID {
+			continue
+		}
 		handlersutil.MustDeleteKeyspaceGroup(re, server, group.ID)
 	}
 }
