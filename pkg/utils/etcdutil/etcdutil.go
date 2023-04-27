@@ -354,6 +354,13 @@ func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 	return typeutil.BytesToUint64(response.Kvs[0].Value)
 }
 
+const (
+	defaultLoadDataTimeout           = 30 * time.Second
+	defaultLoadFromEtcdRetryInterval = 200 * time.Millisecond
+	defaultLoadFromEtcdMaxRetryTimes = int(defaultLoadDataTimeout / defaultLoadFromEtcdRetryInterval)
+	watchEtcdChangeRetryInterval     = 1 * time.Second
+)
+
 // LoopWatcher loads data from etcd and sets a watcher for it.
 type LoopWatcher struct {
 	ctx         context.Context
@@ -362,6 +369,7 @@ type LoopWatcher struct {
 	key         string
 	name        string
 	forceLoadCh chan struct{}
+	isLoadedCh  chan error
 	putFn       func(*mvccpb.KeyValue) error
 	deleteFn    func(*mvccpb.KeyValue) error
 	opts        []clientv3.OpOption
@@ -376,55 +384,32 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 		key:         key,
 		wg:          wg,
 		forceLoadCh: make(chan struct{}, 1),
+		isLoadedCh:  make(chan error, 1),
 		putFn:       putFn,
 		deleteFn:    deleteFn,
-		opts:        opts,
+		opts:        opts, // todo: add default opts, e.g. clientv3.WithPrefix(), clientv3.Limit(512)
 	}
 }
-
-const (
-	maxLoadRetryTimes            = 30
-	loadRetryInterval            = time.Millisecond * 100
-	watchEtcdChangeRetryInterval = time.Second
-)
 
 // StartWatchLoop starts a loop to watch the key.
 func (lw *LoopWatcher) StartWatchLoop() {
 	defer logutil.LogPanic()
 	defer lw.wg.Done()
-	ctx, cancel := context.WithCancel(lw.ctx)
-	defer cancel()
 
-	var (
-		revision int64
-		err      error
-	)
-	ticker := time.NewTicker(loadRetryInterval)
-	defer ticker.Stop()
-	for i := 0; i < maxLoadRetryTimes; i++ {
-		revision, err = lw.load()
-		if err == nil {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-	}
-	if err != nil || revision == 0 {
-		log.Warn("watched key doesn't exist in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
-	}
+	ctx, cancel := context.WithTimeout(lw.ctx, defaultLoadDataTimeout)
+	defer cancel()
+	watchStartRevision := lw.initFromEtcd(ctx)
+
 	log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 	for {
 		select {
-		case <-ctx.Done():
+		case <-lw.ctx.Done():
 			close(lw.forceLoadCh)
 			log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 			return
 		default:
 		}
-		nextRevision, err := lw.watch(ctx, revision)
+		nextRevision, err := lw.watch(lw.ctx, watchStartRevision)
 		if err != nil {
 			log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
 				zap.String("name", lw.name),
@@ -432,10 +417,42 @@ func (lw *LoopWatcher) StartWatchLoop() {
 				zap.Int64("next-revision", nextRevision),
 				zap.Time("retry-at", time.Now().Add(watchEtcdChangeRetryInterval)),
 				zap.Error(err))
-			revision = nextRevision
+			watchStartRevision = nextRevision
 			time.Sleep(watchEtcdChangeRetryInterval)
 		}
 	}
+}
+
+func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
+	var (
+		watchStartRevision int64
+		err                error
+	)
+	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
+	defer ticker.Stop()
+	for i := 0; i < defaultLoadFromEtcdMaxRetryTimes; i++ {
+		watchStartRevision, err = lw.load()
+		failpoint.Inject("loadKeyspaceGroupsTemporaryFail", func(val failpoint.Value) {
+			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
+				err = errors.New("fail to read from etcd")
+				failpoint.Continue()
+			}
+		})
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			lw.isLoadedCh <- errors.Errorf("ctx is done before load data from etcd")
+			return watchStartRevision
+		case <-ticker.C:
+		}
+	}
+	if err != nil {
+		log.Warn("watched key doesn't exist in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+	}
+	lw.isLoadedCh <- err
+	return watchStartRevision
 }
 
 func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
@@ -462,8 +479,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("compact-revision", wresp.CompactRevision))
 				revision = wresp.CompactRevision
 				goto WatchChan
-			}
-			if wresp.Err() != nil {
+			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
 				log.Error("watcher is canceled in watch loop",
 					zap.Int64("revision", revision),
 					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
@@ -490,6 +506,12 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 
 func (lw *LoopWatcher) load() (nextRevision int64, err error) {
 	resp, err := EtcdKVGet(lw.client, lw.key, lw.opts...)
+	failpoint.Inject("delayLoadKeyspaceGroups", func(val failpoint.Value) {
+		if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
+			time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
+		}
+	})
+
 	if err != nil {
 		log.Error("load failed in watch loop", zap.String("name", lw.name),
 			zap.String("key", lw.key), zap.Error(err))
@@ -511,4 +533,8 @@ func (lw *LoopWatcher) ForceLoad() {
 	case lw.forceLoadCh <- struct{}{}:
 	default:
 	}
+}
+
+func (lw *LoopWatcher) WaitLoad() error {
+	return <-lw.isLoadedCh
 }

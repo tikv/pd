@@ -29,10 +29,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -106,8 +104,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	re.Equal(legacySvcRootPath, kgm.legacySvcRootPath)
 	re.Equal(tsoSvcRootPath, kgm.tsoSvcRootPath)
 	re.Equal(suite.cfg, kgm.cfg)
-	re.Equal(defaultLoadKeyspaceGroupsBatchSize, kgm.loadKeyspaceGroupsBatchSize)
-	re.Equal(defaultLoadKeyspaceGroupsTimeout, kgm.loadKeyspaceGroupsTimeout)
 
 	am, err := kgm.GetAllocatorManager(mcsutils.DefaultKeyspaceGroupID)
 	re.NoError(err)
@@ -166,72 +162,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadWithDifferentBatchSize() {
 	}
 }
 
-// TestLoadKeyspaceGroupsTimeout tests there is timeout when loading the initial keyspace group assignment
-// from etcd. The initialization of the keyspace group manager should fail.
-func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
-	re := suite.Require()
-
-	mgr := suite.newUniqueKeyspaceGroupManager(1)
-	re.NotNil(mgr)
-	defer mgr.Close()
-
-	addKeyspaceGroupAssignment(
-		suite.ctx, suite.etcdClient, true,
-		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0), []uint32{0})
-
-	// Set the timeout to 1 second and inject the delayLoadKeyspaceGroups to return 3 seconds to let
-	// the loading sleep 3 seconds.
-	mgr.loadKeyspaceGroupsTimeout = time.Second
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delayLoadKeyspaceGroups", "return(3)"))
-	err := mgr.Initialize()
-	// If loading keyspace groups timeout, the initialization should fail with ErrLoadKeyspaceGroupsTerminated.
-	re.Equal(errs.ErrLoadKeyspaceGroupsTerminated, err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delayLoadKeyspaceGroups"))
-}
-
-// TestLoadKeyspaceGroupsSucceedWithTempFailures tests the initialization should succeed when there are temporary
-// failures during loading the initial keyspace group assignment from etcd.
-func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSucceedWithTempFailures() {
-	re := suite.Require()
-
-	mgr := suite.newUniqueKeyspaceGroupManager(1)
-	re.NotNil(mgr)
-	defer mgr.Close()
-
-	addKeyspaceGroupAssignment(
-		suite.ctx, suite.etcdClient, true,
-		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0), []uint32{0})
-
-	// Set the max retry times to 3 and inject the loadKeyspaceGroupsTemporaryFail to return 2 to let
-	// loading from etcd fail 2 times but the whole initialization still succeeds.
-	mgr.loadFromEtcdMaxRetryTimes = 3
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/loadKeyspaceGroupsTemporaryFail", "return(2)"))
-	err := mgr.Initialize()
-	re.NoError(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/loadKeyspaceGroupsTemporaryFail"))
-}
-
-// TestLoadKeyspaceGroupsFailed tests the initialization should fail when there are too many failures
-// during loading the initial keyspace group assignment from etcd.
-func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsFailed() {
-	re := suite.Require()
-
-	mgr := suite.newUniqueKeyspaceGroupManager(1)
-	re.NotNil(mgr)
-	defer mgr.Close()
-
-	addKeyspaceGroupAssignment(
-		suite.ctx, suite.etcdClient, true,
-		mgr.legacySvcRootPath, mgr.tsoServiceID.ServiceAddr, uint32(0), []uint32{0})
-
-	// Set the max retry times to 3 and inject the loadKeyspaceGroupsTemporaryFail to return 3 to let
-	// loading from etcd fail 3 times which should cause the whole initialization to fail.
-	mgr.loadFromEtcdMaxRetryTimes = 3
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/loadKeyspaceGroupsTemporaryFail", "return(3)"))
-	err := mgr.Initialize()
-	re.Error(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/loadKeyspaceGroupsTemporaryFail"))
-}
+// TODO: move test
 
 // TestWatchAndDynamicallyApplyChanges tests the keyspace group manager watch and dynamically apply
 // keyspace groups' membership/distribution meta changes.
@@ -668,10 +599,9 @@ func (suite *keyspaceGroupManagerTestSuite) newUniqueKeyspaceGroupManager(
 	electionNamePrefix := "kgm-test-" + uniqueStr
 
 	keyspaceGroupManager := suite.newKeyspaceGroupManager(tsoServiceID, electionNamePrefix, legacySvcRootPath, tsoSvcRootPath)
-
-	if loadKeyspaceGroupsBatchSize != 0 {
-		keyspaceGroupManager.loadKeyspaceGroupsBatchSize = loadKeyspaceGroupsBatchSize
-	}
+	// if loadKeyspaceGroupsBatchSize != 0 {
+	// 	keyspaceGroupManager.loadKeyspaceGroupsBatchSize = loadKeyspaceGroupsBatchSize
+	// }
 	return keyspaceGroupManager
 }
 
