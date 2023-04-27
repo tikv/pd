@@ -505,6 +505,10 @@ func (lw *LoopWatcher) load() (nextRevision int64, err error) {
 }
 
 func (lw *LoopWatcher) ForceLoad() {
+	if lw == nil {
+		// avoid panic when lw is nil, it may be called in pd mode for follower forward.
+		return
+	}
 	select {
 	case lw.forceLoadCh <- struct{}{}:
 	default:
