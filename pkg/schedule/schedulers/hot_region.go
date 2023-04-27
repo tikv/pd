@@ -1715,22 +1715,6 @@ const (
 	resourceTypeLen
 )
 
-// String implements fmt.Stringer interface.
-func (ty resourceType) String() string {
-	switch ty {
-	case writePeer:
-		return "write-peer"
-	case writeLeader:
-		return "write-leader"
-	case readPeer:
-		return "read-peer"
-	case readLeader:
-		return "read-leader"
-	default:
-		return ""
-	}
-}
-
 func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
 	switch rwTy {
 	case statistics.Write:
