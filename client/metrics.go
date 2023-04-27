@@ -26,10 +26,12 @@ var (
 	requestForwarded    *prometheus.GaugeVec
 )
 
+// InitMetrics initializes metrics for PD client.
 func InitMetrics() {
 	initMetrics(nil)
 }
 
+// InitMetricsWithConstLabels initializes metrics for PD client with labels.
 func InitMetricsWithConstLabels(constLabels prometheus.Labels) {
 	initMetrics(constLabels)
 }
@@ -188,6 +190,7 @@ func initCmdDurations() {
 	cmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")
 }
 
+// RegisterMetrics registers all metrics for PD client.
 func RegisterMetrics() {
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
