@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -64,12 +65,12 @@ func (s *TSODispatcher) DispatchRequest(
 	tsoProtoFactory ProtoFactory,
 	doneCh <-chan struct{},
 	errCh chan<- error,
-	callbacks ...func()) {
+	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
 	val, loaded := s.dispatchChs.LoadOrStore(req.getForwardedHost(), make(chan Request, maxMergeRequests))
 	reqCh := val.(chan Request)
 	if !loaded {
 		tsDeadlineCh := make(chan deadline, 1)
-		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh, callbacks...)
+		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh, tsoPrimaryWatchers...)
 		go watchTSDeadline(ctx, tsDeadlineCh)
 	}
 	reqCh <- req
@@ -84,7 +85,7 @@ func (s *TSODispatcher) dispatch(
 	tsDeadlineCh chan<- deadline,
 	doneCh <-chan struct{},
 	errCh chan<- error,
-	callbacks ...func()) {
+	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
 	defer logutil.LogPanic()
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
 	defer ctxCancel()
@@ -111,7 +112,7 @@ func (s *TSODispatcher) dispatch(
 	defer cancel()
 
 	requests := make([]Request, maxMergeRequests+1)
-	needUpdateServicePrimaryAddr := len(callbacks) > 0 && callbacks[0] != nil
+	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
 	for {
 		select {
 		case first := <-tsoRequestCh:
@@ -139,7 +140,7 @@ func (s *TSODispatcher) dispatch(
 					errs.ZapError(errs.ErrGRPCSend, err))
 				if needUpdateServicePrimaryAddr {
 					if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
-						callbacks[0]()
+						tsoPrimaryWatchers[0].ForceLoad()
 					}
 				}
 				select {
