@@ -215,10 +215,10 @@ type Server struct {
 
 	auditBackends []audit.Backend
 
-	registry                  *registry.ServiceRegistry
-	mode                      string
-	servicePrimaryMap         sync.Map /* Store as map[string]string */
-	servicePrimaryLoopWatcher *etcdutil.LoopWatcher
+	registry          *registry.ServiceRegistry
+	mode              string
+	servicePrimaryMap sync.Map /* Store as map[string]string */
+	tsoPrimaryWatcher *etcdutil.LoopWatcher
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -565,29 +565,10 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() { // disable tso service in api server
-		serviceName := mcs.TSOServiceName
-		tsoServicePrimaryKey := s.servicePrimaryKey(serviceName)
+	if s.IsAPIServiceMode() {
+		s.initTSOPrimaryWatcher()
 		s.serverLoopWg.Add(1)
-		s.servicePrimaryLoopWatcher = etcdutil.NewLoopWatcher(s.serverLoopCtx, &s.serverLoopWg, s.client, "service-primary", tsoServicePrimaryKey)
-		putFn := func(kv *mvccpb.KeyValue) error {
-			primary := &tsopb.Participant{} // TODO: use Generics
-			if err := proto.Unmarshal(kv.Value, primary); err != nil {
-				return err
-			} else {
-				listenUrls := primary.GetListenUrls()
-				if len(listenUrls) > 0 {
-					// listenUrls[0] is the primary service endpoint of the keyspace group
-					s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-				}
-			}
-			return nil
-		}
-		deleteFn := func(kv *mvccpb.KeyValue) error {
-			s.servicePrimaryMap.Delete(serviceName)
-			return nil
-		}
-		go s.servicePrimaryLoopWatcher.StartWatchLoop(putFn, deleteFn)
+		go s.tsoPrimaryWatcher.StartWatchLoop()
 	}
 }
 
@@ -1743,6 +1724,37 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 
 func (s *Server) servicePrimaryKey(serviceName string) string {
 	return fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
+}
+
+func (s *Server) initTSOPrimaryWatcher() {
+	serviceName := mcs.TSOServiceName
+	tsoServicePrimaryKey := s.servicePrimaryKey(serviceName)
+	putFn := func(kv *mvccpb.KeyValue) error {
+		primary := &tsopb.Participant{} // TODO: use Generics
+		if err := proto.Unmarshal(kv.Value, primary); err != nil {
+			return err
+		} else {
+			listenUrls := primary.GetListenUrls()
+			if len(listenUrls) > 0 {
+				// listenUrls[0] is the primary service endpoint of the keyspace group
+				s.servicePrimaryMap.Store(serviceName, listenUrls[0])
+			}
+		}
+		return nil
+	}
+	deleteFn := func(kv *mvccpb.KeyValue) error {
+		s.servicePrimaryMap.Delete(serviceName)
+		return nil
+	}
+	s.tsoPrimaryWatcher = etcdutil.NewLoopWatcher(
+		s.serverLoopCtx,
+		&s.serverLoopWg,
+		s.client,
+		"service-primary",
+		tsoServicePrimaryKey,
+		putFn,
+		deleteFn,
+	)
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id

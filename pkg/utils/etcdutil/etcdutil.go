@@ -362,10 +362,13 @@ type LoopWatcher struct {
 	key         string
 	name        string
 	forceLoadCh chan struct{}
+	putFn       func(*mvccpb.KeyValue) error
+	deleteFn    func(*mvccpb.KeyValue) error
+	opts        []clientv3.OpOption
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
-func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string) *LoopWatcher {
+func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string, putFn, deleteFn func(*mvccpb.KeyValue) error, opts ...clientv3.OpOption) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:         ctx,
 		client:      client,
@@ -373,6 +376,9 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 		key:         key,
 		wg:          wg,
 		forceLoadCh: make(chan struct{}, 1),
+		putFn:       putFn,
+		deleteFn:    deleteFn,
+		opts:        opts,
 	}
 }
 
@@ -383,7 +389,7 @@ const (
 )
 
 // StartWatchLoop starts a loop to watch the key.
-func (lw *LoopWatcher) StartWatchLoop(putFn, deleteFn func(*mvccpb.KeyValue) error, opts ...clientv3.OpOption) {
+func (lw *LoopWatcher) StartWatchLoop() {
 	defer logutil.LogPanic()
 	defer lw.wg.Done()
 	ctx, cancel := context.WithCancel(lw.ctx)
@@ -396,7 +402,7 @@ func (lw *LoopWatcher) StartWatchLoop(putFn, deleteFn func(*mvccpb.KeyValue) err
 	ticker := time.NewTicker(loadRetryInterval)
 	defer ticker.Stop()
 	for i := 0; i < maxLoadRetryTimes; i++ {
-		revision, err = lw.load(putFn, opts...)
+		revision, err = lw.load()
 		if err == nil {
 			break
 		}
@@ -417,7 +423,7 @@ func (lw *LoopWatcher) StartWatchLoop(putFn, deleteFn func(*mvccpb.KeyValue) err
 			return
 		default:
 		}
-		nextRevision, err := lw.watch(ctx, revision, putFn, deleteFn, opts...)
+		nextRevision, err := lw.watch(ctx, revision)
 		if err != nil {
 			log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
 				zap.String("name", lw.name),
@@ -431,18 +437,18 @@ func (lw *LoopWatcher) StartWatchLoop(putFn, deleteFn func(*mvccpb.KeyValue) err
 	}
 }
 
-func (lw *LoopWatcher) watch(ctx context.Context, revision int64, putFn, deleteFn func(*mvccpb.KeyValue) error, opts ...clientv3.OpOption) (nextRevision int64, err error) {
+func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
 	watcher := clientv3.NewWatcher(lw.client)
 	defer watcher.Close()
 
 	for {
 	WatchChan:
-		watchChan := watcher.Watch(ctx, lw.key, append(opts, clientv3.WithRev(revision))...)
+		watchChan := watcher.Watch(ctx, lw.key, append(lw.opts, clientv3.WithRev(revision))...)
 		select {
 		case <-ctx.Done():
 			return revision, nil
 		case <-lw.forceLoadCh:
-			revision, err = lw.load(putFn, opts...)
+			revision, err = lw.load()
 			if err != nil {
 				log.Warn("force load key failed in watch loop", zap.String("name", lw.name),
 					zap.String("key", lw.key), zap.Error(err))
@@ -465,12 +471,12 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64, putFn, deleteF
 			for _, event := range wresp.Events {
 				switch event.Type {
 				case clientv3.EventTypePut:
-					if err := putFn(event.Kv); err != nil {
+					if err := lw.putFn(event.Kv); err != nil {
 						log.Error("put failed in watch loop", zap.String("name", lw.name),
 							zap.String("key", lw.key), zap.Error(err))
 					}
 				case clientv3.EventTypeDelete:
-					if err := deleteFn(event.Kv); err != nil {
+					if err := lw.deleteFn(event.Kv); err != nil {
 						log.Error("delete failed in watch loop", zap.String("name", lw.name),
 							zap.String("key", lw.key), zap.Error(err))
 					}
@@ -481,15 +487,15 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64, putFn, deleteF
 	}
 }
 
-func (lw *LoopWatcher) load(putFn func(*mvccpb.KeyValue) error, opts ...clientv3.OpOption) (nextRevision int64, err error) {
-	resp, err := EtcdKVGet(lw.client, lw.key, opts...)
+func (lw *LoopWatcher) load() (nextRevision int64, err error) {
+	resp, err := EtcdKVGet(lw.client, lw.key, lw.opts...)
 	if err != nil {
 		log.Error("load failed in watch loop", zap.String("name", lw.name),
 			zap.String("key", lw.key), zap.Error(err))
 		return 0, err
 	}
 	for _, item := range resp.Kvs {
-		err = putFn(item)
+		err = lw.putFn(item)
 		if err != nil {
 			log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
 			continue
