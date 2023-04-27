@@ -22,7 +22,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -134,7 +133,7 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running            atomic.Bool
+	running            bool
 	meta               *metapb.Cluster
 	storeConfigManager *config.StoreConfigManager
 	storage            storage.Storage
@@ -258,13 +257,13 @@ func (c *RaftCluster) InitCluster(
 
 // Start starts a cluster.
 func (c *RaftCluster) Start(s Server) error {
-	if c.IsRunning() {
+	c.Lock()
+	defer c.Unlock()
+
+	if c.running {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-
-	c.Lock()
-	defer c.Unlock()
 
 	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster(), s.GetKeyspaceGroupManager())
 	cluster, err := c.LoadClusterInfo()
@@ -274,12 +273,14 @@ func (c *RaftCluster) Start(s Server) error {
 	if cluster == nil {
 		return nil
 	}
+
 	if s.IsAPIServiceMode() {
 		err = c.keyspaceGroupManager.Bootstrap()
 		if err != nil {
 			return err
 		}
 	}
+
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
 		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
@@ -317,7 +318,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 
-	c.running.Store(true)
+	c.running = true
 	return nil
 }
 
@@ -605,26 +606,31 @@ func (c *RaftCluster) runReplicationMode() {
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
 	c.Lock()
-	if !c.running.CompareAndSwap(true, false) {
+	if !c.running {
 		c.Unlock()
 		return
 	}
-
+	c.running = false
 	c.coordinator.stop()
 	c.cancel()
 	c.Unlock()
+
 	c.wg.Wait()
 	log.Info("raftcluster is stopped")
 }
 
 // IsRunning return if the cluster is running.
 func (c *RaftCluster) IsRunning() bool {
-	return c.running.Load()
+	c.RLock()
+	defer c.RUnlock()
+	return c.running
 }
 
 // Context returns the context of RaftCluster.
 func (c *RaftCluster) Context() context.Context {
-	if c.running.Load() {
+	c.RLock()
+	defer c.RUnlock()
+	if c.running {
 		return c.ctx
 	}
 	return nil
@@ -2286,8 +2292,8 @@ func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 }
 
 // BucketsStats returns hot region's buckets stats.
-func (c *RaftCluster) BucketsStats(degree int) map[uint64][]*buckets.BucketStat {
-	task := buckets.NewCollectBucketStatsTask(degree)
+func (c *RaftCluster) BucketsStats(degree int, regions ...uint64) map[uint64][]*buckets.BucketStat {
+	task := buckets.NewCollectBucketStatsTask(degree, regions...)
 	if !c.hotBuckets.CheckAsync(task) {
 		return nil
 	}

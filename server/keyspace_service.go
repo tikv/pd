@@ -55,10 +55,6 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &keyspacepb.LoadKeyspaceResponse{Header: s.notBootstrappedHeader()}, nil
-	}
 
 	manager := s.GetKeyspaceManager()
 	meta, err := manager.LoadKeyspace(request.GetName())
@@ -76,10 +72,6 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesRequest, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return err
-	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.notBootstrappedHeader()})
 	}
 
 	ctx, cancel := context.WithCancel(s.Context())
@@ -161,10 +153,7 @@ func (s *KeyspaceServer) UpdateKeyspaceState(_ context.Context, request *keyspac
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &keyspacepb.UpdateKeyspaceStateResponse{Header: s.notBootstrappedHeader()}, nil
-	}
+
 	manager := s.GetKeyspaceManager()
 	meta, err := manager.UpdateKeyspaceStateByID(request.GetId(), request.GetState(), time.Now().Unix())
 	if err != nil {

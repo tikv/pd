@@ -51,6 +51,8 @@ var (
 	ErrKeyspaceGroupNotInSplit = errors.New("keyspace group is not in split state")
 	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
 	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
+	// ErrKeyspaceGroupNotEnoughReplicas is used to indicate not enough replicas in the keyspace group.
+	ErrKeyspaceGroupNotEnoughReplicas = errors.New("not enough replicas in the keyspace group")
 	// ErrNoAvailableNode is used to indicate no available node in the keyspace group.
 	ErrNoAvailableNode  = errors.New("no available node")
 	errModifyDefault    = errors.New("cannot modify default keyspace's state")

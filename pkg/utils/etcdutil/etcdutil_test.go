@@ -260,6 +260,33 @@ func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck"))
 }
 
+func TestEtcdScaleInAndOutWithoutMultiPoint(t *testing.T) {
+	re := require.New(t)
+	// Start a etcd server.
+	cfg1 := NewTestSingleConfig(t)
+	etcd1, err := embed.StartEtcd(cfg1)
+	re.NoError(err)
+	ep1 := cfg1.LCUrls[0].String()
+	<-etcd1.Server.ReadyNotify()
+
+	// Create two etcd clients with etcd1 as endpoint.
+	urls, err := types.NewURLs([]string{ep1})
+	re.NoError(err)
+	client1, err := createEtcdClient(nil, urls[0]) // execute member change operation with this client
+	re.NoError(err)
+	client2, err := createEtcdClient(nil, urls[0]) // check member change with this client
+	re.NoError(err)
+
+	// Add a new member and check members
+	etcd2 := checkAddEtcdMember(t, cfg1, client1)
+	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
+
+	// scale in etcd1
+	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	re.NoError(err)
+	checkMembers(re, client2, []*embed.Etcd{etcd2})
+}
+
 func checkEtcdWithHangLeader(t *testing.T) error {
 	re := require.New(t)
 	// Start a etcd server.

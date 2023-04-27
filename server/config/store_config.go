@@ -128,6 +128,14 @@ func (c *StoreConfig) IsEnableRegionBucket() bool {
 	return c.Coprocessor.EnableRegionBucket
 }
 
+// IsRaftKV2 returns true if the raft kv is v2.
+func (c *StoreConfig) IsRaftKV2() bool {
+	if c == nil {
+		return false
+	}
+	return c.Storage.Engine == raftStoreV2
+}
+
 // SetRegionBucketEnabled sets if the region bucket is enabled.
 func (c *StoreConfig) SetRegionBucketEnabled(enabled bool) {
 	if c == nil {

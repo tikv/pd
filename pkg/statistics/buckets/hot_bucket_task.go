@@ -66,13 +66,15 @@ func (t *checkBucketsTask) runTask(cache *HotBucketCache) {
 
 type collectBucketStatsTask struct {
 	minDegree int
+	regions   []uint64
 	ret       chan map[uint64][]*BucketStat // RegionID ==>Buckets
 }
 
 // NewCollectBucketStatsTask creates task to collect bucket stats.
-func NewCollectBucketStatsTask(minDegree int) *collectBucketStatsTask {
+func NewCollectBucketStatsTask(minDegree int, regions ...uint64) *collectBucketStatsTask {
 	return &collectBucketStatsTask{
 		minDegree: minDegree,
+		regions:   regions,
 		ret:       make(chan map[uint64][]*BucketStat, 1),
 	}
 }
@@ -82,7 +84,7 @@ func (t *collectBucketStatsTask) taskType() flowItemTaskKind {
 }
 
 func (t *collectBucketStatsTask) runTask(cache *HotBucketCache) {
-	t.ret <- cache.GetHotBucketStats(t.minDegree)
+	t.ret <- cache.GetHotBucketStats(t.minDegree, t.regions)
 }
 
 // WaitRet returns the result of the task.

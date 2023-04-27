@@ -43,8 +43,12 @@ import (
 const (
 	// defaultKeyspaceID is the default key space id.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap and reserved for users who haven't been assigned keyspace.
+	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap
+	// and reserved for users who haven't been assigned keyspace.
 	defaultKeyspaceID = uint32(0)
+	// defaultKeySpaceGroupID is the default key space group id.
+	// We also reserved 0 for the keyspace group for the same purpose.
+	defaultKeySpaceGroupID = uint32(0)
 )
 
 // Region contains information of a region's meta and its peers.
@@ -205,6 +209,8 @@ var (
 	errClosing = errors.New("[pd] closing")
 	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
 	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+	// errInvalidRespHeader is returned when the response doesn't contain service mode info unexpectedly.
+	errNoServiceModeReturned = errors.New("[pd] no service mode returned")
 )
 
 // ClientOption configures client.
@@ -308,8 +314,6 @@ func NewClientWithContext(ctx context.Context, svrAddrs []string, security Secur
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
 func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd] create pd client with endpoints and keyspace", zap.Strings("pd-address", svrAddrs), zap.Uint32("keyspace-id", keyspaceID))
-
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
@@ -342,6 +346,49 @@ func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []st
 		return nil, err
 	}
 
+	return c, nil
+}
+
+// NewClientWithKeyspaceName creates a client with context and the specified keyspace name.
+func NewClientWithKeyspaceName(ctx context.Context, keyspace string, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+	log.Info("[pd] create pd client with endpoints and keyspace", zap.Strings("pd-address", svrAddrs), zap.String("keyspace", keyspace))
+
+	tlsCfg := &tlsutil.TLSConfig{
+		CAPath:   security.CAPath,
+		CertPath: security.CertPath,
+		KeyPath:  security.KeyPath,
+
+		SSLCABytes:   security.SSLCABytes,
+		SSLCertBytes: security.SSLCertBytes,
+		SSLKEYBytes:  security.SSLKEYBytes,
+	}
+
+	clientCtx, clientCancel := context.WithCancel(ctx)
+	c := &client{
+		updateTokenConnectionCh: make(chan struct{}, 1),
+		ctx:                     clientCtx,
+		cancel:                  clientCancel,
+		svrUrls:                 addrsToUrls(svrAddrs),
+		tlsCfg:                  tlsCfg,
+		option:                  newOption(),
+	}
+
+	// Inject the client options.
+	for _, opt := range opts {
+		opt(c)
+	}
+
+	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, c.svrUrls, c.tlsCfg, c.option)
+	if err := c.setup(); err != nil {
+		c.cancel()
+		return nil, err
+	}
+	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
+	// Here we ignore ENTRY_NOT_FOUND error and it will set the keyspaceID to 0.
+	if err != nil && !strings.Contains(err.Error(), "ENTRY_NOT_FOUND") {
+		return nil, err
+	}
+	c.keyspaceID = keyspaceMeta.GetId()
 	return c, nil
 }
 
@@ -380,6 +427,7 @@ func (c *client) Close() {
 func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	c.Lock()
 	defer c.Unlock()
+
 	if newMode == c.serviceMode {
 		return
 	}
@@ -396,13 +444,18 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
 			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
 	case pdpb.ServiceMode_API_SVC_MODE:
-		newTSOSvcDiscovery = newTSOServiceDiscovery(c.ctx, MetaStorageClient(c),
-			c.GetClusterID(c.ctx), c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
+		newTSOSvcDiscovery = newTSOServiceDiscovery(
+			c.ctx, MetaStorageClient(c), c.pdSvcDiscovery,
+			c.GetClusterID(c.ctx), c.keyspaceID, c.tlsCfg, c.option)
+		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
+		// and will be updated later.
 		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
 			newTSOSvcDiscovery, &tsoTSOStreamBuilderFactory{})
 		if err := newTSOSvcDiscovery.Init(); err != nil {
 			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
-				zap.Strings("svr-urls", c.svrUrls), zap.String("current-mode", c.serviceMode.String()), zap.Error(err))
+				zap.Strings("svr-urls", c.svrUrls),
+				zap.String("current-mode", c.serviceMode.String()),
+				zap.Error(err))
 			return
 		}
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
@@ -424,9 +477,10 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 			oldTSOSvcDiscovery.Close()
 		}
 	}
+	oldMode := c.serviceMode
 	c.serviceMode = newMode
 	log.Info("[pd] service mode changed",
-		zap.String("old-mode", c.serviceMode.String()),
+		zap.String("old-mode", oldMode.String()),
 		zap.String("new-mode", newMode.String()))
 }
 
@@ -601,11 +655,10 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req.clientCtx = c.ctx
 	tsoClient := c.getTSOClient()
 	req.start = time.Now()
-	req.keyspaceID = c.keyspaceID
 	req.dcLocation = dcLocation
 
 	if tsoClient == nil {
-		req.done <- errs.ErrClientGetTSO
+		req.done <- errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
 		return req
 	}
 

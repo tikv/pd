@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -82,7 +83,7 @@ func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 			}
 		}
 		if previousTS != typeutil.ZeroTime && typeutil.SubRealTimeByWallClock(ts, previousTS) <= 0 {
-			return nil
+			return errors.Errorf("saving timestamp %d is less than or equal to the previous one %d", ts.UnixNano(), previousTS.UnixNano())
 		}
 		data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
 		return txn.Save(key, string(data))

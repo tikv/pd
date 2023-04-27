@@ -312,25 +312,25 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			)
 			// RU info.
 			if consumption.RRU != 0 {
-				rruMetrics.Observe(consumption.RRU)
+				rruMetrics.Add(consumption.RRU)
 			}
 			if consumption.WRU != 0 {
-				wruMetrics.Observe(consumption.WRU)
+				wruMetrics.Add(consumption.WRU)
 			}
 			// Byte info.
 			if consumption.ReadBytes != 0 {
-				readByteMetrics.Observe(consumption.ReadBytes)
+				readByteMetrics.Add(consumption.ReadBytes)
 			}
 			if consumption.WriteBytes != 0 {
-				writeByteMetrics.Observe(consumption.WriteBytes)
+				writeByteMetrics.Add(consumption.WriteBytes)
 			}
 			// CPU time info.
 			if consumption.TotalCpuTimeMs > 0 {
 				if consumption.SqlLayerCpuTimeMs > 0 {
 					sqlLayerRuMetrics.Add(consumption.SqlLayerCpuTimeMs * m.controllerConfig.RequestUnit.CPUMsCost)
-					sqlCPUMetrics.Observe(consumption.SqlLayerCpuTimeMs)
+					sqlCPUMetrics.Add(consumption.SqlLayerCpuTimeMs)
 				}
-				kvCPUMetrics.Observe(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
+				kvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
 			}
 			// RPC count info.
 			if consumption.KvReadRpcCount != 0 {

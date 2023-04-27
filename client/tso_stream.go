@@ -70,7 +70,9 @@ type tsoTSOStreamBuilder struct {
 	client tsopb.TSOClient
 }
 
-func (b *tsoTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (tsoStream, error) {
+func (b *tsoTSOStreamBuilder) build(
+	ctx context.Context, cancel context.CancelFunc, timeout time.Duration,
+) (tsoStream, error) {
 	done := make(chan struct{})
 	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
 	go checkStreamTimeout(ctx, cancel, done, timeout)
@@ -97,16 +99,19 @@ func checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done cha
 
 type tsoStream interface {
 	// processRequests processes TSO requests in streaming mode to get timestamps
-	processRequests(clusterID uint64, dcLocation string, requests []*tsoRequest,
-		batchStartTime time.Time) (physical, logical int64, suffixBits uint32, err error)
+	processRequests(
+		clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
+		requests []*tsoRequest, batchStartTime time.Time,
+	) (physical, logical int64, suffixBits uint32, err error)
 }
 
 type pdTSOStream struct {
 	stream pdpb.PD_TsoClient
 }
 
-func (s *pdTSOStream) processRequests(clusterID uint64, dcLocation string, requests []*tsoRequest,
-	batchStartTime time.Time) (physical, logical int64, suffixBits uint32, err error) {
+func (s *pdTSOStream) processRequests(
+	clusterID uint64, _, _ uint32, dcLocation string, requests []*tsoRequest, batchStartTime time.Time,
+) (physical, logical int64, suffixBits uint32, err error) {
 	start := time.Now()
 	count := int64(len(requests))
 	req := &pdpb.TsoRequest{
@@ -152,13 +157,17 @@ type tsoTSOStream struct {
 	stream tsopb.TSO_TsoClient
 }
 
-func (s *tsoTSOStream) processRequests(clusterID uint64, dcLocation string, requests []*tsoRequest,
-	batchStartTime time.Time) (physical, logical int64, suffixBits uint32, err error) {
+func (s *tsoTSOStream) processRequests(
+	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
+	requests []*tsoRequest, batchStartTime time.Time,
+) (physical, logical int64, suffixBits uint32, err error) {
 	start := time.Now()
 	count := int64(len(requests))
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId: clusterID,
+			ClusterId:       clusterID,
+			KeyspaceId:      keyspaceID,
+			KeyspaceGroupId: keyspaceGroupID,
 		},
 		Count:      uint32(count),
 		DcLocation: dcLocation,

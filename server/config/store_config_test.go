@@ -113,6 +113,7 @@ func TestParseConfig(t *testing.T) {
 	re.NoError(json.Unmarshal([]byte(body), &config))
 	m.update(&config)
 	re.Equal(uint64(96), config.GetRegionBucketSize())
+	re.True(config.IsRaftKV2())
 	re.Equal(raftStoreV2, config.Storage.Engine)
 }
 

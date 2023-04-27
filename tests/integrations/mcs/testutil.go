@@ -27,14 +27,14 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 var once sync.Once
 
-func initLogger(cfg *tso.Config) (err error) {
+// InitLogger initializes the logger for test.
+func InitLogger(cfg *tso.Config) (err error) {
 	once.Do(func() {
 		// Setup the logger.
 		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
@@ -50,14 +50,7 @@ func initLogger(cfg *tso.Config) (err error) {
 
 // SetupClientWithKeyspace creates a TSO client for test.
 func SetupClientWithKeyspace(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
-	cli, err := pd.NewClientWithKeyspace(ctx, utils.DefaultKeyspaceID, endpoints, pd.SecurityOption{}, opts...)
-	re.NoError(err)
-	return cli
-}
-
-// SetupClient creates a TSO client for test.
-func SetupClient(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
-	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
+	cli, err := pd.NewClientWithKeyspaceName(ctx, "", endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }
@@ -88,10 +81,10 @@ func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	re.NoError(err)
 
 	// Setup the logger.
-	err = initLogger(cfg)
+	err = InitLogger(cfg)
 	re.NoError(err)
 
-	s, cleanup, err := newTSOTestServer(ctx, cfg)
+	s, cleanup, err := NewTSOTestServer(ctx, cfg)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return !s.IsClosed()
@@ -100,7 +93,8 @@ func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 	return s, cleanup
 }
 
-func newTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testutil.CleanupFunc, error) {
+// NewTSOTestServer creates a tso server with given config for testing.
+func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testutil.CleanupFunc, error) {
 	s := tso.CreateServer(ctx, cfg)
 	if err := s.Run(); err != nil {
 		return nil, nil, err

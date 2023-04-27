@@ -63,4 +63,7 @@ const (
 	// MaxKeyspaceGroupCountInUse is a much more reasonable value of the max count in the
 	// foreseen future, and the former is just for extensibility in theory.
 	MaxKeyspaceGroupCountInUse = uint32(4096)
+
+	// KeyspaceGroupDefaultReplicaCount is the default replica count of keyspace group.
+	KeyspaceGroupDefaultReplicaCount = 2
 )

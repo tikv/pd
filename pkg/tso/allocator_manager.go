@@ -128,12 +128,13 @@ type ElectionMember interface {
 	// Basically it will reset the leader lease and unset leader info.
 	ResetLeader()
 	// GetLeaderListenUrls returns current leader's listen urls
+	// The first element is the leader/primary url
 	GetLeaderListenUrls() []string
 	// GetLeaderID returns current leader's member ID.
 	GetLeaderID() uint64
 	// GetLeaderPath returns the path of the leader.
 	GetLeaderPath() string
-	// GetLeadership returns the leadership of the PD member.
+	// GetLeadership returns the leadership of the election member.
 	GetLeadership() *election.Leadership
 	// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 	GetDCLocationPathPrefix() string
@@ -813,7 +814,7 @@ func (am *AllocatorManager) ClusterDCLocationChecker() {
 		}
 	}
 	// Only leader can write the TSO suffix to etcd in order to make it consistent in the cluster
-	if am.member.IsLeader() {
+	if am.IsLeader() {
 		for dcLocation, info := range am.mu.clusterDCLocations {
 			if info.Suffix > 0 {
 				continue
@@ -1187,7 +1188,7 @@ func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string
 }
 
 func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcLocation string) (bool, *pdpb.GetDCLocationInfoResponse, error) {
-	if am.member.IsLeader() {
+	if am.IsLeader() {
 		info, ok := am.GetDCLocationInfo(dcLocation)
 		if !ok {
 			return false, &pdpb.GetDCLocationInfoResponse{}, nil
@@ -1200,11 +1201,11 @@ func (am *AllocatorManager) getDCLocationInfoFromLeader(ctx context.Context, dcL
 		return ok, dcLocationInfo, nil
 	}
 
-	leaderAddrs := am.member.GetLeaderListenUrls()
-	if leaderAddrs == nil || len(leaderAddrs) < 1 {
+	leaderAddr := am.GetLeaderAddr()
+	if len(leaderAddr) < 1 {
 		return false, &pdpb.GetDCLocationInfoResponse{}, fmt.Errorf("failed to get leader client url")
 	}
-	conn, err := am.getOrCreateGRPCConn(ctx, leaderAddrs[0])
+	conn, err := am.getOrCreateGRPCConn(ctx, leaderAddr)
 	if err != nil {
 		return false, &pdpb.GetDCLocationInfoResponse{}, err
 	}
@@ -1310,4 +1311,24 @@ func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
 // EnableLocalTSO returns the value of AllocatorManager.enableLocalTSO.
 func (am *AllocatorManager) EnableLocalTSO() bool {
 	return am.enableLocalTSO
+}
+
+// IsLeader returns whether the current member is the leader in the election group.
+func (am *AllocatorManager) IsLeader() bool {
+	if am == nil || am.member == nil || !am.member.IsLeader() {
+		return false
+	}
+	return true
+}
+
+// GetLeaderAddr returns the address of leader in the election group.
+func (am *AllocatorManager) GetLeaderAddr() string {
+	if am == nil || am.member == nil {
+		return ""
+	}
+	leaderAddrs := am.member.GetLeaderListenUrls()
+	if len(leaderAddrs) < 1 {
+		return ""
+	}
+	return leaderAddrs[0]
 }

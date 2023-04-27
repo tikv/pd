@@ -36,9 +36,10 @@ import (
 )
 
 const (
-	defaultBalancerPolicy = balancer.PolicyRoundRobin
-	allocNodeTimeout      = 1 * time.Second
-	allocNodeInterval     = 10 * time.Millisecond
+	defaultBalancerPolicy              = balancer.PolicyRoundRobin
+	allocNodesToKeyspaceGroupsInterval = 1 * time.Second
+	allocNodesTimeout                  = 1 * time.Second
+	allocNodesInterval                 = 10 * time.Millisecond
 	// TODO: move it to etcdutil
 	watchEtcdChangeRetryInterval = 1 * time.Second
 	maxRetryTimes                = 25
@@ -55,14 +56,20 @@ type GroupManager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	// the lock for the groups
+
 	sync.RWMutex
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
+	// patrolKeyspaceAssignmentOnce is used to indicate whether we have patrolled all keyspaces
+	// and assign them to the keyspace groups.
+	patrolKeyspaceAssignmentOnce bool
 
 	// store is the storage for keyspace group related information.
-	store endpoint.KeyspaceGroupStorage
+	store interface {
+		endpoint.KeyspaceGroupStorage
+		endpoint.KeyspaceStorage
+	}
 
 	client *clientv3.Client
 
@@ -70,8 +77,6 @@ type GroupManager struct {
 	tsoServiceKey string
 	// tsoServiceEndKey is the end key of TSO service in etcd.
 	tsoServiceEndKey string
-
-	policy balancer.Policy
 
 	// TODO: add user kind with different balancer
 	// when we ensure where the correspondence between tso node and user kind will be found
@@ -81,23 +86,42 @@ type GroupManager struct {
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
-func NewKeyspaceGroupManager(ctx context.Context, store endpoint.KeyspaceGroupStorage, client *clientv3.Client, clusterID uint64) *GroupManager {
+func NewKeyspaceGroupManager(
+	ctx context.Context,
+	store interface {
+		endpoint.KeyspaceGroupStorage
+		endpoint.KeyspaceStorage
+	},
+	client *clientv3.Client,
+	clusterID uint64,
+) *GroupManager {
 	ctx, cancel := context.WithCancel(ctx)
 	key := discovery.TSOPath(clusterID)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
 	for i := 0; i < int(endpoint.UserKindCount); i++ {
 		groups[endpoint.UserKind(i)] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
 	}
-	return &GroupManager{
-		ctx:              ctx,
-		cancel:           cancel,
-		store:            store,
-		client:           client,
-		tsoServiceKey:    key,
-		tsoServiceEndKey: clientv3.GetPrefixRangeEnd(key) + "/",
-		policy:           defaultBalancerPolicy,
-		groups:           groups,
+	m := &GroupManager{
+		ctx:                ctx,
+		cancel:             cancel,
+		store:              store,
+		client:             client,
+		tsoServiceKey:      key,
+		tsoServiceEndKey:   clientv3.GetPrefixRangeEnd(key) + "/",
+		groups:             groups,
+		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
+		serviceRegistryMap: make(map[string]string),
 	}
+
+	// If the etcd client is not nil, start the watch loop for the registered tso servers.
+	// The PD(TSO) Client relies on this info to discover tso servers.
+	if m.client != nil {
+		log.Info("start the watch loop for tso service discovery")
+		m.wg.Add(1)
+		go m.startWatchLoop(ctx)
+	}
+
+	return m
 }
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
@@ -114,6 +138,13 @@ func (m *GroupManager) Bootstrap() error {
 
 	m.Lock()
 	defer m.Unlock()
+
+	// If the etcd client is not nil, start the watch loop.
+	if m.client != nil {
+		m.wg.Add(1)
+		go m.allocNodesToAllKeyspaceGroups()
+	}
+
 	// Ignore the error if default keyspace group already exists in the storage (e.g. PD restart/recover).
 	err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup}, false)
 	if err != nil && err != ErrKeyspaceGroupExists {
@@ -130,13 +161,6 @@ func (m *GroupManager) Bootstrap() error {
 		m.groups[userKind].Put(group)
 	}
 
-	// If the etcd client is not nil, start the watch loop.
-	if m.client != nil {
-		m.nodesBalancer = balancer.GenByPolicy[string](m.policy)
-		m.serviceRegistryMap = make(map[string]string)
-		m.wg.Add(1)
-		go m.startWatchLoop()
-	}
 	return nil
 }
 
@@ -146,25 +170,93 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
-func (m *GroupManager) startWatchLoop() {
+// patrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
+func (m *GroupManager) patrolKeyspaceAssignment() error {
+	m.Lock()
+	defer m.Unlock()
+	if m.patrolKeyspaceAssignmentOnce {
+		return nil
+	}
+	keyspaces, err := m.store.LoadRangeKeyspace(utils.DefaultKeyspaceID, 0)
+	if err != nil {
+		return err
+	}
+	config, err := m.getKeyspaceConfigByKindLocked(endpoint.Basic)
+	if err != nil {
+		return err
+	}
+	for _, ks := range keyspaces {
+		if ks == nil {
+			continue
+		}
+		groupID, err := strconv.ParseUint(config[TSOKeyspaceGroupIDKey], 10, 64)
+		if err != nil {
+			return err
+		}
+		err = m.updateKeyspaceForGroupLocked(endpoint.Basic, groupID, ks.GetId(), opAdd)
+		if err != nil {
+			return err
+		}
+	}
+	m.patrolKeyspaceAssignmentOnce = true
+	return nil
+}
+
+func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
-	ctx, cancel := context.WithCancel(m.ctx)
+	ticker := time.NewTicker(allocNodesToKeyspaceGroupsInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		countOfNodes := m.GetNodesCount()
+		if countOfNodes < utils.KeyspaceGroupDefaultReplicaCount {
+			continue
+		}
+		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
+		if err != nil {
+			log.Error("failed to load the all keyspace group", zap.Error(err))
+			continue
+		}
+		withError := false
+		for _, group := range groups {
+			if len(group.Members) < utils.KeyspaceGroupDefaultReplicaCount {
+				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, utils.KeyspaceGroupDefaultReplicaCount)
+				if err != nil {
+					withError = true
+					log.Error("failed to alloc nodes for keyspace group", zap.Error(err))
+					continue
+				}
+				group.Members = nodes
+			}
+		}
+		if !withError {
+			// all keyspace groups have equal or more than default replica count
+			return
+		}
+	}
+}
+
+func (m *GroupManager) startWatchLoop(parentCtx context.Context) {
+	defer logutil.LogPanic()
+	defer m.wg.Done()
+	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 	var (
 		resp     *clientv3.GetResponse
 		revision int64
 		err      error
 	)
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(retryInterval):
-		}
 		resp, err = etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
 		if err == nil {
-			revision = resp.Header.Revision
+			revision = resp.Header.Revision + 1
 			for _, item := range resp.Kvs {
 				s := &discovery.ServiceRegistryEntry{}
 				if err := json.Unmarshal(item.Value, s); err != nil {
@@ -177,6 +269,11 @@ func (m *GroupManager) startWatchLoop() {
 			break
 		}
 		log.Warn("failed to get tso service addrs from etcd and will retry", zap.Error(err))
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
 	if err != nil || revision == 0 {
 		log.Warn("failed to get tso service addrs from etcd finally when loading", zap.Error(err))
@@ -263,6 +360,14 @@ func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceG
 	}
 
 	return nil
+}
+
+// GetTSOServiceAddrs gets all TSO service addresses.
+func (m *GroupManager) GetTSOServiceAddrs() []string {
+	if m == nil || m.nodesBalancer == nil {
+		return nil
+	}
+	return m.nodesBalancer.GetAll()
 }
 
 // GetKeyspaceGroups gets keyspace groups from the start ID with limit.
@@ -367,11 +472,18 @@ func (m *GroupManager) GetKeyspaceConfigByKind(userKind endpoint.UserKind) (map[
 	}
 	m.RLock()
 	defer m.RUnlock()
+	return m.getKeyspaceConfigByKindLocked(userKind)
+}
+
+func (m *GroupManager) getKeyspaceConfigByKindLocked(userKind endpoint.UserKind) (map[string]string, error) {
 	groups, ok := m.groups[userKind]
 	if !ok {
 		return map[string]string{}, errors.Errorf("user kind %s not found", userKind)
 	}
 	kg := groups.Top()
+	if kg == nil {
+		return map[string]string{}, errors.Errorf("no keyspace group for user kind %s", userKind)
+	}
 	id := strconv.FormatUint(uint64(kg.ID), 10)
 	config := map[string]string{
 		UserKindKey:           userKind.String(),
@@ -393,9 +505,13 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 
 	m.Lock()
 	defer m.Unlock()
-	kg := m.groups[userKind].Get(uint32(id))
+	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)
+}
+
+func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, groupID uint64, keyspaceID uint32, mutation int) error {
+	kg := m.groups[userKind].Get(uint32(groupID))
 	if kg == nil {
-		return errors.Errorf("keyspace group %d not found", id)
+		return errors.Errorf("keyspace group %d not found", groupID)
 	}
 	if kg.IsSplitting() {
 		return ErrKeyspaceGroupInSplit
@@ -476,11 +592,14 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 // SplitKeyspaceGroupByID splits the keyspace group by ID into a new keyspace group with the given new ID.
 // And the keyspaces in the old keyspace group will be moved to the new keyspace group.
 func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint32, keyspaces []uint32) error {
+	err := m.patrolKeyspaceAssignment()
+	if err != nil {
+		return err
+	}
 	var splitSourceKg, splitTargetKg *endpoint.KeyspaceGroup
 	m.Lock()
 	defer m.Unlock()
-	// TODO: avoid to split when the keyspaces is empty.
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+	if err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
 		// Load the old keyspace group first.
 		splitSourceKg, err = m.store.LoadKeyspaceGroup(txn, splitSourceID)
 		if err != nil {
@@ -493,6 +612,10 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 		if splitSourceKg.IsSplitting() {
 			return ErrKeyspaceGroupInSplit
 		}
+		// Check if the source keyspace group has enough replicas.
+		if len(splitSourceKg.Members) < utils.KeyspaceGroupDefaultReplicaCount {
+			return ErrKeyspaceGroupNotEnoughReplicas
+		}
 		// Check if the new keyspace group already exists.
 		splitTargetKg, err = m.store.LoadKeyspaceGroup(txn, splitTargetID)
 		if err != nil {
@@ -501,13 +624,15 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 		if splitTargetKg != nil {
 			return ErrKeyspaceGroupExists
 		}
+		keyspaceNum := len(keyspaces)
+		sourceKeyspaceNum := len(splitSourceKg.Keyspaces)
 		// Check if the keyspaces are all in the old keyspace group.
-		if len(keyspaces) > len(splitSourceKg.Keyspaces) {
+		if keyspaceNum == 0 || keyspaceNum > sourceKeyspaceNum {
 			return ErrKeyspaceNotInKeyspaceGroup
 		}
 		var (
-			oldKeyspaceMap = make(map[uint32]struct{}, len(splitSourceKg.Keyspaces))
-			newKeyspaceMap = make(map[uint32]struct{}, len(keyspaces))
+			oldKeyspaceMap = make(map[uint32]struct{}, sourceKeyspaceNum)
+			newKeyspaceMap = make(map[uint32]struct{}, keyspaceNum)
 		)
 		for _, keyspace := range splitSourceKg.Keyspaces {
 			oldKeyspaceMap[keyspace] = struct{}{}
@@ -519,7 +644,7 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 			newKeyspaceMap[keyspace] = struct{}{}
 		}
 		// Get the split keyspace group for the old keyspace group.
-		splitKeyspaces := make([]uint32, 0, len(splitSourceKg.Keyspaces)-len(keyspaces))
+		splitKeyspaces := make([]uint32, 0, sourceKeyspaceNum-keyspaceNum)
 		for _, keyspace := range splitSourceKg.Keyspaces {
 			if _, ok := newKeyspaceMap[keyspace]; !ok {
 				splitKeyspaces = append(splitKeyspaces, keyspace)
@@ -603,18 +728,23 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 	return nil
 }
 
-// GetNodesNum returns the number of nodes.
-func (m *GroupManager) GetNodesNum() int {
+// GetNodesCount returns the count of nodes.
+func (m *GroupManager) GetNodesCount() int {
+	if m.nodesBalancer == nil {
+		return 0
+	}
 	return m.nodesBalancer.Len()
 }
 
 // AllocNodesForKeyspaceGroup allocates nodes for the keyspace group.
-func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]endpoint.KeyspaceGroupMember, error) {
-	ctx, cancel := context.WithTimeout(m.ctx, allocNodeTimeout)
+func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount int) ([]endpoint.KeyspaceGroupMember, error) {
+	m.Lock()
+	defer m.Unlock()
+	ctx, cancel := context.WithTimeout(m.ctx, allocNodesTimeout)
 	defer cancel()
-	ticker := time.NewTicker(allocNodeInterval)
+	ticker := time.NewTicker(allocNodesInterval)
 	defer ticker.Stop()
-	nodes := make([]endpoint.KeyspaceGroupMember, 0, replica)
+	nodes := make([]endpoint.KeyspaceGroupMember, 0, desiredReplicaCount)
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		kg, err := m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
@@ -623,19 +753,25 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]end
 		if kg == nil {
 			return ErrKeyspaceGroupNotExists
 		}
+		if kg.IsSplitting() {
+			return ErrKeyspaceGroupInSplit
+		}
 		exists := make(map[string]struct{})
 		for _, member := range kg.Members {
 			exists[member.Address] = struct{}{}
 			nodes = append(nodes, member)
 		}
-		for len(exists) < replica {
+		if len(exists) >= desiredReplicaCount {
+			return nil
+		}
+		for len(exists) < desiredReplicaCount {
 			select {
 			case <-ctx.Done():
 				return nil
 			case <-ticker.C:
 			}
-			num := m.GetNodesNum()
-			if num < replica || num == 0 { // double check
+			countOfNodes := m.GetNodesCount()
+			if countOfNodes < desiredReplicaCount || countOfNodes == 0 { // double check
 				return ErrNoAvailableNode
 			}
 			addr := m.nodesBalancer.Next()
@@ -654,5 +790,41 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, replica int) ([]end
 	if err != nil {
 		return nil, err
 	}
+	log.Info("alloc nodes for keyspace group", zap.Uint32("id", id), zap.Reflect("nodes", nodes))
 	return nodes, nil
+}
+
+// SetNodesForKeyspaceGroup sets the nodes for the keyspace group.
+func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error {
+	m.Lock()
+	defer m.Unlock()
+	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		kg, err := m.store.LoadKeyspaceGroup(txn, id)
+		if err != nil {
+			return err
+		}
+		if kg == nil {
+			return ErrKeyspaceGroupNotExists
+		}
+		if kg.IsSplitting() {
+			return ErrKeyspaceGroupInSplit
+		}
+		members := make([]endpoint.KeyspaceGroupMember, 0, len(nodes))
+		for _, node := range nodes {
+			members = append(members, endpoint.KeyspaceGroupMember{Address: node})
+		}
+		kg.Members = members
+		return m.store.SaveKeyspaceGroup(txn, kg)
+	})
+}
+
+// IsExistNode checks if the node exists.
+func (m *GroupManager) IsExistNode(addr string) bool {
+	nodes := m.nodesBalancer.GetAll()
+	for _, node := range nodes {
+		if node == addr {
+			return true
+		}
+	}
+	return false
 }
