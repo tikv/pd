@@ -103,6 +103,8 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "The status to indicate if the request is forwarded",
 			ConstLabels: constLabels,
 		}, []string{"host", "delegate"})
+
+	initCmdDurations()
 }
 
 var (
