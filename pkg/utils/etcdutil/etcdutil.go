@@ -419,6 +419,7 @@ func (lw *LoopWatcher) StartWatchLoop() {
 	for {
 		select {
 		case <-ctx.Done():
+			close(lw.forceLoadCh)
 			log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 			return
 		default:
@@ -504,13 +505,10 @@ func (lw *LoopWatcher) load() (nextRevision int64, err error) {
 	return resp.Header.Revision + 1, err
 }
 
+// ForceLoad forces to load the key.
 func (lw *LoopWatcher) ForceLoad() {
 	select {
 	case lw.forceLoadCh <- struct{}{}:
 	default:
 	}
-}
-
-func (lw *LoopWatcher) Close() {
-	close(lw.forceLoadCh)
 }

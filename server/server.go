@@ -1731,12 +1731,11 @@ func (s *Server) initTSOPrimaryWatcher() {
 		primary := &tsopb.Participant{} // TODO: use Generics
 		if err := proto.Unmarshal(kv.Value, primary); err != nil {
 			return err
-		} else {
-			listenUrls := primary.GetListenUrls()
-			if len(listenUrls) > 0 {
-				// listenUrls[0] is the primary service endpoint of the keyspace group
-				s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-			}
+		}
+		listenUrls := primary.GetListenUrls()
+		if len(listenUrls) > 0 {
+			// listenUrls[0] is the primary service endpoint of the keyspace group
+			s.servicePrimaryMap.Store(serviceName, listenUrls[0])
 		}
 		return nil
 	}
@@ -1748,7 +1747,7 @@ func (s *Server) initTSOPrimaryWatcher() {
 		s.serverLoopCtx,
 		&s.serverLoopWg,
 		s.client,
-		"service-primary",
+		"tso-primary-watcher",
 		tsoServicePrimaryKey,
 		putFn,
 		deleteFn,
