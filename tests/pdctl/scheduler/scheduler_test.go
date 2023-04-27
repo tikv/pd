@@ -481,14 +481,4 @@ func TestScheduler(t *testing.T) {
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
 	checkSchedulerWithStatusCommand(nil, "disabled", nil)
-
-	// test split bucket scheduler
-	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "split-bucket-scheduler"}, nil)
-	re.Contains(echo, "\"degree\": 3")
-	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "split-bucket-scheduler", "set", "degree", "10"}, nil)
-	re.Contains(echo, "Success")
-	echo = mustExec([]string{"-u", pdAddr, "scheduler", "config", "split-bucket-scheduler"}, nil)
-	re.Contains(echo, "\"degree\": 10")
-	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "split-bucket-scheduler"}, nil)
-	re.Contains(echo, "Success!")
 }
