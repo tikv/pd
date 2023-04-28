@@ -245,7 +245,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 			wg := sync.WaitGroup{}
 			// Select the default keyspace and a randomly picked keyspace to test
 			keyspaceIDs := []uint32{mcsutils.DefaultKeyspaceID}
-			selectIdx := uint32(r.Intn(len(suite.keyspaceIDs)-1)+1)
+			selectIdx := uint32(r.Intn(len(suite.keyspaceIDs)-1) + 1)
 			keyspaceIDs = append(keyspaceIDs, suite.keyspaceIDs[selectIdx])
 			wg.Add(len(keyspaceIDs))
 			for _, keyspaceID := range keyspaceIDs {
@@ -273,12 +273,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 
-	ctx, cancel := context.WithCancel(suite.ctx)
-	var wg sync.WaitGroup
-	checkTSO(ctx, re, &wg, suite.backendEndpoints)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	parallelAct := func() {
 		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
 		// currently, the time to discover tso service is usually a little longer than 1s, compared
 		// to the previous time taken < 1s.
@@ -290,9 +285,9 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 			suite.cluster.GetServer(suite.cluster.GetLeader()).GetServer().Close()
 		}
 		time.Sleep(time.Duration(n) * time.Second)
-		cancel()
-	}()
-	wg.Wait()
+	}
+
+	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
 	suite.TearDownSuite()
 	suite.SetupSuite()
 }
