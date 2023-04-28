@@ -589,7 +589,15 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 		if err != nil {
 			return err
 		}
-		assigned := false
+		var (
+			assigned            = false
+			keyspaceIDsToUnlock = make([]uint32, 0, len(keyspaces))
+		)
+		defer func() {
+			for _, id := range keyspaceIDsToUnlock {
+				manager.metaLock.Unlock(id)
+			}
+		}()
 		for _, ks := range keyspaces {
 			if ks == nil {
 				continue
@@ -606,7 +614,7 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 				}
 			}
 			// Unlock the keyspace meta lock after the whole txn.
-			defer manager.metaLock.Unlock(ks.Id)
+			keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, ks.Id)
 			// If the keyspace doesn't have a group ID, assign it to the default keyspace group.
 			if !slice.Contains(defaultKeyspaceGroup.Keyspaces, ks.Id) {
 				defaultKeyspaceGroup.Keyspaces = append(defaultKeyspaceGroup.Keyspaces, ks.Id)
