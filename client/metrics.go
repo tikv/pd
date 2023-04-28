@@ -26,8 +26,7 @@ var (
 	requestForwarded    *prometheus.GaugeVec
 )
 
-// InitMetrics initializes metrics for PD client.
-func InitMetrics() {
+func init() {
 	initMetrics(nil)
 }
 
