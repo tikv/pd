@@ -83,7 +83,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownTest() {
 }
 
 func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
-	for _, group := range handlersutil.MustLoadKeyspaceGroups(re, server, "0", "0") {
+	keyspaceGroups := handlersutil.MustLoadKeyspaceGroups(re, server, "0", "0")
+	for _, group := range keyspaceGroups {
 		// Do not delete default keyspace group.
 		if group.ID == mcsutils.DefaultKeyspaceGroupID {
 			continue
@@ -130,6 +131,86 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 			}
 		}
 	}
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	wg := &sync.WaitGroup{}
+	keyspaceIDs := []uint32{0, 1, 2, 3, 1000}
+	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
+		ctx, re, wg, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
+	wg.Wait()
+	re.Equal(len(keyspaceIDs), len(clients))
+	mcs.CheckMultiKeyspacesTSO(ctx, re, wg, clients, 3*time.Second)
+	cancel()
+	wg.Wait()
+}
+
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKeyspaceGroup() {
+	// Create multiple keyspace groups, and every keyspace should be served by one of them
+	// on a tso server.
+	re := suite.Require()
+
+	params := []struct {
+		keyspaceGroupID uint32
+		keyspaceIDs     []uint32
+	}{
+		{0, []uint32{0, 10}},
+		{1, []uint32{1, 11}},
+		{2, []uint32{2, 12}},
+	}
+
+	for _, param := range params {
+		if param.keyspaceGroupID == 0 {
+			// we have already created default keyspace group, so we can skip it.
+			// keyspace 10 isn't assigned to any keyspace group, so they will be
+			// served by default keyspace group.
+			continue
+		}
+		handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
+			KeyspaceGroups: []*endpoint.KeyspaceGroup{
+				{
+					ID:        param.keyspaceGroupID,
+					UserKind:  endpoint.Standard.String(),
+					Members:   suite.tsoCluster.GetKeyspaceGroupMember(),
+					Keyspaces: param.keyspaceIDs,
+				},
+			},
+		})
+	}
+
+	testutil.Eventually(re, func() bool {
+		for _, param := range params {
+			for _, keyspaceID := range param.keyspaceIDs {
+				served := false
+				for _, server := range suite.tsoCluster.GetServers() {
+					if server.IsKeyspaceServing(keyspaceID, param.keyspaceGroupID) {
+						tam, err := server.GetTSOAllocatorManager(param.keyspaceGroupID)
+						re.NoError(err)
+						re.NotNil(tam)
+						served = true
+					}
+				}
+				if !served {
+					return false
+				}
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	keyspaceIDs := make([]uint32, 0)
+	for _, param := range params {
+		keyspaceIDs = append(keyspaceIDs, param.keyspaceIDs...)
+	}
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	wg := &sync.WaitGroup{}
+	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
+		ctx, re, wg, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
+	wg.Wait()
+	re.Equal(len(keyspaceIDs), len(clients))
+	mcs.CheckMultiKeyspacesTSO(ctx, re, wg, clients, 3*time.Second)
+	cancel()
+	wg.Wait()
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
