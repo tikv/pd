@@ -82,7 +82,7 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 	// add three nodes.
 	nodes := make(map[string]bs.Server)
-	for i := 0; i < utils.KeyspaceGroupDefaultReplicaCount+2; i++ {
+	for i := 0; i < utils.KeyspaceGroupDefaultReplicaCount+1; i++ {
 		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 		defer cleanup()
 		nodes[s.GetAddr()] = s
@@ -113,7 +113,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 		oldMembers[member.Address] = struct{}{}
 	}
 
-	// alloc node update to 2.
+	// alloc node update to 3.
 	params.Replica = utils.KeyspaceGroupDefaultReplicaCount + 1
 	got, code = suite.tryAllocNodesForKeyspaceGroup(id, params)
 	suite.Equal(http.StatusOK, code)

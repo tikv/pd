@@ -516,21 +516,30 @@ func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, 
 	if kg.IsSplitting() {
 		return ErrKeyspaceGroupInSplit
 	}
+
+	changed := false
+
 	switch mutation {
 	case opAdd:
 		if !slice.Contains(kg.Keyspaces, keyspaceID) {
 			kg.Keyspaces = append(kg.Keyspaces, keyspaceID)
+			changed = true
 		}
 	case opDelete:
-		if slice.Contains(kg.Keyspaces, keyspaceID) {
-			kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
+		lenOfKeyspaces := len(kg.Keyspaces)
+		kg.Keyspaces = slice.Remove(kg.Keyspaces, keyspaceID)
+		if lenOfKeyspaces != len(kg.Keyspaces) {
+			changed = true
 		}
 	}
-	if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true); err != nil {
-		return err
-	}
 
-	m.groups[userKind].Put(kg)
+	if changed {
+		if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true); err != nil {
+			return err
+		}
+
+		m.groups[userKind].Put(kg)
+	}
 	return nil
 }
 
@@ -569,8 +578,9 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 		updateNew = true
 	}
 
-	if slice.Contains(oldKG.Keyspaces, keyspaceID) {
-		oldKG.Keyspaces = slice.Remove(oldKG.Keyspaces, keyspaceID)
+	lenOfOldKeyspaces := len(oldKG.Keyspaces)
+	oldKG.Keyspaces = slice.Remove(oldKG.Keyspaces, keyspaceID)
+	if lenOfOldKeyspaces != len(oldKG.Keyspaces) {
 		updateOld = true
 	}
 
