@@ -16,6 +16,7 @@ package tso
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -251,9 +252,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient() {
-	// TODO: remove the skip after the client is able to support multi-keyspace-group.
-	suite.T().SkipNow()
-
 	re := suite.Require()
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
@@ -287,13 +285,27 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 		for {
 			select {
 			case <-ctx.Done():
+				// Make sure at least one TSO request is successful.
+				re.NotEmpty(lastPhysical)
 				return
 			default:
 			}
 			physical, logical, err := tsoClient.GetTS(ctx)
-			re.NoError(err)
-			re.Greater(physical, lastPhysical)
-			re.Greater(logical, lastLogical)
+			if err != nil {
+				errMsg := err.Error()
+				// Ignore the errors caused by the split and context cancellation.
+				if strings.Contains(errMsg, "context canceled") ||
+					strings.Contains(errMsg, "not leader") ||
+					strings.Contains(errMsg, "ErrKeyspaceNotAssigned") {
+					continue
+				}
+				re.FailNow(errMsg)
+			}
+			if physical == lastPhysical {
+				re.Greater(logical, lastLogical)
+			} else {
+				re.Greater(physical, lastPhysical)
+			}
 			lastPhysical, lastLogical = physical, logical
 		}
 	}()
@@ -308,6 +320,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 	re.True(kg2.IsSplitTarget())
 	// Finish the split.
 	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, 2)
+	// Wait for a while to make sure the client has received the new TSO.
+	time.Sleep(time.Second)
+	// Stop the client.
 	cancel()
 	wg.Wait()
 }
