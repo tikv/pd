@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/testutil"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -234,29 +235,37 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 
-	ctx, cancel := context.WithCancel(suite.ctx)
-	var wg sync.WaitGroup
-	checkTSO(ctx, re, &wg, suite.backendEndpoints)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	parallelAct := func() {
 		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
 		// currently, the time to discover tso service is usually a little longer than 1s, compared
 		// to the previous time taken < 1s.
 		n := r.Intn(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
-			suite.tsoCluster.ResignPrimary()
-			suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+			wg := sync.WaitGroup{}
+			// Select the default keyspace and a randomly picked keyspace to test
+			keyspaceIDs := []uint32{mcsutils.DefaultKeyspaceID}
+			selectIdx := uint32(r.Intn(len(suite.keyspaceIDs)-1)+1)
+			keyspaceIDs = append(keyspaceIDs, suite.keyspaceIDs[selectIdx])
+			wg.Add(len(keyspaceIDs))
+			for _, keyspaceID := range keyspaceIDs {
+				go func(keyspaceID uint32) {
+					defer wg.Done()
+					err := suite.tsoCluster.ResignPrimary(keyspaceID, 0)
+					re.NoError(err)
+					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, 0)
+				}(keyspaceID)
+			}
+			wg.Wait()
 		} else {
 			err := suite.cluster.ResignLeader()
 			re.NoError(err)
 			suite.cluster.WaitLeader()
 		}
 		time.Sleep(time.Duration(n) * time.Second)
-		cancel()
-	}()
-	wg.Wait()
+	}
+
+	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
 }
 
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
