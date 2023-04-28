@@ -130,10 +130,8 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			suite.keyspaceIDs = append(suite.keyspaceIDs, param.keyspaceIDs...)
 		}
 
-		wg := &sync.WaitGroup{}
 		suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
-			suite.ctx, re, wg, suite.keyspaceIDs, strings.Split(suite.backendEndpoints, ","))
-		wg.Wait()
+			suite.ctx, re, suite.keyspaceIDs, strings.Split(suite.backendEndpoints, ","))
 		re.Equal(len(suite.keyspaceIDs), len(suite.clients))
 	}
 }

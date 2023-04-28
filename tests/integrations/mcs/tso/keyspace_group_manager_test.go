@@ -132,16 +132,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 		}
 	}
 
-	ctx, cancel := context.WithCancel(suite.ctx)
-	wg := &sync.WaitGroup{}
 	keyspaceIDs := []uint32{0, 1, 2, 3, 1000}
 	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
-		ctx, re, wg, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
-	wg.Wait()
+		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Equal(len(keyspaceIDs), len(clients))
-	mcs.CheckMultiKeyspacesTSO(ctx, re, wg, clients, 3*time.Second)
-	cancel()
-	wg.Wait()
+	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, 3*time.Second)
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKeyspaceGroup() {
@@ -202,15 +197,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 		keyspaceIDs = append(keyspaceIDs, param.keyspaceIDs...)
 	}
 
-	ctx, cancel := context.WithCancel(suite.ctx)
-	wg := &sync.WaitGroup{}
 	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
-		ctx, re, wg, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
-	wg.Wait()
+		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Equal(len(keyspaceIDs), len(clients))
-	mcs.CheckMultiKeyspacesTSO(ctx, re, wg, clients, 3*time.Second)
-	cancel()
-	wg.Wait()
+	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, 3*time.Second)
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {

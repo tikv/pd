@@ -153,9 +153,11 @@ func WaitForTSOServiceAvailable(ctx context.Context, pdClient pd.Client) error {
 
 // CheckMultiKeyspacesTSO checks the correctness of TSO for multiple keyspaces.
 func CheckMultiKeyspacesTSO(
-	ctx context.Context, re *require.Assertions, wg *sync.WaitGroup,
+	ctx context.Context, re *require.Assertions,
 	clients []pd.Client, duration time.Duration,
 ) {
+	ctx, cancel := context.WithCancel(ctx)
+	wg := sync.WaitGroup{}
 	wg.Add(len(clients))
 
 	for _, client := range clients {
@@ -183,13 +185,16 @@ func CheckMultiKeyspacesTSO(
 	}
 
 	time.Sleep(duration)
+	cancel()
+	wg.Wait()
 }
 
 // WaitForMultiKeyspacesTSOAvailable waits for the given keyspaces being served by the tso server side
 func WaitForMultiKeyspacesTSOAvailable(
-	ctx context.Context, re *require.Assertions, wg *sync.WaitGroup,
+	ctx context.Context, re *require.Assertions,
 	keyspaceIDs []uint32, backendEndpoints []string,
 ) []pd.Client {
+	wg := sync.WaitGroup{}
 	wg.Add(len(keyspaceIDs))
 
 	clients := make([]pd.Client, 0, len(keyspaceIDs))
@@ -207,5 +212,6 @@ func WaitForMultiKeyspacesTSOAvailable(
 		}()
 	}
 
+	wg.Wait()
 	return clients
 }
