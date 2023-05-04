@@ -141,7 +141,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	})
 }
 
-func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKeyspaceGroup() {
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKeyspaceGroups() {
 	// Create multiple keyspace groups, and every keyspace should be served by one of them
 	// on a tso server.
 	re := suite.Require()

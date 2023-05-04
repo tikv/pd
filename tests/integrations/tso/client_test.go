@@ -168,12 +168,11 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 
 func (suite *tsoClientTestSuite) TestGetTSAsync() {
 	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber)
+	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
-			defer wg.Done()
-
-			for _, client := range suite.clients {
+		for _, client := range suite.clients {
+			go func(client pd.Client) {
+				defer wg.Done()
 				tsFutures := make([]pd.TSFuture, tsoRequestRound)
 				for j := range tsFutures {
 					tsFutures[j] = client.GetTSAsync(suite.ctx)
@@ -186,8 +185,8 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 					suite.Greater(lastTS, ts)
 					lastTS = ts
 				}
-			}
-		}()
+			}(client)
+		}
 	}
 	wg.Wait()
 }
