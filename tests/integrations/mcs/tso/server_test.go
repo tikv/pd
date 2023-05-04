@@ -357,7 +357,6 @@ func (suite *APIServerForwardTestSuite) TestForwardTSOUnexpectedToFollower1() {
 		min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1)
 		suite.NoError(err)
 		suite.Equal(uint64(0), min)
-
 	})
 }
 
