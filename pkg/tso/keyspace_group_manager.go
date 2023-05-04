@@ -812,7 +812,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	return curAM, curKeyspaceGroup, curKeyspaceGroupID, nil
 }
 
-// GetElectionMember returns the election member of the given keyspace group
+// GetElectionMember returns the election member of the keyspace group serving the given keyspace.
 func (kgm *KeyspaceGroupManager) GetElectionMember(
 	keyspaceID, keyspaceGroupID uint32,
 ) (ElectionMember, error) {
