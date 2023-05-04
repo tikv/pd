@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -239,6 +240,7 @@ func (suite *APIServerForwardTestSuite) SetupSuite() {
 	suite.NoError(suite.pdLeader.BootstrapCluster())
 	suite.addRegions()
 
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
 	suite.pdClient, err = pd.NewClientWithContext(context.Background(),
 		[]string{suite.backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 	suite.NoError(err)
@@ -258,6 +260,7 @@ func (suite *APIServerForwardTestSuite) TearDownSuite() {
 	}
 	suite.cluster.Destroy()
 	suite.cancel()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
 }
 
 func (suite *APIServerForwardTestSuite) TestForwardTSORelated() {
