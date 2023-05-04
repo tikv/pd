@@ -387,7 +387,7 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 		isLoadedCh:  make(chan error, 1),
 		putFn:       putFn,
 		deleteFn:    deleteFn,
-		opts:        opts, // todo: add default opts, e.g. clientv3.WithPrefix(), clientv3.Limit(512)
+		opts:        opts,
 	}
 }
 
@@ -396,7 +396,13 @@ func (lw *LoopWatcher) StartWatchLoop() {
 	defer logutil.LogPanic()
 	defer lw.wg.Done()
 
-	ctx, cancel := context.WithTimeout(lw.ctx, defaultLoadDataTimeout)
+	timeout := defaultLoadDataTimeout
+	failpoint.Inject("loadRetryTimeout", func(val failpoint.Value) {
+		if v, ok := val.(int); ok {
+			timeout = time.Duration(v) * time.Second
+		}
+	})
+	ctx, cancel := context.WithTimeout(lw.ctx, timeout)
 	defer cancel()
 	watchStartRevision := lw.initFromEtcd(ctx)
 
@@ -430,9 +436,16 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	)
 	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
 	defer ticker.Stop()
-	for i := 0; i < defaultLoadFromEtcdMaxRetryTimes; i++ {
+
+	maxRetryTimes := defaultLoadFromEtcdMaxRetryTimes
+	failpoint.Inject("loadRetryTimes", func(val failpoint.Value) {
+		if v, ok := val.(int); ok {
+			maxRetryTimes = v
+		}
+	})
+	for i := 0; i < maxRetryTimes; i++ {
 		watchStartRevision, err = lw.load()
-		failpoint.Inject("loadKeyspaceGroupsTemporaryFail", func(val failpoint.Value) {
+		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
 				err = errors.New("fail to read from etcd")
 				failpoint.Continue()
@@ -506,7 +519,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 
 func (lw *LoopWatcher) load() (nextRevision int64, err error) {
 	resp, err := EtcdKVGet(lw.client, lw.key, lw.opts...)
-	failpoint.Inject("delayLoadKeyspaceGroups", func(val failpoint.Value) {
+	failpoint.Inject("delayLoad", func(val failpoint.Value) {
 		if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
 			time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
 		}
