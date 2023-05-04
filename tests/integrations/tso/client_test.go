@@ -179,7 +179,7 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	defer re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 
 	ctx, cancel := context.WithCancel(suite.ctx)
 	var wg sync.WaitGroup
@@ -209,7 +209,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	defer re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 
 	ctx, cancel := context.WithCancel(suite.ctx)
 	var wg sync.WaitGroup
@@ -240,9 +240,9 @@ func TestMixedTSODeployment(t *testing.T) {
 	re := require.New(t)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	defer re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	defer re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
-	defer re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
+	defer re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipUpdateServiceMode"))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(ctx, 1)
