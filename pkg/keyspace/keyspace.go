@@ -574,6 +574,7 @@ func (manager *Manager) allocID() (uint32, error) {
 
 // PatrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
 func (manager *Manager) PatrolKeyspaceAssignment() error {
+	// TODO: since the number of keyspaces might be large, we should consider to assign them in batches.
 	return manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		defaultKeyspaceGroup, err := manager.kgm.store.LoadKeyspaceGroup(txn, utils.DefaultKeyspaceGroupID)
 		if err != nil {
