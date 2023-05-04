@@ -251,7 +251,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 			for _, keyspaceID := range keyspaceIDs {
 				go func(keyspaceID uint32) {
 					defer wg.Done()
-					err := suite.tsoCluster.ResignPrimary(keyspaceID, 0)
+					err := suite.tsoCluster.ResignPrimary(keyspaceID, mcsutils.DefaultKeyspaceGroupID)
 					re.NoError(err)
 					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, 0)
 				}(keyspaceID)

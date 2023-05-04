@@ -136,7 +136,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Equal(len(keyspaceIDs), len(clients))
-	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, 3*time.Second)
+	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+		time.Sleep(3 * time.Second)
+	})
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKeyspaceGroup() {
@@ -200,7 +202,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Equal(len(keyspaceIDs), len(clients))
-	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, 3*time.Second)
+	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+		time.Sleep(3 * time.Second)
+	})
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
@@ -231,7 +235,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	})
 	ts.Physical += time.Hour.Milliseconds()
 	// Set the TSO of the keyspace group 1 to a large value.
-	err = suite.tsoCluster.GetPrimary(222, 1).GetHandler().ResetTS(tsoutil.GenerateTS(&ts), false, true, 1)
+	err = suite.tsoCluster.GetPrimaryServer(222, 1).GetHandler().ResetTS(tsoutil.GenerateTS(&ts), false, true, 1)
 	re.NoError(err)
 	// Split the keyspace group 1 to 2.
 	handlersutil.MustSplitKeyspaceGroup(re, suite.pdLeaderServer, 1, &handlers.SplitKeyspaceGroupByIDParams{
