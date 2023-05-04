@@ -349,11 +349,11 @@ func (suite *APIServerForwardTestSuite) checkAvailableTSO() {
 
 type CommonTestSuite struct {
 	suite.Suite
-	ctx                     context.Context
-	cancel                  context.CancelFunc
-	cluster                 *tests.TestCluster
-	tsoCluster              *mcs.TestTSOCluster
-	pdLeader                *tests.TestServer
+	ctx        context.Context
+	cancel     context.CancelFunc
+	cluster    *tests.TestCluster
+	tsoCluster *mcs.TestTSOCluster
+	pdLeader   *tests.TestServer
 	// tsoDefaultPrimaryServer is the primary server of the default keyspace group
 	tsoDefaultPrimaryServer *tso.Server
 	backendEndpoints        string
