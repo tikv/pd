@@ -281,9 +281,12 @@ func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 
-	// can use the tso-related interface with new primary
+	// can use the tso-related interface with old primary
 	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
 	re.True(exist)
+	suite.checkAvailableTSO()
+
+	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
 	tc.WaitForDefaultPrimaryServing(re)
