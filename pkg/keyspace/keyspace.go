@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -38,10 +39,6 @@ const (
 	AllocStep = uint64(100)
 	// AllocLabel is used to label keyspace idAllocator's metrics.
 	AllocLabel = "keyspace-idAlloc"
-	// DefaultKeyspaceName is the name reserved for default keyspace.
-	DefaultKeyspaceName = "DEFAULT"
-	// DefaultKeyspaceID is the id of default keyspace.
-	DefaultKeyspaceID = uint32(0)
 	// regionLabelIDPrefix is used to prefix the keyspace region label.
 	regionLabelIDPrefix = "keyspaces/"
 	// regionLabelKey is the key for keyspace id in keyspace region label.
@@ -106,13 +103,13 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
 	// Split Keyspace Region for default keyspace.
-	if err := manager.splitKeyspaceRegion(DefaultKeyspaceID); err != nil {
+	if err := manager.splitKeyspaceRegion(utils.DefaultKeyspaceID); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
 	defaultKeyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:             DefaultKeyspaceID,
-		Name:           DefaultKeyspaceName,
+		Id:             utils.DefaultKeyspaceID,
+		Name:           utils.DefaultKeyspaceName,
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
 		StateChangedAt: now,
@@ -425,7 +422,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
-	if name == DefaultKeyspaceName {
+	if name == utils.DefaultKeyspaceName {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Error(errModifyDefault),
 		)
@@ -477,7 +474,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
-	if id == DefaultKeyspaceID {
+	if id == utils.DefaultKeyspaceID {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Error(errModifyDefault),
 		)
