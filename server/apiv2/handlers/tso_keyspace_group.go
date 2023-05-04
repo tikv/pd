@@ -177,6 +177,7 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		err = manager.PatrolKeyspaceAssignment()
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			patrolKeyspaceAssignmentState.Unlock()
 			return
 		}
 		patrolKeyspaceAssignmentState.patrolled = true
