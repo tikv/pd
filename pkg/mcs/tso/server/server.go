@@ -244,10 +244,9 @@ func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMemb
 	return member, nil
 }
 
-// ResignPrimary resigns the primary of the given keyspace and keyspace group.
-func (s *Server) ResignPrimary() error {
-	member, err := s.keyspaceGroupManager.GetElectionMember(
-		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+// ResignPrimary resigns the primary of the given keyspace.
+func (s *Server) ResignPrimary(keyspaceID, keyspaceGroupID uint32) error {
+	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return err
 	}
