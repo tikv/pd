@@ -295,7 +295,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		log.Error("failed to initialize keyspace group manager", errs.ZapError(err))
 		// We might have partially loaded/initialized the keyspace groups. Close the manager to clean up.
 		kgm.Close()
-		return err
+		return errs.ErrLoadKeyspaceGroupsTerminated
 	}
 
 	kgm.wg.Add(1)

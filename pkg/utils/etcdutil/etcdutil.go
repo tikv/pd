@@ -452,7 +452,9 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 			}
 		})
 		if err == nil {
-			break
+			if deadline, ok := ctx.Deadline(); ok && deadline.After(time.Now()) {
+				break
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -474,7 +476,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 
 	for {
 	WatchChan:
-		watchChan := watcher.Watch(ctx, lw.key, append(lw.opts, clientv3.WithRev(revision))...)
+		watchChan := watcher.Watch(ctx, lw.key, append(lw.opts, clientv3.WithRev(revision), clientv3.WithLimit(0))...)
 		select {
 		case <-ctx.Done():
 			return revision, nil
@@ -548,6 +550,7 @@ func (lw *LoopWatcher) ForceLoad() {
 	}
 }
 
+// WaitLoad waits for the result to obtain whether data is loaded.
 func (lw *LoopWatcher) WaitLoad() error {
 	return <-lw.isLoadedCh
 }
