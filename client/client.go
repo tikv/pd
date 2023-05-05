@@ -392,7 +392,7 @@ func NewClientWithKeyspaceName(ctx context.Context, keyspace string, svrAddrs []
 func (c *client) initRetry(f func(s string) error, str string) error {
 	var err error
 	for i := 0; i < c.option.maxRetryTimes; i++ {
-		if err = f(str); err == nil {
+		if err = f(str); err == nil || strings.Contains(err.Error(), "ENTRY_NOT_FOUND") {
 			return nil
 		}
 		select {
