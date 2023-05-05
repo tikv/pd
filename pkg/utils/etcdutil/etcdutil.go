@@ -373,6 +373,7 @@ type LoopWatcher struct {
 	isLoadedCh     chan error
 	putFn          func(*mvccpb.KeyValue) error
 	deleteFn       func(*mvccpb.KeyValue) error
+	postEventFn    func() error
 	opts           []clientv3.OpOption
 	loadTimeout    time.Duration
 	loadRetryTimes int
@@ -380,7 +381,8 @@ type LoopWatcher struct {
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
-func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string, putFn, deleteFn func(*mvccpb.KeyValue) error, opts ...clientv3.OpOption) *LoopWatcher {
+func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string,
+	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error, opts ...clientv3.OpOption) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:            ctx,
 		client:         client,
@@ -391,6 +393,7 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 		isLoadedCh:     make(chan error, 1),
 		putFn:          putFn,
 		deleteFn:       deleteFn,
+		postEventFn:    postEventFn,
 		opts:           opts,
 		loadTimeout:    defaultLoadDataFromEtcdTimeout,
 		loadRetryTimes: defaultLoadFromEtcdRetryTimes,
@@ -510,6 +513,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					}
 				}
 			}
+			if err := lw.postEventFn(); err != nil {
+				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
+					zap.String("key", lw.key), zap.Error(err))
+			}
 			revision = wresp.Header.Revision + 1
 		}
 	}
@@ -543,7 +550,11 @@ func (lw *LoopWatcher) load() (nextRevision int64, err error) {
 			}
 		}
 		count := int64(len(resp.Kvs))
-		if count < limit {
+		if count < limit { // no more data
+			if err := lw.postEventFn(); err != nil {
+				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
+					zap.String("key", lw.key), zap.Error(err))
+			}
 			return resp.Header.Revision + 1, err
 		}
 		startKey = string(resp.Kvs[count-1].Key)

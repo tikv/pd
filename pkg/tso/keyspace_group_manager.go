@@ -274,6 +274,22 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
 	}
+	postEventFn := func() error {
+		kgm.groupUpdateRetryList.Range(func(key, value interface{}) bool {
+			id, ok := key.(uint64)
+			if !ok {
+				return true
+			}
+			group, ok := value.(*endpoint.KeyspaceGroup)
+			if !ok {
+				return true
+			}
+			kgm.groupUpdateRetryList.Delete(id)
+			kgm.updateKeyspaceGroup(group)
+			return true
+		})
+		return nil
+	}
 	kgm.groupWatcher = etcdutil.NewLoopWatcher(
 		kgm.ctx,
 		&kgm.wg,
@@ -282,6 +298,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		startKey,
 		putFn,
 		deleteFn,
+		postEventFn,
 		clientv3.WithRange(endKey),
 	)
 	if kgm.loadKeyspaceGroupsTimeout > 0 {
@@ -302,9 +319,6 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		kgm.Close()
 		return errs.ErrLoadKeyspaceGroupsTerminated
 	}
-
-	kgm.wg.Add(1)
-	go kgm.startRetryUpdateLoop()
 
 	if !defaultKGConfigured {
 		log.Info("initializing default keyspace group")
@@ -332,33 +346,6 @@ func (kgm *KeyspaceGroupManager) Close() {
 	kgm.state.deinitialize()
 
 	log.Info("keyspace group manager closed")
-}
-
-func (kgm *KeyspaceGroupManager) startRetryUpdateLoop() {
-	defer logutil.LogPanic()
-	defer kgm.wg.Done()
-	ticker := time.NewTicker(defaultRetryInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-kgm.ctx.Done():
-			return
-		case <-ticker.C:
-			kgm.groupUpdateRetryList.Range(func(key, value interface{}) bool {
-				id, ok := key.(uint64)
-				if !ok {
-					return true
-				}
-				group, ok := value.(*endpoint.KeyspaceGroup)
-				if !ok {
-					return true
-				}
-				kgm.groupUpdateRetryList.Delete(id)
-				kgm.updateKeyspaceGroup(group)
-				return true
-			})
-		}
-	}
 }
 
 func (kgm *KeyspaceGroupManager) isAssignedToMe(group *endpoint.KeyspaceGroup) bool {

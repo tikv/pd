@@ -1751,6 +1751,7 @@ func (s *Server) initTSOPrimaryWatcher() {
 		tsoServicePrimaryKey,
 		putFn,
 		deleteFn,
+		func() error { return nil },
 	)
 }
 

@@ -258,6 +258,7 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client, clusterID ui
 		tsoServiceKey,
 		putFn,
 		deleteFn,
+		func() error { return nil },
 		clientv3.WithRange(tsoServiceEndKey),
 	)
 }

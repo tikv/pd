@@ -17,7 +17,6 @@ package server
 import (
 	"context"
 	"path"
-	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -77,31 +76,22 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	defer cancel()
 	startKey := path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix())
 
-	var firstLoading struct {
-		sync.Mutex
-		isFinished bool
-		keyspaces  []*keyspacepb.KeyspaceMeta
-	}
-	firstLoading.keyspaces = make([]*keyspacepb.KeyspaceMeta, 0)
-
+	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0)
 	putFn := func(kv *mvccpb.KeyValue) error {
 		meta := &keyspacepb.KeyspaceMeta{}
 		if err := proto.Unmarshal(kv.Value, meta); err != nil {
 			return err
 		}
-		firstLoading.Lock()
-		if !firstLoading.isFinished {
-			firstLoading.keyspaces = append(firstLoading.keyspaces, meta)
-			firstLoading.Unlock()
-			return nil
-		}
-		firstLoading.Unlock()
-		return stream.Send(&keyspacepb.WatchKeyspacesResponse{
-			Header:    s.header(),
-			Keyspaces: []*keyspacepb.KeyspaceMeta{meta}})
+		keyspaces = append(keyspaces, meta)
+		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		return nil
+	}
+	postEventFn := func() error {
+		return stream.Send(&keyspacepb.WatchKeyspacesResponse{
+			Header:    s.header(),
+			Keyspaces: keyspaces})
 	}
 
 	watcher := etcdutil.NewLoopWatcher(
@@ -112,6 +102,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		startKey,
 		putFn,
 		deleteFn,
+		postEventFn,
 		clientv3.WithPrefix(),
 	)
 	s.serverLoopWg.Add(1)
@@ -120,18 +111,6 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		cancel() // cancel context to stop watcher
 		return err
 	}
-
-	// send all existing keyspaces as first package
-	firstLoading.Lock()
-	if len(firstLoading.keyspaces) > 0 {
-		if err := stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: firstLoading.keyspaces}); err != nil {
-			cancel() // cancel context to stop watcher
-			firstLoading.Unlock()
-			return err
-		}
-		firstLoading.isFinished = true
-	}
-	firstLoading.Unlock()
 
 	<-ctx.Done() // wait for context done
 	return nil
