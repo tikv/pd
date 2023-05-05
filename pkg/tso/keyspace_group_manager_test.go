@@ -180,13 +180,12 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 
 	// Set the timeout to 1 second and inject the delayLoad to return 3 seconds to let
 	// the loading sleep 3 seconds.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/loadRetryTimeout", "return(1)"))
+	mgr.groupWatcher.SetLoadTimeout(time.Second)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/delayLoad", "return(3)"))
 	err := mgr.Initialize()
 	// If loading keyspace groups timeout, the initialization should fail with ErrLoadKeyspaceGroupsTerminated.
 	re.Equal(errs.ErrLoadKeyspaceGroupsTerminated, err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/delayLoad"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/loadRetryTimeout"))
 }
 
 // TestLoadKeyspaceGroupsSucceedWithTempFailures tests the initialization should succeed when there are temporary
@@ -204,12 +203,11 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSucceedWithTem
 
 	// Set the max retry times to 3 and inject the loadTemporaryFail to return 2 to let
 	// loading from etcd fail 2 times but the whole initialization still succeeds.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/loadRetryTimes", "return(3)"))
+	mgr.groupWatcher.SetLoadRetryTimes(3)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail", "return(2)"))
 	err := mgr.Initialize()
 	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/loadRetryTimes"))
 }
 
 // TestLoadKeyspaceGroupsFailed tests the initialization should fail when there are too many failures
@@ -670,6 +668,7 @@ func (suite *keyspaceGroupManagerTestSuite) newUniqueKeyspaceGroupManager(
 	electionNamePrefix := "kgm-test-" + uniqueStr
 
 	keyspaceGroupManager := suite.newKeyspaceGroupManager(tsoServiceID, electionNamePrefix, legacySvcRootPath, tsoSvcRootPath)
+
 	if loadKeyspaceGroupsBatchSize != 0 {
 		keyspaceGroupManager.loadKeyspaceGroupsBatchSize = loadKeyspaceGroupsBatchSize
 	}

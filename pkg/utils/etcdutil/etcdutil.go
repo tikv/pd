@@ -355,39 +355,43 @@ func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 }
 
 const (
-	defaultLoadDataTimeout           = 30 * time.Second
+	defaultLoadDataFromEtcdTimeout   = 30 * time.Second
 	defaultLoadFromEtcdRetryInterval = 200 * time.Millisecond
-	defaultLoadFromEtcdMaxRetryTimes = int(defaultLoadDataTimeout / defaultLoadFromEtcdRetryInterval)
+	defaultLoadFromEtcdRetryTimes    = int(defaultLoadDataFromEtcdTimeout / defaultLoadFromEtcdRetryInterval)
 	watchEtcdChangeRetryInterval     = 1 * time.Second
 )
 
 // LoopWatcher loads data from etcd and sets a watcher for it.
 type LoopWatcher struct {
-	ctx         context.Context
-	wg          *sync.WaitGroup
-	client      *clientv3.Client
-	key         string
-	name        string
-	forceLoadCh chan struct{}
-	isLoadedCh  chan error
-	putFn       func(*mvccpb.KeyValue) error
-	deleteFn    func(*mvccpb.KeyValue) error
-	opts        []clientv3.OpOption
+	ctx            context.Context
+	wg             *sync.WaitGroup
+	client         *clientv3.Client
+	key            string
+	name           string
+	forceLoadCh    chan struct{}
+	isLoadedCh     chan error
+	putFn          func(*mvccpb.KeyValue) error
+	deleteFn       func(*mvccpb.KeyValue) error
+	opts           []clientv3.OpOption
+	loadTimeout    time.Duration
+	loadRetryTimes int
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
 func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string, putFn, deleteFn func(*mvccpb.KeyValue) error, opts ...clientv3.OpOption) *LoopWatcher {
 	return &LoopWatcher{
-		ctx:         ctx,
-		client:      client,
-		name:        name,
-		key:         key,
-		wg:          wg,
-		forceLoadCh: make(chan struct{}, 1),
-		isLoadedCh:  make(chan error, 1),
-		putFn:       putFn,
-		deleteFn:    deleteFn,
-		opts:        opts,
+		ctx:            ctx,
+		client:         client,
+		name:           name,
+		key:            key,
+		wg:             wg,
+		forceLoadCh:    make(chan struct{}, 1),
+		isLoadedCh:     make(chan error, 1),
+		putFn:          putFn,
+		deleteFn:       deleteFn,
+		opts:           opts,
+		loadTimeout:    defaultLoadDataFromEtcdTimeout,
+		loadRetryTimes: defaultLoadFromEtcdRetryTimes,
 	}
 }
 
@@ -396,13 +400,7 @@ func (lw *LoopWatcher) StartWatchLoop() {
 	defer logutil.LogPanic()
 	defer lw.wg.Done()
 
-	timeout := defaultLoadDataTimeout
-	failpoint.Inject("loadRetryTimeout", func(val failpoint.Value) {
-		if v, ok := val.(int); ok {
-			timeout = time.Duration(v) * time.Second
-		}
-	})
-	ctx, cancel := context.WithTimeout(lw.ctx, timeout)
+	ctx, cancel := context.WithTimeout(lw.ctx, lw.loadTimeout)
 	defer cancel()
 	watchStartRevision := lw.initFromEtcd(ctx)
 
@@ -437,13 +435,7 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
 	defer ticker.Stop()
 
-	maxRetryTimes := defaultLoadFromEtcdMaxRetryTimes
-	failpoint.Inject("loadRetryTimes", func(val failpoint.Value) {
-		if v, ok := val.(int); ok {
-			maxRetryTimes = v
-		}
-	})
-	for i := 0; i < maxRetryTimes; i++ {
+	for i := 0; i < lw.loadRetryTimes; i++ {
 		watchStartRevision, err = lw.load()
 		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
@@ -553,4 +545,14 @@ func (lw *LoopWatcher) ForceLoad() {
 // WaitLoad waits for the result to obtain whether data is loaded.
 func (lw *LoopWatcher) WaitLoad() error {
 	return <-lw.isLoadedCh
+}
+
+// SetLoadRetryTimes sets the retry times when loading data from etcd.
+func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
+	lw.loadRetryTimes = times
+}
+
+// SetLoadTimeout sets the timeout when loading data from etcd.
+func (lw *LoopWatcher) SetLoadTimeout(timeout time.Duration) {
+	lw.loadTimeout = timeout
 }
