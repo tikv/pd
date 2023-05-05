@@ -110,7 +110,7 @@ func TestLeadership(t *testing.T) {
 	// Check the lease.
 	lease1 := leadership1.getLease()
 	re.NotNil(lease1)
-	lease2 := leadership1.getLease()
+	lease2 := leadership2.getLease()
 	re.NotNil(lease2)
 
 	re.True(lease1.IsExpired())
