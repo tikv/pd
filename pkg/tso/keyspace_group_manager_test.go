@@ -180,7 +180,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 
 	// Set the timeout to 1 second and inject the delayLoad to return 3 seconds to let
 	// the loading sleep 3 seconds.
-	mgr.groupWatcher.SetLoadTimeout(time.Second)
+	mgr.loadKeyspaceGroupsTimeout = time.Second
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/delayLoad", "return(3)"))
 	err := mgr.Initialize()
 	// If loading keyspace groups timeout, the initialization should fail with ErrLoadKeyspaceGroupsTerminated.
@@ -203,7 +203,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSucceedWithTem
 
 	// Set the max retry times to 3 and inject the loadTemporaryFail to return 2 to let
 	// loading from etcd fail 2 times but the whole initialization still succeeds.
-	mgr.groupWatcher.SetLoadRetryTimes(3)
+	mgr.loadFromEtcdMaxRetryTimes = 3
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail", "return(2)"))
 	err := mgr.Initialize()
 	re.NoError(err)
@@ -225,12 +225,11 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsFailed() {
 
 	// Set the max retry times to 3 and inject the loadTemporaryFail to return 3 to let
 	// loading from etcd fail 3 times which should cause the whole initialization to fail.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/loadRetryTimes", "return(3)"))
+	mgr.loadFromEtcdMaxRetryTimes = 3
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail", "return(3)"))
 	err := mgr.Initialize()
 	re.Error(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/loadRetryTimes"))
 }
 
 // TestWatchAndDynamicallyApplyChanges tests the keyspace group manager watch and dynamically apply
