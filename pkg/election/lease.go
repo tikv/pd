@@ -42,7 +42,7 @@ type lease struct {
 	// etcd client and lease
 	client *clientv3.Client
 	lease  clientv3.Lease
-	ID     clientv3.LeaseID
+	ID     atomic.Value // store as clientv3.LeaseID
 	// leaseTimeout and expireTime are used to control the lease's lifetime
 	leaseTimeout time.Duration
 	expireTime   atomic.Value
@@ -64,7 +64,7 @@ func (l *lease) Grant(leaseTimeout int64) error {
 		log.Warn("lease grants too slow", zap.Duration("cost", cost), zap.String("purpose", l.Purpose))
 	}
 	log.Info("lease granted", zap.Int64("lease-id", int64(leaseResp.ID)), zap.Int64("lease-timeout", leaseTimeout), zap.String("purpose", l.Purpose))
-	l.ID = leaseResp.ID
+	l.ID.Store(leaseResp.ID)
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
 	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
 	return nil
@@ -80,7 +80,11 @@ func (l *lease) Close() error {
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
-	l.lease.Revoke(ctx, l.ID)
+	var leaseID clientv3.LeaseID
+	if l.ID.Load() != nil {
+		leaseID = l.ID.Load().(clientv3.LeaseID)
+	}
+	l.lease.Revoke(ctx, leaseID)
 	return l.lease.Close()
 }
 
@@ -145,7 +149,11 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				start := time.Now()
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
-				res, err := l.lease.KeepAliveOnce(ctx1, l.ID)
+				var leaseID clientv3.LeaseID
+				if l.ID.Load() != nil {
+					leaseID = l.ID.Load().(clientv3.LeaseID)
+				}
+				res, err := l.lease.KeepAliveOnce(ctx1, leaseID)
 				if err != nil {
 					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), errs.ZapError(err))
 					return
