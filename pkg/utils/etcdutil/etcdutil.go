@@ -358,6 +358,7 @@ const (
 	defaultLoadDataFromEtcdTimeout   = 30 * time.Second
 	defaultLoadFromEtcdRetryInterval = 200 * time.Millisecond
 	defaultLoadFromEtcdRetryTimes    = int(defaultLoadDataFromEtcdTimeout / defaultLoadFromEtcdRetryInterval)
+	defaultLoadBatchSize             = 400
 	watchEtcdChangeRetryInterval     = 1 * time.Second
 )
 
@@ -375,6 +376,7 @@ type LoopWatcher struct {
 	opts           []clientv3.OpOption
 	loadTimeout    time.Duration
 	loadRetryTimes int
+	loadBatchSize  int64
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
@@ -392,6 +394,7 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 		opts:           opts,
 		loadTimeout:    defaultLoadDataFromEtcdTimeout,
 		loadRetryTimes: defaultLoadFromEtcdRetryTimes,
+		loadBatchSize:  defaultLoadBatchSize,
 	}
 }
 
@@ -468,7 +471,8 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 
 	for {
 	WatchChan:
-		watchChan := watcher.Watch(ctx, lw.key, append(lw.opts, clientv3.WithRev(revision), clientv3.WithLimit(0))...)
+		opts := append(lw.opts, clientv3.WithRev(revision))
+		watchChan := watcher.Watch(ctx, lw.key, opts...)
 		select {
 		case <-ctx.Done():
 			return revision, nil
@@ -512,26 +516,38 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 }
 
 func (lw *LoopWatcher) load() (nextRevision int64, err error) {
-	resp, err := EtcdKVGet(lw.client, lw.key, lw.opts...)
-	failpoint.Inject("delayLoad", func(val failpoint.Value) {
-		if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
-			time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
-		}
-	})
+	startKey := lw.key
+	limit := lw.loadBatchSize
+	if limit <= 0 {
+		limit = defaultLoadBatchSize
+	}
+	for {
+		opts := append(lw.opts, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend), clientv3.WithLimit(limit))
+		resp, err := EtcdKVGet(lw.client, startKey, opts...)
+		failpoint.Inject("delayLoad", func(val failpoint.Value) {
+			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
+				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
+			}
+		})
 
-	if err != nil {
-		log.Error("load failed in watch loop", zap.String("name", lw.name),
-			zap.String("key", lw.key), zap.Error(err))
-		return 0, err
-	}
-	for _, item := range resp.Kvs {
-		err = lw.putFn(item)
 		if err != nil {
-			log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
-			continue
+			log.Error("load failed in watch loop", zap.String("name", lw.name),
+				zap.String("key", lw.key), zap.Error(err))
+			return 0, err
 		}
+		for _, item := range resp.Kvs {
+			err = lw.putFn(item)
+			if err != nil {
+				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+				continue
+			}
+		}
+		count := int64(len(resp.Kvs))
+		if count < limit {
+			return resp.Header.Revision + 1, err
+		}
+		startKey = string(resp.Kvs[count-1].Key)
 	}
-	return resp.Header.Revision + 1, err
 }
 
 // ForceLoad forces to load the key.
@@ -555,4 +571,9 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadTimeout sets the timeout when loading data from etcd.
 func (lw *LoopWatcher) SetLoadTimeout(timeout time.Duration) {
 	lw.loadTimeout = timeout
+}
+
+// SetLoadBatchSize sets the batch size when loading data from etcd.
+func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
+	lw.loadBatchSize = size
 }

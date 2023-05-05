@@ -106,7 +106,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	re.Equal(legacySvcRootPath, kgm.legacySvcRootPath)
 	re.Equal(tsoSvcRootPath, kgm.tsoSvcRootPath)
 	re.Equal(suite.cfg, kgm.cfg)
-	re.Equal(defaultLoadKeyspaceGroupsBatchSize, kgm.loadKeyspaceGroupsBatchSize)
 
 	am, err := kgm.GetAllocatorManager(mcsutils.DefaultKeyspaceGroupID)
 	re.NoError(err)

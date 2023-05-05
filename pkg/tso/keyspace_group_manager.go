@@ -47,9 +47,8 @@ import (
 
 const (
 	// primaryElectionSuffix is the suffix of the key for keyspace group primary election
-	primaryElectionSuffix              = "primary"
-	defaultRetryInterval               = 500 * time.Millisecond
-	defaultLoadKeyspaceGroupsBatchSize = int64(400)
+	primaryElectionSuffix = "primary"
+	defaultRetryInterval  = 500 * time.Millisecond
 )
 
 type state struct {
@@ -230,17 +229,16 @@ func NewKeyspaceGroupManager(
 
 	ctx, cancel := context.WithCancel(ctx)
 	kgm := &KeyspaceGroupManager{
-		ctx:                         ctx,
-		cancel:                      cancel,
-		tsoServiceID:                tsoServiceID,
-		etcdClient:                  etcdClient,
-		httpClient:                  httpClient,
-		electionNamePrefix:          electionNamePrefix,
-		legacySvcRootPath:           legacySvcRootPath,
-		tsoSvcRootPath:              tsoSvcRootPath,
-		cfg:                         cfg,
-		loadKeyspaceGroupsBatchSize: defaultLoadKeyspaceGroupsBatchSize,
-		groupUpdateRetryList:        make(map[uint32]*endpoint.KeyspaceGroup),
+		ctx:                  ctx,
+		cancel:               cancel,
+		tsoServiceID:         tsoServiceID,
+		etcdClient:           etcdClient,
+		httpClient:           httpClient,
+		electionNamePrefix:   electionNamePrefix,
+		legacySvcRootPath:    legacySvcRootPath,
+		tsoSvcRootPath:       tsoSvcRootPath,
+		cfg:                  cfg,
+		groupUpdateRetryList: make(map[uint32]*endpoint.KeyspaceGroup),
 	}
 	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
@@ -286,7 +284,6 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		putFn,
 		deleteFn,
 		clientv3.WithRange(endKey),
-		clientv3.WithLimit(kgm.loadKeyspaceGroupsBatchSize),
 		// It loads keyspace groups from the start ID with limit.
 		// If limit is 0, it will load all keyspace groups from the start ID.
 	)
@@ -295,6 +292,9 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 	}
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
+	}
+	if kgm.loadKeyspaceGroupsBatchSize > 0 {
+		kgm.groupWatcher.SetLoadBatchSize(kgm.loadKeyspaceGroupsBatchSize)
 	}
 	kgm.wg.Add(1)
 	go kgm.groupWatcher.StartWatchLoop()
