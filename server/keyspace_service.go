@@ -89,6 +89,9 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		return nil
 	}
 	postEventFn := func() error {
+		defer func() {
+			keyspaces = make([]*keyspacepb.KeyspaceMeta, 0)
+		}()
 		return stream.Send(&keyspacepb.WatchKeyspacesResponse{
 			Header:    s.header(),
 			Keyspaces: keyspaces})

@@ -205,7 +205,7 @@ type KeyspaceGroupManager struct {
 	loadFromEtcdMaxRetryTimes   int
 
 	// groupUpdateRetryList is the list of keyspace groups which failed to update and need to retry.
-	groupUpdateRetryList sync.Map // store as map[uint32]*endpoint.KeyspaceGroup
+	groupUpdateRetryList map[uint32]*endpoint.KeyspaceGroup
 
 	groupWatcher *etcdutil.LoopWatcher
 }
@@ -229,15 +229,16 @@ func NewKeyspaceGroupManager(
 
 	ctx, cancel := context.WithCancel(ctx)
 	kgm := &KeyspaceGroupManager{
-		ctx:                ctx,
-		cancel:             cancel,
-		tsoServiceID:       tsoServiceID,
-		etcdClient:         etcdClient,
-		httpClient:         httpClient,
-		electionNamePrefix: electionNamePrefix,
-		legacySvcRootPath:  legacySvcRootPath,
-		tsoSvcRootPath:     tsoSvcRootPath,
-		cfg:                cfg,
+		ctx:                  ctx,
+		cancel:               cancel,
+		tsoServiceID:         tsoServiceID,
+		etcdClient:           etcdClient,
+		httpClient:           httpClient,
+		electionNamePrefix:   electionNamePrefix,
+		legacySvcRootPath:    legacySvcRootPath,
+		tsoSvcRootPath:       tsoSvcRootPath,
+		cfg:                  cfg,
+		groupUpdateRetryList: make(map[uint32]*endpoint.KeyspaceGroup),
 	}
 	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
@@ -275,19 +276,11 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		return nil
 	}
 	postEventFn := func() error {
-		kgm.groupUpdateRetryList.Range(func(key, value interface{}) bool {
-			id, ok := key.(uint64)
-			if !ok {
-				return true
-			}
-			group, ok := value.(*endpoint.KeyspaceGroup)
-			if !ok {
-				return true
-			}
-			kgm.groupUpdateRetryList.Delete(id)
+		// Retry the groups that are not initialized successfully before.
+		for id, group := range kgm.groupUpdateRetryList {
+			delete(kgm.groupUpdateRetryList, id)
 			kgm.updateKeyspaceGroup(group)
-			return true
-		})
+		}
 		return nil
 	}
 	kgm.groupWatcher = etcdutil.NewLoopWatcher(
@@ -411,7 +404,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		splitSourceAM, splitSourceGroup := kgm.getKeyspaceGroupMeta(splitSource)
 		if !validateSplit(splitSourceAM, group, splitSourceGroup) {
 			// Put the group into the retry list to retry later.
-			kgm.groupUpdateRetryList.Store(group.ID, group)
+			kgm.groupUpdateRetryList[group.ID] = group
 			return
 		}
 		participant.SetCampaignChecker(func(leadership *election.Leadership) bool {

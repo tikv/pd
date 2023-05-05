@@ -549,15 +549,17 @@ func (lw *LoopWatcher) load() (nextRevision int64, err error) {
 				continue
 			}
 		}
-		count := int64(len(resp.Kvs))
-		if count < limit { // no more data
+		if !resp.More {
 			if err := lw.postEventFn(); err != nil {
 				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
 					zap.String("key", lw.key), zap.Error(err))
 			}
 			return resp.Header.Revision + 1, err
 		}
-		startKey = string(resp.Kvs[count-1].Key)
+		index := int64(len(resp.Kvs)) - 1
+		if index >= 0 {
+			startKey = string(resp.Kvs[index].Key)
+		}
 	}
 }
 
