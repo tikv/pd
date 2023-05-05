@@ -284,8 +284,6 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		putFn,
 		deleteFn,
 		clientv3.WithRange(endKey),
-		// It loads keyspace groups from the start ID with limit.
-		// If limit is 0, it will load all keyspace groups from the start ID.
 	)
 	if kgm.loadKeyspaceGroupsTimeout > 0 {
 		kgm.groupWatcher.SetLoadTimeout(kgm.loadKeyspaceGroupsTimeout)
