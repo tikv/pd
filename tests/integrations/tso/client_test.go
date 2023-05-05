@@ -53,6 +53,11 @@ type tsoClientTestSuite struct {
 	// The TSO service in microservice mode.
 	tsoCluster *mcs.TestTSOCluster
 
+	keyspaceGroups []struct {
+		keyspaceGroupID uint32
+		keyspaceIDs     []uint32
+	}
+
 	backendEndpoints string
 	keyspaceIDs      []uint32
 	clients          []pd.Client
@@ -99,7 +104,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 		suite.tsoCluster, err = mcs.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
 		re.NoError(err)
 
-		params := []struct {
+		suite.keyspaceGroups = []struct {
 			keyspaceGroupID uint32
 			keyspaceIDs     []uint32
 		}{
@@ -108,7 +113,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			{2, []uint32{2}},
 		}
 
-		for _, param := range params {
+		for _, param := range suite.keyspaceGroups {
 			if param.keyspaceGroupID == 0 {
 				// we have already created default keyspace group, so we can skip it.
 				// keyspace 10 isn't assigned to any keyspace group, so they will be
@@ -127,8 +132,8 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			})
 		}
 
-		for _, param := range params {
-			suite.keyspaceIDs = append(suite.keyspaceIDs, param.keyspaceIDs...)
+		for _, keyspaceGroup := range suite.keyspaceGroups {
+			suite.keyspaceIDs = append(suite.keyspaceIDs, keyspaceGroup.keyspaceIDs...)
 		}
 
 		suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
@@ -242,10 +247,15 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
 			wg := sync.WaitGroup{}
-			// Select the default keyspace and a randomly picked keyspace to test
-			keyspaceIDs := []uint32{mcsutils.DefaultKeyspaceID}
-			selectIdx := uint32(r.Intn(len(suite.keyspaceIDs)-1) + 1)
-			keyspaceIDs = append(keyspaceIDs, suite.keyspaceIDs[selectIdx])
+			// Select the first keyspace from all keyspace groups. We need to make sure the selected
+			// keyspaces are from different keyspace groups, otherwise multiple goroutines below could
+			// try to resign the primary of the same keyspace group and cause race condition.
+			keyspaceIDs := make([]uint32, 0)
+			for _, keyspaceGroup := range suite.keyspaceGroups {
+				if len(keyspaceGroup.keyspaceIDs) > 0 {
+					keyspaceIDs = append(keyspaceIDs, keyspaceGroup.keyspaceIDs[0])
+				}
+			}
 			wg.Add(len(keyspaceIDs))
 			for _, keyspaceID := range keyspaceIDs {
 				go func(keyspaceID uint32) {
