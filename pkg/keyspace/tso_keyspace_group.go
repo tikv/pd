@@ -61,15 +61,9 @@ type GroupManager struct {
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
-	// patrolKeyspaceAssignmentOnce is used to indicate whether we have patrolled all keyspaces
-	// and assign them to the keyspace groups.
-	patrolKeyspaceAssignmentOnce bool
 
 	// store is the storage for keyspace group related information.
-	store interface {
-		endpoint.KeyspaceGroupStorage
-		endpoint.KeyspaceStorage
-	}
+	store endpoint.KeyspaceGroupStorage
 
 	client *clientv3.Client
 
@@ -88,10 +82,7 @@ type GroupManager struct {
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
 func NewKeyspaceGroupManager(
 	ctx context.Context,
-	store interface {
-		endpoint.KeyspaceGroupStorage
-		endpoint.KeyspaceStorage
-	},
+	store endpoint.KeyspaceGroupStorage,
 	client *clientv3.Client,
 	clusterID uint64,
 ) *GroupManager {
@@ -168,38 +159,6 @@ func (m *GroupManager) Bootstrap() error {
 func (m *GroupManager) Close() {
 	m.cancel()
 	m.wg.Wait()
-}
-
-// patrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
-func (m *GroupManager) patrolKeyspaceAssignment() error {
-	m.Lock()
-	defer m.Unlock()
-	if m.patrolKeyspaceAssignmentOnce {
-		return nil
-	}
-	keyspaces, err := m.store.LoadRangeKeyspace(utils.DefaultKeyspaceID, 0)
-	if err != nil {
-		return err
-	}
-	config, err := m.getKeyspaceConfigByKindLocked(endpoint.Basic)
-	if err != nil {
-		return err
-	}
-	for _, ks := range keyspaces {
-		if ks == nil {
-			continue
-		}
-		groupID, err := strconv.ParseUint(config[TSOKeyspaceGroupIDKey], 10, 64)
-		if err != nil {
-			return err
-		}
-		err = m.updateKeyspaceForGroupLocked(endpoint.Basic, groupID, ks.GetId(), opAdd)
-		if err != nil {
-			return err
-		}
-	}
-	m.patrolKeyspaceAssignmentOnce = true
-	return nil
 }
 
 func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
@@ -602,14 +561,10 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 // SplitKeyspaceGroupByID splits the keyspace group by ID into a new keyspace group with the given new ID.
 // And the keyspaces in the old keyspace group will be moved to the new keyspace group.
 func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint32, keyspaces []uint32) error {
-	err := m.patrolKeyspaceAssignment()
-	if err != nil {
-		return err
-	}
 	var splitSourceKg, splitTargetKg *endpoint.KeyspaceGroup
 	m.Lock()
 	defer m.Unlock()
-	if err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
 		// Load the old keyspace group first.
 		splitSourceKg, err = m.store.LoadKeyspaceGroup(txn, splitSourceID)
 		if err != nil {
