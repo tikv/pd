@@ -41,7 +41,7 @@ type KeyspaceStorage interface {
 	SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
 	LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error)
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
-	LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
+	LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
@@ -104,10 +104,10 @@ func (se *StorageEndpoint) RunInTxn(ctx context.Context, f func(txn kv.Txn) erro
 
 // LoadRangeKeyspace loads keyspaces starting at startID.
 // limit specifies the limit of loaded keyspaces.
-func (se *StorageEndpoint) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
+func (se *StorageEndpoint) LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
 	startKey := KeyspaceMetaPath(startID)
 	endKey := clientv3.GetPrefixRangeEnd(KeyspaceMetaPrefix())
-	keys, values, err := se.LoadRange(startKey, endKey, limit)
+	keys, values, err := txn.LoadRange(startKey, endKey, limit)
 	if err != nil {
 		return nil, err
 	}

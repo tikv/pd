@@ -17,6 +17,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -140,6 +141,11 @@ type SplitKeyspaceGroupByIDParams struct {
 	Keyspaces []uint32 `json:"keyspaces"`
 }
 
+var patrolKeyspaceAssignmentState struct {
+	sync.RWMutex
+	patrolled bool
+}
+
 // SplitKeyspaceGroupByID splits keyspace group by ID into a new keyspace group with the given new ID.
 // And the keyspaces in the old keyspace group will be moved to the new keyspace group.
 func SplitKeyspaceGroupByID(c *gin.Context) {
@@ -164,8 +170,22 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 	}
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	manager := svr.GetKeyspaceGroupManager()
-	err = manager.SplitKeyspaceGroupByID(id, splitParams.NewID, splitParams.Keyspaces)
+	patrolKeyspaceAssignmentState.Lock()
+	if !patrolKeyspaceAssignmentState.patrolled {
+		// Patrol keyspace assignment before splitting keyspace group.
+		manager := svr.GetKeyspaceManager()
+		err = manager.PatrolKeyspaceAssignment()
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			patrolKeyspaceAssignmentState.Unlock()
+			return
+		}
+		patrolKeyspaceAssignmentState.patrolled = true
+	}
+	patrolKeyspaceAssignmentState.Unlock()
+	// Split keyspace group.
+	groupManager := svr.GetKeyspaceGroupManager()
+	err = groupManager.SplitKeyspaceGroupByID(id, splitParams.NewID, splitParams.Keyspaces)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
