@@ -186,7 +186,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	cli := mcs.SetupClientWithKeyspace(ctx, re, []string{backendEndpoints})
+	cli := mcs.SetupClientWithDefaultKeyspaceName(ctx, re, []string{backendEndpoints})
 	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
 	ts := tsoutil.ComposeTS(physical, logical)
@@ -349,13 +349,14 @@ func (suite *APIServerForwardTestSuite) checkAvailableTSO() {
 
 type CommonTestSuite struct {
 	suite.Suite
-	ctx              context.Context
-	cancel           context.CancelFunc
-	cluster          *tests.TestCluster
-	tsoCluster       *mcs.TestTSOCluster
-	pdLeader         *tests.TestServer
-	tsoPrimary       *tso.Server
-	backendEndpoints string
+	ctx        context.Context
+	cancel     context.CancelFunc
+	cluster    *tests.TestCluster
+	tsoCluster *mcs.TestTSOCluster
+	pdLeader   *tests.TestServer
+	// tsoDefaultPrimaryServer is the primary server of the default keyspace group
+	tsoDefaultPrimaryServer *tso.Server
+	backendEndpoints        string
 }
 
 func TestCommonTestSuite(t *testing.T) {
@@ -380,7 +381,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	suite.tsoCluster, err = mcs.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	suite.NoError(err)
 	suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-	suite.tsoPrimary = suite.tsoCluster.GetPrimary(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
 }
 
 func (suite *CommonTestSuite) TearDownSuite() {
@@ -401,14 +402,14 @@ func (suite *CommonTestSuite) TearDownSuite() {
 func (suite *CommonTestSuite) TestAdvertiseAddr() {
 	re := suite.Require()
 
-	conf := suite.tsoPrimary.GetConfig()
+	conf := suite.tsoDefaultPrimaryServer.GetConfig()
 	re.Equal(conf.GetListenAddr(), conf.GetAdvertiseListenAddr())
 }
 
 func (suite *CommonTestSuite) TestMetrics() {
 	re := suite.Require()
 
-	resp, err := http.Get(suite.tsoPrimary.GetConfig().GetAdvertiseListenAddr() + "/metrics")
+	resp, err := http.Get(suite.tsoDefaultPrimaryServer.GetConfig().GetAdvertiseListenAddr() + "/metrics")
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)

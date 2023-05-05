@@ -16,6 +16,7 @@ package mcs
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -92,12 +93,16 @@ func (tc *TestTSOCluster) DestroyServer(addr string) {
 }
 
 // ResignPrimary resigns the primary TSO server.
-func (tc *TestTSOCluster) ResignPrimary() {
-	tc.GetPrimary(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID).ResignPrimary()
+func (tc *TestTSOCluster) ResignPrimary(keyspaceID, keyspaceGroupID uint32) error {
+	primaryServer := tc.GetPrimaryServer(keyspaceID, keyspaceGroupID)
+	if primaryServer == nil {
+		return fmt.Errorf("no tso server serves this keyspace %d", keyspaceID)
+	}
+	return primaryServer.ResignPrimary(keyspaceID, keyspaceGroupID)
 }
 
-// GetPrimary returns the primary TSO server.
-func (tc *TestTSOCluster) GetPrimary(keyspaceID, keyspaceGroupID uint32) *tso.Server {
+// GetPrimaryServer returns the primary TSO server of the given keyspace
+func (tc *TestTSOCluster) GetPrimaryServer(keyspaceID, keyspaceGroupID uint32) *tso.Server {
 	for _, server := range tc.servers {
 		if server.IsKeyspaceServing(keyspaceID, keyspaceGroupID) {
 			return server
