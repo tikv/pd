@@ -241,7 +241,7 @@ func TestEtcdClientSync(t *testing.T) {
 	re.Len(listResp3.Members, 1)
 	re.Equal(uint64(etcd2.Server.ID()), listResp3.Members[0].ID)
 
-	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval"))
 }
 
 func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
@@ -251,13 +251,13 @@ func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval", "return(true)"))
 	err = checkEtcdWithHangLeader(t)
 	re.NoError(err)
-	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval"))
 
 	// Test with disable check.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck", "return(true)"))
 	err = checkEtcdWithHangLeader(t)
 	re.Error(err)
-	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck"))
 }
 
 func TestEtcdScaleInAndOutWithoutMultiPoint(t *testing.T) {
