@@ -49,9 +49,9 @@ import (
 )
 
 const (
-	heartbeatSendTimeout                   = 5 * time.Second
-	maxRetryTimesGetGlobalTSOFromTSOServer = 3
-	retryIntervalGetGlobalTSOFromTSOServer = 500 * time.Millisecond
+	heartbeatSendTimeout         	 = 5 * time.Second
+	maxRetryTimesRequestTSOServer = 3
+	retryIntervalRequestTSOServer = 500 * time.Millisecond
 )
 
 // gRPC errors
@@ -1789,7 +1789,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		ts            *tsopb.TsoResponse
 		err           error
 	)
-	for i := 0; i < maxRetryTimesGetGlobalTSOFromTSOServer; i++ {
+	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
 		forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
 		if !ok || forwardedHost == "" {
 			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
@@ -1801,13 +1801,13 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		forwardStream.Send(request)
 		ts, err = forwardStream.Recv()
 		if err != nil {
-			if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
+			if strings.Contains(err.Error(), errs.NotLeaderErr) {
 				select {
 				case s.updateServicePrimaryAddrCh <- struct{}{}:
 					log.Info("update service primary address when meet not leader error")
 				default:
 				}
-				time.Sleep(retryIntervalGetGlobalTSOFromTSOServer)
+				time.Sleep(retryIntervalRequestTSOServer)
 				continue
 			}
 			if strings.Contains(err.Error(), codes.Unavailable.String()) {
