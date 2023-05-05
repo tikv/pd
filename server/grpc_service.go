@@ -49,7 +49,7 @@ import (
 )
 
 const (
-	heartbeatSendTimeout         	 = 5 * time.Second
+	heartbeatSendTimeout          = 5 * time.Second
 	maxRetryTimesRequestTSOServer = 3
 	retryIntervalRequestTSOServer = 500 * time.Millisecond
 )
