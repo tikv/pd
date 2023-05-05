@@ -145,6 +145,8 @@ type Server struct {
 	member *member.EmbeddedEtcdMember
 	// etcd client
 	client *clientv3.Client
+	// electionClient is used for leader election.
+	electionClient *clientv3.Client
 	// http client
 	httpClient *http.Client
 	clusterID  uint64 // pd cluster id.
@@ -330,7 +332,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	// start client
-	s.client, s.httpClient, err = startClient(s.cfg)
+	s.client, s.electionClient, s.httpClient, err = startClient(s.cfg)
 	if err != nil {
 		return err
 	}
@@ -353,18 +355,18 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
 	})
-	s.member = member.NewMember(etcd, s.client, etcdServerID)
+	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
 	return nil
 }
 
-func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
+func startClient(cfg *config.Config) (*clientv3.Client, *clientv3.Client, *http.Client, error) {
 	tlsConfig, err := cfg.Security.ToTLSConfig()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	etcdCfg, err := cfg.GenEmbedEtcdConfig()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls[0])
 }
@@ -482,6 +484,11 @@ func (s *Server) Close() {
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+	if s.electionClient != nil {
+		if err := s.electionClient.Close(); err != nil {
+			log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
 		}
 	}
 
