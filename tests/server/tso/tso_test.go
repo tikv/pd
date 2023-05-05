@@ -70,7 +70,7 @@ func TestLoadTimestamp(t *testing.T) {
 		re.Greater(newTS.GetPhysical()-lastTS.GetPhysical(), int64(0))
 	}
 
-	failpoint.Disable("github.com/tikv/pd/pkg/tso/systemTimeSlow")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/systemTimeSlow"))
 }
 
 func requestLocalTSOs(re *require.Assertions, cluster *tests.TestCluster, dcLocationConfig map[string]string) map[string]*pdpb.Timestamp {

@@ -383,13 +383,35 @@ func NewClientWithKeyspaceName(ctx context.Context, keyspace string, svrAddrs []
 		c.cancel()
 		return nil, err
 	}
+	if err := c.initRetry(c.loadKeyspaceMeta, keyspace); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func (c *client) initRetry(f func(s string) error, str string) error {
+	var err error
+	for i := 0; i < c.option.maxRetryTimes; i++ {
+		if err = f(str); err == nil || strings.Contains(err.Error(), "ENTRY_NOT_FOUND") {
+			return nil
+		}
+		select {
+		case <-c.ctx.Done():
+			return err
+		case <-time.After(time.Second):
+		}
+	}
+	return errors.WithStack(err)
+}
+
+func (c *client) loadKeyspaceMeta(keyspace string) error {
 	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
 	// Here we ignore ENTRY_NOT_FOUND error and it will set the keyspaceID to 0.
 	if err != nil && !strings.Contains(err.Error(), "ENTRY_NOT_FOUND") {
-		return nil, err
+		return err
 	}
 	c.keyspaceID = keyspaceMeta.GetId()
-	return c, nil
+	return nil
 }
 
 func (c *client) setup() error {
