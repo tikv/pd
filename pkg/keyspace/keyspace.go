@@ -582,7 +582,7 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 		if defaultKeyspaceGroup.IsSplitting() {
 			return ErrKeyspaceGroupInSplit
 		}
-		keyspaces, err := manager.store.LoadRangeKeyspace(txn, DefaultKeyspaceID, 0)
+		keyspaces, err := manager.store.LoadRangeKeyspace(txn, utils.DefaultKeyspaceID, 0)
 		if err != nil {
 			return err
 		}
