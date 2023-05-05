@@ -414,7 +414,6 @@ func (lw *LoopWatcher) StartWatchLoop() {
 	for {
 		select {
 		case <-lw.ctx.Done():
-			close(lw.forceLoadCh)
 			log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 			return
 		default:
@@ -442,7 +441,7 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	defer ticker.Stop()
 
 	for i := 0; i < lw.loadRetryTimes; i++ {
-		watchStartRevision, err = lw.load()
+		watchStartRevision, err = lw.load(ctx)
 		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
 				err = errors.New("fail to read from etcd")
@@ -480,7 +479,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		case <-ctx.Done():
 			return revision, nil
 		case <-lw.forceLoadCh:
-			revision, err = lw.load()
+			revision, err = lw.load(ctx)
 			if err != nil {
 				log.Warn("force load key failed in watch loop", zap.String("name", lw.name),
 					zap.String("key", lw.key), zap.Error(err))
@@ -522,15 +521,19 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	}
 }
 
-func (lw *LoopWatcher) load() (nextRevision int64, err error) {
+func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
 	startKey := lw.key
 	limit := lw.loadBatchSize
-	if limit <= 0 {
-		limit = defaultLoadBatchSize
+	// If limit is 0, it means no limit.
+	// If limit is 1, we need to load 2 items to look for the next key.
+	if limit == 1 {
+		limit = 2
 	}
+	ctx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
+	defer cancel()
 	for {
 		opts := append(lw.opts, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend), clientv3.WithLimit(limit))
-		resp, err := EtcdKVGet(lw.client, startKey, opts...)
+		resp, err := clientv3.NewKV(lw.client).Get(ctx, startKey, opts...)
 		failpoint.Inject("delayLoad", func(val failpoint.Value) {
 			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
 				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
@@ -549,17 +552,15 @@ func (lw *LoopWatcher) load() (nextRevision int64, err error) {
 				continue
 			}
 		}
-		if !resp.More {
+		if !resp.More || len(resp.Kvs) == 0 {
 			if err := lw.postEventFn(); err != nil {
 				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
 					zap.String("key", lw.key), zap.Error(err))
 			}
+			log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 			return resp.Header.Revision + 1, err
 		}
-		index := int64(len(resp.Kvs)) - 1
-		if index >= 0 {
-			startKey = string(resp.Kvs[index].Key)
-		}
+		startKey = string(resp.Kvs[int64(len(resp.Kvs))-1].Key)
 	}
 }
 
