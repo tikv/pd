@@ -96,13 +96,9 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 			return nil
 		}
 		firstLoading.Unlock()
-		resp := &keyspacepb.WatchKeyspacesResponse{
+		return stream.Send(&keyspacepb.WatchKeyspacesResponse{
 			Header:    s.header(),
-			Keyspaces: []*keyspacepb.KeyspaceMeta{meta}}
-		if err := stream.Send(resp); err != nil {
-			return err
-		}
-		return nil
+			Keyspaces: []*keyspacepb.KeyspaceMeta{meta}})
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		return nil
