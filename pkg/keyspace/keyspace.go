@@ -48,6 +48,8 @@ const (
 	UserKindKey = "user_kind"
 	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
+	// keyspacePatrolBatchSize is the batch size for keyspace assignment patrol.
+	keyspacePatrolBatchSize = 256
 )
 
 // Config is the interface for keyspace config.
@@ -72,6 +74,8 @@ type Manager struct {
 	config Config
 	// kgm is the keyspace group manager of the server.
 	kgm *GroupManager
+	// nextPatrolStartID is the next start id of keyspace assignment patrol.
+	nextPatrolStartID uint32
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -94,13 +98,14 @@ func NewKeyspaceManager(
 	kgm *GroupManager,
 ) *Manager {
 	return &Manager{
-		metaLock:    syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
-		idAllocator: idAllocator,
-		store:       store,
-		cluster:     cluster,
-		ctx:         ctx,
-		config:      config,
-		kgm:         kgm,
+		metaLock:          syncutil.NewLockGroup(syncutil.WithHash(keyspaceIDHash)),
+		idAllocator:       idAllocator,
+		store:             store,
+		cluster:           cluster,
+		ctx:               ctx,
+		config:            config,
+		kgm:               kgm,
+		nextPatrolStartID: utils.DefaultKeyspaceID,
 	}
 }
 
@@ -570,64 +575,96 @@ func (manager *Manager) allocID() (uint32, error) {
 
 // PatrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
 func (manager *Manager) PatrolKeyspaceAssignment() error {
-	// TODO: since the number of keyspaces might be large, we should consider to assign them in batches.
-	return manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		defaultKeyspaceGroup, err := manager.kgm.store.LoadKeyspaceGroup(txn, utils.DefaultKeyspaceGroupID)
-		if err != nil {
-			return err
-		}
-		if defaultKeyspaceGroup == nil {
-			return errors.Errorf("default keyspace group %d not found", utils.DefaultKeyspaceGroupID)
-		}
-		if defaultKeyspaceGroup.IsSplitting() {
-			return ErrKeyspaceGroupInSplit
-		}
-		keyspaces, err := manager.store.LoadRangeKeyspace(txn, utils.DefaultKeyspaceID, 0)
-		if err != nil {
-			return err
-		}
-		var (
-			assigned            = false
-			keyspaceIDsToUnlock = make([]uint32, 0, len(keyspaces))
-		)
-		defer func() {
-			for _, id := range keyspaceIDsToUnlock {
-				manager.metaLock.Unlock(id)
+	var (
+		// The current start ID of the patrol, used for logging.
+		currentStartID = manager.nextPatrolStartID
+		// The next start ID of the patrol, used for the next patrol.
+		nextStartID  = currentStartID
+		moreToPatrol = true
+		err          error
+	)
+	for moreToPatrol {
+		err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+			defaultKeyspaceGroup, err := manager.kgm.store.LoadKeyspaceGroup(txn, utils.DefaultKeyspaceGroupID)
+			if err != nil {
+				return err
 			}
-		}()
-		for _, ks := range keyspaces {
-			if ks == nil {
-				continue
+			if defaultKeyspaceGroup == nil {
+				return errors.Errorf("default keyspace group %d not found", utils.DefaultKeyspaceGroupID)
 			}
-			manager.metaLock.Lock(ks.Id)
-			if ks.Config == nil {
-				ks.Config = make(map[string]string, 1)
-			} else {
-				// If the keyspace already has a group ID, skip it.
-				_, ok := ks.Config[TSOKeyspaceGroupIDKey]
-				if ok {
+			if defaultKeyspaceGroup.IsSplitting() {
+				return ErrKeyspaceGroupInSplit
+			}
+			keyspaces, err := manager.store.LoadRangeKeyspace(txn, manager.nextPatrolStartID, keyspacePatrolBatchSize)
+			if err != nil {
+				return err
+			}
+			keyspaceNum := len(keyspaces)
+			// If there are more than one keyspace, update the current and next start IDs.
+			if keyspaceNum > 0 {
+				currentStartID = keyspaces[0].GetId()
+				nextStartID = keyspaces[keyspaceNum-1].GetId() + 1
+			}
+			// If there are less than `keyspacePatrolBatchSize` keyspaces,
+			// we have reached the end of the keyspace list.
+			moreToPatrol = keyspaceNum == keyspacePatrolBatchSize
+			var (
+				assigned            = false
+				keyspaceIDsToUnlock = make([]uint32, 0, keyspaceNum)
+			)
+			defer func() {
+				for _, id := range keyspaceIDsToUnlock {
+					manager.metaLock.Unlock(id)
+				}
+			}()
+			for _, ks := range keyspaces {
+				if ks == nil {
+					continue
+				}
+				manager.metaLock.Lock(ks.Id)
+				if ks.Config == nil {
+					ks.Config = make(map[string]string, 1)
+				} else if _, ok := ks.Config[TSOKeyspaceGroupIDKey]; ok {
+					// If the keyspace already has a group ID, skip it.
 					manager.metaLock.Unlock(ks.Id)
 					continue
 				}
+				// Unlock the keyspace meta lock after the whole txn.
+				keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, ks.Id)
+				// If the keyspace doesn't have a group ID, assign it to the default keyspace group.
+				if !slice.Contains(defaultKeyspaceGroup.Keyspaces, ks.Id) {
+					defaultKeyspaceGroup.Keyspaces = append(defaultKeyspaceGroup.Keyspaces, ks.Id)
+					// Only save the keyspace group meta if any keyspace is assigned to it.
+					assigned = true
+				}
+				ks.Config[TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(utils.DefaultKeyspaceGroupID), 10)
+				err = manager.store.SaveKeyspaceMeta(txn, ks)
+				if err != nil {
+					log.Error("[keyspace] failed to save keyspace meta during patrol",
+						zap.Int("batch-size", keyspacePatrolBatchSize),
+						zap.Uint32("current-start-id", currentStartID),
+						zap.Uint32("next-start-id", nextStartID),
+						zap.Uint32("keyspace-id", ks.Id), zap.Error(err))
+					return err
+				}
 			}
-			// Unlock the keyspace meta lock after the whole txn.
-			keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, ks.Id)
-			// If the keyspace doesn't have a group ID, assign it to the default keyspace group.
-			if !slice.Contains(defaultKeyspaceGroup.Keyspaces, ks.Id) {
-				defaultKeyspaceGroup.Keyspaces = append(defaultKeyspaceGroup.Keyspaces, ks.Id)
-				assigned = true
+			if assigned {
+				err = manager.kgm.store.SaveKeyspaceGroup(txn, defaultKeyspaceGroup)
+				if err != nil {
+					log.Error("[keyspace] failed to save default keyspace group meta during patrol",
+						zap.Int("batch-size", keyspacePatrolBatchSize),
+						zap.Uint32("current-start-id", currentStartID),
+						zap.Uint32("next-start-id", nextStartID), zap.Error(err))
+					return err
+				}
 			}
-			ks.Config[TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(utils.DefaultKeyspaceGroupID), 10)
-			err = manager.store.SaveKeyspaceMeta(txn, ks)
-			if err != nil {
-				log.Error("[keyspace] failed to save keyspace meta during patrol",
-					zap.Uint32("ID", ks.Id), zap.Error(err))
-				return err
-			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		if assigned {
-			return manager.kgm.store.SaveKeyspaceGroup(txn, defaultKeyspaceGroup)
-		}
-		return nil
-	})
+		// If all keyspaces in the current batch are assigned, update the next start ID.
+		manager.nextPatrolStartID = nextStartID
+	}
+	return nil
 }
