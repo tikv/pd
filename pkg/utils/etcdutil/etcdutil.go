@@ -455,17 +455,20 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	defer ticker.Stop()
 
 	for i := 0; i < lw.loadRetryTimes; i++ {
-		watchStartRevision, err = lw.load(ctx)
 		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
 				err = errors.New("fail to read from etcd")
 				failpoint.Continue()
 			}
 		})
-		if err == nil {
-			if deadline, ok := ctx.Deadline(); ok && deadline.After(time.Now()) {
-				break
+		failpoint.Inject("delayLoad", func(val failpoint.Value) {
+			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
+				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
 			}
+		})
+		watchStartRevision, err = lw.load(ctx)
+		if err == nil {
+			break
 		}
 		select {
 		case <-ctx.Done():
@@ -536,37 +539,38 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 }
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
-	startKey := lw.key
-	limit := lw.loadBatchSize
-	// If limit is 0, it means no limit.
-	// If limit is 1, we need to load 2 items to look for the next key.
-	if limit == 1 {
-		limit = 2
-	}
 	ctx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
+	startKey := lw.key
+	// If limit is 0, it means no limit.
+	// If limit is not 0, we need to add 1 to limit to get the next key.
+	limit := lw.loadBatchSize
+	if limit != 0 {
+		limit++
+	}
 	for {
+		// Sort by key to get the next key and we don't need to worry about the performance,
+		// Because the default sort is just SortByKey and SortAscend
 		opts := append(lw.opts, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend), clientv3.WithLimit(limit))
 		resp, err := clientv3.NewKV(lw.client).Get(ctx, startKey, opts...)
-		failpoint.Inject("delayLoad", func(val failpoint.Value) {
-			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
-				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
-			}
-		})
-
 		if err != nil {
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(err))
 			return 0, err
 		}
-		for _, item := range resp.Kvs {
+		for i, item := range resp.Kvs {
+			if resp.More && i == len(resp.Kvs)-1 {
+				// The last key is the start key of the next batch.
+				// To avoid to get the same key in the next load, we need to skip the last key.
+				startKey = string(item.Key)
+				continue
+			}
 			err = lw.putFn(item)
 			if err != nil {
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
-				continue
 			}
 		}
-		if !resp.More || len(resp.Kvs) == 0 {
+		if !resp.More {
 			if err := lw.postEventFn(); err != nil {
 				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
 					zap.String("key", lw.key), zap.Error(err))
@@ -574,7 +578,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 			return resp.Header.Revision + 1, err
 		}
-		startKey = string(resp.Kvs[int64(len(resp.Kvs))-1].Key)
 	}
 }
 
