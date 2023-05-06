@@ -63,10 +63,10 @@ type GroupManager struct {
 	store endpoint.KeyspaceGroupStorage
 
 	// nodeBalancer is the balancer for tso nodes.
-	// TODO: add user kind with different balancer
-	// when we ensure where the correspondence between tso node and user kind will be found
+	// TODO: add user kind with different balancer when we ensure where the correspondence between tso node and user kind will be found
 	nodesBalancer balancer.Balancer[string]
 	// serviceRegistryMap stores the mapping from the service registry key to the service address.
+	// Note: it is only used in tsoNodesWatcher.
 	serviceRegistryMap map[string]string
 	// tsoNodesWatcher is the watcher for the registered tso servers.
 	tsoNodesWatcher *etcdutil.LoopWatcher

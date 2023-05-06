@@ -459,13 +459,24 @@ func (suite *loopWatcherTestSuite) TearDownSuite() {
 }
 
 func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
+	cache := struct {
+		sync.RWMutex
+		data map[string]struct{}
+	}{
+		data: make(map[string]struct{}),
+	}
 	watcher := NewLoopWatcher(
 		suite.ctx,
 		&suite.wg,
 		suite.client,
 		"test",
 		"TestLoadWithoutKey",
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache.Lock()
+			defer cache.Unlock()
+			cache.data[string(kv.Key)] = struct{}{}
+			return nil
+		},
 		func(kv *mvccpb.KeyValue) error { return nil },
 		func() error { return nil },
 	)
@@ -474,10 +485,18 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 	go watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	suite.NoError(err) // although no key, watcher returns no error
+	cache.RLock()
+	defer cache.RUnlock()
+	suite.Len(cache.data, 0)
 }
 
 func (suite *loopWatcherTestSuite) TestCallBack() {
-	cache := make(map[string]struct{})
+	cache := struct {
+		sync.RWMutex
+		data map[string]struct{}
+	}{
+		data: make(map[string]struct{}),
+	}
 	result := make([]string, 0)
 	watcher := NewLoopWatcher(
 		suite.ctx,
@@ -490,12 +509,16 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 			return nil
 		},
 		func(kv *mvccpb.KeyValue) error {
-			delete(cache, string(kv.Key))
+			cache.Lock()
+			defer cache.Unlock()
+			delete(cache.data, string(kv.Key))
 			return nil
 		},
 		func() error {
+			cache.Lock()
+			defer cache.Unlock()
 			for _, r := range result {
-				cache[r] = struct{}{}
+				cache.data[r] = struct{}{}
 			}
 			result = result[:0]
 			return nil
@@ -513,7 +536,9 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 		suite.put(fmt.Sprintf("TestCallBack%d", i), "")
 	}
 	time.Sleep(time.Second)
-	suite.Len(cache, 10)
+	cache.RLock()
+	suite.Len(cache.data, 10)
+	cache.RUnlock()
 
 	// delete 10 keys
 	for i := 0; i < 10; i++ {
@@ -522,7 +547,9 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 		suite.NoError(err)
 	}
 	time.Sleep(time.Second)
-	suite.Empty(cache)
+	cache.RLock()
+	suite.Empty(cache.data)
+	cache.RUnlock()
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
@@ -532,7 +559,12 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 			for i := 0; i < count; i++ {
 				suite.put(fmt.Sprintf("TestWatcherLoadLimit%d", i), "")
 			}
-			cache := []string{}
+			cache := struct {
+				sync.RWMutex
+				data []string
+			}{
+				data: make([]string, 0),
+			}
 			watcher := NewLoopWatcher(
 				ctx,
 				&suite.wg,
@@ -540,7 +572,9 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 				"test",
 				"TestWatcherLoadLimit",
 				func(kv *mvccpb.KeyValue) error {
-					cache = append(cache, string(kv.Key))
+					cache.Lock()
+					defer cache.Unlock()
+					cache.data = append(cache.data, string(kv.Key))
 					return nil
 				},
 				func(kv *mvccpb.KeyValue) error {
@@ -555,22 +589,42 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 			go watcher.StartWatchLoop()
 			err := watcher.WaitLoad()
 			suite.NoError(err)
-			suite.Len(cache, count)
+			cache.RLock()
+			suite.Len(cache.data, count)
+			cache.RUnlock()
 			cancel()
 		}
 	}
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherBreak() {
-	cache := make(map[string]string)
+	cache := struct {
+		sync.RWMutex
+		data string
+	}{}
+	checkCache := func(expect string) {
+		testutil.Eventually(suite.Require(), func() bool {
+			cache.RLock()
+			defer cache.RUnlock()
+			return cache.data == expect
+		}, testutil.WithWaitFor(time.Second))
+	}
+
 	watcher := NewLoopWatcher(
 		suite.ctx,
 		&suite.wg,
 		suite.client,
 		"test",
 		"TestWatcherBreak",
-		func(kv *mvccpb.KeyValue) error { cache[string(kv.Key)] = string(kv.Value); return nil },
-		func(kv *mvccpb.KeyValue) error { delete(cache, string(kv.Key)); return nil },
+		func(kv *mvccpb.KeyValue) error {
+			if string(kv.Key) == "TestWatcherBreak" {
+				cache.Lock()
+				defer cache.Unlock()
+				cache.data = string(kv.Value)
+			}
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error { return nil },
 		func() error { return nil },
 	)
 	watcher.watchChangeRetryInterval = 100 * time.Millisecond
@@ -579,15 +633,13 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	go watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	suite.NoError(err)
+	checkCache("")
 
 	// Case1: restart the etcd server
-	suite.Empty(cache)
 	suite.etcd.Close()
 	suite.startEtcd()
 	suite.put("TestWatcherBreak", "1")
-	time.Sleep(watcher.watchChangeRetryInterval)
-	suite.Len(cache, 1)
-	suite.Equal("1", cache["TestWatcherBreak"])
+	checkCache("1")
 
 	// Case2: close the etcd client and put a new value after watcher restarts
 	suite.client.Close()
@@ -595,9 +647,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	suite.NoError(err)
 	watcher.client = suite.client
 	suite.put("TestWatcherBreak", "2")
-	testutil.Eventually(suite.Require(), func() bool {
-		return cache["TestWatcherBreak"] == "2"
-	}, testutil.WithWaitFor(time.Second))
+	checkCache("2")
 
 	// Case3: close the etcd client and put a new value before watcher restarts
 	suite.client.Close()
@@ -605,9 +655,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	suite.NoError(err)
 	suite.put("TestWatcherBreak", "3")
 	watcher.client = suite.client
-	testutil.Eventually(suite.Require(), func() bool {
-		return cache["TestWatcherBreak"] == "3"
-	}, testutil.WithWaitFor(time.Second))
+	checkCache("3")
 
 	// Case4: close the etcd client and put a new value with compact
 	suite.client.Close()
@@ -621,16 +669,14 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	suite.NoError(err)
 	suite.Equal(revision, resp2.Header.Revision)
 	watcher.client = suite.client
-	testutil.Eventually(suite.Require(), func() bool {
-		return cache["TestWatcherBreak"] == "4"
-	}, testutil.WithWaitFor(time.Second))
+	checkCache("4")
 
 	// Case5: there is an error data in cache
-	cache["TestWatcherBreak"] = "error"
+	cache.Lock()
+	cache.data = "error"
+	cache.Unlock()
 	watcher.ForceLoad()
-	testutil.Eventually(suite.Require(), func() bool {
-		return cache["TestWatcherBreak"] == "4"
-	}, testutil.WithWaitFor(time.Second))
+	checkCache("4")
 }
 
 func (suite *loopWatcherTestSuite) startEtcd() {

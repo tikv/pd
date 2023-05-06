@@ -481,7 +481,7 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		}
 	}
 	if err != nil {
-		log.Warn("watched key doesn't exist in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
 	}
 	lw.isLoadedCh <- err
 	return watchStartRevision
