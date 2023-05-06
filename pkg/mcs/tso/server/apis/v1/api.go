@@ -104,7 +104,7 @@ func NewService(srv *tsoserver.Service) *Service {
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
 	tsoAdminHandler := tso.NewAdminHandler(s.srv.GetHandler(), s.rd)
-	router.POST("/admin/reset-ts", gin.WrapF(tsoAdminHandler.ResetTS))
+	router.POST("/reset-ts", gin.WrapF(tsoAdminHandler.ResetTS))
 }
 
 // RegisterKeyspaceGroupRouter registers the router of the TSO keyspace group handler.
