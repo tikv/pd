@@ -138,10 +138,8 @@ func (s *TSODispatcher) dispatch(
 				log.Error("proxy forward tso error",
 					zap.String("forwarded-host", forwardedHost),
 					errs.ZapError(errs.ErrGRPCSend, err))
-				if needUpdateServicePrimaryAddr {
-					if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
-						tsoPrimaryWatchers[0].ForceLoad()
-					}
+				if needUpdateServicePrimaryAddr && strings.Contains(err.Error(), errs.NotLeaderErr) {
+					tsoPrimaryWatchers[0].ForceLoad()
 				}
 				select {
 				case <-dispatcherCtx.Done():

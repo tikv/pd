@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -60,7 +61,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
-	suite.manager = NewKeyspaceManager(store, nil, allocator, &mockConfig{}, kgm)
+	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
 	suite.NoError(kgm.Bootstrap())
 	suite.NoError(suite.manager.Bootstrap())
 }
@@ -163,7 +164,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 		re.Error(err)
 	}
 	// Changing config of DEFAULT keyspace is allowed.
-	updated, err := manager.UpdateKeyspaceConfig(DefaultKeyspaceName, mutations)
+	updated, err := manager.UpdateKeyspaceConfig(utils.DefaultKeyspaceName, mutations)
 	re.NoError(err)
 	// remove auto filled fields
 	delete(updated.Config, TSOKeyspaceGroupIDKey)
@@ -203,7 +204,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
 		// Changing state of DEFAULT keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+		_, err = manager.UpdateKeyspaceState(utils.DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.Error(err)
 	}
 }
@@ -353,4 +354,31 @@ func updateKeyspaceConfig(re *require.Assertions, manager *Manager, name string,
 		checkMutations(re, oldMeta.GetConfig(), updatedMeta.GetConfig(), mutations)
 		oldMeta = updatedMeta
 	}
+}
+
+func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
+	re := suite.Require()
+	// Create a keyspace without any keyspace group.
+	now := time.Now().Unix()
+	err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+		Id:             111,
+		Name:           "111",
+		State:          keyspacepb.KeyspaceState_ENABLED,
+		CreatedAt:      now,
+		StateChangedAt: now,
+	})
+	re.NoError(err)
+	// Check if the keyspace is not attached to the default group.
+	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(defaultKeyspaceGroup)
+	re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(111))
+	// Patrol the keyspace assignment.
+	err = suite.manager.PatrolKeyspaceAssignment()
+	re.NoError(err)
+	// Check if the keyspace is attached to the default group.
+	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(defaultKeyspaceGroup)
+	re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(111))
 }

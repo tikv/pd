@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -23,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
@@ -38,10 +40,6 @@ const (
 	AllocStep = uint64(100)
 	// AllocLabel is used to label keyspace idAllocator's metrics.
 	AllocLabel = "keyspace-idAlloc"
-	// DefaultKeyspaceName is the name reserved for default keyspace.
-	DefaultKeyspaceName = "DEFAULT"
-	// DefaultKeyspaceID is the id of default keyspace.
-	DefaultKeyspaceID = uint32(0)
 	// regionLabelIDPrefix is used to prefix the keyspace region label.
 	regionLabelIDPrefix = "keyspaces/"
 	// regionLabelKey is the key for keyspace id in keyspace region label.
@@ -72,7 +70,8 @@ type Manager struct {
 	ctx context.Context
 	// config is the configurations of the manager.
 	config Config
-	kgm    *GroupManager
+	// kgm is the keyspace group manager of the server.
+	kgm *GroupManager
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -86,7 +85,9 @@ type CreateKeyspaceRequest struct {
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
-func NewKeyspaceManager(store endpoint.KeyspaceStorage,
+func NewKeyspaceManager(
+	ctx context.Context,
+	store endpoint.KeyspaceStorage,
 	cluster schedule.Cluster,
 	idAllocator id.Allocator,
 	config Config,
@@ -97,7 +98,7 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 		idAllocator: idAllocator,
 		store:       store,
 		cluster:     cluster,
-		ctx:         context.TODO(),
+		ctx:         ctx,
 		config:      config,
 		kgm:         kgm,
 	}
@@ -106,13 +107,13 @@ func NewKeyspaceManager(store endpoint.KeyspaceStorage,
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
 	// Split Keyspace Region for default keyspace.
-	if err := manager.splitKeyspaceRegion(DefaultKeyspaceID); err != nil {
+	if err := manager.splitKeyspaceRegion(utils.DefaultKeyspaceID); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
 	defaultKeyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:             DefaultKeyspaceID,
-		Name:           DefaultKeyspaceName,
+		Id:             utils.DefaultKeyspaceID,
+		Name:           utils.DefaultKeyspaceName,
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
 		StateChangedAt: now,
@@ -425,7 +426,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
-	if name == DefaultKeyspaceName {
+	if name == utils.DefaultKeyspaceName {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Error(errModifyDefault),
 		)
@@ -477,7 +478,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
-	if id == DefaultKeyspaceID {
+	if id == utils.DefaultKeyspaceID {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Error(errModifyDefault),
 		)
@@ -540,7 +541,18 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 	if startID > spaceIDMax {
 		return nil, errors.Errorf("startID of the scan %d exceeds spaceID Max %d", startID, spaceIDMax)
 	}
-	return manager.store.LoadRangeKeyspace(startID, limit)
+	var (
+		keyspaces []*keyspacepb.KeyspaceMeta
+		err       error
+	)
+	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		keyspaces, err = manager.store.LoadRangeKeyspace(txn, startID, limit)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return keyspaces, nil
 }
 
 // allocID allocate a new keyspace id.
@@ -554,4 +566,68 @@ func (manager *Manager) allocID() (uint32, error) {
 		return 0, err
 	}
 	return id32, nil
+}
+
+// PatrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
+func (manager *Manager) PatrolKeyspaceAssignment() error {
+	// TODO: since the number of keyspaces might be large, we should consider to assign them in batches.
+	return manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		defaultKeyspaceGroup, err := manager.kgm.store.LoadKeyspaceGroup(txn, utils.DefaultKeyspaceGroupID)
+		if err != nil {
+			return err
+		}
+		if defaultKeyspaceGroup == nil {
+			return errors.Errorf("default keyspace group %d not found", utils.DefaultKeyspaceGroupID)
+		}
+		if defaultKeyspaceGroup.IsSplitting() {
+			return ErrKeyspaceGroupInSplit
+		}
+		keyspaces, err := manager.store.LoadRangeKeyspace(txn, utils.DefaultKeyspaceID, 0)
+		if err != nil {
+			return err
+		}
+		var (
+			assigned            = false
+			keyspaceIDsToUnlock = make([]uint32, 0, len(keyspaces))
+		)
+		defer func() {
+			for _, id := range keyspaceIDsToUnlock {
+				manager.metaLock.Unlock(id)
+			}
+		}()
+		for _, ks := range keyspaces {
+			if ks == nil {
+				continue
+			}
+			manager.metaLock.Lock(ks.Id)
+			if ks.Config == nil {
+				ks.Config = make(map[string]string, 1)
+			} else {
+				// If the keyspace already has a group ID, skip it.
+				_, ok := ks.Config[TSOKeyspaceGroupIDKey]
+				if ok {
+					manager.metaLock.Unlock(ks.Id)
+					continue
+				}
+			}
+			// Unlock the keyspace meta lock after the whole txn.
+			keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, ks.Id)
+			// If the keyspace doesn't have a group ID, assign it to the default keyspace group.
+			if !slice.Contains(defaultKeyspaceGroup.Keyspaces, ks.Id) {
+				defaultKeyspaceGroup.Keyspaces = append(defaultKeyspaceGroup.Keyspaces, ks.Id)
+				assigned = true
+			}
+			ks.Config[TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(utils.DefaultKeyspaceGroupID), 10)
+			err = manager.store.SaveKeyspaceMeta(txn, ks)
+			if err != nil {
+				log.Error("[keyspace] failed to save keyspace meta during patrol",
+					zap.Uint32("ID", ks.Id), zap.Error(err))
+				return err
+			}
+		}
+		if assigned {
+			return manager.kgm.store.SaveKeyspaceGroup(txn, defaultKeyspaceGroup)
+		}
+		return nil
+	})
 }

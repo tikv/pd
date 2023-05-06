@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 )
 
@@ -30,7 +31,7 @@ func TestValidateID(t *testing.T) {
 		id     uint32
 		hasErr bool
 	}{
-		{DefaultKeyspaceID, true}, // Reserved id should result in error.
+		{utils.DefaultKeyspaceID, true}, // Reserved id should result in error.
 		{100, false},
 		{spaceIDMax - 1, false},
 		{spaceIDMax, false},
@@ -48,7 +49,7 @@ func TestValidateName(t *testing.T) {
 		name   string
 		hasErr bool
 	}{
-		{DefaultKeyspaceName, true}, // Reserved name should result in error.
+		{utils.DefaultKeyspaceName, true}, // Reserved name should result in error.
 		{"keyspaceName1", false},
 		{"keyspace_name_1", false},
 		{"10", false},

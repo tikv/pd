@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server"
 )
@@ -61,10 +62,10 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	_, err := suite.client.LoadKeyspace(suite.ctx, "non-existing keyspace")
 	re.Error(err)
 	// Loading default keyspace should be successful.
-	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, keyspace.DefaultKeyspaceName)
+	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, utils.DefaultKeyspaceName)
 	re.NoError(err)
-	re.Equal(keyspace.DefaultKeyspaceID, keyspaceDefault.GetId())
-	re.Equal(keyspace.DefaultKeyspaceName, keyspaceDefault.GetName())
+	re.Equal(utils.DefaultKeyspaceID, keyspaceDefault.GetId())
+	re.Equal(utils.DefaultKeyspaceName, keyspaceDefault.GetName())
 }
 
 func (suite *clientTestSuite) TestWatchKeyspaces() {
@@ -105,7 +106,7 @@ func (suite *clientTestSuite) TestWatchKeyspaces() {
 	loaded = <-watchChan
 	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
 	// Updates to default keyspace's config should also be captured.
-	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(keyspace.DefaultKeyspaceName, []*keyspace.Mutation{
+	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(utils.DefaultKeyspaceName, []*keyspace.Mutation{
 		{
 			Op:    keyspace.OpPut,
 			Key:   "config",
