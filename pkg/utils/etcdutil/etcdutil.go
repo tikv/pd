@@ -359,7 +359,7 @@ const (
 	defaultLoadFromEtcdRetryInterval = 200 * time.Millisecond
 	defaultLoadFromEtcdRetryTimes    = int(defaultLoadDataFromEtcdTimeout / defaultLoadFromEtcdRetryInterval)
 	defaultLoadBatchSize             = 400
-	watchEtcdChangeRetryInterval     = 1 * time.Second
+	defaultWatchChangeRetryInterval  = 1 * time.Second
 )
 
 // LoopWatcher loads data from etcd and sets a watcher for it.
@@ -392,26 +392,29 @@ type LoopWatcher struct {
 	loadRetryTimes int
 	// loadBatchSize is used to set the batch size for loading data from etcd.
 	loadBatchSize int64
+	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
+	watchChangeRetryInterval time.Duration
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
 func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string,
 	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error, opts ...clientv3.OpOption) *LoopWatcher {
 	return &LoopWatcher{
-		ctx:            ctx,
-		client:         client,
-		name:           name,
-		key:            key,
-		wg:             wg,
-		forceLoadCh:    make(chan struct{}, 1),
-		isLoadedCh:     make(chan error, 1),
-		putFn:          putFn,
-		deleteFn:       deleteFn,
-		postEventFn:    postEventFn,
-		opts:           opts,
-		loadTimeout:    defaultLoadDataFromEtcdTimeout,
-		loadRetryTimes: defaultLoadFromEtcdRetryTimes,
-		loadBatchSize:  defaultLoadBatchSize,
+		ctx:                      ctx,
+		client:                   client,
+		name:                     name,
+		key:                      key,
+		wg:                       wg,
+		forceLoadCh:              make(chan struct{}, 1),
+		isLoadedCh:               make(chan error, 1),
+		putFn:                    putFn,
+		deleteFn:                 deleteFn,
+		postEventFn:              postEventFn,
+		opts:                     opts,
+		loadTimeout:              defaultLoadDataFromEtcdTimeout,
+		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
+		loadBatchSize:            defaultLoadBatchSize,
+		watchChangeRetryInterval: defaultWatchChangeRetryInterval,
 	}
 }
 
@@ -438,10 +441,10 @@ func (lw *LoopWatcher) StartWatchLoop() {
 				zap.String("name", lw.name),
 				zap.String("key", lw.key),
 				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(watchEtcdChangeRetryInterval)),
+				zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
 				zap.Error(err))
 			watchStartRevision = nextRevision
-			time.Sleep(watchEtcdChangeRetryInterval)
+			time.Sleep(lw.watchChangeRetryInterval)
 		}
 	}
 }

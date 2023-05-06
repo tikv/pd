@@ -21,18 +21,27 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/etcdserver/etcdserverpb"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/types"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestMemberHelpers(t *testing.T) {
 	re := require.New(t)
@@ -407,4 +416,238 @@ func ioCopy(dst io.Writer, src io.Reader, enableDiscard *atomic.Bool) (err error
 		}
 	}
 	return err
+}
+
+type loopWatcherTestSuite struct {
+	suite.Suite
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	cleans []func()
+	etcd   *embed.Etcd
+	client *clientv3.Client
+	config *embed.Config
+}
+
+func TestLoopWatcherTestSuite(t *testing.T) {
+	suite.Run(t, new(loopWatcherTestSuite))
+}
+
+func (suite *loopWatcherTestSuite) SetupSuite() {
+	t := suite.T()
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cleans = make([]func(), 0)
+	// Start a etcd server and create a client with etcd1 as endpoint.
+	suite.config = NewTestSingleConfig(t)
+	suite.startEtcd()
+	ep1 := suite.config.LCUrls[0].String()
+	urls, err := types.NewURLs([]string{ep1})
+	suite.NoError(err)
+	suite.client, err = createEtcdClient(nil, urls[0])
+	suite.NoError(err)
+	suite.cleans = append(suite.cleans, func() {
+		suite.client.Close()
+	})
+}
+
+func (suite *loopWatcherTestSuite) TearDownSuite() {
+	suite.cancel()
+	suite.wg.Wait()
+	for _, clean := range suite.cleans {
+		clean()
+	}
+}
+
+func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestLoadWithoutKey",
+		func(kv *mvccpb.KeyValue) error { return nil },
+		func(kv *mvccpb.KeyValue) error { return nil },
+		func() error { return nil },
+	)
+
+	suite.wg.Add(1)
+	go watcher.StartWatchLoop()
+	err := watcher.WaitLoad()
+	suite.NoError(err) // although no key, watcher returns no error
+}
+
+func (suite *loopWatcherTestSuite) TestCallBack() {
+	cache := make(map[string]struct{})
+	result := make([]string, 0)
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestCallBack",
+		func(kv *mvccpb.KeyValue) error {
+			result = append(result, string(kv.Key))
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			delete(cache, string(kv.Key))
+			return nil
+		},
+		func() error {
+			for _, r := range result {
+				cache[r] = struct{}{}
+			}
+			result = result[:0]
+			return nil
+		},
+		clientv3.WithPrefix(),
+	)
+
+	suite.wg.Add(1)
+	go watcher.StartWatchLoop()
+	err := watcher.WaitLoad()
+	suite.NoError(err)
+
+	// put 10 keys
+	for i := 0; i < 10; i++ {
+		suite.put(fmt.Sprintf("TestCallBack%d", i), "")
+	}
+	time.Sleep(time.Second)
+	suite.Len(cache, 10)
+
+	// delete 10 keys
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("TestCallBack%d", i)
+		_, err = suite.client.Delete(suite.ctx, key)
+		suite.NoError(err)
+	}
+	time.Sleep(time.Second)
+	suite.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
+	for count := 1; count < 10; count++ {
+		for limit := 0; limit < 10; limit++ {
+			ctx, cancel := context.WithCancel(suite.ctx)
+			for i := 0; i < count; i++ {
+				suite.put(fmt.Sprintf("TestWatcherLoadLimit%d", i), "")
+			}
+			cache := []string{}
+			watcher := NewLoopWatcher(
+				ctx,
+				&suite.wg,
+				suite.client,
+				"test",
+				"TestWatcherLoadLimit",
+				func(kv *mvccpb.KeyValue) error {
+					cache = append(cache, string(kv.Key))
+					return nil
+				},
+				func(kv *mvccpb.KeyValue) error {
+					return nil
+				},
+				func() error {
+					return nil
+				},
+				clientv3.WithPrefix(),
+			)
+			suite.wg.Add(1)
+			go watcher.StartWatchLoop()
+			err := watcher.WaitLoad()
+			suite.NoError(err)
+			suite.Len(cache, count)
+			cancel()
+		}
+	}
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherBreak() {
+	cache := make(map[string]string)
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestWatcherBreak",
+		func(kv *mvccpb.KeyValue) error { cache[string(kv.Key)] = string(kv.Value); return nil },
+		func(kv *mvccpb.KeyValue) error { delete(cache, string(kv.Key)); return nil },
+		func() error { return nil },
+	)
+	watcher.watchChangeRetryInterval = 100 * time.Millisecond
+
+	suite.wg.Add(1)
+	go watcher.StartWatchLoop()
+	err := watcher.WaitLoad()
+	suite.NoError(err)
+
+	// Case1: restart the etcd server
+	suite.Empty(cache)
+	suite.etcd.Close()
+	suite.startEtcd()
+	suite.put("TestWatcherBreak", "1")
+	time.Sleep(watcher.watchChangeRetryInterval)
+	suite.Len(cache, 1)
+	suite.Equal("1", cache["TestWatcherBreak"])
+
+	// Case2: close the etcd client and put a new value after watcher restarts
+	suite.client.Close()
+	suite.client, err = createEtcdClient(nil, suite.config.LCUrls[0])
+	suite.NoError(err)
+	watcher.client = suite.client
+	suite.put("TestWatcherBreak", "2")
+	testutil.Eventually(suite.Require(), func() bool {
+		return cache["TestWatcherBreak"] == "2"
+	}, testutil.WithWaitFor(time.Second))
+
+	// Case3: close the etcd client and put a new value before watcher restarts
+	suite.client.Close()
+	suite.client, err = createEtcdClient(nil, suite.config.LCUrls[0])
+	suite.NoError(err)
+	suite.put("TestWatcherBreak", "3")
+	watcher.client = suite.client
+	testutil.Eventually(suite.Require(), func() bool {
+		return cache["TestWatcherBreak"] == "3"
+	}, testutil.WithWaitFor(time.Second))
+
+	// Case4: close the etcd client and put a new value with compact
+	suite.client.Close()
+	suite.client, err = createEtcdClient(nil, suite.config.LCUrls[0])
+	suite.NoError(err)
+	suite.put("TestWatcherBreak", "4")
+	resp, err := EtcdKVGet(suite.client, "TestWatcherBreak")
+	suite.NoError(err)
+	revision := resp.Header.Revision
+	resp2, err := suite.etcd.Server.Compact(suite.ctx, &etcdserverpb.CompactionRequest{Revision: revision})
+	suite.NoError(err)
+	suite.Equal(revision, resp2.Header.Revision)
+	watcher.client = suite.client
+	testutil.Eventually(suite.Require(), func() bool {
+		return cache["TestWatcherBreak"] == "4"
+	}, testutil.WithWaitFor(time.Second))
+
+	// Case5: there is an error data in cache
+	cache["TestWatcherBreak"] = "error"
+	watcher.ForceLoad()
+	testutil.Eventually(suite.Require(), func() bool {
+		return cache["TestWatcherBreak"] == "4"
+	}, testutil.WithWaitFor(time.Second))
+}
+
+func (suite *loopWatcherTestSuite) startEtcd() {
+	etcd1, err := embed.StartEtcd(suite.config)
+	suite.NoError(err)
+	suite.etcd = etcd1
+	<-etcd1.Server.ReadyNotify()
+	suite.cleans = append(suite.cleans, func() {
+		suite.etcd.Close()
+	})
+}
+
+func (suite *loopWatcherTestSuite) put(key, value string) {
+	kv := clientv3.NewKV(suite.client)
+	_, err := kv.Put(suite.ctx, key, value)
+	suite.NoError(err)
+	resp, err := kv.Get(suite.ctx, key)
+	suite.NoError(err)
+	suite.Equal(value, string(resp.Kvs[0].Value))
 }
