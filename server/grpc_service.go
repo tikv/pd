@@ -49,8 +49,9 @@ import (
 )
 
 const (
-	heartbeatSendTimeout                   = 5 * time.Second
-	maxRetryTimesGetGlobalTSOFromTSOServer = 3
+	heartbeatSendTimeout          = 5 * time.Second
+	maxRetryTimesRequestTSOServer = 3
+	retryIntervalRequestTSOServer = 500 * time.Millisecond
 )
 
 // gRPC errors
@@ -1774,10 +1775,6 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 }
 
 func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
-	forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
-	if !ok || forwardedHost == "" {
-		return pdpb.Timestamp{}, ErrNotFoundTSOAddr
-	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
@@ -1787,11 +1784,16 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		Count: 1,
 	}
 	var (
+		forwardedHost string
 		forwardStream tsopb.TSO_TsoClient
 		ts            *tsopb.TsoResponse
 		err           error
 	)
-	for i := 0; i < maxRetryTimesGetGlobalTSOFromTSOServer; i++ {
+	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
+		forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
+		if !ok || forwardedHost == "" {
+			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
+		}
 		forwardStream, err = s.getTSOForwardStream(forwardedHost)
 		if err != nil {
 			return pdpb.Timestamp{}, err
@@ -1799,6 +1801,15 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		forwardStream.Send(request)
 		ts, err = forwardStream.Recv()
 		if err != nil {
+			if strings.Contains(err.Error(), errs.NotLeaderErr) {
+				select {
+				case s.updateServicePrimaryAddrCh <- struct{}{}:
+					log.Info("update service primary address when meet not leader error")
+				default:
+				}
+				time.Sleep(retryIntervalRequestTSOServer)
+				continue
+			}
 			if strings.Contains(err.Error(), codes.Unavailable.String()) {
 				s.tsoClientPool.Lock()
 				delete(s.tsoClientPool.clients, forwardedHost)

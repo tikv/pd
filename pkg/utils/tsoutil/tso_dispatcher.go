@@ -138,7 +138,7 @@ func (s *TSODispatcher) dispatch(
 					zap.String("forwarded-host", forwardedHost),
 					errs.ZapError(errs.ErrGRPCSend, err))
 				if needUpdateServicePrimaryAddr {
-					if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
+					if strings.Contains(err.Error(), errs.NotLeaderErr) {
 						select {
 						case updateServicePrimaryAddrChs[0] <- struct{}{}:
 						default:

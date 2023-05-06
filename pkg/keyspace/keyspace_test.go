@@ -164,7 +164,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 		re.Error(err)
 	}
 	// Changing config of DEFAULT keyspace is allowed.
-	updated, err := manager.UpdateKeyspaceConfig(DefaultKeyspaceName, mutations)
+	updated, err := manager.UpdateKeyspaceConfig(utils.DefaultKeyspaceName, mutations)
 	re.NoError(err)
 	// remove auto filled fields
 	delete(updated.Config, TSOKeyspaceGroupIDKey)
@@ -204,7 +204,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
 		// Changing state of DEFAULT keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+		_, err = manager.UpdateKeyspaceState(utils.DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.Error(err)
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/testutil"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -327,8 +328,9 @@ func TestMixedTSODeployment(t *testing.T) {
 	err = apiSvr.Run()
 	re.NoError(err)
 
-	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+	s, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
+	mcs.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s})
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
