@@ -394,6 +394,9 @@ type LoopWatcher struct {
 	loadBatchSize int64
 	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
 	watchChangeRetryInterval time.Duration
+	// updateClientCh is used to update the etcd client.
+	// It's only used for testing.
+	updateClientCh chan *clientv3.Client
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
@@ -407,6 +410,7 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 		wg:                       wg,
 		forceLoadCh:              make(chan struct{}, 1),
 		isLoadedCh:               make(chan error, 1),
+		updateClientCh:           make(chan *clientv3.Client, 1),
 		putFn:                    putFn,
 		deleteFn:                 deleteFn,
 		postEventFn:              postEventFn,
@@ -445,6 +449,9 @@ func (lw *LoopWatcher) StartWatchLoop() {
 				zap.Error(err))
 			watchStartRevision = nextRevision
 			time.Sleep(lw.watchChangeRetryInterval)
+			failpoint.Inject("updateClient", func() {
+				lw.client = <-lw.updateClientCh
+			})
 		}
 	}
 }

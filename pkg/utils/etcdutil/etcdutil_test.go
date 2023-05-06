@@ -318,6 +318,9 @@ func TestEtcdScaleInAndOutWithoutMultiPoint(t *testing.T) {
 
 	// Add a new member and check members
 	etcd2 := checkAddEtcdMember(t, cfg1, client1)
+	defer func() {
+		etcd2.Close()
+	}()
 	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
 
 	// scale in etcd1
@@ -671,6 +674,9 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	suite.NoError(err)
 	checkCache("")
 
+	// we use close client and update client in failpoint to simulate the network error and recover
+	failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient", "return(true)")
+
 	// Case1: restart the etcd server
 	suite.etcd.Close()
 	suite.startEtcd()
@@ -681,7 +687,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	suite.client.Close()
 	suite.client, err = createEtcdClient(nil, suite.config.LCUrls[0])
 	suite.NoError(err)
-	watcher.client = suite.client
+	watcher.updateClientCh <- suite.client
 	suite.put("TestWatcherBreak", "2")
 	checkCache("2")
 
@@ -690,7 +696,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	suite.client, err = createEtcdClient(nil, suite.config.LCUrls[0])
 	suite.NoError(err)
 	suite.put("TestWatcherBreak", "3")
-	watcher.client = suite.client
+	watcher.updateClientCh <- suite.client
 	checkCache("3")
 
 	// Case4: close the etcd client and put a new value with compact
@@ -704,7 +710,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	resp2, err := suite.etcd.Server.Compact(suite.ctx, &etcdserverpb.CompactionRequest{Revision: revision})
 	suite.NoError(err)
 	suite.Equal(revision, resp2.Header.Revision)
-	watcher.client = suite.client
+	watcher.updateClientCh <- suite.client
 	checkCache("4")
 
 	// Case5: there is an error data in cache
@@ -713,6 +719,8 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	cache.Unlock()
 	watcher.ForceLoad()
 	checkCache("4")
+
+	failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient")
 }
 
 func (suite *loopWatcherTestSuite) startEtcd() {
