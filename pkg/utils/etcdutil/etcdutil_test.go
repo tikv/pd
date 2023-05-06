@@ -56,6 +56,9 @@ func TestMemberHelpers(t *testing.T) {
 	client1, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep1},
 	})
+	defer func() {
+		client1.Close()
+	}()
 	re.NoError(err)
 
 	<-etcd1.Server.ReadyNotify()
@@ -75,6 +78,9 @@ func TestMemberHelpers(t *testing.T) {
 	client2, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep2},
 	})
+	defer func() {
+		client2.Close()
+	}()
 	re.NoError(err)
 	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
 
@@ -107,6 +113,9 @@ func TestEtcdKVGet(t *testing.T) {
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})
+	defer func() {
+		client.Close()
+	}()
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()
@@ -157,6 +166,9 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})
+	defer func() {
+		client.Close()
+	}()
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()
@@ -197,6 +209,9 @@ func TestInitClusterID(t *testing.T) {
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})
+	defer func() {
+		client.Close()
+	}()
 	re.NoError(err)
 
 	<-etcd.Server.ReadyNotify()
@@ -223,6 +238,9 @@ func TestEtcdClientSync(t *testing.T) {
 	// Start a etcd server.
 	cfg1 := NewTestSingleConfig(t)
 	etcd1, err := embed.StartEtcd(cfg1)
+	defer func() {
+		etcd1.Close()
+	}()
 	re.NoError(err)
 
 	// Create a etcd client with etcd1 as endpoint.
@@ -230,6 +248,9 @@ func TestEtcdClientSync(t *testing.T) {
 	urls, err := types.NewURLs([]string{ep1})
 	re.NoError(err)
 	client1, err := createEtcdClientWithMultiEndpoint(nil, urls)
+	defer func() {
+		client1.Close()
+	}()
 	re.NoError(err)
 	<-etcd1.Server.ReadyNotify()
 
@@ -274,6 +295,9 @@ func TestEtcdScaleInAndOutWithoutMultiPoint(t *testing.T) {
 	// Start a etcd server.
 	cfg1 := NewTestSingleConfig(t)
 	etcd1, err := embed.StartEtcd(cfg1)
+	defer func() {
+		etcd1.Close()
+	}()
 	re.NoError(err)
 	ep1 := cfg1.LCUrls[0].String()
 	<-etcd1.Server.ReadyNotify()
@@ -282,8 +306,14 @@ func TestEtcdScaleInAndOutWithoutMultiPoint(t *testing.T) {
 	urls, err := types.NewURLs([]string{ep1})
 	re.NoError(err)
 	client1, err := createEtcdClient(nil, urls[0]) // execute member change operation with this client
+	defer func() {
+		client1.Close()
+	}()
 	re.NoError(err)
 	client2, err := createEtcdClient(nil, urls[0]) // check member change with this client
+	defer func() {
+		client2.Close()
+	}()
 	re.NoError(err)
 
 	// Add a new member and check members
@@ -301,6 +331,9 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	// Start a etcd server.
 	cfg1 := NewTestSingleConfig(t)
 	etcd1, err := embed.StartEtcd(cfg1)
+	defer func() {
+		etcd1.Close()
+	}()
 	re.NoError(err)
 	ep1 := cfg1.LCUrls[0].String()
 	<-etcd1.Server.ReadyNotify()
@@ -314,6 +347,9 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	urls, err := types.NewURLs([]string{proxyAddr})
 	re.NoError(err)
 	client1, err := createEtcdClientWithMultiEndpoint(nil, urls)
+	defer func() {
+		client1.Close()
+	}()
 	re.NoError(err)
 
 	// Add a new member and set the client endpoints to etcd1 and etcd2.
