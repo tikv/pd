@@ -96,8 +96,8 @@ func NewKeyspaceGroupManager(
 	// If the etcd client is not nil, start the watch loop for the registered tso servers.
 	// The PD(TSO) Client relies on this info to discover tso servers.
 	if client != nil {
-		m.wg.Add(2)
 		m.initTSONodesWatcher(client, clusterID)
+		m.wg.Add(2)
 		go m.tsoNodesWatcher.StartWatchLoop()
 		go m.allocNodesToAllKeyspaceGroups()
 	}
