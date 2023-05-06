@@ -105,7 +105,7 @@ func (m *Manager) updateInfo() {
 	m.isLeader = true
 
 	var err error
-	if m.members, err = cluster.GetMembers(m.srv.GetClient()); err != nil {
+	if m.members, err = cluster.GetMembers(m.srv.GetClient().Ctx(), m.srv.GetClient()); err != nil {
 		log.Warn("failed to get members", errs.ZapError(err))
 		m.members = nil
 		return

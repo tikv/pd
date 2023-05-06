@@ -50,7 +50,7 @@ func newHealthHandler(svr *server.Server, rd *render.Render) *healthHandler {
 // @Router   /health [get]
 func (h *healthHandler) GetHealthStatus(w http.ResponseWriter, r *http.Request) {
 	client := h.svr.GetClient()
-	members, err := cluster.GetMembers(client)
+	members, err := cluster.GetMembers(r.Context(), client)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

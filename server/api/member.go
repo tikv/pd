@@ -128,7 +128,7 @@ func (h *memberHandler) DeleteMemberByName(w http.ResponseWriter, r *http.Reques
 	// Get etcd ID by name.
 	var id uint64
 	name := mux.Vars(r)["name"]
-	listResp, err := etcdutil.ListEtcdMembers(client)
+	listResp, err := etcdutil.ListEtcdMembers(r.Context(), client)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -287,7 +287,7 @@ func (h *leaderHandler) GetLeader(w http.ResponseWriter, r *http.Request) {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /leader/resign [post]
 func (h *leaderHandler) ResignLeader(w http.ResponseWriter, r *http.Request) {
-	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), "")
+	err := h.svr.GetMember().ResignEtcdLeader(r.Context(), h.svr.Name(), "")
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -304,7 +304,7 @@ func (h *leaderHandler) ResignLeader(w http.ResponseWriter, r *http.Request) {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /leader/transfer/{nextLeader} [post]
 func (h *leaderHandler) TransferLeader(w http.ResponseWriter, r *http.Request) {
-	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), mux.Vars(r)["next_leader"])
+	err := h.svr.GetMember().ResignEtcdLeader(r.Context(), h.svr.Name(), mux.Vars(r)["next_leader"])
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

@@ -64,7 +64,7 @@ func TestMemberHelpers(t *testing.T) {
 	<-etcd1.Server.ReadyNotify()
 
 	// Test ListEtcdMembers
-	listResp1, err := ListEtcdMembers(client1)
+	listResp1, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp1.Members, 1)
 	// types.ID is an alias of uint64.
@@ -94,7 +94,7 @@ func TestMemberHelpers(t *testing.T) {
 	_, err = RemoveEtcdMember(client1, uint64(etcd2.Server.ID()))
 	re.NoError(err)
 
-	listResp3, err := ListEtcdMembers(client1)
+	listResp3, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp3.Members, 1)
 	re.Equal(uint64(etcd1.Server.ID()), listResp3.Members[0].ID)
@@ -266,7 +266,7 @@ func TestEtcdClientSync(t *testing.T) {
 	etcd1.Close()
 
 	// Check the client can get the new member with the new endpoints.
-	listResp3, err := ListEtcdMembers(client1)
+	listResp3, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp3.Members, 1)
 	re.Equal(uint64(etcd2.Server.ID()), listResp3.Members[0].ID)
@@ -386,7 +386,7 @@ func checkAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Clien
 
 func checkMembers(re *require.Assertions, client *clientv3.Client, etcds []*embed.Etcd) {
 	// Check the client can get the new member.
-	listResp, err := ListEtcdMembers(client)
+	listResp, err := ListEtcdMembers(client.Ctx(), client)
 	re.NoError(err)
 	re.Len(listResp.Members, len(etcds))
 	inList := func(m *etcdserverpb.Member) bool {

@@ -104,8 +104,8 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 }
 
 // ListEtcdMembers returns a list of internal etcd members.
-func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
+func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	listResp, err := client.MemberList(ctx)
 	cancel()
 	if err != nil {
