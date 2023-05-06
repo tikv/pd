@@ -74,7 +74,7 @@ type Manager struct {
 	config Config
 	// kgm is the keyspace group manager of the server.
 	kgm *GroupManager
-	// nextPatrolStartID is the last start id of keyspace assignment patrol.
+	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
 }
 
@@ -624,13 +624,10 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 				manager.metaLock.Lock(ks.Id)
 				if ks.Config == nil {
 					ks.Config = make(map[string]string, 1)
-				} else {
+				} else if _, ok := ks.Config[TSOKeyspaceGroupIDKey]; ok {
 					// If the keyspace already has a group ID, skip it.
-					_, ok := ks.Config[TSOKeyspaceGroupIDKey]
-					if ok {
-						manager.metaLock.Unlock(ks.Id)
-						continue
-					}
+					manager.metaLock.Unlock(ks.Id)
+					continue
 				}
 				// Unlock the keyspace meta lock after the whole txn.
 				keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, ks.Id)
