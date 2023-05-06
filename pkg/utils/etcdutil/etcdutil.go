@@ -364,20 +364,34 @@ const (
 
 // LoopWatcher loads data from etcd and sets a watcher for it.
 type LoopWatcher struct {
-	ctx            context.Context
-	wg             *sync.WaitGroup
-	client         *clientv3.Client
-	key            string
-	name           string
-	forceLoadCh    chan struct{}
-	isLoadedCh     chan error
-	putFn          func(*mvccpb.KeyValue) error
-	deleteFn       func(*mvccpb.KeyValue) error
-	postEventFn    func() error
-	opts           []clientv3.OpOption
-	loadTimeout    time.Duration
+	ctx    context.Context
+	wg     *sync.WaitGroup
+	name   string
+	client *clientv3.Client
+
+	// key is the etcd key to watch.
+	key string
+	// opts is used to set etcd options.
+	opts []clientv3.OpOption
+
+	// forceLoadCh is used to force loading data from etcd.
+	forceLoadCh chan struct{}
+	// isLoadedCh is used to notify that the data has been loaded from etcd first time.
+	isLoadedCh chan error
+
+	// putFn is used to handle the put event.
+	putFn func(*mvccpb.KeyValue) error
+	// deleteFn is used to handle the delete event.
+	deleteFn func(*mvccpb.KeyValue) error
+	// postEventFn is used to call after handling all events.
+	postEventFn func() error
+
+	// loadTimeout is used to set the timeout for loading data from etcd.
+	loadTimeout time.Duration
+	// loadRetryTimes is used to set the retry times for loading data from etcd.
 	loadRetryTimes int
-	loadBatchSize  int64
+	// loadBatchSize is used to set the batch size for loading data from etcd.
+	loadBatchSize int64
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
