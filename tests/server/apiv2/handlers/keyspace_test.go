@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -54,11 +55,13 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	suite.NotEmpty(cluster.WaitLeader())
 	suite.server = cluster.GetServer(cluster.GetLeader())
 	suite.NoError(suite.server.BootstrapCluster())
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
 	suite.cleanup()
 	suite.cluster.Destroy()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {

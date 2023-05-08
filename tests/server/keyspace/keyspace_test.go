@@ -83,6 +83,7 @@ func (suite *keyspaceTestSuite) TestRegionLabeler() {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name:       fmt.Sprintf("test_keyspace_%d", i),
 			CreateTime: now,
+			IsPreAlloc: true, // skip wait region split
 		})
 		re.NoError(err)
 	}

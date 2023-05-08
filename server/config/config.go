@@ -1421,7 +1421,7 @@ func (c *KeyspaceConfig) Validate() error {
 			minCheckRegionSplitInterval, maxCheckRegionSplitInterval))
 	}
 	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
-		return errors.New(fmt.Sprintf("[keyspace] check-region-split-interval should be less than wait-region-split-timeout"))
+		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
 	}
 	return nil
 }
