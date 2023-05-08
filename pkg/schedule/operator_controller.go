@@ -836,6 +836,11 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 		if ops[0].GetPriorityLevel() == constant.Urgent {
 			return false
 		}
+		// skip scatter-region operator, no limit.
+		if ops[0].Desc() == "scatter-region" {
+			operator.OperatorLimitCounter.WithLabelValues(desc, "skip").Inc()
+			return false
+		}
 	}
 	opInfluence := NewTotalOpInfluence(ops, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {

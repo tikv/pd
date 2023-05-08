@@ -163,6 +163,10 @@ func newEngineContext(ctx context.Context, filterFuncs ...filterFunc) engineCont
 	filterFuncs = append(filterFuncs, func() filter.Filter {
 		return &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true}
 	})
+	filterFuncs = append(filterFuncs, func() filter.Filter {
+		// Add StorageThresholdFilter to avoid selecting the store that is almost full.
+		return filter.NewStorageThresholdFilter(regionScatterName)
+	})
 	return engineContext{
 		filterFuncs:    filterFuncs,
 		selectedPeer:   newSelectedStores(ctx),
