@@ -273,6 +273,11 @@ func (s *Server) IsClosed() bool {
 	return atomic.LoadInt64(&s.isRunning) == 0
 }
 
+// GetKeyspaceGroupManager returns the manager of keyspace group.
+func (s *Server) GetKeyspaceGroupManager() *tso.KeyspaceGroupManager {
+	return s.keyspaceGroupManager
+}
+
 // GetTSOAllocatorManager returns the manager of TSO Allocator.
 func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorManager, error) {
 	return s.keyspaceGroupManager.GetAllocatorManager(keyspaceGroupID)

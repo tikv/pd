@@ -646,6 +646,20 @@ func (kgm *KeyspaceGroupManager) GetElectionMember(
 	return am.GetMember(), nil
 }
 
+// GetKeyspaceGroups returns all keyspace groups managed by the current keyspace group manager.
+func (kgm *KeyspaceGroupManager) GetKeyspaceGroups() map[uint32]*endpoint.KeyspaceGroup {
+	kgm.RLock()
+	defer kgm.RUnlock()
+	keyspaceGroups := make(map[uint32]*endpoint.KeyspaceGroup)
+	for _, keyspaceGroupID := range kgm.keyspaceLookupTable {
+		if _, ok := keyspaceGroups[keyspaceGroupID]; ok {
+			continue
+		}
+		keyspaceGroups[keyspaceGroupID] = kgm.kgs[keyspaceGroupID]
+	}
+	return keyspaceGroups
+}
+
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
 func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	keyspaceID, keyspaceGroupID uint32,
