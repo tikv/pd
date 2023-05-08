@@ -15,10 +15,10 @@
 package api
 
 import (
-	"github.com/gorilla/mux"
 	"net/http"
 	"strconv"
 
+	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
