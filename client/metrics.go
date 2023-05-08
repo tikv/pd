@@ -119,6 +119,9 @@ var (
 	requestDurationTSO                        = requestDuration.WithLabelValues("tso")
 	cmdFailedDurationGet                      = cmdFailedDuration.WithLabelValues("get")
 	cmdFailedDurationPut                      = cmdFailedDuration.WithLabelValues("put")
+
+	cmdFailedDurationUpdateGCSafePointV2      = cmdFailedDuration.WithLabelValues("update_gc_safe_point_v2")
+	cmdFailedDurationUpdateServiceSafePointV2 = cmdFailedDuration.WithLabelValues("update_service_safe_point_v2")
 )
 
 func init() {
