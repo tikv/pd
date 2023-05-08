@@ -16,6 +16,14 @@ package pd
 
 import "github.com/prometheus/client_golang/prometheus"
 
+func initAndRegisterMetrics(constLabels prometheus.Labels) {
+	// init metrics with constLabels
+	initMetrics(constLabels)
+	initCmdDurations()
+	// register metrics
+	registerMetrics()
+}
+
 var (
 	cmdDuration         *prometheus.HistogramVec
 	cmdFailedDuration   *prometheus.HistogramVec
@@ -25,15 +33,6 @@ var (
 	tsoBatchSendLatency prometheus.Histogram
 	requestForwarded    *prometheus.GaugeVec
 )
-
-func init() {
-	initMetrics(nil)
-}
-
-// InitMetricsWithConstLabels initializes metrics for PD client with labels.
-func InitMetricsWithConstLabels(constLabels prometheus.Labels) {
-	initMetrics(constLabels)
-}
 
 func initMetrics(constLabels prometheus.Labels) {
 	cmdDuration = prometheus.NewHistogramVec(
@@ -104,8 +103,6 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "The status to indicate if the request is forwarded",
 			ConstLabels: constLabels,
 		}, []string{"host", "delegate"})
-
-	initCmdDurations()
 }
 
 var (
@@ -189,8 +186,7 @@ func initCmdDurations() {
 	cmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")
 }
 
-// RegisterMetrics registers all metrics for PD client.
-func RegisterMetrics() {
+func registerMetrics() {
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
 	prometheus.MustRegister(requestDuration)
