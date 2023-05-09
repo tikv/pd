@@ -199,6 +199,14 @@ func (s *Service) FindGroupByKeyspaceID(
 	}, nil
 }
 
+// GetMinTS gets the minimum timestamp across all keyspace groups served by the TSO server
+// who receives and handles the request.
+func (s *Service) GetMinTS(
+	ctx context.Context, request *tsopb.GetMinTSRequest,
+) (*tsopb.GetMinTSResponse, error) {
+	return nil, nil
+}
+
 func (s *Service) header(keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
 	if s.clusterID == 0 {
 		return s.wrapErrorToHeader(
