@@ -125,7 +125,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}
 }
 
-func (suite *tsoServerTestSuite) TestPariticipantStartWithAdvertiseListenAddr() {
+func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 	re := suite.Require()
 
 	cfg := tso.NewConfig()
