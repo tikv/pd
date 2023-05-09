@@ -71,6 +71,7 @@ var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
 	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
+	regionSkipSchedulerCounter    = regionEventCounter.WithLabelValues("region_skip_scheduler")
 	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
 	versionNotMatchCounter        = bucketEventCounter.WithLabelValues("version_not_match")
 	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
