@@ -14,14 +14,23 @@
 
 package pd
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"sync/atomic"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+// make sure register metrics only once
+var initialized int32
 
 func initAndRegisterMetrics(constLabels prometheus.Labels) {
-	// init metrics with constLabels
-	initMetrics(constLabels)
-	initCmdDurations()
-	// register metrics
-	registerMetrics()
+	if atomic.CompareAndSwapInt32(&initialized, 0, 1) {
+		// init metrics with constLabels
+		initMetrics(constLabels)
+		initCmdDurations()
+		// register metrics
+		registerMetrics()
+	}
 }
 
 var (
