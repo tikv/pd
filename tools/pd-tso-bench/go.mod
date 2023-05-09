@@ -13,4 +13,4 @@ require (
 
 replace github.com/tikv/pd/client => ../../client
 
-replace github.com/pingcap/kvproto => github.com/binshi-bing/kvproto v0.0.0-20230509011509-858ab29c7c43
+replace github.com/pingcap/kvproto => github.com/binshi-bing/kvproto v0.0.0-20230509080925-7eb4efa86fe2

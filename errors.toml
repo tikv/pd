@@ -746,6 +746,11 @@ error = '''
 get local allocator failed, %s
 '''
 
+["PD:tso:ErrGetMinTS"]
+error = '''
+get min ts failed, %s
+'''
+
 ["PD:tso:ErrKeyspaceGroupIDInvalid"]
 error = '''
 the keyspace group id is invalid, %s
