@@ -21,7 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 )
 
-// NewTSOCommand return a ping subcommand of rootCmd
+// NewTSOCommand return a TSO subcommand of rootCmd
 func NewTSOCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "tso <timestamp>",
