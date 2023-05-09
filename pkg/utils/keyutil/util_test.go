@@ -29,6 +29,50 @@ func TestKeyUtil(t *testing.T) {
 	re.Equal("61-62", key)
 }
 
+func TestCompare(t *testing.T) {
+	re := require.New(t)
+	testdata := []struct {
+		a        []byte
+		b        []byte
+		min      []byte
+		max      []byte
+		boundary boundary
+	}{
+		{
+			[]byte("a"),
+			[]byte("b"),
+			[]byte("a"),
+			[]byte("b"),
+			Left,
+		}, {
+			[]byte("a"),
+			[]byte("b"),
+			[]byte("a"),
+			[]byte("b"),
+			Right,
+		},
+		{
+			[]byte("a"),
+			[]byte(""),
+			[]byte(""),
+			[]byte("a"),
+			Left,
+		},
+		{
+			[]byte("a"),
+			[]byte(""),
+			[]byte("a"),
+			[]byte(""),
+			Right,
+		},
+	}
+
+	for _, data := range testdata {
+		re.Equal(data.min, MinKey(data.a, data.b, data.boundary))
+		re.Equal(data.max, MaxKey(data.a, data.b, data.boundary))
+	}
+}
+
 func TestLess(t *testing.T) {
 	re := require.New(t)
 	TestData := []struct {
@@ -40,48 +84,54 @@ func TestLess(t *testing.T) {
 		{
 			[]byte("a"),
 			[]byte("b"),
-			left,
+			Left,
 			true,
 		},
 		{
 			[]byte("a"),
 			[]byte("b"),
-			right,
+			Right,
 			true,
 		},
 		{
 			[]byte("a"),
 			[]byte(""),
-			left,
+			Left,
 			false,
 		},
 		{
 			[]byte("a"),
 			[]byte(""),
-			right,
+			Right,
 			true,
 		},
 		{
+			[]byte(""),
+			[]byte("a"),
+			Right,
+			false,
+		},
+		{
 			[]byte("a"),
 			[]byte("a"),
-			right,
+			Right,
 			false,
 		},
 		{
 			[]byte(""),
 			[]byte(""),
-			right,
+			Right,
 			false,
 		},
 		{
 			[]byte(""),
 			[]byte(""),
-			left,
+			Left,
 			false,
 		},
 	}
 	for _, data := range TestData {
-		re.Equal(data.expect, less(data.a, data.b, data.boundary))
+		re.Equal(data.expect, Less(data.a, data.b, data.boundary))
 	}
 }
 

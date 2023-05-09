@@ -45,13 +45,14 @@ type flowBucketsItemTask interface {
 
 // checkBucketsTask indicates the task in checkBuckets queue
 type checkBucketsTask struct {
-	Buckets *metapb.Buckets
+	item *BucketTreeItem
 }
 
 // NewCheckPeerTask creates task to update peerInfo
 func NewCheckPeerTask(buckets *metapb.Buckets) flowBucketsItemTask {
+	item := convertToBucketTreeItem(buckets)
 	return &checkBucketsTask{
-		Buckets: buckets,
+		item: item,
 	}
 }
 
@@ -60,8 +61,8 @@ func (t *checkBucketsTask) taskType() flowItemTaskKind {
 }
 
 func (t *checkBucketsTask) runTask(cache *HotBucketCache) {
-	newItems, overlaps := cache.checkBucketsFlow(t.Buckets)
-	cache.putItem(newItems, overlaps)
+	overlaps := cache.checkBucketsFlow(t.item)
+	cache.putItem(t.item, overlaps)
 }
 
 type collectBucketStatsTask struct {

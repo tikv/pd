@@ -26,16 +26,16 @@ func BuildKeyRangeKey(startKey, endKey []byte) string {
 }
 
 // MaxKey return the bigger key for the given keys.
-func MaxKey(a, b []byte) []byte {
-	if bytes.Compare(a, b) > 0 {
+func MaxKey(a, b []byte, boundary boundary) []byte {
+	if Less(b, a, boundary) {
 		return a
 	}
 	return b
 }
 
 // MinKey returns the smaller key for the given keys.
-func MinKey(a, b []byte) []byte {
-	if bytes.Compare(a, b) > 0 {
+func MinKey(a, b []byte, boundary boundary) []byte {
+	if Less(b, a, boundary) {
 		return b
 	}
 	return a
@@ -44,25 +44,29 @@ func MinKey(a, b []byte) []byte {
 type boundary int
 
 const (
-	left boundary = iota
-	right
+	Left boundary = iota
+	Right
 )
 
-// less returns true if a < b.
-// If the key is empty and the boundary is right, the keys is infinite.
-func less(a, b []byte, boundary boundary) bool {
-	ret := bytes.Compare(a, b)
-	if ret < 0 {
-		return true
-	}
-	if boundary == right && len(b) == 0 && len(a) > 0 {
-		return true
+// Less returns true only if a < b.
+// If the key is empty and the boundary is Right, the keys is infinite.
+func Less(a, b []byte, boundary boundary) bool {
+	if boundary == Right {
+		if len(a) == 0 {
+			return false
+		}
+		if len(b) == 0 {
+			return true
+		}
+		return bytes.Compare(a, b) < 0
+	} else {
+		return bytes.Compare(a, b) < 0
 	}
 	return false
 }
 
 // Between returns true if startKey < key < endKey.
-// If the key is empty and the boundary is right, the keys is infinite.
+// If the key is empty and the boundary is Right, the keys is infinite.
 func Between(startKey, endKey, key []byte) bool {
-	return less(startKey, key, left) && less(key, endKey, right)
+	return Less(startKey, key, Left) && Less(key, endKey, Right)
 }

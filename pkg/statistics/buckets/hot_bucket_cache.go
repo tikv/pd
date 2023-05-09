@@ -47,7 +47,7 @@ const (
 
 // HotBucketCache is the cache of hot stats.
 type HotBucketCache struct {
-	tree            *rangetree.RangeTree       // regionId -> BucketTreeItem
+	tree            *rangetree.RangeTree       // key range -> BucketTreeItem
 	bucketsOfRegion map[uint64]*BucketTreeItem // regionId -> BucketTreeItem
 	taskQueue       chan flowBucketsItemTask
 	ctx             context.Context
@@ -83,37 +83,38 @@ func (h *HotBucketCache) GetHotBucketStats(degree int, regions []uint64) map[uin
 }
 
 // bucketDebrisFactory returns the debris if the key range of the item is bigger than the given key range.
-// start and end key:    | 001------------------------200|
-// the split key range:              |050---150|
-// returns debris:       |001-----050|         |150------200|
-func bucketDebrisFactory(startKey, endKey []byte, item rangetree.RangeItem) []rangetree.RangeItem {
+// old key range        : | 001------------------------200|
+// startKey,endKey range:              |050---150|
+// returns debris:       |001-------050|         |150------200|
+func bucketDebrisFactory(startKey, endKey []byte, old rangetree.RangeItem) []rangetree.RangeItem {
 	var res []rangetree.RangeItem
-	left := keyutil.MaxKey(startKey, item.GetStartKey())
-	right := keyutil.MinKey(endKey, item.GetEndKey())
+	left := keyutil.MaxKey(startKey, old.GetStartKey(), keyutil.Left)
+	right := keyutil.MinKey(endKey, old.GetEndKey(), keyutil.Right)
 	if len(endKey) == 0 {
-		right = item.GetEndKey()
+		right = old.GetEndKey()
 	}
-	if len(item.GetEndKey()) == 0 {
+	if len(old.GetEndKey()) == 0 {
 		right = endKey
 	}
 	// they have no intersection.
-	// key range:   |001--------------100|
+	// key range:   |001--------------80|
 	// bucket tree:                      |100-----------200|
-	if bytes.Compare(left, right) > 0 && len(right) != 0 {
+	// [left,right]: [100,80]
+	if keyutil.Less(right, left, keyutil.Left) && len(right) != 0 {
 		return nil
 	}
 
-	bt := item.(*BucketTreeItem)
+	bt := old.(*BucketTreeItem)
 	// there will be no debris if the left is equal to the start key.
-	if !bytes.Equal(item.GetStartKey(), left) {
-		res = append(res, bt.cloneBucketItemByRange(item.GetStartKey(), left))
+	if !bytes.Equal(bt.GetStartKey(), left) {
+		res = append(res, bt.cloneBucketItemByRange(bt.GetStartKey(), left))
 	}
 	// there will be no debris if the right is equal to the end key.
-	if !bytes.Equal(item.GetEndKey(), right) || len(right) == 0 {
+	if !bytes.Equal(bt.GetEndKey(), right) || len(right) == 0 {
 		if len(right) == 0 {
-			res = append(res, bt.cloneBucketItemByRange(item.GetEndKey(), right))
+			res = append(res, bt.cloneBucketItemByRange(bt.GetEndKey(), right))
 		} else {
-			res = append(res, bt.cloneBucketItemByRange(right, item.GetEndKey()))
+			res = append(res, bt.cloneBucketItemByRange(right, bt.GetEndKey()))
 		}
 	}
 	return res
@@ -180,10 +181,9 @@ func (h *HotBucketCache) schedule() {
 // step1: convert to bucket tree item.
 // step2: inherit old bucket states.
 // step3: update bucket states.
-func (h *HotBucketCache) checkBucketsFlow(buckets *metapb.Buckets) (newItem *BucketTreeItem, overlaps []*BucketTreeItem) {
-	newItem = convertToBucketTreeItem(buckets)
+func (h *HotBucketCache) checkBucketsFlow(newItem *BucketTreeItem) (overlaps []*BucketTreeItem) {
 	// origin is existed and the version is same.
-	if origin := h.bucketsOfRegion[buckets.GetRegionId()]; newItem.equals(origin) {
+	if origin := h.bucketsOfRegion[newItem.regionID]; newItem.equals(origin) {
 		overlaps = []*BucketTreeItem{origin}
 	} else {
 		overlaps = h.getBucketsByKeyRange(newItem.startKey, newItem.endKey)
@@ -191,7 +191,7 @@ func (h *HotBucketCache) checkBucketsFlow(buckets *metapb.Buckets) (newItem *Buc
 	newItem.inherit(overlaps)
 	newItem.calculateHotDegree()
 	newItem.collectBucketsMetrics()
-	return newItem, overlaps
+	return overlaps
 }
 
 // getBucketsByKeyRange returns the overlaps with the key range.
