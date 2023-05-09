@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -27,9 +28,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 )
@@ -349,4 +352,269 @@ func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 	}
 
 	return typeutil.BytesToUint64(response.Kvs[0].Value)
+}
+
+const (
+	defaultLoadDataFromEtcdTimeout   = 30 * time.Second
+	defaultLoadFromEtcdRetryInterval = 200 * time.Millisecond
+	defaultLoadFromEtcdRetryTimes    = int(defaultLoadDataFromEtcdTimeout / defaultLoadFromEtcdRetryInterval)
+	defaultLoadBatchSize             = 400
+	defaultWatchChangeRetryInterval  = 1 * time.Second
+)
+
+// LoopWatcher loads data from etcd and sets a watcher for it.
+type LoopWatcher struct {
+	ctx    context.Context
+	wg     *sync.WaitGroup
+	name   string
+	client *clientv3.Client
+
+	// key is the etcd key to watch.
+	key string
+	// opts is used to set etcd options.
+	opts []clientv3.OpOption
+
+	// forceLoadCh is used to force loading data from etcd.
+	forceLoadCh chan struct{}
+	// isLoadedCh is used to notify that the data has been loaded from etcd first time.
+	isLoadedCh chan error
+
+	// putFn is used to handle the put event.
+	putFn func(*mvccpb.KeyValue) error
+	// deleteFn is used to handle the delete event.
+	deleteFn func(*mvccpb.KeyValue) error
+	// postEventFn is used to call after handling all events.
+	postEventFn func() error
+
+	// loadTimeout is used to set the timeout for loading data from etcd.
+	loadTimeout time.Duration
+	// loadRetryTimes is used to set the retry times for loading data from etcd.
+	loadRetryTimes int
+	// loadBatchSize is used to set the batch size for loading data from etcd.
+	loadBatchSize int64
+	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
+	watchChangeRetryInterval time.Duration
+	// updateClientCh is used to update the etcd client.
+	// It's only used for testing.
+	updateClientCh chan *clientv3.Client
+}
+
+// NewLoopWatcher creates a new LoopWatcher.
+func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string,
+	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error, opts ...clientv3.OpOption) *LoopWatcher {
+	return &LoopWatcher{
+		ctx:                      ctx,
+		client:                   client,
+		name:                     name,
+		key:                      key,
+		wg:                       wg,
+		forceLoadCh:              make(chan struct{}, 1),
+		isLoadedCh:               make(chan error, 1),
+		updateClientCh:           make(chan *clientv3.Client, 1),
+		putFn:                    putFn,
+		deleteFn:                 deleteFn,
+		postEventFn:              postEventFn,
+		opts:                     opts,
+		loadTimeout:              defaultLoadDataFromEtcdTimeout,
+		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
+		loadBatchSize:            defaultLoadBatchSize,
+		watchChangeRetryInterval: defaultWatchChangeRetryInterval,
+	}
+}
+
+// StartWatchLoop starts a loop to watch the key.
+func (lw *LoopWatcher) StartWatchLoop() {
+	defer logutil.LogPanic()
+	defer lw.wg.Done()
+
+	ctx, cancel := context.WithTimeout(lw.ctx, lw.loadTimeout)
+	defer cancel()
+	watchStartRevision := lw.initFromEtcd(ctx)
+
+	log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+	for {
+		select {
+		case <-lw.ctx.Done():
+			log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+			return
+		default:
+		}
+		nextRevision, err := lw.watch(lw.ctx, watchStartRevision)
+		if err != nil {
+			log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
+				zap.String("name", lw.name),
+				zap.String("key", lw.key),
+				zap.Int64("next-revision", nextRevision),
+				zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
+				zap.Error(err))
+			watchStartRevision = nextRevision
+			time.Sleep(lw.watchChangeRetryInterval)
+			failpoint.Inject("updateClient", func() {
+				lw.client = <-lw.updateClientCh
+			})
+		}
+	}
+}
+
+func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
+	var (
+		watchStartRevision int64
+		err                error
+	)
+	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
+	defer ticker.Stop()
+
+	for i := 0; i < lw.loadRetryTimes; i++ {
+		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
+			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
+				err = errors.New("fail to read from etcd")
+				failpoint.Continue()
+			}
+		})
+		failpoint.Inject("delayLoad", func(val failpoint.Value) {
+			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
+				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
+			}
+		})
+		watchStartRevision, err = lw.load(ctx)
+		if err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			lw.isLoadedCh <- errors.Errorf("ctx is done before load data from etcd")
+			return watchStartRevision
+		case <-ticker.C:
+		}
+	}
+	if err != nil {
+		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+	}
+	lw.isLoadedCh <- err
+	return watchStartRevision
+}
+
+func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
+	watcher := clientv3.NewWatcher(lw.client)
+	defer watcher.Close()
+
+	for {
+	WatchChan:
+		opts := append(lw.opts, clientv3.WithRev(revision))
+		watchChan := watcher.Watch(ctx, lw.key, opts...)
+		select {
+		case <-ctx.Done():
+			return revision, nil
+		case <-lw.forceLoadCh:
+			revision, err = lw.load(ctx)
+			if err != nil {
+				log.Warn("force load key failed in watch loop", zap.String("name", lw.name),
+					zap.String("key", lw.key), zap.Error(err))
+			}
+			goto WatchChan
+		case wresp := <-watchChan:
+			if wresp.CompactRevision != 0 {
+				log.Warn("required revision has been compacted, use the compact revision in watch loop",
+					zap.Int64("required-revision", revision),
+					zap.Int64("compact-revision", wresp.CompactRevision))
+				revision = wresp.CompactRevision
+				goto WatchChan
+			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
+				log.Error("watcher is canceled in watch loop",
+					zap.Int64("revision", revision),
+					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
+				return revision, wresp.Err()
+			}
+			for _, event := range wresp.Events {
+				switch event.Type {
+				case clientv3.EventTypePut:
+					if err := lw.putFn(event.Kv); err != nil {
+						log.Error("put failed in watch loop", zap.String("name", lw.name),
+							zap.String("key", lw.key), zap.Error(err))
+					}
+				case clientv3.EventTypeDelete:
+					if err := lw.deleteFn(event.Kv); err != nil {
+						log.Error("delete failed in watch loop", zap.String("name", lw.name),
+							zap.String("key", lw.key), zap.Error(err))
+					}
+				}
+			}
+			if err := lw.postEventFn(); err != nil {
+				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
+					zap.String("key", lw.key), zap.Error(err))
+			}
+			revision = wresp.Header.Revision + 1
+		}
+	}
+}
+
+func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
+	defer cancel()
+	startKey := lw.key
+	// If limit is 0, it means no limit.
+	// If limit is not 0, we need to add 1 to limit to get the next key.
+	limit := lw.loadBatchSize
+	if limit != 0 {
+		limit++
+	}
+	for {
+		// Sort by key to get the next key and we don't need to worry about the performance,
+		// Because the default sort is just SortByKey and SortAscend
+		opts := append(lw.opts, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend), clientv3.WithLimit(limit))
+		resp, err := clientv3.NewKV(lw.client).Get(ctx, startKey, opts...)
+		if err != nil {
+			log.Error("load failed in watch loop", zap.String("name", lw.name),
+				zap.String("key", lw.key), zap.Error(err))
+			return 0, err
+		}
+		for i, item := range resp.Kvs {
+			if resp.More && i == len(resp.Kvs)-1 {
+				// The last key is the start key of the next batch.
+				// To avoid to get the same key in the next load, we need to skip the last key.
+				startKey = string(item.Key)
+				continue
+			}
+			err = lw.putFn(item)
+			if err != nil {
+				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+			}
+		}
+		if !resp.More {
+			if err := lw.postEventFn(); err != nil {
+				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
+					zap.String("key", lw.key), zap.Error(err))
+			}
+			log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+			return resp.Header.Revision + 1, err
+		}
+	}
+}
+
+// ForceLoad forces to load the key.
+func (lw *LoopWatcher) ForceLoad() {
+	select {
+	case lw.forceLoadCh <- struct{}{}:
+	default:
+	}
+}
+
+// WaitLoad waits for the result to obtain whether data is loaded.
+func (lw *LoopWatcher) WaitLoad() error {
+	return <-lw.isLoadedCh
+}
+
+// SetLoadRetryTimes sets the retry times when loading data from etcd.
+func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
+	lw.loadRetryTimes = times
+}
+
+// SetLoadTimeout sets the timeout when loading data from etcd.
+func (lw *LoopWatcher) SetLoadTimeout(timeout time.Duration) {
+	lw.loadTimeout = timeout
+}
+
+// SetLoadBatchSize sets the batch size when loading data from etcd.
+func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
+	lw.loadBatchSize = size
 }

@@ -230,7 +230,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			}
 
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
-			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory, doneCh, errCh, s.updateServicePrimaryAddrCh)
+			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory, doneCh, errCh, s.tsoPrimaryWatcher)
 			continue
 		}
 
@@ -1802,11 +1802,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		ts, err = forwardStream.Recv()
 		if err != nil {
 			if strings.Contains(err.Error(), errs.NotLeaderErr) {
-				select {
-				case s.updateServicePrimaryAddrCh <- struct{}{}:
-					log.Info("update service primary address when meet not leader error")
-				default:
-				}
+				s.tsoPrimaryWatcher.ForceLoad()
 				time.Sleep(retryIntervalRequestTSOServer)
 				continue
 			}

@@ -22,12 +22,11 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 )
 
 // KeyspaceServer wraps GrpcServer to provide keyspace service.
@@ -73,79 +72,51 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return err
 	}
-
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
+	startKey := path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix())
 
-	revision, err := s.sendAllKeyspaceMeta(ctx, stream)
-	if err != nil {
+	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0)
+	putFn := func(kv *mvccpb.KeyValue) error {
+		meta := &keyspacepb.KeyspaceMeta{}
+		if err := proto.Unmarshal(kv.Value, meta); err != nil {
+			return err
+		}
+		keyspaces = append(keyspaces, meta)
+		return nil
+	}
+	deleteFn := func(kv *mvccpb.KeyValue) error {
+		return nil
+	}
+	postEventFn := func() error {
+		defer func() {
+			keyspaces = keyspaces[:0]
+		}()
+		return stream.Send(&keyspacepb.WatchKeyspacesResponse{
+			Header:    s.header(),
+			Keyspaces: keyspaces})
+	}
+
+	watcher := etcdutil.NewLoopWatcher(
+		ctx,
+		&s.serverLoopWg,
+		s.client,
+		"keyspace-server-watcher",
+		startKey,
+		putFn,
+		deleteFn,
+		postEventFn,
+		clientv3.WithPrefix(),
+	)
+	s.serverLoopWg.Add(1)
+	go watcher.StartWatchLoop()
+	if err := watcher.WaitLoad(); err != nil {
+		cancel() // cancel context to stop watcher
 		return err
 	}
 
-	watcher := clientv3.NewWatcher(s.client)
-	defer watcher.Close()
-
-	for {
-		rch := watcher.Watch(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix(), clientv3.WithRev(revision))
-		for wresp := range rch {
-			if wresp.CompactRevision != 0 {
-				log.Warn("required revision has been compacted, use the compact revision",
-					zap.Int64("required-revision", revision),
-					zap.Int64("compact-revision", wresp.CompactRevision))
-				revision = wresp.CompactRevision
-				break
-			}
-			if wresp.Canceled {
-				log.Error("watcher is canceled with",
-					zap.Int64("revision", revision),
-					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
-				return wresp.Err()
-			}
-			keyspaces := make([]*keyspacepb.KeyspaceMeta, 0, len(wresp.Events))
-			for _, event := range wresp.Events {
-				if event.Type != clientv3.EventTypePut {
-					continue
-				}
-				meta := &keyspacepb.KeyspaceMeta{}
-				if err = proto.Unmarshal(event.Kv.Value, meta); err != nil {
-					return err
-				}
-				keyspaces = append(keyspaces, meta)
-			}
-			if len(keyspaces) > 0 {
-				if err = stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: keyspaces}); err != nil {
-					return err
-				}
-			}
-		}
-		select {
-		case <-ctx.Done():
-			// server closed, return
-			return nil
-		default:
-		}
-	}
-}
-
-func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspacepb.Keyspace_WatchKeyspacesServer) (int64, error) {
-	getResp, err := s.client.Get(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix())
-	if err != nil {
-		return 0, err
-	}
-	metas := make([]*keyspacepb.KeyspaceMeta, getResp.Count)
-	for i, kv := range getResp.Kvs {
-		meta := &keyspacepb.KeyspaceMeta{}
-		if err = proto.Unmarshal(kv.Value, meta); err != nil {
-			return 0, err
-		}
-		metas[i] = meta
-	}
-	var revision int64
-	if getResp.Header != nil {
-		// start from the next revision
-		revision = getResp.Header.GetRevision() + 1
-	}
-	return revision, stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: metas})
+	<-ctx.Done() // wait for context done
+	return nil
 }
 
 // UpdateKeyspaceState updates the state of keyspace specified in the request.
