@@ -413,11 +413,23 @@ func TestCheckRegionWithScheduleDeny(t *testing.T) {
 		Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
 	})
 
+	// should allow to do rule checker
 	re.True(labelerManager.ScheduleDisabled(region))
-	checkRegionAndOperator(re, tc, co, 1, 0)
+	checkRegionAndOperator(re, tc, co, 1, 1)
+
+	// should not allow to merge
+	tc.opt.SetSplitMergeInterval(time.Duration(0))
+
+	re.NoError(tc.addLeaderRegion(2, 2, 3, 4))
+	re.NoError(tc.addLeaderRegion(3, 2, 3, 4))
+	region = tc.GetRegion(2)
+	re.True(labelerManager.ScheduleDisabled(region))
+	checkRegionAndOperator(re, tc, co, 2, 0)
+
+	// delete label rule, should allow to do merge
 	labelerManager.DeleteLabelRule("schedulelabel")
 	re.False(labelerManager.ScheduleDisabled(region))
-	checkRegionAndOperator(re, tc, co, 1, 1)
+	checkRegionAndOperator(re, tc, co, 2, 2)
 }
 
 func TestCheckerIsBusy(t *testing.T) {
