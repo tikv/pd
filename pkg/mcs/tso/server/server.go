@@ -160,7 +160,7 @@ func (s *Server) Run() error {
 		skipWaitAPIServiceReady = true
 	})
 	if !skipWaitAPIServiceReady {
-		if err := s.waitAPIServiceReady(s.ctx); err != nil {
+		if err := s.waitAPIServiceReady(); err != nil {
 			return err
 		}
 	}
@@ -534,9 +534,9 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-func (s *Server) waitAPIServiceReady(ctx context.Context) error {
+func (s *Server) waitAPIServiceReady() error {
 	for i := 0; i < maxRetryTimesWaitAPIService; i++ {
-		ready, err := s.isAPIServiceReady(ctx)
+		ready, err := s.isAPIServiceReady()
 		if err != nil {
 			log.Warn("failed to check api server ready", errs.ZapError(err))
 		}
@@ -544,7 +544,7 @@ func (s *Server) waitAPIServiceReady(ctx context.Context) error {
 			return nil
 		}
 		select {
-		case <-ctx.Done():
+		case <-s.ctx.Done():
 			return errors.New("context canceled while waiting api server ready")
 		case <-time.After(retryIntervalWaitAPIService):
 			log.Debug("api server is not ready, retrying")
@@ -553,7 +553,7 @@ func (s *Server) waitAPIServiceReady(ctx context.Context) error {
 	return errors.Errorf("failed to wait api server ready after retrying %d times", maxRetryTimesWaitAPIService)
 }
 
-func (s *Server) isAPIServiceReady(ctx context.Context) (bool, error) {
+func (s *Server) isAPIServiceReady() (bool, error) {
 	urls := strings.Split(s.cfg.BackendEndpoints, ",")
 	if len(urls) == 0 {
 		return false, errors.New("no backend endpoints")
