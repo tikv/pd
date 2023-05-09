@@ -232,16 +232,22 @@ func (s *Service) GetMinTS(
 		}, nil
 	}
 
-	minTS, err := s.keyspaceGroupManager.GetMinTS(request.GetDcLocation())
+	minTS, kgAskedCount, kgTotalCount, err := s.keyspaceGroupManager.GetMinTS(request.GetDcLocation())
 	if err != nil {
 		return &tsopb.GetMinTSResponse{
-			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), respKeyspaceGroup),
+			Header: s.wrapErrorToHeader(
+				tsopb.ErrorType_UNKNOWN, err.Error(), respKeyspaceGroup),
+			Timestamp:             &minTS,
+			KeyspaceGroupsServing: kgAskedCount,
+			KeyspaceGroupsTotal:   kgTotalCount,
 		}, nil
 	}
 
 	return &tsopb.GetMinTSResponse{
-		Header:    s.header(respKeyspaceGroup),
-		Timestamp: &minTS,
+		Header:                s.header(respKeyspaceGroup),
+		Timestamp:             &minTS,
+		KeyspaceGroupsServing: kgAskedCount,
+		KeyspaceGroupsTotal:   kgTotalCount,
 	}, nil
 }
 
