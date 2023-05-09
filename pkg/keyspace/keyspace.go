@@ -218,7 +218,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	err = manager.saveNewKeyspace(keyspace)
 	if err != nil {
 		log.Warn("[keyspace] failed to create keyspace",
-			zap.Uint32("ID", keyspace.GetId()),
+			zap.Uint32("keyspace-id", keyspace.GetId()),
 			zap.String("name", keyspace.GetName()),
 			zap.Error(err),
 		)
@@ -228,7 +228,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		return nil, err
 	}
 	log.Info("[keyspace] keyspace created",
-		zap.Uint32("ID", keyspace.GetId()),
+		zap.Uint32("keyspace-id", keyspace.GetId()),
 		zap.String("name", keyspace.GetName()),
 	)
 	return keyspace, nil
@@ -281,7 +281,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	err = cl.GetRegionLabeler().SetLabelRule(keyspaceRule)
 	if err != nil {
 		log.Warn("[keyspace] failed to add region label for keyspace",
-			zap.Uint32("keyspaceID", id),
+			zap.Uint32("keyspace-id", id),
 			zap.Error(err),
 		)
 		return err
@@ -294,6 +294,10 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 
 	if waitRegionSplit {
 		ranges := keyspaceRule.Data.([]*labeler.KeyRangeRule)
+		if len(ranges) < 2 {
+			log.Warn("[keyspace] failed to split keyspace region with insufficient range", zap.Any("label-rule", keyspaceRule))
+			return ErrRegionSplitFailed
+		}
 		rawLeftBound, rawRightBound := ranges[0].StartKey, ranges[0].EndKey
 		txnLeftBound, txnRightBound := ranges[1].StartKey, ranges[1].EndKey
 
@@ -325,20 +329,20 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 				}
 			case <-timer.C:
 				log.Warn("[keyspace] wait region split timeout",
-					zap.Uint32("keyspaceID", id),
+					zap.Uint32("keyspace-id", id),
 					zap.Error(err),
 				)
 				err = ErrRegionSplitTimeout
 				return
 			}
-			log.Info("[keyspace] wait reigon split successfully", zap.Uint32("keyspaceID", id))
+			log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
 			break
 		}
 	}
 
 	log.Info("[keyspace] added region label for keyspace",
-		zap.Uint32("keyspaceID", id),
-		zap.Any("LabelRule", keyspaceRule),
+		zap.Uint32("keyspace-id", id),
+		zap.Any("label-rule", keyspaceRule),
 		zap.Duration("takes", time.Since(start)),
 	)
 	return
@@ -482,16 +486,16 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
-			zap.Uint32("ID", meta.GetId()),
+			zap.Uint32("keyspace-id", meta.GetId()),
 			zap.String("name", meta.GetName()),
 			zap.Error(err),
 		)
 		return nil, err
 	}
 	log.Info("[keyspace] keyspace config updated",
-		zap.Uint32("ID", meta.GetId()),
+		zap.Uint32("keyspace-id", meta.GetId()),
 		zap.String("name", meta.GetName()),
-		zap.Any("new config", meta.GetConfig()),
+		zap.Any("new-config", meta.GetConfig()),
 	)
 	return meta, nil
 }
@@ -534,7 +538,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	})
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
-			zap.Uint32("ID", meta.GetId()),
+			zap.Uint32("keyspace-id", meta.GetId()),
 			zap.String("name", meta.GetName()),
 			zap.Error(err),
 		)
@@ -542,8 +546,8 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	}
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("ID", meta.GetId()),
-		zap.String("name", meta.GetName()),
-		zap.String("new state", newState.String()),
+		zap.String("keyspace-id", meta.GetName()),
+		zap.String("new-state", newState.String()),
 	)
 	return meta, nil
 }
@@ -579,16 +583,16 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	})
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
-			zap.Uint32("ID", meta.GetId()),
+			zap.Uint32("keyspace-id", meta.GetId()),
 			zap.String("name", meta.GetName()),
 			zap.Error(err),
 		)
 		return nil, err
 	}
 	log.Info("[keyspace] keyspace state updated",
-		zap.Uint32("ID", meta.GetId()),
+		zap.Uint32("keyspace-id", meta.GetId()),
 		zap.String("name", meta.GetName()),
-		zap.String("new state", newState.String()),
+		zap.String("new-state", newState.String()),
 	)
 	return meta, nil
 }
