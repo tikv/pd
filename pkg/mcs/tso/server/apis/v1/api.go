@@ -22,16 +22,22 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/pingcap/kvproto/pkg/tsopb"
+	"github.com/pingcap/log"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
-// APIPathPrefix is the prefix of the API path.
-const APIPathPrefix = "/tso/api/v1"
+const (
+	// APIPathPrefix is the prefix of the API path.
+	APIPathPrefix = "/tso/api/v1"
+)
 
 var (
 	once            sync.Once
@@ -46,14 +52,14 @@ var (
 func init() {
 	tsoserver.SetUpRestHandler = func(srv *tsoserver.Service) (http.Handler, apiutil.APIServiceGroup) {
 		s := NewService(srv)
-		return s.handler(), apiServiceGroup
+		return s.apiHandlerEngine, apiServiceGroup
 	}
 }
 
 // Service is the tso service.
 type Service struct {
 	apiHandlerEngine *gin.Engine
-	baseEndpoint     *gin.RouterGroup
+	root             *gin.RouterGroup
 
 	srv *tsoserver.Service
 	rd  *render.Render
@@ -77,30 +83,64 @@ func NewService(srv *tsoserver.Service) *Service {
 	apiHandlerEngine.Use(cors.Default())
 	apiHandlerEngine.Use(gzip.Gzip(gzip.DefaultCompression))
 	apiHandlerEngine.Use(func(c *gin.Context) {
-		c.Set("service", srv)
+		c.Set(multiservicesapi.ServiceContextKey, srv)
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
-	endpoint := apiHandlerEngine.Group(APIPathPrefix)
+	root := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
 		srv:              srv,
 		apiHandlerEngine: apiHandlerEngine,
-		baseEndpoint:     endpoint,
+		root:             root,
 		rd:               createIndentRender(),
 	}
-	s.RegisterRouter()
+	s.RegisterAdminRouter()
+	s.RegisterKeyspaceGroupRouter()
 	return s
 }
 
-// RegisterRouter registers the router of the service.
-func (s *Service) RegisterRouter() {
+// RegisterAdminRouter registers the router of the TSO admin handler.
+func (s *Service) RegisterAdminRouter() {
+	router := s.root.Group("admin")
 	tsoAdminHandler := tso.NewAdminHandler(s.srv.GetHandler(), s.rd)
-	s.baseEndpoint.POST("/admin/reset-ts", gin.WrapF(tsoAdminHandler.ResetTS))
+	router.POST("/reset-ts", gin.WrapF(tsoAdminHandler.ResetTS))
 }
 
-func (s *Service) handler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.apiHandlerEngine.ServeHTTP(w, r)
-	})
+// RegisterKeyspaceGroupRouter registers the router of the TSO keyspace group handler.
+func (s *Service) RegisterKeyspaceGroupRouter() {
+	router := s.root.Group("keyspace-groups")
+	router.GET("/members", GetKeyspaceGroupMembers)
+}
+
+// KeyspaceGroupMember contains the keyspace group and its member information.
+type KeyspaceGroupMember struct {
+	Group     *endpoint.KeyspaceGroup
+	Member    *tsopb.Participant
+	IsPrimary bool   `json:"is_primary"`
+	PrimaryID uint64 `json:"primary_id"`
+}
+
+// GetKeyspaceGroupMembers gets the keyspace group members that the TSO service is serving.
+func GetKeyspaceGroupMembers(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	kgm := svr.GetKeyspaceGroupManager()
+	keyspaceGroups := kgm.GetKeyspaceGroups()
+	members := make(map[uint32]*KeyspaceGroupMember, len(keyspaceGroups))
+	for id, group := range keyspaceGroups {
+		am, err := kgm.GetAllocatorManager(id)
+		if err != nil {
+			log.Error("failed to get allocator manager",
+				zap.Uint32("keyspace-group-id", id), zap.Error(err))
+			continue
+		}
+		member := am.GetMember()
+		members[id] = &KeyspaceGroupMember{
+			Group:     group,
+			Member:    member.GetMember().(*tsopb.Participant),
+			IsPrimary: member.IsLeader(),
+			PrimaryID: member.GetLeaderID(),
+		}
+	}
+	c.IndentedJSON(http.StatusOK, members)
 }

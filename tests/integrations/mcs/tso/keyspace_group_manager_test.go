@@ -371,6 +371,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 				// Ignore the errors caused by the split and context cancellation.
 				if strings.Contains(errMsg, "context canceled") ||
 					strings.Contains(errMsg, "not leader") ||
+					strings.Contains(errMsg, "not served") ||
 					strings.Contains(errMsg, "ErrKeyspaceNotAssigned") {
 					continue
 				}

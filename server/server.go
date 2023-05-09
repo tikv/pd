@@ -77,6 +77,7 @@ import (
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -104,8 +105,6 @@ const (
 	maxRetryTimesGetServicePrimary = 25
 	// retryIntervalGetServicePrimary is the retry interval for getting primary addr.
 	retryIntervalGetServicePrimary = 100 * time.Millisecond
-	// TODO: move it to etcdutil
-	watchEtcdChangeRetryInterval = 1 * time.Second
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -217,9 +216,7 @@ type Server struct {
 	registry          *registry.ServiceRegistry
 	mode              string
 	servicePrimaryMap sync.Map /* Store as map[string]string */
-	// updateServicePrimaryAddrCh is used to notify the server to update the service primary address.
-	// Note: it is only used in API service mode.
-	updateServicePrimaryAddrCh chan struct{}
+	tsoPrimaryWatcher *etcdutil.LoopWatcher
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -566,9 +563,10 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() { // disable tso service in api server
+	if s.IsAPIServiceMode() {
+		s.initTSOPrimaryWatcher()
 		s.serverLoopWg.Add(1)
-		go s.startWatchServicePrimaryAddrLoop(mcs.TSOServiceName)
+		go s.tsoPrimaryWatcher.StartWatchLoop()
 	}
 }
 
@@ -1754,124 +1752,6 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 	return "", false
 }
 
-// startWatchServicePrimaryAddrLoop starts a loop to watch the primary address of a given service.
-func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	defer cancel()
-	s.updateServicePrimaryAddrCh = make(chan struct{}, 1)
-	serviceKey := s.servicePrimaryKey(serviceName)
-	var (
-		revision int64
-		err      error
-	)
-	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
-		revision, err = s.updateServicePrimaryAddr(serviceName)
-		if revision != 0 && err == nil { // update success
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(retryIntervalGetServicePrimary):
-		}
-	}
-	if err != nil {
-		log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey), zap.Error(err))
-	}
-	log.Info("start to watch service primary addr", zap.String("service-key", serviceKey))
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("server is closed, exist watch service primary addr loop", zap.String("service", serviceName))
-			return
-		default:
-		}
-		nextRevision, err := s.watchServicePrimaryAddr(ctx, serviceName, revision)
-		if err != nil {
-			log.Error("watcher canceled unexpectedly and a new watcher will start after a while",
-				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(watchEtcdChangeRetryInterval)),
-				zap.Error(err))
-			revision = nextRevision
-			time.Sleep(watchEtcdChangeRetryInterval)
-		}
-	}
-}
-
-// watchServicePrimaryAddr watches the primary address on etcd.
-func (s *Server) watchServicePrimaryAddr(ctx context.Context, serviceName string, revision int64) (nextRevision int64, err error) {
-	serviceKey := s.servicePrimaryKey(serviceName)
-	watcher := clientv3.NewWatcher(s.client)
-	defer watcher.Close()
-
-	for {
-	WatchChan:
-		watchChan := watcher.Watch(s.serverLoopCtx, serviceKey, clientv3.WithRev(revision))
-		select {
-		case <-ctx.Done():
-			return revision, nil
-		case <-s.updateServicePrimaryAddrCh:
-			revision, err = s.updateServicePrimaryAddr(serviceName)
-			if err != nil {
-				log.Warn("update service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
-			}
-			goto WatchChan
-		case wresp := <-watchChan:
-			if wresp.CompactRevision != 0 {
-				log.Warn("required revision has been compacted, use the compact revision",
-					zap.Int64("required-revision", revision),
-					zap.Int64("compact-revision", wresp.CompactRevision))
-				revision = wresp.CompactRevision
-				goto WatchChan
-			}
-			if wresp.Err() != nil {
-				log.Error("watcher is canceled with",
-					zap.Int64("revision", revision),
-					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
-				return revision, wresp.Err()
-			}
-			for _, event := range wresp.Events {
-				switch event.Type {
-				case clientv3.EventTypePut:
-					primary := &tsopb.Participant{}
-					if err := proto.Unmarshal(event.Kv.Value, primary); err != nil {
-						log.Error("watch service primary addr failed", zap.String("service-key", serviceKey), zap.Error(err))
-					} else {
-						listenUrls := primary.GetListenUrls()
-						if len(listenUrls) > 0 {
-							// listenUrls[0] is the primary service endpoint of the keyspace group
-							s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-						} else {
-							log.Warn("service primary addr doesn't exist", zap.String("service-key", serviceKey))
-						}
-					}
-				case clientv3.EventTypeDelete:
-					log.Warn("service primary is deleted", zap.String("service-key", serviceKey))
-					s.servicePrimaryMap.Delete(serviceName)
-				}
-			}
-			revision = wresp.Header.Revision + 1
-		}
-	}
-}
-
-// updateServicePrimaryAddr updates the primary address from etcd with get operation.
-func (s *Server) updateServicePrimaryAddr(serviceName string) (nextRevision int64, err error) {
-	serviceKey := s.servicePrimaryKey(serviceName)
-	primary := &tsopb.Participant{}
-	ok, revision, err := etcdutil.GetProtoMsgWithModRev(s.client, serviceKey, primary)
-	listenUrls := primary.GetListenUrls()
-	if !ok || err != nil || len(listenUrls) == 0 {
-		return 0, err
-	}
-	// listenUrls[0] is the primary service endpoint of the keyspace group
-	s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-	log.Info("update service primary addr", zap.String("service-key", serviceKey), zap.String("primary-addr", listenUrls[0]))
-	return revision, nil
-}
-
 // SetServicePrimaryAddr sets the primary address directly.
 // Note: This function is only used for test.
 func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
@@ -1880,6 +1760,37 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 
 func (s *Server) servicePrimaryKey(serviceName string) string {
 	return fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
+}
+
+func (s *Server) initTSOPrimaryWatcher() {
+	serviceName := mcs.TSOServiceName
+	tsoServicePrimaryKey := s.servicePrimaryKey(serviceName)
+	putFn := func(kv *mvccpb.KeyValue) error {
+		primary := &tsopb.Participant{} // TODO: use Generics
+		if err := proto.Unmarshal(kv.Value, primary); err != nil {
+			return err
+		}
+		listenUrls := primary.GetListenUrls()
+		if len(listenUrls) > 0 {
+			// listenUrls[0] is the primary service endpoint of the keyspace group
+			s.servicePrimaryMap.Store(serviceName, listenUrls[0])
+		}
+		return nil
+	}
+	deleteFn := func(kv *mvccpb.KeyValue) error {
+		s.servicePrimaryMap.Delete(serviceName)
+		return nil
+	}
+	s.tsoPrimaryWatcher = etcdutil.NewLoopWatcher(
+		s.serverLoopCtx,
+		&s.serverLoopWg,
+		s.client,
+		"tso-primary-watcher",
+		tsoServicePrimaryKey,
+		putFn,
+		deleteFn,
+		func() error { return nil },
+	)
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id
