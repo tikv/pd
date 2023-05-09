@@ -900,7 +900,17 @@ func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
 		if diagnosable {
 			s.diagnosticRecorder.setResultFromPlans(ops, plans)
 		}
-		if len(ops) > 0 {
+		foundDisabled := false
+		for _, op := range ops {
+			if labelMgr := s.cluster.GetRegionLabeler(); labelMgr != nil {
+				if labelMgr.ScheduleDisabled(s.cluster.GetRegion(op.RegionID())) {
+					regionSkipSchedulerCounter.Inc()
+					foundDisabled = true
+					break
+				}
+			}
+		}
+		if len(ops) > 0 && !foundDisabled {
 			// If we have schedule, reset interval to the minimal interval.
 			s.nextInterval = s.Scheduler.GetMinInterval()
 			return ops

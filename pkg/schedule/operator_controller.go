@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -423,14 +422,6 @@ func (oc *OperatorController) checkAddOperator(isPromoting bool, ops ...*operato
 
 		if op.SchedulerKind() == operator.OpAdmin || op.IsLeaveJointStateOperator() {
 			continue
-		}
-		if cl, ok := oc.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
-			l := cl.GetRegionLabeler()
-			if l.ScheduleDisabled(region) {
-				log.Debug("schedule disabled", zap.Uint64("region-id", op.RegionID()))
-				operatorWaitCounter.WithLabelValues(op.Desc(), "schedule-disabled").Inc()
-				return false
-			}
 		}
 	}
 	expired := false
@@ -836,8 +827,8 @@ func (oc *OperatorController) exceedStoreLimitLocked(ops ...*operator.Operator) 
 		if ops[0].GetPriorityLevel() == constant.Urgent {
 			return false
 		}
-		// skip scatter-region operator, no limit.
-		if ops[0].Desc() == "scatter-region" {
+		// skip scatter region operator, no limit.
+		if ops[0].Desc() == regionScatterName {
 			operator.OperatorLimitCounter.WithLabelValues(desc, "skip").Inc()
 			return false
 		}

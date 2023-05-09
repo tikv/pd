@@ -80,13 +80,6 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return []*operator.Operator{op}
 	}
 
-	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
-		l := cl.GetRegionLabeler()
-		if l.ScheduleDisabled(region) {
-			return nil
-		}
-	}
-
 	if op := c.splitChecker.Check(region); op != nil {
 		return []*operator.Operator{op}
 	}
@@ -123,6 +116,13 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			}
 			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
 			c.regionWaitingList.Put(region.GetID(), nil)
+		}
+	}
+	// only consider merge checker when region label is set to "schedule=deny".
+	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+		l := cl.GetRegionLabeler()
+		if l.ScheduleDisabled(region) {
+			return nil
 		}
 	}
 
