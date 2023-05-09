@@ -30,6 +30,8 @@ import (
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
+const managerUninitializedErr = "keyspace manager is not initialized"
+
 // RegisterKeyspace register keyspace related handlers to router paths.
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
@@ -62,6 +64,10 @@ type CreateKeyspaceParams struct {
 func CreateKeyspace(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	createParams := &CreateKeyspaceParams{}
 	err := c.BindJSON(createParams)
 	if err != nil {
@@ -94,6 +100,10 @@ func CreateKeyspace(c *gin.Context) {
 func LoadKeyspace(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	name := c.Param("name")
 	meta, err := manager.LoadKeyspace(name)
 	if err != nil {
@@ -120,6 +130,10 @@ func LoadKeyspaceByID(c *gin.Context) {
 	}
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	meta, err := manager.LoadKeyspaceByID(uint32(id))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -188,6 +202,10 @@ type LoadAllKeyspacesResponse struct {
 func LoadAllKeyspaces(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	scanStart, scanLimit, err := parseLoadAllQuery(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
@@ -249,6 +267,10 @@ type UpdateConfigParams struct {
 func UpdateKeyspaceConfig(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	name := c.Param("name")
 	configParams := &UpdateConfigParams{}
 	err := c.BindJSON(configParams)
@@ -306,6 +328,10 @@ type UpdateStateParam struct {
 func UpdateKeyspaceState(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	name := c.Param("name")
 	param := &UpdateStateParam{}
 	err := c.BindJSON(param)
