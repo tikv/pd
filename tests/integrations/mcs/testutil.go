@@ -85,19 +85,22 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 	return s, cleanup
 }
 
-// StartSingleTSOTestServer creates and starts a tso server with default config for testing.
-func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*tso.Server, func()) {
+// StartSingleTSOTestServerWithoutCheck creates and starts a tso server with default config for testing.
+func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*tso.Server, func(), error) {
 	cfg := tso.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
-
 	// Setup the logger.
 	err = InitLogger(cfg)
 	re.NoError(err)
+	return NewTSOTestServer(ctx, cfg)
+}
 
-	s, cleanup, err := NewTSOTestServer(ctx, cfg)
+// StartSingleTSOTestServer creates and starts a tso server with default config for testing.
+func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*tso.Server, func()) {
+	s, cleanup, err := StartSingleTSOTestServerWithoutCheck(ctx, re, backendEndpoints, listenAddrs)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return !s.IsClosed()
