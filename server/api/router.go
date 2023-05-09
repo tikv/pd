@@ -346,6 +346,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// min resolved ts API
 	minResolvedTSHandler := newMinResolvedTSHandler(svr, rd)
 	registerFunc(clusterRouter, "/min-resolved-ts", minResolvedTSHandler.GetMinResolvedTS, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/min-resolved-ts/{store_id}", minResolvedTSHandler.GetStoreMinResolvedTS, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	// unsafe admin operation API
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
