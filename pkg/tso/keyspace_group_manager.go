@@ -731,8 +731,6 @@ func (kgm *KeyspaceGroupManager) GetMinTS(
 		return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, nil
 	}
 
-	log.Info("get min ts!!!!!!!!!!!!!!!!!!!!", zap.String("dc-location", dcLocation), zap.Int64("min-ts-physical", minTS.Physical), zap.Int64("min-ts-logical", minTS.Logical))
-
 	return *minTS, kgAskedCount, kgTotalCount, nil
 }
 
