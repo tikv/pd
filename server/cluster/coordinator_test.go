@@ -924,7 +924,7 @@ func TestDenyScheduler(t *testing.T) {
 	re.NoError(tc.updateLeaderCount(1, 10))
 	re.NoError(tc.addLeaderRegion(2, 4, 3, 2))
 
-	// there should no balance leader operator
+	// there should no balance leader/region operator
 	for i := 0; i < 10; i++ {
 		re.Nil(co.opController.GetOperator(1))
 		re.Nil(co.opController.GetOperator(2))
