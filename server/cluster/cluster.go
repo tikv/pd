@@ -73,6 +73,8 @@ var (
 	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
 	versionNotMatchCounter        = bucketEventCounter.WithLabelValues("version_not_match")
 	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
+
+	denySchedulersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("schedulers", "deny")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
