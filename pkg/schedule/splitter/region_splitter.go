@@ -147,6 +147,9 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) map[uint64]*regionGrou
 		if !r.checkRegionValid(region) {
 			continue
 		}
+		if bytes.Equal(region.GetStartKey(), key) {
+			continue
+		}
 		log.Info("found region",
 			zap.Uint64("region-id", region.GetID()),
 			logutil.ZapRedactByteString("key", key))
@@ -166,9 +169,6 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) map[uint64]*regionGrou
 }
 
 func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
-	if r.cluster.IsRegionHot(region) {
-		return false
-	}
 	if !filter.IsRegionReplicated(r.cluster, region) {
 		r.cluster.AddSuspectRegions(region.GetID())
 		return false
