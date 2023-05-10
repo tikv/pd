@@ -893,6 +893,45 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(co.schedulers, defaultCount-2)
 }
 
+func TestDenyScheduler(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) {
+		labelerManager := co.cluster.GetRegionLabeler()
+		labelerManager.SetLabelRule(&labeler.LabelRule{
+			ID:       "schedulelabel",
+			Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
+			RuleType: labeler.KeyRange,
+			Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
+		})
+		co.run()
+	}, re)
+	defer cleanup()
+
+	re.Len(co.schedulers, len(config.DefaultSchedulers))
+
+	// Transfer peer from store 4 to store 1 if not set deny.
+	re.NoError(tc.addRegionStore(4, 40))
+	re.NoError(tc.addRegionStore(3, 30))
+	re.NoError(tc.addRegionStore(2, 20))
+	re.NoError(tc.addRegionStore(1, 10))
+	re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
+
+	// Transfer leader from store 4 to store 2 if not set deny.
+	re.NoError(tc.updateLeaderCount(4, 1000))
+	re.NoError(tc.updateLeaderCount(3, 50))
+	re.NoError(tc.updateLeaderCount(2, 20))
+	re.NoError(tc.updateLeaderCount(1, 10))
+	re.NoError(tc.addLeaderRegion(2, 4, 3, 2))
+
+	// there should no balance leader operator
+	for i := 0; i < 10; i++ {
+		re.Nil(co.opController.GetOperator(1))
+		re.Nil(co.opController.GetOperator(2))
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestRemoveScheduler(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
