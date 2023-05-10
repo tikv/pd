@@ -225,6 +225,38 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 	wg.Wait()
 }
 
+// TestGetMinTS tests the correctness of GetMinTS.
+func (suite *tsoClientTestSuite) TestGetMinTS() {
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for _, client := range suite.clients {
+			go func(client pd.Client) {
+				defer wg.Done()
+				var lastMinTS uint64
+				for j := 0; j < tsoRequestRound; j++ {
+					physical, logical, err := client.GetMinTS(suite.ctx)
+					suite.NoError(err)
+					minTS := tsoutil.ComposeTS(physical, logical)
+					suite.Less(lastMinTS, minTS)
+					lastMinTS = minTS
+
+					// Now we check whether the returned ts is the minimum one
+					// among all keyspace groups, i.e., the returned ts is
+					// less than the new timestamps of all keyspace groups.
+					for _, client := range suite.clients {
+						physical, logical, err := client.GetTS(suite.ctx)
+						suite.NoError(err)
+						ts := tsoutil.ComposeTS(physical, logical)
+						suite.Less(minTS, ts)
+					}
+				}
+			}(client)
+		}
+	}
+	wg.Wait()
+}
+
 // More details can be found in this issue: https://github.com/tikv/pd/issues/4884
 func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 	re := suite.Require()

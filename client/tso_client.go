@@ -320,29 +320,30 @@ func (c *tsoClient) getMinTS(ctx context.Context) (physical, logical int64, err 
 		minTS               *pdpb.Timestamp
 		keyspaceGroupsAsked uint32
 	)
-	emptyTS := &pdpb.Timestamp{}
-
 	if len(resps) != len(addrs) {
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("failed to get min ts from all tso servers/pods")
 	}
-	for i := 0; i < len(resps); i++ {
-		if resps[i].KeyspaceGroupsTotal == 0 {
+	emptyTS := &pdpb.Timestamp{}
+	keyspaceGroupsTotal := resps[0].KeyspaceGroupsTotal
+	for _, resp := range resps {
+		if resp.KeyspaceGroupsTotal == 0 {
 			return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("the tso service has no keyspace group")
 		}
-		if i > 0 && resps[i-1].KeyspaceGroupsTotal != resps[i].KeyspaceGroupsTotal {
+		if resp.KeyspaceGroupsTotal != keyspaceGroupsTotal {
 			return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs(
 				"the tso service has inconsistent keyspace group total count")
 		}
-		keyspaceGroupsAsked += resps[i].KeyspaceGroupsTotal
-		if tsoutil.CompareTimestamp(resps[i].Timestamp, emptyTS) > 0 &&
-			(minTS == nil || tsoutil.CompareTimestamp(resps[i].Timestamp, minTS) < 0) {
-			minTS = resps[i].Timestamp
+		keyspaceGroupsAsked += resp.KeyspaceGroupsServing
+		if tsoutil.CompareTimestamp(resp.Timestamp, emptyTS) > 0 &&
+			(minTS == nil || tsoutil.CompareTimestamp(resp.Timestamp, minTS) < 0) {
+			minTS = resp.Timestamp
 		}
 	}
 
-	if keyspaceGroupsAsked != resps[0].KeyspaceGroupsTotal {
+	if keyspaceGroupsAsked != keyspaceGroupsTotal {
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs(
-			"can't query all the tso keyspace groups")
+			fmt.Sprintf("can't query all the tso keyspace groups. Asked %d, expected %d",
+				keyspaceGroupsAsked, keyspaceGroupsTotal))
 	}
 
 	if minTS == nil {

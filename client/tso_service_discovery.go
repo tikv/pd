@@ -98,10 +98,11 @@ type tsoServerDiscovery struct {
 	failureCount int
 }
 
-func (t *tsoServerDiscovery) countFailure() {
+func (t *tsoServerDiscovery) countFailure() bool {
 	t.Lock()
 	defer t.Unlock()
 	t.failureCount++
+	return t.failureCount >= len(t.addrs)
 }
 
 func (t *tsoServerDiscovery) resetFailure() {
@@ -414,8 +415,9 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	}
 	keyspaceGroup, err := c.findGroupByKeyspaceID(c.keyspaceID, tsoServerAddr, updateMemberTimeout)
 	if err != nil {
-		c.tsoServerDiscovery.countFailure()
-		log.Error("[tso] failed to find the keyspace group", errs.ZapError(err))
+		if c.tsoServerDiscovery.countFailure() {
+			log.Error("[tso] failed to find the keyspace group", errs.ZapError(err))
+		}
 		return err
 	}
 	c.tsoServerDiscovery.resetFailure()

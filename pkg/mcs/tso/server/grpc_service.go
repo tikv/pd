@@ -158,17 +158,17 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 func (s *Service) FindGroupByKeyspaceID(
 	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
 ) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
-	// if s.IsClosed() || s.keyspaceGroupManager == nil {
-	// 	return &tsopb.FindGroupByKeyspaceIDResponse{
-	// 		Header: s.wrapErrorToHeader(tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted.Error(), 0),
-	// 	}, nil
-	// }
+	if s.IsClosed() || s.keyspaceGroupManager == nil {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted.Error(), 0),
+		}, nil
+	}
 
-	// if request.GetHeader().GetClusterId() != s.clusterID {
-	// 	return &tsopb.FindGroupByKeyspaceIDResponse{
-	// 		Header: s.wrapErrorToHeader(tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched.Error(), 0),
-	// 	}, nil
-	// }
+	if request.GetHeader().GetClusterId() != s.clusterID {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched.Error(), 0),
+		}, nil
+	}
 
 	keyspaceID := request.GetKeyspaceId()
 	am, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
