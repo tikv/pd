@@ -251,6 +251,13 @@ func WithMetricsLabels(labels prometheus.Labels) ClientOption {
 	}
 }
 
+// WithInitMetricsOption configures the client with metrics labels.
+func WithInitMetricsOption(initMetrics bool) ClientOption {
+	return func(c *client) {
+		c.option.initMetrics = initMetrics
+	}
+}
+
 var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
