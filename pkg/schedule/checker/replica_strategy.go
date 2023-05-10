@@ -133,7 +133,7 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 		level = constant.Urgent
 	}
 	source := filter.NewCandidates(coLocationStores).
-		FilterSource(s.cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: replicaCheckerName, MoveRegion: true, OperatorLevel: level}).
+		FilterSource(s.cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
 		KeepTheTopStores(isolationComparer, true).
 		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), false)
 	if source == nil {

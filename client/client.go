@@ -244,6 +244,13 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
+// WithMetricsLabels configures the client with metrics labels.
+func WithMetricsLabels(labels prometheus.Labels) ClientOption {
+	return func(c *client) {
+		c.option.metricsLabels = labels
+	}
+}
+
 var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
@@ -419,6 +426,9 @@ func (c *client) setup() error {
 	if err := c.pdSvcDiscovery.Init(); err != nil {
 		return err
 	}
+
+	// Init the metrics.
+	initAndRegisterMetrics(c.option.metricsLabels)
 
 	// Register callbacks
 	c.pdSvcDiscovery.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
