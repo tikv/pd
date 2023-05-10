@@ -905,7 +905,7 @@ func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
 		for _, op := range ops {
 			if labelMgr := s.cluster.GetRegionLabeler(); labelMgr != nil {
 				if labelMgr.ScheduleDisabled(s.cluster.GetRegion(op.RegionID())) {
-					regionDisableSchedulerCounter.Inc()
+					denySchedulersByLabelerCounter.Inc()
 					foundDisabled = true
 					break
 				}
