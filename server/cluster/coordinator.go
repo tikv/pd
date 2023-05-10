@@ -911,9 +911,13 @@ func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
 				}
 			}
 		}
-		if len(ops) > 0 && !foundDisabled {
+		if len(ops) > 0 {
 			// If we have schedule, reset interval to the minimal interval.
 			s.nextInterval = s.Scheduler.GetMinInterval()
+			// try regenerating operators
+			if foundDisabled {
+				continue
+			}
 			return ops
 		}
 	}
