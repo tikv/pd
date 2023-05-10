@@ -505,7 +505,7 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	}
 	newTSOCli.Setup()
 	// Replace the old TSO client.
-	oldTSOClient, _ := c.getServiceClientProxy()
+	oldTSOClient := c.tsoClient
 	c.tsoClient = newTSOCli
 	oldTSOClient.Close()
 	// Replace the old TSO service discovery if needed.
