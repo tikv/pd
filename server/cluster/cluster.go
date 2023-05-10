@@ -71,10 +71,11 @@ var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
 	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
-	regionDisableSchedulerCounter = regionEventCounter.WithLabelValues("schedule_disable_for_region")
 	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
 	versionNotMatchCounter        = bucketEventCounter.WithLabelValues("version_not_match")
 	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
+
+	denySchedulersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("schedulers", "deny")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.

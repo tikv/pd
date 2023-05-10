@@ -33,6 +33,8 @@ import (
 // DefaultCacheSize is the default length of waiting list.
 const DefaultCacheSize = 1000
 
+var denyCheckersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("checkers", "deny")
+
 // Controller is used to manage all checkers.
 type Controller struct {
 	cluster           schedule.Cluster
@@ -122,6 +124,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
 		l := cl.GetRegionLabeler()
 		if l.ScheduleDisabled(region) {
+			denyCheckersByLabelerCounter.Inc()
 			return nil
 		}
 	}
