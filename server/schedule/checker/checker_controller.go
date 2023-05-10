@@ -32,6 +32,8 @@ import (
 // DefaultCacheSize is the default length of waiting list.
 const DefaultCacheSize = 1000
 
+var denyCheckersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("checkers", "deny")
+
 // Controller is used to manage all checkers.
 type Controller struct {
 	cluster           schedule.Cluster
@@ -80,13 +82,6 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return []*operator.Operator{op}
 	}
 
-	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
-		l := cl.GetRegionLabeler()
-		if l.ScheduleDisabled(region) {
-			return nil
-		}
-	}
-
 	if op := c.splitChecker.Check(region); op != nil {
 		return []*operator.Operator{op}
 	}
@@ -110,6 +105,15 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			}
 			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
 			c.regionWaitingList.Put(region.GetID(), nil)
+		}
+	}
+	// skip the joint checker, split checker and rule checker when region label is set to "schedule=deny".
+	// those checkers is help to make region health, it's necessary to skip them when region is set to deny.
+	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+		l := cl.GetRegionLabeler()
+		if l.ScheduleDisabled(region) {
+			denyCheckersByLabelerCounter.Inc()
+			return nil
 		}
 	}
 

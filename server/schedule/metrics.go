@@ -83,6 +83,15 @@ var (
 			Name:      "scatter_distribution",
 			Help:      "Counter of the distribution in scatter.",
 		}, []string{"store", "is_leader", "engine"})
+
+	// LabelerEventCounter is a counter of the scheduler labeler system.
+	LabelerEventCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "labeler_event_counter",
+			Help:      "Counter of the scheduler label.",
+		}, []string{"type", "event"})
 )
 
 func init() {
@@ -94,4 +103,5 @@ func init() {
 	prometheus.MustRegister(scatterCounter)
 	prometheus.MustRegister(scatterDistributionCounter)
 	prometheus.MustRegister(operatorSizeHist)
+	prometheus.MustRegister(LabelerEventCounter)
 }
