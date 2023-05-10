@@ -892,9 +892,34 @@ func (s *scheduleController) Schedule() []*operator.Operator {
 		default:
 		}
 		cacheCluster := newCacheCluster(s.cluster)
+<<<<<<< HEAD
 		// If we have schedule, reset interval to the minimal interval.
 		if ops := s.Scheduler.Schedule(cacheCluster); len(ops) > 0 {
+=======
+		// we need only process diagnostic once in the retry loop
+		diagnosable = diagnosable && i == 0
+		ops, plans := s.Scheduler.Schedule(cacheCluster, diagnosable)
+		if diagnosable {
+			s.diagnosticRecorder.setResultFromPlans(ops, plans)
+		}
+		foundDisabled := false
+		for _, op := range ops {
+			if labelMgr := s.cluster.GetRegionLabeler(); labelMgr != nil {
+				if labelMgr.ScheduleDisabled(s.cluster.GetRegion(op.RegionID())) {
+					denySchedulersByLabelerCounter.Inc()
+					foundDisabled = true
+					break
+				}
+			}
+		}
+		if len(ops) > 0 {
+			// If we have schedule, reset interval to the minimal interval.
+>>>>>>> 2e12b960a (checker: fix unhealth region skip the rule check (#6427))
 			s.nextInterval = s.Scheduler.GetMinInterval()
+			// try regenerating operators
+			if foundDisabled {
+				continue
+			}
 			return ops
 		}
 	}

@@ -753,6 +753,7 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 		Data:     []interface{}{map[string]interface{}{"start_key": "1a", "end_key": "1b"}},
 	})
 
+<<<<<<< HEAD:server/schedule/operator_controller_test.go
 	c.Assert(labelerManager.ScheduleDisabled(source), IsTrue)
 	// add operator should be failed since it is labeled with `schedule=deny`.
 	c.Assert(controller.AddWaitingOperator(ops...), Equals, 0)
@@ -771,4 +772,29 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 
 	// no space left, new operator can not be added.
 	c.Assert(controller.AddWaitingOperator(addPeerOp(0)), Equals, 0)
+=======
+	suite.True(labelerManager.ScheduleDisabled(source))
+	// add operator should be success since it is not check in addWaitingOperator
+	suite.Equal(2, controller.AddWaitingOperator(ops...))
+}
+
+// issue #5279
+func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewOperatorController(suite.ctx, tc, stream)
+	// If PD and store 3 are gone, PD will not have info of store 3 after recreating it.
+	tc.AddRegionStore(1, 1)
+	tc.AddRegionStore(2, 1)
+	tc.AddRegionStore(4, 1)
+	tc.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+	steps := []operator.OpStep{
+		operator.RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
+	}
+	op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	suite.True(oc.addOperatorLocked(op))
+	// Although store 3 does not exist in PD, PD can also send op to TiKV.
+	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
+>>>>>>> 2e12b960a (checker: fix unhealth region skip the rule check (#6427)):pkg/schedule/operator_controller_test.go
 }

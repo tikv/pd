@@ -62,7 +62,20 @@ import (
 
 var (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
+<<<<<<< HEAD
 	DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
+=======
+	// If interval in config is zero, it means not to persist resolved ts and check config with this DefaultMinResolvedTSPersistenceInterval
+	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
+	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
+	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
+	versionNotMatchCounter        = bucketEventCounter.WithLabelValues("version_not_match")
+	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
+
+	denySchedulersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("schedulers", "deny")
+>>>>>>> 2e12b960a (checker: fix unhealth region skip the rule check (#6427))
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.

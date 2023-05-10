@@ -373,11 +373,31 @@ func (s *testCoordinatorSuite) TestCheckRegionWithScheduleDeny(c *C) {
 		Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
 	})
 
+<<<<<<< HEAD
 	c.Assert(labelerManager.ScheduleDisabled(region), IsTrue)
 	s.checkRegion(c, tc, co, 1, 0)
 	labelerManager.DeleteLabelRule("schedulelabel")
 	c.Assert(labelerManager.ScheduleDisabled(region), IsFalse)
 	s.checkRegion(c, tc, co, 1, 1)
+=======
+	// should allow to do rule checker
+	re.True(labelerManager.ScheduleDisabled(region))
+	checkRegionAndOperator(re, tc, co, 1, 1)
+
+	// should not allow to merge
+	tc.opt.SetSplitMergeInterval(time.Duration(0))
+
+	re.NoError(tc.addLeaderRegion(2, 2, 3, 4))
+	re.NoError(tc.addLeaderRegion(3, 2, 3, 4))
+	region = tc.GetRegion(2)
+	re.True(labelerManager.ScheduleDisabled(region))
+	checkRegionAndOperator(re, tc, co, 2, 0)
+
+	// delete label rule, should allow to do merge
+	labelerManager.DeleteLabelRule("schedulelabel")
+	re.False(labelerManager.ScheduleDisabled(region))
+	checkRegionAndOperator(re, tc, co, 2, 2)
+>>>>>>> 2e12b960a (checker: fix unhealth region skip the rule check (#6427))
 }
 
 func (s *testCoordinatorSuite) TestCheckerIsBusy(c *C) {
@@ -812,7 +832,54 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	c.Assert(co.schedulers, HasLen, 3)
 }
 
+<<<<<<< HEAD
 func (s *testCoordinatorSuite) TestRemoveScheduler(c *C) {
+=======
+func TestDenyScheduler(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, func(co *coordinator) {
+		labelerManager := co.cluster.GetRegionLabeler()
+		labelerManager.SetLabelRule(&labeler.LabelRule{
+			ID:       "schedulelabel",
+			Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
+			RuleType: labeler.KeyRange,
+			Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
+		})
+		co.run()
+	}, re)
+	defer cleanup()
+
+	re.Len(co.schedulers, len(config.DefaultSchedulers))
+
+	// Transfer peer from store 4 to store 1 if not set deny.
+	re.NoError(tc.addRegionStore(4, 40))
+	re.NoError(tc.addRegionStore(3, 30))
+	re.NoError(tc.addRegionStore(2, 20))
+	re.NoError(tc.addRegionStore(1, 10))
+	re.NoError(tc.addLeaderRegion(1, 2, 3, 4))
+
+	// Transfer leader from store 4 to store 2 if not set deny.
+	re.NoError(tc.updateLeaderCount(4, 1000))
+	re.NoError(tc.updateLeaderCount(3, 50))
+	re.NoError(tc.updateLeaderCount(2, 20))
+	re.NoError(tc.updateLeaderCount(1, 10))
+	re.NoError(tc.addLeaderRegion(2, 4, 3, 2))
+
+	// there should no balance leader/region operator
+	for i := 0; i < 10; i++ {
+		re.Nil(co.opController.GetOperator(1))
+		re.Nil(co.opController.GetOperator(2))
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestRemoveScheduler(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+>>>>>>> 2e12b960a (checker: fix unhealth region skip the rule check (#6427))
 	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0
 	}, nil, func(co *coordinator) { co.run() }, c)
