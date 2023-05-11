@@ -53,7 +53,6 @@ type option struct {
 	maxRetryTimes    int
 	enableForwarding bool
 	metricsLabels    prometheus.Labels
-	initMetrics      bool
 
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
@@ -67,7 +66,6 @@ func newOption() *option {
 		timeout:                  defaultPDTimeout,
 		maxRetryTimes:            maxInitClusterRetries,
 		enableTSOFollowerProxyCh: make(chan struct{}, 1),
-		initMetrics:              true,
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
