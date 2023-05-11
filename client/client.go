@@ -435,7 +435,9 @@ func (c *client) setup() error {
 	}
 
 	// Init the metrics.
-	initAndRegisterMetrics(c.option.metricsLabels)
+	if c.option.initMetrics {
+		initAndRegisterMetrics(c.option.metricsLabels)
+	}
 
 	// Register callbacks
 	c.pdSvcDiscovery.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
