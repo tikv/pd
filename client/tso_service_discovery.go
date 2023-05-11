@@ -519,6 +519,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 			return "", err
 		}
 		failpoint.Inject("serverReturnsNoTSOAddrs", func() {
+			log.Info("[failpoint] injected error: server returns no tso addrs")
 			addrs = nil
 		})
 		if len(addrs) == 0 {
