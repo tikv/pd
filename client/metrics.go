@@ -23,6 +23,11 @@ import (
 // make sure register metrics only once
 var initialized int32
 
+func init() {
+	initMetrics(prometheus.Labels{})
+	initCmdDurations()
+}
+
 func initAndRegisterMetrics(constLabels prometheus.Labels) {
 	if atomic.CompareAndSwapInt32(&initialized, 0, 1) {
 		// init metrics with constLabels
