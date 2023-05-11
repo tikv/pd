@@ -427,19 +427,19 @@ func (lw *LoopWatcher) StartWatchLoop() {
 	defer logutil.LogPanic()
 	defer lw.wg.Done()
 
-	ctx, cancel := context.WithTimeout(lw.ctx, lw.loadTimeout)
+	ctx, cancel := context.WithCancel(lw.ctx)
 	defer cancel()
 	watchStartRevision := lw.initFromEtcd(ctx)
 
 	log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 	for {
 		select {
-		case <-lw.ctx.Done():
+		case <-ctx.Done():
 			log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 			return
 		default:
 		}
-		nextRevision, err := lw.watch(lw.ctx, watchStartRevision)
+		nextRevision, err := lw.watch(ctx, watchStartRevision)
 		if err != nil {
 			log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
 				zap.String("name", lw.name),
@@ -461,6 +461,8 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		watchStartRevision int64
 		err                error
 	)
+	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
+	defer cancel()
 	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
 	defer ticker.Stop()
 
@@ -489,6 +491,8 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	}
 	if err != nil {
 		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+	} else {
+		log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 	}
 	lw.isLoadedCh <- err
 	return watchStartRevision
@@ -500,8 +504,12 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 
 	for {
 	WatchChan:
+		// In order to prevent a watch stream being stuck in a partitioned node,
+		// make sure to wrap context with "WithRequireLeader".
+		watchChanCtx, watchChanCancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
+		defer watchChanCancel()
 		opts := append(lw.opts, clientv3.WithRev(revision))
-		watchChan := watcher.Watch(ctx, lw.key, opts...)
+		watchChan := watcher.Watch(watchChanCtx, lw.key, opts...)
 		select {
 		case <-ctx.Done():
 			return revision, nil
@@ -511,6 +519,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("force load key failed in watch loop", zap.String("name", lw.name),
 					zap.String("key", lw.key), zap.Error(err))
 			}
+			watchChanCancel()
 			goto WatchChan
 		case wresp := <-watchChan:
 			if wresp.CompactRevision != 0 {
@@ -518,6 +527,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("required-revision", revision),
 					zap.Int64("compact-revision", wresp.CompactRevision))
 				revision = wresp.CompactRevision
+				watchChanCancel()
 				goto WatchChan
 			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
 				log.Error("watcher is canceled in watch loop",
@@ -532,11 +542,16 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 						log.Error("put failed in watch loop", zap.String("name", lw.name),
 							zap.String("key", lw.key), zap.Error(err))
 					}
+					log.Debug("put in watch loop", zap.String("name", lw.name),
+						zap.ByteString("key", event.Kv.Key),
+						zap.ByteString("value", event.Kv.Value))
 				case clientv3.EventTypeDelete:
 					if err := lw.deleteFn(event.Kv); err != nil {
 						log.Error("delete failed in watch loop", zap.String("name", lw.name),
 							zap.String("key", lw.key), zap.Error(err))
 					}
+					log.Debug("delete in watch loop", zap.String("name", lw.name),
+						zap.ByteString("key", event.Kv.Key))
 				}
 			}
 			if err := lw.postEventFn(); err != nil {
@@ -545,6 +560,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			}
 			revision = wresp.Header.Revision + 1
 		}
+		watchChanCancel()
 	}
 }
 
@@ -580,6 +596,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
 			}
 		}
+		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
 			if err := lw.postEventFn(); err != nil {
 				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
