@@ -429,14 +429,12 @@ func (c *client) loadKeyspaceMeta(keyspace string) error {
 }
 
 func (c *client) setup() error {
+	// Init the metrics.
+	initAndRegisterMetrics(c.option.metricsLabels)
+
 	// Init the client base.
 	if err := c.pdSvcDiscovery.Init(); err != nil {
 		return err
-	}
-
-	// Init the metrics.
-	if c.option.initMetrics {
-		initAndRegisterMetrics(c.option.metricsLabels)
 	}
 
 	// Register callbacks

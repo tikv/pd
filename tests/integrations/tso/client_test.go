@@ -197,6 +197,34 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 	wg.Wait()
 }
 
+func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
+	re := suite.Require()
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber)
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		go func() {
+			defer wg.Done()
+			// Simulate the case that the server has lower version than the client and returns no tso addrs
+			// in the GetClusterInfo RPC.
+			re.NoError(failpoint.Enable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs", "return(true)"))
+			defer func() {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs"))
+			}()
+			client := mcs.SetupClientWithDefaultKeyspaceName(
+				suite.ctx, re, strings.Split(suite.backendEndpoints, ","))
+			var lastTS uint64
+			for j := 0; j < tsoRequestRound; j++ {
+				physical, logical, err := client.GetTS(suite.ctx)
+				suite.NoError(err)
+				ts := tsoutil.ComposeTS(physical, logical)
+				suite.Less(lastTS, ts)
+				lastTS = ts
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 // More details can be found in this issue: https://github.com/tikv/pd/issues/4884
 func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 	re := suite.Require()
