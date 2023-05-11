@@ -80,6 +80,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	putFn := func(kv *mvccpb.KeyValue) error {
 		meta := &keyspacepb.KeyspaceMeta{}
 		if err := proto.Unmarshal(kv.Value, meta); err != nil {
+			defer cancel() // cancel context to stop watcher
 			return err
 		}
 		keyspaces = append(keyspaces, meta)
@@ -92,9 +93,14 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		defer func() {
 			keyspaces = keyspaces[:0]
 		}()
-		return stream.Send(&keyspacepb.WatchKeyspacesResponse{
+		err := stream.Send(&keyspacepb.WatchKeyspacesResponse{
 			Header:    s.header(),
 			Keyspaces: keyspaces})
+		if err != nil {
+			defer cancel() // cancel context to stop watcher
+			return err
+		}
+		return nil
 	}
 
 	watcher := etcdutil.NewLoopWatcher(
