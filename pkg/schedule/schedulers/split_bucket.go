@@ -23,12 +23,12 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 )
@@ -221,15 +221,10 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 			// the key range of the bucket must less than the region.
 			// like bucket: [001 100] and region: [001 100] will not pass.
 			// like bucket: [003 100] and region: [002 100] will pass.
-			if bytes.Compare(bucket.StartKey, region.GetStartKey()) < 0 || bytes.Compare(bucket.EndKey, region.GetEndKey()) > 0 {
+			if !(keyutil.Contains(region.GetStartKey(), region.GetEndKey(), bucket.StartKey) && keyutil.Contains(region.GetStartKey(), region.GetEndKey(), bucket.EndKey)) {
 				splitBucketKeyRangeNotMatchCounter.Inc()
 				continue
 			}
-			if bytes.Equal(bucket.StartKey, region.GetStartKey()) && bytes.Equal(bucket.EndKey, region.GetEndKey()) {
-				splitBucketNoSplitKeysCounter.Inc()
-				continue
-			}
-
 			if splitBucket == nil || bucket.HotDegree > splitBucket.HotDegree {
 				splitBucket = bucket
 			}
@@ -238,10 +233,10 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 	if splitBucket != nil {
 		region := plan.cluster.GetRegion(splitBucket.RegionID)
 		splitKey := make([][]byte, 0)
-		if bytes.Compare(region.GetStartKey(), splitBucket.StartKey) < 0 {
+		if keyutil.Less(region.GetStartKey(), splitBucket.StartKey, keyutil.Left) {
 			splitKey = append(splitKey, splitBucket.StartKey)
 		}
-		if bytes.Compare(region.GetEndKey(), splitBucket.EndKey) > 0 {
+		if keyutil.Less(splitBucket.EndKey, region.GetEndKey(), keyutil.Right) {
 			splitKey = append(splitKey, splitBucket.EndKey)
 		}
 		op, err := operator.CreateSplitRegionOperator(SplitBucketType, plan.cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
@@ -251,8 +246,6 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 			return nil
 		}
 		splitBucketNewOperatorCounter.Inc()
-		op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
-		op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
 		op.AdditionalInfos["hot-degree"] = strconv.FormatInt(int64(splitBucket.HotDegree), 10)
 		return []*operator.Operator{op}
 	}

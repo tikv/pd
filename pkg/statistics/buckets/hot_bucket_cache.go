@@ -100,7 +100,7 @@ func bucketDebrisFactory(startKey, endKey []byte, old rangetree.RangeItem) []ran
 	// key range:   |001--------------80|
 	// bucket tree:                      |100-----------200|
 	// [left,right]: [100,80]
-	if keyutil.Less(right, left, keyutil.Left) && len(right) != 0 {
+	if !keyutil.Less(left, right, keyutil.Mix) {
 		return nil
 	}
 

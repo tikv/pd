@@ -96,7 +96,7 @@ func (b *BucketTreeItem) String() string {
 
 // Less returns true if the start key is less than the other.
 func (b *BucketTreeItem) Less(than rangetree.RangeItem) bool {
-	return bytes.Compare(b.startKey, than.(*BucketTreeItem).startKey) < 0
+	return keyutil.Less(b.startKey, than.(*BucketTreeItem).startKey, keyutil.Left)
 }
 
 // equals returns whether the key range is overlaps with the item.
@@ -127,7 +127,7 @@ func (b *BucketTreeItem) cloneBucketItemByRange(startKey, endKey []byte) *Bucket
 		if len(endKey) == 0 {
 			right = stat.EndKey
 		}
-		if bytes.Compare(left, right) < 0 {
+		if keyutil.Less(left, right, keyutil.Mix) {
 			copy := stat.clone()
 			copy.StartKey = left
 			copy.EndKey = right
@@ -142,7 +142,7 @@ func (b *BucketTreeItem) cloneBucketItemByRange(startKey, endKey []byte) *Bucket
 // rule2: if the cross buckets are not hot, it will inherit the coldest one.
 // rule3: if some cross buckets are hot and the others are cold, it will inherit the hottest one.
 func (b *BucketTreeItem) inherit(origins []*BucketTreeItem) {
-	if len(origins) == 0 || len(b.stats) == 0 || bytes.Compare(b.endKey, origins[0].startKey) < 0 {
+	if len(origins) == 0 || len(b.stats) == 0 || !keyutil.Less(origins[0].startKey, b.endKey, keyutil.Mix) {
 		return
 	}
 

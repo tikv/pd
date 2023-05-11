@@ -44,14 +44,22 @@ func MinKey(a, b []byte, boundary boundary) []byte {
 type boundary int
 
 const (
+	// Left means that the empty key is the smallest key.
 	Left boundary = iota
+	// Right means that the empty key is the biggest key.
 	Right
+	// Mix means that the first empty key is the smallest key and the second empty key is biggest key.
+	Mix
 )
 
 // Less returns true only if a < b.
-// If the key is empty and the boundary is Right, the keys is infinite.
 func Less(a, b []byte, boundary boundary) bool {
-	if boundary == Right {
+	switch boundary {
+	case Left:
+		return bytes.Compare(a, b) < 0
+	case Mix:
+		return bytes.Compare(a, b) < 0 || len(b) == 0
+	case Right:
 		if len(a) == 0 {
 			return false
 		}
@@ -59,14 +67,16 @@ func Less(a, b []byte, boundary boundary) bool {
 			return true
 		}
 		return bytes.Compare(a, b) < 0
-	} else {
-		return bytes.Compare(a, b) < 0
 	}
-	return false
+	return true
 }
 
 // Between returns true if startKey < key < endKey.
-// If the key is empty and the boundary is Right, the keys is infinite.
 func Between(startKey, endKey, key []byte) bool {
 	return Less(startKey, key, Left) && Less(key, endKey, Right)
+}
+
+// Contains returns true if startKey <= key < endKey.
+func Contains(startKey, endKey, key []byte) bool {
+	return Between(startKey, endKey, key) || bytes.Equal(startKey, key)
 }

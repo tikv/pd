@@ -129,6 +129,24 @@ func TestLess(t *testing.T) {
 			Left,
 			false,
 		},
+		{
+			[]byte(""),
+			[]byte(""),
+			Mix,
+			true,
+		},
+		{
+			[]byte("a"),
+			[]byte(""),
+			Mix,
+			true,
+		},
+		{
+			[]byte(""),
+			[]byte("a"),
+			Mix,
+			true,
+		},
 	}
 	for _, data := range TestData {
 		re.Equal(data.expect, Less(data.a, data.b, data.boundary))
