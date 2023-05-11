@@ -366,7 +366,7 @@ func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls[0])
+	return etcdutil.CreateClientsWithMultiEndpoint(tlsConfig, etcdCfg.ACUrls)
 }
 
 // AddStartCallback adds a callback in the startServer phase.

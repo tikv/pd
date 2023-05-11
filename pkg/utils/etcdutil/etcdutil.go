@@ -35,6 +35,8 @@ import (
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 )
 
 const (
@@ -248,6 +250,17 @@ func createEtcdClientWithMultiEndpoint(tlsConfig *tls.Config, acUrls []url.URL) 
 		LogConfig:            &lgc,
 		DialKeepAliveTime:    dialKeepAliveTime,
 		DialKeepAliveTimeout: dialKeepAliveTimeout,
+		DialOptions: []grpc.DialOption{
+			grpc.WithConnectParams(grpc.ConnectParams{
+				Backoff: backoff.Config{
+					BaseDelay:  time.Second,     // Default was 1s.
+					Multiplier: 1.6,             // Default
+					Jitter:     0.2,             // Default
+					MaxDelay:   3 * time.Second, // Default was 120s.
+				},
+				MinConnectTimeout: 5 * time.Second,
+			}),
+		},
 	})
 	if err == nil {
 		log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
