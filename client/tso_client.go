@@ -314,14 +314,13 @@ func (c *tsoClient) getMinTS(ctx context.Context) (physical, logical int64, err 
 	// Check the results. The returned minimal timestamp is valid if all the conditions are met:
 	// 1. The number of responses is equal to the number of TSO servers/pods.
 	// 2. The number of keyspace groups asked is equal to the number of TSO servers/pods.
-	// 3. Every TSO server/pod returns the same total count of keyspace groups
 	// 3. The minimal timestamp is not zero.
 	var (
 		minTS               *pdpb.Timestamp
 		keyspaceGroupsAsked uint32
 	)
-	if len(resps) != len(addrs) {
-		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("failed to get min ts from all tso servers/pods")
+	if len(resps) == 0 {
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("none of tso server/pod responded")
 	}
 	emptyTS := &pdpb.Timestamp{}
 	keyspaceGroupsTotal := resps[0].KeyspaceGroupsTotal

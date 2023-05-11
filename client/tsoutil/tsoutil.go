@@ -23,6 +23,7 @@ func AddLogical(logical, count int64, suffixBits uint32) int64 {
 	return logical + count<<suffixBits
 }
 
+// TSLessEqual returns true if (physical, logical) <= (thatPhysical, thatLogical).
 func TSLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
 	if physical == thatPhysical {
 		return logical <= thatLogical

@@ -158,15 +158,10 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 func (s *Service) FindGroupByKeyspaceID(
 	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
 ) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
-	if s.IsClosed() || s.keyspaceGroupManager == nil {
+	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
+	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
-			Header: s.wrapErrorToHeader(tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted.Error(), 0),
-		}, nil
-	}
-
-	if request.GetHeader().GetClusterId() != s.clusterID {
-		return &tsopb.FindGroupByKeyspaceIDResponse{
-			Header: s.wrapErrorToHeader(tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched.Error(), 0),
+			Header: s.wrapErrorToHeader(errorType, err.Error(), respKeyspaceGroup),
 		}, nil
 	}
 
@@ -218,17 +213,9 @@ func (s *Service) GetMinTS(
 	ctx context.Context, request *tsopb.GetMinTSRequest,
 ) (*tsopb.GetMinTSResponse, error) {
 	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
-	if s.IsClosed() || s.keyspaceGroupManager == nil {
+	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
 		return &tsopb.GetMinTSResponse{
-			Header: s.wrapErrorToHeader(
-				tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted.Error(), respKeyspaceGroup),
-		}, nil
-	}
-
-	if request.GetHeader().GetClusterId() != s.clusterID {
-		return &tsopb.GetMinTSResponse{
-			Header: s.wrapErrorToHeader(
-				tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched.Error(), respKeyspaceGroup),
+			Header: s.wrapErrorToHeader(errorType, err.Error(), respKeyspaceGroup),
 		}, nil
 	}
 
@@ -249,6 +236,16 @@ func (s *Service) GetMinTS(
 		KeyspaceGroupsServing: kgAskedCount,
 		KeyspaceGroupsTotal:   kgTotalCount,
 	}, nil
+}
+
+func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, error) {
+	if s.IsClosed() || s.keyspaceGroupManager == nil {
+		return tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted
+	}
+	if header == nil || header.GetClusterId() != s.clusterID {
+		return tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched
+	}
+	return tsopb.ErrorType_OK, nil
 }
 
 func (s *Service) header(keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
