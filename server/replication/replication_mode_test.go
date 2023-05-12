@@ -215,7 +215,7 @@ func TestStateSwitch(t *testing.T) {
 
 	// add new store in dr zone.
 	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone2"})
-	cluster.AddLabelsStore(6, 1, map[string]string{"zone": "zone2"})
+	cluster.AddLabersStoreWithLearnerCount(6, 1, 1, map[string]string{"zone": "zone2"})
 	// async -> sync
 	rep.tickDR()
 	re.Equal(drStateSyncRecover, rep.drGetState())
@@ -233,6 +233,15 @@ func TestStateSwitch(t *testing.T) {
 	setStoreState(cluster, "down", "down", "down", "up", "up", "up")
 	rep.tickDR()
 	re.Equal(drStateSync, rep.drGetState()) // cannot guarantee majority, keep sync.
+
+	setStoreState(cluster, "up", "up", "up", "up", "up", "down")
+	rep.tickDR()
+	re.Equal(drStateSync, rep.drGetState())
+
+	// once the voter node down, even learner node up, swith to async state.
+	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
+	rep.tickDR()
+	re.Equal(drStateAsyncWait, rep.drGetState())
 
 	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
 	rep.tickDR()
