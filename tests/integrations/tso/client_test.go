@@ -133,26 +133,32 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			})
 		}
 
-		for _, keyspaceGroup := range suite.keyspaceGroups {
-			suite.keyspaceIDs = append(suite.keyspaceIDs, keyspaceGroup.keyspaceIDs...)
-		}
-
-		// Make sure all keyspace groups are available.
+		// The tso servers are loading keyspace groups asynchronously. Make sure all keyspace groups
+		// are available for serving tso requests from corresponding keyspaces by querying
+		// IsKeyspaceServing(keyspaceID, the Desired KeyspaceGroupID). if use default keyspace group id
+		// in the query, it will always return true as the keyspace will be served by default keyspace
+		// group before the keyspace groups are loaded.
 		testutil.Eventually(re, func() bool {
-			for _, keyspaceID := range suite.keyspaceIDs {
-				served := false
-				for _, server := range suite.tsoCluster.GetServers() {
-					if server.IsKeyspaceServing(keyspaceID, mcsutils.DefaultKeyspaceGroupID) {
-						served = true
-						break
+			for _, keyspaceGroup := range suite.keyspaceGroups {
+				for _, keyspaceID := range keyspaceGroup.keyspaceIDs {
+					served := false
+					for _, server := range suite.tsoCluster.GetServers() {
+						if server.IsKeyspaceServing(keyspaceID, keyspaceGroup.keyspaceGroupID) {
+							served = true
+							break
+						}
 					}
-				}
-				if !served {
-					return false
+					if !served {
+						return false
+					}
 				}
 			}
 			return true
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+		for _, keyspaceGroup := range suite.keyspaceGroups {
+			suite.keyspaceIDs = append(suite.keyspaceIDs, keyspaceGroup.keyspaceIDs...)
+		}
 
 		// Create clients and make sure they all have discovered the tso service.
 		suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
