@@ -461,10 +461,10 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		watchStartRevision int64
 		err                error
 	)
-	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
-	defer cancel()
 	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
 	defer ticker.Stop()
+	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
+	defer cancel()
 
 	for i := 0; i < lw.loadRetryTimes; i++ {
 		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
