@@ -71,9 +71,10 @@ const (
 	tsoSvcRootPathFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName
 
 	// maxRetryTimesWaitAPIService is the max retry times for initializing the cluster ID.
-	maxRetryTimesWaitAPIService = 60
+	maxRetryTimesWaitAPIService = 360
 	// retryIntervalWaitAPIService is the interval to retry.
-	retryIntervalWaitAPIService = 3 * time.Second
+	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
+	retryIntervalWaitAPIService = 500 * time.Millisecond
 )
 
 var _ bs.Server = (*Server)(nil)
