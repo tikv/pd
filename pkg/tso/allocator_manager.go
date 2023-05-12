@@ -135,6 +135,8 @@ type ElectionMember interface {
 	GetLeaderPath() string
 	// GetLeadership returns the leadership of the PD member.
 	GetLeadership() *election.Leadership
+	// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
+	GetLastLeaderUpdatedTime() time.Time
 	// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 	GetDCLocationPathPrefix() string
 	// GetDCLocationPath returns the dc-location path of a member with the given member ID.
