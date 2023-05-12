@@ -137,6 +137,24 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			suite.keyspaceIDs = append(suite.keyspaceIDs, keyspaceGroup.keyspaceIDs...)
 		}
 
+		// Make sure all keyspace groups are available.
+		testutil.Eventually(re, func() bool {
+			for _, keyspaceID := range suite.keyspaceIDs {
+				served := false
+				for _, server := range suite.tsoCluster.GetServers() {
+					if server.IsKeyspaceServing(keyspaceID, mcsutils.DefaultKeyspaceGroupID) {
+						served = true
+						break
+					}
+				}
+				if !served {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+		// Create clients and make sure they all have discovered the tso service.
 		suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
 			suite.ctx, re, suite.keyspaceIDs, strings.Split(suite.backendEndpoints, ","))
 		re.Equal(len(suite.keyspaceIDs), len(suite.clients))
