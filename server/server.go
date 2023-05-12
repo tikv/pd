@@ -88,6 +88,23 @@ const (
 	idAllocLabel = "idalloc"
 
 	recoveringMarkPath = "cluster/markers/snapshot-recovering"
+<<<<<<< HEAD
+=======
+
+	// PDMode represents that server is in PD mode.
+	PDMode = "PD"
+	// APIServiceMode represents that server is in API service mode.
+	APIServiceMode = "API service"
+
+	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
+	// Note: it need to be less than client.defaultPDTimeout
+	maxRetryTimesGetServicePrimary = 25
+	// retryIntervalGetServicePrimary is the retry interval for getting primary addr.
+	retryIntervalGetServicePrimary = 100 * time.Millisecond
+
+	lostPDLeaderMaxTimeoutSecs   = 10
+	lostPDLeaderReElectionFactor = 10
+>>>>>>> 3e4056406 (server: fix the leader cannot election after pd leader lost while etcd leader intact (#6447))
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1387,7 +1404,19 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
+<<<<<<< HEAD
 		leader, rev, checkAgain := s.member.CheckLeader()
+=======
+		leader, checkAgain := s.member.CheckLeader()
+		// add failpoint to test leader check go to stuck.
+		failpoint.Inject("leaderLoopCheckAgain", func(val failpoint.Value) {
+			memberString := val.(string)
+			memberID, _ := strconv.ParseUint(memberString, 10, 64)
+			if s.member.ID() == memberID {
+				checkAgain = true
+			}
+		})
+>>>>>>> 3e4056406 (server: fix the leader cannot election after pd leader lost while etcd leader intact (#6447))
 		if checkAgain {
 			continue
 		}
@@ -1413,6 +1442,25 @@ func (s *Server) leaderLoop() {
 		// To make sure the etcd leader and PD leader are on the same server.
 		etcdLeader := s.member.GetEtcdLeader()
 		if etcdLeader != s.member.ID() {
+			if s.member.GetLeader() == nil {
+				lastUpdated := s.member.GetLastLeaderUpdatedTime()
+				// use random timeout to avoid leader campaigning storm.
+				randomTimeout := time.Duration(rand.Intn(int(lostPDLeaderMaxTimeoutSecs)))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
+				// add failpoint to test the campaign leader logic.
+				failpoint.Inject("timeoutWaitPDLeader", func() {
+					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
+					randomTimeout = time.Duration(rand.Intn(10))*time.Millisecond + 100*time.Millisecond
+				})
+				if lastUpdated.Add(randomTimeout).Before(time.Now()) && !lastUpdated.IsZero() && etcdLeader != 0 {
+					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
+						zap.Duration("timeout", randomTimeout),
+						zap.Time("last-updated", lastUpdated),
+						zap.String("current-leader-member-id", types.ID(etcdLeader).String()),
+						zap.String("transferee-member-id", types.ID(s.member.ID()).String()),
+					)
+					s.member.MoveEtcdLeader(s.ctx, etcdLeader, s.member.ID())
+				}
+			}
 			log.Info("skip campaigning of pd leader and check later",
 				zap.String("server-name", s.Name()),
 				zap.Uint64("etcd-leader-id", etcdLeader),
@@ -1521,6 +1569,16 @@ func (s *Server) campaignLeader() {
 				log.Info("no longer a leader because lease has expired, pd leader will step down")
 				return
 			}
+			// add failpoint to test exit leader, failpoint judge the member is the give value, then break
+			failpoint.Inject("exitCampaignLeader", func(val failpoint.Value) {
+				memberString := val.(string)
+				memberID, _ := strconv.ParseUint(memberString, 10, 64)
+				if s.member.ID() == memberID {
+					log.Info("exit PD leader")
+					failpoint.Return()
+				}
+			})
+
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {
 				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
