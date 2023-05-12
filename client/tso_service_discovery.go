@@ -559,7 +559,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 func (c *tsoServiceDiscovery) discoverWithLegacyPath() ([]string, error) {
 	resp, err := c.metacli.Get(c.ctx, []byte(c.defaultDiscoveryKey))
 	if err != nil {
-		log.Error("[tso] failed to get the kesypace serving endpoint",
+		log.Error("[tso] failed to get the keyspace serving endpoint",
 			zap.String("discovery-key", c.defaultDiscoveryKey), errs.ZapError(err))
 		return nil, err
 	}
