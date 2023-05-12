@@ -371,7 +371,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.tokens = tokens
 		lim.maybeNotify()
 	} else {
-		log.Warn("[resource group controller]", zap.Float64("NewTokens", lim.tokens), zap.Float64("current rate", float64(lim.limit)), zap.Float64("request tokens", n), zap.Int64("burst", lim.burst), zap.Int("remaining notify times", lim.remainingNotifyTimes))
+		log.Debug("[resource group controller]", zap.Float64("Tokens", lim.tokens), zap.Float64("current rate", float64(lim.limit)), zap.Float64("request tokens", n), zap.Int64("burst", lim.burst), zap.Int("remaining notify times", lim.remainingNotifyTimes))
 		lim.last = last
 		if lim.limit == 0 {
 			lim.notify()
