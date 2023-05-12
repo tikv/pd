@@ -542,17 +542,14 @@ func (s *Server) waitAPIServiceReady() error {
 	)
 	for i := 0; i < maxRetryTimesWaitAPIService; i++ {
 		ready, err = s.isAPIServiceReady()
-		if err != nil {
-			log.Debug("failed to check api server ready", errs.ZapError(err))
-		}
-		if ready {
+		if err == nil && ready {
 			return nil
 		}
+		log.Debug("api server is not ready, retrying", errs.ZapError(err), zap.Bool("ready", ready))
 		select {
 		case <-s.ctx.Done():
 			return errors.New("context canceled while waiting api server ready")
 		case <-time.After(retryIntervalWaitAPIService):
-			log.Debug("api server is not ready, retrying")
 		}
 	}
 	if err != nil {
