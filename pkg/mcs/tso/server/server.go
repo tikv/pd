@@ -536,10 +536,14 @@ func (s *Server) startServer() (err error) {
 }
 
 func (s *Server) waitAPIServiceReady() error {
+	var (
+		ready bool
+		err   error
+	)
 	for i := 0; i < maxRetryTimesWaitAPIService; i++ {
-		ready, err := s.isAPIServiceReady()
+		ready, err = s.isAPIServiceReady()
 		if err != nil {
-			log.Warn("failed to check api server ready", errs.ZapError(err))
+			log.Debug("failed to check api server ready", errs.ZapError(err))
 		}
 		if ready {
 			return nil
@@ -550,6 +554,9 @@ func (s *Server) waitAPIServiceReady() error {
 		case <-time.After(retryIntervalWaitAPIService):
 			log.Debug("api server is not ready, retrying")
 		}
+	}
+	if err != nil {
+		log.Warn("failed to check api server ready", errs.ZapError(err))
 	}
 	return errors.Errorf("failed to wait api server ready after retrying %d times", maxRetryTimesWaitAPIService)
 }
