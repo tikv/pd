@@ -300,7 +300,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 ) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	log.Debug("[resource group controller] before reconfigure", zap.Float64("OldTokens", lim.tokens), zap.Float64("OldRate", float64(lim.limit)), zap.Float64("OldNotifyThreshold", args.NotifyThreshold), zap.Int64("OldBurst", lim.burst))
+	log.Debug("[resource group controller] before reconfigure", zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.limit)), zap.Float64("old-notify-threshold", args.NotifyThreshold), zap.Int64("old-burst", lim.burst))
 	if args.NewBurst < 0 {
 		lim.last = now
 		lim.tokens = args.NewTokens
@@ -316,7 +316,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		opt(lim)
 	}
 	lim.maybeNotify()
-	log.Debug("[resource group controller] after reconfigure", zap.Float64("Tokens", lim.tokens), zap.Float64("Rate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold), zap.Int64("Burst", lim.burst))
+	log.Debug("[resource group controller] after reconfigure", zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.limit)), zap.Float64("notify-threshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -371,7 +371,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.tokens = tokens
 		lim.maybeNotify()
 	} else {
-		log.Debug("[resource group controller]", zap.Float64("Tokens", lim.tokens), zap.Float64("current rate", float64(lim.limit)), zap.Float64("request tokens", n), zap.Int64("burst", lim.burst), zap.Int("remaining notify times", lim.remainingNotifyTimes))
+		log.Debug("[resource group controller]", zap.Float64("current-tokens", lim.tokens), zap.Float64("current-rate", float64(lim.limit)), zap.Float64("request-tokens", n), zap.Int64("burst", lim.burst), zap.Int("remaining-notify-times", lim.remainingNotifyTimes))
 		lim.last = last
 		if lim.limit == 0 {
 			lim.notify()
