@@ -18,7 +18,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
-// Because of the suffix, we need to shift the count before we add it to the logical part.
+// AddLogical shifts the count before we add it to the logical part.
 func AddLogical(logical, count int64, suffixBits uint32) int64 {
 	return logical + count<<suffixBits
 }
