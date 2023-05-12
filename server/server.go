@@ -1448,7 +1448,7 @@ func (s *Server) leaderLoop() {
 			if s.member.GetLeader() == nil {
 				lastUpdated := s.member.GetLastLeaderUpdatedTime()
 				// use random timeout to avoid leader campaigning storm.
-				randomTimeout := time.Duration(rand.Intn(int(lostPDLeaderMaxTimeoutSecs)))*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
+				randomTimeout := time.Duration(rand.Intn(int(lostPDLeaderMaxTimeoutSecs)))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
 				// add failpoint to test the campaign leader logic.
 				failpoint.Inject("timeoutWaitPDLeader", func() {
 					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
