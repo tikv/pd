@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -715,19 +716,14 @@ func (c *tsoClient) processRequests(
 		return err
 	}
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
-	firstLogical := addLogical(logical, -count+1, suffixBits)
+	firstLogical := tsoutil.AddLogical(logical, -count+1, suffixBits)
 	c.compareAndSwapTS(dcLocation, physical, firstLogical, suffixBits, count)
 	c.finishRequest(requests, physical, firstLogical, suffixBits, nil)
 	return nil
 }
 
-// Because of the suffix, we need to shift the count before we add it to the logical part.
-func addLogical(logical, count int64, suffixBits uint32) int64 {
-	return logical + count<<suffixBits
-}
-
 func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical int64, suffixBits uint32, count int64) {
-	largestLogical := addLogical(firstLogical, count-1, suffixBits)
+	largestLogical := tsoutil.AddLogical(firstLogical, count-1, suffixBits)
 	lastTSOInterface, loaded := c.lastTSMap.LoadOrStore(dcLocation, &lastTSO{
 		physical: physical,
 		// Save the largest logical part here
@@ -742,7 +738,7 @@ func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical i
 	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical
 	// to compare with the new TSO's first logical. For example, if we have a TSO resp with logical 10, count 5, then
 	// all TSOs we get will be [6, 7, 8, 9, 10].
-	if tsLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
+	if tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
 		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
 			dcLocation, physical, firstLogical, lastPhysical, lastLogical))
 	}
@@ -751,19 +747,12 @@ func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical i
 	lastTSOPointer.logical = largestLogical
 }
 
-func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
-	if physical == thatPhysical {
-		return logical <= thatLogical
-	}
-	return physical < thatPhysical
-}
-
 func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
 	for i := 0; i < len(requests); i++ {
 		if span := opentracing.SpanFromContext(requests[i].requestCtx); span != nil {
 			span.Finish()
 		}
-		requests[i].physical, requests[i].logical = physical, addLogical(firstLogical, int64(i), suffixBits)
+		requests[i].physical, requests[i].logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
 		requests[i].done <- err
 	}
 }

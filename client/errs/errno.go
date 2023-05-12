@@ -43,6 +43,7 @@ var (
 	ErrClientTSOStreamClosed       = errors.Normalize("encountered TSO stream being closed unexpectedly", errors.RFCCodeText("PD:client:ErrClientTSOStreamClosed"))
 	ErrClientGetTSOTimeout         = errors.Normalize("get TSO timeout", errors.RFCCodeText("PD:client:ErrClientGetTSOTimeout"))
 	ErrClientGetTSO                = errors.Normalize("get TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
+	ErrClientGetMinTSO             = errors.Normalize("get min TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetMinTSO"))
 	ErrClientGetLeader             = errors.Normalize("get leader failed, %v", errors.RFCCodeText("PD:client:ErrClientGetLeader"))
 	ErrClientGetMember             = errors.Normalize("get member failed", errors.RFCCodeText("PD:client:ErrClientGetMember"))
 	ErrClientGetClusterInfo        = errors.Normalize("get cluster info failed", errors.RFCCodeText("PD:client:ErrClientGetClusterInfo"))

@@ -12,7 +12,7 @@ replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230426023724-d90a321b46be
+	github.com/pingcap/kvproto v0.0.0-20230511011722-6e0e8a7deaa1
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.8.2

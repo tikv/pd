@@ -244,6 +244,20 @@ func WithMaxErrorRetry(count int) ClientOption {
 	}
 }
 
+// WithMetricsLabels configures the client with metrics labels.
+func WithMetricsLabels(labels prometheus.Labels) ClientOption {
+	return func(c *client) {
+		c.option.metricsLabels = labels
+	}
+}
+
+// WithInitMetricsOption configures the client with metrics labels.
+func WithInitMetricsOption(initMetrics bool) ClientOption {
+	return func(c *client) {
+		c.option.initMetrics = initMetrics
+	}
+}
+
 var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
@@ -252,20 +266,20 @@ type serviceModeKeeper struct {
 	// triggering service mode switching concurrently.
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
-	tsoClient       atomic.Value // *tsoClient
+	tsoClient       *tsoClient
 	tsoSvcDiscovery ServiceDiscovery
 }
 
-func (smk *serviceModeKeeper) close() {
-	smk.Lock()
-	defer smk.Unlock()
-	switch smk.serviceMode {
+func (k *serviceModeKeeper) close() {
+	k.Lock()
+	defer k.Unlock()
+	switch k.serviceMode {
 	case pdpb.ServiceMode_API_SVC_MODE:
-		smk.tsoSvcDiscovery.Close()
+		k.tsoSvcDiscovery.Close()
 		fallthrough
 	case pdpb.ServiceMode_PD_SVC_MODE:
-		if tsoCli := smk.tsoClient.Load(); tsoCli != nil {
-			tsoCli.(*tsoClient).Close()
+		if k.tsoClient != nil {
+			k.tsoClient.Close()
 		}
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 	}
@@ -415,6 +429,11 @@ func (c *client) loadKeyspaceMeta(keyspace string) error {
 }
 
 func (c *client) setup() error {
+	// Init the metrics.
+	if c.option.initMetrics {
+		initAndRegisterMetrics(c.option.metricsLabels)
+	}
+
 	// Init the client base.
 	if err := c.pdSvcDiscovery.Init(); err != nil {
 		return err
@@ -486,8 +505,8 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	}
 	newTSOCli.Setup()
 	// Replace the old TSO client.
-	oldTSOClient := c.getTSOClient()
-	c.tsoClient.Store(newTSOCli)
+	oldTSOClient := c.tsoClient
+	c.tsoClient = newTSOCli
 	oldTSOClient.Close()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
@@ -506,11 +525,10 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 		zap.String("new-mode", newMode.String()))
 }
 
-func (c *client) getTSOClient() *tsoClient {
-	if tsoCli := c.tsoClient.Load(); tsoCli != nil {
-		return tsoCli.(*tsoClient)
-	}
-	return nil
+func (c *client) getServiceClientProxy() (*tsoClient, pdpb.ServiceMode) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.tsoClient, c.serviceMode
 }
 
 func (c *client) scheduleUpdateTokenConnection() {
@@ -675,7 +693,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
-	tsoClient := c.getTSOClient()
+	tsoClient, _ := c.getServiceClientProxy()
 	req.start = time.Now()
 	req.dcLocation = dcLocation
 
@@ -702,6 +720,26 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
 	resp := c.GetLocalTSAsync(ctx, dcLocation)
 	return resp.Wait()
+}
+
+func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
+	tsoClient, serviceMode := c.getServiceClientProxy()
+	if tsoClient == nil {
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("tso client is nil")
+	}
+
+	switch serviceMode {
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("unknown service mode")
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		// If the service mode is switched to API during GetTS() call, which happens during migration,
+		// returning the default timeline should be fine.
+		return c.GetTS(ctx)
+	case pdpb.ServiceMode_API_SVC_MODE:
+		return tsoClient.getMinTS(ctx)
+	default:
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
+	}
 }
 
 func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
@@ -1395,7 +1433,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 // For test only.
 func (c *client) GetTSOAllocators() *sync.Map {
-	tsoClient := c.getTSOClient()
+	tsoClient, _ := c.getServiceClientProxy()
 	if tsoClient == nil {
 		return nil
 	}
