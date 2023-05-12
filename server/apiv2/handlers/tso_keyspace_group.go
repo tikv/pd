@@ -28,6 +28,8 @@ import (
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
+const groupManagerUninitializedErr = "keyspace group manager is not initialized"
+
 // RegisterTSOKeyspaceGroup registers keyspace group handlers to the server.
 func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router := r.Group("tso/keyspace-groups")
@@ -70,6 +72,10 @@ func CreateKeyspaceGroups(c *gin.Context) {
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
 	err = manager.CreateKeyspaceGroups(createParams.KeyspaceGroups)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -89,6 +95,10 @@ func GetKeyspaceGroups(c *gin.Context) {
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
 	keyspaceGroups, err := manager.GetKeyspaceGroups(scanStart, scanLimit)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -108,6 +118,10 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
 	kg, err := manager.GetKeyspaceGroupByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -127,6 +141,10 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
 	kg, err := manager.DeleteKeyspaceGroupByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -174,6 +192,10 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 	if !patrolKeyspaceAssignmentState.patrolled {
 		// Patrol keyspace assignment before splitting keyspace group.
 		manager := svr.GetKeyspaceManager()
+		if manager == nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+			return
+		}
 		err = manager.PatrolKeyspaceAssignment()
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -185,6 +207,10 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 	patrolKeyspaceAssignmentState.Unlock()
 	// Split keyspace group.
 	groupManager := svr.GetKeyspaceGroupManager()
+	if groupManager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
 	err = groupManager.SplitKeyspaceGroupByID(id, splitParams.NewID, splitParams.Keyspaces)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -225,6 +251,10 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 	}
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
 	allocParams := &AllocNodesForKeyspaceGroupParams{}
 	err = c.BindJSON(allocParams)
 	if err != nil {
@@ -268,6 +298,10 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 	}
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
 	setParams := &SetNodesForKeyspaceGroupParams{}
 	err = c.BindJSON(setParams)
 	if err != nil {

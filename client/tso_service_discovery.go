@@ -21,7 +21,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
@@ -96,35 +98,11 @@ type tsoServerDiscovery struct {
 	failureCount int
 }
 
-func (t *tsoServerDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
-	t.Lock()
-	defer t.Unlock()
-
-	if len(t.addrs) == 0 || t.failureCount == len(t.addrs) {
-		addrs := sd.DiscoverMicroservice(tsoService)
-		if len(addrs) == 0 {
-			return "", errors.New("no tso server address found")
-		}
-
-		log.Info("update tso server addresses", zap.Strings("addrs", addrs))
-
-		t.addrs = addrs
-		t.selectIdx = 0
-		t.failureCount = 0
-	}
-
-	// Pick a TSO server in a round-robin way.
-	tsoServerAddr := t.addrs[t.selectIdx]
-	t.selectIdx++
-	t.selectIdx %= len(t.addrs)
-
-	return tsoServerAddr, nil
-}
-
-func (t *tsoServerDiscovery) countFailure() {
+func (t *tsoServerDiscovery) countFailure() bool {
 	t.Lock()
 	defer t.Unlock()
 	t.failureCount++
+	return t.failureCount >= len(t.addrs)
 }
 
 func (t *tsoServerDiscovery) resetFailure() {
@@ -301,7 +279,7 @@ func (c *tsoServiceDiscovery) GetKeyspaceGroupID() uint32 {
 }
 
 // DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
-func (c *tsoServiceDiscovery) DiscoverMicroservice(svcType serviceType) []string {
+func (c *tsoServiceDiscovery) DiscoverMicroservice(svcType serviceType) ([]string, error) {
 	var urls []string
 
 	switch svcType {
@@ -312,7 +290,7 @@ func (c *tsoServiceDiscovery) DiscoverMicroservice(svcType serviceType) []string
 		panic("invalid service type")
 	}
 
-	return urls
+	return urls, nil
 }
 
 // GetServiceURLs returns the URLs of the tso primary/secondary addresses of this keyspace group.
@@ -430,15 +408,16 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 func (c *tsoServiceDiscovery) updateMember() error {
 	// The keyspace membership or the primary serving address of the keyspace group, to which this
 	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
-	tsoServerAddr, err := c.tsoServerDiscovery.getTSOServer(c.apiSvcDiscovery)
+	tsoServerAddr, err := c.getTSOServer(c.apiSvcDiscovery)
 	if err != nil {
 		log.Error("[tso] failed to get tso server", errs.ZapError(err))
 		return err
 	}
 	keyspaceGroup, err := c.findGroupByKeyspaceID(c.keyspaceID, tsoServerAddr, updateMemberTimeout)
 	if err != nil {
-		c.tsoServerDiscovery.countFailure()
-		log.Error("[tso] failed to find the keyspace group", errs.ZapError(err))
+		if c.tsoServerDiscovery.countFailure() {
+			log.Error("[tso] failed to find the keyspace group", errs.ZapError(err))
+		}
 		return err
 	}
 	c.tsoServerDiscovery.resetFailure()
@@ -525,4 +504,85 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 	}
 
 	return resp.KeyspaceGroup, nil
+}
+
+func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
+	c.Lock()
+	defer c.Unlock()
+
+	var (
+		addrs []string
+		err   error
+	)
+	t := c.tsoServerDiscovery
+	if len(t.addrs) == 0 || t.failureCount == len(t.addrs) {
+		addrs, err = sd.DiscoverMicroservice(tsoService)
+		if err != nil {
+			return "", err
+		}
+		failpoint.Inject("serverReturnsNoTSOAddrs", func() {
+			log.Info("[failpoint] injected error: server returns no tso addrs")
+			addrs = nil
+		})
+		if len(addrs) == 0 {
+			// There is no error but no tso server address found, which means
+			// either the server side is experiencing some problems to get the
+			// tso primary addresses or the server hasn't been upgraded to the
+			// version which processes and returns GetClusterInfoResponse.TsoUrls.
+			// In this case, we fall back to the old way of discovering the tso
+			// primary addresses from etcd directly.
+			log.Warn("[tso] no tso server address found,"+
+				" fallback to the legacy path to discover from etcd directly",
+				zap.String("discovery-key", c.defaultDiscoveryKey))
+			addrs, err = c.discoverWithLegacyPath()
+			if err != nil {
+				return "", err
+			}
+			if len(addrs) == 0 {
+				return "", errors.New("no tso server address found")
+			}
+		}
+
+		log.Info("update tso server addresses", zap.Strings("addrs", addrs))
+
+		t.addrs = addrs
+		t.selectIdx = 0
+		t.failureCount = 0
+	}
+
+	// Pick a TSO server in a round-robin way.
+	tsoServerAddr := t.addrs[t.selectIdx]
+	t.selectIdx++
+	t.selectIdx %= len(t.addrs)
+
+	return tsoServerAddr, nil
+}
+
+func (c *tsoServiceDiscovery) discoverWithLegacyPath() ([]string, error) {
+	resp, err := c.metacli.Get(c.ctx, []byte(c.defaultDiscoveryKey))
+	if err != nil {
+		log.Error("[tso] failed to get the keyspace serving endpoint",
+			zap.String("discovery-key", c.defaultDiscoveryKey), errs.ZapError(err))
+		return nil, err
+	}
+	if resp == nil || len(resp.Kvs) == 0 {
+		log.Error("[tso] didn't find the keyspace serving endpoint",
+			zap.String("primary-key", c.defaultDiscoveryKey))
+		return nil, errs.ErrClientGetServingEndpoint
+	} else if resp.Count > 1 {
+		return nil, errs.ErrClientGetMultiResponse.FastGenByArgs(resp.Kvs)
+	}
+
+	value := resp.Kvs[0].Value
+	primary := &tsopb.Participant{}
+	if err := proto.Unmarshal(value, primary); err != nil {
+		return nil, errs.ErrClientProtoUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	listenUrls := primary.GetListenUrls()
+	if len(listenUrls) == 0 {
+		log.Error("[tso] the keyspace serving endpoint list is empty",
+			zap.String("discovery-key", c.defaultDiscoveryKey))
+		return nil, errs.ErrClientGetServingEndpoint
+	}
+	return listenUrls, nil
 }

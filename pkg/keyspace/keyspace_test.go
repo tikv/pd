@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 const (
@@ -51,10 +52,27 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 type mockConfig struct {
-	PreAlloc []string
+	PreAlloc                 []string
+	WaitRegionSplit          bool
+	WaitRegionSplitTimeout   typeutil.Duration
+	CheckRegionSplitInterval typeutil.Duration
 }
 
-func (m *mockConfig) GetPreAlloc() []string { return m.PreAlloc }
+func (m *mockConfig) GetPreAlloc() []string {
+	return m.PreAlloc
+}
+
+func (m *mockConfig) ToWaitRegionSplit() bool {
+	return m.WaitRegionSplit
+}
+
+func (m *mockConfig) GetWaitRegionSplitTimeout() time.Duration {
+	return m.WaitRegionSplitTimeout.Duration
+}
+
+func (m *mockConfig) GetCheckRegionSplitInterval() time.Duration {
+	return m.CheckRegionSplitInterval.Duration
+}
 
 func (suite *keyspaceTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -89,6 +107,7 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 				testConfig2: "200",
 			},
 			CreateTime: now,
+			IsPreAlloc: true, // skip wait region split
 		}
 	}
 	return requests
