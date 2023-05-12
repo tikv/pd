@@ -121,6 +121,8 @@ type Server struct {
 	member *member.Member
 	// etcd client
 	client *clientv3.Client
+	// electionClient is used for leader election.
+	electionClient *clientv3.Client
 	// http client
 	httpClient *http.Client
 	clusterID  uint64 // pd cluster id.
@@ -340,7 +342,14 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 
+<<<<<<< HEAD
 	etcdServerID := uint64(etcd.Server.ID())
+=======
+	s.electionClient, err = startElectionClient(s.cfg)
+	if err != nil {
+		return err
+	}
+>>>>>>> d2e73d106 (*: use another etcd client for election (#6409))
 
 	// update advertise peer urls.
 	etcdMembers, err := etcdutil.ListEtcdMembers(client)
@@ -367,10 +376,42 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
 	})
+<<<<<<< HEAD
 	s.member = member.NewMember(etcd, client, etcdServerID)
 	return nil
 }
 
+=======
+	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
+	return nil
+}
+
+func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
+	tlsConfig, err := cfg.Security.ToTLSConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls[0])
+}
+
+func startElectionClient(cfg *config.Config) (*clientv3.Client, error) {
+	tlsConfig, err := cfg.Security.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	return etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls[0])
+}
+
+>>>>>>> d2e73d106 (*: use another etcd client for election (#6409))
 // AddStartCallback adds a callback in the startServer phase.
 func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
@@ -492,6 +533,11 @@ func (s *Server) Close() {
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+	if s.electionClient != nil {
+		if err := s.electionClient.Close(); err != nil {
+			log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
 		}
 	}
 
