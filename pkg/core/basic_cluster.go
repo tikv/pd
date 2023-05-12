@@ -175,10 +175,10 @@ func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Typ
 
 // UpdateStoreStatus updates the information of the store.
 func (bc *BasicCluster) UpdateStoreStatus(storeID uint64) {
-	leaderCount, regionCount, witnessCount, pendingPeerCount, leaderRegionSize, regionSize := bc.RegionsInfo.GetStoreStats(storeID)
+	leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize := bc.RegionsInfo.GetStoreStats(storeID)
 	bc.Stores.mu.Lock()
 	defer bc.Stores.mu.Unlock()
-	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, pendingPeerCount, leaderRegionSize, regionSize, witnessCount)
+	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
 // PutStore put a store.
