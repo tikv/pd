@@ -98,20 +98,22 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	// a keyspace group before, will be served by the default keyspace group.
 	re := suite.Require()
 	testutil.Eventually(re, func() bool {
-		for _, server := range suite.tsoCluster.GetServers() {
-			allServed := true
-			for _, keyspaceID := range []uint32{0, 1, 2} {
+		for _, keyspaceID := range []uint32{0, 1, 2} {
+			served := false
+			for _, server := range suite.tsoCluster.GetServers() {
 				if server.IsKeyspaceServing(keyspaceID, mcsutils.DefaultKeyspaceGroupID) {
 					tam, err := server.GetTSOAllocatorManager(mcsutils.DefaultKeyspaceGroupID)
 					re.NoError(err)
 					re.NotNil(tam)
-				} else {
-					allServed = false
+					served = true
+					break
 				}
 			}
-			return allServed
+			if !served {
+				return false
+			}
 		}
-		return false
+		return true
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Any keyspace that was assigned to a keyspace group before, except default keyspace,

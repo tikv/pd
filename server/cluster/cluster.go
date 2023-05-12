@@ -73,6 +73,8 @@ var (
 	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
 	versionNotMatchCounter        = bucketEventCounter.WithLabelValues("version_not_match")
 	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
+
+	denySchedulersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("schedulers", "deny")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -2509,6 +2511,16 @@ func (c *RaftCluster) GetMinResolvedTS() uint64 {
 		return math.MaxUint64
 	}
 	return c.minResolvedTS
+}
+
+// GetStoreMinResolvedTS returns the min resolved ts of the store.
+func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	if !c.isInitialized() || !core.IsAvailableForMinResolvedTS(c.GetStore(storeID)) {
+		return math.MaxUint64
+	}
+	return c.GetStore(storeID).GetMinResolvedTS()
 }
 
 // GetExternalTS returns the external timestamp.

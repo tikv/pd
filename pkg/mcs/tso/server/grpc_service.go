@@ -36,7 +36,8 @@ import (
 
 // gRPC errors
 var (
-	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
+	ErrNotStarted        = status.Errorf(codes.Unavailable, "server not started")
+	ErrClusterMismatched = status.Errorf(codes.Unavailable, "cluster mismatched")
 )
 
 var _ tsopb.TSOServer = (*Service)(nil)
@@ -157,6 +158,13 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 func (s *Service) FindGroupByKeyspaceID(
 	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
 ) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
+	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
+	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(errorType, err.Error(), respKeyspaceGroup),
+		}, nil
+	}
+
 	keyspaceID := request.GetKeyspaceId()
 	am, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
 	if err != nil {
@@ -197,6 +205,47 @@ func (s *Service) FindGroupByKeyspaceID(
 			Members:    members,
 		},
 	}, nil
+}
+
+// GetMinTS gets the minimum timestamp across all keyspace groups served by the TSO server
+// who receives and handles the request.
+func (s *Service) GetMinTS(
+	ctx context.Context, request *tsopb.GetMinTSRequest,
+) (*tsopb.GetMinTSResponse, error) {
+	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
+	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
+		return &tsopb.GetMinTSResponse{
+			Header: s.wrapErrorToHeader(errorType, err.Error(), respKeyspaceGroup),
+		}, nil
+	}
+
+	minTS, kgAskedCount, kgTotalCount, err := s.keyspaceGroupManager.GetMinTS(request.GetDcLocation())
+	if err != nil {
+		return &tsopb.GetMinTSResponse{
+			Header: s.wrapErrorToHeader(
+				tsopb.ErrorType_UNKNOWN, err.Error(), respKeyspaceGroup),
+			Timestamp:             &minTS,
+			KeyspaceGroupsServing: kgAskedCount,
+			KeyspaceGroupsTotal:   kgTotalCount,
+		}, nil
+	}
+
+	return &tsopb.GetMinTSResponse{
+		Header:                s.header(respKeyspaceGroup),
+		Timestamp:             &minTS,
+		KeyspaceGroupsServing: kgAskedCount,
+		KeyspaceGroupsTotal:   kgTotalCount,
+	}, nil
+}
+
+func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, error) {
+	if s.IsClosed() || s.keyspaceGroupManager == nil {
+		return tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted
+	}
+	if header == nil || header.GetClusterId() != s.clusterID {
+		return tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched
+	}
+	return tsopb.ErrorType_OK, nil
 }
 
 func (s *Service) header(keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
