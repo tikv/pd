@@ -505,14 +505,16 @@ func (m *ModeManager) checkStoreStatus() [][]uint64 {
 		}
 		down := s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration
 		labelValue := s.GetLabelValue(m.config.DRAutoSync.LabelKey)
-		if labelValue == m.config.DRAutoSync.Primary {
+		isLearnerNode := s.GetRegionCount() == s.GetLearnerCount()
+		// learner peers do not participate in major commit or vote, so it should not count in primary/dr as a normal store.
+		if labelValue == m.config.DRAutoSync.Primary && !isLearnerNode {
 			if down {
 				stores[primaryDown] = append(stores[primaryDown], s.GetID())
 			} else {
 				stores[primaryUp] = append(stores[primaryUp], s.GetID())
 			}
 		}
-		if labelValue == m.config.DRAutoSync.DR {
+		if labelValue == m.config.DRAutoSync.DR && !isLearnerNode {
 			if down {
 				stores[drDown] = append(stores[drDown], s.GetID())
 			} else {
