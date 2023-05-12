@@ -285,7 +285,10 @@ func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
 // getMinTS gets a timestamp from PD or the minimal timestamp across all keyspace groups from the TSO microservice.
 func (c *tsoClient) getMinTS(ctx context.Context) (physical, logical int64, err error) {
 	// Immediately refresh the TSO server/pod list
-	addrs := c.svcDiscovery.DiscoverMicroservice(tsoService)
+	addrs, err := c.svcDiscovery.DiscoverMicroservice(tsoService)
+	if err != nil {
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(err).GenWithStackByCause()
+	}
 	if len(addrs) == 0 {
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("no tso servers/pods discovered")
 	}
