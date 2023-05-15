@@ -126,7 +126,7 @@ func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoR
 }
 
 // GetMembers implements gRPC PDServer.
-func (s *GrpcServer) GetMembers(ctx context.Context, _ *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
@@ -139,7 +139,7 @@ func (s *GrpcServer) GetMembers(ctx context.Context, _ *pdpb.GetMembersRequest) 
 			},
 		}, nil
 	}
-	members, err := cluster.GetMembers(ctx, s.GetClient())
+	members, err := cluster.GetMembers(s.GetClient())
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),

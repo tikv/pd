@@ -347,7 +347,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	// update advertise peer urls.
-	etcdMembers, err := etcdutil.ListEtcdMembers(newCtx, s.client)
+	etcdMembers, err := etcdutil.ListEtcdMembers(s.client)
 	if err != nil {
 		return err
 	}
@@ -872,7 +872,7 @@ func (s *Server) GetMembers() ([]*pdpb.Member, error) {
 	if s.IsClosed() {
 		return nil, errs.ErrServerNotStarted.FastGenByArgs()
 	}
-	return cluster.GetMembers(s.GetClient().Ctx(), s.GetClient())
+	return cluster.GetMembers(s.GetClient())
 }
 
 // GetServiceMiddlewareConfig gets the service middleware config information.

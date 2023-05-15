@@ -43,7 +43,7 @@ func TestHealth(t *testing.T) {
 	defer tc.Destroy()
 
 	client := tc.GetEtcdClient()
-	members, err := cluster.GetMembers(client.Ctx(), client)
+	members, err := cluster.GetMembers(client)
 	re.NoError(err)
 	healthMembers := cluster.CheckHealth(tc.GetHTTPClient(), members)
 	healths := []api.Health{}
