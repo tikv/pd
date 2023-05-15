@@ -269,7 +269,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	re.Equal(uint32(2), kg2.ID)
 	re.Equal([]uint32{222, 333}, kg2.Keyspaces)
 	re.True(kg2.IsSplitTarget())
-	time.Sleep(3 * time.Second)
 	// Check the split TSO from keyspace group 2.
 	var splitTS pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
