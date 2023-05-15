@@ -902,11 +902,10 @@ func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
 			s.diagnosticRecorder.setResultFromPlans(ops, plans)
 		}
 		foundDisabled := false
-		for i, op := range ops {
+		for _, op := range ops {
 			if labelMgr := s.cluster.GetRegionLabeler(); labelMgr != nil {
 				region := s.cluster.GetRegion(op.RegionID())
 				if region == nil {
-					ops = append(ops[:i], ops[i+1:]...)
 					continue
 				}
 				if labelMgr.ScheduleDisabled(region) {
