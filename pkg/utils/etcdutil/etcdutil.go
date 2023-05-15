@@ -193,6 +193,16 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
 }
 
+// CreateClientsWithMultiEndpoint creates etcd v3 client and http client.
+func CreateClientsWithMultiEndpoint(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
+	client, err := createEtcdClientWithMultiEndpoint(tlsConfig, acUrls)
+	if err != nil {
+		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+	httpClient := createHTTPClient(tlsConfig)
+	return client, httpClient, nil
+}
+
 // CreateClients creates etcd v3 client and http client.
 func CreateClients(tlsConfig *tls.Config, acUrls url.URL) (*clientv3.Client, *http.Client, error) {
 	client, err := CreateEtcdClient(tlsConfig, acUrls)
