@@ -51,6 +51,8 @@ type Participant struct {
 	// preCampaignChecker is called before the campaign. If it returns false, the
 	// campaign will be skipped.
 	preCampaignChecker leadershipCheckFunc
+	// lastLeaderUpdatedTime is the last time when the leader is updated.
+	lastLeaderUpdatedTime atomic.Value
 }
 
 // NewParticipant create a new Participant.
@@ -78,7 +80,8 @@ func (m *Participant) InitInfo(name string, id uint64, rootPath string, leaderNa
 	m.rootPath = rootPath
 	m.leaderPath = path.Join(rootPath, leaderName)
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
-	log.Info("Participant joining election", zap.Stringer("participant-info", m.member), zap.String("leader-path", m.leaderPath))
+	m.lastLeaderUpdatedTime.Store(time.Now())
+	log.Info("participant joining election", zap.Stringer("participant-info", m.member), zap.String("leader-path", m.leaderPath))
 }
 
 // ID returns the unique ID for this participant in the election group
@@ -143,11 +146,13 @@ func (m *Participant) GetLeader() *tsopb.Participant {
 // setLeader sets the member's leader.
 func (m *Participant) setLeader(member *tsopb.Participant) {
 	m.leader.Store(member)
+	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
 // unsetLeader unsets the member's leader.
 func (m *Participant) unsetLeader() {
 	m.leader.Store(&tsopb.Participant{})
+	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
 // EnableLeader declares the member itself to be the leader.
@@ -158,6 +163,15 @@ func (m *Participant) EnableLeader() {
 // GetLeaderPath returns the path of the leader.
 func (m *Participant) GetLeaderPath() string {
 	return m.leaderPath
+}
+
+// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
+func (m *Participant) GetLastLeaderUpdatedTime() time.Time {
+	lastLeaderUpdatedTime := m.lastLeaderUpdatedTime.Load()
+	if lastLeaderUpdatedTime == nil {
+		return time.Time{}
+	}
+	return lastLeaderUpdatedTime.(time.Time)
 }
 
 // GetLeadership returns the leadership of the member.
