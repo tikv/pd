@@ -750,7 +750,9 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	}
 	if err := ag.allocator.UpdateTSO(); err != nil {
 		log.Warn("failed to update allocator's timestamp",
-			zap.String("dc-location", ag.dcLocation), errs.ZapError(err))
+			zap.String("dc-location", ag.dcLocation),
+			zap.String("name", am.member.Name()),
+			errs.ZapError(err))
 		am.ResetAllocatorGroup(ag.dcLocation)
 		return
 	}

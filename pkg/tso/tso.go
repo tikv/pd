@@ -286,7 +286,11 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 
 	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
 	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
-		log.Warn("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prevPhysical), zap.Time("now", now), zap.Duration("update-physical-interval", t.updatePhysicalInterval))
+		log.Warn("clock offset",
+			zap.Duration("jet-lag", jetLag),
+			zap.Time("prev-physical", prevPhysical),
+			zap.Time("now", now),
+			zap.Duration("update-physical-interval", t.updatePhysicalInterval))
 		tsoCounter.WithLabelValues("slow_save", t.dcLocation).Inc()
 	}
 
@@ -314,6 +318,10 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	if typeutil.SubRealTimeByWallClock(t.lastSavedTime.Load().(time.Time), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		if err := t.storage.SaveTimestamp(t.getTimestampPath(), save); err != nil {
+			log.Warn("save timestamp failed",
+				zap.String("dc-location", t.dcLocation),
+				zap.String("timestamp-path", t.getTimestampPath()),
+				zap.Error(err))
 			tsoCounter.WithLabelValues("err_save_update_ts", t.dcLocation).Inc()
 			return err
 		}
