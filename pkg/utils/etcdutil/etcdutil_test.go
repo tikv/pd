@@ -305,12 +305,12 @@ func TestEtcdScaleInAndOutWithoutMultiPoint(t *testing.T) {
 	// Create two etcd clients with etcd1 as endpoint.
 	urls, err := types.NewURLs([]string{ep1})
 	re.NoError(err)
-	client1, err := createEtcdClient(nil, urls[0]) // execute member change operation with this client
+	client1, err := CreateEtcdClient(nil, urls[0]) // execute member change operation with this client
 	defer func() {
 		client1.Close()
 	}()
 	re.NoError(err)
-	client2, err := createEtcdClient(nil, urls[0]) // check member change with this client
+	client2, err := CreateEtcdClient(nil, urls[0]) // check member change with this client
 	defer func() {
 		client2.Close()
 	}()
@@ -482,7 +482,7 @@ func (suite *loopWatcherTestSuite) SetupSuite() {
 	ep1 := suite.config.LCUrls[0].String()
 	urls, err := types.NewURLs([]string{ep1})
 	suite.NoError(err)
-	suite.client, err = createEtcdClient(nil, urls[0])
+	suite.client, err = CreateEtcdClient(nil, urls[0])
 	suite.NoError(err)
 	suite.cleans = append(suite.cleans, func() {
 		suite.client.Close()
@@ -685,7 +685,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case2: close the etcd client and put a new value after watcher restarts
 	suite.client.Close()
-	suite.client, err = createEtcdClient(nil, suite.config.LCUrls[0])
+	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls[0])
 	suite.NoError(err)
 	watcher.updateClientCh <- suite.client
 	suite.put("TestWatcherBreak", "2")
@@ -693,7 +693,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case3: close the etcd client and put a new value before watcher restarts
 	suite.client.Close()
-	suite.client, err = createEtcdClient(nil, suite.config.LCUrls[0])
+	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls[0])
 	suite.NoError(err)
 	suite.put("TestWatcherBreak", "3")
 	watcher.updateClientCh <- suite.client
@@ -701,7 +701,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case4: close the etcd client and put a new value with compact
 	suite.client.Close()
-	suite.client, err = createEtcdClient(nil, suite.config.LCUrls[0])
+	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls[0])
 	suite.NoError(err)
 	suite.put("TestWatcherBreak", "4")
 	resp, err := EtcdKVGet(suite.client, "TestWatcherBreak")

@@ -196,19 +196,9 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
 }
 
-// CreateClientsWithMultiEndpoint creates etcd v3 client and http client.
-func CreateClientsWithMultiEndpoint(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
-	client, err := createEtcdClientWithMultiEndpoint(tlsConfig, acUrls)
-	if err != nil {
-		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
-	}
-	httpClient := createHTTPClient(tlsConfig)
-	return client, httpClient, nil
-}
-
 // CreateClients creates etcd v3 client and http client.
 func CreateClients(tlsConfig *tls.Config, acUrls url.URL) (*clientv3.Client, *http.Client, error) {
-	client, err := createEtcdClient(tlsConfig, acUrls)
+	client, err := CreateEtcdClient(tlsConfig, acUrls)
 	if err != nil {
 		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
@@ -255,9 +245,9 @@ func createEtcdClientWithMultiEndpoint(tlsConfig *tls.Config, acUrls []url.URL) 
 	return client, err
 }
 
-// createEtcdClient creates etcd v3 client.
+// CreateEtcdClient creates etcd v3 client.
 // Note: it will be used by legacy pd-server, and only connect to leader only.
-func createEtcdClient(tlsConfig *tls.Config, acURL url.URL) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURL url.URL) (*clientv3.Client, error) {
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
