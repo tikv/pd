@@ -137,6 +137,24 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			suite.keyspaceIDs = append(suite.keyspaceIDs, keyspaceGroup.keyspaceIDs...)
 		}
 
+		// Make sure all keyspace groups are available.
+		testutil.Eventually(re, func() bool {
+			for _, keyspaceID := range suite.keyspaceIDs {
+				served := false
+				for _, server := range suite.tsoCluster.GetServers() {
+					if server.IsKeyspaceServing(keyspaceID, mcsutils.DefaultKeyspaceGroupID) {
+						served = true
+						break
+					}
+				}
+				if !served {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+		// Create clients and make sure they all have discovered the tso service.
 		suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
 			suite.ctx, re, suite.keyspaceIDs, strings.Split(suite.backendEndpoints, ","))
 		re.Equal(len(suite.keyspaceIDs), len(suite.clients))
@@ -190,6 +208,70 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 					ts := tsoutil.ComposeTS(physical, logical)
 					suite.Greater(lastTS, ts)
 					lastTS = ts
+				}
+			}(client)
+		}
+	}
+	wg.Wait()
+}
+
+func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
+	re := suite.Require()
+	// Simulate the case that the server has lower version than the client and returns no tso addrs
+	// in the GetClusterInfo RPC.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs"))
+	}()
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber)
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		go func() {
+			defer wg.Done()
+			client := mcs.SetupClientWithDefaultKeyspaceName(
+				suite.ctx, re, strings.Split(suite.backendEndpoints, ","))
+			var lastTS uint64
+			for j := 0; j < tsoRequestRound; j++ {
+				physical, logical, err := client.GetTS(suite.ctx)
+				suite.NoError(err)
+				ts := tsoutil.ComposeTS(physical, logical)
+				suite.Less(lastTS, ts)
+				lastTS = ts
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+// TestGetMinTS tests the correctness of GetMinTS.
+func (suite *tsoClientTestSuite) TestGetMinTS() {
+	// Skip this test for the time being due to https://github.com/tikv/pd/issues/6453
+	// TODO: fix it #6453
+	suite.T().SkipNow()
+
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for _, client := range suite.clients {
+			go func(client pd.Client) {
+				defer wg.Done()
+				var lastMinTS uint64
+				for j := 0; j < tsoRequestRound; j++ {
+					physical, logical, err := client.GetMinTS(suite.ctx)
+					suite.NoError(err)
+					minTS := tsoutil.ComposeTS(physical, logical)
+					suite.Less(lastMinTS, minTS)
+					lastMinTS = minTS
+
+					// Now we check whether the returned ts is the minimum one
+					// among all keyspace groups, i.e., the returned ts is
+					// less than the new timestamps of all keyspace groups.
+					for _, client := range suite.clients {
+						physical, logical, err := client.GetTS(suite.ctx)
+						suite.NoError(err)
+						ts := tsoutil.ComposeTS(physical, logical)
+						suite.Less(minTS, ts)
+					}
 				}
 			}(client)
 		}

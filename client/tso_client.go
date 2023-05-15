@@ -22,8 +22,11 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -31,14 +34,17 @@ import (
 
 // TSOClient is the client used to get timestamps.
 type TSOClient interface {
-	// GetTS gets a timestamp from PD.
+	// GetTS gets a timestamp from PD or TSO microservice.
 	GetTS(ctx context.Context) (int64, int64, error)
-	// GetTSAsync gets a timestamp from PD, without block the caller.
+	// GetTSAsync gets a timestamp from PD or TSO microservice, without block the caller.
 	GetTSAsync(ctx context.Context) TSFuture
-	// GetLocalTS gets a local timestamp from PD.
+	// GetLocalTS gets a local timestamp from PD or TSO microservice.
 	GetLocalTS(ctx context.Context, dcLocation string) (int64, int64, error)
-	// GetLocalTSAsync gets a local timestamp from PD, without block the caller.
+	// GetLocalTSAsync gets a local timestamp from PD or TSO microservice, without block the caller.
 	GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture
+	// GetMinTS gets a timestamp from PD or the minimal timestamp across all keyspace groups from
+	// the TSO microservice.
+	GetMinTS(ctx context.Context) (int64, int64, error)
 }
 
 type tsoRequest struct {
@@ -274,4 +280,117 @@ func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
 		}
 	}
 	return nil, ""
+}
+
+// getMinTS gets a timestamp from PD or the minimal timestamp across all keyspace groups from the TSO microservice.
+func (c *tsoClient) getMinTS(ctx context.Context) (physical, logical int64, err error) {
+	// Immediately refresh the TSO server/pod list
+	addrs, err := c.svcDiscovery.DiscoverMicroservice(tsoService)
+	if err != nil {
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(err).GenWithStackByCause()
+	}
+	if len(addrs) == 0 {
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("no tso servers/pods discovered")
+	}
+
+	// Get the minimal timestamp from the TSO servers/pods
+	var mutex sync.Mutex
+	resps := make([]*tsopb.GetMinTSResponse, 0)
+	wg := sync.WaitGroup{}
+	wg.Add(len(addrs))
+	for _, addr := range addrs {
+		go func(addr string) {
+			defer wg.Done()
+			resp, err := c.getMinTSFromSingleServer(ctx, addr, c.option.timeout)
+			if err != nil || resp == nil {
+				log.Warn("[tso] failed to get min ts from tso server",
+					zap.String("address", addr), zap.Error(err))
+				return
+			}
+			mutex.Lock()
+			defer mutex.Unlock()
+			resps = append(resps, resp)
+		}(addr)
+	}
+	wg.Wait()
+
+	// Check the results. The returned minimal timestamp is valid if all the conditions are met:
+	// 1. The number of responses is equal to the number of TSO servers/pods.
+	// 2. The number of keyspace groups asked is equal to the number of TSO servers/pods.
+	// 3. The minimal timestamp is not zero.
+	var (
+		minTS               *pdpb.Timestamp
+		keyspaceGroupsAsked uint32
+	)
+	if len(resps) == 0 {
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("none of tso server/pod responded")
+	}
+	emptyTS := &pdpb.Timestamp{}
+	keyspaceGroupsTotal := resps[0].KeyspaceGroupsTotal
+	for _, resp := range resps {
+		if resp.KeyspaceGroupsTotal == 0 {
+			return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("the tso service has no keyspace group")
+		}
+		if resp.KeyspaceGroupsTotal != keyspaceGroupsTotal {
+			return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs(
+				"the tso service has inconsistent keyspace group total count")
+		}
+		keyspaceGroupsAsked += resp.KeyspaceGroupsServing
+		if tsoutil.CompareTimestamp(resp.Timestamp, emptyTS) > 0 &&
+			(minTS == nil || tsoutil.CompareTimestamp(resp.Timestamp, minTS) < 0) {
+			minTS = resp.Timestamp
+		}
+	}
+
+	if keyspaceGroupsAsked != keyspaceGroupsTotal {
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs(
+			fmt.Sprintf("can't query all the tso keyspace groups. Asked %d, expected %d",
+				keyspaceGroupsAsked, keyspaceGroupsTotal))
+	}
+
+	if minTS == nil {
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("the tso service is not ready")
+	}
+
+	return minTS.Physical, tsoutil.AddLogical(minTS.Logical, 0, minTS.SuffixBits), nil
+}
+
+func (c *tsoClient) getMinTSFromSingleServer(
+	ctx context.Context, tsoSrvAddr string, timeout time.Duration,
+) (*tsopb.GetMinTSResponse, error) {
+	cc, err := c.svcDiscovery.GetOrCreateGRPCConn(tsoSrvAddr)
+	if err != nil {
+		return nil, errs.ErrClientGetMinTSO.FastGenByArgs(
+			fmt.Sprintf("can't connect to tso server %s", tsoSrvAddr))
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	resp, err := tsopb.NewTSOClient(cc).GetMinTS(
+		cctx, &tsopb.GetMinTSRequest{
+			Header: &tsopb.RequestHeader{
+				ClusterId:       c.svcDiscovery.GetClusterID(),
+				KeyspaceId:      c.svcDiscovery.GetKeyspaceID(),
+				KeyspaceGroupId: c.svcDiscovery.GetKeyspaceGroupID(),
+			},
+			DcLocation: globalDCLocation,
+		})
+	if err != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			err, cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp == nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			"no min ts info collected", cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.GetHeader().GetError() != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+
+	return resp, nil
 }

@@ -136,6 +136,8 @@ type ElectionMember interface {
 	GetLeaderPath() string
 	// GetLeadership returns the leadership of the election member.
 	GetLeadership() *election.Leadership
+	// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
+	GetLastLeaderUpdatedTime() time.Time
 	// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 	GetDCLocationPathPrefix() string
 	// GetDCLocationPath returns the dc-location path of a member with the given member ID.
@@ -1068,7 +1070,7 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 
 // HandleRequest forwards TSO allocation requests to correct TSO Allocators.
 func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
-	if dcLocation == "" {
+	if len(dcLocation) == 0 {
 		dcLocation = GlobalDCLocation
 	}
 	allocatorGroup, exist := am.getAllocatorGroup(dcLocation)
