@@ -105,14 +105,11 @@ const (
 	maxRetryTimesGetServicePrimary = 25
 	// retryIntervalGetServicePrimary is the retry interval for getting primary addr.
 	retryIntervalGetServicePrimary = 100 * time.Millisecond
-<<<<<<< HEAD
 	// TODO: move it to etcdutil
 	watchEtcdChangeRetryInterval = 1 * time.Second
-=======
 
 	lostPDLeaderMaxTimeoutSecs   = 10
 	lostPDLeaderReElectionFactor = 10
->>>>>>> 3e4056406 (server: fix the leader cannot election after pd leader lost while etcd leader intact (#6447))
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
