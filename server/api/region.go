@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
@@ -834,6 +835,64 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 		rc.AddSuspectRegions(regionsIDList...)
 	}
 	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
+}
+
+// @Tags     region
+// @Summary  Accelerate regions scheduling in given ranges, only receive hex format for keys
+// @Accept   json
+// @Param    body   body   object   true   "json params"
+// @Param    limit  query  integer  false  "Limit count"  default(256)
+// @Produce  json
+// @Success  200  {string}  string  "Accelerate regions scheduling in given ranges [startKey1, endKey1), [startKey2, endKey2), ..."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/accelerate-schedule/batch [post]
+func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	var input []map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	limit := 256
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+	var msgBuilder strings.Builder
+	msgBuilder.Grow(128)
+	msgBuilder.WriteString("Accelerate regions scheduling in given ranges: ")
+	regionsIDSet := make(map[uint64]struct{})
+	for _, rg := range input {
+		startKey, rawStartKey, err := apiutil.ParseKey("start_key", rg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		endKey, rawEndKey, err := apiutil.ParseKey("end_key", rg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		regions := rc.ScanRegions(startKey, endKey, limit)
+		for _, region := range regions {
+			regionsIDSet[region.GetID()] = struct{}{}
+		}
+		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
+	}
+	if len(regionsIDSet) > 0 {
+		regionsIDList := make([]uint64, 0, len(regionsIDSet))
+		for id := range regionsIDSet {
+			regionsIDList = append(regionsIDList, id)
+		}
+		rc.AddSuspectRegions(regionsIDList...)
+	}
+	h.rd.Text(w, http.StatusOK, msgBuilder.String())
 }
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
