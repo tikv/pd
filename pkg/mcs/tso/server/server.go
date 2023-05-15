@@ -71,9 +71,10 @@ const (
 	tsoSvcRootPathFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName
 
 	// maxRetryTimesWaitAPIService is the max retry times for initializing the cluster ID.
-	maxRetryTimesWaitAPIService = 60
+	maxRetryTimesWaitAPIService = 360
 	// retryIntervalWaitAPIService is the interval to retry.
-	retryIntervalWaitAPIService = 3 * time.Second
+	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
+	retryIntervalWaitAPIService = 500 * time.Millisecond
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -535,20 +536,24 @@ func (s *Server) startServer() (err error) {
 }
 
 func (s *Server) waitAPIServiceReady() error {
+	var (
+		ready bool
+		err   error
+	)
 	for i := 0; i < maxRetryTimesWaitAPIService; i++ {
-		ready, err := s.isAPIServiceReady()
-		if err != nil {
-			log.Warn("failed to check api server ready", errs.ZapError(err))
-		}
-		if ready {
+		ready, err = s.isAPIServiceReady()
+		if err == nil && ready {
 			return nil
 		}
+		log.Debug("api server is not ready, retrying", errs.ZapError(err), zap.Bool("ready", ready))
 		select {
 		case <-s.ctx.Done():
 			return errors.New("context canceled while waiting api server ready")
 		case <-time.After(retryIntervalWaitAPIService):
-			log.Debug("api server is not ready, retrying")
 		}
+	}
+	if err != nil {
+		log.Warn("failed to check api server ready", errs.ZapError(err))
 	}
 	return errors.Errorf("failed to wait api server ready after retrying %d times", maxRetryTimesWaitAPIService)
 }

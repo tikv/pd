@@ -306,8 +306,6 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	oc.SetOperator(op1)
 
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/concurrentRemoveOperator", "return(true)"))
-	defer suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/concurrentRemoveOperator"))
-
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -324,6 +322,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	wg.Wait()
 
 	suite.Equal(op2, oc.GetOperator(1))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/concurrentRemoveOperator"))
 }
 
 func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
