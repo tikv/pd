@@ -46,13 +46,13 @@ import (
 
 const (
 	// GlobalDCLocation is the Global TSO Allocator's DC location label.
-	GlobalDCLocation            = "global"
-	checkStep                   = time.Minute
-	patrolStep                  = time.Second
-	defaultAllocatorLeaderLease = 3
+	GlobalDCLocation             = "global"
+	checkStep                    = time.Minute
+	patrolStep                   = time.Second
+	defaultAllocatorLeaderLease  = 3
 	globalTSOAllocatorEtcdPrefix = "gta"
-	localTSOAllocatorEtcdPrefix = "lta"
-	localTSOSuffixEtcdPrefix    = "lts"
+	localTSOAllocatorEtcdPrefix  = "lta"
+	localTSOSuffixEtcdPrefix     = "lts"
 )
 
 var (

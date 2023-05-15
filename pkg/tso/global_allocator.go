@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -96,7 +95,7 @@ func NewGlobalTSOAllocator(
 	// 2. for the non-default keyspace groups:
 	//     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
 	tsPath := ""
-	if am.kgID != utils.DefaultKeyspaceGroupID {
+	if am.kgID != mcsutils.DefaultKeyspaceGroupID {
 		tsPath = path.Join(fmt.Sprintf("%05d", am.kgID), globalTSOAllocatorEtcdPrefix)
 	}
 

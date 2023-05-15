@@ -201,7 +201,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						} else {
 							timestampPath = fmt.Sprintf("/ms/%s/tso/%05d/gta/timestamp",
 								clusterID, param.keyspaceGroupID)
-
 						}
 						re.Equal(timestampPath, am.GetTimestampPath(""))
 

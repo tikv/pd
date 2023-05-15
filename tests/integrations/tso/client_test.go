@@ -16,7 +16,6 @@ package tso
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"math/rand"
 	"strings"
@@ -140,8 +139,6 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 
 		suite.waitForAllKeyspaceGroupsInServing(re)
 	}
-
-	fmt.Println("TestSuite Setup Done !!!!!!!!!!!!!!!!!!!!!")
 }
 
 func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.Assertions) {
