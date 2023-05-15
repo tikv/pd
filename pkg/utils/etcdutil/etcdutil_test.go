@@ -257,7 +257,7 @@ func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck", "return(true)"))
 	err = checkEtcdWithHangLeader(t)
 	re.Error(err)
-	require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeKeepAliveCheck"))
 }
 
 func checkEtcdWithHangLeader(t *testing.T) error {
