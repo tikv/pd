@@ -269,15 +269,15 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	re.Equal(uint32(2), kg2.ID)
 	re.Equal([]uint32{222, 333}, kg2.Keyspaces)
 	re.True(kg2.IsSplitTarget())
+	time.Sleep(3 * time.Second)
 	// Check the split TSO from keyspace group 2.
 	var splitTS pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
 		splitTS, err = suite.requestTSO(re, 1, 222, 2)
 		return err == nil && tsoutil.CompareTimestamp(&splitTS, &pdpb.Timestamp{}) > 0
 	})
+	splitTS, err = suite.requestTSO(re, 1, 222, 2)
 	re.Greater(tsoutil.CompareTimestamp(&splitTS, &ts), 0)
-	// Finish the split.
-	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, 2)
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
@@ -285,10 +285,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 	count, keyspaceID, keyspaceGroupID uint32,
 ) (pdpb.Timestamp, error) {
 	primary := suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
-	tam, err := primary.GetTSOAllocatorManager(keyspaceGroupID)
+	kgm := primary.GetKeyspaceGroupManager()
+	re.NotNil(kgm)
+	ts, _, err := kgm.HandleTSORequest(keyspaceID, keyspaceGroupID, tsopkg.GlobalDCLocation, count)
 	re.NoError(err)
-	re.NotNil(tam)
-	return tam.HandleRequest(tsopkg.GlobalDCLocation, count)
+	return ts, err
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection() {
