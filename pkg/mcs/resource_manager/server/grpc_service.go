@@ -214,7 +214,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				log.Warn("not supports the resource type", zap.String("resource-group", resourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
 				continue
 			}
-			log.Debug("finish token request from", zap.String("resource group", resourceGroupName))
+			log.Debug("finish token request from", zap.String("resource-group", resourceGroupName))
 			resps.Responses = append(resps.Responses, resp)
 		}
 		stream.Send(resps)
