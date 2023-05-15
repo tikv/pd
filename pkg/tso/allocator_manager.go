@@ -50,6 +50,7 @@ const (
 	checkStep                   = time.Minute
 	patrolStep                  = time.Second
 	defaultAllocatorLeaderLease = 3
+	globalTSOAllocatorEtcdPrefix = "gta"
 	localTSOAllocatorEtcdPrefix = "lta"
 	localTSOSuffixEtcdPrefix    = "lts"
 )
@@ -271,6 +272,23 @@ func (am *AllocatorManager) setUpLocalAllocator(parentCtx context.Context, dcLoc
 	// Start election of the Local TSO Allocator here
 	localTSOAllocator, _ := allocator.(*LocalTSOAllocator)
 	go am.allocatorLeaderLoop(parentCtx, localTSOAllocator)
+}
+
+// GetTimestampPath returns the timestamp path in etcd for the given DCLocation.
+func (am *AllocatorManager) GetTimestampPath(dcLocation string) string {
+	if am == nil {
+		return ""
+	}
+	if len(dcLocation) == 0 {
+		dcLocation = GlobalDCLocation
+	}
+
+	am.mu.RLock()
+	defer am.mu.RUnlock()
+	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
+		return path.Join(am.rootPath, allocatorGroup.allocator.GetTimestampPath())
+	}
+	return ""
 }
 
 // tsoAllocatorLoop is used to run the TSO Allocator updating daemon.

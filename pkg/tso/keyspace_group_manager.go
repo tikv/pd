@@ -186,9 +186,9 @@ type KeyspaceGroupManager struct {
 	// 1. The path for keyspace group primary election. Format: "/ms/{cluster_id}/tso/{group}/primary"
 	// 2. The path for LoadTimestamp/SaveTimestamp in the storage endpoint for all the non-default
 	//    keyspace groups.
-	//    Key: /ms/{cluster_id}/tso/{group}/gts/timestamp
+	//    Key: /ms/{cluster_id}/tso/{group}/gta/timestamp
 	//    Value: ts(time.Time)
-	//    Key: /ms/{cluster_id}/tso/{group}/lts/{dc-location}/timestamp
+	//    Key: /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
 	//    Value: ts(time.Time)
 	// Note: The {group} is 5 digits integer with leading zeros.
 	tsoSvcRootPath string
@@ -425,6 +425,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	}
 	// Initialize all kinds of maps.
 	am := NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg, true)
+	log.Info("created allocator manager",
+		zap.Uint32("keyspace-group-id", group.ID),
+		zap.String("timestamp-path", am.GetTimestampPath("")))
 	kgm.Lock()
 	group.KeyspaceLookupTable = make(map[uint32]struct{})
 	for _, kid := range group.Keyspaces {
