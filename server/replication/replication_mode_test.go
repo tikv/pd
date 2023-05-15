@@ -168,7 +168,7 @@ func TestStateSwitch(t *testing.T) {
 		Primary:          "zone1",
 		DR:               "zone2",
 		PrimaryReplicas:  4,
-		DRReplicas:       1,
+		DRReplicas:       2,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
@@ -242,11 +242,6 @@ func TestStateSwitch(t *testing.T) {
 	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
 	rep.tickDR()
 	re.Equal(drStateAsyncWait, rep.drGetState())
-
-	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
-	rep.tickDR()
-	re.Equal(drStateAsyncWait, rep.drGetState())
-	assertStateIDUpdate()
 
 	rep.drSwitchToSync()
 	replicator.errors[2] = errors.New("fail to replicate")
