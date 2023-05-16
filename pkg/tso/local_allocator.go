@@ -37,7 +37,6 @@ import (
 // which is only used to allocate TSO in one DC each.
 // One PD server may hold multiple Local TSO Allocators.
 type LocalTSOAllocator struct {
-	// kgID is the keyspace group ID
 	allocatorManager *AllocatorManager
 	// leadership is used to campaign the corresponding DC's Local TSO Allocator.
 	leadership      *election.Leadership
