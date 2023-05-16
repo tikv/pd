@@ -181,3 +181,5 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
+
+replace github.com/pingcap/kvproto => github.com/Connor1996/kvproto v0.0.0-20230511072659-58604759a476
