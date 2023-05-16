@@ -488,7 +488,8 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 	}
 	if primarySwitched || secondaryChanged {
-		log.Info("[tso] update tso server/pod list", zap.Strings("tso-servers", addrs))
+		log.Info("[tso] updated keyspace group service discovery info",
+			zap.String("keyspace-group-service", keyspaceGroup.String()))
 	}
 
 	// Even if the primary address is empty, we still updated other returned info above, including the
