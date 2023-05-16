@@ -235,8 +235,8 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 	failpointValue := fmt.Sprintf(`return(%d)`, keyspaceID)
 	// Simulate the case that the server has lower version than the client and returns no tso addrs
 	// in the GetClusterInfo RPC.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs", failpointValue))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unexpectedCallOfFindGroupByKeyspaceID", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unexpectedCallOfFindGroupByKeyspaceID", failpointValue))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/unexpectedCallOfFindGroupByKeyspaceID"))
