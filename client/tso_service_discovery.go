@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -68,7 +69,7 @@ func (k *keyspaceGroupSvcDiscovery) update(
 	keyspaceGroup *tsopb.KeyspaceGroup,
 	newPrimaryAddr string,
 	secondaryAddrs, addrs []string,
-) (oldPrimaryAddr string, primarySwitched bool) {
+) (oldPrimaryAddr string, primarySwitched, secondaryChanged bool) {
 	k.Lock()
 	defer k.Unlock()
 
@@ -79,10 +80,13 @@ func (k *keyspaceGroupSvcDiscovery) update(
 		k.primaryAddr = newPrimaryAddr
 	}
 
-	k.group = keyspaceGroup
-	k.secondaryAddrs = secondaryAddrs
-	k.addrs = addrs
+	if !reflect.DeepEqual(k.secondaryAddrs, secondaryAddrs) {
+		k.secondaryAddrs = secondaryAddrs
+		secondaryChanged = true
+	}
 
+	k.group = keyspaceGroup
+	k.addrs = addrs
 	return
 }
 
@@ -446,12 +450,10 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 		members[0].IsPrimary = true
 		keyspaceGroup = &tsopb.KeyspaceGroup{
-			Id:      c.keyspaceID,
+			Id:      defaultKeySpaceGroupID,
 			Members: members,
 		}
 	}
-
-	log.Info("[tso] update keyspace group", zap.String("keyspace-group", keyspaceGroup.String()))
 
 	// Initialize the serving addresses from the returned keyspace group info.
 	primaryAddr := ""
@@ -478,11 +480,15 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 	}
 
-	oldPrimary, primarySwitched := c.keyspaceGroupSD.update(keyspaceGroup, primaryAddr, secondaryAddrs, addrs)
+	oldPrimary, primarySwitched, secondaryChanged :=
+		c.keyspaceGroupSD.update(keyspaceGroup, primaryAddr, secondaryAddrs, addrs)
 	if primarySwitched {
 		if err := c.afterPrimarySwitched(oldPrimary, primaryAddr); err != nil {
 			return err
 		}
+	}
+	if primarySwitched || secondaryChanged {
+		log.Info("[tso] update tso server/pod list", zap.Strings("tso-servers", addrs))
 	}
 
 	// Even if the primary address is empty, we still updated other returned info above, including the
@@ -499,8 +505,11 @@ func (c *tsoServiceDiscovery) updateMember() error {
 func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 	keyspaceID uint32, tsoSrvAddr string, timeout time.Duration,
 ) (*tsopb.KeyspaceGroup, error) {
-	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func() {
-		panic("findGroupByKeyspaceID is called unexpectedly")
+	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func(val failpoint.Value) {
+		keyspaceToCheck, ok := val.(int)
+		if ok && keyspaceID == uint32(keyspaceToCheck) {
+			panic("findGroupByKeyspaceID is called unexpectedly")
+		}
 	})
 	ctx, cancel := context.WithTimeout(c.ctx, timeout)
 	defer cancel()
