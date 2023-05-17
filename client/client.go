@@ -396,7 +396,7 @@ func NewClientWithKeyspaceName(
 	log.Info("[pd] create pd client with endpoints and keyspace",
 		zap.Strings("pd-address", svrAddrs), zap.String("keyspace-name", keyspaceName))
 
-	// if keyspace is empty, fall back to the legacy API
+	// if keyspace name is empty, fall back to the legacy API
 	if len(keyspaceName) == 0 {
 		return NewClientWithContext(ctx, svrAddrs, security, opts...)
 	}
