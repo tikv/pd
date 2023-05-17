@@ -390,14 +390,14 @@ func createClientWithKeyspace(
 
 // NewClientWithKeyspaceName creates a client with context and the specified keyspace name.
 func NewClientWithKeyspaceName(
-	ctx context.Context, keyspace string, svrAddrs []string,
+	ctx context.Context, keyspaceName string, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
 	log.Info("[pd] create pd client with endpoints and keyspace",
-		zap.Strings("pd-address", svrAddrs), zap.String("keyspace", keyspace))
+		zap.Strings("pd-address", svrAddrs), zap.String("keyspace-name", keyspaceName))
 
 	// if keyspace is empty, fall back to the legacy API
-	if len(keyspace) == 0 {
+	if len(keyspaceName) == 0 {
 		return NewClientWithContext(ctx, svrAddrs, security, opts...)
 	}
 
@@ -434,7 +434,7 @@ func NewClientWithKeyspaceName(
 		c.cancel()
 		return nil, err
 	}
-	if err := c.initRetry(c.loadKeyspaceMeta, keyspace); err != nil {
+	if err := c.initRetry(c.loadKeyspaceMeta, keyspaceName); err != nil {
 		return nil, err
 	}
 	c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
@@ -445,7 +445,7 @@ func NewClientWithKeyspaceName(
 func (c *client) initRetry(f func(s string) error, str string) error {
 	var err error
 	for i := 0; i < c.option.maxRetryTimes; i++ {
-		if err = f(str); err == nil || strings.Contains(err.Error(), "ENTRY_NOT_FOUND") {
+		if err = f(str); err == nil {
 			return nil
 		}
 		select {
@@ -459,8 +459,7 @@ func (c *client) initRetry(f func(s string) error, str string) error {
 
 func (c *client) loadKeyspaceMeta(keyspace string) error {
 	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
-	// Here we ignore ENTRY_NOT_FOUND error and it will set the keyspaceID to 0.
-	if err != nil && !strings.Contains(err.Error(), "ENTRY_NOT_FOUND") {
+	if err != nil {
 		return err
 	}
 	c.keyspaceID = keyspaceMeta.GetId()
