@@ -190,9 +190,11 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				stats := resp.GetRegionStats()
 				regions := resp.GetRegions()
 				buckets := resp.GetBuckets()
+				queryStats := resp.GetQueryStats()
 				regionLeaders := resp.GetRegionLeaders()
 				hasStats := len(stats) == len(regions)
 				hasBuckets := len(buckets) == len(regions)
+				hasQueryStats := len(queryStats) == len(regions)
 				for i, r := range regions {
 					var (
 						region       *core.RegionInfo
@@ -225,6 +227,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
 							region.UpdateBuckets(buckets[i], old)
 						}
+					}
+					if hasQueryStats {
+						region.QueryStats = queryStats[i]
 					}
 					if saveKV {
 						err = regionStorage.SaveRegion(r)
