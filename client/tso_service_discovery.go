@@ -143,9 +143,10 @@ type tsoServiceDiscovery struct {
 
 	checkMembershipCh chan struct{}
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	wg                   sync.WaitGroup
+	printFallbackLogOnce sync.Once
 
 	tlsCfg *tlsutil.TLSConfig
 
@@ -439,9 +440,11 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		// processes and returns GetClusterInfoResponse.TsoUrls. In this case,
 		// we fall back to the old way of discovering the tso primary addresses
 		// from etcd directly.
-		log.Warn("[tso] no tso server address found,"+
-			" fallback to the legacy path to discover from etcd directly",
-			zap.String("discovery-key", c.defaultDiscoveryKey))
+		c.printFallbackLogOnce.Do(func() {
+			log.Warn("[tso] no tso server address found,"+
+				" fallback to the legacy path to discover from etcd directly",
+				zap.String("discovery-key", c.defaultDiscoveryKey))
+		})
 		addrs, err := c.discoverWithLegacyPath()
 		if err != nil {
 			return err
