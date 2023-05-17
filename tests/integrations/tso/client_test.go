@@ -16,6 +16,7 @@ package tso
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
 	"strings"
@@ -30,6 +31,7 @@ import (
 	"github.com/tikv/pd/client/testutil"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -98,7 +100,11 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	if suite.legacy {
 		client, err := pd.NewClientWithContext(suite.ctx, strings.Split(suite.backendEndpoints, ","), pd.SecurityOption{})
 		re.NoError(err)
-		suite.keyspaceIDs = append(suite.keyspaceIDs, 0)
+		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+		re.True(ok)
+		re.Equal(mcsutils.NullKeyspaceID, innerClient.GetServiceDiscovery().GetKeyspaceID())
+		re.Equal(mcsutils.DefaultKeyspaceGroupID, innerClient.GetServiceDiscovery().GetKeyspaceGroupID())
+		mcs.WaitForTSOServiceAvailable(suite.ctx, re, client)
 		suite.clients = make([]pd.Client, 0)
 		suite.clients = append(suite.clients, client)
 	} else {
@@ -109,7 +115,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			keyspaceGroupID uint32
 			keyspaceIDs     []uint32
 		}{
-			{0, []uint32{0, 10}},
+			{0, []uint32{mcsutils.DefaultKeyspaceID, 10}},
 			{1, []uint32{1, 11}},
 			{2, []uint32{2}},
 		}
@@ -227,30 +233,31 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 
 func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 	re := suite.Require()
+	keyspaceID := uint32(1000000)
+	// Make sure this keyspace ID is not in use somewhere.
+	re.False(slice.Contains(suite.keyspaceIDs, keyspaceID))
+	failpointValue := fmt.Sprintf(`return(%d)`, keyspaceID)
 	// Simulate the case that the server has lower version than the client and returns no tso addrs
 	// in the GetClusterInfo RPC.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unexpectedCallOfFindGroupByKeyspaceID", failpointValue))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/unexpectedCallOfFindGroupByKeyspaceID"))
 	}()
-	var wg sync.WaitGroup
-	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		go func() {
-			defer wg.Done()
-			client := mcs.SetupClientWithDefaultKeyspaceName(
-				suite.ctx, re, strings.Split(suite.backendEndpoints, ","))
-			var lastTS uint64
-			for j := 0; j < tsoRequestRound; j++ {
-				physical, logical, err := client.GetTS(suite.ctx)
-				suite.NoError(err)
-				ts := tsoutil.ComposeTS(physical, logical)
-				suite.Less(lastTS, ts)
-				lastTS = ts
-			}
-		}()
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	client := mcs.SetupClientWithKeyspaceID(
+		ctx, re, keyspaceID, strings.Split(suite.backendEndpoints, ","))
+	var lastTS uint64
+	for j := 0; j < tsoRequestRound; j++ {
+		physical, logical, err := client.GetTS(ctx)
+		suite.NoError(err)
+		ts := tsoutil.ComposeTS(physical, logical)
+		suite.Less(lastTS, ts)
+		lastTS = ts
 	}
-	wg.Wait()
 }
 
 // TestGetMinTS tests the correctness of GetMinTS.
