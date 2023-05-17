@@ -396,6 +396,11 @@ func NewClientWithKeyspaceName(
 	log.Info("[pd] create pd client with endpoints and keyspace",
 		zap.Strings("pd-address", svrAddrs), zap.String("keyspace", keyspace))
 
+	// if keyspace is empty, fall back to the legacy API
+	if len(keyspace) == 0 {
+		return NewClientWithContext(ctx, svrAddrs, security, opts...)
+	}
+
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
