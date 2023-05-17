@@ -43,9 +43,12 @@ import (
 const (
 	// defaultKeyspaceID is the default key space id.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap
-	// and reserved for users who haven't been assigned keyspace.
+	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized
+	// when PD bootstrap and reserved for users who haven't been assigned keyspace.
 	defaultKeyspaceID = uint32(0)
+	maxKeyspaceID     = uint32(0xFFFFFF)
+	// nullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic.
+	nullKeyspaceID = uint32(0xFFFFFFFF)
 	// defaultKeySpaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
 	defaultKeySpaceGroupID = uint32(0)
@@ -317,17 +320,37 @@ type SecurityOption struct {
 }
 
 // NewClient creates a PD client.
-func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+func NewClient(
+	svrAddrs []string, security SecurityOption, opts ...ClientOption,
+) (Client, error) {
 	return NewClientWithContext(context.Background(), svrAddrs, security, opts...)
 }
 
 // NewClientWithContext creates a PD client with context. This API uses the default keyspace id 0.
-func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	return NewClientWithKeyspace(ctx, defaultKeyspaceID, svrAddrs, security, opts...)
+func NewClientWithContext(
+	ctx context.Context, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	return createClientWithKeyspace(ctx, nullKeyspaceID, svrAddrs, security, opts...)
 }
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
-func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+func NewClientWithKeyspace(
+	ctx context.Context, keyspaceID uint32, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	if keyspaceID < defaultKeyspaceID || keyspaceID > maxKeyspaceID {
+		return nil, errors.Errorf("invalid keyspace id %d. It must be in the range of [%d, %d]",
+			keyspaceID, defaultKeyspaceID, maxKeyspaceID)
+	}
+	return createClientWithKeyspace(ctx, keyspaceID, svrAddrs, security, opts...)
+}
+
+// createClientWithKeyspace creates a client with context and the specified keyspace id.
+func createClientWithKeyspace(
+	ctx context.Context, keyspaceID uint32, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
@@ -354,7 +377,9 @@ func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []st
 		opt(c)
 	}
 
-	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, c.svrUrls, c.tlsCfg, c.option)
+	c.pdSvcDiscovery = newPDServiceDiscovery(
+		clientCtx, clientCancel, &c.wg, c.setServiceMode,
+		keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		return nil, err
@@ -364,8 +389,12 @@ func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []st
 }
 
 // NewClientWithKeyspaceName creates a client with context and the specified keyspace name.
-func NewClientWithKeyspaceName(ctx context.Context, keyspace string, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd] create pd client with endpoints and keyspace", zap.Strings("pd-address", svrAddrs), zap.String("keyspace", keyspace))
+func NewClientWithKeyspaceName(
+	ctx context.Context, keyspace string, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	log.Info("[pd] create pd client with endpoints and keyspace",
+		zap.Strings("pd-address", svrAddrs), zap.String("keyspace", keyspace))
 
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
@@ -392,7 +421,10 @@ func NewClientWithKeyspaceName(ctx context.Context, keyspace string, svrAddrs []
 		opt(c)
 	}
 
-	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, c.svrUrls, c.tlsCfg, c.option)
+	// Create a PD service discovery with null keyspace id, then query the real id wth the keyspace name,
+	// finally update the keyspace id to the PD service discovery for the following interactions.
+	c.pdSvcDiscovery = newPDServiceDiscovery(
+		clientCtx, clientCancel, &c.wg, c.setServiceMode, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		return nil, err
@@ -400,6 +432,8 @@ func NewClientWithKeyspaceName(ctx context.Context, keyspace string, svrAddrs []
 	if err := c.initRetry(c.loadKeyspaceMeta, keyspace); err != nil {
 		return nil, err
 	}
+	c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
+
 	return c, nil
 }
 

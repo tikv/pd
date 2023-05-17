@@ -100,7 +100,11 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	if suite.legacy {
 		client, err := pd.NewClientWithContext(suite.ctx, strings.Split(suite.backendEndpoints, ","), pd.SecurityOption{})
 		re.NoError(err)
-		suite.keyspaceIDs = append(suite.keyspaceIDs, 0)
+		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+		re.True(ok)
+		re.Equal(mcsutils.NullKeyspaceID, innerClient.GetServiceDiscovery().GetKeyspaceID())
+		re.Equal(mcsutils.DefaultKeyspaceGroupID, innerClient.GetServiceDiscovery().GetKeyspaceGroupID())
+		mcs.WaitForTSOServiceAvailable(suite.ctx, re, client)
 		suite.clients = make([]pd.Client, 0)
 		suite.clients = append(suite.clients, client)
 	} else {
@@ -111,7 +115,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			keyspaceGroupID uint32
 			keyspaceIDs     []uint32
 		}{
-			{0, []uint32{0, 10}},
+			{0, []uint32{mcsutils.DefaultKeyspaceID, 10}},
 			{1, []uint32{1, 11}},
 			{2, []uint32{2}},
 		}

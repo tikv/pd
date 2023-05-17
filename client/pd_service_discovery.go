@@ -59,6 +59,8 @@ type ServiceDiscovery interface {
 	GetClusterID() uint64
 	// GetKeyspaceID returns the ID of the keyspace
 	GetKeyspaceID() uint32
+	// SetKeyspaceID sets the ID of the keyspace
+	SetKeyspaceID(keyspaceID uint32)
 	// GetKeyspaceGroupID returns the ID of the keyspace group
 	GetKeyspaceGroupID() uint32
 	// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
@@ -147,7 +149,8 @@ type pdServiceDiscovery struct {
 	cancel    context.CancelFunc
 	closeOnce sync.Once
 
-	tlsCfg *tlsutil.TLSConfig
+	keyspaceID uint32
+	tlsCfg     *tlsutil.TLSConfig
 	// Client option.
 	option *option
 }
@@ -157,6 +160,7 @@ func newPDServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup,
 	serviceModeUpdateCb func(pdpb.ServiceMode),
+	keyspaceID uint32,
 	urls []string, tlsCfg *tlsutil.TLSConfig, option *option,
 ) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
@@ -165,6 +169,7 @@ func newPDServiceDiscovery(
 		cancel:              cancel,
 		wg:                  wg,
 		serviceModeUpdateCb: serviceModeUpdateCb,
+		keyspaceID:          keyspaceID,
 		tlsCfg:              tlsCfg,
 		option:              option,
 	}
@@ -288,8 +293,12 @@ func (c *pdServiceDiscovery) GetClusterID() uint64 {
 
 // GetKeyspaceID returns the ID of the keyspace
 func (c *pdServiceDiscovery) GetKeyspaceID() uint32 {
-	// PD/API service only supports the default keyspace
-	return defaultKeyspaceID
+	return c.keyspaceID
+}
+
+// SetKeyspaceID sets the ID of the keyspace
+func (c *pdServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
+	c.keyspaceID = keyspaceID
 }
 
 // GetKeyspaceGroupID returns the ID of the keyspace group

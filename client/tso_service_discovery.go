@@ -271,6 +271,11 @@ func (c *tsoServiceDiscovery) GetKeyspaceID() uint32 {
 	return c.keyspaceID
 }
 
+// SetKeyspaceID sets the ID of the keyspace
+func (c *tsoServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
+	c.keyspaceID = keyspaceID
+}
+
 // GetKeyspaceGroupID returns the ID of the keyspace group. If the keyspace group is unknown,
 // it returns the default keyspace group ID.
 func (c *tsoServiceDiscovery) GetKeyspaceGroupID() uint32 {
