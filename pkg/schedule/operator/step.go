@@ -32,10 +32,10 @@ import (
 )
 
 const (
-	// DefaultSlowExecutorRate is the fast rate of the step executor.
+	// DefaultSlowExecutorRate is the slow rate of the step executor.
 	// default: 6 s/Mb
 	DefaultSlowExecutorRate = 6
-	// DefaultFastExecutorRate is the slow rate of the step executor.
+	// DefaultFastExecutorRate is the fast rate of the step executor.
 	// default:  0.6 s/Mb
 	DefaultFastExecutorRate = 0.6
 	// FastStepWaitTime is the duration that the OpStep may take.
