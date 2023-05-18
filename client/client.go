@@ -395,9 +395,10 @@ func createClientWithKeyspace(
 type APIVersion int
 
 // The API versions the client supports.
+// As for V1TTL, client won't use it and we just remove it.
 const (
 	V1 APIVersion = iota
-	V1TTL
+	_
 	V2
 )
 
@@ -421,23 +422,6 @@ func (apiCtx *apiContextV1) GetAPIVersion() (version APIVersion) {
 
 // GetKeyspaceName returns the keyspace name.
 func (apiCtx *apiContextV1) GetKeyspaceName() (keyspaceName string) {
-	return ""
-}
-
-type apiContextV1TTL struct{}
-
-// NewAPIContextV1TTL creates a API context for V1TTL.
-func NewAPIContextV1TTL() APIContext {
-	return &apiContextV1TTL{}
-}
-
-// GetAPIVersion returns the API version.
-func (apiCtx *apiContextV1TTL) GetAPIVersion() (version APIVersion) {
-	return V1TTL
-}
-
-// GetKeyspaceName returns the keyspace name.
-func (apiCtx *apiContextV1TTL) GetKeyspaceName() (keyspaceName string) {
 	return ""
 }
 
@@ -470,7 +454,7 @@ func NewClientWithAPIContext(
 ) (Client, error) {
 	apiVersion, keyspaceName := apiCtx.GetAPIVersion(), apiCtx.GetKeyspaceName()
 	switch apiVersion {
-	case V1, V1TTL:
+	case V1:
 		return NewClientWithContext(ctx, svrAddrs, security, opts...)
 	case V2:
 		return newClientWithKeyspaceName(ctx, keyspaceName, svrAddrs, security, opts...)
