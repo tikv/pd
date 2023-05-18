@@ -192,6 +192,7 @@ func (se *StorageEndpoint) initServiceSafePointV2ForGCWorker(keyspaceID uint32, 
 	return ssp, nil
 }
 
+// SaveServiceSafePointV2 stores service safe point to etcd.
 func (se *StorageEndpoint) SaveServiceSafePointV2(serviceSafePoint *ServiceSafePointV2) error {
 	if serviceSafePoint.ServiceID == "" {
 		return errors.New("service id of service safepoint cannot be empty")

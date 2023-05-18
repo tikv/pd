@@ -116,6 +116,7 @@ func (manager *SafePointV2Manager) getGCSafePoint(keyspaceID uint32) (*endpoint.
 	return v2SafePoint, nil
 }
 
+// UpdateGCSafePoint is used to update gc safe point for given keyspace.
 func (manager *SafePointV2Manager) UpdateGCSafePoint(gcSafePoint *endpoint.GCSafePointV2) (oldGCSafePoint *endpoint.GCSafePointV2, err error) {
 	manager.Lock(gcSafePoint.KeyspaceID)
 	defer manager.Unlock(gcSafePoint.KeyspaceID)

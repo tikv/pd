@@ -25,16 +25,17 @@ import (
 )
 
 const (
-	clusterPath                = "raft"
-	configPath                 = "config"
-	serviceMiddlewarePath      = "service_middleware"
-	schedulePath               = "schedule"
-	gcPath                     = "gc"
-	rulesPath                  = "rules"
-	ruleGroupPath              = "rule_group"
-	regionLabelPath            = "region_label"
-	replicationPath            = "replication_mode"
-	customScheduleConfigPath   = "scheduler_config"
+	clusterPath              = "raft"
+	configPath               = "config"
+	serviceMiddlewarePath    = "service_middleware"
+	schedulePath             = "schedule"
+	gcPath                   = "gc"
+	rulesPath                = "rules"
+	ruleGroupPath            = "rule_group"
+	regionLabelPath          = "region_label"
+	replicationPath          = "replication_mode"
+	customScheduleConfigPath = "scheduler_config"
+	// GcWorkerServiceSafePointID is the service id of gc worker.
 	GcWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
 	externalTimeStamp          = "external_timestamp"

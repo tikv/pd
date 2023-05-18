@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 )
 
+// GetGCSafePointV2 return gc safe point for the given keyspace.
 func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointV2Response, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetGCSafePointV2(ctx, request)
@@ -45,6 +46,7 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 	}, nil
 }
 
+// UpdateGCSafePointV2 update gc safe point for the given keyspace.
 func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointV2Response, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateGCSafePointV2(ctx, request)
@@ -86,6 +88,7 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 	}, nil
 }
 
+// UpdateServiceSafePointV2 update service safe point for the given keyspace.
 func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceSafePointV2Response, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateServiceSafePointV2(ctx, request)
@@ -141,6 +144,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 	}, nil
 }
 
+// WatchGCSafePointV2 watch keyspaces gc safe point changes.
 func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request, stream pdpb.PD_WatchGCSafePointV2Server) error {
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return err
