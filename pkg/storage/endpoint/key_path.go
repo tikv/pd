@@ -35,7 +35,7 @@ const (
 	regionLabelPath            = "region_label"
 	replicationPath            = "replication_mode"
 	customScheduleConfigPath   = "scheduler_config"
-	gcWorkerServiceSafePointID = "gc_worker"
+	GcWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
 	externalTimeStamp          = "external_timestamp"
 	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"

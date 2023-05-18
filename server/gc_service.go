@@ -100,12 +100,19 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 		return &pdpb.UpdateServiceSafePointV2Response{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	nowTSO, err := s.tsoAllocatorManager.HandleRequest(tso.GlobalDCLocation, 1)
+	var (
+		nowTSO pdpb.Timestamp
+		err    error
+	)
+	if s.IsAPIServiceMode() {
+		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
+	} else {
+		nowTSO, err = s.tsoAllocatorManager.HandleRequest(tso.GlobalDCLocation, 1)
+	}
 	if err != nil {
 		return nil, err
 	}
-	physicalTime, _ := tsoutil.ParseTimestamp(nowTSO)
-	now := physicalTime.Unix()
+	now, _ := tsoutil.ParseTimestamp(nowTSO)
 
 	var minServiceSafePoint *endpoint.ServiceSafePointV2
 	if request.Ttl < 0 {
@@ -114,11 +121,11 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 		serviceSafePoint := &endpoint.ServiceSafePointV2{
 			KeyspaceID: request.GetKeyspaceId(),
 			ServiceID:  string(request.GetServiceId()),
-			ExpiredAt:  now + request.GetTtl(),
+			ExpiredAt:  now.Unix() + request.GetTtl(),
 			SafePoint:  request.GetSafePoint(),
 		}
 		// Fix possible overflow.
-		if math.MaxInt64-now <= request.GetTtl() {
+		if math.MaxInt64-now.Unix() <= request.GetTtl() {
 			serviceSafePoint.ExpiredAt = math.MaxInt64
 		}
 		minServiceSafePoint, err = s.safePointV2Manager.UpdateServiceSafePoint(serviceSafePoint, now)
@@ -129,7 +136,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 	return &pdpb.UpdateServiceSafePointV2Response{
 		Header:       s.header(),
 		ServiceId:    []byte(minServiceSafePoint.ServiceID),
-		Ttl:          minServiceSafePoint.ExpiredAt - now,
+		Ttl:          minServiceSafePoint.ExpiredAt - now.Unix(),
 		MinSafePoint: minServiceSafePoint.SafePoint,
 	}, nil
 }

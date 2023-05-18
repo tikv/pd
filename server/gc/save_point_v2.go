@@ -2,6 +2,7 @@ package gc
 
 import (
 	"context"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
@@ -134,7 +135,7 @@ func (manager *SafePointV2Manager) UpdateGCSafePoint(gcSafePoint *endpoint.GCSaf
 }
 
 // UpdateServiceSafePoint update keyspace service safe point with the given serviceSafePoint.
-func (manager *SafePointV2Manager) UpdateServiceSafePoint(serviceSafePoint *endpoint.ServiceSafePointV2, now int64) (*endpoint.ServiceSafePointV2, error) {
+func (manager *SafePointV2Manager) UpdateServiceSafePoint(serviceSafePoint *endpoint.ServiceSafePointV2, now time.Time) (*endpoint.ServiceSafePointV2, error) {
 	manager.Lock(serviceSafePoint.KeyspaceID)
 	defer manager.Unlock(serviceSafePoint.KeyspaceID)
 	// Check if keyspace is valid to update.
@@ -172,7 +173,7 @@ func (manager *SafePointV2Manager) UpdateServiceSafePoint(serviceSafePoint *endp
 }
 
 // RemoveServiceSafePoint remove keyspace service safe point with the given keyspaceID and serviceID.
-func (manager *SafePointV2Manager) RemoveServiceSafePoint(keyspaceID uint32, serviceID string, now int64) (*endpoint.ServiceSafePointV2, error) {
+func (manager *SafePointV2Manager) RemoveServiceSafePoint(keyspaceID uint32, serviceID string, now time.Time) (*endpoint.ServiceSafePointV2, error) {
 	manager.Lock(keyspaceID)
 	defer manager.Unlock(keyspaceID)
 	// Check if keyspace is valid to update.
