@@ -34,6 +34,7 @@ type SafePointV2Manager struct {
 	v1Storage endpoint.GCSafePointStorage
 }
 
+// NewSafePointManagerV2 returns a new SafePointV2Manager.
 func NewSafePointManagerV2(
 	keyspaceStore endpoint.KeyspaceStorage,
 	v2Storage endpoint.SafePointV2Storage,
@@ -48,6 +49,7 @@ func NewSafePointManagerV2(
 	}
 }
 
+// LoadGCSafePoint returns GCSafePointV2 of keyspaceID.
 func (manager *SafePointV2Manager) LoadGCSafePoint(keyspaceID uint32) (*endpoint.GCSafePointV2, error) {
 	manager.Lock(keyspaceID)
 	defer manager.Unlock(keyspaceID)
@@ -131,6 +133,7 @@ func (manager *SafePointV2Manager) UpdateGCSafePoint(gcSafePoint *endpoint.GCSaf
 	return
 }
 
+// UpdateServiceSafePoint update keyspace service safe point with the given serviceSafePoint.
 func (manager *SafePointV2Manager) UpdateServiceSafePoint(serviceSafePoint *endpoint.ServiceSafePointV2, now int64) (*endpoint.ServiceSafePointV2, error) {
 	manager.Lock(serviceSafePoint.KeyspaceID)
 	defer manager.Unlock(serviceSafePoint.KeyspaceID)
@@ -168,6 +171,7 @@ func (manager *SafePointV2Manager) UpdateServiceSafePoint(serviceSafePoint *endp
 	return minServiceSafePoint, err
 }
 
+// RemoveServiceSafePoint remove keyspace service safe point with the given keyspaceID and serviceID.
 func (manager *SafePointV2Manager) RemoveServiceSafePoint(keyspaceID uint32, serviceID string, now int64) (*endpoint.ServiceSafePointV2, error) {
 	manager.Lock(keyspaceID)
 	defer manager.Unlock(keyspaceID)
