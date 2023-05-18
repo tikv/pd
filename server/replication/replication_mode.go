@@ -503,6 +503,10 @@ func (m *ModeManager) checkStoreStatus() [][]uint64 {
 		if s.IsRemoved() {
 			continue
 		}
+		// learner peers do not participate in major commit or vote, so it should not count in primary/dr as a normal store.
+		if s.GetRegionCount() == s.GetLearnerCount() {
+			continue
+		}
 		down := s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration
 		labelValue := s.GetLabelValue(m.config.DRAutoSync.LabelKey)
 		if labelValue == m.config.DRAutoSync.Primary {
