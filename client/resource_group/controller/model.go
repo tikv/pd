@@ -156,13 +156,19 @@ func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Requ
 }
 
 func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
-	if typ == 0 {
+	if custom == nil {
+		return 0
+	}
+	if typ == rmpb.RequestUnitType_RU {
 		return custom.RRU + custom.WRU
 	}
 	return 0
 }
 
 func getRUTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RequestUnitType) *rmpb.TokenBucket {
+	if group == nil {
+		return nil
+	}
 	if typ == 0 {
 		return group.RUSettings.RU
 	}
@@ -170,30 +176,39 @@ func getRUTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RequestUnitType
 }
 
 func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
+	if custom == nil {
+		return 0
+	}
 	switch typ {
-	case 0:
+	case rmpb.RawResourceType_CPU:
 		return custom.TotalCpuTimeMs
-	case 1:
+	case rmpb.RawResourceType_IOReadFlow:
 		return custom.ReadBytes
-	case 2:
+	case rmpb.RawResourceType_IOWriteFlow:
 		return custom.WriteBytes
 	}
 	return 0
 }
 
 func getRawResourceTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RawResourceType) *rmpb.TokenBucket {
+	if group == nil {
+		return nil
+	}
 	switch typ {
-	case 0:
+	case rmpb.RawResourceType_CPU:
 		return group.RawResourceSettings.Cpu
-	case 1:
+	case rmpb.RawResourceType_IOReadFlow:
 		return group.RawResourceSettings.IoRead
-	case 2:
+	case rmpb.RawResourceType_IOWriteFlow:
 		return group.RawResourceSettings.IoWrite
 	}
 	return nil
 }
 
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	if custom1 == nil || custom2 == nil {
+		return
+	}
 	custom1.RRU += custom2.RRU
 	custom1.WRU += custom2.WRU
 	custom1.ReadBytes += custom2.ReadBytes
@@ -205,6 +220,9 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 }
 
 func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	if custom1 == nil || custom2 == nil {
+		return
+	}
 	custom1.RRU -= custom2.RRU
 	custom1.WRU -= custom2.WRU
 	custom1.ReadBytes -= custom2.ReadBytes
