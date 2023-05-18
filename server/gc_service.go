@@ -16,48 +16,48 @@ import (
 	"google.golang.org/grpc"
 )
 
-func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointResponse, error) {
+func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointV2Response, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetGCSafePointV2(ctx, request)
 	}
 	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
-		return rsp.(*pdpb.GetGCSafePointResponse), err
+		return rsp.(*pdpb.GetGCSafePointV2Response), err
 	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetGCSafePointV2Response{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	safePoint, err := s.safePointV2Manager.LoadGCSafePoint(request.GetKeyspaceId())
 
 	if err != nil {
-		return &pdpb.GetGCSafePointResponse{
+		return &pdpb.GetGCSafePointV2Response{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, err
 	}
 
-	return &pdpb.GetGCSafePointResponse{
+	return &pdpb.GetGCSafePointV2Response{
 		Header:    s.header(),
 		SafePoint: safePoint.SafePoint,
 	}, nil
 }
 
-func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointResponse, error) {
+func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointV2Response, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateGCSafePointV2(ctx, request)
 	}
 	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
-		return rsp.(*pdpb.UpdateGCSafePointResponse), err
+		return rsp.(*pdpb.UpdateGCSafePointV2Response), err
 	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.UpdateGCSafePointV2Response{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	newSafePoint := request.GetSafePoint()
@@ -80,24 +80,24 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 		newSafePoint = oldSafePoint.SafePoint
 	}
 
-	return &pdpb.UpdateGCSafePointResponse{
+	return &pdpb.UpdateGCSafePointV2Response{
 		Header:       s.header(),
 		NewSafePoint: newSafePoint,
 	}, nil
 }
 
-func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceGCSafePointResponse, error) {
+func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceSafePointV2Response, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).UpdateServiceSafePointV2(ctx, request)
 	}
 	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
-		return rsp.(*pdpb.UpdateServiceGCSafePointResponse), err
+		return rsp.(*pdpb.UpdateServiceSafePointV2Response), err
 	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.UpdateServiceGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.UpdateServiceSafePointV2Response{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	nowTSO, err := s.tsoAllocatorManager.HandleRequest(tso.GlobalDCLocation, 1)
@@ -126,7 +126,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 	if err != nil {
 		return nil, err
 	}
-	return &pdpb.UpdateServiceGCSafePointResponse{
+	return &pdpb.UpdateServiceSafePointV2Response{
 		Header:       s.header(),
 		ServiceId:    []byte(minServiceSafePoint.ServiceID),
 		TTL:          minServiceSafePoint.ExpiredAt - now,
