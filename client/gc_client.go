@@ -6,9 +6,6 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-
-	//	"github.com/pingcap/kvproto/pkg/pdpb"
-
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
