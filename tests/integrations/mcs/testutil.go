@@ -48,11 +48,10 @@ func InitLogger(cfg *tso.Config) (err error) {
 	return err
 }
 
-// SetupClientWithDefaultKeyspaceName creates a TSO client with default keyspace name for test.
-func SetupClientWithDefaultKeyspaceName(
-	ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption,
+// SetupClientWithAPIContext creates a TSO client with api context name for test.
+func SetupClientWithAPIContext(
+	ctx context.Context, re *require.Assertions, apiCtx pd.APIContext, endpoints []string, opts ...pd.ClientOption,
 ) pd.Client {
-	apiCtx := pd.NewAPIContextV2("")
 	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli

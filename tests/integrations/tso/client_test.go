@@ -456,7 +456,7 @@ func checkTSO(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, b
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
-			cli := mcs.SetupClientWithDefaultKeyspaceName(ctx, re, strings.Split(backendEndpoints, ","))
+			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","))
 			var ts, lastTS uint64
 			for {
 				select {
