@@ -167,7 +167,7 @@ func TestStateSwitch(t *testing.T) {
 		Primary:          "zone1",
 		DR:               "zone2",
 		PrimaryReplicas:  4,
-		DRReplicas:       1,
+		DRReplicas:       2,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
@@ -214,7 +214,7 @@ func TestStateSwitch(t *testing.T) {
 
 	// add new store in dr zone.
 	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone2"})
-	cluster.AddLabelsStore(6, 1, map[string]string{"zone": "zone2"})
+	cluster.AddLabersStoreWithLearnerCount(6, 1, 1, map[string]string{"zone": "zone2"})
 	// async -> sync
 	rep.tickDR()
 	re.Equal(drStateSyncRecover, rep.drGetState())
@@ -233,10 +233,14 @@ func TestStateSwitch(t *testing.T) {
 	rep.tickDR()
 	re.Equal(drStateSync, rep.drGetState()) // cannot guarantee majority, keep sync.
 
+	setStoreState(cluster, "up", "up", "up", "up", "up", "down")
+	rep.tickDR()
+	re.Equal(drStateSync, rep.drGetState())
+
+	// once the voter node down, even learner node up, swith to async state.
 	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
 	rep.tickDR()
 	re.Equal(drStateAsyncWait, rep.drGetState())
-	assertStateIDUpdate()
 
 	rep.drSwitchToSync()
 	replicator.errors[2] = errors.New("fail to replicate")

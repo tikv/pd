@@ -43,6 +43,7 @@ type storeStatistics struct {
 	StorageCapacity uint64
 	RegionCount     int
 	LeaderCount     int
+	LearnerCount    int
 	WitnessCount    int
 	LabelCounter    map[string]int
 	Preparing       int
@@ -111,6 +112,19 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.RegionCount += store.GetRegionCount()
 	s.LeaderCount += store.GetLeaderCount()
 	s.WitnessCount += store.GetWitnessCount()
+<<<<<<< HEAD:server/statistics/store_collection.go
+=======
+	s.LearnerCount += store.GetLearnerCount()
+	limit, ok := store.GetStoreLimit().(*storelimit.SlidingWindows)
+	if ok {
+		cap := limit.GetCap()
+		storeStatusGauge.WithLabelValues(storeAddress, id, "windows_size").Set(float64(cap))
+		for i, use := range limit.GetUsed() {
+			priority := constant.PriorityLevel(i).String()
+			storeStatusGauge.WithLabelValues(storeAddress, id, "windows_used_level_"+priority).Set(float64(use))
+		}
+	}
+>>>>>>> 6f6bf01a1 (replication_mode: fix the state cannot switch to async while existing learner node (#6452)):pkg/statistics/store_collection.go
 
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetRegionScoreFormulaVersion(), s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderSchedulePolicy(), 0))
@@ -119,6 +133,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_size").Set(float64(store.GetLeaderSize()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_count").Set(float64(store.GetLeaderCount()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "witness_count").Set(float64(store.GetWitnessCount()))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "learner_count").Set(float64(store.GetLearnerCount()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_available").Set(float64(store.GetAvailable()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_used").Set(float64(store.GetUsedSize()))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_capacity").Set(float64(store.GetCapacity()))
@@ -170,6 +185,7 @@ func (s *storeStatistics) Collect() {
 	metrics["region_count"] = float64(s.RegionCount)
 	metrics["leader_count"] = float64(s.LeaderCount)
 	metrics["witness_count"] = float64(s.WitnessCount)
+	metrics["learner_count"] = float64(s.LearnerCount)
 	metrics["storage_size"] = float64(s.StorageSize)
 	metrics["storage_capacity"] = float64(s.StorageCapacity)
 
@@ -241,6 +257,7 @@ func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
 		"leader_size",
 		"leader_count",
 		"witness_count",
+		"learner_count",
 		"store_available",
 		"store_used",
 		"store_capacity",
