@@ -16,10 +16,10 @@ package install
 
 import (
 	"github.com/tikv/pd/pkg/mcs/registry"
-	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 
 	// init API group
-	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1"
+	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
 )
 
 func init() {

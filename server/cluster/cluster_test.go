@@ -95,7 +95,7 @@ func TestStoreHeartbeat(t *testing.T) {
 
 	for i, store := range stores {
 		tmp := &metapb.Store{}
-		ok, err := cluster.storage.LoadStore(store.GetID(), tmp)
+		ok, err := cluster.storage.LoadStoreMeta(store.GetID(), tmp)
 		re.True(ok)
 		re.NoError(err)
 		re.Equal(storeMetasAfterHeartbeat[i], tmp)

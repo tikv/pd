@@ -52,12 +52,12 @@ func TestBasic(t *testing.T) {
 	re.Equal(meta, newMeta)
 
 	store := &metapb.Store{Id: 123}
-	ok, err = storage.LoadStore(123, store)
+	ok, err = storage.LoadStoreMeta(123, store)
 	re.False(ok)
 	re.NoError(err)
-	re.NoError(storage.SaveStore(store))
+	re.NoError(storage.SaveStoreMeta(store))
 	newStore := &metapb.Store{}
-	ok, err = storage.LoadStore(123, newStore)
+	ok, err = storage.LoadStoreMeta(123, newStore)
 	re.True(ok)
 	re.NoError(err)
 	re.Equal(store, newStore)
@@ -87,7 +87,7 @@ func mustSaveStores(re *require.Assertions, s Storage, n int) []*metapb.Store {
 	}
 
 	for _, store := range stores {
-		re.NoError(s.SaveStore(store))
+		re.NoError(s.SaveStoreMeta(store))
 	}
 
 	return stores
