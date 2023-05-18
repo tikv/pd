@@ -52,7 +52,8 @@ func InitLogger(cfg *tso.Config) (err error) {
 func SetupClientWithDefaultKeyspaceName(
 	ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption,
 ) pd.Client {
-	cli, err := pd.NewClientWithKeyspaceName(ctx, "", endpoints, pd.SecurityOption{}, opts...)
+	apiCtx := pd.NewAPIContextV2("")
+	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }

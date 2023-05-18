@@ -52,6 +52,7 @@ const (
 	// defaultKeySpaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
 	defaultKeySpaceGroupID = uint32(0)
+	defaultKeyspaceName    = "DEFAULT"
 )
 
 // Region contains information of a region's meta and its peers.
@@ -388,6 +389,79 @@ func createClientWithKeyspace(
 	return c, nil
 }
 
+// APIVersion is the API version the server and the client is using.
+// See more details in https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md#kvproto
+type APIVersion int
+
+// The API versions the client supports.
+const (
+	V1 APIVersion = iota
+	V1TTL
+	V2
+)
+
+// APIContext is the context for API version.
+type APIContext interface {
+	GetAPIVersionInfo() (apiVersion APIVersion, keyspaceName string)
+}
+
+type apiContextV1 struct{}
+
+// NewAPIContextV1 creates a API context for V1.
+func NewAPIContextV1() APIContext {
+	return &apiContextV1{}
+}
+
+// GetAPIVersionInfo returns the API version and the keyspace name.
+func (apiCtx *apiContextV1) GetAPIVersionInfo() (version APIVersion, keyspaceName string) {
+	return V1, ""
+}
+
+type apiContextV1TTL struct{}
+
+// NewAPIContextV1TTL creates a API context for V1TTL.
+func NewAPIContextV1TTL() APIContext {
+	return &apiContextV1TTL{}
+}
+
+// GetAPIVersionInfo returns the API version and the keyspace name.
+func (apiCtx *apiContextV1TTL) GetAPIVersionInfo() (version APIVersion, keyspaceName string) {
+	return V1TTL, ""
+}
+
+type apiContextV2 struct {
+	keyspaceName string
+}
+
+// NewAPIContextV2 creates a API context with the specified keyspace name for V2.
+func NewAPIContextV2(keyspaceName string) APIContext {
+	return &apiContextV2{keyspaceName: keyspaceName}
+}
+
+// GetAPIVersionInfo returns the API version and the keyspace name.
+func (apiCtx *apiContextV2) GetAPIVersionInfo() (version APIVersion, keyspaceName string) {
+	return V2, apiCtx.keyspaceName
+}
+
+// NewClientWithAPIContext creates a client according to the API context.
+func NewClientWithAPIContext(
+	ctx context.Context, apiCtx APIContext, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	apiVersion, keyspaceName := apiCtx.GetAPIVersionInfo()
+	switch apiVersion {
+	case V1, V1TTL:
+		return NewClientWithContext(ctx, svrAddrs, security, opts...)
+	case V2:
+		if keyspaceName == "" {
+			keyspaceName = defaultKeyspaceName
+		}
+		return NewClientWithKeyspaceName(ctx, keyspaceName, svrAddrs, security, opts...)
+	default:
+		return nil, errors.Errorf("[pd] invalid API version %d", apiVersion)
+	}
+}
+
 // NewClientWithKeyspaceName creates a client with context and the specified keyspace name.
 func NewClientWithKeyspaceName(
 	ctx context.Context, keyspaceName string, svrAddrs []string,
@@ -395,11 +469,6 @@ func NewClientWithKeyspaceName(
 ) (Client, error) {
 	log.Info("[pd] create pd client with endpoints and keyspace",
 		zap.Strings("pd-address", svrAddrs), zap.String("keyspace-name", keyspaceName))
-
-	// if keyspace name is empty, fall back to the legacy API
-	if len(keyspaceName) == 0 {
-		return NewClientWithContext(ctx, svrAddrs, security, opts...)
-	}
 
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
