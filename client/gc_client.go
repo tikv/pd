@@ -43,6 +43,7 @@ func (c *client) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 	return resp.GetNewSafePoint(), nil
 }
 
+// UpdateServiceSafePointV2 update service safe point for the given keyspace.
 func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.UpdateServiceSafePointV2", opentracing.ChildOf(span.Context()))
@@ -68,6 +69,7 @@ func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 	return resp.GetMinSafePoint(), nil
 }
 
+// WatchGCSafePointV2 watch gc safe point change.
 func (c *client) WatchGCSafePointV2(ctx context.Context) (chan []*pdpb.SafePointEvent, error) {
 	SafePointEventsChan := make(chan []*pdpb.SafePointEvent)
 	req := &pdpb.WatchGCSafePointV2Request{
