@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -68,7 +69,7 @@ func (k *keyspaceGroupSvcDiscovery) update(
 	keyspaceGroup *tsopb.KeyspaceGroup,
 	newPrimaryAddr string,
 	secondaryAddrs, addrs []string,
-) (oldPrimaryAddr string, primarySwitched bool) {
+) (oldPrimaryAddr string, primarySwitched, secondaryChanged bool) {
 	k.Lock()
 	defer k.Unlock()
 
@@ -79,10 +80,13 @@ func (k *keyspaceGroupSvcDiscovery) update(
 		k.primaryAddr = newPrimaryAddr
 	}
 
-	k.group = keyspaceGroup
-	k.secondaryAddrs = secondaryAddrs
-	k.addrs = addrs
+	if !reflect.DeepEqual(k.secondaryAddrs, secondaryAddrs) {
+		k.secondaryAddrs = secondaryAddrs
+		secondaryChanged = true
+	}
 
+	k.group = keyspaceGroup
+	k.addrs = addrs
 	return
 }
 
@@ -139,9 +143,10 @@ type tsoServiceDiscovery struct {
 
 	checkMembershipCh chan struct{}
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	wg                   sync.WaitGroup
+	printFallbackLogOnce sync.Once
 
 	tlsCfg *tlsutil.TLSConfig
 
@@ -265,6 +270,11 @@ func (c *tsoServiceDiscovery) GetClusterID() uint64 {
 // GetKeyspaceID returns the ID of the keyspace
 func (c *tsoServiceDiscovery) GetKeyspaceID() uint32 {
 	return c.keyspaceID
+}
+
+// SetKeyspaceID sets the ID of the keyspace
+func (c *tsoServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
+	c.keyspaceID = keyspaceID
 }
 
 // GetKeyspaceGroupID returns the ID of the keyspace group. If the keyspace group is unknown,
@@ -413,16 +423,45 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		log.Error("[tso] failed to get tso server", errs.ZapError(err))
 		return err
 	}
-	keyspaceGroup, err := c.findGroupByKeyspaceID(c.keyspaceID, tsoServerAddr, updateMemberTimeout)
-	if err != nil {
-		if c.tsoServerDiscovery.countFailure() {
-			log.Error("[tso] failed to find the keyspace group", errs.ZapError(err))
-		}
-		return err
-	}
-	c.tsoServerDiscovery.resetFailure()
 
-	log.Info("[tso] update keyspace group", zap.String("keyspace-group", keyspaceGroup.String()))
+	var keyspaceGroup *tsopb.KeyspaceGroup
+	if len(tsoServerAddr) > 0 {
+		keyspaceGroup, err = c.findGroupByKeyspaceID(c.keyspaceID, tsoServerAddr, updateMemberTimeout)
+		if err != nil {
+			if c.tsoServerDiscovery.countFailure() {
+				log.Error("[tso] failed to find the keyspace group", errs.ZapError(err))
+			}
+			return err
+		}
+		c.tsoServerDiscovery.resetFailure()
+	} else {
+		// There is no error but no tso server address found, which means
+		// the server side hasn't been upgraded to the version that
+		// processes and returns GetClusterInfoResponse.TsoUrls. In this case,
+		// we fall back to the old way of discovering the tso primary addresses
+		// from etcd directly.
+		c.printFallbackLogOnce.Do(func() {
+			log.Warn("[tso] no tso server address found,"+
+				" fallback to the legacy path to discover from etcd directly",
+				zap.String("discovery-key", c.defaultDiscoveryKey))
+		})
+		addrs, err := c.discoverWithLegacyPath()
+		if err != nil {
+			return err
+		}
+		if len(addrs) == 0 {
+			return errors.New("no tso server address found")
+		}
+		members := make([]*tsopb.KeyspaceGroupMember, 0, len(addrs))
+		for _, addr := range addrs {
+			members = append(members, &tsopb.KeyspaceGroupMember{Address: addr})
+		}
+		members[0].IsPrimary = true
+		keyspaceGroup = &tsopb.KeyspaceGroup{
+			Id:      defaultKeySpaceGroupID,
+			Members: members,
+		}
+	}
 
 	// Initialize the serving addresses from the returned keyspace group info.
 	primaryAddr := ""
@@ -449,11 +488,16 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 	}
 
-	oldPrimary, primarySwitched := c.keyspaceGroupSD.update(keyspaceGroup, primaryAddr, secondaryAddrs, addrs)
+	oldPrimary, primarySwitched, secondaryChanged :=
+		c.keyspaceGroupSD.update(keyspaceGroup, primaryAddr, secondaryAddrs, addrs)
 	if primarySwitched {
 		if err := c.afterPrimarySwitched(oldPrimary, primaryAddr); err != nil {
 			return err
 		}
+	}
+	if primarySwitched || secondaryChanged {
+		log.Info("[tso] updated keyspace group service discovery info",
+			zap.String("keyspace-group-service", keyspaceGroup.String()))
 	}
 
 	// Even if the primary address is empty, we still updated other returned info above, including the
@@ -470,6 +514,12 @@ func (c *tsoServiceDiscovery) updateMember() error {
 func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 	keyspaceID uint32, tsoSrvAddr string, timeout time.Duration,
 ) (*tsopb.KeyspaceGroup, error) {
+	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func(val failpoint.Value) {
+		keyspaceToCheck, ok := val.(int)
+		if ok && keyspaceID == uint32(keyspaceToCheck) {
+			panic("findGroupByKeyspaceID is called unexpectedly")
+		}
+	})
 	ctx, cancel := context.WithTimeout(c.ctx, timeout)
 	defer cancel()
 
@@ -526,21 +576,10 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 		})
 		if len(addrs) == 0 {
 			// There is no error but no tso server address found, which means
-			// either the server side is experiencing some problems to get the
-			// tso primary addresses or the server hasn't been upgraded to the
-			// version which processes and returns GetClusterInfoResponse.TsoUrls.
-			// In this case, we fall back to the old way of discovering the tso
-			// primary addresses from etcd directly.
-			log.Warn("[tso] no tso server address found,"+
-				" fallback to the legacy path to discover from etcd directly",
-				zap.String("discovery-key", c.defaultDiscoveryKey))
-			addrs, err = c.discoverWithLegacyPath()
-			if err != nil {
-				return "", err
-			}
-			if len(addrs) == 0 {
-				return "", errors.New("no tso server address found")
-			}
+			// the server side hasn't been upgraded to the version that
+			// processes and returns GetClusterInfoResponse.TsoUrls. Return here
+			// and handle the fallback logic outside of this function.
+			return "", nil
 		}
 
 		log.Info("update tso server addresses", zap.Strings("addrs", addrs))

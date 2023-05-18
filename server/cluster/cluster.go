@@ -57,7 +57,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	syncer "github.com/tikv/pd/server/region_syncer"
+	syncer "github.com/tikv/pd/server/regionsyncer"
 	"github.com/tikv/pd/server/replication"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -892,7 +892,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
 	if newStore.NeedPersist() && c.storage != nil {
-		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
+		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
 		} else {
 			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
@@ -1260,21 +1260,15 @@ func (c *RaftCluster) GetRangeHoles() [][]string {
 }
 
 // UpdateStoreLabels updates a store's location labels
-// If 'force' is true, then update the store's labels forcibly.
+// If 'force' is true, the origin labels will be overwritten with the new one forcibly.
 func (c *RaftCluster) UpdateStoreLabels(storeID uint64, labels []*metapb.StoreLabel, force bool) error {
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
 	}
 	newStore := typeutil.DeepClone(store.GetMeta(), core.StoreFactory)
-	if force {
-		newStore.Labels = labels
-	} else {
-		// If 'force' isn't set, the given labels will merge into those labels which already existed in the store.
-		newStore.Labels = core.MergeLabels(newStore.GetLabels(), labels)
-	}
-	// PutStore will perform label merge.
-	return c.putStoreImpl(newStore)
+	newStore.Labels = labels
+	return c.putStoreImpl(newStore, force)
 }
 
 // DeleteStoreLabel updates a store's location labels
@@ -1295,13 +1289,12 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 		return errors.Errorf("the label key %s does not exist", labelKey)
 	}
 	newStore.Labels = labels
-	// PutStore will perform label merge.
-	return c.putStoreImpl(newStore)
+	return c.putStoreImpl(newStore, true)
 }
 
 // PutStore puts a store.
 func (c *RaftCluster) PutStore(store *metapb.Store) error {
-	if err := c.putStoreImpl(store); err != nil {
+	if err := c.putStoreImpl(store, false); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
@@ -1310,8 +1303,9 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 }
 
 // putStoreImpl puts a store.
-// If 'force' is true, then overwrite the store's labels.
-func (c *RaftCluster) putStoreImpl(store *metapb.Store) error {
+// If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
+// If 'force' is false, the store's labels will merge into those labels which already existed in the store.
+func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -1341,6 +1335,9 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store) error {
 	} else {
 		// Use the given labels to update the store.
 		labels := store.GetLabels()
+		if !force {
+			labels = core.MergeLabels(s.GetLabels(), labels)
+		}
 		// Update an existed store.
 		s = s.Clone(
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
@@ -1717,7 +1714,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 
 func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 	if c.storage != nil {
-		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
+		if err := c.storage.SaveStoreMeta(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -2061,7 +2058,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 // deleteStore deletes the store from the cluster. it's concurrent safe.
 func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	if c.storage != nil {
-		if err := c.storage.DeleteStore(store.GetMeta()); err != nil {
+		if err := c.storage.DeleteStoreMeta(store.GetMeta()); err != nil {
 			return err
 		}
 	}

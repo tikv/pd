@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -43,7 +44,7 @@ type LocalTSOAllocator struct {
 	// for election use, notice that the leadership that member holds is
 	// the leadership for PD leader. Local TSO Allocator's leadership is for the
 	// election of Local TSO Allocator leader among several PD servers and
-	// Local TSO Allocator only use member's some etcd and pbpd.Member info.
+	// Local TSO Allocator only use member's some etcd and pdpb.Member info.
 	// So it's not conflicted.
 	rootPath        string
 	allocatorLeader atomic.Value // stored as *pdpb.Member
@@ -55,13 +56,24 @@ func NewLocalTSOAllocator(
 	leadership *election.Leadership,
 	dcLocation string,
 ) Allocator {
+	// Construct the timestampOracle path prefix, which is:
+	// 1. for the default keyspace group:
+	//    lta/{dc-location} in /pd/{cluster_id}/lta/{dc-location}/timestamp
+	// 2. for the non-default keyspace groups:
+	//    {group}/lta/{dc-location} in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
+	var tsPath string
+	if am.kgID == utils.DefaultKeyspaceGroupID {
+		tsPath = path.Join(localTSOAllocatorEtcdPrefix, dcLocation)
+	} else {
+		tsPath = path.Join(fmt.Sprintf("%05d", am.kgID), localTSOAllocatorEtcdPrefix, dcLocation)
+	}
 	return &LocalTSOAllocator{
 		allocatorManager: am,
 		leadership:       leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
 			rootPath:               am.rootPath,
-			ltsPath:                path.Join(localTSOAllocatorEtcdPrefix, dcLocation),
+			tsPath:                 tsPath,
 			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
@@ -71,6 +83,14 @@ func NewLocalTSOAllocator(
 		},
 		rootPath: leadership.GetLeaderKey(),
 	}
+}
+
+// GetTimestampPath returns the timestamp path in etcd.
+func (lta *LocalTSOAllocator) GetTimestampPath() string {
+	if lta == nil || lta.timestampOracle == nil {
+		return ""
+	}
+	return lta.timestampOracle.GetTimestampPath()
 }
 
 // GetDCLocation returns the local allocator's dc-location.

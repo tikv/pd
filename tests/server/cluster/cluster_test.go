@@ -44,7 +44,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	syncer "github.com/tikv/pd/server/region_syncer"
+	syncer "github.com/tikv/pd/server/regionsyncer"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -831,7 +831,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(testStorage.SaveStore(store))
+		re.NoError(testStorage.SaveStoreMeta(store))
 	}
 
 	regions := make([]*metapb.Region, 0, n)
@@ -1450,7 +1450,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(storage.SaveStore(store))
+		re.NoError(storage.SaveStoreMeta(store))
 	}
 	rc, err = rc.LoadClusterInfo()
 	re.NoError(err)

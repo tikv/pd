@@ -105,7 +105,6 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		failpoint.Inject("concurrentRemoveOperator", func() {
 			time.Sleep(500 * time.Millisecond)
 		})
-
 		// Update operator status:
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.

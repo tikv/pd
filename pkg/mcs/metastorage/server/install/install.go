@@ -15,7 +15,7 @@
 package install
 
 import (
-	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
+	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 )
 

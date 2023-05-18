@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -45,6 +46,14 @@ type Allocator interface {
 	IsInitialize() bool
 	// UpdateTSO is used to update the TSO in memory and the time window in etcd.
 	UpdateTSO() error
+	// GetTimestampPath returns the timestamp path in etcd, which is:
+	// 1. for the default keyspace group:
+	//     a. timestamp in /pd/{cluster_id}/timestamp
+	//     b. lta/{dc-location}/timestamp in /pd/{cluster_id}/lta/{dc-location}/timestamp
+	// 1. for the non-default keyspace groups:
+	//     a. {group}/gts/timestamp in /ms/{cluster_id}/tso/{group}/gta/timestamp
+	//     b. {group}/lts/{dc-location}/timestamp in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
+	GetTimestampPath() string
 	// SetTSO sets the physical part with given TSO. It's mainly used for BR restore.
 	// Cannot set the TSO smaller than now in any case.
 	// if ignoreSmaller=true, if input ts is smaller than current, ignore silently, else return error
@@ -80,6 +89,16 @@ func NewGlobalTSOAllocator(
 	am *AllocatorManager,
 	startGlobalLeaderLoop bool,
 ) Allocator {
+	// Construct the timestampOracle path prefix, which is:
+	// 1. for the default keyspace group:
+	//     "" in /pd/{cluster_id}/timestamp
+	// 2. for the non-default keyspace groups:
+	//     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
+	tsPath := ""
+	if am.kgID != mcsutils.DefaultKeyspaceGroupID {
+		tsPath = path.Join(fmt.Sprintf("%05d", am.kgID), globalTSOAllocatorEtcdPrefix)
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	gta := &GlobalTSOAllocator{
 		ctx:    ctx,
@@ -89,7 +108,7 @@ func NewGlobalTSOAllocator(
 		timestampOracle: &timestampOracle{
 			client:                 am.member.GetLeadership().GetClient(),
 			rootPath:               am.rootPath,
-			ltsPath:                "",
+			tsPath:                 tsPath,
 			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
@@ -125,6 +144,14 @@ func (gta *GlobalTSOAllocator) getSyncRTT() int64 {
 		return 0
 	}
 	return syncRTT.(int64)
+}
+
+// GetTimestampPath returns the timestamp path in etcd.
+func (gta *GlobalTSOAllocator) GetTimestampPath() string {
+	if gta == nil || gta.timestampOracle == nil {
+		return ""
+	}
+	return gta.timestampOracle.GetTimestampPath()
 }
 
 func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32, suffixBits int) (*pdpb.Timestamp, bool, error) {
