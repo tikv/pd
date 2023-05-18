@@ -306,8 +306,6 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	oc.SetOperator(op1)
 
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/concurrentRemoveOperator", "return(true)"))
-	defer suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/concurrentRemoveOperator"))
-
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -324,6 +322,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	wg.Wait()
 
 	suite.Equal(op2, oc.GetOperator(1))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/concurrentRemoveOperator"))
 }
 
 func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
@@ -794,23 +793,8 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	})
 
 	suite.True(labelerManager.ScheduleDisabled(source))
-	// add operator should be failed since it is labeled with `schedule=deny`.
-	suite.Equal(0, controller.AddWaitingOperator(ops...))
-
-	// add operator should be success without `schedule=deny`
-	labelerManager.DeleteLabelRule("schedulelabel")
-	labelerManager.ScheduleDisabled(source)
-	suite.False(labelerManager.ScheduleDisabled(source))
-	// now there is one operator being allowed to add, if it is a merge operator
-	// both of the pair are allowed
-	ops, err = operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
-	suite.NoError(err)
-	suite.Len(ops, 2)
+	// add operator should be success since it is not check in addWaitingOperator
 	suite.Equal(2, controller.AddWaitingOperator(ops...))
-	suite.Equal(0, controller.AddWaitingOperator(ops...))
-
-	// no space left, new operator can not be added.
-	suite.Equal(0, controller.AddWaitingOperator(addPeerOp(0)))
 }
 
 // issue #5279

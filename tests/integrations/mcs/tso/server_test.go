@@ -125,7 +125,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}
 }
 
-func (suite *tsoServerTestSuite) TestPariticipantStartWithAdvertiseListenAddr() {
+func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 	re := suite.Require()
 
 	cfg := tso.NewConfig()
@@ -154,7 +154,9 @@ func (suite *tsoServerTestSuite) TestPariticipantStartWithAdvertiseListenAddr() 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
 	checkTSOPath(re, true /*isAPIServiceMode*/)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady", "return(true)"))
 	checkTSOPath(re, false /*isAPIServiceMode*/)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady"))
 }
 
 func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
@@ -187,7 +189,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	cli := mcs.SetupClientWithDefaultKeyspaceName(ctx, re, []string{backendEndpoints})
+	cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
 	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
 	ts := tsoutil.ComposeTS(physical, logical)
@@ -208,6 +210,56 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 		count++
 	}
 	return count
+}
+
+func TestWaitAPIServiceReady(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startCluster := func(isAPIServiceMode bool) (cluster *tests.TestCluster, backendEndpoints string) {
+		var err error
+		if isAPIServiceMode {
+			cluster, err = tests.NewTestAPICluster(ctx, 1)
+		} else {
+			cluster, err = tests.NewTestCluster(ctx, 1)
+		}
+		re.NoError(err)
+		err = cluster.RunInitialServers()
+		re.NoError(err)
+		leaderName := cluster.WaitLeader()
+		pdLeader := cluster.GetServer(leaderName)
+		return cluster, pdLeader.GetAddr()
+	}
+
+	// tso server cannot be started because the pd server is not ready as api service.
+	cluster, backendEndpoints := startCluster(false /*isAPIServiceMode*/)
+	sctx, scancel := context.WithTimeout(ctx, time.Second*10)
+	defer scancel()
+	s, _, err := mcs.StartSingleTSOTestServerWithoutCheck(sctx, re, backendEndpoints, tempurl.Alloc())
+	re.Error(err)
+	re.Nil(s)
+	cluster.Destroy()
+
+	// tso server can be started because the pd server is ready as api service.
+	cluster, backendEndpoints = startCluster(true /*isAPIServiceMode*/)
+	sctx, scancel = context.WithTimeout(ctx, time.Second*10)
+	defer scancel()
+	s, cleanup, err := mcs.StartSingleTSOTestServerWithoutCheck(sctx, re, backendEndpoints, tempurl.Alloc())
+	re.NoError(err)
+	defer cluster.Destroy()
+	defer cleanup()
+
+	for i := 0; i < 12; i++ {
+		select {
+		case <-time.After(time.Second):
+		case <-sctx.Done():
+			return
+		}
+		if s != nil && s.IsServing() {
+			break
+		}
+	}
 }
 
 type APIServerForwardTestSuite struct {
@@ -443,20 +495,20 @@ func (suite *APIServerForwardTestSuite) checkUnavailableTSO() {
 }
 
 func (suite *APIServerForwardTestSuite) checkAvailableTSO() {
-	err := mcs.WaitForTSOServiceAvailable(suite.ctx, suite.pdClient)
-	suite.NoError(err)
+	re := suite.Require()
+	mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
 	// try to get ts
-	_, _, err = suite.pdClient.GetTS(suite.ctx)
-	suite.NoError(err)
+	_, _, err := suite.pdClient.GetTS(suite.ctx)
+	re.NoError(err)
 	// try to update gc safe point
 	min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1)
-	suite.NoError(err)
-	suite.Equal(uint64(0), min)
+	re.NoError(err)
+	re.Equal(uint64(0), min)
 	// try to set external ts
 	ts, err := suite.pdClient.GetExternalTimestamp(suite.ctx)
-	suite.NoError(err)
+	re.NoError(err)
 	err = suite.pdClient.SetExternalTimestamp(suite.ctx, ts+1)
-	suite.NoError(err)
+	re.NoError(err)
 }
 
 type CommonTestSuite struct {

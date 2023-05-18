@@ -30,14 +30,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/resource_group/controller"
-	"github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 
 	// Register Service
 	_ "github.com/tikv/pd/pkg/mcs/registry"
-	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/install"
+	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
 )
 
 func TestMain(m *testing.M) {
@@ -61,7 +61,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedMode", `return(true)`))
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
@@ -146,7 +146,7 @@ func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.cluster.Destroy()
 	suite.clean()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedMode"))
 }
 
 func (suite *resourceManagerClientTestSuite) TearDownTest() {
@@ -599,7 +599,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		Requests:              make([]*rmpb.TokenBucketRequest, 0),
 		TargetRequestPeriodMs: uint64(time.Second * 10 / time.Millisecond),
 	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/fastPersist", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastPersist", `return(true)`))
 	suite.resignAndWaitLeader()
 	groups = append(groups, &rmpb.ResourceGroup{Name: "test3"})
 	for i := 0; i < 3; i++ {
@@ -647,7 +647,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		re.NoError(err)
 		checkFunc(gresp, groups[0])
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/fastPersist"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastPersist"))
 }
 
 func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
@@ -933,7 +933,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 		WriteCostPerByte: 1,
 		CPUMsCost:        1,
 	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/acquireFailed", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU", "return(true)"))
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
 	controller.Start(suite.ctx)
@@ -959,7 +959,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 	// we can not check `inDegradedMode` because of data race.
 	re.True(endTime.Before(beginTime.Add(time.Second)))
 	controller.Stop()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resource_manager/server/acquireFailed"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/acquireFailed"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU"))
 }
 
@@ -997,7 +997,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
 	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
 	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
-	// refer github.com/tikv/pd/pkg/mcs/resource_manager/server/enableDegradedMode, check with 1s.
+	// refer github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedMode, check with 1s.
 	re.Equal(time.Second, config.DegradedModeWaitDuration)
 }
 

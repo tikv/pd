@@ -129,7 +129,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 	return &pdpb.UpdateServiceSafePointV2Response{
 		Header:       s.header(),
 		ServiceId:    []byte(minServiceSafePoint.ServiceID),
-		TTL:          minServiceSafePoint.ExpiredAt - now,
+		Ttl:          minServiceSafePoint.ExpiredAt - now,
 		MinSafePoint: minServiceSafePoint.SafePoint,
 	}, nil
 }

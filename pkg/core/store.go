@@ -55,6 +55,7 @@ type StoreInfo struct {
 	slowTrendEvicted    bool // this store has been evicted as a slow store by trend, should not transfer leader to it
 	leaderCount         int
 	regionCount         int
+	learnerCount        int
 	witnessCount        int
 	leaderSize          int64
 	regionSize          int64
@@ -273,6 +274,11 @@ func (s *StoreInfo) GetLeaderCount() int {
 // GetRegionCount returns the Region count of the store.
 func (s *StoreInfo) GetRegionCount() int {
 	return s.regionCount
+}
+
+// GetLearnerCount returns the learner count of the store.
+func (s *StoreInfo) GetLearnerCount() int {
+	return s.learnerCount
 }
 
 // GetWitnessCount returns the witness count of the store.
@@ -789,11 +795,12 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, witnessCount int) {
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
 			SetWitnessCount(witnessCount),
+			SetLearnerCount(learnerCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))

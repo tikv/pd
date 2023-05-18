@@ -186,9 +186,9 @@ type KeyspaceGroupManager struct {
 	// 1. The path for keyspace group primary election. Format: "/ms/{cluster_id}/tso/{group}/primary"
 	// 2. The path for LoadTimestamp/SaveTimestamp in the storage endpoint for all the non-default
 	//    keyspace groups.
-	//    Key: /ms/{cluster_id}/tso/{group}/gts/timestamp
+	//    Key: /ms/{cluster_id}/tso/{group}/gta/timestamp
 	//    Value: ts(time.Time)
-	//    Key: /ms/{cluster_id}/tso/{group}/lts/{dc-location}/timestamp
+	//    Key: /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
 	//    Value: ts(time.Time)
 	// Note: The {group} is 5 digits integer with leading zeros.
 	tsoSvcRootPath string
@@ -425,6 +425,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	}
 	// Initialize all kinds of maps.
 	am := NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg, true)
+	log.Info("created allocator manager",
+		zap.Uint32("keyspace-group-id", group.ID),
+		zap.String("timestamp-path", am.GetTimestampPath("")))
 	kgm.Lock()
 	group.KeyspaceLookupTable = make(map[uint32]struct{})
 	for _, kid := range group.Keyspaces {
@@ -686,6 +689,52 @@ func (kgm *KeyspaceGroupManager) checkKeySpaceGroupID(id uint32) error {
 	}
 	return errs.ErrKeyspaceGroupIDInvalid.FastGenByArgs(
 		fmt.Sprintf("%d shouldn't >= %d", id, mcsutils.MaxKeyspaceGroupCountInUse))
+}
+
+// GetMinTS returns the minimum timestamp across all keyspace groups served by this TSO server/pod.
+func (kgm *KeyspaceGroupManager) GetMinTS(
+	dcLocation string,
+) (_ pdpb.Timestamp, kgAskedCount, kgTotalCount uint32, err error) {
+	kgm.RLock()
+	defer kgm.RUnlock()
+
+	var minTS *pdpb.Timestamp
+	for i, am := range kgm.ams {
+		if kgm.kgs[i] != nil {
+			kgTotalCount++
+		}
+		// If any keyspace group hasn't elected primary, we can't know its current timestamp of
+		// the group, so as to the min ts across all keyspace groups. Return error in this case.
+		if am != nil && !am.member.IsLeaderElected() {
+			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, errs.ErrGetMinTS.FastGenByArgs("leader is not elected")
+		}
+		// Skip the keyspace groups that are not served by this TSO Server/Pod.
+		if am == nil || !am.IsLeader() {
+			continue
+		}
+		kgAskedCount++
+		// Skip the keyspace groups that are split targets, because they always have newer
+		// time lines than the existing split sources thus won't contribute to the min ts.
+		if kgm.kgs[i] != nil && kgm.kgs[i].IsSplitTarget() {
+			continue
+		}
+		ts, err := am.HandleRequest(dcLocation, 1)
+		if err != nil {
+			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, err
+		}
+		if minTS == nil || tsoutil.CompareTimestamp(&ts, minTS) < 0 {
+			minTS = &ts
+		}
+	}
+
+	if minTS == nil {
+		// This TSO server/pod is not serving any keyspace group, return an empty timestamp,
+		// and the client needs to skip the empty timestamps when collecting the min timestamp
+		// from all TSO servers/pods.
+		return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, nil
+	}
+
+	return *minTS, kgAskedCount, kgTotalCount, nil
 }
 
 func genNotServedErr(perr *perrors.Error, keyspaceGroupID uint32) error {

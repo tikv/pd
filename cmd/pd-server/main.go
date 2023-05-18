@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
-	resource_manager "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	resource_manager "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"

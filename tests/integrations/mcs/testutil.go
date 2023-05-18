@@ -21,11 +21,10 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
 	bs "github.com/tikv/pd/pkg/basicserver"
-	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -49,11 +48,11 @@ func InitLogger(cfg *tso.Config) (err error) {
 	return err
 }
 
-// SetupClientWithDefaultKeyspaceName creates a TSO client with default keyspace name for test.
-func SetupClientWithDefaultKeyspaceName(
-	ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption,
+// SetupClientWithAPIContext creates a TSO client with api context name for test.
+func SetupClientWithAPIContext(
+	ctx context.Context, re *require.Assertions, apiCtx pd.APIContext, endpoints []string, opts ...pd.ClientOption,
 ) pd.Client {
-	cli, err := pd.NewClientWithKeyspaceName(ctx, "", endpoints, pd.SecurityOption{}, opts...)
+	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }
@@ -85,19 +84,22 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 	return s, cleanup
 }
 
-// StartSingleTSOTestServer creates and starts a tso server with default config for testing.
-func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*tso.Server, func()) {
+// StartSingleTSOTestServerWithoutCheck creates and starts a tso server with default config for testing.
+func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*tso.Server, func(), error) {
 	cfg := tso.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
-
 	// Setup the logger.
 	err = InitLogger(cfg)
 	re.NoError(err)
+	return NewTSOTestServer(ctx, cfg)
+}
 
-	s, cleanup, err := NewTSOTestServer(ctx, cfg)
+// StartSingleTSOTestServer creates and starts a tso server with default config for testing.
+func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*tso.Server, func()) {
+	s, cleanup, err := StartSingleTSOTestServerWithoutCheck(ctx, re, backendEndpoints, listenAddrs)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return !s.IsClosed()
@@ -136,19 +138,13 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 }
 
 // WaitForTSOServiceAvailable waits for the pd client being served by the tso server side
-func WaitForTSOServiceAvailable(ctx context.Context, pdClient pd.Client) error {
-	var err error
-	for i := 0; i < 30; i++ {
-		if _, _, err := pdClient.GetTS(ctx); err == nil {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return err
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-	return errors.WithStack(err)
+func WaitForTSOServiceAvailable(
+	ctx context.Context, re *require.Assertions, client pd.Client,
+) {
+	testutil.Eventually(re, func() bool {
+		_, _, err := client.GetTS(ctx)
+		return err == nil
+	})
 }
 
 // CheckMultiKeyspacesTSO checks the correctness of TSO for multiple keyspaces.

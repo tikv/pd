@@ -45,9 +45,9 @@ func TestLoadRegion(t *testing.T) {
 	for i := 0; i < 30; i++ {
 		rs.SaveRegion(&metapb.Region{Id: uint64(i) + 1})
 	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/base_backend/slowLoadRegion", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/base_backend/slowLoadRegion"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion"))
 	}()
 
 	rc := NewRegionSyncer(server)

@@ -355,6 +355,13 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 	mc.PutStore(store)
 }
 
+// AddLabersStoreWithLearnerCount adds store with specified count of region, learner and labels.
+func (mc *Cluster) AddLabersStoreWithLearnerCount(storeID uint64, regionCount int, learnerCount int, labels map[string]string) {
+	mc.AddLabelsStore(storeID, regionCount, labels)
+	store := mc.GetStore(storeID).Clone(core.SetLearnerCount(learnerCount))
+	mc.PutStore(store)
+}
+
 // AddLeaderRegion adds region with specified leader and followers.
 func (mc *Cluster) AddLeaderRegion(regionID uint64, leaderStoreID uint64, otherPeerStoreIDs ...uint64) *core.RegionInfo {
 	origin := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)

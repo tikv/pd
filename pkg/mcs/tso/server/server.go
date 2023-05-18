@@ -32,10 +32,13 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+	"github.com/pkg/errors"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -66,6 +69,12 @@ const (
 	// tsoSvcRootPathFormat defines the root path for all etcd paths used for different purposes.
 	// format: "/ms/{cluster_id}/tso".
 	tsoSvcRootPathFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName
+
+	// maxRetryTimesWaitAPIService is the max retry times for initializing the cluster ID.
+	maxRetryTimesWaitAPIService = 360
+	// retryIntervalWaitAPIService is the interval to retry.
+	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
+	retryIntervalWaitAPIService = 500 * time.Millisecond
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -147,6 +156,15 @@ func (s *Server) GetAddr() string {
 
 // Run runs the TSO server.
 func (s *Server) Run() error {
+	skipWaitAPIServiceReady := false
+	failpoint.Inject("skipWaitAPIServiceReady", func() {
+		skipWaitAPIServiceReady = true
+	})
+	if !skipWaitAPIServiceReady {
+		if err := s.waitAPIServiceReady(); err != nil {
+			return err
+		}
+	}
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
@@ -515,6 +533,55 @@ func (s *Server) startServer() (err error) {
 
 	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
+}
+
+func (s *Server) waitAPIServiceReady() error {
+	var (
+		ready bool
+		err   error
+	)
+	for i := 0; i < maxRetryTimesWaitAPIService; i++ {
+		ready, err = s.isAPIServiceReady()
+		if err == nil && ready {
+			return nil
+		}
+		log.Debug("api server is not ready, retrying", errs.ZapError(err), zap.Bool("ready", ready))
+		select {
+		case <-s.ctx.Done():
+			return errors.New("context canceled while waiting api server ready")
+		case <-time.After(retryIntervalWaitAPIService):
+		}
+	}
+	if err != nil {
+		log.Warn("failed to check api server ready", errs.ZapError(err))
+	}
+	return errors.Errorf("failed to wait api server ready after retrying %d times", maxRetryTimesWaitAPIService)
+}
+
+func (s *Server) isAPIServiceReady() (bool, error) {
+	urls := strings.Split(s.cfg.BackendEndpoints, ",")
+	if len(urls) == 0 {
+		return false, errors.New("no backend endpoints")
+	}
+	cc, err := s.GetDelegateClient(s.ctx, urls[0])
+	if err != nil {
+		return false, err
+	}
+	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(s.ctx, &pdpb.GetClusterInfoRequest{})
+	if err != nil {
+		return false, err
+	}
+	if clusterInfo.GetHeader().GetError() != nil {
+		return false, errors.Errorf(clusterInfo.GetHeader().GetError().String())
+	}
+	modes := clusterInfo.ServiceModes
+	if len(modes) == 0 {
+		return false, errors.New("no service mode")
+	}
+	if modes[0] == pdpb.ServiceMode_API_SVC_MODE {
+		return true, nil
+	}
+	return false, nil
 }
 
 // CreateServer creates the Server

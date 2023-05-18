@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -106,7 +105,6 @@ func (oc *OperatorController) Dispatch(region *core.RegionInfo, source string) {
 		failpoint.Inject("concurrentRemoveOperator", func() {
 			time.Sleep(500 * time.Millisecond)
 		})
-
 		// Update operator status:
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
@@ -423,14 +421,6 @@ func (oc *OperatorController) checkAddOperator(isPromoting bool, ops ...*operato
 
 		if op.SchedulerKind() == operator.OpAdmin || op.IsLeaveJointStateOperator() {
 			continue
-		}
-		if cl, ok := oc.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
-			l := cl.GetRegionLabeler()
-			if l.ScheduleDisabled(region) {
-				log.Debug("schedule disabled", zap.Uint64("region-id", op.RegionID()))
-				operatorWaitCounter.WithLabelValues(op.Desc(), "schedule-disabled").Inc()
-				return false
-			}
 		}
 	}
 	expired := false

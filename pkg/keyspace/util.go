@@ -39,6 +39,10 @@ const (
 var (
 	// ErrKeyspaceNotFound is used to indicate target keyspace does not exist.
 	ErrKeyspaceNotFound = errors.New("keyspace does not exist")
+	// ErrRegionSplitTimeout indices to split region timeout
+	ErrRegionSplitTimeout = errors.New("region split timeout")
+	// ErrRegionSplitFailed indices to split region failed
+	ErrRegionSplitFailed = errors.New("region split failed")
 	// ErrKeyspaceExists indicates target keyspace already exists.
 	// It's used when creating a new keyspace.
 	ErrKeyspaceExists = errors.New("keyspace already exists")
