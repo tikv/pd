@@ -336,6 +336,7 @@ func NewClientWithContext(
 }
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
+// And now, it's only for test purpose.
 func NewClientWithKeyspace(
 	ctx context.Context, keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
@@ -456,14 +457,14 @@ func NewClientWithAPIContext(
 		if keyspaceName == "" {
 			keyspaceName = defaultKeyspaceName
 		}
-		return NewClientWithKeyspaceName(ctx, keyspaceName, svrAddrs, security, opts...)
+		return newClientWithKeyspaceName(ctx, keyspaceName, svrAddrs, security, opts...)
 	default:
 		return nil, errors.Errorf("[pd] invalid API version %d", apiVersion)
 	}
 }
 
-// NewClientWithKeyspaceName creates a client with context and the specified keyspace name.
-func NewClientWithKeyspaceName(
+// newClientWithKeyspaceName creates a client with context and the specified keyspace name.
+func newClientWithKeyspaceName(
 	ctx context.Context, keyspaceName string, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
