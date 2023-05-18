@@ -403,7 +403,8 @@ const (
 
 // APIContext is the context for API version.
 type APIContext interface {
-	GetAPIVersionInfo() (apiVersion APIVersion, keyspaceName string)
+	GetAPIVersion() (apiVersion APIVersion)
+	GetKeyspaceName() (keyspaceName string)
 }
 
 type apiContextV1 struct{}
@@ -413,9 +414,14 @@ func NewAPIContextV1() APIContext {
 	return &apiContextV1{}
 }
 
-// GetAPIVersionInfo returns the API version and the keyspace name.
-func (apiCtx *apiContextV1) GetAPIVersionInfo() (version APIVersion, keyspaceName string) {
-	return V1, ""
+// GetAPIVersion returns the API version.
+func (apiCtx *apiContextV1) GetAPIVersion() (version APIVersion) {
+	return V1
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (apiCtx *apiContextV1) GetKeyspaceName() (keyspaceName string) {
+	return ""
 }
 
 type apiContextV1TTL struct{}
@@ -425,9 +431,14 @@ func NewAPIContextV1TTL() APIContext {
 	return &apiContextV1TTL{}
 }
 
-// GetAPIVersionInfo returns the API version and the keyspace name.
-func (apiCtx *apiContextV1TTL) GetAPIVersionInfo() (version APIVersion, keyspaceName string) {
-	return V1TTL, ""
+// GetAPIVersion returns the API version.
+func (apiCtx *apiContextV1TTL) GetAPIVersion() (version APIVersion) {
+	return V1TTL
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (apiCtx *apiContextV1TTL) GetKeyspaceName() (keyspaceName string) {
+	return ""
 }
 
 type apiContextV2 struct {
@@ -436,12 +447,20 @@ type apiContextV2 struct {
 
 // NewAPIContextV2 creates a API context with the specified keyspace name for V2.
 func NewAPIContextV2(keyspaceName string) APIContext {
+	if len(keyspaceName) == 0 {
+		keyspaceName = defaultKeyspaceName
+	}
 	return &apiContextV2{keyspaceName: keyspaceName}
 }
 
-// GetAPIVersionInfo returns the API version and the keyspace name.
-func (apiCtx *apiContextV2) GetAPIVersionInfo() (version APIVersion, keyspaceName string) {
-	return V2, apiCtx.keyspaceName
+// GetAPIVersion returns the API version.
+func (apiCtx *apiContextV2) GetAPIVersion() (version APIVersion) {
+	return V2
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (apiCtx *apiContextV2) GetKeyspaceName() (keyspaceName string) {
+	return apiCtx.keyspaceName
 }
 
 // NewClientWithAPIContext creates a client according to the API context.
@@ -449,14 +468,11 @@ func NewClientWithAPIContext(
 	ctx context.Context, apiCtx APIContext, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	apiVersion, keyspaceName := apiCtx.GetAPIVersionInfo()
+	apiVersion, keyspaceName := apiCtx.GetAPIVersion(), apiCtx.GetKeyspaceName()
 	switch apiVersion {
 	case V1, V1TTL:
 		return NewClientWithContext(ctx, svrAddrs, security, opts...)
 	case V2:
-		if keyspaceName == "" {
-			keyspaceName = defaultKeyspaceName
-		}
 		return newClientWithKeyspaceName(ctx, keyspaceName, svrAddrs, security, opts...)
 	default:
 		return nil, errors.Errorf("[pd] invalid API version %d", apiVersion)
