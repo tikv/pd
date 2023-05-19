@@ -112,18 +112,27 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 }
 
 func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res ResponseInfo) {
+	if consumption == nil {
+		return
+	}
 	readBytes := float64(res.ReadBytes())
 	consumption.ReadBytes += readBytes
 	consumption.RRU += float64(kc.ReadBytesCost) * readBytes
 }
 
 func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res ResponseInfo) {
+	if consumption == nil {
+		return
+	}
 	kvCPUMs := float64(res.KVCPU().Nanoseconds()) / 1000000.0
 	consumption.TotalCpuTimeMs += kvCPUMs
 	consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
 }
 
 func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
+	if consumption == nil {
+		return
+	}
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes -= writeBytes
 	consumption.WRU -= float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
