@@ -91,6 +91,7 @@ func (c *client) WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.Keyspac
 	}
 	go func() {
 		defer func() {
+			close(keyspaceWatcherChan)
 			if r := recover(); r != nil {
 				log.Error("[pd] panic in keyspace client `WatchKeyspaces`", zap.Any("error", r))
 				return
@@ -99,7 +100,6 @@ func (c *client) WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.Keyspac
 		for {
 			select {
 			case <-ctx.Done():
-				close(keyspaceWatcherChan)
 				return
 			default:
 				resp, err := stream.Recv()
