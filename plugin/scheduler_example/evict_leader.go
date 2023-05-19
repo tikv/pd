@@ -25,7 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -46,7 +45,7 @@ const (
 )
 
 func init() {
-	schedule.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedule.ConfigDecoder {
+	schedulers.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedulers.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -69,7 +68,7 @@ func init() {
 		}
 	})
 
-	schedule.RegisterScheduler(EvictLeaderType, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
+	schedulers.RegisterScheduler(EvictLeaderType, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder) (schedulers.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -130,7 +129,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	name := conf.getScheduleName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	data, err := schedule.EncodeConfig(conf)
+	data, err := schedulers.EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -159,7 +158,7 @@ type evictLeaderScheduler struct {
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
-func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
+func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) schedulers.Scheduler {
 	base := schedulers.NewBaseScheduler(opController)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
@@ -184,7 +183,7 @@ func (s *evictLeaderScheduler) GetType() string {
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
-	return schedule.EncodeConfig(s.conf)
+	return schedulers.EncodeConfig(s.conf)
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster sche.ClusterInformer) error {

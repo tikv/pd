@@ -24,7 +24,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
@@ -149,7 +148,7 @@ type hotRegionSchedulerConfig struct {
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
 	conf.RLock()
 	defer conf.RUnlock()
-	return schedule.EncodeConfig(conf)
+	return EncodeConfig(conf)
 }
 
 func (conf *hotRegionSchedulerConfig) GetStoreStatZombieDuration() time.Duration {
@@ -427,7 +426,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 }
 
 func (conf *hotRegionSchedulerConfig) persistLocked() error {
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}

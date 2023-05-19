@@ -24,7 +24,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -55,7 +54,7 @@ func TestShuffleLeader(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
-	sl, err := schedule.CreateScheduler(ShuffleLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleLeaderType, []string{"", ""}))
+	sl, err := CreateScheduler(ShuffleLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(ShuffleLeaderType, []string{"", ""}))
 	re.NoError(err)
 	ops, _ := sl.Schedule(tc, false)
 	re.Empty(ops)
@@ -93,7 +92,7 @@ func TestRejectLeader(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 1, 3)
 
 	// The label scheduler transfers leader out of store1.
-	sl, err := schedule.CreateScheduler(LabelType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(LabelType, []string{"", ""}))
+	sl, err := CreateScheduler(LabelType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(LabelType, []string{"", ""}))
 	re.NoError(err)
 	ops, _ := sl.Schedule(tc, false)
 	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpLeader, 1)
@@ -105,13 +104,13 @@ func TestRejectLeader(t *testing.T) {
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
-	bs, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
+	bs, err := CreateScheduler(BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
 	ops, _ = bs.Schedule(tc, false)
 	re.Empty(ops)
 
 	// Can't evict leader from store2, neither.
-	el, err := schedule.CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"2"}))
+	el, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"2"}))
 	re.NoError(err)
 	ops, _ = el.Schedule(tc, false)
 	re.Empty(ops)
@@ -137,7 +136,7 @@ func TestRemoveRejectLeader(t *testing.T) {
 	defer cancel()
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 1)
-	el, err := schedule.CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
+	el, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
 	re.NoError(err)
 	tc.DeleteStore(tc.GetStore(1))
 	succ, _ := el.(*evictLeaderScheduler).conf.removeStore(1)
@@ -157,7 +156,7 @@ func checkBalance(re *require.Assertions, enablePlacementRules bool) {
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
-	hb, err := schedule.CreateScheduler(ShuffleHotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
+	hb, err := CreateScheduler(ShuffleHotRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
 	re.NoError(err)
 	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
@@ -204,7 +203,7 @@ func TestHotRegionScheduleAbnormalReplica(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetHotRegionScheduleLimit(0)
-	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 
 	tc.AddRegionStore(1, 3)
@@ -229,7 +228,7 @@ func TestShuffleRegion(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
-	sl, err := schedule.CreateScheduler(ShuffleRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
+	sl, err := CreateScheduler(ShuffleRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
 	re.NoError(err)
 	re.True(sl.IsScheduleAllowed(tc))
 	ops, _ := sl.Schedule(tc, false)
@@ -293,7 +292,7 @@ func TestShuffleRegionRole(t *testing.T) {
 	}, peers[0])
 	tc.PutRegion(region)
 
-	sl, err := schedule.CreateScheduler(ShuffleRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
+	sl, err := CreateScheduler(ShuffleRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))
 	re.NoError(err)
 
 	conf := sl.(*shuffleRegionScheduler).conf
@@ -313,10 +312,10 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	defer cancel()
 
 	storage := storage.NewStorageWithMemoryBackend()
-	cd := schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
-	bs, err := schedule.CreateScheduler(BalanceRegionType, oc, storage, cd)
+	cd := ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
+	bs, err := CreateScheduler(BalanceRegionType, oc, storage, cd)
 	re.NoError(err)
-	hs, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage, cd)
+	hs, err := CreateScheduler(statistics.Write.String(), oc, storage, cd)
 	re.NoError(err)
 
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -365,8 +364,8 @@ func TestSpecialUseReserved(t *testing.T) {
 	defer cancel()
 
 	storage := storage.NewStorageWithMemoryBackend()
-	cd := schedule.ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
-	bs, err := schedule.CreateScheduler(BalanceRegionType, oc, storage, cd)
+	cd := ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
+	bs, err := CreateScheduler(BalanceRegionType, oc, storage, cd)
 	re.NoError(err)
 
 	tc.SetHotRegionCacheHitsThreshold(0)
@@ -400,7 +399,7 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetEnablePlacementRules(true)
-	lb, err := schedule.CreateScheduler(BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
+	lb, err := CreateScheduler(BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
 
 	tc.AddLeaderStore(1, 1)

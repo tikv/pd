@@ -21,7 +21,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -58,7 +57,7 @@ type randomMergeScheduler struct {
 
 // newRandomMergeScheduler creates an admin scheduler that randomly picks two adjacent regions
 // then merges them.
-func newRandomMergeScheduler(opController *operator.Controller, conf *randomMergeSchedulerConfig) schedule.Scheduler {
+func newRandomMergeScheduler(opController *operator.Controller, conf *randomMergeSchedulerConfig) Scheduler {
 	base := NewBaseScheduler(opController)
 	return &randomMergeScheduler{
 		BaseScheduler: base,
@@ -75,7 +74,7 @@ func (s *randomMergeScheduler) GetType() string {
 }
 
 func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {

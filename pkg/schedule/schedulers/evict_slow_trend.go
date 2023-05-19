@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -48,7 +47,7 @@ type evictSlowTrendSchedulerConfig struct {
 
 func (conf *evictSlowTrendSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
 	})
@@ -137,7 +136,7 @@ func (s *evictSlowTrendScheduler) GetType() string {
 }
 
 func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
 func (s *evictSlowTrendScheduler) Prepare(cluster sche.ClusterInformer) error {
@@ -264,7 +263,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.ClusterInformer, dryRun 
 	return s.scheduleEvictLeader(cluster), nil
 }
 
-func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) schedule.Scheduler {
+func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
 	return &evictSlowTrendScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
 		conf:          conf,

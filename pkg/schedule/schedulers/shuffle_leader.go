@@ -19,7 +19,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -54,7 +53,7 @@ type shuffleLeaderScheduler struct {
 
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
-func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleLeaderSchedulerConfig) schedule.Scheduler {
+func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleLeaderSchedulerConfig) Scheduler {
 	filters := []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true, OperatorLevel: constant.Low},
 		filter.NewSpecialUseFilter(conf.Name),
@@ -76,7 +75,7 @@ func (s *shuffleLeaderScheduler) GetType() string {
 }
 
 func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
 func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {

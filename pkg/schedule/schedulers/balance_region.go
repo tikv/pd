@@ -67,7 +67,7 @@ type balanceRegionScheduler struct {
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
-func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) schedule.Scheduler {
+func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) Scheduler {
 	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
 		BaseScheduler: base,
@@ -113,7 +113,7 @@ func (s *balanceRegionScheduler) GetType() string {
 }
 
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {

@@ -19,7 +19,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -57,7 +56,7 @@ type labelScheduler struct {
 // LabelScheduler is mainly based on the store's label information for scheduling.
 // Now only used for reject leader schedule, that will move the leader out of
 // the store with the specific label.
-func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerConfig) schedule.Scheduler {
+func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerConfig) Scheduler {
 	return &labelScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
 		conf:          conf,
@@ -73,7 +72,7 @@ func (s *labelScheduler) GetType() string {
 }
 
 func (s *labelScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
 func (s *labelScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {

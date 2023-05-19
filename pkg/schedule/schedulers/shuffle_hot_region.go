@@ -19,7 +19,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -57,7 +56,7 @@ type shuffleHotRegionScheduler struct {
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
-func newShuffleHotRegionScheduler(opController *operator.Controller, conf *shuffleHotRegionSchedulerConfig) schedule.Scheduler {
+func newShuffleHotRegionScheduler(opController *operator.Controller, conf *shuffleHotRegionSchedulerConfig) Scheduler {
 	base := newBaseHotScheduler(opController)
 	ret := &shuffleHotRegionScheduler{
 		baseHotScheduler: base,
@@ -75,7 +74,7 @@ func (s *shuffleHotRegionScheduler) GetType() string {
 }
 
 func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {

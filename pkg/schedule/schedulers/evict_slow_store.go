@@ -19,7 +19,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -47,7 +46,7 @@ type evictSlowStoreSchedulerConfig struct {
 
 func (conf *evictSlowStoreSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
 	})
@@ -107,7 +106,7 @@ func (s *evictSlowStoreScheduler) GetType() string {
 }
 
 func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
 func (s *evictSlowStoreScheduler) Prepare(cluster sche.ClusterInformer) error {
@@ -211,7 +210,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.ClusterInformer, dryRun 
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
-func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) schedule.Scheduler {
+func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) Scheduler {
 	base := NewBaseScheduler(opController)
 
 	s := &evictSlowStoreScheduler{

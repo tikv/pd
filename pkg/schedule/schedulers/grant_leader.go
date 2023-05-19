@@ -24,7 +24,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -91,7 +90,7 @@ func (conf *grantLeaderSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -152,7 +151,7 @@ type grantLeaderScheduler struct {
 
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func newGrantLeaderScheduler(opController *operator.Controller, conf *grantLeaderSchedulerConfig) schedule.Scheduler {
+func newGrantLeaderScheduler(opController *operator.Controller, conf *grantLeaderSchedulerConfig) Scheduler {
 	base := NewBaseScheduler(opController)
 	handler := newGrantLeaderHandler(conf)
 	return &grantLeaderScheduler{
@@ -175,7 +174,7 @@ func (s *grantLeaderScheduler) GetType() string {
 }
 
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
 func (s *grantLeaderScheduler) Prepare(cluster sche.ClusterInformer) error {

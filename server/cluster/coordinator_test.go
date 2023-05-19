@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -594,7 +593,7 @@ func TestPeerState(t *testing.T) {
 
 	stream := mockhbstream.NewHeartbeatStream()
 
-	// Wait for schedule.
+	// Wait for schedulers.
 	waitOperator(re, co, 1)
 	operatorutil.CheckTransferPeer(re, co.opController.GetOperator(1), operator.OpKind(0), 4, 1)
 
@@ -746,7 +745,7 @@ func TestAddScheduler(t *testing.T) {
 	oc := co.opController
 
 	// test ConfigJSONDecoder create
-	bl, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("{}")))
+	bl, err := schedulers.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigJSONDecoder([]byte("{}")))
 	re.NoError(err)
 	conf, err := bl.EncodeConfig()
 	re.NoError(err)
@@ -756,16 +755,16 @@ func TestAddScheduler(t *testing.T) {
 	batch := data["batch"].(float64)
 	re.Equal(4, int(batch))
 
-	gls, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
+	gls, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
 	re.NoError(err)
 	re.NotNil(co.addScheduler(gls))
 	re.NotNil(co.removeScheduler(gls.GetName()))
 
-	gls, err = schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls, err = schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	re.NoError(err)
 	re.NoError(co.addScheduler(gls))
 
-	hb, err := schedule.CreateScheduler(schedulers.HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("{}")))
+	hb, err := schedulers.CreateScheduler(schedulers.HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigJSONDecoder([]byte("{}")))
 	re.NoError(err)
 	conf, err = hb.EncodeConfig()
 	re.NoError(err)
@@ -807,10 +806,10 @@ func TestPersistScheduler(t *testing.T) {
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	re.NoError(err)
 	re.NoError(co.addScheduler(gls1, "1"))
-	evict, err := schedule.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
+	evict, err := schedulers.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
 	re.NoError(err)
 	re.NoError(co.addScheduler(evict, "2"))
 	re.Len(co.schedulers, defaultCount+2)
@@ -832,7 +831,7 @@ func TestPersistScheduler(t *testing.T) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	re.NoError(err)
-	_, err = schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
+	_, err = schedulers.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedulers.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	// suppose we add a new default enable scheduler
 	config.DefaultSchedulers = append(config.DefaultSchedulers, config.SchedulerConfig{Type: "shuffle-region"})
@@ -864,10 +863,10 @@ func TestPersistScheduler(t *testing.T) {
 	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.run()
 	re.Len(co.schedulers, 3)
-	bls, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	bls, err := schedulers.CreateScheduler(schedulers.BalanceLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
 	re.NoError(co.addScheduler(bls))
-	brs, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
+	brs, err := schedulers.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
 	re.NoError(co.addScheduler(brs))
 	re.Len(co.schedulers, defaultCount)
@@ -953,7 +952,7 @@ func TestRemoveScheduler(t *testing.T) {
 	oc := co.opController
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedule.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedule.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
 	re.NoError(err)
 	re.NoError(co.addScheduler(gls1, "1"))
 	re.Len(co.schedulers, defaultCount+1)
@@ -1139,7 +1138,7 @@ func TestStoreOverloaded(t *testing.T) {
 	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
+	lb, err := schedulers.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedulers.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
 	opt := tc.GetOpts()
 	re.NoError(tc.addRegionStore(4, 100))
@@ -1193,7 +1192,7 @@ func TestStoreOverloadedWithReplace(t *testing.T) {
 	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	oc := co.opController
-	lb, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
+	lb, err := schedulers.CreateScheduler(schedulers.BalanceRegionType, oc, tc.storage, schedulers.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
 
 	re.NoError(tc.addRegionStore(4, 100))
@@ -1266,7 +1265,7 @@ func TestDownStoreLimit(t *testing.T) {
 
 // FIXME: remove after move into schedulers package
 type mockLimitScheduler struct {
-	schedule.Scheduler
+	schedulers.Scheduler
 	limit   uint64
 	counter *operator.Controller
 	kind    operator.OpKind
@@ -1285,7 +1284,7 @@ func TestController(t *testing.T) {
 
 	re.NoError(tc.addLeaderRegion(1, 1))
 	re.NoError(tc.addLeaderRegion(2, 2))
-	scheduler, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	scheduler, err := schedulers.CreateScheduler(schedulers.BalanceLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
 	lb := &mockLimitScheduler{
 		Scheduler: scheduler,
@@ -1371,7 +1370,7 @@ func TestInterval(t *testing.T) {
 	_, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 
-	lb, err := schedule.CreateScheduler(schedulers.BalanceLeaderType, co.opController, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
+	lb, err := schedulers.CreateScheduler(schedulers.BalanceLeaderType, co.opController, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
 	sc := newScheduleController(co, lb)
 

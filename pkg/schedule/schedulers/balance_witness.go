@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -106,7 +105,7 @@ func (conf *balanceWitnessSchedulerConfig) Clone() *balanceWitnessSchedulerConfi
 }
 
 func (conf *balanceWitnessSchedulerConfig) persistLocked() error {
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -155,7 +154,7 @@ type balanceWitnessScheduler struct {
 
 // newBalanceWitnessScheduler creates a scheduler that tends to keep witnesses on
 // each store balanced.
-func newBalanceWitnessScheduler(opController *operator.Controller, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) schedule.Scheduler {
+func newBalanceWitnessScheduler(opController *operator.Controller, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) Scheduler {
 	base := NewBaseScheduler(opController)
 	s := &balanceWitnessScheduler{
 		BaseScheduler: base,
@@ -209,7 +208,7 @@ func (b *balanceWitnessScheduler) GetType() string {
 func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 	b.conf.mu.RLock()
 	defer b.conf.mu.RUnlock()
-	return schedule.EncodeConfig(b.conf)
+	return EncodeConfig(b.conf)
 }
 
 func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {

@@ -20,7 +20,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -52,7 +51,7 @@ type shuffleRegionScheduler struct {
 
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
-func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleRegionSchedulerConfig) schedule.Scheduler {
+func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleRegionSchedulerConfig) Scheduler {
 	filters := []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: ShuffleRegionName, MoveRegion: true, OperatorLevel: constant.Low},
 		filter.NewSpecialUseFilter(ShuffleRegionName),

@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -100,7 +99,7 @@ func (conf *grantHotRegionSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -147,7 +146,7 @@ func (s *grantHotRegionScheduler) GetType() string {
 }
 
 func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
 // IsScheduleAllowed returns whether the scheduler is allowed to schedule.
