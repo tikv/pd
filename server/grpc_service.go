@@ -179,7 +179,7 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 			defer wg.Done()
 			resp, err := s.getMinTSFromSingleServer(s.ctx, dcLocation, addr)
 			if err != nil || resp == nil {
-				log.Warn("[tso] failed to get min ts from tso server",
+				log.Warn("failed to get min ts from tso server",
 					zap.String("address", addr), zap.Error(err))
 				return
 			}
