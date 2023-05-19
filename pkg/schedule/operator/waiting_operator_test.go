@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package operator
 
 import (
 	"testing"
@@ -20,14 +20,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core/constant"
-	"github.com/tikv/pd/pkg/schedule/operator"
 )
 
 func TestRandBuckets(t *testing.T) {
 	re := require.New(t)
-	rb := NewRandBuckets()
+	rb := newRandBuckets()
 	addOperators(rb)
-	for i := 0; i < len(PriorityWeight); i++ {
+	for i := 0; i < len(priorityWeight); i++ {
 		op := rb.GetOperator()
 		re.NotNil(op)
 	}
@@ -35,23 +34,23 @@ func TestRandBuckets(t *testing.T) {
 }
 
 func addOperators(wop WaitingOperator) {
-	op := operator.NewTestOperator(uint64(1), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
-		operator.RemovePeer{FromStore: uint64(1)},
+	op := NewTestOperator(uint64(1), &metapb.RegionEpoch{}, OpRegion, []OpStep{
+		RemovePeer{FromStore: uint64(1)},
 	}...)
 	op.SetPriorityLevel(constant.Medium)
 	wop.PutOperator(op)
-	op = operator.NewTestOperator(uint64(2), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
-		operator.RemovePeer{FromStore: uint64(2)},
+	op = NewTestOperator(uint64(2), &metapb.RegionEpoch{}, OpRegion, []OpStep{
+		RemovePeer{FromStore: uint64(2)},
 	}...)
 	op.SetPriorityLevel(constant.High)
 	wop.PutOperator(op)
-	op = operator.NewTestOperator(uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
-		operator.RemovePeer{FromStore: uint64(3)},
+	op = NewTestOperator(uint64(3), &metapb.RegionEpoch{}, OpRegion, []OpStep{
+		RemovePeer{FromStore: uint64(3)},
 	}...)
 	op.SetPriorityLevel(constant.Low)
 	wop.PutOperator(op)
-	op = operator.NewTestOperator(uint64(4), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
-		operator.RemovePeer{FromStore: uint64(4)},
+	op = NewTestOperator(uint64(4), &metapb.RegionEpoch{}, OpRegion, []OpStep{
+		RemovePeer{FromStore: uint64(4)},
 	}...)
 	op.SetPriorityLevel(constant.Urgent)
 	wop.PutOperator(op)
@@ -59,20 +58,20 @@ func addOperators(wop WaitingOperator) {
 
 func TestListOperator(t *testing.T) {
 	re := require.New(t)
-	rb := NewRandBuckets()
+	rb := newRandBuckets()
 	addOperators(rb)
-	re.Len(rb.ListOperator(), len(PriorityWeight))
+	re.Len(rb.ListOperator(), len(priorityWeight))
 }
 
 func TestRandomBucketsWithMergeRegion(t *testing.T) {
 	re := require.New(t)
-	rb := NewRandBuckets()
+	rb := newRandBuckets()
 	descs := []string{"merge-region", "admin-merge-region", "random-merge"}
 	for j := 0; j < 100; j++ {
 		// adds operators
 		desc := descs[j%3]
-		op := operator.NewTestOperator(uint64(1), &metapb.RegionEpoch{}, operator.OpRegion|operator.OpMerge, []operator.OpStep{
-			operator.MergeRegion{
+		op := NewTestOperator(uint64(1), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OpStep{
+			MergeRegion{
 				FromRegion: &metapb.Region{
 					Id:          1,
 					StartKey:    []byte{},
@@ -87,8 +86,8 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 		}...)
 		op.SetDesc(desc)
 		rb.PutOperator(op)
-		op = operator.NewTestOperator(uint64(2), &metapb.RegionEpoch{}, operator.OpRegion|operator.OpMerge, []operator.OpStep{
-			operator.MergeRegion{
+		op = NewTestOperator(uint64(2), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OpStep{
+			MergeRegion{
 				FromRegion: &metapb.Region{
 					Id:          1,
 					StartKey:    []byte{},
@@ -103,8 +102,8 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 		}...)
 		op.SetDesc(desc)
 		rb.PutOperator(op)
-		op = operator.NewTestOperator(uint64(3), &metapb.RegionEpoch{}, operator.OpRegion, []operator.OpStep{
-			operator.RemovePeer{FromStore: uint64(3)},
+		op = NewTestOperator(uint64(3), &metapb.RegionEpoch{}, OpRegion, []OpStep{
+			RemovePeer{FromStore: uint64(3)},
 		}...)
 		op.SetDesc("testOperatorHigh")
 		op.SetPriorityLevel(constant.High)

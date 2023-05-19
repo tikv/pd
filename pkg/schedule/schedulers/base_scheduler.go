@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -60,11 +61,11 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 
 // BaseScheduler is a basic scheduler for all other complex scheduler
 type BaseScheduler struct {
-	OpController *schedule.OperatorController
+	OpController *operator.Controller
 }
 
 // NewBaseScheduler returns a basic scheduler
-func NewBaseScheduler(opController *schedule.OperatorController) *BaseScheduler {
+func NewBaseScheduler(opController *operator.Controller) *BaseScheduler {
 	return &BaseScheduler{OpController: opController}
 }
 

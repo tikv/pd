@@ -237,7 +237,7 @@ func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream
 	if err := co.cluster.putRegion(region.Clone()); err != nil {
 		return err
 	}
-	co.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
+	co.opController.Dispatch(region, operator.DispatchFromHeartBeat)
 	return nil
 }
 
@@ -1268,7 +1268,7 @@ func TestDownStoreLimit(t *testing.T) {
 type mockLimitScheduler struct {
 	schedule.Scheduler
 	limit   uint64
-	counter *schedule.OperatorController
+	counter *operator.Controller
 	kind    operator.OpKind
 }
 

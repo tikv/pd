@@ -125,7 +125,7 @@ type scatterRangeScheduler struct {
 }
 
 // newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
-func newScatterRangeScheduler(opController *schedule.OperatorController, config *scatterRangeSchedulerConfig) schedule.Scheduler {
+func newScatterRangeScheduler(opController *operator.Controller, config *scatterRangeSchedulerConfig) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
 
 	name := config.getSchedulerName()

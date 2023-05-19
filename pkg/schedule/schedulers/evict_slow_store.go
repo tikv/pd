@@ -211,7 +211,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.ClusterInformer, dryRun 
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
-func newEvictSlowStoreScheduler(opController *schedule.OperatorController, conf *evictSlowStoreSchedulerConfig) schedule.Scheduler {
+func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
 
 	s := &evictSlowStoreScheduler{

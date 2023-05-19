@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package operator
 
 import (
 	"time"
-
-	"github.com/tikv/pd/pkg/schedule/operator"
 )
 
 type operatorWithTime struct {
-	op   *operator.Operator
+	op   *Operator
 	time time.Time
 }
 
