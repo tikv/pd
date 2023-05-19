@@ -1,4 +1,4 @@
-// Copyright 2017 TiKV Project Authors.
+// Copyright 2020 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,29 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package scheduling
 
 import (
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/storage"
 )
 
-// Cluster provides an overview of a cluster's regions distribution.
-type Cluster interface {
-	core.RegionSetInformer
-	core.StoreSetInformer
-	core.StoreSetController
-
+// ClusterInformer provides the necessary information of a cluster.
+type ClusterInformer interface {
+	RegionHealthCluster
 	statistics.RegionStatInformer
 	statistics.StoreStatInformer
 	buckets.BucketStatInformer
 
-	operator.ClusterInformer
-
+	GetBasicCluster() *core.BasicCluster
+	GetStoreConfig() config.StoreConfig
+	GetAllocator() id.Allocator
+	GetRegionLabeler() *labeler.RegionLabeler
+	GetStorage() storage.Storage
 	RemoveScheduler(name string) error
 	AddSuspectRegions(ids ...uint64)
 	SetHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64)
 	RecordOpStepWithTTL(regionID uint64)
+}
+
+// RegionHealthCluster is an aggregate interface that wraps multiple interfaces
+type RegionHealthCluster interface {
+	core.StoreSetInformer
+	core.StoreSetController
+	core.RegionSetInformer
+
+	GetOpts() config.Config
+	GetRuleManager() *placement.RuleManager
 }

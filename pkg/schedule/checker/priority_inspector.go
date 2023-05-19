@@ -19,9 +19,9 @@ import (
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 )
 
 // the default value of priority queue size
@@ -29,13 +29,13 @@ const defaultPriorityQueueSize = 1280
 
 // PriorityInspector ensures high priority region should run first
 type PriorityInspector struct {
-	cluster schedule.Cluster
+	cluster scheduling.ClusterInformer
 	conf    config.Config
 	queue   *cache.PriorityQueue
 }
 
 // NewPriorityInspector creates a priority inspector.
-func NewPriorityInspector(cluster schedule.Cluster, conf config.Config) *PriorityInspector {
+func NewPriorityInspector(cluster scheduling.ClusterInformer, conf config.Config) *PriorityInspector {
 	return &PriorityInspector{
 		cluster: cluster,
 		conf:    conf,

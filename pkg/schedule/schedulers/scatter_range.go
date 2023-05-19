@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -168,11 +169,11 @@ func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(l.config)
 }
 
-func (l *scatterRangeScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (l *scatterRangeScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
 	return l.allowBalanceLeader(cluster) || l.allowBalanceRegion(cluster)
 }
 
-func (l *scatterRangeScheduler) allowBalanceLeader(cluster schedule.Cluster) bool {
+func (l *scatterRangeScheduler) allowBalanceLeader(cluster scheduling.ClusterInformer) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
@@ -180,7 +181,7 @@ func (l *scatterRangeScheduler) allowBalanceLeader(cluster schedule.Cluster) boo
 	return allowed
 }
 
-func (l *scatterRangeScheduler) allowBalanceRegion(cluster schedule.Cluster) bool {
+func (l *scatterRangeScheduler) allowBalanceRegion(cluster scheduling.ClusterInformer) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpRegion.String()).Inc()
@@ -188,7 +189,7 @@ func (l *scatterRangeScheduler) allowBalanceRegion(cluster schedule.Cluster) boo
 	return allowed
 }
 
-func (l *scatterRangeScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (l *scatterRangeScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	scatterRangeCounter.Inc()
 	// isolate a new cluster according to the key range
 	c := schedule.GenRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())

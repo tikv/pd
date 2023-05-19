@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"go.uber.org/zap"
 )
 
@@ -75,7 +76,7 @@ func (s *labelScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *labelScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -83,7 +84,7 @@ func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return allowed
 }
 
-func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *labelScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	labelCounter.Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})

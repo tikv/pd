@@ -23,9 +23,9 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"go.uber.org/zap"
 )
 
@@ -61,13 +61,13 @@ var (
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
 	PauseController
-	cluster           schedule.Cluster
+	cluster           scheduling.ClusterInformer
 	conf              config.Config
 	regionWaitingList cache.Cache
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster schedule.Cluster, conf config.Config, regionWaitingList cache.Cache) *ReplicaChecker {
+func NewReplicaChecker(cluster scheduling.ClusterInformer, conf config.Config, regionWaitingList cache.Cache) *ReplicaChecker {
 	return &ReplicaChecker{
 		cluster:           cluster,
 		conf:              conf,

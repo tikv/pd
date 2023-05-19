@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 )
 
 const (
@@ -80,7 +81,7 @@ func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
 	return s.conf.EncodeConfig()
 }
 
-func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
@@ -88,7 +89,7 @@ func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) boo
 	return allowed
 }
 
-func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *shuffleRegionScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleRegionCounter.Inc()
 	region, oldPeer := s.scheduleRemovePeer(cluster)
 	if region == nil {
@@ -112,7 +113,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	return []*operator.Operator{op}, nil
 }
 
-func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer) {
+func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster scheduling.ClusterInformer) (*core.RegionInfo, *metapb.Peer) {
 	candidates := filter.NewCandidates(cluster.GetStores()).
 		FilterSource(cluster.GetOpts(), nil, nil, s.filters...).
 		Shuffle()
@@ -144,7 +145,7 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*
 	return nil, nil
 }
 
-func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
+func (s *shuffleRegionScheduler) scheduleAddPeer(cluster scheduling.ClusterInformer, region *core.RegionInfo, oldPeer *metapb.Peer) *metapb.Peer {
 	store := cluster.GetStore(oldPeer.GetStoreId())
 	if store == nil {
 		return nil

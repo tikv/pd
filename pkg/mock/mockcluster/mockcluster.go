@@ -47,6 +47,7 @@ const (
 
 // Cluster is used to mock a cluster for test purpose.
 type Cluster struct {
+	ctx context.Context
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
@@ -57,12 +58,13 @@ type Cluster struct {
 	suspectRegions map[uint64]struct{}
 	*config.StoreConfigManager
 	*buckets.HotBucketCache
-	ctx context.Context
+	storage.Storage
 }
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
+		ctx:                ctx,
 		BasicCluster:       core.NewBasicCluster(),
 		IDAllocator:        mockid.NewIDAllocator(),
 		HotStat:            statistics.NewHotStat(ctx),
@@ -70,7 +72,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		PersistOptions:     opts,
 		suspectRegions:     map[uint64]struct{}{},
 		StoreConfigManager: config.NewTestStoreConfigManager(nil),
-		ctx:                ctx,
+		Storage:            storage.NewStorageWithMemoryBackend(),
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
@@ -94,6 +96,11 @@ func (mc *Cluster) GetOpts() sc.Config {
 // GetAllocator returns the ID allocator.
 func (mc *Cluster) GetAllocator() id.Allocator {
 	return mc.IDAllocator
+}
+
+// GetStorage returns the storage.
+func (mc *Cluster) GetStorage() storage.Storage {
+	return mc.Storage
 }
 
 // ScanRegions scans region with start key, until number greater than limit.

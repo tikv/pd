@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/statistics"
 	"go.uber.org/zap"
 )
@@ -43,7 +44,7 @@ const (
 
 type solver struct {
 	*balanceSchedulerPlan
-	schedule.Cluster
+	scheduling.ClusterInformer
 	kind              constant.ScheduleKind
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
@@ -54,10 +55,10 @@ type solver struct {
 	targetScore float64
 }
 
-func newSolver(basePlan *balanceSchedulerPlan, kind constant.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *balanceSchedulerPlan, kind constant.ScheduleKind, cluster scheduling.ClusterInformer, opInfluence operator.OpInfluence) *solver {
 	return &solver{
 		balanceSchedulerPlan: basePlan,
-		Cluster:              cluster,
+		ClusterInformer:      cluster,
 		kind:                 kind,
 		opInfluence:          opInfluence,
 		tolerantSizeRatio:    adjustTolerantRatio(cluster, kind),
@@ -181,7 +182,7 @@ func (p *solver) getTolerantResource() int64 {
 	return p.tolerantSource
 }
 
-func adjustTolerantRatio(cluster schedule.Cluster, kind constant.ScheduleKind) float64 {
+func adjustTolerantRatio(cluster scheduling.ClusterInformer, kind constant.ScheduleKind) float64 {
 	var tolerantSizeRatio float64
 	switch c := cluster.(type) {
 	case *schedule.RangeCluster:

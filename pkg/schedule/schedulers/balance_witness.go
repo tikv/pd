@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -211,7 +212,7 @@ func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(b.conf)
 }
 
-func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
 	allowed := b.opController.OperatorCount(operator.OpWitness) < cluster.GetOpts().GetWitnessScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(b.GetType(), operator.OpWitness.String()).Inc()
@@ -219,7 +220,7 @@ func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster schedule.Cluster) bo
 	return allowed
 }
 
-func (b *balanceWitnessScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (b *balanceWitnessScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	b.conf.mu.RLock()
 	defer b.conf.mu.RUnlock()
 	basePlan := NewBalanceSchedulerPlan()

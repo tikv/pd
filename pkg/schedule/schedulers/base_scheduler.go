@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -87,7 +88,7 @@ func (s *BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 }
 
 // Prepare does some prepare work
-func (s *BaseScheduler) Prepare(cluster schedule.Cluster) error { return nil }
+func (s *BaseScheduler) Prepare(cluster scheduling.ClusterInformer) error { return nil }
 
 // Cleanup does some cleanup work
-func (s *BaseScheduler) Cleanup(cluster schedule.Cluster) {}
+func (s *BaseScheduler) Cleanup(cluster scheduling.ClusterInformer) {}

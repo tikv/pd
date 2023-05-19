@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	sche "github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -1271,7 +1272,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 

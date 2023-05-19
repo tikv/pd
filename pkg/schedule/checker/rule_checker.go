@@ -27,10 +27,10 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
 )
@@ -81,7 +81,7 @@ var (
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
-	cluster            schedule.Cluster
+	cluster            scheduling.ClusterInformer
 	ruleManager        *placement.RuleManager
 	name               string
 	regionWaitingList  cache.Cache
@@ -91,7 +91,7 @@ type RuleChecker struct {
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
+func NewRuleChecker(ctx context.Context, cluster scheduling.ClusterInformer, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
 	return &RuleChecker{
 		cluster:            cluster,
 		ruleManager:        ruleManager,
@@ -572,7 +572,7 @@ func (o *recorder) incOfflineLeaderCount(storeID uint64) {
 // Offline is triggered manually and only appears when the node makes some adjustments. here is an operator timeout / 2.
 var offlineCounterTTL = 5 * time.Minute
 
-func (o *recorder) refresh(cluster schedule.Cluster) {
+func (o *recorder) refresh(cluster scheduling.ClusterInformer) {
 	// re-count the offlineLeaderCounter if the store is already tombstone or store is gone.
 	if len(o.offlineLeaderCounter) > 0 && time.Since(o.lastUpdateTime) > offlineCounterTTL {
 		needClean := false

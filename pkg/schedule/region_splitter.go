@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
@@ -44,7 +45,7 @@ type SplitRegionsHandler interface {
 }
 
 // NewSplitRegionsHandler return SplitRegionsHandler
-func NewSplitRegionsHandler(cluster Cluster, oc *OperatorController) SplitRegionsHandler {
+func NewSplitRegionsHandler(cluster scheduling.ClusterInformer, oc *OperatorController) SplitRegionsHandler {
 	return &splitRegionsHandler{
 		cluster: cluster,
 		oc:      oc,
@@ -53,12 +54,12 @@ func NewSplitRegionsHandler(cluster Cluster, oc *OperatorController) SplitRegion
 
 // RegionSplitter handles split regions
 type RegionSplitter struct {
-	cluster Cluster
+	cluster scheduling.ClusterInformer
 	handler SplitRegionsHandler
 }
 
 // NewRegionSplitter return a region splitter
-func NewRegionSplitter(cluster Cluster, handler SplitRegionsHandler) *RegionSplitter {
+func NewRegionSplitter(cluster scheduling.ClusterInformer, handler SplitRegionsHandler) *RegionSplitter {
 	return &RegionSplitter{
 		cluster: cluster,
 		handler: handler,
@@ -177,7 +178,7 @@ func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
 }
 
 type splitRegionsHandler struct {
-	cluster Cluster
+	cluster scheduling.ClusterInformer
 	oc      *OperatorController
 }
 

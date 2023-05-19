@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -433,7 +434,7 @@ func (conf *hotRegionSchedulerConfig) persistLocked() error {
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }
 
-func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster schedule.Cluster) bool {
+func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster scheduling.ClusterInformer) bool {
 	querySupport := versioninfo.IsFeatureSupported(cluster.GetOpts().GetClusterVersion(), versioninfo.HotScheduleWithQuery)
 	conf.Lock()
 	defer conf.Unlock()

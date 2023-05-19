@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
@@ -37,7 +38,7 @@ var denyCheckersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues(
 
 // Controller is used to manage all checkers.
 type Controller struct {
-	cluster           schedule.Cluster
+	cluster           scheduling.ClusterInformer
 	conf              config.Config
 	opController      *schedule.OperatorController
 	learnerChecker    *LearnerChecker
@@ -53,7 +54,7 @@ type Controller struct {
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster schedule.Cluster, conf config.Config, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
+func NewController(ctx context.Context, cluster scheduling.ClusterInformer, conf config.Config, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &Controller{
 		cluster:           cluster,

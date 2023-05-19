@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -95,7 +96,7 @@ type evictLeaderSchedulerConfig struct {
 	mu               syncutil.RWMutex
 	storage          endpoint.ConfigStorage
 	StoreIDWitRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster          schedule.Cluster
+	cluster          scheduling.ClusterInformer
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -186,7 +187,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
+func (s *evictLeaderScheduler) Prepare(cluster scheduling.ClusterInformer) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -198,7 +199,7 @@ func (s *evictLeaderScheduler) Prepare(cluster schedule.Cluster) error {
 	return res
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
+func (s *evictLeaderScheduler) Cleanup(cluster scheduling.ClusterInformer) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
@@ -206,7 +207,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 	}
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -214,7 +215,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictLeaderScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWitRanges))
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()

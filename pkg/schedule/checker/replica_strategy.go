@@ -18,8 +18,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"go.uber.org/zap"
 )
 
@@ -27,7 +27,7 @@ import (
 // exists to allow replica_checker and rule_checker to reuse common logics.
 type ReplicaStrategy struct {
 	checkerName    string // replica-checker / rule-checker
-	cluster        schedule.Cluster
+	cluster        scheduling.ClusterInformer
 	locationLabels []string
 	isolationLevel string
 	region         *core.RegionInfo
