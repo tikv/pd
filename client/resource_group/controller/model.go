@@ -142,6 +142,9 @@ func newSQLCalculator(cfg *Config) *SQLCalculator {
 
 // Trickle update sql layer CPU consumption.
 func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption) {
+	if consumption == nil {
+		return
+	}
 	delta := getSQLProcessCPUTime(dsc.isSingleGroupByKeyspace) - consumption.SqlLayerCpuTimeMs
 	consumption.TotalCpuTimeMs += delta
 	consumption.SqlLayerCpuTimeMs += delta
@@ -169,7 +172,7 @@ func getRUTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RequestUnitType
 	if group == nil {
 		return nil
 	}
-	if typ == 0 {
+	if typ == rmpb.RequestUnitType_RU {
 		return group.RUSettings.RU
 	}
 	return nil
