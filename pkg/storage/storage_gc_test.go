@@ -130,6 +130,9 @@ func TestSaveLoadGCSafePoint(t *testing.T) {
 		re.NoError(err)
 		re.Equal(testSafePoint, loadGCSafePoint.SafePoint)
 	}
+
+	_, err2 := storage.LoadGCSafePointV2(999)
+	re.NoError(err2)
 }
 
 func TestLoadAllKeyspaceGCSafePoints(t *testing.T) {
