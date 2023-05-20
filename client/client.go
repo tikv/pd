@@ -640,6 +640,12 @@ func (c *client) getTSOClient() *tsoClient {
 	return c.tsoClient
 }
 
+func (c *client) getServiceMode() pdpb.ServiceMode {
+	c.RLock()
+	defer c.RUnlock()
+	return c.serviceMode
+}
+
 func (c *client) scheduleUpdateTokenConnection() {
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
@@ -832,6 +838,21 @@ func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical in
 }
 
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
+	// Handle compatibility issue in case of PD/API server doesn't support GetMinTS API.
+	serviceMode := c.getServiceMode()
+	switch serviceMode {
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("unknown service mode")
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		// If the service mode is switched to API during GetTS() call, which happens during migration,
+		// returning the default timeline should be fine.
+		return c.GetTS(ctx)
+	case pdpb.ServiceMode_API_SVC_MODE:
+	default:
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
+	}
+
+	// Call GetMinTS API to get the minimal TS from the API leader.
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return 0, 0, errs.ErrClientGetProtoClient
@@ -841,6 +862,10 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 		Header: c.requestHeader(),
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "Unimplemented") {
+			// If the method is not supported, we fallback to GetTS.
+			return c.GetTS(ctx)
+		}
 		return 0, 0, errs.ErrClientGetMinTSO.Wrap(err).GenWithStackByCause()
 	}
 	if resp == nil {
