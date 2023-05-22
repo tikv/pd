@@ -2967,7 +2967,7 @@
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{event}}",
-              "metric": "pd_scheduler_status",
+              "metric": "pd_schedule_operators_count",
               "refId": "A",
               "step": 4
             }

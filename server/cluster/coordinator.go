@@ -539,7 +539,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
 		// See issue #1341.
-		if allowed, _ := s.cluster.checkSchedulingAllowance(); !s.IsPaused() && !allowed {
+		if allowed, _ := s.cluster.checkSchedulingAllowance(); !s.IsPaused() && allowed {
 			allowScheduler = 1
 		}
 		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
@@ -946,7 +946,14 @@ func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 		}
 		return false
 	}
-	if allowed, _ := s.cluster.checkSchedulingAllowance(); s.IsPaused() || allowed {
+	allowed, _ := s.cluster.checkSchedulingAllowance()
+	if !allowed {
+		if diagnosable {
+			s.diagnosticRecorder.setResultFromStatus(halted)
+		}
+		return false
+	}
+	if s.IsPaused() {
 		if diagnosable {
 			s.diagnosticRecorder.setResultFromStatus(paused)
 		}
