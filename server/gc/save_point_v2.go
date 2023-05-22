@@ -37,12 +37,13 @@ type SafePointV2Manager struct {
 
 // NewSafePointManagerV2 returns a new SafePointV2Manager.
 func NewSafePointManagerV2(
+	ctx context.Context,
 	keyspaceStore endpoint.KeyspaceStorage,
 	v2Storage endpoint.SafePointV2Storage,
 	v1Storage endpoint.GCSafePointStorage,
 ) *SafePointV2Manager {
 	return &SafePointV2Manager{
-		ctx:             context.TODO(),
+		ctx:             ctx,
 		LockGroup:       syncutil.NewLockGroup(syncutil.WithHash(keyspace.MaskKeyspaceID)),
 		keyspaceStorage: keyspaceStore,
 		v2Storage:       v2Storage,
