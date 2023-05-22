@@ -62,8 +62,8 @@ func (manager *SafePointV2Manager) LoadGCSafePoint(keyspaceID uint32) (*endpoint
 	gcSafePoint, err := manager.getGCSafePoint(keyspaceID)
 	if err != nil {
 		log.Warn("failed to load gc safe point",
+			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Error(err),
-			zap.Uint32("keyspaceID", keyspaceID),
 		)
 		return nil, err
 	}
@@ -90,8 +90,8 @@ func (manager *SafePointV2Manager) checkKeyspace(keyspaceID uint32, updateReques
 	})
 	if err != nil {
 		log.Warn("check keyspace failed",
+			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Error(err),
-			zap.Uint32("keyspaceID", keyspaceID),
 		)
 	}
 	return err
@@ -110,7 +110,7 @@ func (manager *SafePointV2Manager) getGCSafePoint(keyspaceID uint32) (*endpoint.
 			return nil, err
 		}
 		log.Info("keyspace does not have a gc safe point, using v1 gc safe point instead",
-			zap.Uint32("keyspaceID", keyspaceID),
+			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Uint64("v1 gc safe point", v1SafePoint))
 		v2SafePoint.SafePoint = v1SafePoint
 	}
