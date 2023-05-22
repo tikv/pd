@@ -16,7 +16,6 @@ type GCClient interface {
 	UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (uint64, error)
 	UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	WatchGCSafePointV2(ctx context.Context) (chan []*pdpb.SafePointEvent, error)
-	GetGCSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error)
 }
 
 // UpdateGCSafePointV2 update gc safe point for the given keyspace.
@@ -103,28 +102,4 @@ func (c *client) WatchGCSafePointV2(ctx context.Context) (chan []*pdpb.SafePoint
 		}
 	}()
 	return SafePointEventsChan, err
-}
-
-// GetGCSafePointV2 get gc safe point for the given keyspace.
-func (c *client) GetGCSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetGCSafePointV2", opentracing.ChildOf(span.Context()))
-		defer span.Finish()
-	}
-	start := time.Now()
-	defer func() { cmdDurationGetGCSafePointV2.Observe(time.Since(start).Seconds()) }()
-
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	req := &pdpb.GetGCSafePointV2Request{
-		Header:     c.requestHeader(),
-		KeyspaceId: keyspaceID,
-	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().GetGCSafePointV2(ctx, req)
-	cancel()
-
-	if err = c.respForErr(cmdFailedDurationGetGCSafePointV2, start, err, resp.GetHeader()); err != nil {
-		return 0, err
-	}
-	return resp.GetSafePoint(), nil
 }
