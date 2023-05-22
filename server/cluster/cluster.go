@@ -2733,3 +2733,16 @@ func (c *RaftCluster) GetPausedSchedulerDelayAt(name string) (int64, error) {
 func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 	return c.coordinator.getPausedSchedulerDelayUntil(name)
 }
+
+// checkSchedulingAllowance checks if the cluster allows scheduling.
+func (c *RaftCluster) checkSchedulingAllowance() (bool, error) {
+	// If the cluster is in the process of online unsafe recovery, it should not allow scheduling.
+	if c.GetUnsafeRecoveryController().IsRunning() {
+		return false, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	}
+	// If the halt-scheduling is set, it should not allow scheduling.
+	if c.opt.IsSchedulingHalted() {
+		return false, errs.ErrSchedulingIsHalted.FastGenByArgs()
+	}
+	return true, nil
+}
