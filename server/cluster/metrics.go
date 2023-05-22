@@ -41,6 +41,14 @@ var (
 			Help:      "Counter of the bucket event",
 		}, []string{"event"})
 
+	schedulingAllowanceStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduling",
+			Name:      "allowance_status",
+			Help:      "Status of the scheduling allowance.",
+		}, []string{"kind"})
+
 	schedulerStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -140,6 +148,7 @@ var (
 func init() {
 	prometheus.MustRegister(regionEventCounter)
 	prometheus.MustRegister(healthStatusGauge)
+	prometheus.MustRegister(schedulingAllowanceStatusGauge)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(patrolCheckRegionsGauge)

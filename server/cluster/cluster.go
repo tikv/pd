@@ -2734,15 +2734,24 @@ func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 	return c.coordinator.getPausedSchedulerDelayUntil(name)
 }
 
+var (
+	onlineUnsafeRecoveryStatus = schedulingAllowanceStatusGauge.WithLabelValues("online-unsafe-recovery")
+	haltSchedulingStatus       = schedulingAllowanceStatusGauge.WithLabelValues("halt-scheduling")
+)
+
 // checkSchedulingAllowance checks if the cluster allows scheduling.
 func (c *RaftCluster) checkSchedulingAllowance() (bool, error) {
 	// If the cluster is in the process of online unsafe recovery, it should not allow scheduling.
 	if c.GetUnsafeRecoveryController().IsRunning() {
+		onlineUnsafeRecoveryStatus.Set(1)
 		return false, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
+	onlineUnsafeRecoveryStatus.Set(0)
 	// If the halt-scheduling is set, it should not allow scheduling.
 	if c.opt.IsSchedulingHalted() {
+		haltSchedulingStatus.Set(1)
 		return false, errs.ErrSchedulingIsHalted.FastGenByArgs()
 	}
+	haltSchedulingStatus.Set(0)
 	return true, nil
 }
