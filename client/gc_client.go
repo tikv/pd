@@ -108,7 +108,7 @@ func (c *client) WatchGCSafePointV2(ctx context.Context) (chan []*pdpb.SafePoint
 // GetGCSafePointV2 get gc safe point for the given keyspace.
 func (c *client) GetGCSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.UpdateGCSafePointV2", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.GetGCSafePointV2", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
