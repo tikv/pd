@@ -111,7 +111,7 @@ func (manager *SafePointV2Manager) getGCSafePoint(keyspaceID uint32) (*endpoint.
 		}
 		log.Info("keyspace does not have a gc safe point, using v1 gc safe point instead",
 			zap.Uint32("keyspace-id", keyspaceID),
-			zap.Uint64("v1 gc safe point", v1SafePoint))
+			zap.Uint64("gc-safe-point-v1", v1SafePoint))
 		v2SafePoint.SafePoint = v1SafePoint
 	}
 	return v2SafePoint, nil
