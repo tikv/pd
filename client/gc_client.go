@@ -82,6 +82,7 @@ func (c *client) WatchGCSafePointV2(ctx context.Context) (chan []*pdpb.SafePoint
 	}
 	go func() {
 		defer func() {
+			close(SafePointEventsChan)
 			if r := recover(); r != nil {
 				log.Error("[pd] panic in gc client `WatchGCSafePointV2`", zap.Any("error", r))
 				return
@@ -90,7 +91,6 @@ func (c *client) WatchGCSafePointV2(ctx context.Context) (chan []*pdpb.SafePoint
 		for {
 			select {
 			case <-ctx.Done():
-				close(SafePointEventsChan)
 				return
 			default:
 				resp, err := stream.Recv()
