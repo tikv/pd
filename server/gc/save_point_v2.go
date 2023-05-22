@@ -151,7 +151,7 @@ func (manager *SafePointV2Manager) UpdateServiceSafePoint(serviceSafePoint *endp
 	if serviceSafePoint.SafePoint < minServiceSafePoint.SafePoint {
 		log.Warn("failed to update service safe point, proposed safe point smaller than current min",
 			zap.Error(err),
-			zap.Uint32("keyspaceID", serviceSafePoint.KeyspaceID),
+			zap.Uint32("keyspace-id", serviceSafePoint.KeyspaceID),
 			zap.Uint64("proposed safe point", serviceSafePoint.SafePoint),
 			zap.Uint64("min service safe point", minServiceSafePoint.SafePoint),
 		)
