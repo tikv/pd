@@ -123,7 +123,7 @@ func (c *client) GetGCSafePointV2(ctx context.Context, keyspaceID uint32) (uint6
 	resp, err := c.getClient().GetGCSafePointV2(ctx, req)
 	cancel()
 
-	if err = c.respForErr(cmdFailedDurationUpdateGCSafePointV2, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(cmdFailedDurationGetGCSafePointV2, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetSafePoint(), nil

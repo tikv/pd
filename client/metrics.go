@@ -162,6 +162,7 @@ var (
 	cmdFailedDurationPut                      prometheus.Observer
 	cmdFailedDurationUpdateGCSafePointV2      prometheus.Observer
 	cmdFailedDurationUpdateServiceSafePointV2 prometheus.Observer
+	cmdFailedDurationGetGCSafePointV2         prometheus.Observer
 )
 
 func initCmdDurations() {
@@ -208,6 +209,7 @@ func initCmdDurations() {
 	cmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")
 	cmdFailedDurationUpdateGCSafePointV2 = cmdFailedDuration.WithLabelValues("update_gc_safe_point_v2")
 	cmdFailedDurationUpdateServiceSafePointV2 = cmdFailedDuration.WithLabelValues("update_service_safe_point_v2")
+	cmdFailedDurationGetGCSafePointV2 = cmdFailedDuration.WithLabelValues("get_gc_safe_point_v2")
 }
 
 func registerMetrics() {
