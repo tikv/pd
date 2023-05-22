@@ -105,6 +105,19 @@ func CreateMovePeerOperator(desc string, ci ClusterInformer, region *core.Region
 
 // CreateMoveWitnessOperator creates an operator that replaces an old witness with a new witness.
 func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64) (*Operator, error) {
+	if region.GetStorePeer(targetStoreID) != nil {
+		return nil, errors.Errorf("cannot move witness to a store which has already stored another peer of the same region")
+	}
+	oldPeer := region.GetStorePeer(sourceStoreID)
+	newPeer := &metapb.Peer{StoreId: targetStoreID, Role: oldPeer.Role, IsWitness: true}
+	return NewBuilder(desc, ci, region).
+		RemovePeer(sourceStoreID).
+		AddPeer(newPeer).
+		Build(OpWitness)
+}
+
+// CreateTransferWitnessOperator creates an operator that transfers witness to another peer.
+func CreateTransferWitnessOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		BecomeNonWitness(sourceStoreID).
 		BecomeWitness(targetStoreID).

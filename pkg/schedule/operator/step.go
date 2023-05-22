@@ -347,18 +347,18 @@ func (bn BecomeNonWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool)
 
 // BatchSwitchWitness is an OpStep that batch switch witness.
 type BatchSwitchWitness struct {
-	ToWitnesses    []BecomeWitness
 	ToNonWitnesses []BecomeNonWitness
+	ToWitnesses    []BecomeWitness
 }
 
 func (bsw BatchSwitchWitness) String() string {
 	b := &strings.Builder{}
 	_, _ = b.WriteString("batch switch witness")
-	for _, w := range bsw.ToWitnesses {
-		_, _ = fmt.Fprintf(b, ", switch peer %v on store %v to witness", w.PeerID, w.StoreID)
-	}
 	for _, nw := range bsw.ToNonWitnesses {
 		_, _ = fmt.Fprintf(b, ", switch peer %v on store %v to non-witness", nw.PeerID, nw.StoreID)
+	}
+	for _, w := range bsw.ToWitnesses {
+		_, _ = fmt.Fprintf(b, ", switch peer %v on store %v to witness", w.PeerID, w.StoreID)
 	}
 	return b.String()
 }
@@ -587,6 +587,7 @@ func (pl PromoteLearner) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *pdpb.
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
 	FromStore, PeerID uint64
+	IsWitness         bool
 	IsDownStore       bool
 }
 
@@ -605,7 +606,11 @@ func (rp RemovePeer) ConfVerChanged(region *core.RegionInfo) uint64 {
 }
 
 func (rp RemovePeer) String() string {
-	return fmt.Sprintf("remove peer on store %v", rp.FromStore)
+	info := "peer"
+	if rp.IsWitness {
+		info = "witness peer"
+	}
+	return fmt.Sprintf("remove %v on store %v", info, rp.FromStore)
 }
 
 // IsFinish checks if current step is finished.
@@ -626,11 +631,13 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	from := opInfluence.GetStoreInfluence(rp.FromStore)
 
 	regionSize := region.GetStorePeerApproximateSize(rp.FromStore)
-	from.RegionSize -= regionSize
+	if rp.IsWitness {
+		from.WitnessCount -= 1
+	} else {
+		from.RegionSize -= regionSize
+	}
 	from.RegionCount--
-	peer := region.GetStorePeer(rp.FromStore)
-	if peer != nil && peer.IsWitness {
-		from.WitnessCount--
+	if rp.IsWitness {
 		return
 	}
 
@@ -826,10 +833,18 @@ func (cpe ChangePeerV2Enter) String() string {
 	b := &strings.Builder{}
 	_, _ = b.WriteString("use joint consensus")
 	for _, pl := range cpe.PromoteLearners {
-		_, _ = fmt.Fprintf(b, ", promote learner peer %v on store %v to voter", pl.PeerID, pl.ToStore)
+		info := "learner peer"
+		if pl.IsWitness {
+			info = "witness learner peer"
+		}
+		_, _ = fmt.Fprintf(b, ", promote %v %v on store %v to voter", info, pl.PeerID, pl.ToStore)
 	}
 	for _, dv := range cpe.DemoteVoters {
-		_, _ = fmt.Fprintf(b, ", demote voter peer %v on store %v to learner", dv.PeerID, dv.ToStore)
+		info := "voter peer"
+		if dv.IsWitness {
+			info = "witness voter peer"
+		}
+		_, _ = fmt.Fprintf(b, ", demote %v %v on store %v to learner", info, dv.PeerID, dv.ToStore)
 	}
 	return b.String()
 }

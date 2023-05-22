@@ -91,6 +91,27 @@ func (bc *BasicCluster) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInf
 	return Stores
 }
 
+// GetOptionalStoresForRegion returns all Stores that can be used to store the region's peer.
+func (bc *BasicCluster) GetOptionalStoresForRegion(region *RegionInfo) []*StoreInfo {
+	bc.Stores.mu.RLock()
+	defer bc.Stores.mu.RUnlock()
+	var Stores []*StoreInfo
+	for _, store := range bc.Stores.GetStores() {
+		in := false
+		for id := range region.GetStoreIDs() {
+			// TODO: Make sure the constraints are sufficient
+			if store.GetID() == id && store.IsUp() && !store.IsTiFlash() {
+				in = true
+				break
+			}
+		}
+		if !in {
+			Stores = append(Stores, store)
+		}
+	}
+	return Stores
+}
+
 // GetFollowerStores returns all Stores that contains the region's follower peer.
 func (bc *BasicCluster) GetFollowerStores(region *RegionInfo) []*StoreInfo {
 	bc.Stores.mu.RLock()
@@ -269,6 +290,7 @@ type StoreSetInformer interface {
 
 	GetRegionStores(region *RegionInfo) []*StoreInfo
 	GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo
+	GetOptionalStoresForRegion(region *RegionInfo) []*StoreInfo
 	GetFollowerStores(region *RegionInfo) []*StoreInfo
 	GetLeaderStore(region *RegionInfo) *StoreInfo
 }

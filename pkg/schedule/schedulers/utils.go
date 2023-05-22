@@ -34,6 +34,7 @@ const (
 	// adjustRatio is used to adjust TolerantSizeRatio according to region count.
 	adjustRatio                  float64 = 0.005
 	leaderTolerantSizeRatio      float64 = 5.0
+	witnessTolerantSizeRatio     float64 = 5.0
 	minTolerantSizeRatio         float64 = 1.0
 	influenceAmp                 int64   = 5
 	defaultMaxRetryLimit                 = 10
@@ -193,6 +194,12 @@ func adjustTolerantRatio(cluster schedule.Cluster, kind constant.ScheduleKind) f
 	if kind.Resource == constant.LeaderKind && kind.Policy == constant.ByCount {
 		if tolerantSizeRatio == 0 {
 			return leaderTolerantSizeRatio
+		}
+		return tolerantSizeRatio
+	}
+	if kind.Resource == constant.WitnessKind {
+		if tolerantSizeRatio == 0 {
+			return witnessTolerantSizeRatio
 		}
 		return tolerantSizeRatio
 	}
