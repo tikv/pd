@@ -21,6 +21,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -52,6 +53,7 @@ const (
 	heartbeatSendTimeout          = 5 * time.Second
 	maxRetryTimesRequestTSOServer = 3
 	retryIntervalRequestTSOServer = 500 * time.Millisecond
+	getMinTSFromTSOServerTimeout  = 1 * time.Second
 )
 
 // gRPC errors
@@ -100,12 +102,7 @@ func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoR
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
 		return &pdpb.GetClusterInfoResponse{
-			Header: &pdpb.ResponseHeader{
-				Error: &pdpb.Error{
-					Type:    pdpb.ErrorType_UNKNOWN,
-					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
-				},
-			},
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
 
@@ -125,18 +122,160 @@ func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoR
 	}, nil
 }
 
+// GetMinTS implements gRPC PDServer. In PD service mode, it simply returns a timestamp.
+// In API service mode, it queries all tso servers and gets the minimum timestamp across
+// all keyspace groups.
+func (s *GrpcServer) GetMinTS(
+	ctx context.Context, request *pdpb.GetMinTSRequest,
+) (*pdpb.GetMinTSResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return &pdpb.GetMinTSResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+
+	var (
+		minTS *pdpb.Timestamp
+		err   error
+	)
+	if s.IsAPIServiceMode() {
+		minTS, err = s.GetMinTSFromTSOService(tso.GlobalDCLocation)
+	} else {
+		start := time.Now()
+		ts, internalErr := s.tsoAllocatorManager.HandleRequest(tso.GlobalDCLocation, 1)
+		if internalErr == nil {
+			tsoHandleDuration.Observe(time.Since(start).Seconds())
+		}
+		minTS = &ts
+	}
+	if err != nil {
+		return &pdpb.GetMinTSResponse{
+			Header:    s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Timestamp: minTS,
+		}, nil
+	}
+
+	return &pdpb.GetMinTSResponse{
+		Header:    s.header(),
+		Timestamp: minTS,
+	}, nil
+}
+
+// GetMinTSFromTSOService queries all tso servers and gets the minimum timestamp across
+// all keyspace groups.
+func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp, error) {
+	addrs := s.keyspaceGroupManager.GetTSOServiceAddrs()
+	if len(addrs) == 0 {
+		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("no tso servers/pods discovered")
+	}
+
+	// Get the minimal timestamp from the TSO servers/pods
+	var mutex sync.Mutex
+	resps := make([]*tsopb.GetMinTSResponse, 0)
+	wg := sync.WaitGroup{}
+	wg.Add(len(addrs))
+	for _, addr := range addrs {
+		go func(addr string) {
+			defer wg.Done()
+			resp, err := s.getMinTSFromSingleServer(s.ctx, dcLocation, addr)
+			if err != nil || resp == nil {
+				log.Warn("failed to get min ts from tso server",
+					zap.String("address", addr), zap.Error(err))
+				return
+			}
+			mutex.Lock()
+			defer mutex.Unlock()
+			resps = append(resps, resp)
+		}(addr)
+	}
+	wg.Wait()
+
+	// Check the results. The returned minimal timestamp is valid if all the conditions are met:
+	// 1. The number of responses is equal to the number of TSO servers/pods.
+	// 2. The number of keyspace groups asked is equal to the number of TSO servers/pods.
+	// 3. The minimal timestamp is not zero.
+	var (
+		minTS               *pdpb.Timestamp
+		keyspaceGroupsAsked uint32
+	)
+	if len(resps) == 0 {
+		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("none of tso server/pod responded")
+	}
+	emptyTS := &pdpb.Timestamp{}
+	keyspaceGroupsTotal := resps[0].KeyspaceGroupsTotal
+	for _, resp := range resps {
+		if resp.KeyspaceGroupsTotal == 0 {
+			return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("the tso service has no keyspace group")
+		}
+		if resp.KeyspaceGroupsTotal != keyspaceGroupsTotal {
+			return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs(
+				"the tso service has inconsistent keyspace group total count")
+		}
+		keyspaceGroupsAsked += resp.KeyspaceGroupsServing
+		if tsoutil.CompareTimestamp(resp.Timestamp, emptyTS) > 0 &&
+			(minTS == nil || tsoutil.CompareTimestamp(resp.Timestamp, minTS) < 0) {
+			minTS = resp.Timestamp
+		}
+	}
+
+	if keyspaceGroupsAsked != keyspaceGroupsTotal {
+		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs(
+			fmt.Sprintf("can't query all the tso keyspace groups. Asked %d, expected %d",
+				keyspaceGroupsAsked, keyspaceGroupsTotal))
+	}
+
+	if minTS == nil {
+		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("the tso service is not ready")
+	}
+
+	return minTS, nil
+}
+
+func (s *GrpcServer) getMinTSFromSingleServer(
+	ctx context.Context, dcLocation, tsoSrvAddr string,
+) (*tsopb.GetMinTSResponse, error) {
+	cc, err := s.getDelegateClient(s.ctx, tsoSrvAddr)
+	if err != nil {
+		return nil, errs.ErrClientGetMinTSO.FastGenByArgs(
+			fmt.Sprintf("can't connect to tso server %s", tsoSrvAddr))
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, getMinTSFromTSOServerTimeout)
+	defer cancel()
+
+	resp, err := tsopb.NewTSOClient(cc).GetMinTS(
+		cctx, &tsopb.GetMinTSRequest{
+			Header: &tsopb.RequestHeader{
+				ClusterId: s.ClusterID(),
+			},
+			DcLocation: dcLocation,
+		})
+	if err != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			err, cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp == nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			"no min ts info collected", cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.GetHeader().GetError() != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+
+	return resp, nil
+}
+
 // GetMembers implements gRPC PDServer.
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
 		return &pdpb.GetMembersResponse{
-			Header: &pdpb.ResponseHeader{
-				Error: &pdpb.Error{
-					Type:    pdpb.ErrorType_UNKNOWN,
-					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
-				},
-			},
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
 	members, err := cluster.GetMembers(s.GetClient())
@@ -1359,6 +1498,34 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 		TTL:          min.ExpiredAt - now.Unix(),
 		MinSafePoint: min.SafePoint,
 	}, nil
+}
+
+// GetGCSafePointV2 implements gRPC PDServer.
+// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
+// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
+func (s *GrpcServer) GetGCSafePointV2(_ context.Context, _ *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointV2Response, error) {
+	return nil, errors.New("not implemented")
+}
+
+// WatchGCSafePointV2 implements gRPC PDServer.
+// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
+// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
+func (s *GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, server pdpb.PD_WatchGCSafePointV2Server) error {
+	return errors.New("not implemented")
+}
+
+// UpdateGCSafePointV2 implements gRPC PDServer.
+// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
+// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
+func (s *GrpcServer) UpdateGCSafePointV2(_ context.Context, _ *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointV2Response, error) {
+	return nil, errors.New("not implemented")
+}
+
+// UpdateServiceSafePointV2 implements gRPC PDServer.
+// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
+// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
+func (s *GrpcServer) UpdateServiceSafePointV2(_ context.Context, _ *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceSafePointV2Response, error) {
+	return nil, errors.New("not implemented")
 }
 
 // GetOperator gets information about the operator belonging to the specify region.

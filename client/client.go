@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -633,10 +634,16 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 		zap.String("new-mode", newMode.String()))
 }
 
-func (c *client) getServiceClientProxy() (*tsoClient, pdpb.ServiceMode) {
+func (c *client) getTSOClient() *tsoClient {
 	c.RLock()
 	defer c.RUnlock()
-	return c.tsoClient, c.serviceMode
+	return c.tsoClient
+}
+
+func (c *client) getServiceMode() pdpb.ServiceMode {
+	c.RLock()
+	defer c.RUnlock()
+	return c.serviceMode
 }
 
 func (c *client) scheduleUpdateTokenConnection() {
@@ -801,7 +808,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
-	tsoClient, _ := c.getServiceClientProxy()
+	tsoClient := c.getTSOClient()
 	req.start = time.Now()
 	req.dcLocation = dcLocation
 
@@ -831,11 +838,8 @@ func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical in
 }
 
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
-	tsoClient, serviceMode := c.getServiceClientProxy()
-	if tsoClient == nil {
-		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("tso client is nil")
-	}
-
+	// Handle compatibility issue in case of PD/API server doesn't support GetMinTS API.
+	serviceMode := c.getServiceMode()
 	switch serviceMode {
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("unknown service mode")
@@ -844,10 +848,37 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 		// returning the default timeline should be fine.
 		return c.GetTS(ctx)
 	case pdpb.ServiceMode_API_SVC_MODE:
-		return tsoClient.getMinTS(ctx)
 	default:
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
 	}
+
+	// Call GetMinTS API to get the minimal TS from the API leader.
+	protoClient := c.getClient()
+	if protoClient == nil {
+		return 0, 0, errs.ErrClientGetProtoClient
+	}
+
+	resp, err := protoClient.GetMinTS(ctx, &pdpb.GetMinTSRequest{
+		Header: c.requestHeader(),
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "Unimplemented") {
+			// If the method is not supported, we fallback to GetTS.
+			return c.GetTS(ctx)
+		}
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(err).GenWithStackByCause()
+	}
+	if resp == nil {
+		attachErr := errors.Errorf("error:%s", "no min ts info collected")
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.GetHeader().GetError() != nil {
+		attachErr := errors.Errorf("error:%s s", resp.GetHeader().GetError().String())
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+
+	minTS := resp.GetTimestamp()
+	return minTS.Physical, tsoutil.AddLogical(minTS.Logical, 0, minTS.SuffixBits), nil
 }
 
 func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
@@ -1541,7 +1572,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 // For test only.
 func (c *client) GetTSOAllocators() *sync.Map {
-	tsoClient, _ := c.getServiceClientProxy()
+	tsoClient := c.getTSOClient()
 	if tsoClient == nil {
 		return nil
 	}
