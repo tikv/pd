@@ -20,9 +20,9 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
 )
@@ -110,7 +110,7 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *evictSlowStoreScheduler) Prepare(cluster scheduling.ClusterInformer) error {
+func (s *evictSlowStoreScheduler) Prepare(cluster sche.ClusterInformer) error {
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
 		return cluster.SlowStoreEvicted(evictStore)
@@ -118,11 +118,11 @@ func (s *evictSlowStoreScheduler) Prepare(cluster scheduling.ClusterInformer) er
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) Cleanup(cluster scheduling.ClusterInformer) {
+func (s *evictSlowStoreScheduler) Cleanup(cluster sche.ClusterInformer) {
 	s.cleanupEvictLeader(cluster)
 }
 
-func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster scheduling.ClusterInformer, storeID uint64) error {
+func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.ClusterInformer, storeID uint64) error {
 	err := s.conf.setStoreAndPersist(storeID)
 	if err != nil {
 		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", storeID))
@@ -132,7 +132,7 @@ func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster scheduling.ClusterI
 	return cluster.SlowStoreEvicted(storeID)
 }
 
-func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster scheduling.ClusterInformer) {
+func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.ClusterInformer) {
 	evictSlowStore, err := s.conf.clearAndPersist()
 	if err != nil {
 		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", evictSlowStore))
@@ -143,11 +143,11 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster scheduling.ClusterI
 	cluster.SlowStoreRecovered(evictSlowStore)
 }
 
-func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster scheduling.ClusterInformer) []*operator.Operator {
+func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.ClusterInformer) []*operator.Operator {
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
 }
 
-func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
+func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	if s.conf.evictStore() != 0 {
 		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 		if !allowed {
@@ -158,7 +158,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster scheduling.ClusterIn
 	return true
 }
 
-func (s *evictSlowStoreScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictSlowStoreScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
 	var ops []*operator.Operator
 

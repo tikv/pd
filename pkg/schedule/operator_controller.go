@@ -29,9 +29,9 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
@@ -59,7 +59,7 @@ var (
 type OperatorController struct {
 	syncutil.RWMutex
 	ctx             context.Context
-	cluster         scheduling.ClusterInformer
+	cluster         sche.ClusterInformer
 	operators       map[uint64]*operator.Operator
 	hbStreams       *hbstream.HeartbeatStreams
 	fastOperators   *cache.TTLUint64
@@ -71,7 +71,7 @@ type OperatorController struct {
 }
 
 // NewOperatorController creates a OperatorController.
-func NewOperatorController(ctx context.Context, cluster scheduling.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
+func NewOperatorController(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *OperatorController {
 	return &OperatorController{
 		ctx:             ctx,
 		cluster:         cluster,
@@ -93,7 +93,7 @@ func (oc *OperatorController) Ctx() context.Context {
 }
 
 // GetCluster exports cluster to evict-scheduler for check store status.
-func (oc *OperatorController) GetCluster() scheduling.ClusterInformer {
+func (oc *OperatorController) GetCluster() sche.ClusterInformer {
 	oc.RLock()
 	defer oc.RUnlock()
 	return oc.cluster
@@ -716,7 +716,7 @@ func (oc *OperatorController) OperatorCount(kind operator.OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-func (oc *OperatorController) GetOpInfluence(cluster scheduling.ClusterInformer) operator.OpInfluence {
+func (oc *OperatorController) GetOpInfluence(cluster sche.ClusterInformer) operator.OpInfluence {
 	influence := operator.OpInfluence{
 		StoresInfluence: make(map[uint64]*operator.StoreInfluence),
 	}
@@ -734,7 +734,7 @@ func (oc *OperatorController) GetOpInfluence(cluster scheduling.ClusterInformer)
 }
 
 // GetFastOpInfluence get fast finish operator influence
-func (oc *OperatorController) GetFastOpInfluence(cluster scheduling.ClusterInformer, influence operator.OpInfluence) {
+func (oc *OperatorController) GetFastOpInfluence(cluster sche.ClusterInformer, influence operator.OpInfluence) {
 	for _, id := range oc.fastOperators.GetAllID() {
 		value, ok := oc.fastOperators.Get(id)
 		if !ok {
@@ -749,13 +749,13 @@ func (oc *OperatorController) GetFastOpInfluence(cluster scheduling.ClusterInfor
 }
 
 // AddOpInfluence add operator influence for cluster
-func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster scheduling.ClusterInformer) {
+func AddOpInfluence(op *operator.Operator, influence operator.OpInfluence, cluster sche.ClusterInformer) {
 	region := cluster.GetRegion(op.RegionID())
 	op.TotalInfluence(influence, region)
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
-func NewTotalOpInfluence(operators []*operator.Operator, cluster scheduling.ClusterInformer) operator.OpInfluence {
+func NewTotalOpInfluence(operators []*operator.Operator, cluster sche.ClusterInformer) operator.OpInfluence {
 	influence := *operator.NewOpInfluence()
 
 	for _, op := range operators {

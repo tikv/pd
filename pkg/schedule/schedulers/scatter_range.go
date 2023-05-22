@@ -23,9 +23,9 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -169,11 +169,11 @@ func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(l.config)
 }
 
-func (l *scatterRangeScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
+func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	return l.allowBalanceLeader(cluster) || l.allowBalanceRegion(cluster)
 }
 
-func (l *scatterRangeScheduler) allowBalanceLeader(cluster scheduling.ClusterInformer) bool {
+func (l *scatterRangeScheduler) allowBalanceLeader(cluster sche.ClusterInformer) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
@@ -181,7 +181,7 @@ func (l *scatterRangeScheduler) allowBalanceLeader(cluster scheduling.ClusterInf
 	return allowed
 }
 
-func (l *scatterRangeScheduler) allowBalanceRegion(cluster scheduling.ClusterInformer) bool {
+func (l *scatterRangeScheduler) allowBalanceRegion(cluster sche.ClusterInformer) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpRegion.String()).Inc()
@@ -189,7 +189,7 @@ func (l *scatterRangeScheduler) allowBalanceRegion(cluster scheduling.ClusterInf
 	return allowed
 }
 
-func (l *scatterRangeScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (l *scatterRangeScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	scatterRangeCounter.Inc()
 	// isolate a new cluster according to the key range
 	c := schedule.GenRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())

@@ -18,14 +18,14 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 )
 
 // LearnerChecker ensures region has a learner will be promoted.
 type LearnerChecker struct {
 	PauseController
-	cluster scheduling.ClusterInformer
+	cluster sche.ClusterInformer
 }
 
 var (
@@ -34,7 +34,7 @@ var (
 )
 
 // NewLearnerChecker creates a learner checker.
-func NewLearnerChecker(cluster scheduling.ClusterInformer) *LearnerChecker {
+func NewLearnerChecker(cluster sche.ClusterInformer) *LearnerChecker {
 	return &LearnerChecker{
 		cluster: cluster,
 	}

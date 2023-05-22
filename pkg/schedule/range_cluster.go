@@ -17,19 +17,19 @@ package schedule
 import (
 	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 )
 
 // RangeCluster isolates the cluster by range.
 type RangeCluster struct {
-	scheduling.ClusterInformer
+	sche.ClusterInformer
 	subCluster        *core.BasicCluster // Collect all regions belong to the range.
 	tolerantSizeRatio float64
 }
 
 // GenRangeCluster gets a range cluster by specifying start key and end key.
 // The cluster can only know the regions within [startKey, endKey].
-func GenRangeCluster(cluster scheduling.ClusterInformer, startKey, endKey []byte) *RangeCluster {
+func GenRangeCluster(cluster sche.ClusterInformer, startKey, endKey []byte) *RangeCluster {
 	subCluster := core.NewBasicCluster()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
 		origin, overlaps, rangeChanged := subCluster.SetRegion(r)

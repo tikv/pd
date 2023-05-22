@@ -26,10 +26,10 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -60,7 +60,7 @@ type evictLeaderSchedulerConfig struct {
 	mu                syncutil.RWMutex
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster           scheduling.ClusterInformer
+	cluster           sche.ClusterInformer
 }
 
 func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
@@ -204,7 +204,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster scheduling.ClusterInformer) error {
+func (s *evictLeaderScheduler) Prepare(cluster sche.ClusterInformer) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -216,7 +216,7 @@ func (s *evictLeaderScheduler) Prepare(cluster scheduling.ClusterInformer) error
 	return res
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster scheduling.ClusterInformer) {
+func (s *evictLeaderScheduler) Cleanup(cluster sche.ClusterInformer) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
@@ -224,7 +224,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster scheduling.ClusterInformer) {
 	}
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -232,7 +232,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster scheduling.ClusterInfor
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictLeaderScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize), nil
 }
@@ -257,7 +257,7 @@ type evictLeaderStoresConf interface {
 	getKeyRangesByID(id uint64) []core.KeyRange
 }
 
-func scheduleEvictLeaderBatch(name, typ string, cluster scheduling.ClusterInformer, conf evictLeaderStoresConf, batchSize int) []*operator.Operator {
+func scheduleEvictLeaderBatch(name, typ string, cluster sche.ClusterInformer, conf evictLeaderStoresConf, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
 	for i := 0; i < batchSize; i++ {
 		once := scheduleEvictLeaderOnce(name, typ, cluster, conf)
@@ -274,7 +274,7 @@ func scheduleEvictLeaderBatch(name, typ string, cluster scheduling.ClusterInform
 	return ops
 }
 
-func scheduleEvictLeaderOnce(name, typ string, cluster scheduling.ClusterInformer, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(name, typ string, cluster sche.ClusterInformer, conf evictLeaderStoresConf) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {

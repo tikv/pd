@@ -24,9 +24,9 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
 )
@@ -40,10 +40,10 @@ type Scheduler interface {
 	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster scheduling.ClusterInformer) error
-	Cleanup(cluster scheduling.ClusterInformer)
-	Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan)
-	IsScheduleAllowed(cluster scheduling.ClusterInformer) bool
+	Prepare(cluster sche.ClusterInformer) error
+	Cleanup(cluster sche.ClusterInformer)
+	Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan)
+	IsScheduleAllowed(cluster sche.ClusterInformer) bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.

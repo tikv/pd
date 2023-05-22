@@ -24,10 +24,10 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"go.uber.org/zap"
 )
 
@@ -116,7 +116,7 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *balanceRegionScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
+func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	allowed := s.opController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
@@ -124,7 +124,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster scheduling.ClusterInf
 	return allowed
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *balanceRegionScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {

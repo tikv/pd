@@ -21,9 +21,9 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -40,7 +40,7 @@ import (
 // according to various constraints.
 type Builder struct {
 	// basic info
-	scheduling.ClusterInformer
+	sche.ClusterInformer
 	desc            string
 	regionID        uint64
 	regionEpoch     *metapb.RegionEpoch
@@ -92,7 +92,7 @@ func SkipPlacementRulesCheck(b *Builder) {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, ci scheduling.ClusterInformer, region *core.RegionInfo, opts ...BuilderOption) *Builder {
+func NewBuilder(desc string, ci sche.ClusterInformer, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
 		desc:            desc,
 		ClusterInformer: ci,

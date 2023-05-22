@@ -25,10 +25,10 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -53,7 +53,7 @@ type grantLeaderSchedulerConfig struct {
 	mu                syncutil.RWMutex
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster           scheduling.ClusterInformer
+	cluster           sche.ClusterInformer
 }
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -178,7 +178,7 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *grantLeaderScheduler) Prepare(cluster scheduling.ClusterInformer) error {
+func (s *grantLeaderScheduler) Prepare(cluster sche.ClusterInformer) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -190,7 +190,7 @@ func (s *grantLeaderScheduler) Prepare(cluster scheduling.ClusterInformer) error
 	return res
 }
 
-func (s *grantLeaderScheduler) Cleanup(cluster scheduling.ClusterInformer) {
+func (s *grantLeaderScheduler) Cleanup(cluster sche.ClusterInformer) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
@@ -198,7 +198,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster scheduling.ClusterInformer) {
 	}
 }
 
-func (s *grantLeaderScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
+func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -206,7 +206,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster scheduling.ClusterInfor
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *grantLeaderScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()

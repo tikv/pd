@@ -23,10 +23,10 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/checker"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 )
 
 const (
@@ -78,7 +78,7 @@ func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *randomMergeScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
+func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetOpts().GetMergeScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpMerge.String()).Inc()
@@ -86,7 +86,7 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster scheduling.ClusterInfor
 	return allowed
 }
 
-func (s *randomMergeScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *randomMergeScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	randomMergeCounter.Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
@@ -129,7 +129,7 @@ func (s *randomMergeScheduler) Schedule(cluster scheduling.ClusterInformer, dryR
 	return ops, nil
 }
 
-func (s *randomMergeScheduler) allowMerge(cluster scheduling.ClusterInformer, region, target *core.RegionInfo) bool {
+func (s *randomMergeScheduler) allowMerge(cluster sche.ClusterInformer, region, target *core.RegionInfo) bool {
 	if !filter.IsRegionHealthy(region) || !filter.IsRegionHealthy(target) {
 		return false
 	}

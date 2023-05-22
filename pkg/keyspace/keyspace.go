@@ -26,8 +26,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -71,7 +71,7 @@ type Manager struct {
 	// store is the storage for keyspace related information.
 	store endpoint.KeyspaceStorage
 	// rc is the raft cluster of the server.
-	cluster scheduling.ClusterInformer
+	cluster core.ClusterInformer
 	// ctx is the context of the manager, to be used in transaction.
 	ctx context.Context
 	// config is the configurations of the manager.
@@ -98,7 +98,7 @@ type CreateKeyspaceRequest struct {
 func NewKeyspaceManager(
 	ctx context.Context,
 	store endpoint.KeyspaceStorage,
-	cluster scheduling.ClusterInformer,
+	cluster core.ClusterInformer,
 	idAllocator id.Allocator,
 	config Config,
 	kgm *GroupManager,

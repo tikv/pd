@@ -19,14 +19,14 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 )
 
 // JointStateChecker ensures region is in joint state will leave.
 type JointStateChecker struct {
 	PauseController
-	cluster scheduling.ClusterInformer
+	cluster sche.ClusterInformer
 }
 
 const jointStateCheckerName = "joint_state_checker"
@@ -41,7 +41,7 @@ var (
 )
 
 // NewJointStateChecker creates a joint state checker.
-func NewJointStateChecker(cluster scheduling.ClusterInformer) *JointStateChecker {
+func NewJointStateChecker(cluster sche.ClusterInformer) *JointStateChecker {
 	return &JointStateChecker{
 		cluster: cluster,
 	}

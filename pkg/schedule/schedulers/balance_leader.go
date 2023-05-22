@@ -29,10 +29,10 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/scheduling"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -227,7 +227,7 @@ func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(l.conf)
 }
 
-func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster scheduling.ClusterInformer) bool {
+func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	allowed := l.opController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
@@ -327,7 +327,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 	}
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster scheduling.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (l *balanceLeaderScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
 	basePlan := NewBalanceSchedulerPlan()
