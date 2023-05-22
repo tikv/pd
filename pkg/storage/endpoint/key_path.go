@@ -35,8 +35,8 @@ const (
 	regionLabelPath          = "region_label"
 	replicationPath          = "replication_mode"
 	customScheduleConfigPath = "scheduler_config"
-	// GcWorkerServiceSafePointID is the service id of gc worker.
-	GcWorkerServiceSafePointID = "gc_worker"
+	// GCWorkerServiceSafePointID is the service id of GC worker.
+	GCWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
 	externalTimeStamp          = "external_timestamp"
 	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
