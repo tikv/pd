@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -131,7 +132,7 @@ func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]
 type RegionScatterer struct {
 	ctx            context.Context
 	name           string
-	cluster        Cluster
+	cluster        sche.ClusterInformer
 	ordinaryEngine engineContext
 	specialEngines sync.Map
 	opController   *OperatorController
@@ -139,7 +140,7 @@ type RegionScatterer struct {
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(ctx context.Context, cluster Cluster, opController *OperatorController) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster sche.ClusterInformer, opController *OperatorController) *RegionScatterer {
 	return &RegionScatterer{
 		ctx:          ctx,
 		name:         regionScatterName,

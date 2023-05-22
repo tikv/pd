@@ -17,26 +17,27 @@ package schedule
 import (
 	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/core"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 )
 
 // RangeCluster isolates the cluster by range.
 type RangeCluster struct {
-	Cluster
+	sche.ClusterInformer
 	subCluster        *core.BasicCluster // Collect all regions belong to the range.
 	tolerantSizeRatio float64
 }
 
 // GenRangeCluster gets a range cluster by specifying start key and end key.
 // The cluster can only know the regions within [startKey, endKey].
-func GenRangeCluster(cluster Cluster, startKey, endKey []byte) *RangeCluster {
+func GenRangeCluster(cluster sche.ClusterInformer, startKey, endKey []byte) *RangeCluster {
 	subCluster := core.NewBasicCluster()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
 		origin, overlaps, rangeChanged := subCluster.SetRegion(r)
 		subCluster.UpdateSubTree(r, origin, overlaps, rangeChanged)
 	}
 	return &RangeCluster{
-		Cluster:    cluster,
-		subCluster: subCluster,
+		ClusterInformer: cluster,
+		subCluster:      subCluster,
 	}
 }
 
@@ -69,7 +70,7 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 
 // GetStore searches for a store by ID.
 func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
-	s := r.Cluster.GetStore(id)
+	s := r.ClusterInformer.GetStore(id)
 	if s == nil {
 		return nil
 	}
@@ -78,7 +79,7 @@ func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
 
 // GetStores returns all Stores in the cluster.
 func (r *RangeCluster) GetStores() []*core.StoreInfo {
-	stores := r.Cluster.GetStores()
+	stores := r.ClusterInformer.GetStores()
 	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
@@ -96,7 +97,7 @@ func (r *RangeCluster) GetTolerantSizeRatio() float64 {
 	if r.tolerantSizeRatio != 0 {
 		return r.tolerantSizeRatio
 	}
-	return r.Cluster.GetOpts().GetTolerantSizeRatio()
+	return r.ClusterInformer.GetOpts().GetTolerantSizeRatio()
 }
 
 // RandFollowerRegions returns a random region that has a follower on the store.
@@ -116,7 +117,7 @@ func (r *RangeCluster) GetAverageRegionSize() int64 {
 
 // GetRegionStores returns all stores that contains the region's peer.
 func (r *RangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
-	stores := r.Cluster.GetRegionStores(region)
+	stores := r.ClusterInformer.GetRegionStores(region)
 	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
@@ -126,7 +127,7 @@ func (r *RangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInf
 
 // GetFollowerStores returns all stores that contains the region's follower peer.
 func (r *RangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
-	stores := r.Cluster.GetFollowerStores(region)
+	stores := r.ClusterInformer.GetFollowerStores(region)
 	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
@@ -136,7 +137,7 @@ func (r *RangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreI
 
 // GetLeaderStore returns all stores that contains the region's leader peer.
 func (r *RangeCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
-	s := r.Cluster.GetLeaderStore(region)
+	s := r.ClusterInformer.GetLeaderStore(region)
 	if s != nil {
 		return r.updateStoreInfo(s)
 	}

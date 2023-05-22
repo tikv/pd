@@ -25,8 +25,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -76,14 +76,14 @@ var (
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	PauseController
-	cluster    schedule.Cluster
+	cluster    sche.ClusterInformer
 	conf       config.Config
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster schedule.Cluster, conf config.Config) *MergeChecker {
+func NewMergeChecker(ctx context.Context, cluster sche.ClusterInformer, conf config.Config) *MergeChecker {
 	splitCache := cache.NewIDTTL(ctx, time.Minute, conf.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,
@@ -250,7 +250,7 @@ func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 }
 
 // AllowMerge returns true if two regions can be merged according to the key type.
-func AllowMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
+func AllowMerge(cluster sche.ClusterInformer, region, adjacent *core.RegionInfo) bool {
 	var start, end []byte
 	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
 		start, end = region.GetStartKey(), adjacent.GetEndKey()
@@ -306,7 +306,7 @@ func isTableIDSame(region, adjacent *core.RegionInfo) bool {
 // Check whether there is a peer of the adjacent region on an offline store,
 // while the source region has no peer on it. This is to prevent from bringing
 // any other peer into an offline store to slow down the offline process.
-func checkPeerStore(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
+func checkPeerStore(cluster sche.ClusterInformer, region, adjacent *core.RegionInfo) bool {
 	regionStoreIDs := region.GetStoreIDs()
 	for _, peer := range adjacent.GetPeers() {
 		storeID := peer.GetStoreId()

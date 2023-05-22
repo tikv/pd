@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -54,7 +55,7 @@ var (
 type grantHotRegionSchedulerConfig struct {
 	mu            syncutil.RWMutex
 	storage       endpoint.ConfigStorage
-	cluster       schedule.Cluster
+	cluster       sche.ClusterInformer
 	StoreIDs      []uint64 `json:"store-id"`
 	StoreLeaderID uint64   `json:"store-leader-id"`
 }
@@ -151,7 +152,7 @@ func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 
 // IsScheduleAllowed returns whether the scheduler is allowed to schedule.
 // TODO it should check if there is any scheduler such as evict or hot region scheduler
-func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !regionAllowed {
@@ -225,14 +226,14 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 	return router
 }
 
-func (s *grantHotRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *grantHotRegionScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	grantHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
 	return s.dispatch(rw, cluster), nil
 }
 
-func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
+func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster sche.ClusterInformer) []*operator.Operator {
 	stLoadInfos := s.stLoadInfos[buildResourceType(typ, constant.RegionKind)]
 	infos := make([]*statistics.StoreLoadDetail, len(stLoadInfos))
 	index := 0
@@ -246,7 +247,7 @@ func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster schedu
 	return s.randomSchedule(cluster, infos)
 }
 
-func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, srcStores []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
+func (s *grantHotRegionScheduler) randomSchedule(cluster sche.ClusterInformer, srcStores []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
 	isLeader := s.r.Int()%2 == 1
 	for _, srcStore := range srcStores {
 		srcStoreID := srcStore.GetID()
@@ -277,7 +278,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster schedule.Cluster, srcSt
 	return nil
 }
 
-func (s *grantHotRegionScheduler) transfer(cluster schedule.Cluster, regionID uint64, srcStoreID uint64, isLeader bool) (op *operator.Operator, err error) {
+func (s *grantHotRegionScheduler) transfer(cluster sche.ClusterInformer, regionID uint64, srcStoreID uint64, isLeader bool) (op *operator.Operator, err error) {
 	srcRegion := cluster.GetRegion(regionID)
 	if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {
 		return nil, errs.ErrRegionRuleNotFound

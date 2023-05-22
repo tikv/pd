@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -226,7 +227,7 @@ func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(l.conf)
 }
 
-func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	allowed := l.opController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
@@ -326,7 +327,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 	}
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (l *balanceLeaderScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
 	basePlan := NewBalanceSchedulerPlan()
@@ -421,7 +422,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 		storesIDs := candidate.binarySearchStores(plan.source, plan.target)
 		candidateUpdateStores[id] = storesIDs
 	}
-	schedule.AddOpInfluence(op, plan.opInfluence, plan.Cluster)
+	schedule.AddOpInfluence(op, plan.opInfluence, plan.ClusterInformer)
 	for id, candidate := range candidates {
 		for _, pos := range candidateUpdateStores[id] {
 			candidate.resortStoreWithPos(pos)

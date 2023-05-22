@@ -18,16 +18,16 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"go.uber.org/zap"
 )
 
 const (
@@ -108,7 +108,7 @@ func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
 	return conf.Persist()
 }
 
-func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster schedule.Cluster) (oldID uint64, err error) {
+func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.ClusterInformer) (oldID uint64, err error) {
 	oldID = conf.evictedStore()
 	if oldID == 0 {
 		return
@@ -140,7 +140,7 @@ func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
 	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *evictSlowTrendScheduler) Prepare(cluster schedule.Cluster) error {
+func (s *evictSlowTrendScheduler) Prepare(cluster sche.ClusterInformer) error {
 	evictedStoreID := s.conf.evictedStore()
 	if evictedStoreID == 0 {
 		return nil
@@ -148,11 +148,11 @@ func (s *evictSlowTrendScheduler) Prepare(cluster schedule.Cluster) error {
 	return cluster.SlowTrendEvicted(evictedStoreID)
 }
 
-func (s *evictSlowTrendScheduler) Cleanup(cluster schedule.Cluster) {
+func (s *evictSlowTrendScheduler) Cleanup(cluster sche.ClusterInformer) {
 	s.cleanupEvictLeader(cluster)
 }
 
-func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster schedule.Cluster, storeID uint64) error {
+func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster sche.ClusterInformer, storeID uint64) error {
 	err := s.conf.setStoreAndPersist(storeID)
 	if err != nil {
 		log.Info("evict-slow-trend-scheduler persist config failed", zap.Uint64("store-id", storeID))
@@ -161,7 +161,7 @@ func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster schedule.Cluster, s
 	return cluster.SlowTrendEvicted(storeID)
 }
 
-func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster schedule.Cluster) {
+func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster sche.ClusterInformer) {
 	evictedStoreID, err := s.conf.clearAndPersist(cluster)
 	if err != nil {
 		log.Info("evict-slow-trend-scheduler persist config failed", zap.Uint64("store-id", evictedStoreID))
@@ -171,7 +171,7 @@ func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster schedule.Cluster) {
 	}
 }
 
-func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster schedule.Cluster) []*operator.Operator {
+func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.ClusterInformer) []*operator.Operator {
 	store := cluster.GetStore(s.conf.evictedStore())
 	if store == nil {
 		return nil
@@ -180,7 +180,7 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster schedule.Cluster) 
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
 }
 
-func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	if s.conf.evictedStore() == 0 {
 		return true
 	}
@@ -191,7 +191,7 @@ func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster schedule.Cluster) bo
 	return allowed
 }
 
-func (s *evictSlowTrendScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictSlowTrendScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	var ops []*operator.Operator
@@ -271,7 +271,7 @@ func newEvictSlowTrendScheduler(opController *schedule.OperatorController, conf 
 	}
 }
 
-func chooseEvictCandidate(cluster schedule.Cluster) (slowStore *core.StoreInfo) {
+func chooseEvictCandidate(cluster sche.ClusterInformer) (slowStore *core.StoreInfo) {
 	stores := cluster.GetStores()
 	if len(stores) < 3 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-few").Inc()
@@ -331,7 +331,7 @@ func chooseEvictCandidate(cluster schedule.Cluster) (slowStore *core.StoreInfo) 
 	return store
 }
 
-func checkStoresAreUpdated(cluster schedule.Cluster, slowStoreID uint64, slowStoreRecordTS time.Time) bool {
+func checkStoresAreUpdated(cluster sche.ClusterInformer, slowStoreID uint64, slowStoreRecordTS time.Time) bool {
 	stores := cluster.GetStores()
 	if len(stores) <= 1 {
 		return false
@@ -360,7 +360,7 @@ func checkStoresAreUpdated(cluster schedule.Cluster, slowStoreID uint64, slowSto
 	return updatedStores >= expected
 }
 
-func checkStoreSlowerThanOthers(cluster schedule.Cluster, target *core.StoreInfo) bool {
+func checkStoreSlowerThanOthers(cluster sche.ClusterInformer, target *core.StoreInfo) bool {
 	stores := cluster.GetStores()
 	expected := (len(stores)*2 + 1) / 3
 	targetSlowTrend := target.GetSlowTrend()
@@ -391,7 +391,7 @@ func checkStoreSlowerThanOthers(cluster schedule.Cluster, target *core.StoreInfo
 	return slowerThanStoresNum >= expected
 }
 
-func checkStoreCanRecover(cluster schedule.Cluster, target *core.StoreInfo) bool {
+func checkStoreCanRecover(cluster sche.ClusterInformer, target *core.StoreInfo) bool {
 	/*
 		//
 		// This might not be necessary,
@@ -414,7 +414,7 @@ func checkStoreCanRecover(cluster schedule.Cluster, target *core.StoreInfo) bool
 	return checkStoreFasterThanOthers(cluster, target)
 }
 
-func checkStoreFasterThanOthers(cluster schedule.Cluster, target *core.StoreInfo) bool {
+func checkStoreFasterThanOthers(cluster sche.ClusterInformer, target *core.StoreInfo) bool {
 	stores := cluster.GetStores()
 	expected := (len(stores) + 1) / 2
 	targetSlowTrend := target.GetSlowTrend()

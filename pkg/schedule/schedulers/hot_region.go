@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -118,7 +119,7 @@ func newBaseHotScheduler(opController *schedule.OperatorController) *baseHotSche
 
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store, only update read or write load detail
-func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster schedule.Cluster) {
+func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.ClusterInformer) {
 	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
 	h.summaryPendingInfluence(cluster)
 	h.storesLoads = cluster.GetStoresLoads()
@@ -157,7 +158,7 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
-func (h *baseHotScheduler) summaryPendingInfluence(cluster schedule.Cluster) {
+func (h *baseHotScheduler) summaryPendingInfluence(cluster sche.ClusterInformer) {
 	for id, p := range h.regionPendings {
 		from := h.stInfos[p.from]
 		to := h.stInfos[p.to]
@@ -258,7 +259,7 @@ func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
 
-func (h *hotScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (h *hotScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetOpts().GetHotRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
@@ -266,13 +267,13 @@ func (h *hotScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
 	return allowed
 }
 
-func (h *hotScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (h *hotScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	hotSchedulerCounter.Inc()
 	rw := h.randomRWType()
 	return h.dispatch(rw, cluster), nil
 }
 
-func (h *hotScheduler) dispatch(typ statistics.RWType, cluster schedule.Cluster) []*operator.Operator {
+func (h *hotScheduler) dispatch(typ statistics.RWType, cluster sche.ClusterInformer) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 	h.prepareForBalance(typ, cluster)
@@ -306,7 +307,7 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, d
 	return true
 }
 
-func (h *hotScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operator.Operator {
+func (h *hotScheduler) balanceHotReadRegions(cluster sche.ClusterInformer) []*operator.Operator {
 	leaderSolver := newBalanceSolver(h, cluster, statistics.Read, transferLeader)
 	leaderOps := leaderSolver.solve()
 	peerSolver := newBalanceSolver(h, cluster, statistics.Read, movePeer)
@@ -349,7 +350,7 @@ func (h *hotScheduler) balanceHotReadRegions(cluster schedule.Cluster) []*operat
 	return nil
 }
 
-func (h *hotScheduler) balanceHotWriteRegions(cluster schedule.Cluster) []*operator.Operator {
+func (h *hotScheduler) balanceHotWriteRegions(cluster sche.ClusterInformer) []*operator.Operator {
 	// prefer to balance by peer
 	s := h.r.Intn(100)
 	switch {
@@ -438,7 +439,7 @@ func isAvailableV1(s *solution) bool {
 }
 
 type balanceSolver struct {
-	schedule.Cluster
+	sche.ClusterInformer
 	sche         *hotScheduler
 	stLoadDetail map[uint64]*statistics.StoreLoadDetail
 	rwTy         statistics.RWType
@@ -559,7 +560,7 @@ func (bs *balanceSolver) isSelectedDim(dim int) bool {
 }
 
 func (bs *balanceSolver) getPriorities() []string {
-	querySupport := bs.sche.conf.checkQuerySupport(bs.Cluster)
+	querySupport := bs.sche.conf.checkQuerySupport(bs.ClusterInformer)
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	switch bs.resourceTy {
@@ -574,19 +575,19 @@ func (bs *balanceSolver) getPriorities() []string {
 	return []string{}
 }
 
-func newBalanceSolver(sche *hotScheduler, cluster schedule.Cluster, rwTy statistics.RWType, opTy opType) *balanceSolver {
+func newBalanceSolver(sche *hotScheduler, cluster sche.ClusterInformer, rwTy statistics.RWType, opTy opType) *balanceSolver {
 	bs := &balanceSolver{
-		Cluster: cluster,
-		sche:    sche,
-		rwTy:    rwTy,
-		opTy:    opTy,
+		ClusterInformer: cluster,
+		sche:            sche,
+		rwTy:            rwTy,
+		opTy:            opTy,
 	}
 	bs.init()
 	return bs
 }
 
 func (bs *balanceSolver) isValid() bool {
-	if bs.Cluster == nil || bs.sche == nil || bs.stLoadDetail == nil {
+	if bs.ClusterInformer == nil || bs.sche == nil || bs.stLoadDetail == nil {
 		return false
 	}
 	return true
@@ -905,7 +906,7 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
-	if !filter.IsRegionReplicated(bs.Cluster, region) {
+	if !filter.IsRegionReplicated(bs.ClusterInformer, region) {
 		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
 		hotSchedulerAbnormalReplicaCounter.Inc()
 		return false
@@ -1478,7 +1479,7 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 	for i, region := range regions {
 		ids[i] = region.GetID()
 	}
-	hotBuckets := bs.Cluster.BucketsStats(bs.minHotDegree, ids...)
+	hotBuckets := bs.ClusterInformer.BucketsStats(bs.minHotDegree, ids...)
 	operators := make([]*operator.Operator, 0)
 
 	createFunc := func(region *core.RegionInfo) {

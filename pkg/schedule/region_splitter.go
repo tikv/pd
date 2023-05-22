@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -44,7 +45,7 @@ type SplitRegionsHandler interface {
 }
 
 // NewSplitRegionsHandler return SplitRegionsHandler
-func NewSplitRegionsHandler(cluster Cluster, oc *OperatorController) SplitRegionsHandler {
+func NewSplitRegionsHandler(cluster sche.ClusterInformer, oc *OperatorController) SplitRegionsHandler {
 	return &splitRegionsHandler{
 		cluster: cluster,
 		oc:      oc,
@@ -53,12 +54,12 @@ func NewSplitRegionsHandler(cluster Cluster, oc *OperatorController) SplitRegion
 
 // RegionSplitter handles split regions
 type RegionSplitter struct {
-	cluster Cluster
+	cluster sche.ClusterInformer
 	handler SplitRegionsHandler
 }
 
 // NewRegionSplitter return a region splitter
-func NewRegionSplitter(cluster Cluster, handler SplitRegionsHandler) *RegionSplitter {
+func NewRegionSplitter(cluster sche.ClusterInformer, handler SplitRegionsHandler) *RegionSplitter {
 	return &RegionSplitter{
 		cluster: cluster,
 		handler: handler,
@@ -177,7 +178,7 @@ func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
 }
 
 type splitRegionsHandler struct {
-	cluster Cluster
+	cluster sche.ClusterInformer
 	oc      *OperatorController
 }
 

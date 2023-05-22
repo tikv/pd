@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -39,10 +40,10 @@ type Scheduler interface {
 	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster Cluster) error
-	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
-	IsScheduleAllowed(cluster Cluster) bool
+	Prepare(cluster sche.ClusterInformer) error
+	Cleanup(cluster sche.ClusterInformer)
+	Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan)
+	IsScheduleAllowed(cluster sche.ClusterInformer) bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.
