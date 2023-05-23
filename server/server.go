@@ -332,24 +332,23 @@ func (s *Server) startEtcd(ctx context.Context) error {
 
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
+	clientConfig := clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdTimeout,
 		TLS:         tlsConfig,
 		LogConfig:   &lgc,
-	})
+	}
+	client, err := clientv3.New(clientConfig)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 
-<<<<<<< HEAD
-	etcdServerID := uint64(etcd.Server.ID())
-=======
-	s.electionClient, err = startElectionClient(s.cfg)
+	s.electionClient, err = clientv3.New(clientConfig)
 	if err != nil {
-		return err
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
->>>>>>> d2e73d106 (*: use another etcd client for election (#6409))
+
+	etcdServerID := uint64(etcd.Server.ID())
 
 	// update advertise peer urls.
 	etcdMembers, err := etcdutil.ListEtcdMembers(client)
@@ -376,42 +375,10 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
 	})
-<<<<<<< HEAD
-	s.member = member.NewMember(etcd, client, etcdServerID)
-	return nil
-}
-
-=======
 	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
 	return nil
 }
 
-func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
-	tlsConfig, err := cfg.Security.ToTLSConfig()
-	if err != nil {
-		return nil, nil, err
-	}
-	etcdCfg, err := cfg.GenEmbedEtcdConfig()
-	if err != nil {
-		return nil, nil, err
-	}
-	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls[0])
-}
-
-func startElectionClient(cfg *config.Config) (*clientv3.Client, error) {
-	tlsConfig, err := cfg.Security.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	etcdCfg, err := cfg.GenEmbedEtcdConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	return etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls[0])
-}
-
->>>>>>> d2e73d106 (*: use another etcd client for election (#6409))
 // AddStartCallback adds a callback in the startServer phase.
 func (s *Server) AddStartCallback(callbacks ...func()) {
 	s.startCallbacks = append(s.startCallbacks, callbacks...)
