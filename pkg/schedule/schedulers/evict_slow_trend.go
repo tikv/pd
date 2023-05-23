@@ -264,7 +264,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.ClusterInformer, dryRun 
 	return s.scheduleEvictLeader(cluster), nil
 }
 
-func newEvictSlowTrendScheduler(opController *schedule.OperatorController, conf *evictSlowTrendSchedulerConfig) schedule.Scheduler {
+func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) schedule.Scheduler {
 	return &evictSlowTrendScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
 		conf:          conf,

@@ -36,7 +36,7 @@ type balanceWitnessSchedulerTestSuite struct {
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
 	lb     schedule.Scheduler
-	oc     *schedule.OperatorController
+	oc     *operator.Controller
 	conf   config.Config
 }
 

@@ -100,7 +100,7 @@ func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
 }
 
 // GetOperatorController returns OperatorController.
-func (h *Handler) GetOperatorController() (*schedule.OperatorController, error) {
+func (h *Handler) GetOperatorController() (*operator.Controller, error) {
 	rc := h.s.GetRaftCluster()
 	if rc == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
@@ -393,7 +393,7 @@ func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
 }
 
 // GetOperatorStatus returns the status of the region operator.
-func (h *Handler) GetOperatorStatus(regionID uint64) (*schedule.OperatorWithStatus, error) {
+func (h *Handler) GetOperatorStatus(regionID uint64) (*operator.OpWithStatus, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err

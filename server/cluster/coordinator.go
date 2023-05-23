@@ -77,7 +77,7 @@ type coordinator struct {
 	regionScatterer   *schedule.RegionScatterer
 	regionSplitter    *schedule.RegionSplitter
 	schedulers        map[string]*scheduleController
-	opController      *schedule.OperatorController
+	opController      *operator.Controller
 	hbStreams         *hbstream.HeartbeatStreams
 	pluginInterface   *schedule.PluginInterface
 	diagnosticManager *diagnosticManager
@@ -86,7 +86,7 @@ type coordinator struct {
 // newCoordinator creates a new coordinator.
 func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstream.HeartbeatStreams) *coordinator {
 	ctx, cancel := context.WithCancel(ctx)
-	opController := schedule.NewOperatorController(ctx, cluster, hbStreams)
+	opController := operator.NewController(ctx, cluster, hbStreams)
 	schedulers := make(map[string]*scheduleController)
 	return &coordinator{
 		ctx:               ctx,
@@ -290,7 +290,7 @@ func (c *coordinator) drivePushOperator() {
 
 	defer c.wg.Done()
 	log.Info("coordinator begins to actively drive push operator")
-	ticker := time.NewTicker(schedule.PushOperatorTickInterval)
+	ticker := time.NewTicker(operator.PushOperatorTickInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -682,7 +682,7 @@ func (c *coordinator) removeOptScheduler(o *config.PersistOptions, name string) 
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
 		decoder := schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
-		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, schedule.NewOperatorController(c.ctx, nil, nil), storage.NewStorageWithMemoryBackend(), decoder)
+		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, operator.NewController(c.ctx, nil, nil), storage.NewStorageWithMemoryBackend(), decoder)
 		if err != nil {
 			return err
 		}
@@ -855,7 +855,7 @@ func (c *coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error
 type scheduleController struct {
 	schedule.Scheduler
 	cluster            *RaftCluster
-	opController       *schedule.OperatorController
+	opController       *operator.Controller
 	nextInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc

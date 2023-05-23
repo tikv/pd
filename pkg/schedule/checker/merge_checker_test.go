@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -464,7 +463,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 
 	mc := NewMergeChecker(suite.ctx, tc, tc.GetOpts())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := schedule.NewOperatorController(suite.ctx, tc, stream)
+	oc := operator.NewController(suite.ctx, tc, stream)
 
 	regions[2] = regions[2].Clone(
 		core.SetPeers([]*metapb.Peer{

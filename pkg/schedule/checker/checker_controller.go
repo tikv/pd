@@ -40,7 +40,7 @@ var denyCheckersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues(
 type Controller struct {
 	cluster           sche.ClusterInformer
 	conf              config.Config
-	opController      *schedule.OperatorController
+	opController      *operator.Controller
 	learnerChecker    *LearnerChecker
 	replicaChecker    *ReplicaChecker
 	ruleChecker       *RuleChecker
@@ -54,7 +54,7 @@ type Controller struct {
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster sche.ClusterInformer, conf config.Config, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *schedule.OperatorController) *Controller {
+func NewController(ctx context.Context, cluster sche.ClusterInformer, conf config.Config, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &Controller{
 		cluster:           cluster,

@@ -135,12 +135,12 @@ type RegionScatterer struct {
 	cluster        sche.ClusterInformer
 	ordinaryEngine engineContext
 	specialEngines sync.Map
-	opController   *OperatorController
+	opController   *operator.Controller
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(ctx context.Context, cluster sche.ClusterInformer, opController *OperatorController) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster sche.ClusterInformer, opController *operator.Controller) *RegionScatterer {
 	return &RegionScatterer{
 		ctx:          ctx,
 		name:         regionScatterName,
@@ -261,7 +261,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 					continue
 				}
 				failpoint.Inject("scatterHbStreamsDrain", func() {
-					r.opController.hbStreams.Drain(1)
+					r.opController.GetHBStreams().Drain(1)
 					r.opController.RemoveOperator(op)
 				})
 			}

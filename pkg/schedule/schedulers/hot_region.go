@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -102,7 +101,7 @@ type baseHotScheduler struct {
 	updateWriteTime time.Time
 }
 
-func newBaseHotScheduler(opController *schedule.OperatorController) *baseHotScheduler {
+func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
 	base := NewBaseScheduler(opController)
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
@@ -222,7 +221,7 @@ type hotScheduler struct {
 	searchRevertRegions [resourceTypeLen]bool // Whether to search revert regions.
 }
 
-func newHotScheduler(opController *schedule.OperatorController, conf *hotRegionSchedulerConfig) *hotScheduler {
+func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
 	base := newBaseHotScheduler(opController)
 	ret := &hotScheduler{
 		name:             HotRegionName,

@@ -58,7 +58,7 @@ type randomMergeScheduler struct {
 
 // newRandomMergeScheduler creates an admin scheduler that randomly picks two adjacent regions
 // then merges them.
-func newRandomMergeScheduler(opController *schedule.OperatorController, conf *randomMergeSchedulerConfig) schedule.Scheduler {
+func newRandomMergeScheduler(opController *operator.Controller, conf *randomMergeSchedulerConfig) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
 	return &randomMergeScheduler{
 		BaseScheduler: base,

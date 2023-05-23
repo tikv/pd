@@ -162,7 +162,7 @@ type balanceLeaderScheduler struct {
 	name          string
 	conf          *balanceLeaderSchedulerConfig
 	handler       http.Handler
-	opController  *schedule.OperatorController
+	opController  *operator.Controller
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
@@ -170,7 +170,7 @@ type balanceLeaderScheduler struct {
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) schedule.Scheduler {
+func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
@@ -422,7 +422,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 		storesIDs := candidate.binarySearchStores(plan.source, plan.target)
 		candidateUpdateStores[id] = storesIDs
 	}
-	schedule.AddOpInfluence(op, plan.opInfluence, plan.ClusterInformer)
+	operator.AddOpInfluence(op, plan.opInfluence, plan.ClusterInformer)
 	for id, candidate := range candidates {
 		for _, pos := range candidateUpdateStores[id] {
 			candidate.resortStoreWithPos(pos)

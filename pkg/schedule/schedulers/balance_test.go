@@ -229,7 +229,7 @@ type balanceLeaderSchedulerTestSuite struct {
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
 	lb     schedule.Scheduler
-	oc     *schedule.OperatorController
+	oc     *operator.Controller
 	conf   config.Config
 }
 
@@ -545,7 +545,7 @@ type balanceLeaderRangeSchedulerTestSuite struct {
 	suite.Suite
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
-	oc     *schedule.OperatorController
+	oc     *operator.Controller
 }
 
 func TestBalanceLeaderRangeSchedulerTestSuite(t *testing.T) {
@@ -1465,6 +1465,6 @@ func scheduleAndApplyOperator(tc *mockcluster.Cluster, hb schedule.Scheduler, co
 			limit++
 			continue
 		}
-		schedule.ApplyOperator(tc, ops[0])
+		operator.ApplyOperator(tc, ops[0])
 	}
 }

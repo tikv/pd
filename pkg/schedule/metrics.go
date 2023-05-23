@@ -17,58 +17,6 @@ package schedule
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	// TODO: pre-allocate gauge metrics
-	operatorCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "operators_count",
-			Help:      "Counter of schedule operators.",
-		}, []string{"type", "event"})
-
-	operatorDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "finish_operators_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of finished operator.",
-			Buckets:   []float64{0.5, 1, 2, 4, 8, 16, 20, 40, 60, 90, 120, 180, 240, 300, 480, 600, 720, 900, 1200, 1800, 3600},
-		}, []string{"type"})
-
-	operatorSizeHist = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "operator_region_size",
-			Help:      "Bucketed histogram of the operator region size.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 20), // 1MB~1TB
-		}, []string{"type"})
-
-	operatorWaitCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "operators_waiting_count",
-			Help:      "Counter of schedule waiting operators.",
-		}, []string{"type", "event"})
-
-	operatorWaitDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "waiting_operators_duration_seconds",
-			Help:      "Bucketed histogram of waiting time (s) of operator for being promoted.",
-			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
-		}, []string{"type"})
-
-	storeLimitCostCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "store_limit_cost",
-			Help:      "limit rate cost of store.",
-		}, []string{"store", "limit_type"})
-
 	scatterCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -96,13 +44,7 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(operatorCounter)
-	prometheus.MustRegister(operatorDuration)
-	prometheus.MustRegister(operatorWaitDuration)
-	prometheus.MustRegister(storeLimitCostCounter)
-	prometheus.MustRegister(operatorWaitCounter)
 	prometheus.MustRegister(scatterCounter)
 	prometheus.MustRegister(scatterDistributionCounter)
-	prometheus.MustRegister(operatorSizeHist)
 	prometheus.MustRegister(LabelerEventCounter)
 }

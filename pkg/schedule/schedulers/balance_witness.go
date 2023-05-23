@@ -147,7 +147,7 @@ type balanceWitnessScheduler struct {
 	name          string
 	conf          *balanceWitnessSchedulerConfig
 	handler       http.Handler
-	opController  *schedule.OperatorController
+	opController  *operator.Controller
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
@@ -155,7 +155,7 @@ type balanceWitnessScheduler struct {
 
 // newBalanceWitnessScheduler creates a scheduler that tends to keep witnesses on
 // each store balanced.
-func newBalanceWitnessScheduler(opController *schedule.OperatorController, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) schedule.Scheduler {
+func newBalanceWitnessScheduler(opController *operator.Controller, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) schedule.Scheduler {
 	base := NewBaseScheduler(opController)
 	s := &balanceWitnessScheduler{
 		BaseScheduler: base,

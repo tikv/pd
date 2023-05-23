@@ -36,7 +36,7 @@ type evictSlowStoreTestSuite struct {
 	tc     *mockcluster.Cluster
 	es     schedule.Scheduler
 	bs     schedule.Scheduler
-	oc     *schedule.OperatorController
+	oc     *operator.Controller
 }
 
 func TestEvictSlowStoreTestSuite(t *testing.T) {

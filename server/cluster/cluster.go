@@ -43,6 +43,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/slice"
@@ -644,7 +645,7 @@ func (c *RaftCluster) GetCoordinator() *coordinator {
 }
 
 // GetOperatorController returns the operator controller.
-func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
+func (c *RaftCluster) GetOperatorController() *operator.Controller {
 	return c.coordinator.opController
 }
 

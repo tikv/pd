@@ -35,7 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
-func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.Config, *mockcluster.Cluster, *schedule.OperatorController) {
+func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.Config, *mockcluster.Cluster, *operator.Controller) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
 	opt := mockconfig.NewTestOptions()
@@ -46,7 +46,7 @@ func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.
 	} else {
 		stream = hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, needToRunStream[0])
 	}
-	oc := schedule.NewOperatorController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc, stream)
 	return cancel, opt, tc, oc
 }
 

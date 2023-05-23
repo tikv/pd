@@ -57,7 +57,7 @@ type labelScheduler struct {
 // LabelScheduler is mainly based on the store's label information for scheduling.
 // Now only used for reject leader schedule, that will move the leader out of
 // the store with the specific label.
-func newLabelScheduler(opController *schedule.OperatorController, conf *labelSchedulerConfig) schedule.Scheduler {
+func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerConfig) schedule.Scheduler {
 	return &labelScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
 		conf:          conf,

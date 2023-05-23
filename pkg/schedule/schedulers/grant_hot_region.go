@@ -127,7 +127,7 @@ type grantHotRegionScheduler struct {
 }
 
 // newGrantHotRegionScheduler creates an admin scheduler that transfers hot region peer to fixed store and hot region leader to one store.
-func newGrantHotRegionScheduler(opController *schedule.OperatorController, conf *grantHotRegionSchedulerConfig) *grantHotRegionScheduler {
+func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHotRegionSchedulerConfig) *grantHotRegionScheduler {
 	base := newBaseHotScheduler(opController)
 	handler := newGrantHotRegionHandler(conf)
 	ret := &grantHotRegionScheduler{
