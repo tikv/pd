@@ -357,7 +357,7 @@ func (c *coordinator) run() {
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
 		data := configs[i]
-		typ := schedule.FindSchedulerTypeByName(name)
+		typ := schedulers.FindSchedulerTypeByName(name)
 		var cfg config.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
 			if c.Type == typ {
@@ -373,7 +373,7 @@ func (c *coordinator) run() {
 			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
 			continue
 		}
-		s, err := schedule.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, schedule.ConfigJSONDecoder([]byte(data)))
+		s, err := schedulers.CreateScheduler(cfg.Type, c.opController, c.cluster.storage, schedulers.ConfigJSONDecoder([]byte(data)))
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
@@ -394,7 +394,7 @@ func (c *coordinator) run() {
 			continue
 		}
 
-		s, err := schedule.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
+		s, err := schedulers.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.storage, schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args))
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
@@ -443,7 +443,7 @@ func (c *coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	}
 	schedulerArgs := SchedulerArgs.(func() []string)
 	// create and add user scheduler
-	s, err := schedule.CreateScheduler(schedulerType(), c.opController, c.cluster.storage, schedule.ConfigSliceDecoder(schedulerType(), schedulerArgs()))
+	s, err := schedulers.CreateScheduler(schedulerType(), c.opController, c.cluster.storage, schedulers.ConfigSliceDecoder(schedulerType(), schedulerArgs()))
 	if err != nil {
 		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), errs.ZapError(err))
 		return
@@ -623,7 +623,7 @@ func (c *coordinator) shouldRun() bool {
 	return c.prepareChecker.check(c.cluster.GetBasicCluster())
 }
 
-func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string) error {
+func (c *coordinator) addScheduler(scheduler schedulers.Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -681,8 +681,8 @@ func (c *coordinator) removeOptScheduler(o *config.PersistOptions, name string) 
 	v := o.GetScheduleConfig().Clone()
 	for i, schedulerCfg := range v.Schedulers {
 		// To create a temporary scheduler is just used to get scheduler's name
-		decoder := schedule.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
-		tmp, err := schedule.CreateScheduler(schedulerCfg.Type, operator.NewController(c.ctx, nil, nil), storage.NewStorageWithMemoryBackend(), decoder)
+		decoder := schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
+		tmp, err := schedulers.CreateScheduler(schedulerCfg.Type, operator.NewController(c.ctx, nil, nil), storage.NewStorageWithMemoryBackend(), decoder)
 		if err != nil {
 			return err
 		}
@@ -851,9 +851,9 @@ func (c *coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error
 	return c.diagnosticManager.getDiagnosticResult(name)
 }
 
-// scheduleController is used to manage a scheduler to schedule.
+// scheduleController is used to manage a scheduler to schedulers.
 type scheduleController struct {
-	schedule.Scheduler
+	schedulers.Scheduler
 	cluster            *RaftCluster
 	opController       *operator.Controller
 	nextInterval       time.Duration
@@ -865,7 +865,7 @@ type scheduleController struct {
 }
 
 // newScheduleController creates a new scheduleController.
-func newScheduleController(c *coordinator, s schedule.Scheduler) *scheduleController {
+func newScheduleController(c *coordinator, s schedulers.Scheduler) *scheduleController {
 	ctx, cancel := context.WithCancel(c.ctx)
 	return &scheduleController{
 		Scheduler:          s,
@@ -939,7 +939,7 @@ func (s *scheduleController) GetInterval() time.Duration {
 	return s.nextInterval
 }
 
-// AllowSchedule returns if a scheduler is allowed to schedule.
+// AllowSchedule returns if a scheduler is allowed to schedulers.
 func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 	if !s.Scheduler.IsScheduleAllowed(s.cluster) {
 		if diagnosable {

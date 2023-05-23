@@ -56,9 +56,9 @@ import (
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -908,7 +908,7 @@ func (s *Server) GetConfig() *config.Config {
 	payload := make(map[string]interface{})
 	for i, sche := range sches {
 		var config interface{}
-		err := schedule.DecodeConfig([]byte(configs[i]), &config)
+		err := schedulers.DecodeConfig([]byte(configs[i]), &config)
 		if err != nil {
 			log.Error("failed to decode scheduler config",
 				zap.String("config", configs[i]),

@@ -21,7 +21,6 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -80,7 +79,7 @@ func (s *BaseScheduler) GetMinInterval() time.Duration {
 
 // EncodeConfig encode config for the scheduler
 func (s *BaseScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(nil)
+	return EncodeConfig(nil)
 }
 
 // GetNextInterval return the next interval for the scheduler

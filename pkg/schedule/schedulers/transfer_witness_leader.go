@@ -20,7 +20,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -53,7 +52,7 @@ type trasferWitnessLeaderScheduler struct {
 }
 
 // newTransferWitnessLeaderScheduler creates an admin scheduler that transfers witness leader of a region.
-func newTransferWitnessLeaderScheduler(opController *operator.Controller) schedule.Scheduler {
+func newTransferWitnessLeaderScheduler(opController *operator.Controller) Scheduler {
 	return &trasferWitnessLeaderScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
 		regions:       make(chan *core.RegionInfo, transferWitnessLeaderRecvMaxRegionSize),
@@ -126,6 +125,6 @@ func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ 
 }
 
 // RecvRegionInfo receives a checked region from coordinator
-func RecvRegionInfo(s schedule.Scheduler) chan<- *core.RegionInfo {
+func RecvRegionInfo(s Scheduler) chan<- *core.RegionInfo {
 	return s.(*trasferWitnessLeaderScheduler).regions
 }

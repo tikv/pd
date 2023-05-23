@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package schedulers
 
 import (
 	"encoding/json"
@@ -35,7 +35,7 @@ import (
 type Scheduler interface {
 	http.Handler
 	GetName() string
-	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
+	// GetType should in accordance with the name passing to RegisterScheduler()
 	GetType() string
 	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration

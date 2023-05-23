@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -121,7 +120,7 @@ func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig 
 }
 
 func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -170,7 +169,7 @@ type balanceLeaderScheduler struct {
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) schedule.Scheduler {
+func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) Scheduler {
 	base := NewBaseScheduler(opController)
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
@@ -224,7 +223,7 @@ func (l *balanceLeaderScheduler) GetType() string {
 func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
-	return schedule.EncodeConfig(l.conf)
+	return EncodeConfig(l.conf)
 }
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {

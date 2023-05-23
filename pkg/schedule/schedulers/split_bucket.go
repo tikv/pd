@@ -24,7 +24,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -81,7 +80,7 @@ func (conf *splitBucketSchedulerConfig) Clone() *splitBucketSchedulerConfig {
 }
 
 func (conf *splitBucketSchedulerConfig) persistLocked() error {
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}

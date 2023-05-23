@@ -692,7 +692,7 @@ func (c *RaftCluster) GetSchedulerHandlers() map[string]http.Handler {
 }
 
 // AddScheduler adds a scheduler.
-func (c *RaftCluster) AddScheduler(scheduler schedule.Scheduler, args ...string) error {
+func (c *RaftCluster) AddScheduler(scheduler schedulers.Scheduler, args ...string) error {
 	return c.coordinator.addScheduler(scheduler, args...)
 }
 

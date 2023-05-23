@@ -84,7 +84,7 @@ func (conf *scatterRangeSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -119,13 +119,13 @@ type scatterRangeScheduler struct {
 	*BaseScheduler
 	name          string
 	config        *scatterRangeSchedulerConfig
-	balanceLeader schedule.Scheduler
-	balanceRegion schedule.Scheduler
+	balanceLeader Scheduler
+	balanceRegion Scheduler
 	handler       http.Handler
 }
 
 // newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
-func newScatterRangeScheduler(opController *operator.Controller, config *scatterRangeSchedulerConfig) schedule.Scheduler {
+func newScatterRangeScheduler(opController *operator.Controller, config *scatterRangeSchedulerConfig) Scheduler {
 	base := NewBaseScheduler(opController)
 
 	name := config.getSchedulerName()
@@ -166,7 +166,7 @@ func (l *scatterRangeScheduler) GetType() string {
 func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 	l.config.mu.RLock()
 	defer l.config.mu.RUnlock()
-	return schedule.EncodeConfig(l.config)
+	return EncodeConfig(l.config)
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
