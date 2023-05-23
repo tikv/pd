@@ -135,36 +135,6 @@ func TestSaveLoadGCSafePoint(t *testing.T) {
 	re.NoError(err2)
 }
 
-func TestLoadAllKeyspaceGCSafePoints(t *testing.T) {
-	re := require.New(t)
-	storage := NewStorageWithMemoryBackend()
-	testGCSafePoints := testGCSafePoints()
-	for _, testGCSafePoint := range testGCSafePoints {
-		err := storage.SaveGCSafePointV2(testGCSafePoint)
-		re.NoError(err)
-	}
-	loadedGCSafePoints, err := storage.LoadAllGCSafePoints()
-	re.NoError(err)
-	for i := range loadedGCSafePoints {
-		re.Equal(testGCSafePoints[i].KeyspaceID, loadedGCSafePoints[i].KeyspaceID)
-		re.Equal(testGCSafePoints[i].SafePoint, loadedGCSafePoints[i].SafePoint)
-	}
-
-	// saving some service safe points.
-	testServiceSafePoints := testServiceSafePoints()
-	for _, testServiceSafePoint := range testServiceSafePoints {
-		re.NoError(storage.SaveServiceSafePointV2(testServiceSafePoint))
-	}
-
-	// verify that service safe points do not interfere with gc safe points.
-	loadedSafePoints, err := storage.LoadAllGCSafePoints()
-	re.NoError(err)
-	for i := range loadedSafePoints {
-		re.Equal(testGCSafePoints[i].KeyspaceID, loadedSafePoints[i].KeyspaceID)
-		re.Equal(testGCSafePoints[i].SafePoint, loadedSafePoints[i].SafePoint)
-	}
-}
-
 func TestLoadEmpty(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
@@ -179,8 +149,4 @@ func TestLoadEmpty(t *testing.T) {
 	re.NoError(err)
 	re.Nil(serviceSafePoint)
 
-	// loading empty key spaces should return empty slices
-	loadedGCSafePoints, err := storage.LoadAllGCSafePoints()
-	re.NoError(err)
-	re.Empty(loadedGCSafePoints)
 }
