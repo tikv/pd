@@ -19,9 +19,9 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 
@@ -48,7 +48,7 @@ func newPluginHandler(handler *server.Handler, rd *render.Render) *pluginHandler
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /plugin [post]
 func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, cluster.PluginLoad)
+	h.processPluginCommand(w, r, schedule.PluginLoad)
 }
 
 // FIXME: details of input json body params
@@ -62,7 +62,7 @@ func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /plugin [delete]
 func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, cluster.PluginUnload)
+	h.processPluginCommand(w, r, schedule.PluginUnload)
 }
 
 func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Request, action string) {
@@ -77,14 +77,14 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 	}
 	var err error
 	switch action {
-	case cluster.PluginLoad:
+	case schedule.PluginLoad:
 		err = h.PluginLoad(path)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		h.rd.JSON(w, http.StatusOK, "Load plugin successfully.")
-	case cluster.PluginUnload:
+	case schedule.PluginUnload:
 		err = h.PluginUnload(path)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())

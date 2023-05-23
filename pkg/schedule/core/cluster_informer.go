@@ -17,12 +17,13 @@ package core
 import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/schedule/config"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/server/config"
 )
 
 // ClusterInformer provides the necessary information of a cluster.
@@ -33,14 +34,18 @@ type ClusterInformer interface {
 	buckets.BucketStatInformer
 
 	GetBasicCluster() *core.BasicCluster
-	GetStoreConfig() config.StoreConfig
+	GetStoreConfig() sc.StoreConfig
 	GetAllocator() id.Allocator
 	GetRegionLabeler() *labeler.RegionLabeler
 	GetStorage() storage.Storage
 	RemoveScheduler(name string) error
 	AddSuspectRegions(ids ...uint64)
-	SetHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64)
 	RecordOpStepWithTTL(regionID uint64)
+	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
+	IsSchedulerExisted(name string) (bool, error)
+	IsSchedulerDisabled(name string) (bool, error)
+	GetPersistOptions() *config.PersistOptions
+	IsUnsafeRecovering() bool
 }
 
 // RegionHealthCluster is an aggregate interface that wraps multiple interfaces
@@ -49,6 +54,6 @@ type RegionHealthCluster interface {
 	core.StoreSetController
 	core.RegionSetInformer
 
-	GetOpts() config.Config
+	GetOpts() sc.Config
 	GetRuleManager() *placement.RuleManager
 }

@@ -157,6 +157,15 @@ var storeSlowTrendMiscGauge = prometheus.NewGaugeVec(
 		Help:      "Store trend internal uncatelogued values",
 	}, []string{"type"})
 
+// HotPendingSum is the sum of pending influence in hot region scheduler.
+var HotPendingSum = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduler",
+		Name:      "hot_pending_sum",
+		Help:      "Pending influence sum of store in hot region scheduler.",
+	}, []string{"store", "rw", "dim"})
+
 func init() {
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
@@ -175,4 +184,5 @@ func init() {
 	prometheus.MustRegister(storeSlowTrendEvictedStatusGauge)
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
+	prometheus.MustRegister(HotPendingSum)
 }

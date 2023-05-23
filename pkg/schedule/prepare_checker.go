@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cluster
+package schedule
 
 import (
 	"time"
@@ -65,7 +65,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	return true
 }
 
-func (checker *prepareChecker) collect(region *core.RegionInfo) {
+func (checker *prepareChecker) Collect(region *core.RegionInfo) {
 	checker.Lock()
 	defer checker.Unlock()
 	for _, p := range region.GetPeers() {
@@ -74,8 +74,22 @@ func (checker *prepareChecker) collect(region *core.RegionInfo) {
 	checker.sum++
 }
 
-func (checker *prepareChecker) isPrepared() bool {
+func (checker *prepareChecker) IsPrepared() bool {
 	checker.RLock()
 	defer checker.RUnlock()
 	return checker.prepared
+}
+
+// for test purpose
+func (checker *prepareChecker) SetPrepared() {
+	checker.Lock()
+	defer checker.Unlock()
+	checker.prepared = true
+}
+
+// for test purpose
+func (checker *prepareChecker) GetSum() int {
+	checker.RLock()
+	defer checker.RUnlock()
+	return checker.sum
 }

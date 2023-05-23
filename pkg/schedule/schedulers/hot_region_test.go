@@ -165,7 +165,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		}
 	}
 
-	hb.summaryPendingInfluence(tc) // Calling this function will GC.
+	hb.summaryPendingInfluence() // Calling this function will GC.
 
 	for i := range opInfluenceCreators {
 		for j, typ := range typs {
@@ -1895,7 +1895,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	op := ops[0]
 	re.NotNil(op)
 
-	hb.(*hotScheduler).summaryPendingInfluence(tc)
+	hb.(*hotScheduler).summaryPendingInfluence()
 	stInfos := hb.(*hotScheduler).stInfos
 	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteKeys], -0.5*units.MiB))
 	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteBytes], -0.5*units.MiB))
@@ -1920,7 +1920,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	op = ops[0]
 	re.NotNil(op)
 
-	hb.(*hotScheduler).summaryPendingInfluence(tc)
+	hb.(*hotScheduler).summaryPendingInfluence()
 	stInfos = hb.(*hotScheduler).stInfos
 	// assert read/write influence is the sum of write peer and write leader
 	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[statistics.RegionWriteKeys], -1.2*units.MiB))

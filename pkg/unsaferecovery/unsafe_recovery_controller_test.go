@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cluster
+// change the package to avoid import cycle
+package unsaferecovery
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,9 +28,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
-	"github.com/tikv/pd/pkg/storage"
 )
 
 func newStoreHeartbeat(storeID uint64, report *pdpb.StoreReport) *pdpb.StoreHeartbeatRequest {
@@ -162,7 +165,7 @@ func applyRecoveryPlan(re *require.Assertions, storeID uint64, storeReports map[
 	}
 }
 
-func advanceUntilFinished(re *require.Assertions, recoveryController *unsafeRecoveryController, reports map[uint64]*pdpb.StoreReport) {
+func advanceUntilFinished(re *require.Assertions, recoveryController *Controller, reports map[uint64]*pdpb.StoreReport) {
 	retry := 0
 
 	for {
@@ -173,10 +176,10 @@ func advanceUntilFinished(re *require.Assertions, recoveryController *unsafeReco
 			recoveryController.HandleStoreHeartbeat(req, resp)
 			applyRecoveryPlan(re, storeID, reports, resp)
 		}
-		if recoveryController.GetStage() == finished {
+		if recoveryController.GetStage() == Finished {
 			break
-		} else if recoveryController.GetStage() == failed {
-			panic("failed to recovery")
+		} else if recoveryController.GetStage() == Failed {
+			panic("Failed to recovery")
 		} else if retry >= 10 {
 			panic("retry timeout")
 		}
@@ -189,14 +192,14 @@ func TestFinished(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -214,7 +217,7 @@ func TestFinished(t *testing.T) {
 							{Id: 11, StoreId: 1}, {Id: 21, StoreId: 2}, {Id: 31, StoreId: 3}}}}},
 		}},
 	}
-	re.Equal(collectReport, recoveryController.GetStage())
+	re.Equal(CollectReport, recoveryController.GetStage())
 	for storeID := range reports {
 		req := newStoreHeartbeat(storeID, nil)
 		resp := &pdpb.StoreHeartbeatResponse{}
@@ -240,7 +243,7 @@ func TestFinished(t *testing.T) {
 		re.NotNil(resp.RecoveryPlan.ForceLeader.FailedStores)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
-	re.Equal(forceLeader, recoveryController.GetStage())
+	re.Equal(ForceLeader, recoveryController.GetStage())
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
@@ -251,7 +254,7 @@ func TestFinished(t *testing.T) {
 		re.Len(resp.RecoveryPlan.Demotes, 1)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
-	re.Equal(demoteFailedVoter, recoveryController.GetStage())
+	re.Equal(DemoteFailedVoter, recoveryController.GetStage())
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
 		req.StoreReport = report
@@ -261,7 +264,7 @@ func TestFinished(t *testing.T) {
 		// remove the two failed peers
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
-	re.Equal(finished, recoveryController.GetStage())
+	re.Equal(Finished, recoveryController.GetStage())
 }
 
 func TestFailed(t *testing.T) {
@@ -269,14 +272,14 @@ func TestFailed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -294,7 +297,7 @@ func TestFailed(t *testing.T) {
 							{Id: 11, StoreId: 1}, {Id: 21, StoreId: 2}, {Id: 31, StoreId: 3}}}}},
 		}},
 	}
-	re.Equal(collectReport, recoveryController.GetStage())
+	re.Equal(CollectReport, recoveryController.GetStage())
 	// require peer report
 	for storeID := range reports {
 		req := newStoreHeartbeat(storeID, nil)
@@ -319,7 +322,7 @@ func TestFailed(t *testing.T) {
 		re.NotNil(resp.RecoveryPlan.ForceLeader.FailedStores)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
-	re.Equal(forceLeader, recoveryController.GetStage())
+	re.Equal(ForceLeader, recoveryController.GetStage())
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
@@ -330,13 +333,13 @@ func TestFailed(t *testing.T) {
 		re.Len(resp.RecoveryPlan.Demotes, 1)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
-	re.Equal(demoteFailedVoter, recoveryController.GetStage())
+	re.Equal(DemoteFailedVoter, recoveryController.GetStage())
 
-	// received heartbeat from failed store, abort
+	// received heartbeat from Failed store, abort
 	req := newStoreHeartbeat(2, nil)
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(exitForceLeader, recoveryController.GetStage())
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
@@ -354,7 +357,7 @@ func TestFailed(t *testing.T) {
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
-	re.Equal(failed, recoveryController.GetStage())
+	re.Equal(Failed, recoveryController.GetStage())
 }
 
 func TestForceLeaderFail(t *testing.T) {
@@ -362,14 +365,14 @@ func TestForceLeaderFail(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(4, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		3: {},
 		4: {},
@@ -414,7 +417,7 @@ func TestForceLeaderFail(t *testing.T) {
 	resp2 := &pdpb.StoreHeartbeatResponse{}
 	req2.StoreReport.Step = 1
 	recoveryController.HandleStoreHeartbeat(req2, resp2)
-	re.Equal(forceLeader, recoveryController.GetStage())
+	re.Equal(ForceLeader, recoveryController.GetStage())
 	recoveryController.HandleStoreHeartbeat(req1, resp1)
 
 	// force leader on store 1 succeed
@@ -426,7 +429,7 @@ func TestForceLeaderFail(t *testing.T) {
 	// force leader should retry on store 2
 	recoveryController.HandleStoreHeartbeat(req1, resp1)
 	recoveryController.HandleStoreHeartbeat(req2, resp2)
-	re.Equal(forceLeader, recoveryController.GetStage())
+	re.Equal(ForceLeader, recoveryController.GetStage())
 	recoveryController.HandleStoreHeartbeat(req1, resp1)
 
 	// force leader succeed this time
@@ -434,7 +437,7 @@ func TestForceLeaderFail(t *testing.T) {
 	applyRecoveryPlan(re, 2, reports, resp2)
 	recoveryController.HandleStoreHeartbeat(req1, resp1)
 	recoveryController.HandleStoreHeartbeat(req2, resp2)
-	re.Equal(demoteFailedVoter, recoveryController.GetStage())
+	re.Equal(DemoteFailedVoter, recoveryController.GetStage())
 }
 
 func TestAffectedTableID(t *testing.T) {
@@ -442,14 +445,14 @@ func TestAffectedTableID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -473,8 +476,8 @@ func TestAffectedTableID(t *testing.T) {
 
 	advanceUntilFinished(re, recoveryController, reports)
 
-	re.Len(recoveryController.affectedTableIDs, 1)
-	_, exists := recoveryController.affectedTableIDs[6]
+	re.Len(recoveryController.AffectedTableIDs, 1)
+	_, exists := recoveryController.AffectedTableIDs[6]
 	re.True(exists)
 }
 
@@ -483,14 +486,14 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -529,7 +532,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 	resp := &pdpb.StoreHeartbeatResponse{}
 	req.StoreReport.Step = 1
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(forceLeaderForCommitMerge, recoveryController.GetStage())
+	re.Equal(ForceLeaderForCommitMerge, recoveryController.GetStage())
 
 	// force leader on regions of commit merge first
 	re.NotNil(resp.RecoveryPlan)
@@ -540,7 +543,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 	applyRecoveryPlan(re, 1, reports, resp)
 
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(forceLeader, recoveryController.GetStage())
+	re.Equal(ForceLeader, recoveryController.GetStage())
 
 	// force leader on the rest regions
 	re.NotNil(resp.RecoveryPlan)
@@ -551,7 +554,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 	applyRecoveryPlan(re, 1, reports, resp)
 
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(demoteFailedVoter, recoveryController.GetStage())
+	re.Equal(DemoteFailedVoter, recoveryController.GetStage())
 }
 
 func TestAutoDetectMode(t *testing.T) {
@@ -559,14 +562,14 @@ func TestAutoDetectMode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(1, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
 
 	reports := map[uint64]*pdpb.StoreReport{
@@ -611,14 +614,14 @@ func TestOneLearner(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -666,17 +669,17 @@ func TestTiflashLearnerPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		if store.GetID() == 3 {
 			store.GetMeta().Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
 		}
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		4: {},
 		5: {},
@@ -841,14 +844,14 @@ func TestUninitializedPeer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -897,14 +900,14 @@ func TestJointState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		4: {},
 		5: {},
@@ -1090,14 +1093,14 @@ func TestExecutionTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -1107,10 +1110,10 @@ func TestExecutionTimeout(t *testing.T) {
 	req := newStoreHeartbeat(1, nil)
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(exitForceLeader, recoveryController.GetStage())
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
 	req.StoreReport = &pdpb.StoreReport{Step: 2}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(failed, recoveryController.GetStage())
+	re.Equal(Failed, recoveryController.GetStage())
 
 	output := recoveryController.Show()
 	re.Equal(len(output), 3)
@@ -1122,14 +1125,14 @@ func TestNoHeartbeatTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -1137,7 +1140,7 @@ func TestNoHeartbeatTimeout(t *testing.T) {
 
 	time.Sleep(time.Second)
 	recoveryController.Show()
-	re.Equal(exitForceLeader, recoveryController.GetStage())
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
 }
 
 func TestExitForceLeader(t *testing.T) {
@@ -1145,14 +1148,14 @@ func TestExitForceLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -1183,7 +1186,7 @@ func TestExitForceLeader(t *testing.T) {
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
-	re.Equal(exitForceLeader, recoveryController.GetStage())
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
 
 	for storeID, report := range reports {
 		req := newStoreHeartbeat(storeID, report)
@@ -1192,7 +1195,7 @@ func TestExitForceLeader(t *testing.T) {
 		recoveryController.HandleStoreHeartbeat(req, resp)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
-	re.Equal(finished, recoveryController.GetStage())
+	re.Equal(Finished, recoveryController.GetStage())
 
 	expects := map[uint64]*pdpb.StoreReport{
 		1: {
@@ -1223,14 +1226,14 @@ func TestStep(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -1255,22 +1258,22 @@ func TestStep(t *testing.T) {
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	// step is not set, ignore
-	re.Equal(collectReport, recoveryController.GetStage())
+	re.Equal(CollectReport, recoveryController.GetStage())
 
 	// valid store report
 	req.StoreReport.Step = 1
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(forceLeader, recoveryController.GetStage())
+	re.Equal(ForceLeader, recoveryController.GetStage())
 
 	// duplicate report with same step, ignore
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(forceLeader, recoveryController.GetStage())
+	re.Equal(ForceLeader, recoveryController.GetStage())
 	applyRecoveryPlan(re, 1, reports, resp)
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(demoteFailedVoter, recoveryController.GetStage())
+	re.Equal(DemoteFailedVoter, recoveryController.GetStage())
 	applyRecoveryPlan(re, 1, reports, resp)
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	re.Equal(finished, recoveryController.GetStage())
+	re.Equal(Finished, recoveryController.GetStage())
 }
 
 func TestOnHealthyRegions(t *testing.T) {
@@ -1278,14 +1281,14 @@ func TestOnHealthyRegions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		4: {},
 		5: {},
@@ -1323,7 +1326,7 @@ func TestOnHealthyRegions(t *testing.T) {
 							{Id: 11, StoreId: 1}, {Id: 21, StoreId: 2}, {Id: 31, StoreId: 3}}}}},
 		}},
 	}
-	re.Equal(collectReport, recoveryController.GetStage())
+	re.Equal(CollectReport, recoveryController.GetStage())
 	// require peer report
 	for storeID := range reports {
 		req := newStoreHeartbeat(storeID, nil)
@@ -1346,7 +1349,7 @@ func TestOnHealthyRegions(t *testing.T) {
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
 	// nothing to do, finish directly
-	re.Equal(finished, recoveryController.GetStage())
+	re.Equal(Finished, recoveryController.GetStage())
 }
 
 func TestCreateEmptyRegion(t *testing.T) {
@@ -1354,14 +1357,14 @@ func TestCreateEmptyRegion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -1463,14 +1466,14 @@ func TestRangeOverlap1(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		4: {},
 		5: {},
@@ -1558,14 +1561,14 @@ func TestRangeOverlap2(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		4: {},
 		5: {},
@@ -1652,17 +1655,16 @@ func TestRemoveFailedStores(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
 	for _, store := range stores {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
-
+	recoveryController := NewController(cluster)
 	// Store 3 doesn't exist, reject to remove.
 	re.Error(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		1: {},
@@ -1673,8 +1675,8 @@ func TestRemoveFailedStores(t *testing.T) {
 		1: {},
 	}, 60, false))
 	re.True(cluster.GetStore(uint64(1)).IsRemoved())
-	for _, s := range cluster.GetSchedulers() {
-		paused, err := cluster.IsSchedulerAllowed(s)
+	for _, s := range coordinator.GetSchedulers() {
+		paused, err := coordinator.IsSchedulerAllowed(s)
 		if s != "split-bucket-scheduler" {
 			re.NoError(err)
 			re.True(paused)
@@ -1688,34 +1690,26 @@ func TestRemoveFailedStores(t *testing.T) {
 		}, 60, false))
 }
 
-func TestSplitPaused(t *testing.T) {
+func TestRunning(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	recoveryController := newUnsafeRecoveryController(cluster)
-	cluster.Lock()
-	cluster.unsafeRecoveryController = recoveryController
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.Unlock()
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
 	for _, store := range stores {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
 	failedStores := map[uint64]struct{}{
 		1: {},
 	}
+	recoveryController := NewController(cluster)
 	re.NoError(recoveryController.RemoveFailedStores(failedStores, 60, false))
-	askSplitReq := &pdpb.AskSplitRequest{}
-	_, err := cluster.HandleAskSplit(askSplitReq)
-	re.Equal("[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running", err.Error())
-	askBatchSplitReq := &pdpb.AskBatchSplitRequest{}
-	_, err = cluster.HandleAskBatchSplit(askBatchSplitReq)
-	re.Equal("[PD:unsaferecovery:ErrUnsafeRecoveryIsRunning]unsafe recovery is running", err.Error())
+	re.True(recoveryController.IsRunning())
 }
 
 func TestEpochComparsion(t *testing.T) {
@@ -1723,14 +1717,14 @@ func TestEpochComparsion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, opt, _ := newTestScheduleConfig()
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
-	cluster.coordinator.run()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
-		re.Nil(cluster.PutStore(store.GetMeta()))
+		cluster.PutStore(store)
 	}
-	recoveryController := newUnsafeRecoveryController(cluster)
+	recoveryController := NewController(cluster)
 	re.Nil(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
@@ -1795,4 +1789,27 @@ func TestEpochComparsion(t *testing.T) {
 			re.Empty(len(report.PeerReports))
 		}
 	}
+}
+
+// TODO: remove them
+// Create n stores (0..n).
+func newTestStores(n uint64, version string) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, n)
+	for i := uint64(1); i <= n; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("127.0.0.1:%d", i),
+			StatusAddress: fmt.Sprintf("127.0.0.1:%d", i),
+			State:         metapb.StoreState_Up,
+			Version:       version,
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Serving,
+		}
+		stores = append(stores, core.NewStoreInfo(store))
+	}
+	return stores
+}
+
+func getTestDeployPath(storeID uint64) string {
+	return fmt.Sprintf("test/store%d", storeID)
 }

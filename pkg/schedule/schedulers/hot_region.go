@@ -120,7 +120,7 @@ func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
 // each store, only update read or write load detail
 func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.ClusterInformer) {
 	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
-	h.summaryPendingInfluence(cluster)
+	h.summaryPendingInfluence()
 	h.storesLoads = cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
 
@@ -157,7 +157,7 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
-func (h *baseHotScheduler) summaryPendingInfluence(cluster sche.ClusterInformer) {
+func (h *baseHotScheduler) summaryPendingInfluence() {
 	for id, p := range h.regionPendings {
 		from := h.stInfos[p.from]
 		to := h.stInfos[p.to]
@@ -180,10 +180,15 @@ func (h *baseHotScheduler) summaryPendingInfluence(cluster sche.ClusterInformer)
 		storeLabel := strconv.FormatUint(storeID, 10)
 		if infl := info.PendingSum; infl != nil {
 			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, kind statistics.RegionStatKind) {
-				cluster.SetHotPendingInfluenceMetrics(storeLabel, rwTy.String(), statistics.DimToString(dim), infl.Loads[kind])
+				setHotPendingInfluenceMetrics(storeLabel, rwTy.String(), statistics.DimToString(dim), infl.Loads[kind])
 			})
 		}
 	}
+}
+
+// setHotPendingInfluenceMetrics sets pending influence in hot scheduler.
+func setHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64) {
+	HotPendingSum.WithLabelValues(storeLabel, rwTy, dim).Set(load)
 }
 
 func (h *baseHotScheduler) randomRWType() statistics.RWType {
