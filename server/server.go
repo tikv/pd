@@ -46,7 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	gc2 "github.com/tikv/pd/pkg/gc"
+	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
@@ -166,11 +166,11 @@ type Server struct {
 	// for storage operation.
 	storage storage.Storage
 	// safepoint manager
-	gcSafePointManager *gc2.SafePointManager
+	gcSafePointManager *gc.SafePointManager
 	// keyspace manager
 	keyspaceManager *keyspace.Manager
 	// safe point V2 manager
-	safePointV2Manager *gc2.SafePointV2Manager
+	safePointV2Manager *gc.SafePointV2Manager
 	// keyspace group manager
 	keyspaceGroupManager *keyspace.GroupManager
 	// for basicCluster operation.
@@ -452,7 +452,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 
-	s.gcSafePointManager = gc2.NewSafePointManager(s.storage)
+	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
@@ -467,7 +467,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, s.clusterID)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
-	s.safePointV2Manager = gc2.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
+	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -851,7 +851,7 @@ func (s *Server) GetKeyspaceManager() *keyspace.Manager {
 }
 
 // GetSafePointV2Manager returns the safe point v2 manager of server.
-func (s *Server) GetSafePointV2Manager() *gc2.SafePointV2Manager {
+func (s *Server) GetSafePointV2Manager() *gc.SafePointV2Manager {
 	return s.safePointV2Manager
 }
 
