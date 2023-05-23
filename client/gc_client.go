@@ -112,6 +112,7 @@ func (c *client) WatchGCSafePointV2(ctx context.Context, revision int64) (chan [
 			default:
 				resp, err := stream.Recv()
 				if err != nil {
+					log.Error("watch gc safe point v2 error", errs.ZapError(errs.ErrClientWatchGCSafePointV2Stream, err))
 					return
 				}
 				SafePointEventsChan <- resp.GetEvents()
