@@ -24,41 +24,42 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
 
 // CreateAddPeerOperator creates an operator that adds a new peer.
-func CreateAddPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer, kind OpKind) (*Operator, error) {
+func CreateAddPeerOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, peer *metapb.Peer, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		AddPeer(peer).
 		Build(kind)
 }
 
 // CreateDemoteVoterOperator creates an operator that demotes a voter
-func CreateDemoteVoterOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+func CreateDemoteVoterOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		DemoteVoter(peer.GetStoreId()).
 		Build(0)
 }
 
 // CreatePromoteLearnerOperator creates an operator that promotes a learner.
-func CreatePromoteLearnerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+func CreatePromoteLearnerOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		PromoteLearner(peer.GetStoreId()).
 		Build(0)
 }
 
 // CreateRemovePeerOperator creates an operator that removes a peer from region.
-func CreateRemovePeerOperator(desc string, ci ClusterInformer, kind OpKind, region *core.RegionInfo, storeID uint64) (*Operator, error) {
+func CreateRemovePeerOperator(desc string, ci sche.ClusterInformer, kind OpKind, region *core.RegionInfo, storeID uint64) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		RemovePeer(storeID).
 		Build(kind)
 }
 
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
-func CreateTransferLeaderOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
+func CreateTransferLeaderOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck).
 		SetLeader(targetStoreID).
 		SetLeaders(targetStoreIDs).
@@ -66,7 +67,7 @@ func CreateTransferLeaderOperator(desc string, ci ClusterInformer, region *core.
 }
 
 // CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.
-func CreateForceTransferLeaderOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
+func CreateForceTransferLeaderOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck, SkipPlacementRulesCheck).
 		SetLeader(targetStoreID).
 		EnableForceTargetLeader().
@@ -74,7 +75,7 @@ func CreateForceTransferLeaderOperator(desc string, ci ClusterInformer, region *
 }
 
 // CreateMoveRegionOperator creates an operator that moves a region to specified stores.
-func CreateMoveRegionOperator(desc string, ci ClusterInformer, region *core.RegionInfo, kind OpKind, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
+func CreateMoveRegionOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, kind OpKind, roles map[uint64]placement.PeerRoleType) (*Operator, error) {
 	// construct the peers from roles
 	oldPeers := region.GetPeers()
 	peers := make(map[uint64]*metapb.Peer)
@@ -96,7 +97,7 @@ func CreateMoveRegionOperator(desc string, ci ClusterInformer, region *core.Regi
 }
 
 // CreateMovePeerOperator creates an operator that replaces an old peer with a new peer.
-func CreateMovePeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+func CreateMovePeerOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
@@ -104,7 +105,7 @@ func CreateMovePeerOperator(desc string, ci ClusterInformer, region *core.Region
 }
 
 // CreateMoveWitnessOperator creates an operator that replaces an old witness with a new witness.
-func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64) (*Operator, error) {
+func CreateMoveWitnessOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		BecomeNonWitness(sourceStoreID).
 		BecomeWitness(targetStoreID).
@@ -112,7 +113,7 @@ func CreateMoveWitnessOperator(desc string, ci ClusterInformer, region *core.Reg
 }
 
 // CreateReplaceLeaderPeerOperator creates an operator that replaces an old peer with a new peer, and move leader from old store firstly.
-func CreateReplaceLeaderPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer, leader *metapb.Peer) (*Operator, error) {
+func CreateReplaceLeaderPeerOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer, leader *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
@@ -121,7 +122,7 @@ func CreateReplaceLeaderPeerOperator(desc string, ci ClusterInformer, region *co
 }
 
 // CreateMoveLeaderOperator creates an operator that replaces an old leader with a new leader.
-func CreateMoveLeaderOperator(desc string, ci ClusterInformer, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
+func CreateMoveLeaderOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, kind OpKind, oldStore uint64, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		RemovePeer(oldStore).
 		AddPeer(peer).
@@ -156,7 +157,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 }
 
 // CreateMergeRegionOperator creates an operator that merge two region into one.
-func CreateMergeRegionOperator(desc string, ci ClusterInformer, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
+func CreateMergeRegionOperator(desc string, ci sche.ClusterInformer, source *core.RegionInfo, target *core.RegionInfo, kind OpKind) ([]*Operator, error) {
 	if core.IsInJointState(source.GetPeers()...) || core.IsInJointState(target.GetPeers()...) {
 		return nil, errors.Errorf("cannot merge regions which are in joint state")
 	}
@@ -214,7 +215,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
-func CreateScatterRegionOperator(desc string, ci ClusterInformer, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) (*Operator, error) {
+func CreateScatterRegionOperator(desc string, ci sche.ClusterInformer, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) (*Operator, error) {
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
@@ -242,7 +243,7 @@ func CreateScatterRegionOperator(desc string, ci ClusterInformer, origin *core.R
 const OpDescLeaveJointState = "leave-joint-state"
 
 // CreateLeaveJointStateOperator creates an operator that let region leave joint state.
-func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core.RegionInfo) (*Operator, error) {
+func CreateLeaveJointStateOperator(desc string, ci sche.ClusterInformer, origin *core.RegionInfo) (*Operator, error) {
 	b := NewBuilder(desc, ci, origin, SkipOriginJointStateCheck, SkipPlacementRulesCheck)
 
 	if b.err == nil && !core.IsInJointState(origin.GetPeers()...) {
@@ -302,14 +303,14 @@ func CreateLeaveJointStateOperator(desc string, ci ClusterInformer, origin *core
 }
 
 // CreateWitnessPeerOperator creates an operator that set a follower or learner peer with witness
-func CreateWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+func CreateWitnessPeerOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		BecomeWitness(peer.GetStoreId()).
 		Build(OpWitness)
 }
 
 // CreateNonWitnessPeerOperator creates an operator that set a peer with non-witness
-func CreateNonWitnessPeerOperator(desc string, ci ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
+func CreateNonWitnessPeerOperator(desc string, ci sche.ClusterInformer, region *core.RegionInfo, peer *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		BecomeNonWitness(peer.GetStoreId()).
 		Build(OpWitness)

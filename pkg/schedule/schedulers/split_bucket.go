@@ -24,7 +24,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -80,7 +80,7 @@ func (conf *splitBucketSchedulerConfig) Clone() *splitBucketSchedulerConfig {
 }
 
 func (conf *splitBucketSchedulerConfig) persistLocked() error {
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,7 @@ func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
 	return router
 }
 
-func newSplitBucketScheduler(opController *schedule.OperatorController, conf *splitBucketSchedulerConfig) *splitBucketScheduler {
+func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucketSchedulerConfig) *splitBucketScheduler {
 	base := NewBaseScheduler(opController)
 	handler := newSplitBucketHandler(conf)
 	ret := &splitBucketScheduler{
@@ -166,7 +166,7 @@ func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 // IsScheduleAllowed return true if the sum of executing opSplit operator is less  .
-func (s *splitBucketScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	if !cluster.GetStoreConfig().IsEnableRegionBucket() {
 		splitBucketDisableCounter.Inc()
 		return false
@@ -181,13 +181,13 @@ func (s *splitBucketScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 
 type splitBucketPlan struct {
 	hotBuckets         map[uint64][]*buckets.BucketStat
-	cluster            schedule.Cluster
+	cluster            sche.ClusterInformer
 	conf               *splitBucketSchedulerConfig
 	hotRegionSplitSize int64
 }
 
 // Schedule return operators if some bucket is too hot.
-func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *splitBucketScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	splitBucketScheduleCounter.Inc()
 	conf := s.conf.Clone()
 	plan := &splitBucketPlan{

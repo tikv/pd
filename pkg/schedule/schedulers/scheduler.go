@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package schedulers
 
 import (
 	"encoding/json"
@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -34,15 +35,15 @@ import (
 type Scheduler interface {
 	http.Handler
 	GetName() string
-	// GetType should in accordance with the name passing to schedule.RegisterScheduler()
+	// GetType should in accordance with the name passing to RegisterScheduler()
 	GetType() string
 	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster Cluster) error
-	Cleanup(cluster Cluster)
-	Schedule(cluster Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
-	IsScheduleAllowed(cluster Cluster) bool
+	Prepare(cluster sche.ClusterInformer) error
+	Cleanup(cluster sche.ClusterInformer)
+	Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan)
+	IsScheduleAllowed(cluster sche.ClusterInformer) bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.
@@ -88,7 +89,7 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 }
 
 // CreateSchedulerFunc is for creating scheduler.
-type CreateSchedulerFunc func(opController *OperatorController, storage endpoint.ConfigStorage, dec ConfigDecoder) (Scheduler, error)
+type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
 var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
@@ -113,7 +114,7 @@ func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) 
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(typ string, opController *OperatorController, storage endpoint.ConfigStorage, dec ConfigDecoder) (Scheduler, error) {
+func CreateScheduler(typ string, opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)

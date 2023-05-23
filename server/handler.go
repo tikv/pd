@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -100,7 +99,7 @@ func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
 }
 
 // GetOperatorController returns OperatorController.
-func (h *Handler) GetOperatorController() (*schedule.OperatorController, error) {
+func (h *Handler) GetOperatorController() (*operator.Controller, error) {
 	rc := h.s.GetRaftCluster()
 	if rc == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
@@ -221,7 +220,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		return err
 	}
 
-	s, err := schedule.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedule.ConfigSliceDecoder(name, args))
+	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args))
 	if err != nil {
 		return err
 	}
@@ -393,7 +392,7 @@ func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
 }
 
 // GetOperatorStatus returns the status of the region operator.
-func (h *Handler) GetOperatorStatus(regionID uint64) (*schedule.OperatorWithStatus, error) {
+func (h *Handler) GetOperatorStatus(regionID uint64) (*operator.OpWithStatus, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err

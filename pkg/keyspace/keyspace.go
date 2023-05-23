@@ -26,7 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -64,6 +64,8 @@ type Config interface {
 // Manager manages keyspace related data.
 // It validates requests and provides concurrency control.
 type Manager struct {
+	// ctx is the context of the manager, to be used in transaction.
+	ctx context.Context
 	// metaLock guards keyspace meta.
 	metaLock *syncutil.LockGroup
 	// idAllocator allocates keyspace id.
@@ -71,9 +73,7 @@ type Manager struct {
 	// store is the storage for keyspace related information.
 	store endpoint.KeyspaceStorage
 	// rc is the raft cluster of the server.
-	cluster schedule.Cluster
-	// ctx is the context of the manager, to be used in transaction.
-	ctx context.Context
+	cluster core.ClusterInformer
 	// config is the configurations of the manager.
 	config Config
 	// kgm is the keyspace group manager of the server.
@@ -98,17 +98,17 @@ type CreateKeyspaceRequest struct {
 func NewKeyspaceManager(
 	ctx context.Context,
 	store endpoint.KeyspaceStorage,
-	cluster schedule.Cluster,
+	cluster core.ClusterInformer,
 	idAllocator id.Allocator,
 	config Config,
 	kgm *GroupManager,
 ) *Manager {
 	return &Manager{
+                ctx:               ctx,
 		metaLock:          syncutil.NewLockGroup(syncutil.WithHash(MaskKeyspaceID)),
 		idAllocator:       idAllocator,
 		store:             store,
 		cluster:           cluster,
-		ctx:               ctx,
 		config:            config,
 		kgm:               kgm,
 		nextPatrolStartID: utils.DefaultKeyspaceID,

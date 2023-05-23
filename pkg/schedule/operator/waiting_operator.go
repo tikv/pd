@@ -12,49 +12,47 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package operator
 
 import (
 	"math/rand"
-
-	"github.com/tikv/pd/pkg/schedule/operator"
 )
 
-// PriorityWeight is used to represent the weight of different priorities of operators.
-var PriorityWeight = []float64{1.0, 4.0, 9.0, 16.0}
+// priorityWeight is used to represent the weight of different priorities of operators.
+var priorityWeight = []float64{1.0, 4.0, 9.0, 16.0}
 
 // WaitingOperator is an interface of waiting operators.
 type WaitingOperator interface {
-	PutOperator(op *operator.Operator)
-	GetOperator() []*operator.Operator
-	ListOperator() []*operator.Operator
+	PutOperator(op *Operator)
+	GetOperator() []*Operator
+	ListOperator() []*Operator
 }
 
-// Bucket is used to maintain the operators created by a specific scheduler.
-type Bucket struct {
+// bucket is used to maintain the operators created by a specific scheduler.
+type bucket struct {
 	weight float64
-	ops    []*operator.Operator
+	ops    []*Operator
 }
 
-// RandBuckets is an implementation of waiting operators
-type RandBuckets struct {
+// randBuckets is an implementation of waiting operators
+type randBuckets struct {
 	totalWeight float64
-	buckets     []*Bucket
+	buckets     []*bucket
 }
 
-// NewRandBuckets creates a random buckets.
-func NewRandBuckets() *RandBuckets {
-	var buckets []*Bucket
-	for i := 0; i < len(PriorityWeight); i++ {
-		buckets = append(buckets, &Bucket{
-			weight: PriorityWeight[i],
+// newRandBuckets creates a random buckets.
+func newRandBuckets() *randBuckets {
+	var buckets []*bucket
+	for i := 0; i < len(priorityWeight); i++ {
+		buckets = append(buckets, &bucket{
+			weight: priorityWeight[i],
 		})
 	}
-	return &RandBuckets{buckets: buckets}
+	return &randBuckets{buckets: buckets}
 }
 
 // PutOperator puts an operator into the random buckets.
-func (b *RandBuckets) PutOperator(op *operator.Operator) {
+func (b *randBuckets) PutOperator(op *Operator) {
 	priority := op.GetPriorityLevel()
 	bucket := b.buckets[priority]
 	if len(bucket.ops) == 0 {
@@ -64,8 +62,8 @@ func (b *RandBuckets) PutOperator(op *operator.Operator) {
 }
 
 // ListOperator lists all operator in the random buckets.
-func (b *RandBuckets) ListOperator() []*operator.Operator {
-	var ops []*operator.Operator
+func (b *randBuckets) ListOperator() []*Operator {
+	var ops []*Operator
 	for i := range b.buckets {
 		bucket := b.buckets[i]
 		ops = append(ops, bucket.ops...)
@@ -74,7 +72,7 @@ func (b *RandBuckets) ListOperator() []*operator.Operator {
 }
 
 // GetOperator gets an operator from the random buckets.
-func (b *RandBuckets) GetOperator() []*operator.Operator {
+func (b *randBuckets) GetOperator() []*Operator {
 	if b.totalWeight == 0 {
 		return nil
 	}
@@ -87,10 +85,10 @@ func (b *RandBuckets) GetOperator() []*operator.Operator {
 		}
 		proportion := bucket.weight / b.totalWeight
 		if r >= sum && r < sum+proportion {
-			var res []*operator.Operator
+			var res []*Operator
 			res = append(res, bucket.ops[0])
 			// Merge operation has two operators, and thus it should be handled specifically.
-			if bucket.ops[0].Kind()&operator.OpMerge != 0 {
+			if bucket.ops[0].Kind()&OpMerge != 0 {
 				res = append(res, bucket.ops[1])
 				bucket.ops = bucket.ops[2:]
 			} else {
@@ -106,14 +104,14 @@ func (b *RandBuckets) GetOperator() []*operator.Operator {
 	return nil
 }
 
-// WaitingOperatorStatus is used to limit the count of each kind of operators.
-type WaitingOperatorStatus struct {
+// waitingOperatorStatus is used to limit the count of each kind of operators.
+type waitingOperatorStatus struct {
 	ops map[string]uint64
 }
 
-// NewWaitingOperatorStatus creates a new WaitingOperatorStatus.
-func NewWaitingOperatorStatus() *WaitingOperatorStatus {
-	return &WaitingOperatorStatus{
+// newWaitingOperatorStatus creates a new waitingOperatorStatus.
+func newWaitingOperatorStatus() *waitingOperatorStatus {
+	return &waitingOperatorStatus{
 		make(map[string]uint64),
 	}
 }
