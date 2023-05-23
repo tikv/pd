@@ -7,6 +7,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
 )
@@ -34,7 +35,12 @@ func (c *client) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 		SafePoint:  safePoint,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().UpdateGCSafePointV2(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.UpdateGCSafePointV2(ctx, req)
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationUpdateGCSafePointV2, start, err, resp.GetHeader()); err != nil {
@@ -61,7 +67,12 @@ func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 		Ttl:        ttl,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.getClient().UpdateServiceSafePointV2(ctx, req)
+	protoClient := c.getClient()
+	if protoClient == nil {
+		cancel()
+		return 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.UpdateServiceSafePointV2(ctx, req)
 	cancel()
 	if err = c.respForErr(cmdFailedDurationUpdateServiceSafePointV2, start, err, resp.GetHeader()); err != nil {
 		return 0, err
@@ -76,7 +87,12 @@ func (c *client) WatchGCSafePointV2(ctx context.Context, revision int64) (chan [
 		Header:   c.requestHeader(),
 		Revision: revision,
 	}
-	stream, err := c.getClient().WatchGCSafePointV2(ctx, req)
+
+	protoClient := c.getClient()
+	if protoClient == nil {
+		return nil, errs.ErrClientGetProtoClient
+	}
+	stream, err := protoClient.WatchGCSafePointV2(ctx, req)
 	if err != nil {
 		close(SafePointEventsChan)
 		return nil, err
