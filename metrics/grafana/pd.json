@@ -10051,6 +10051,16 @@
               "legendFormat": "tso request/secs",
               "refId": "A",
               "step": 2
+            },
+            {
+              "expr": "sum(rate(pd_tso_events{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (type,dc)",
+              "format": "time_series",
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "{{type}}-{{dc}}",
+              "hide": true,
+              "refId": "B",
+              "step": 2
             }
           ],
           "thresholds": [],
