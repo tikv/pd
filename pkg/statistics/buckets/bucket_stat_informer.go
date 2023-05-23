@@ -96,7 +96,7 @@ func (b *BucketTreeItem) String() string {
 
 // Less returns true if the start key is less than the other.
 func (b *BucketTreeItem) Less(than rangetree.RangeItem) bool {
-	return bytes.Compare(b.startKey, than.(*BucketTreeItem).startKey) < 0
+	return keyutil.Less(b.startKey, than.(*BucketTreeItem).startKey, keyutil.Left)
 }
 
 // equals returns whether the key range is overlaps with the item.
@@ -122,12 +122,12 @@ func (b *BucketTreeItem) cloneBucketItemByRange(startKey, endKey []byte) *Bucket
 
 	for _, stat := range b.stats {
 		//  insert if the stat has debris with the key range.
-		left := keyutil.MaxKey(stat.StartKey, startKey)
-		right := keyutil.MinKey(stat.EndKey, endKey)
+		left := keyutil.MaxKey(stat.StartKey, startKey, keyutil.Left)
+		right := keyutil.MinKey(stat.EndKey, endKey, keyutil.Right)
 		if len(endKey) == 0 {
 			right = stat.EndKey
 		}
-		if bytes.Compare(left, right) < 0 {
+		if keyutil.Less(left, right, keyutil.Mix) {
 			copy := stat.clone()
 			copy.StartKey = left
 			copy.EndKey = right
@@ -142,7 +142,7 @@ func (b *BucketTreeItem) cloneBucketItemByRange(startKey, endKey []byte) *Bucket
 // rule2: if the cross buckets are not hot, it will inherit the coldest one.
 // rule3: if some cross buckets are hot and the others are cold, it will inherit the hottest one.
 func (b *BucketTreeItem) inherit(origins []*BucketTreeItem) {
-	if len(origins) == 0 || len(b.stats) == 0 || bytes.Compare(b.endKey, origins[0].startKey) < 0 {
+	if len(origins) == 0 || len(b.stats) == 0 || !keyutil.Less(origins[0].startKey, b.endKey, keyutil.Mix) {
 		return
 	}
 
@@ -156,15 +156,15 @@ func (b *BucketTreeItem) inherit(origins []*BucketTreeItem) {
 	// It should calculate the value if some item has intersection.
 	for p1, p2 := 0, 0; p1 < len(newItems) && p2 < len(oldItems); {
 		newItem, oldItem := newItems[p1], oldItems[p2]
-		left := keyutil.MaxKey(newItem.StartKey, oldItem.StartKey)
-		right := keyutil.MinKey(newItem.EndKey, oldItem.EndKey)
+		left := keyutil.MaxKey(newItem.StartKey, oldItem.StartKey, keyutil.Left)
+		right := keyutil.MinKey(newItem.EndKey, oldItem.EndKey, keyutil.Right)
 
 		// bucket should inherit the old bucket hot degree if they have some intersection.
 		// skip if the left is equal to the right key, such as [10 20] [20 30].
 		// new bucket:         					|10 ---- 20 |
 		// old bucket: 					| 5 ---------15|
 		// they has one intersection 			|10--15|.
-		if bytes.Compare(left, right) < 0 || len(right) == 0 {
+		if keyutil.Less(left, right, keyutil.Left) || len(right) == 0 {
 			oldDegree := oldItem.HotDegree
 			newDegree := newItem.HotDegree
 			// new bucket should interim old if the hot degree of the new bucket is less than zero.
@@ -177,7 +177,7 @@ func (b *BucketTreeItem) inherit(origins []*BucketTreeItem) {
 			}
 		}
 		// move the left item to the next, old should move first if they are equal.
-		if bytes.Compare(newItem.EndKey, oldItem.EndKey) > 0 || len(newItem.EndKey) == 0 {
+		if keyutil.Less(oldItem.EndKey, newItem.EndKey, keyutil.Right) {
 			p2++
 		} else {
 			p1++

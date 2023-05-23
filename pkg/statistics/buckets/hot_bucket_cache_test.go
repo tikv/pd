@@ -120,12 +120,12 @@ func TestConvertToBucketTreeStat(t *testing.T) {
 func TestGetBucketsByKeyRange(t *testing.T) {
 	re := require.New(t)
 	cache := NewBucketsCache(context.Background())
-	bucket1 := newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("015")}, 0)
-	bucket2 := newTestBuckets(2, 1, [][]byte{[]byte("015"), []byte("020")}, 0)
-	bucket3 := newTestBuckets(3, 1, [][]byte{[]byte("020"), []byte("")}, 0)
-	cache.putItem(cache.checkBucketsFlow(bucket1))
-	cache.putItem(cache.checkBucketsFlow(bucket2))
-	cache.putItem(cache.checkBucketsFlow(bucket3))
+	bucket1 := convertToBucketTreeItem(newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("015")}, 0))
+	bucket2 := convertToBucketTreeItem(newTestBuckets(2, 1, [][]byte{[]byte("015"), []byte("020")}, 0))
+	bucket3 := convertToBucketTreeItem(newTestBuckets(3, 1, [][]byte{[]byte("020"), []byte("")}, 0))
+	cache.putItem(bucket1, cache.checkBucketsFlow(bucket1))
+	cache.putItem(bucket2, cache.checkBucketsFlow(bucket2))
+	cache.putItem(bucket3, cache.checkBucketsFlow(bucket3))
 	re.Len(cache.getBucketsByKeyRange([]byte(""), []byte("100")), 3)
 	re.Len(cache.getBucketsByKeyRange([]byte("030"), []byte("100")), 1)
 	re.Len(cache.getBucketsByKeyRange([]byte("010"), []byte("030")), 3)
@@ -144,26 +144,32 @@ func TestInherit(t *testing.T) {
 	testdata := []struct {
 		buckets *metapb.Buckets
 		expect  []int
-	}{{
-		// case1: one bucket can be inherited by many buckets.
-		buckets: newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("20"), []byte("30"), []byte("40"), []byte("50")}, 0),
-		expect:  []int{3, 2, 2, 2},
-	}, {
-		// case2: the first start key is less than the end key of old item.
-		buckets: newTestBuckets(1, 1, [][]byte{[]byte("20"), []byte("45"), []byte("50")}, 0),
-		expect:  []int{2, 2},
-	}, {
-		// case3: the first start key is less than the end key of old item.
-		buckets: newTestBuckets(1, 1, [][]byte{[]byte("00"), []byte("05")}, 0),
-		expect:  []int{3},
-	}, {
-		// case4: newItem starKey is greater than old.
-		buckets: newTestBuckets(1, 1, [][]byte{[]byte("80"), []byte("")}, 0),
-		expect:  []int{10},
-	}, {
-		buckets: newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("")}, 0),
-		expect:  []int{10},
-	}}
+	}{
+		{
+			// case1: one bucket can be inherited by many buckets.
+			buckets: newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("20"), []byte("30"), []byte("40"), []byte("50")}, 0),
+			expect:  []int{3, 2, 2, 2},
+		},
+		{
+			// case2: the first start key is less than the end key of old item.
+			buckets: newTestBuckets(1, 1, [][]byte{[]byte("20"), []byte("45"), []byte("50")}, 0),
+			expect:  []int{2, 2},
+		},
+		{
+			// case3: the first start key is less than the end key of old item.
+			buckets: newTestBuckets(1, 1, [][]byte{[]byte("00"), []byte("05")}, 0),
+			expect:  []int{3},
+		},
+		{
+			// case4: newItem starKey is greater than old.
+			buckets: newTestBuckets(1, 1, [][]byte{[]byte("80"), []byte("")}, 0),
+			expect:  []int{10},
+		},
+		{
+			buckets: newTestBuckets(1, 1, [][]byte{[]byte(""), []byte("")}, 0),
+			expect:  []int{10},
+		},
+	}
 
 	// init: key range |10--20---50---60|(3 2 10)
 	for _, v := range testdata {
