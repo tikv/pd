@@ -148,5 +148,4 @@ func TestLoadEmpty(t *testing.T) {
 	serviceSafePoint, err := storage.LoadServiceSafePointV2(1, "testService")
 	re.NoError(err)
 	re.Nil(serviceSafePoint)
-
 }
