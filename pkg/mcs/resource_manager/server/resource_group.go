@@ -35,7 +35,7 @@ type ResourceGroup struct {
 	// RU settings
 	RUSettings *RequestUnitSettings  `json:"r_u_settings,omitempty"`
 	Priority   uint32                `json:"priority"`
-	Runaway    *rmpb.RunawaySettings `json:"runaway,omitempty"`
+	Runaway    *rmpb.RunawaySettings `json:"runaway_settings,omitempty"`
 }
 
 // RequestUnitSettings is the definition of the RU settings.
