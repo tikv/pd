@@ -29,7 +29,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
-	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"

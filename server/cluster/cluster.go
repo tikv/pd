@@ -43,6 +43,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/slice"
@@ -57,7 +58,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	syncer "github.com/tikv/pd/server/region_syncer"
+	syncer "github.com/tikv/pd/server/regionsyncer"
 	"github.com/tikv/pd/server/replication"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -644,7 +645,7 @@ func (c *RaftCluster) GetCoordinator() *coordinator {
 }
 
 // GetOperatorController returns the operator controller.
-func (c *RaftCluster) GetOperatorController() *schedule.OperatorController {
+func (c *RaftCluster) GetOperatorController() *operator.Controller {
 	return c.coordinator.opController
 }
 
@@ -691,7 +692,7 @@ func (c *RaftCluster) GetSchedulerHandlers() map[string]http.Handler {
 }
 
 // AddScheduler adds a scheduler.
-func (c *RaftCluster) AddScheduler(scheduler schedule.Scheduler, args ...string) error {
+func (c *RaftCluster) AddScheduler(scheduler schedulers.Scheduler, args ...string) error {
 	return c.coordinator.addScheduler(scheduler, args...)
 }
 
@@ -892,7 +893,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			zap.Uint64("available", newStore.GetAvailable()))
 	}
 	if newStore.NeedPersist() && c.storage != nil {
-		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
+		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
 		} else {
 			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
@@ -1714,7 +1715,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 
 func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 	if c.storage != nil {
-		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
+		if err := c.storage.SaveStoreMeta(store.GetMeta()); err != nil {
 			return err
 		}
 	}
@@ -2058,7 +2059,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 // deleteStore deletes the store from the cluster. it's concurrent safe.
 func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	if c.storage != nil {
-		if err := c.storage.DeleteStore(store.GetMeta()); err != nil {
+		if err := c.storage.DeleteStoreMeta(store.GetMeta()); err != nil {
 			return err
 		}
 	}

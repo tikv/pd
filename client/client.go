@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -43,12 +44,16 @@ import (
 const (
 	// defaultKeyspaceID is the default key space id.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap
-	// and reserved for users who haven't been assigned keyspace.
+	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized
+	// when PD bootstrap and reserved for users who haven't been assigned keyspace.
 	defaultKeyspaceID = uint32(0)
+	maxKeyspaceID     = uint32(0xFFFFFF)
+	// nullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic.
+	nullKeyspaceID = uint32(0xFFFFFFFF)
 	// defaultKeySpaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
 	defaultKeySpaceGroupID = uint32(0)
+	defaultKeyspaceName    = "DEFAULT"
 )
 
 // Region contains information of a region's meta and its peers.
@@ -317,17 +322,38 @@ type SecurityOption struct {
 }
 
 // NewClient creates a PD client.
-func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+func NewClient(
+	svrAddrs []string, security SecurityOption, opts ...ClientOption,
+) (Client, error) {
 	return NewClientWithContext(context.Background(), svrAddrs, security, opts...)
 }
 
 // NewClientWithContext creates a PD client with context. This API uses the default keyspace id 0.
-func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	return NewClientWithKeyspace(ctx, defaultKeyspaceID, svrAddrs, security, opts...)
+func NewClientWithContext(
+	ctx context.Context, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	return createClientWithKeyspace(ctx, nullKeyspaceID, svrAddrs, security, opts...)
 }
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
-func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
+// And now, it's only for test purpose.
+func NewClientWithKeyspace(
+	ctx context.Context, keyspaceID uint32, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	if keyspaceID < defaultKeyspaceID || keyspaceID > maxKeyspaceID {
+		return nil, errors.Errorf("invalid keyspace id %d. It must be in the range of [%d, %d]",
+			keyspaceID, defaultKeyspaceID, maxKeyspaceID)
+	}
+	return createClientWithKeyspace(ctx, keyspaceID, svrAddrs, security, opts...)
+}
+
+// createClientWithKeyspace creates a client with context and the specified keyspace id.
+func createClientWithKeyspace(
+	ctx context.Context, keyspaceID uint32, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
@@ -354,7 +380,9 @@ func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []st
 		opt(c)
 	}
 
-	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, c.svrUrls, c.tlsCfg, c.option)
+	c.pdSvcDiscovery = newPDServiceDiscovery(
+		clientCtx, clientCancel, &c.wg, c.setServiceMode,
+		keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		return nil, err
@@ -363,9 +391,86 @@ func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []st
 	return c, nil
 }
 
-// NewClientWithKeyspaceName creates a client with context and the specified keyspace name.
-func NewClientWithKeyspaceName(ctx context.Context, keyspace string, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd] create pd client with endpoints and keyspace", zap.Strings("pd-address", svrAddrs), zap.String("keyspace", keyspace))
+// APIVersion is the API version the server and the client is using.
+// See more details in https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md#kvproto
+type APIVersion int
+
+// The API versions the client supports.
+// As for V1TTL, client won't use it and we just remove it.
+const (
+	V1 APIVersion = iota
+	_
+	V2
+)
+
+// APIContext is the context for API version.
+type APIContext interface {
+	GetAPIVersion() (apiVersion APIVersion)
+	GetKeyspaceName() (keyspaceName string)
+}
+
+type apiContextV1 struct{}
+
+// NewAPIContextV1 creates a API context for V1.
+func NewAPIContextV1() APIContext {
+	return &apiContextV1{}
+}
+
+// GetAPIVersion returns the API version.
+func (apiCtx *apiContextV1) GetAPIVersion() (version APIVersion) {
+	return V1
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (apiCtx *apiContextV1) GetKeyspaceName() (keyspaceName string) {
+	return ""
+}
+
+type apiContextV2 struct {
+	keyspaceName string
+}
+
+// NewAPIContextV2 creates a API context with the specified keyspace name for V2.
+func NewAPIContextV2(keyspaceName string) APIContext {
+	if len(keyspaceName) == 0 {
+		keyspaceName = defaultKeyspaceName
+	}
+	return &apiContextV2{keyspaceName: keyspaceName}
+}
+
+// GetAPIVersion returns the API version.
+func (apiCtx *apiContextV2) GetAPIVersion() (version APIVersion) {
+	return V2
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (apiCtx *apiContextV2) GetKeyspaceName() (keyspaceName string) {
+	return apiCtx.keyspaceName
+}
+
+// NewClientWithAPIContext creates a client according to the API context.
+func NewClientWithAPIContext(
+	ctx context.Context, apiCtx APIContext, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	apiVersion, keyspaceName := apiCtx.GetAPIVersion(), apiCtx.GetKeyspaceName()
+	switch apiVersion {
+	case V1:
+		return NewClientWithContext(ctx, svrAddrs, security, opts...)
+	case V2:
+		return newClientWithKeyspaceName(ctx, keyspaceName, svrAddrs, security, opts...)
+	default:
+		return nil, errors.Errorf("[pd] invalid API version %d", apiVersion)
+	}
+}
+
+// newClientWithKeyspaceName creates a client with context and the specified keyspace name.
+func newClientWithKeyspaceName(
+	ctx context.Context, keyspaceName string, svrAddrs []string,
+	security SecurityOption, opts ...ClientOption,
+) (Client, error) {
+	log.Info("[pd] create pd client with endpoints and keyspace",
+		zap.Strings("pd-address", svrAddrs), zap.String("keyspace-name", keyspaceName))
 
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
@@ -392,21 +497,26 @@ func NewClientWithKeyspaceName(ctx context.Context, keyspace string, svrAddrs []
 		opt(c)
 	}
 
-	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, c.svrUrls, c.tlsCfg, c.option)
+	// Create a PD service discovery with null keyspace id, then query the real id wth the keyspace name,
+	// finally update the keyspace id to the PD service discovery for the following interactions.
+	c.pdSvcDiscovery = newPDServiceDiscovery(
+		clientCtx, clientCancel, &c.wg, c.setServiceMode, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		return nil, err
 	}
-	if err := c.initRetry(c.loadKeyspaceMeta, keyspace); err != nil {
+	if err := c.initRetry(c.loadKeyspaceMeta, keyspaceName); err != nil {
 		return nil, err
 	}
+	c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
+
 	return c, nil
 }
 
 func (c *client) initRetry(f func(s string) error, str string) error {
 	var err error
 	for i := 0; i < c.option.maxRetryTimes; i++ {
-		if err = f(str); err == nil || strings.Contains(err.Error(), "ENTRY_NOT_FOUND") {
+		if err = f(str); err == nil {
 			return nil
 		}
 		select {
@@ -420,8 +530,7 @@ func (c *client) initRetry(f func(s string) error, str string) error {
 
 func (c *client) loadKeyspaceMeta(keyspace string) error {
 	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
-	// Here we ignore ENTRY_NOT_FOUND error and it will set the keyspaceID to 0.
-	if err != nil && !strings.Contains(err.Error(), "ENTRY_NOT_FOUND") {
+	if err != nil {
 		return err
 	}
 	c.keyspaceID = keyspaceMeta.GetId()
@@ -525,10 +634,16 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 		zap.String("new-mode", newMode.String()))
 }
 
-func (c *client) getServiceClientProxy() (*tsoClient, pdpb.ServiceMode) {
+func (c *client) getTSOClient() *tsoClient {
 	c.RLock()
 	defer c.RUnlock()
-	return c.tsoClient, c.serviceMode
+	return c.tsoClient
+}
+
+func (c *client) getServiceMode() pdpb.ServiceMode {
+	c.RLock()
+	defer c.RUnlock()
+	return c.serviceMode
 }
 
 func (c *client) scheduleUpdateTokenConnection() {
@@ -693,7 +808,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
-	tsoClient, _ := c.getServiceClientProxy()
+	tsoClient := c.getTSOClient()
 	req.start = time.Now()
 	req.dcLocation = dcLocation
 
@@ -723,11 +838,8 @@ func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical in
 }
 
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
-	tsoClient, serviceMode := c.getServiceClientProxy()
-	if tsoClient == nil {
-		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("tso client is nil")
-	}
-
+	// Handle compatibility issue in case of PD/API server doesn't support GetMinTS API.
+	serviceMode := c.getServiceMode()
 	switch serviceMode {
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("unknown service mode")
@@ -736,10 +848,37 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 		// returning the default timeline should be fine.
 		return c.GetTS(ctx)
 	case pdpb.ServiceMode_API_SVC_MODE:
-		return tsoClient.getMinTS(ctx)
 	default:
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
 	}
+
+	// Call GetMinTS API to get the minimal TS from the API leader.
+	protoClient := c.getClient()
+	if protoClient == nil {
+		return 0, 0, errs.ErrClientGetProtoClient
+	}
+
+	resp, err := protoClient.GetMinTS(ctx, &pdpb.GetMinTSRequest{
+		Header: c.requestHeader(),
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "Unimplemented") {
+			// If the method is not supported, we fallback to GetTS.
+			return c.GetTS(ctx)
+		}
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(err).GenWithStackByCause()
+	}
+	if resp == nil {
+		attachErr := errors.Errorf("error:%s", "no min ts info collected")
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.GetHeader().GetError() != nil {
+		attachErr := errors.Errorf("error:%s s", resp.GetHeader().GetError().String())
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+
+	minTS := resp.GetTimestamp()
+	return minTS.Physical, tsoutil.AddLogical(minTS.Logical, 0, minTS.SuffixBits), nil
 }
 
 func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
@@ -1433,7 +1572,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 // For test only.
 func (c *client) GetTSOAllocators() *sync.Map {
-	tsoClient, _ := c.getServiceClientProxy()
+	tsoClient := c.getTSOClient()
 	if tsoClient == nil {
 		return nil
 	}

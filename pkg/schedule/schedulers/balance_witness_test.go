@@ -20,7 +20,6 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -35,8 +34,8 @@ type balanceWitnessSchedulerTestSuite struct {
 	suite.Suite
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
-	lb     schedule.Scheduler
-	oc     *schedule.OperatorController
+	lb     Scheduler
+	oc     *operator.Controller
 	conf   config.Config
 }
 
@@ -50,7 +49,7 @@ func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
 			Count:   4,
 		},
 	})
-	lb, err := schedule.CreateScheduler(BalanceWitnessType, suite.oc, storage.NewStorageWithMemoryBackend(), schedule.ConfigSliceDecoder(BalanceWitnessType, []string{"", ""}))
+	lb, err := CreateScheduler(BalanceWitnessType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceWitnessType, []string{"", ""}))
 	suite.NoError(err)
 	suite.lb = lb
 }

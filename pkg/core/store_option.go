@@ -165,6 +165,13 @@ func SetRegionCount(regionCount int) StoreCreateOption {
 	}
 }
 
+// SetLearnerCount sets the learner count for the store.
+func SetLearnerCount(learnerCount int) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.learnerCount = learnerCount
+	}
+}
+
 // SetWitnessCount sets the witness count for the store.
 func SetWitnessCount(witnessCount int) StoreCreateOption {
 	return func(store *StoreInfo) {

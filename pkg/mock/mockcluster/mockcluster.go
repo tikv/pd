@@ -47,6 +47,7 @@ const (
 
 // Cluster is used to mock a cluster for test purpose.
 type Cluster struct {
+	ctx context.Context
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
@@ -57,12 +58,13 @@ type Cluster struct {
 	suspectRegions map[uint64]struct{}
 	*config.StoreConfigManager
 	*buckets.HotBucketCache
-	ctx context.Context
+	storage.Storage
 }
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	clus := &Cluster{
+		ctx:                ctx,
 		BasicCluster:       core.NewBasicCluster(),
 		IDAllocator:        mockid.NewIDAllocator(),
 		HotStat:            statistics.NewHotStat(ctx),
@@ -70,7 +72,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		PersistOptions:     opts,
 		suspectRegions:     map[uint64]struct{}{},
 		StoreConfigManager: config.NewTestStoreConfigManager(nil),
-		ctx:                ctx,
+		Storage:            storage.NewStorageWithMemoryBackend(),
 	}
 	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		clus.initRuleManager()
@@ -94,6 +96,11 @@ func (mc *Cluster) GetOpts() sc.Config {
 // GetAllocator returns the ID allocator.
 func (mc *Cluster) GetAllocator() id.Allocator {
 	return mc.IDAllocator
+}
+
+// GetStorage returns the storage.
+func (mc *Cluster) GetStorage() storage.Storage {
+	return mc.Storage
 }
 
 // ScanRegions scans region with start key, until number greater than limit.
@@ -352,6 +359,13 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+	mc.PutStore(store)
+}
+
+// AddLabersStoreWithLearnerCount adds store with specified count of region, learner and labels.
+func (mc *Cluster) AddLabersStoreWithLearnerCount(storeID uint64, regionCount int, learnerCount int, labels map[string]string) {
+	mc.AddLabelsStore(storeID, regionCount, labels)
+	store := mc.GetStore(storeID).Clone(core.SetLearnerCount(learnerCount))
 	mc.PutStore(store)
 }
 

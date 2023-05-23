@@ -48,17 +48,17 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
-	ms_server "github.com/tikv/pd/pkg/mcs/meta_storage/server"
+	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	rm_server "github.com/tikv/pd/pkg/mcs/resource_manager/server"
-	_ "github.com/tikv/pd/pkg/mcs/resource_manager/server/apis/v1" // init API group
-	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"              // init tso API group
+	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
+	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -75,7 +75,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/gc"
-	syncer "github.com/tikv/pd/server/region_syncer"
+	syncer "github.com/tikv/pd/server/regionsyncer"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/mvcc/mvccpb"
@@ -908,7 +908,7 @@ func (s *Server) GetConfig() *config.Config {
 	payload := make(map[string]interface{})
 	for i, sche := range sches {
 		var config interface{}
-		err := schedule.DecodeConfig([]byte(configs[i]), &config)
+		err := schedulers.DecodeConfig([]byte(configs[i]), &config)
 		if err != nil {
 			log.Error("failed to decode scheduler config",
 				zap.String("config", configs[i]),

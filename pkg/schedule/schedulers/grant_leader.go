@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -52,7 +52,7 @@ type grantLeaderSchedulerConfig struct {
 	mu                syncutil.RWMutex
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster           schedule.Cluster
+	cluster           sche.ClusterInformer
 }
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -90,7 +90,7 @@ func (conf *grantLeaderSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ type grantLeaderScheduler struct {
 
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func newGrantLeaderScheduler(opController *schedule.OperatorController, conf *grantLeaderSchedulerConfig) schedule.Scheduler {
+func newGrantLeaderScheduler(opController *operator.Controller, conf *grantLeaderSchedulerConfig) Scheduler {
 	base := NewBaseScheduler(opController)
 	handler := newGrantLeaderHandler(conf)
 	return &grantLeaderScheduler{
@@ -174,10 +174,10 @@ func (s *grantLeaderScheduler) GetType() string {
 }
 
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
-func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
+func (s *grantLeaderScheduler) Prepare(cluster sche.ClusterInformer) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -189,7 +189,7 @@ func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
 	return res
 }
 
-func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
+func (s *grantLeaderScheduler) Cleanup(cluster sche.ClusterInformer) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
@@ -197,7 +197,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
 	}
 }
 
-func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -205,7 +205,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool 
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *grantLeaderScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
