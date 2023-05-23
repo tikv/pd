@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"path"
 
@@ -161,12 +162,34 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 	if err != nil {
 		return err
 	}
-	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, endpoint.GCSafePointV2Prefix()), clientv3.WithPrefix())
+	revision := request.GetRevision()
+	// If the revision is compacted, will meet required revision has been compacted error.
+	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
+	// - If required revision >= CompactRevision, just keep watching.
+	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
+	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, endpoint.GCSafePointV2Prefix()), clientv3.WithRev(revision), clientv3.WithPrefix())
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case res := <-watchChan:
+			if res.Err() != nil {
+				var resp pdpb.WatchGCSafePointV2Response
+				if revision < res.CompactRevision {
+					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", revision, res.CompactRevision))
+				} else {
+					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
+				}
+				if err := stream.Send(&resp); err != nil {
+					return err
+				}
+				// Err() indicates that this WatchResponse holds a channel-closing error.
+				return res.Err()
+			}
+			revision = res.Header.GetRevision()
+
 			safePointEvents := make([]*pdpb.SafePointEvent, 0, len(res.Events))
 			for _, event := range res.Events {
 				gcSafePoint := &endpoint.GCSafePointV2{}
@@ -180,7 +203,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 				})
 			}
 			if len(safePointEvents) > 0 {
-				if err = stream.Send(&pdpb.WatchGCSafePointV2Response{Header: s.header(), Events: safePointEvents}); err != nil {
+				if err = stream.Send(&pdpb.WatchGCSafePointV2Response{Header: s.header(), Events: safePointEvents, Revision: res.Header.GetRevision()}); err != nil {
 					return err
 				}
 			}
