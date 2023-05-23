@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
@@ -73,6 +74,10 @@ func (manager *SafePointV2Manager) LoadGCSafePoint(keyspaceID uint32) (*endpoint
 // checkKeyspace check if target keyspace exists, and if request is a update request,
 // also check if keyspace state allows for update.
 func (manager *SafePointV2Manager) checkKeyspace(keyspaceID uint32, updateRequest bool) error {
+	failpoint.Inject("checkKeyspace", func() {
+		failpoint.Return(nil)
+	})
+
 	err := manager.keyspaceStorage.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		meta, err := manager.keyspaceStorage.LoadKeyspaceMeta(txn, keyspaceID)
 		if err != nil {

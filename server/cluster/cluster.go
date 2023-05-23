@@ -57,6 +57,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/gc"
 	syncer "github.com/tikv/pd/server/regionsyncer"
 	"github.com/tikv/pd/server/replication"
 	"go.etcd.io/etcd/clientv3"
@@ -115,6 +116,7 @@ type Server interface {
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceGroupManager() *keyspace.GroupManager
 	IsAPIServiceMode() bool
+	GetSafePointV2Manager() *gc.SafePointV2Manager
 }
 
 // RaftCluster is used for cluster config management.

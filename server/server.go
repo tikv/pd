@@ -850,6 +850,11 @@ func (s *Server) GetKeyspaceManager() *keyspace.Manager {
 	return s.keyspaceManager
 }
 
+// GetSafePointV2Manager returns the safe point v2 manager of server.
+func (s *Server) GetSafePointV2Manager() *gc.SafePointV2Manager {
+	return s.safePointV2Manager
+}
+
 // GetKeyspaceGroupManager returns the keyspace group manager of server.
 func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 	return s.keyspaceGroupManager

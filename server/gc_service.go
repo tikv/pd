@@ -58,11 +58,6 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 		return rsp.(*pdpb.UpdateGCSafePointV2Response), err
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.UpdateGCSafePointV2Response{Header: s.notBootstrappedHeader()}, nil
-	}
-
 	newSafePoint := request.GetSafePoint()
 	oldSafePoint, err := s.safePointV2Manager.UpdateGCSafePoint(&endpoint.GCSafePointV2{
 		KeyspaceID: request.KeyspaceId,
@@ -147,21 +142,8 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 
 // WatchGCSafePointV2 watch keyspaces gc safe point changes.
 func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request, stream pdpb.PD_WatchGCSafePointV2Server) error {
-	if err := s.validateRequest(request.GetHeader()); err != nil {
-		return err
-	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return stream.Send(&pdpb.WatchGCSafePointV2Response{Header: s.notBootstrappedHeader()})
-	}
-
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
-
-	err := s.sendAllGCSafePoints(ctx, stream)
-	if err != nil {
-		return err
-	}
 	revision := request.GetRevision()
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
@@ -193,7 +175,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 			safePointEvents := make([]*pdpb.SafePointEvent, 0, len(res.Events))
 			for _, event := range res.Events {
 				gcSafePoint := &endpoint.GCSafePointV2{}
-				if err = json.Unmarshal(event.Kv.Value, gcSafePoint); err != nil {
+				if err := json.Unmarshal(event.Kv.Value, gcSafePoint); err != nil {
 					return err
 				}
 				safePointEvents = append(safePointEvents, &pdpb.SafePointEvent{
@@ -203,30 +185,10 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 				})
 			}
 			if len(safePointEvents) > 0 {
-				if err = stream.Send(&pdpb.WatchGCSafePointV2Response{Header: s.header(), Events: safePointEvents, Revision: res.Header.GetRevision()}); err != nil {
+				if err := stream.Send(&pdpb.WatchGCSafePointV2Response{Header: s.header(), Events: safePointEvents, Revision: res.Header.GetRevision()}); err != nil {
 					return err
 				}
 			}
 		}
 	}
-}
-
-func (s *GrpcServer) sendAllGCSafePoints(ctx context.Context, stream pdpb.PD_WatchGCSafePointV2Server) error {
-	getResp, err := s.client.Get(ctx, path.Join(s.rootPath, endpoint.GCSafePointV2Prefix()), clientv3.WithPrefix())
-	if err != nil {
-		return err
-	}
-	safePointEvents := make([]*pdpb.SafePointEvent, 0, len(getResp.Kvs))
-	for i, kv := range getResp.Kvs {
-		gcSafePoint := &endpoint.GCSafePointV2{}
-		if err = json.Unmarshal(kv.Value, gcSafePoint); err != nil {
-			return err
-		}
-		safePointEvents[i] = &pdpb.SafePointEvent{
-			KeyspaceId: gcSafePoint.KeyspaceID,
-			SafePoint:  gcSafePoint.SafePoint,
-			Type:       pdpb.EventType_PUT,
-		}
-	}
-	return stream.Send(&pdpb.WatchGCSafePointV2Response{Header: s.header(), Events: safePointEvents})
 }

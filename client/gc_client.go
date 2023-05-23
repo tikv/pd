@@ -15,7 +15,7 @@ import (
 type GCClient interface {
 	UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (uint64, error)
 	UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error)
-	WatchGCSafePointV2(ctx context.Context) (chan []*pdpb.SafePointEvent, error)
+	WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error)
 }
 
 // UpdateGCSafePointV2 update gc safe point for the given keyspace.
@@ -70,10 +70,11 @@ func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 }
 
 // WatchGCSafePointV2 watch gc safe point change.
-func (c *client) WatchGCSafePointV2(ctx context.Context) (chan []*pdpb.SafePointEvent, error) {
+func (c *client) WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error) {
 	SafePointEventsChan := make(chan []*pdpb.SafePointEvent)
 	req := &pdpb.WatchGCSafePointV2Request{
-		Header: c.requestHeader(),
+		Header:   c.requestHeader(),
+		Revision: revision,
 	}
 	stream, err := c.getClient().WatchGCSafePointV2(ctx, req)
 	if err != nil {
