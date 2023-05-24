@@ -16,7 +16,6 @@ package pd
 
 import (
 	"context"
-	"math/rand"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -189,12 +188,9 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 		close(eventCh)
 		return nil, err
 	}
-	rand := rand.New(rand.NewSource(time.Now().Unix()))
-	ii := rand.Int31()
 	go func() {
 		defer func() {
 			close(eventCh)
-			log.Info("close", zap.Int32("ii", ii), zap.Error(err))
 			if r := recover(); r != nil {
 				log.Error("[pd] panic in client `Watch`", zap.Any("error", r))
 				return
@@ -205,7 +201,6 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 			failpoint.Inject("watchStreamError", func() {
 				err = errors.Errorf("fake error")
 			})
-			log.Info("revice", zap.Int32("ii", ii), zap.Error(err), zap.Any("resp.Revision", resp.GetHeader().Revision))
 			if err != nil {
 				return
 			}

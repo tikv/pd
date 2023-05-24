@@ -265,7 +265,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					continue
 				}
 				for _, item := range resp {
-					log.Info("item", zap.Any("item", item), zap.Int64("revision", revision), zap.Int64("item.Kv.ModRevision", item.Kv.ModRevision))
 					revision = item.Kv.ModRevision
 					group := &rmpb.ResourceGroup{}
 					if err := proto.Unmarshal([]byte(item.Kv.Value), group); err != nil {
@@ -284,7 +283,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 				}
 			case <-watchRetryTimer.C:
-				watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(1), pd.WithPrefix())
+				watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix())
 				if err != nil {
 					watchRetryTimer.Reset(watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
