@@ -55,15 +55,9 @@ type StoreStatus struct {
 	RegionWeight       float64            `json:"region_weight"`
 	RegionScore        float64            `json:"region_score"`
 	RegionSize         int64              `json:"region_size"`
-<<<<<<< HEAD
-	WitnessCount       int                `json:"witness_count"`
-	SlowScore          uint64             `json:"slow_score"`
-=======
 	LearnerCount       int                `json:"learner_count,omitempty"`
 	WitnessCount       int                `json:"witness_count,omitempty"`
 	SlowScore          uint64             `json:"slow_score,omitempty"`
-	SlowTrend          *SlowTrend         `json:"slow_trend,omitempty"`
->>>>>>> 6f6bf01a1 (replication_mode: fix the state cannot switch to async while existing learner node (#6452))
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	IsBusy             bool               `json:"is_busy,omitempty"`
@@ -84,14 +78,6 @@ const (
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
-<<<<<<< HEAD
-=======
-	var slowTrend *SlowTrend
-	coreSlowTrend := store.GetSlowTrend()
-	if coreSlowTrend != nil {
-		slowTrend = &SlowTrend{coreSlowTrend.CauseValue, coreSlowTrend.CauseRate, coreSlowTrend.ResultValue, coreSlowTrend.ResultRate}
-	}
->>>>>>> 6f6bf01a1 (replication_mode: fix the state cannot switch to async while existing learner node (#6452))
 	s := &StoreInfo{
 		Store: &MetaStore{
 			Store:     store.GetMeta(),

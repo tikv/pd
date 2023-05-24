@@ -112,19 +112,6 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	s.RegionCount += store.GetRegionCount()
 	s.LeaderCount += store.GetLeaderCount()
 	s.WitnessCount += store.GetWitnessCount()
-<<<<<<< HEAD:server/statistics/store_collection.go
-=======
-	s.LearnerCount += store.GetLearnerCount()
-	limit, ok := store.GetStoreLimit().(*storelimit.SlidingWindows)
-	if ok {
-		cap := limit.GetCap()
-		storeStatusGauge.WithLabelValues(storeAddress, id, "windows_size").Set(float64(cap))
-		for i, use := range limit.GetUsed() {
-			priority := constant.PriorityLevel(i).String()
-			storeStatusGauge.WithLabelValues(storeAddress, id, "windows_used_level_"+priority).Set(float64(use))
-		}
-	}
->>>>>>> 6f6bf01a1 (replication_mode: fix the state cannot switch to async while existing learner node (#6452)):pkg/statistics/store_collection.go
 
 	storeStatusGauge.WithLabelValues(storeAddress, id, "region_score").Set(store.RegionScore(s.opt.GetRegionScoreFormulaVersion(), s.opt.GetHighSpaceRatio(), s.opt.GetLowSpaceRatio(), 0))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "leader_score").Set(store.LeaderScore(s.opt.GetLeaderSchedulePolicy(), 0))
