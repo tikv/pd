@@ -71,11 +71,11 @@ func (suite *gcClientTestSuite) SetupSuite() {
 	addr := suite.server.GetAddr()
 	suite.client, err = pd.NewClientWithContext(suite.server.Context(), []string{addr}, pd.SecurityOption{})
 	suite.NoError(err)
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/gc/checkKeyspace", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/checkKeyspace", "return(true)"))
 }
 
 func (suite *gcClientTestSuite) TearDownSuite() {
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/gc/checkKeyspace"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/checkKeyspace"))
 	suite.cleanup()
 }
 
@@ -148,10 +148,8 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(isNewRevision bool) 
 			suite.NoError(err)
 		}
 	}()
-	// Mock get revision by loading
-	var revision int64
 
-	// Update init gc safepoint
+	// Init gc safe point.
 	gcSafePointV2, err := suite.makerGCSafePointV2(testKeyspaceID, initGCSafePoint)
 	suite.NoError(err)
 	_, err = suite.server.GetClient().Put(suite.server.Context(), suite.GetKeyspaceGCEtcdPath(testKeyspaceID), string(gcSafePointV2))
@@ -159,7 +157,7 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(isNewRevision bool) 
 
 	res, err := suite.server.GetClient().Get(suite.server.Context(), suite.GetKeyspaceGCEtcdPath(testKeyspaceID))
 	suite.NoError(err)
-	revision = res.Header.GetRevision()
+	revision := res.Header.GetRevision()
 
 	// Mock when start watcher there are existed some keys, will load firstly
 	gcSafePointV2, err = suite.makerGCSafePointV2(testKeyspaceID, newestGCSafePoint)
@@ -173,7 +171,7 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(isNewRevision bool) 
 	watchChan, err := suite.client.WatchGCSafePointV2(suite.server.Context(), revision)
 	suite.NoError(err)
 
-	// IF there is a old revision,it need to ignore check, we just need get the newest data of all keyspace.
+	// IF there is an old revision,it needed to ignore check, we just need get the newest data of all keyspace.
 	var isOldestValue bool
 
 	for {
@@ -196,10 +194,10 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(isNewRevision bool) 
 	}
 }
 
-func (suite *gcClientTestSuite) makerGCSafePointV2(keyspaceID uint32, gcSafepoint uint64) ([]byte, error) {
+func (suite *gcClientTestSuite) makerGCSafePointV2(keyspaceID uint32, gcSafePoint uint64) ([]byte, error) {
 	gcSafePointV2 := &endpoint.GCSafePointV2{
 		KeyspaceID: keyspaceID,
-		SafePoint:  gcSafepoint,
+		SafePoint:  gcSafePoint,
 	}
 	value, err := json.Marshal(gcSafePointV2)
 	if err != nil {

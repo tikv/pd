@@ -172,7 +172,7 @@ func (manager *SafePointV2Manager) UpdateServiceSafePoint(serviceSafePoint *endp
 			zap.Error(err),
 			zap.Uint32("keyspace-id", serviceSafePoint.KeyspaceID),
 			zap.Uint64("proposed safe point", serviceSafePoint.SafePoint),
-			zap.Uint64("min service safe point", minServiceSafePoint.SafePoint),
+			zap.Uint64("min-service-safe-point", minServiceSafePoint.SafePoint),
 		)
 		return minServiceSafePoint, nil
 	}
