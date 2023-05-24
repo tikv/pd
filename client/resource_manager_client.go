@@ -38,6 +38,7 @@ const (
 	errNotPrimary = "not primary"
 )
 
+// GroupSettingsPathPrefixBytes is used to watch or get resource groups.
 var GroupSettingsPathPrefixBytes = []byte(groupSettingsPathPrefix)
 
 // ResourceManagerClient manages resource group info and token request.

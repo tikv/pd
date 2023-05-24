@@ -22,10 +22,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/grpcutil"
-	"go.uber.org/zap"
 )
 
 // MetaStorageClient is the interface for meta storage client.
@@ -191,10 +189,6 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 	go func() {
 		defer func() {
 			close(eventCh)
-			if r := recover(); r != nil {
-				log.Error("[pd] panic in client `Watch`", zap.Any("error", r))
-				return
-			}
 		}()
 		for {
 			resp, err := res.Recv()
