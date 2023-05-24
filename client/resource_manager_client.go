@@ -172,7 +172,7 @@ func (c *client) LoadResourcrGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 	groups := make([]*rmpb.ResourceGroup, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
 		group := &rmpb.ResourceGroup{}
-		if err := proto.Unmarshal([]byte(item.Value), group); err != nil {
+		if err := proto.Unmarshal(item.Value, group); err != nil {
 			continue
 		}
 		groups = append(groups, group)
@@ -211,7 +211,7 @@ func (c *client) WatchResourceGroup(ctx context.Context, revision int64) (chan [
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
 						group := &rmpb.ResourceGroup{}
-						if err := proto.Unmarshal([]byte(item.Kv.Value), group); err != nil {
+						if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
 							return
 						}
 						groups = append(groups, group)

@@ -235,7 +235,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 				c.run.currentRequests = nil
 			case <-cleanupTicker.C:
-				if err := c.cleanUpResourceGroup(c.loopCtx); err != nil {
+				if err := c.cleanUpResourceGroup(); err != nil {
 					log.Error("[resource group controller] clean up resource groups failed", zap.Error(err))
 				}
 			case <-stateUpdateTicker.C:
@@ -267,7 +267,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				for _, item := range resp {
 					revision = item.Kv.ModRevision
 					group := &rmpb.ResourceGroup{}
-					if err := proto.Unmarshal([]byte(item.Kv.Value), group); err != nil {
+					if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
 						continue
 					}
 					switch item.Type {
@@ -340,7 +340,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	return tmp.(*groupCostController), nil
 }
 
-func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) error {
+func (c *ResourceGroupsController) cleanUpResourceGroup() error {
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
