@@ -28,11 +28,6 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 		return rsp.(*pdpb.GetGCSafePointV2Response), err
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.GetGCSafePointV2Response{Header: s.notBootstrappedHeader()}, nil
-	}
-
 	safePoint, err := s.safePointV2Manager.LoadGCSafePoint(request.GetKeyspaceId())
 
 	if err != nil {
@@ -93,10 +88,6 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.UpdateServiceSafePointV2Response), err
-	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.UpdateServiceSafePointV2Response{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	var (
