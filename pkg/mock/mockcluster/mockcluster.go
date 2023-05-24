@@ -64,7 +64,7 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
-	clus := &Cluster{
+	c := &Cluster{
 		ctx:                ctx,
 		BasicCluster:       core.NewBasicCluster(),
 		IDAllocator:        mockid.NewIDAllocator(),
@@ -75,13 +75,13 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		StoreConfigManager: config.NewTestStoreConfigManager(nil),
 		Storage:            storage.NewStorageWithMemoryBackend(),
 	}
-	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
-		clus.initRuleManager()
+	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
+		c.initRuleManager()
 	}
 	// It should be updated to the latest feature version.
-	clus.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, clus.Storage, time.Second*5)
-	return clus
+	c.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
+	c.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, c.Storage, time.Second*5)
+	return c
 }
 
 // GetStoreConfig returns the store config.

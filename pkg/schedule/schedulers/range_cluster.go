@@ -28,7 +28,7 @@ type rangeCluster struct {
 }
 
 // genRangeCluster gets a range cluster by specifying start key and end key.
-// The cluster can only know the regions within [startKey, endKey].
+// The cluster can only know the regions within [startKey, endKey).
 func genRangeCluster(cluster sche.ClusterInformer, startKey, endKey []byte) *rangeCluster {
 	subCluster := core.NewBasicCluster()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
