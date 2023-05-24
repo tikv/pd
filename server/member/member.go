@@ -148,7 +148,7 @@ func (m *Member) GetLeadership() *election.Leadership {
 }
 
 // GetLastLeaderUpdatedTime returns the last time when the leader is updated.
-func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
+func (m *Member) GetLastLeaderUpdatedTime() time.Time {
 	lastLeaderUpdatedTime := m.lastLeaderUpdatedTime.Load()
 	if lastLeaderUpdatedTime == nil {
 		return time.Time{}

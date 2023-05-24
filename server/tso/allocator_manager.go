@@ -95,59 +95,6 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 	return copiedInfo
 }
 
-<<<<<<< HEAD:server/tso/allocator_manager.go
-=======
-// ElectionMember defines the interface for the election related logic.
-type ElectionMember interface {
-	// ID returns the unique ID in the election group. For example, it can be unique
-	// server id of a cluster or the unique keyspace group replica id of the election
-	// group comprised of the replicas of a keyspace group.
-	ID() uint64
-	// ID returns the unique Name in the election group.
-	Name() string
-	// MemberValue returns the member value.
-	MemberValue() string
-	// GetMember() returns the current member
-	GetMember() interface{}
-	// Client returns the etcd client.
-	Client() *clientv3.Client
-	// IsLeader returns whether the participant is the leader or not by checking its
-	// leadership's lease and leader info.
-	IsLeader() bool
-	// IsLeaderElected returns true if the leader exists; otherwise false.
-	IsLeaderElected() bool
-	// CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
-	// otherwise returns a bool which indicates if it is needed to check later.
-	CheckLeader() (leader member.ElectionLeader, checkAgain bool)
-	// EnableLeader declares the member itself to be the leader.
-	EnableLeader()
-	// KeepLeader is used to keep the leader's leadership.
-	KeepLeader(ctx context.Context)
-	// CampaignLeader is used to campaign the leadership and make it become a leader in an election group.
-	CampaignLeader(leaseTimeout int64) error
-	// ResetLeader is used to reset the member's current leadership.
-	// Basically it will reset the leader lease and unset leader info.
-	ResetLeader()
-	// GetLeaderListenUrls returns current leader's listen urls
-	// The first element is the leader/primary url
-	GetLeaderListenUrls() []string
-	// GetLeaderID returns current leader's member ID.
-	GetLeaderID() uint64
-	// GetLeaderPath returns the path of the leader.
-	GetLeaderPath() string
-	// GetLeadership returns the leadership of the election member.
-	GetLeadership() *election.Leadership
-	// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
-	GetLastLeaderUpdatedTime() time.Time
-	// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
-	GetDCLocationPathPrefix() string
-	// GetDCLocationPath returns the dc-location path of a member with the given member ID.
-	GetDCLocationPath(id uint64) string
-	// PreCheckLeader does some pre-check before checking whether it's the leader.
-	PreCheckLeader() error
-}
-
->>>>>>> 3e4056406 (server: fix the leader cannot election after pd leader lost while etcd leader intact (#6447)):pkg/tso/allocator_manager.go
 // AllocatorManager is used to manage the TSO Allocators a PD server holds.
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.

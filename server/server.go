@@ -88,23 +88,9 @@ const (
 	idAllocLabel = "idalloc"
 
 	recoveringMarkPath = "cluster/markers/snapshot-recovering"
-<<<<<<< HEAD
-=======
-
-	// PDMode represents that server is in PD mode.
-	PDMode = "PD"
-	// APIServiceMode represents that server is in API service mode.
-	APIServiceMode = "API service"
-
-	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
-	// Note: it need to be less than client.defaultPDTimeout
-	maxRetryTimesGetServicePrimary = 25
-	// retryIntervalGetServicePrimary is the retry interval for getting primary addr.
-	retryIntervalGetServicePrimary = 100 * time.Millisecond
 
 	lostPDLeaderMaxTimeoutSecs   = 10
 	lostPDLeaderReElectionFactor = 10
->>>>>>> 3e4056406 (server: fix the leader cannot election after pd leader lost while etcd leader intact (#6447))
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1404,10 +1390,7 @@ func (s *Server) leaderLoop() {
 			return
 		}
 
-<<<<<<< HEAD
 		leader, rev, checkAgain := s.member.CheckLeader()
-=======
-		leader, checkAgain := s.member.CheckLeader()
 		// add failpoint to test leader check go to stuck.
 		failpoint.Inject("leaderLoopCheckAgain", func(val failpoint.Value) {
 			memberString := val.(string)
@@ -1416,7 +1399,6 @@ func (s *Server) leaderLoop() {
 				checkAgain = true
 			}
 		})
->>>>>>> 3e4056406 (server: fix the leader cannot election after pd leader lost while etcd leader intact (#6447))
 		if checkAgain {
 			continue
 		}
