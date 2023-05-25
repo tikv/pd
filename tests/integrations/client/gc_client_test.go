@@ -15,7 +15,6 @@
 package client_test
 
 import (
-	"go.etcd.io/etcd/clientv3"
 	"path"
 	"strconv"
 	"testing"
@@ -31,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
