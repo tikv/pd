@@ -247,9 +247,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 				c.run.currentRequests = nil
 			case <-cleanupTicker.C:
-				if err := c.cleanUpResourceGroup(); err != nil {
-					log.Error("[resource group controller] clean up resource groups failed", zap.Error(err))
-				}
+				c.cleanUpResourceGroup()
 			case <-stateUpdateTicker.C:
 				c.executeOnAllGroups((*groupCostController).updateRunState)
 				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
@@ -352,7 +350,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	return tmp.(*groupCostController), nil
 }
 
-func (c *ResourceGroupsController) cleanUpResourceGroup() error {
+func (c *ResourceGroupsController) cleanUpResourceGroup() {
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
 		gc := value.(*groupCostController)
@@ -372,7 +370,6 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() error {
 		}
 		return true
 	})
-	return nil
 }
 
 func (c *ResourceGroupsController) executeOnAllGroups(f func(controller *groupCostController)) {

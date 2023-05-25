@@ -268,7 +268,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 
 	// Check watch result
 	watchChan, err := suite.client.WatchResourceGroup(suite.ctx, revision)
-	re.Nil(err)
+	re.NoError(err)
 	i := 0
 	for {
 		select {
@@ -283,8 +283,6 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 				}
 				i++
 			}
-
-			fmt.Println("@@@@@@@@@@10")
 		}
 	}
 }

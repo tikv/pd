@@ -22,10 +22,9 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
-	"go.uber.org/zap"
 )
 
 // MetaStorageClient is the interface for meta storage client.
@@ -126,7 +125,12 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 		PrevKv: options.prevKv,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.metaStorageClient().Put(ctx, req)
+	cli := c.metaStorageClient()
+	if cli == nil {
+		cancel()
+		return nil, errs.ErrClientGetMetaStorageClient
+	}
+	resp, err := cli.Put(ctx, req)
 	cancel()
 
 	if err = c.respForMetaStorageErr(cmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
@@ -159,7 +163,12 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 		Revision: options.revision,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.metaStorageClient().Get(ctx, req)
+	cli := c.metaStorageClient()
+	if cli == nil {
+		cancel()
+		return nil, errs.ErrClientGetMetaStorageClient
+	}
+	resp, err := cli.Get(ctx, req)
 	cancel()
 
 	if err = c.respForMetaStorageErr(cmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
@@ -178,7 +187,11 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 		options.rangeEnd = getPrefix(key)
 	}
 
-	res, err := c.metaStorageClient().Watch(ctx, &meta_storagepb.WatchRequest{
+	cli := c.metaStorageClient()
+	if cli == nil {
+		return nil, errs.ErrClientGetMetaStorageClient
+	}
+	res, err := cli.Watch(ctx, &meta_storagepb.WatchRequest{
 		Key:           key,
 		RangeEnd:      options.rangeEnd,
 		StartRevision: options.revision,
@@ -191,10 +204,6 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 	go func() {
 		defer func() {
 			close(eventCh)
-			if r := recover(); r != nil {
-				log.Error("[pd] panic in client `Watch`", zap.Any("error", r))
-				return
-			}
 		}()
 		for {
 			resp, err := res.Recv()
