@@ -2308,6 +2308,16 @@ func (c *RaftCluster) GetMinResolvedTS() uint64 {
 	return c.minResolvedTS
 }
 
+// GetStoreMinResolvedTS returns the min resolved ts of the store.
+func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
+	c.RLock()
+	defer c.RUnlock()
+	if !c.isInitialized() || !core.IsAvailableForMinResolvedTS(c.GetStore(storeID)) {
+		return math.MaxUint64
+	}
+	return c.GetStore(storeID).GetMinResolvedTS()
+}
+
 // GetExternalTS returns the external timestamp.
 func (c *RaftCluster) GetExternalTS() uint64 {
 	c.RLock()
