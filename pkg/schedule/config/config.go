@@ -81,6 +81,7 @@ type Config interface {
 	IsDebugMetricsEnabled() bool
 	GetClusterVersion() *semver.Version
 	GetStoreLimitVersion() string
+	IsDiagnosticAllowed() bool
 	// for test purpose
 	SetPlacementRuleEnabled(bool)
 	SetSplitMergeInterval(time.Duration)

@@ -152,3 +152,13 @@ type stringer struct {
 func (s stringer) String() string {
 	return "?"
 }
+
+// CondUint32 constructs a field with the given key and value conditionally.
+// If the condition is true, it constructs a field with uint32 type; otherwise,
+// skip the field.
+func CondUint32(key string, val uint32, condition bool) zap.Field {
+	if condition {
+		return zap.Uint32(key, val)
+	}
+	return zap.Skip()
+}

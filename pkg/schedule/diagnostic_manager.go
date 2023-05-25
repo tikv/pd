@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package cluster
+package schedule
 
 import (
 	"fmt"
@@ -22,6 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/movingaverage"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -53,11 +54,11 @@ var DiagnosableSummaryFunc = map[string]plan.Summary{
 }
 
 type diagnosticManager struct {
-	cluster   *RaftCluster
+	cluster   sche.ClusterInformer
 	recorders map[string]*diagnosticRecorder
 }
 
-func newDiagnosticManager(cluster *RaftCluster) *diagnosticManager {
+func newDiagnosticManager(cluster sche.ClusterInformer) *diagnosticManager {
 	recorders := make(map[string]*diagnosticRecorder)
 	for name := range DiagnosableSummaryFunc {
 		recorders[name] = newDiagnosticRecorder(name, cluster)
@@ -69,7 +70,7 @@ func newDiagnosticManager(cluster *RaftCluster) *diagnosticManager {
 }
 
 func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult, error) {
-	if !d.cluster.opt.IsDiagnosticAllowed() {
+	if !d.cluster.GetOpts().IsDiagnosticAllowed() {
 		return nil, errs.ErrDiagnosticDisabled
 	}
 
@@ -99,12 +100,12 @@ func (d *diagnosticManager) getRecorder(name string) *diagnosticRecorder {
 // diagnosticRecorder is used to manage diagnostic for one scheduler.
 type diagnosticRecorder struct {
 	schedulerName string
-	cluster       *RaftCluster
+	cluster       sche.ClusterInformer
 	summaryFunc   plan.Summary
 	results       *cache.FIFO
 }
 
-func newDiagnosticRecorder(name string, cluster *RaftCluster) *diagnosticRecorder {
+func newDiagnosticRecorder(name string, cluster sche.ClusterInformer) *diagnosticRecorder {
 	summaryFunc, ok := DiagnosableSummaryFunc[name]
 	if !ok {
 		log.Error("can't find summary function", zap.String("scheduler-name", name))
@@ -122,7 +123,7 @@ func (d *diagnosticRecorder) isAllowed() bool {
 	if d == nil {
 		return false
 	}
-	return d.cluster.opt.IsDiagnosticAllowed()
+	return d.cluster.GetOpts().IsDiagnosticAllowed()
 }
 
 func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {

@@ -33,18 +33,44 @@ var (
 			Help:      "Counter of the distribution in scatter.",
 		}, []string{"store", "is_leader", "engine"})
 
-	// LabelerEventCounter is a counter of the scheduler labeler system.
-	LabelerEventCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
+	hotSpotStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "labeler_event_counter",
-			Help:      "Counter of the scheduler label.",
-		}, []string{"type", "event"})
+			Subsystem: "hotspot",
+			Name:      "status",
+			Help:      "Status of the hotspot.",
+		}, []string{"address", "store", "type"})
+
+	schedulerStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "status",
+			Help:      "Status of the scheduler.",
+		}, []string{"kind", "type"})
+
+	regionListGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "region_list",
+			Help:      "Number of region in waiting list",
+		}, []string{"type"})
+
+	patrolCheckRegionsGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "patrol_regions_time",
+			Help:      "Time spent of patrol checks region.",
+		})
 )
 
 func init() {
 	prometheus.MustRegister(scatterCounter)
 	prometheus.MustRegister(scatterDistributionCounter)
-	prometheus.MustRegister(LabelerEventCounter)
+	prometheus.MustRegister(schedulerStatusGauge)
+	prometheus.MustRegister(hotSpotStatusGauge)
+	prometheus.MustRegister(regionListGauge)
+	prometheus.MustRegister(patrolCheckRegionsGauge)
 }

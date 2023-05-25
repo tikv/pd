@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -982,7 +983,7 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 	h.pluginChMapLock.Lock()
 	defer h.pluginChMapLock.Unlock()
 	if ch, ok := h.pluginChMap[pluginPath]; ok {
-		ch <- cluster.PluginUnload
+		ch <- schedule.PluginUnload
 		return nil
 	}
 	return ErrPluginNotFound(pluginPath)
