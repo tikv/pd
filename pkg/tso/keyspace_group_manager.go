@@ -360,8 +360,6 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 
 	// If the default keyspace group isn't assigned to any tso node/pod, assign it to everyone.
 	if group.ID == mcsutils.DefaultKeyspaceGroupID && len(group.Members) == 0 {
-		log.Warn("configured the default keyspace group but no members/distribution specified. " +
-			"ignore it for now and fallback to the way of every tso node/pod owning a replica")
 		// TODO: fill members with all tso nodes/pods.
 		group.Members = []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}}
 	}
@@ -373,10 +371,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		return
 	}
 
-	// If this host is already assigned a replica of this keyspace group, that is to is already initialized, just update the meta.
+	// If this host is already assigned a replica of this keyspace group, i.e., the election member
+	// is already initialized, just update the meta.
 	if oldAM, oldGroup := kgm.getKeyspaceGroupMeta(group.ID); oldAM != nil {
-		log.Info("keyspace group already initialized, so update meta only",
-			zap.Uint32("keyspace-group-id", group.ID))
 		kgm.updateKeyspaceGroupMembership(oldGroup, group, true)
 		return
 	}
@@ -513,6 +510,12 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 		// The keyspace group membership is not changed. Reuse the old one.
 		newGroup.KeyspaceLookupTable = oldKeyspaceLookupTable
 	} else {
+		// The keyspace list might be too long, so we only log the length, though there is a rare case that
+		// the old length and the new length are the same but the keyspace list is changed.
+		log.Info("the keyspace group's keyspace list is changed",
+			zap.Uint32("keyspace-group-id", groupID),
+			zap.Int("old-keyspaces-count", oldLen),
+			zap.Int("new-keyspaces-count", newLen))
 		// The keyspace group membership is changed. Update the keyspace lookup table.
 		newGroup.KeyspaceLookupTable = make(map[uint32]struct{})
 		for i, j := 0, 0; i < oldLen || j < newLen; {
