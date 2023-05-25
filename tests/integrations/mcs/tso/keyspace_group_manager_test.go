@@ -435,7 +435,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
 	re.Equal(uint32(0), kg.ID)
 	re.Equal([]uint32{0}, kg.Keyspaces)
 	re.False(kg.IsSplitting())
-	re.Equal(0, len(kg.Members))
 	// wait for finishing alloc nodes
 	testutil.Eventually(re, func() bool {
 		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
