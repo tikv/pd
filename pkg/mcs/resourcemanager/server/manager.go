@@ -38,6 +38,7 @@ const (
 	defaultConsumptionChanSize = 1024
 	metricsCleanupInterval     = time.Minute
 	metricsCleanupTimeout      = 20 * time.Minute
+	metricsAvailableRUInterval = 30 * time.Second
 
 	reservedDefaultGroupName = "default"
 	middlePriority           = 8
@@ -287,8 +288,10 @@ func (m *Manager) persistResourceGroupRunningState() {
 // Receive the consumption and flush it to the metrics.
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer logutil.LogPanic()
-	ticker := time.NewTicker(metricsCleanupInterval)
-	defer ticker.Stop()
+	cleanUpTicker := time.NewTicker(metricsCleanupInterval)
+	defer cleanUpTicker.Stop()
+	availableRUTicker := time.NewTicker(metricsAvailableRUInterval)
+	defer availableRUTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -342,7 +345,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 
 			m.consumptionRecord[name] = time.Now()
 
-		case <-ticker.C:
+		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
 			for name, lastTime := range m.consumptionRecord {
 				if time.Since(lastTime) > metricsCleanupTimeout {
@@ -358,6 +361,12 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					delete(m.consumptionRecord, name)
 				}
 			}
+		case <-availableRUTicker.C:
+			m.RLock()
+			for name, group := range m.groups {
+				availableRUCounter.WithLabelValues(name).Set(group.getRUToken())
+			}
+			m.RUnlock()
 		}
 	}
 }
