@@ -1171,11 +1171,11 @@ func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 }
 
 // GetStoreStats returns the store stats.
-func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, pending int, leaderSize, regionSize int64) {
+func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, learner, pending int, leaderSize, regionSize int64) {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.leaders[storeID].length(), r.getStoreRegionCountLocked(storeID), r.witnesses[storeID].length(),
-		r.pendingPeers[storeID].length(), r.leaders[storeID].TotalSize(), r.getStoreRegionSizeLocked(storeID)
+		r.learners[storeID].length(), r.pendingPeers[storeID].length(), r.leaders[storeID].TotalSize(), r.getStoreRegionSizeLocked(storeID)
 }
 
 // GetRegionCount gets the total count of RegionInfo of regionMap
