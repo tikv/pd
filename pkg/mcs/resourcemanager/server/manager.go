@@ -364,6 +364,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		case <-availableRUTicker.C:
 			m.RLock()
 			for name, group := range m.groups {
+				if name == reservedDefaultGroupName {
+					continue
+				}
 				availableRUCounter.WithLabelValues(name).Set(group.getRUToken())
 			}
 			m.RUnlock()
