@@ -46,8 +46,6 @@ const (
 var (
 	slowNotifyInterval = 5 * time.Second
 	fastNotifyInterval = 2 * time.Second
-	// PushOperatorTickInterval is the interval try to push the
-	PushOperatorTickInterval = 500 * time.Millisecond
 	// StoreBalanceBaseTime represents the base time of balance rate.
 	StoreBalanceBaseTime float64 = 60
 	// FastOperatorFinishTime min finish time, if finish duration less than it,op will be pushed to fast operator queue

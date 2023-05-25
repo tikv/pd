@@ -488,16 +488,14 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 	}
 
-	oldPrimary, primarySwitched, secondaryChanged :=
+	oldPrimary, primarySwitched, _ :=
 		c.keyspaceGroupSD.update(keyspaceGroup, primaryAddr, secondaryAddrs, addrs)
 	if primarySwitched {
+		log.Info("[tso] updated keyspace group service discovery info",
+			zap.String("keyspace-group-service", keyspaceGroup.String()))
 		if err := c.afterPrimarySwitched(oldPrimary, primaryAddr); err != nil {
 			return err
 		}
-	}
-	if primarySwitched || secondaryChanged {
-		log.Info("[tso] updated keyspace group service discovery info",
-			zap.String("keyspace-group-service", keyspaceGroup.String()))
 	}
 
 	// Even if the primary address is empty, we still updated other returned info above, including the

@@ -8718,12 +8718,20 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "etcd_debugging_mvcc_db_total_size_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
+              "expr": "etcd_mvcc_db_total_size_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 1,
-              "legendFormat": "{{instance}}",
+              "legendFormat": "{{instance}}-physically-allocated",
               "refId": "A"
+            },
+            {
+              "expr": "etcd_mvcc_db_total_size_in_use_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 1,
+              "legendFormat": "{{instance}}-logically-in-use",
+              "refId": "B"        
             }
           ],
           "thresholds": [],

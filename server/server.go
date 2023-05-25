@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
@@ -74,7 +75,6 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/gc"
 	syncer "github.com/tikv/pd/server/regionsyncer"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -169,6 +169,8 @@ type Server struct {
 	gcSafePointManager *gc.SafePointManager
 	// keyspace manager
 	keyspaceManager *keyspace.Manager
+	// safe point V2 manager
+	safePointV2Manager *gc.SafePointV2Manager
 	// keyspace group manager
 	keyspaceGroupManager *keyspace.GroupManager
 	// for basicCluster operation.
@@ -465,6 +467,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, s.clusterID)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -845,6 +848,11 @@ func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 // GetKeyspaceManager returns the keyspace manager of server.
 func (s *Server) GetKeyspaceManager() *keyspace.Manager {
 	return s.keyspaceManager
+}
+
+// GetSafePointV2Manager returns the safe point v2 manager of server.
+func (s *Server) GetSafePointV2Manager() *gc.SafePointV2Manager {
+	return s.safePointV2Manager
 }
 
 // GetKeyspaceGroupManager returns the keyspace group manager of server.

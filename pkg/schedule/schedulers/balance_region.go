@@ -23,7 +23,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -153,7 +152,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.ClusterInformer, dryRun b
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter}
 	switch cluster.(type) {
-	case *schedule.RangeCluster:
+	case *rangeCluster:
 		// allow empty region to be scheduled in range cluster
 	default:
 		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(cluster))
