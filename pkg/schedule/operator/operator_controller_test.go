@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package operator
 
 import (
 	"container/heap"
@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
-	"github.com/tikv/pd/pkg/schedule/operator"
 )
 
 type operatorControllerTestSuite struct {
@@ -49,7 +48,7 @@ func TestOperatorControllerTestSuite(t *testing.T) {
 
 func (suite *operatorControllerTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/unexpectedOperator", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/unexpectedOperator", "return(true)"))
 }
 
 func (suite *operatorControllerTestSuite) TearDownSuite() {
@@ -59,30 +58,30 @@ func (suite *operatorControllerTestSuite) TearDownSuite() {
 func (suite *operatorControllerTestSuite) TestCacheInfluence() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	oc := NewOperatorController(suite.ctx, tc, nil)
+	oc := NewController(suite.ctx, tc, nil)
 	tc.AddLeaderStore(2, 1)
 	region := tc.AddLeaderRegion(1, 1, 2)
 
-	steps := []operator.OpStep{
-		operator.RemovePeer{FromStore: 2},
+	steps := []OpStep{
+		RemovePeer{FromStore: 2},
 	}
-	op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
 	oc.SetOperator(op)
 	suite.True(op.Start())
-	influence := operator.NewOpInfluence()
+	influence := NewOpInfluence()
 	AddOpInfluence(op, *influence, tc)
 	suite.Equal(int64(-96), influence.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is same even if the region size changed.
 	region = region.Clone(core.SetApproximateSize(100))
 	tc.PutRegion(region)
-	influence1 := operator.NewOpInfluence()
+	influence1 := NewOpInfluence()
 	AddOpInfluence(op, *influence1, tc)
 	suite.Equal(int64(-96), influence1.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is valid even if the region is removed.
 	tc.RemoveRegion(region)
-	influence2 := operator.NewOpInfluence()
+	influence2 := NewOpInfluence()
 	AddOpInfluence(op, *influence2, tc)
 	suite.Equal(int64(-96), influence2.GetStoreInfluence(2).RegionSize)
 }
@@ -91,15 +90,15 @@ func (suite *operatorControllerTestSuite) TestCacheInfluence() {
 func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	oc := NewOperatorController(suite.ctx, tc, nil)
+	oc := NewController(suite.ctx, tc, nil)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
-	steps := []operator.OpStep{
-		operator.RemovePeer{FromStore: 2},
+	steps := []OpStep{
+		RemovePeer{FromStore: 2},
 	}
-	op1 := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
-	op2 := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op2 := NewTestOperator(2, &metapb.RegionEpoch{}, OpRegion, steps...)
 	suite.True(op1.Start())
 	oc.SetOperator(op1)
 	suite.True(op2.Start())
@@ -134,26 +133,26 @@ func (suite *operatorControllerTestSuite) TestOperatorStatus() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewOperatorController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
-	steps := []operator.OpStep{
-		operator.RemovePeer{FromStore: 2},
-		operator.AddPeer{ToStore: 2, PeerID: 4},
+	steps := []OpStep{
+		RemovePeer{FromStore: 2},
+		AddPeer{ToStore: 2, PeerID: 4},
 	}
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
-	op1 := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
-	op2 := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op2 := NewTestOperator(2, &metapb.RegionEpoch{}, OpRegion, steps...)
 	suite.True(op1.Start())
 	oc.SetOperator(op1)
 	suite.True(op2.Start())
 	oc.SetOperator(op2)
 	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(2).Status)
-	op1.SetStatusReachTime(operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
+	op1.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime-FastStepWaitTime))
 	region2 = ApplyOperatorStep(region2, op2)
 	tc.PutRegion(region2)
 	oc.Dispatch(region1, "test")
@@ -169,17 +168,17 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewOperatorController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
 	tc.AddLeaderRegion(1, 1, 2)
-	steps := []operator.OpStep{
-		operator.RemovePeer{FromStore: 2},
-		operator.AddPeer{ToStore: 3, PeerID: 4},
+	steps := []OpStep{
+		RemovePeer{FromStore: 2},
+		AddPeer{ToStore: 3, PeerID: 4},
 	}
 	region := tc.GetRegion(1)
-	op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
 	suite.True(op.Start())
 	oc.SetOperator(op)
 	oc.Dispatch(region, "test")
@@ -187,14 +186,14 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 	// change the leader
 	region = region.Clone(core.WithLeader(region.GetPeer(2)))
 	oc.Dispatch(region, DispatchFromHeartBeat)
-	suite.Equal(operator.CANCELED, op.Status())
+	suite.Equal(CANCELED, op.Status())
 	suite.Nil(oc.GetOperator(region.GetID()))
 
 	// transfer leader to an illegal store.
-	op = operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 5})
+	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 5})
 	oc.SetOperator(op)
 	oc.Dispatch(region, DispatchFromHeartBeat)
-	suite.Equal(operator.CANCELED, op.Status())
+	suite.Equal(CANCELED, op.Status())
 	suite.Nil(oc.GetOperator(region.GetID()))
 }
 
@@ -203,14 +202,14 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewOperatorController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
 	tc.AddLeaderRegion(1, 1, 2)
 	region := tc.GetRegion(1)
-	steps := []operator.OpStep{operator.TransferLeader{ToStore: 2}}
-	op := operator.NewTestOperator(1, region.GetRegionEpoch(), operator.OpLeader, steps...)
+	steps := []OpStep{TransferLeader{ToStore: 2}}
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, steps...)
 	oc.SetOperator(op)
 	suite.False(oc.checkStaleOperator(op, steps[0], region))
 	tc.SetStoreDown(2)
@@ -218,42 +217,42 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 }
 
 func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/unexpectedOperator"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/unexpectedOperator"))
 
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewOperatorController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc, stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 2, 1)
 	tc.AddLeaderRegion(2, 2, 1)
 	region1 := tc.GetRegion(1)
-	steps := []operator.OpStep{
-		operator.RemovePeer{FromStore: 1},
-		operator.AddPeer{ToStore: 1, PeerID: 4},
+	steps := []OpStep{
+		RemovePeer{FromStore: 1},
+		AddPeer{ToStore: 1, PeerID: 4},
 	}
 	{
 		// finished op
-		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 		suite.True(oc.checkAddOperator(false, op))
 		op.Start()
 		suite.False(oc.checkAddOperator(false, op)) // started
 		suite.Nil(op.Check(region1))
 
-		suite.Equal(operator.SUCCESS, op.Status())
+		suite.Equal(SUCCESS, op.Status())
 		suite.False(oc.checkAddOperator(false, op)) // success
 	}
 	{
 		// finished op canceled
-		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 		suite.True(oc.checkAddOperator(false, op))
 		suite.True(op.Cancel())
 		suite.False(oc.checkAddOperator(false, op))
 	}
 	{
 		// finished op replaced
-		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 		suite.True(oc.checkAddOperator(false, op))
 		suite.True(op.Start())
 		suite.True(op.Replace())
@@ -261,23 +260,23 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 	}
 	{
 		// finished op expired
-		op1 := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-		op2 := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 1})
+		op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
+		op2 := NewTestOperator(2, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 1})
 		suite.True(oc.checkAddOperator(false, op1, op2))
-		op1.SetStatusReachTime(operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
-		op2.SetStatusReachTime(operator.CREATED, time.Now().Add(-operator.OperatorExpireTime))
+		op1.SetStatusReachTime(CREATED, time.Now().Add(-OperatorExpireTime))
+		op2.SetStatusReachTime(CREATED, time.Now().Add(-OperatorExpireTime))
 		suite.False(oc.checkAddOperator(false, op1, op2))
-		suite.Equal(operator.EXPIRED, op1.Status())
-		suite.Equal(operator.EXPIRED, op2.Status())
+		suite.Equal(EXPIRED, op1.Status())
+		suite.Equal(EXPIRED, op2.Status())
 	}
 	// finished op never timeout
 
 	{
 		// unfinished op timeout
-		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
 		suite.True(oc.checkAddOperator(false, op))
 		op.Start()
-		op.SetStatusReachTime(operator.STARTED, time.Now().Add(-operator.SlowStepWaitTime-operator.FastStepWaitTime))
+		op.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime-FastStepWaitTime))
 		suite.True(op.CheckTimeout())
 		suite.False(oc.checkAddOperator(false, op))
 	}
@@ -288,24 +287,24 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewOperatorController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc, stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 2, 1)
 	region1 := tc.GetRegion(1)
-	steps := []operator.OpStep{
-		operator.RemovePeer{FromStore: 1},
-		operator.AddPeer{ToStore: 1, PeerID: 4},
+	steps := []OpStep{
+		RemovePeer{FromStore: 1},
+		AddPeer{ToStore: 1, PeerID: 4},
 	}
 	// finished op with normal priority
-	op1 := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+	op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 	// unfinished op with high priority
-	op2 := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion|operator.OpAdmin, steps...)
+	op2 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion|OpAdmin, steps...)
 
 	suite.True(op1.Start())
 	oc.SetOperator(op1)
 
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/concurrentRemoveOperator", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator", "return(true)"))
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -322,27 +321,27 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	wg.Wait()
 
 	suite.Equal(op2, oc.GetOperator(1))
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/concurrentRemoveOperator"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/concurrentRemoveOperator"))
 }
 
 func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewOperatorController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc, stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
 	tc.AddLeaderRegion(4, 2, 1)
-	steps := []operator.OpStep{
-		operator.RemovePeer{FromStore: 2},
-		operator.AddPeer{ToStore: 2, PeerID: 4},
+	steps := []OpStep{
+		RemovePeer{FromStore: 2},
+		AddPeer{ToStore: 2, PeerID: 4},
 	}
-	op1 := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
-	op2 := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
-	op3 := operator.NewTestOperator(3, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
-	op4 := operator.NewTestOperator(4, &metapb.RegionEpoch{}, operator.OpRegion, operator.TransferLeader{ToStore: 2})
+	op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
+	op2 := NewTestOperator(2, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op3 := NewTestOperator(3, &metapb.RegionEpoch{}, OpRegion, steps...)
+	op4 := NewTestOperator(4, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 	region1 := tc.GetRegion(1)
 	region2 := tc.GetRegion(2)
 	region4 := tc.GetRegion(4)
@@ -402,7 +401,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewOperatorController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc, stream)
 	tc.AddLeaderStore(1, 0)
 	tc.UpdateLeaderCount(1, 1000)
 	tc.AddLeaderStore(2, 0)
@@ -414,53 +413,53 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 
 	tc.SetStoreLimit(2, storelimit.AddPeer, 60)
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: i})
 		suite.True(oc.AddOperator(op))
 		suite.checkRemoveOperatorSuccess(oc, op)
 	}
-	op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: 1})
 	suite.False(oc.AddOperator(op))
 	suite.False(oc.RemoveOperator(op))
 
 	tc.SetStoreLimit(2, storelimit.AddPeer, 120)
 	for i := uint64(1); i <= 10; i++ {
-		op = operator.NewTestOperator(i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: i})
 		suite.True(oc.AddOperator(op))
 		suite.checkRemoveOperatorSuccess(oc, op)
 	}
 	tc.SetAllStoresLimit(storelimit.AddPeer, 60)
 	for i := uint64(1); i <= 5; i++ {
-		op = operator.NewTestOperator(i, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: i})
+		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: i})
 		suite.True(oc.AddOperator(op))
 		suite.checkRemoveOperatorSuccess(oc, op)
 	}
-	op = operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 1})
+	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: 1})
 	suite.False(oc.AddOperator(op))
 	suite.False(oc.RemoveOperator(op))
 
 	tc.SetStoreLimit(2, storelimit.RemovePeer, 60)
 	for i := uint64(1); i <= 5; i++ {
-		op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 		suite.True(oc.AddOperator(op))
 		suite.checkRemoveOperatorSuccess(oc, op)
 	}
-	op = operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	suite.False(oc.AddOperator(op))
 	suite.False(oc.RemoveOperator(op))
 
 	tc.SetStoreLimit(2, storelimit.RemovePeer, 120)
 	for i := uint64(1); i <= 10; i++ {
-		op = operator.NewTestOperator(i, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 		suite.True(oc.AddOperator(op))
 		suite.checkRemoveOperatorSuccess(oc, op)
 	}
 	tc.SetAllStoresLimit(storelimit.RemovePeer, 60)
 	for i := uint64(1); i <= 5; i++ {
-		op = operator.NewTestOperator(i, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 		suite.True(oc.AddOperator(op))
 		suite.checkRemoveOperatorSuccess(oc, op)
 	}
-	op = operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, operator.RemovePeer{FromStore: 2})
+	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	suite.False(oc.AddOperator(op))
 	suite.False(oc.RemoveOperator(op))
 }
@@ -469,18 +468,18 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewOperatorController(suite.ctx, cluster, stream)
+	controller := NewController(suite.ctx, cluster, stream)
 
 	cluster.AddLeaderStore(1, 2)
 	cluster.AddLeaderStore(2, 0)
 	cluster.SetAllStoresLimit(storelimit.RemovePeer, 600)
 	cluster.AddLeaderRegion(1, 1, 2)
-	steps := []operator.OpStep{
-		operator.TransferLeader{FromStore: 1, ToStore: 2},
-		operator.RemovePeer{FromStore: 1},
+	steps := []OpStep{
+		TransferLeader{FromStore: 1, ToStore: 2},
+		RemovePeer{FromStore: 1},
 	}
 
-	op := operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 0, Version: 0}, operator.OpRegion, steps...)
+	op := NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 0, Version: 0}, OpRegion, steps...)
 	suite.True(controller.AddOperator(op))
 	suite.Equal(1, stream.MsgLength())
 
@@ -501,8 +500,8 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	suite.Equal(2, stream.MsgLength())
 
 	// add and dispatch op again, the op should be stale
-	op = operator.NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 0, Version: 0},
-		operator.OpRegion, steps...)
+	op = NewTestOperator(1, &metapb.RegionEpoch{ConfVer: 0, Version: 0},
+		OpRegion, steps...)
 	suite.True(controller.AddOperator(op))
 	suite.Equal(uint64(0), op.ConfVerChanged(region))
 	suite.Equal(3, stream.MsgLength())
@@ -519,7 +518,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewOperatorController(suite.ctx, cluster, stream)
+	controller := NewController(suite.ctx, cluster, stream)
 
 	epoch := &metapb.RegionEpoch{ConfVer: 0, Version: 0}
 	region := cluster.MockRegionInfo(1, 1, []uint64{2}, []uint64{}, epoch)
@@ -528,16 +527,16 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	cluster.AddRegionStore(1, 1)
 	cluster.AddRegionStore(3, 1)
 
-	steps := []operator.OpStep{
-		operator.AddLearner{ToStore: 3, PeerID: 3},
-		operator.PromoteLearner{ToStore: 3, PeerID: 3},
-		operator.TransferLeader{FromStore: 1, ToStore: 3},
-		operator.RemovePeer{FromStore: 1},
+	steps := []OpStep{
+		AddLearner{ToStore: 3, PeerID: 3},
+		PromoteLearner{ToStore: 3, PeerID: 3},
+		TransferLeader{FromStore: 1, ToStore: 3},
+		RemovePeer{FromStore: 1},
 	}
-	op := operator.NewTestOperator(1, epoch, operator.OpRegion, steps...)
+	op := NewTestOperator(1, epoch, OpRegion, steps...)
 	suite.True(controller.AddOperator(op))
 
-	check := func(influence operator.OpInfluence, id uint64, expect *operator.StoreInfluence) {
+	check := func(influence OpInfluence, id uint64, expect *StoreInfluence) {
 		si := influence.GetStoreInfluence(id)
 		suite.Equal(si.LeaderCount, expect.LeaderCount)
 		suite.Equal(si.LeaderSize, expect.LeaderSize)
@@ -548,7 +547,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	}
 
 	influence := controller.GetOpInfluence(cluster)
-	check(influence, 1, &operator.StoreInfluence{
+	check(influence, 1, &StoreInfluence{
 		LeaderSize:  -20,
 		LeaderCount: -1,
 		RegionSize:  -20,
@@ -557,7 +556,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 			storelimit.RemovePeer: 200,
 		},
 	})
-	check(influence, 3, &operator.StoreInfluence{
+	check(influence, 3, &StoreInfluence{
 		LeaderSize:  20,
 		LeaderCount: 1,
 		RegionSize:  20,
@@ -575,7 +574,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	op.Check(region2)
 
 	influence = controller.GetOpInfluence(cluster)
-	check(influence, 1, &operator.StoreInfluence{
+	check(influence, 1, &StoreInfluence{
 		LeaderSize:  -20,
 		LeaderCount: -1,
 		RegionSize:  -20,
@@ -584,7 +583,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 			storelimit.RemovePeer: 200,
 		},
 	})
-	check(influence, 3, &operator.StoreInfluence{
+	check(influence, 3, &StoreInfluence{
 		LeaderSize:  20,
 		LeaderCount: 1,
 		RegionSize:  0,
@@ -596,7 +595,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewOperatorController(suite.ctx, cluster, stream)
+	controller := NewController(suite.ctx, cluster, stream)
 
 	// Create a new region with epoch(0, 0)
 	// the region has two peers with its peer id allocated incrementally.
@@ -611,24 +610,24 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 	cluster.AddRegionStore(3, 1)
 	// The next allocated peer should have peerid 3, so we add this peer
 	// to store 3
-	testSteps := [][]operator.OpStep{
+	testSteps := [][]OpStep{
 		{
-			operator.AddLearner{ToStore: 3, PeerID: 3},
-			operator.PromoteLearner{ToStore: 3, PeerID: 3},
-			operator.TransferLeader{FromStore: 1, ToStore: 3},
-			operator.RemovePeer{FromStore: 1},
+			AddLearner{ToStore: 3, PeerID: 3},
+			PromoteLearner{ToStore: 3, PeerID: 3},
+			TransferLeader{FromStore: 1, ToStore: 3},
+			RemovePeer{FromStore: 1},
 		},
 		{
-			operator.AddLearner{ToStore: 3, PeerID: 3, IsLightWeight: true},
-			operator.PromoteLearner{ToStore: 3, PeerID: 3},
-			operator.TransferLeader{FromStore: 1, ToStore: 3},
-			operator.RemovePeer{FromStore: 1},
+			AddLearner{ToStore: 3, PeerID: 3, IsLightWeight: true},
+			PromoteLearner{ToStore: 3, PeerID: 3},
+			TransferLeader{FromStore: 1, ToStore: 3},
+			RemovePeer{FromStore: 1},
 		},
 	}
 
 	for _, steps := range testSteps {
 		// Create an operator
-		op := operator.NewTestOperator(1, epoch, operator.OpRegion, steps...)
+		op := NewTestOperator(1, epoch, OpRegion, steps...)
 		suite.True(controller.AddOperator(op))
 		suite.Equal(1, stream.MsgLength())
 
@@ -723,7 +722,7 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 	)
 }
 
-func (suite *operatorControllerTestSuite) checkRemoveOperatorSuccess(oc *OperatorController, op *operator.Operator) {
+func (suite *operatorControllerTestSuite) checkRemoveOperatorSuccess(oc *Controller, op *Operator) {
 	suite.True(oc.RemoveOperator(op))
 	suite.True(op.IsEnd())
 	suite.Equal(op, oc.GetOperatorStatus(op.RegionID()).Operator)
@@ -733,11 +732,11 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(suite.ctx, opts)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewOperatorController(suite.ctx, cluster, stream)
+	controller := NewController(suite.ctx, cluster, stream)
 	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
-	addPeerOp := func(i uint64) *operator.Operator {
+	addPeerOp := func(i uint64) *Operator {
 		start := fmt.Sprintf("%da", i)
 		end := fmt.Sprintf("%db", i)
 		region := newRegionInfo(i, start, end, 1, 1, []uint64{101, 1}, []uint64{101, 1})
@@ -745,7 +744,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 		peer := &metapb.Peer{
 			StoreId: 2,
 		}
-		op, err := operator.CreateAddPeerOperator("add-peer", cluster, region, peer, operator.OpKind(0))
+		op, err := CreateAddPeerOperator("add-peer", cluster, region, peer, OpKind(0))
 		suite.NoError(err)
 		suite.NotNil(op)
 
@@ -753,7 +752,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	}
 
 	// a batch of operators should be added atomically
-	var batch []*operator.Operator
+	var batch []*Operator
 	for i := uint64(0); i < cluster.GetSchedulerMaxWaitingOperator(); i++ {
 		batch = append(batch, addPeerOp(i))
 	}
@@ -779,7 +778,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	target := newRegionInfo(102, "0a", "0b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(target)
 
-	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
+	ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
 	suite.NoError(err)
 	suite.Len(ops, 2)
 
@@ -802,16 +801,16 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewOperatorController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc, stream)
 	// If PD and store 3 are gone, PD will not have info of store 3 after recreating it.
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)
 	tc.AddRegionStore(4, 1)
 	tc.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
-	steps := []operator.OpStep{
-		operator.RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
+	steps := []OpStep{
+		RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
 	}
-	op := operator.NewTestOperator(1, &metapb.RegionEpoch{}, operator.OpRegion, steps...)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
 	suite.True(oc.addOperatorLocked(op))
 	// Although store 3 does not exist in PD, PD can also send op to TiKV.
 	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)

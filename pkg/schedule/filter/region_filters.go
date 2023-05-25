@@ -18,6 +18,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/slice"
@@ -99,12 +100,12 @@ func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 
 // RegionReplicatedFilter filters all unreplicated regions.
 type RegionReplicatedFilter struct {
-	cluster regionHealthCluster
+	cluster sche.RegionHealthCluster
 	fit     *placement.RegionFit
 }
 
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
-func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
+func NewRegionReplicatedFilter(cluster sche.RegionHealthCluster) RegionFilter {
 	return &RegionReplicatedFilter{cluster: cluster}
 }
 
@@ -131,11 +132,11 @@ func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 type regionEmptyFilter struct {
-	cluster regionHealthCluster
+	cluster sche.RegionHealthCluster
 }
 
 // NewRegionEmptyFilter returns creates a RegionFilter that filters all empty regions.
-func NewRegionEmptyFilter(cluster regionHealthCluster) RegionFilter {
+func NewRegionEmptyFilter(cluster sche.RegionHealthCluster) RegionFilter {
 	return &regionEmptyFilter{cluster: cluster}
 }
 
@@ -147,7 +148,7 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
-func isEmptyRegionAllowBalance(cluster regionHealthCluster, region *core.RegionInfo) bool {
+func isEmptyRegionAllowBalance(cluster sche.RegionHealthCluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < core.InitClusterRegionThreshold
 }
 

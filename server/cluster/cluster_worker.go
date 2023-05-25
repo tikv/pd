@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -37,13 +37,13 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 
-	c.coordinator.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
+	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat)
 	return nil
 }
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
-	if allowed, err := c.checkSchedulingAllowance(); !allowed {
+	if allowed, err := c.CheckSchedulingAllowance(); !allowed {
 		return nil, err
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
@@ -105,7 +105,7 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 
 // HandleAskBatchSplit handles the batch split request.
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
-	if allowed, err := c.checkSchedulingAllowance(); !allowed {
+	if allowed, err := c.CheckSchedulingAllowance(); !allowed {
 		return nil, err
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {

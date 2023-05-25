@@ -12,35 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package schedulers
 
 import (
 	"github.com/docker/go-units"
 	"github.com/tikv/pd/pkg/core"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 )
 
-// RangeCluster isolates the cluster by range.
-type RangeCluster struct {
-	Cluster
+// rangeCluster isolates the cluster by range.
+type rangeCluster struct {
+	sche.ClusterInformer
 	subCluster        *core.BasicCluster // Collect all regions belong to the range.
 	tolerantSizeRatio float64
 }
 
-// GenRangeCluster gets a range cluster by specifying start key and end key.
-// The cluster can only know the regions within [startKey, endKey].
-func GenRangeCluster(cluster Cluster, startKey, endKey []byte) *RangeCluster {
+// genRangeCluster gets a range cluster by specifying start key and end key.
+// The cluster can only know the regions within [startKey, endKey).
+func genRangeCluster(cluster sche.ClusterInformer, startKey, endKey []byte) *rangeCluster {
 	subCluster := core.NewBasicCluster()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
 		origin, overlaps, rangeChanged := subCluster.SetRegion(r)
 		subCluster.UpdateSubTree(r, origin, overlaps, rangeChanged)
 	}
-	return &RangeCluster{
-		Cluster:    cluster,
-		subCluster: subCluster,
+	return &rangeCluster{
+		ClusterInformer: cluster,
+		subCluster:      subCluster,
 	}
 }
 
-func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
+func (r *rangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 	id := s.GetID()
 
 	used := float64(s.GetUsedSize()) / units.MiB
@@ -68,8 +69,8 @@ func (r *RangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 }
 
 // GetStore searches for a store by ID.
-func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
-	s := r.Cluster.GetStore(id)
+func (r *rangeCluster) GetStore(id uint64) *core.StoreInfo {
+	s := r.ClusterInformer.GetStore(id)
 	if s == nil {
 		return nil
 	}
@@ -77,8 +78,8 @@ func (r *RangeCluster) GetStore(id uint64) *core.StoreInfo {
 }
 
 // GetStores returns all Stores in the cluster.
-func (r *RangeCluster) GetStores() []*core.StoreInfo {
-	stores := r.Cluster.GetStores()
+func (r *rangeCluster) GetStores() []*core.StoreInfo {
+	stores := r.ClusterInformer.GetStores()
 	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
@@ -87,36 +88,36 @@ func (r *RangeCluster) GetStores() []*core.StoreInfo {
 }
 
 // SetTolerantSizeRatio sets the tolerant size ratio.
-func (r *RangeCluster) SetTolerantSizeRatio(ratio float64) {
+func (r *rangeCluster) SetTolerantSizeRatio(ratio float64) {
 	r.tolerantSizeRatio = ratio
 }
 
 // GetTolerantSizeRatio gets the tolerant size ratio.
-func (r *RangeCluster) GetTolerantSizeRatio() float64 {
+func (r *rangeCluster) GetTolerantSizeRatio() float64 {
 	if r.tolerantSizeRatio != 0 {
 		return r.tolerantSizeRatio
 	}
-	return r.Cluster.GetOpts().GetTolerantSizeRatio()
+	return r.ClusterInformer.GetOpts().GetTolerantSizeRatio()
 }
 
 // RandFollowerRegions returns a random region that has a follower on the store.
-func (r *RangeCluster) RandFollowerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+func (r *rangeCluster) RandFollowerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
 	return r.subCluster.RandFollowerRegions(storeID, ranges)
 }
 
 // RandLeaderRegions returns a random region that has leader on the store.
-func (r *RangeCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
+func (r *rangeCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
 	return r.subCluster.RandLeaderRegions(storeID, ranges)
 }
 
 // GetAverageRegionSize returns the average region approximate size.
-func (r *RangeCluster) GetAverageRegionSize() int64 {
+func (r *rangeCluster) GetAverageRegionSize() int64 {
 	return r.subCluster.GetAverageRegionSize()
 }
 
 // GetRegionStores returns all stores that contains the region's peer.
-func (r *RangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
-	stores := r.Cluster.GetRegionStores(region)
+func (r *rangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
+	stores := r.ClusterInformer.GetRegionStores(region)
 	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
@@ -125,8 +126,8 @@ func (r *RangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInf
 }
 
 // GetFollowerStores returns all stores that contains the region's follower peer.
-func (r *RangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
-	stores := r.Cluster.GetFollowerStores(region)
+func (r *rangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
+	stores := r.ClusterInformer.GetFollowerStores(region)
 	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
@@ -135,8 +136,8 @@ func (r *RangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreI
 }
 
 // GetLeaderStore returns all stores that contains the region's leader peer.
-func (r *RangeCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
-	s := r.Cluster.GetLeaderStore(region)
+func (r *rangeCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
+	s := r.ClusterInformer.GetLeaderStore(region)
 	if s != nil {
 		return r.updateStoreInfo(s)
 	}

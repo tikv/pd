@@ -71,6 +71,11 @@ error = '''
 get member failed
 '''
 
+["PD:client:ErrClientGetMinTSO"]
+error = '''
+get min TSO failed, %v
+'''
+
 ["PD:client:ErrClientGetTSO"]
 error = '''
 get TSO failed, %v

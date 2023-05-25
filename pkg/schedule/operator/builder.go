@@ -21,22 +21,12 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
-
-// ClusterInformer provides the necessary information for building operator.
-type ClusterInformer interface {
-	GetBasicCluster() *core.BasicCluster
-	GetOpts() config.Config
-	GetStoreConfig() config.StoreConfig
-	GetRuleManager() *placement.RuleManager
-	GetAllocator() id.Allocator
-}
 
 // Builder is used to create operators. Usage:
 //
@@ -50,7 +40,7 @@ type ClusterInformer interface {
 // according to various constraints.
 type Builder struct {
 	// basic info
-	ClusterInformer
+	sche.ClusterInformer
 	desc            string
 	regionID        uint64
 	regionEpoch     *metapb.RegionEpoch
@@ -102,7 +92,7 @@ func SkipPlacementRulesCheck(b *Builder) {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, ci ClusterInformer, region *core.RegionInfo, opts ...BuilderOption) *Builder {
+func NewBuilder(desc string, ci sche.ClusterInformer, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
 		desc:            desc,
 		ClusterInformer: ci,

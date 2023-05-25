@@ -29,7 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -72,7 +72,7 @@ type ModeManager struct {
 	syncutil.RWMutex
 	config            config.ReplicationModeConfig
 	storage           endpoint.ReplicationStatusStorage
-	cluster           schedule.Cluster
+	cluster           sche.ClusterInformer
 	fileReplicater    FileReplicater
 	replicatedMembers []uint64
 
@@ -91,7 +91,7 @@ type ModeManager struct {
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
-func NewReplicationModeManager(config config.ReplicationModeConfig, storage endpoint.ReplicationStatusStorage, cluster schedule.Cluster, fileReplicater FileReplicater) (*ModeManager, error) {
+func NewReplicationModeManager(config config.ReplicationModeConfig, storage endpoint.ReplicationStatusStorage, cluster sche.ClusterInformer, fileReplicater FileReplicater) (*ModeManager, error) {
 	m := &ModeManager{
 		initTime:       time.Now(),
 		config:         config,

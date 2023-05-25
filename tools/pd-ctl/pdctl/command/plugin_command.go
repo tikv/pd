@@ -20,7 +20,7 @@ import (
 	"net/http"
 
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/pkg/schedule"
 )
 
 var (
@@ -59,11 +59,11 @@ func NewUnloadPluginCommand() *cobra.Command {
 }
 
 func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	sendPluginCommand(cmd, cluster.PluginLoad, args)
+	sendPluginCommand(cmd, schedule.PluginLoad, args)
 }
 
 func unloadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	sendPluginCommand(cmd, cluster.PluginUnload, args)
+	sendPluginCommand(cmd, schedule.PluginUnload, args)
 }
 
 func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
@@ -80,9 +80,9 @@ func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
 		return
 	}
 	switch action {
-	case cluster.PluginLoad:
+	case schedule.PluginLoad:
 		_, err = doRequest(cmd, pluginPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
-	case cluster.PluginUnload:
+	case schedule.PluginUnload:
 		_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
 	default:
 		cmd.Printf("Unknown action %s\n", action)
