@@ -34,6 +34,8 @@ const (
 	disabled = "disabled"
 	// paused means the current scheduler is paused
 	paused = "paused"
+	// halted means the current scheduler is halted
+	halted = "halted"
 	// scheduling means the current scheduler is generating.
 	scheduling = "scheduling"
 	// pending means the current scheduler cannot generate scheduling operator

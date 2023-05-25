@@ -87,7 +87,7 @@ type Config interface {
 	SetSplitMergeInterval(time.Duration)
 	SetMaxReplicas(int)
 	SetPlacementRulesCacheEnabled(bool)
-	SetWitnessEnabled(bool)
+	SetEnableWitness(bool)
 	// only for store configuration
 	UseRaftV2()
 }

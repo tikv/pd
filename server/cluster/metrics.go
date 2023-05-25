@@ -95,11 +95,20 @@ var (
 			Name:      "store_sync",
 			Help:      "The state of store sync config",
 		}, []string{"address", "state"})
+
+	schedulingAllowanceStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduling",
+			Name:      "allowance_status",
+			Help:      "Status of the scheduling allowance.",
+		}, []string{"kind"})
 )
 
 func init() {
 	prometheus.MustRegister(regionEventCounter)
 	prometheus.MustRegister(healthStatusGauge)
+	prometheus.MustRegister(schedulingAllowanceStatusGauge)
 	prometheus.MustRegister(clusterStateCPUGauge)
 	prometheus.MustRegister(clusterStateCurrent)
 	prometheus.MustRegister(bucketEventCounter)

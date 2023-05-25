@@ -104,11 +104,6 @@ func (mc *Cluster) GetAllocator() id.Allocator {
 	return mc.IDAllocator
 }
 
-// IsUnsafeRecovering returns if the cluster is in unsafe recovering.
-func (mc *Cluster) IsUnsafeRecovering() bool {
-	return false
-}
-
 // GetPersistOptions returns the persist options.
 func (mc *Cluster) GetPersistOptions() *config.PersistOptions {
 	return mc.PersistOptions
@@ -122,6 +117,9 @@ func (mc *Cluster) IsSchedulerExisted(name string) (bool, error) { return false,
 
 // IsSchedulerDisabled checks if the scheduler with name is disabled or not.
 func (mc *Cluster) IsSchedulerDisabled(name string) (bool, error) { return false, nil }
+
+// CheckSchedulingAllowance checks if the cluster allows scheduling currently.
+func (mc *Cluster) CheckSchedulingAllowance() (bool, error) { return true, nil }
 
 // ScanRegions scans region with start key, until number greater than limit.
 func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {

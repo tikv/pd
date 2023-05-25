@@ -826,11 +826,6 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 	return c.unsafeRecoveryController
 }
 
-// IsUnsafeRecovering returns if the cluster is in unsafe recovering.
-func (c *RaftCluster) IsUnsafeRecovering() bool {
-	return c.unsafeRecoveryController.IsRunning()
-}
-
 // AddSuspectKeyRange adds the key range with the its ruleID as the key
 // The instance of each keyRange is like following format:
 // [2][]byte: start key/end key
@@ -2710,4 +2705,26 @@ func (c *RaftCluster) GetPausedSchedulerDelayAt(name string) (int64, error) {
 // GetPausedSchedulerDelayUntil returns DelayUntil of a paused scheduler
 func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 	return c.coordinator.GetPausedSchedulerDelayUntil(name)
+}
+
+var (
+	onlineUnsafeRecoveryStatus = schedulingAllowanceStatusGauge.WithLabelValues("online-unsafe-recovery")
+	haltSchedulingStatus       = schedulingAllowanceStatusGauge.WithLabelValues("halt-scheduling")
+)
+
+// CheckSchedulingAllowance checks if the cluster allows scheduling currently.
+func (c *RaftCluster) CheckSchedulingAllowance() (bool, error) {
+	// If the cluster is in the process of online unsafe recovery, it should not allow scheduling.
+	if c.GetUnsafeRecoveryController().IsRunning() {
+		onlineUnsafeRecoveryStatus.Set(1)
+		return false, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	}
+	onlineUnsafeRecoveryStatus.Set(0)
+	// If the halt-scheduling is set, it should not allow scheduling.
+	if c.opt.IsSchedulingHalted() {
+		haltSchedulingStatus.Set(1)
+		return false, errs.ErrSchedulingIsHalted.FastGenByArgs()
+	}
+	haltSchedulingStatus.Set(0)
+	return true, nil
 }

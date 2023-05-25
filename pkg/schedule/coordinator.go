@@ -142,8 +142,7 @@ func (c *Coordinator) PatrolRegions() {
 			log.Info("patrol regions has been stopped")
 			return
 		}
-		if c.cluster.IsUnsafeRecovering() {
-			// Skip patrolling regions during unsafe recovery.
+		if allowed, _ := c.cluster.CheckSchedulingAllowance(); !allowed {
 			continue
 		}
 
@@ -559,7 +558,7 @@ func (c *Coordinator) CollectSchedulerMetrics() {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
 		// See issue #1341.
-		if !s.IsPaused() && !s.cluster.IsUnsafeRecovering() {
+		if allowed, _ := s.cluster.CheckSchedulingAllowance(); !s.IsPaused() && allowed {
 			allowScheduler = 1
 		}
 		schedulerStatusGauge.WithLabelValues(s.Scheduler.GetName(), "allow").Set(allowScheduler)
@@ -1029,7 +1028,14 @@ func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 		}
 		return false
 	}
-	if s.IsPaused() || s.cluster.IsUnsafeRecovering() {
+	allowed, _ := s.cluster.CheckSchedulingAllowance()
+	if !allowed {
+		if diagnosable {
+			s.diagnosticRecorder.setResultFromStatus(halted)
+		}
+		return false
+	}
+	if s.IsPaused() {
 		if diagnosable {
 			s.diagnosticRecorder.setResultFromStatus(paused)
 		}

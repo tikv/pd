@@ -44,8 +44,8 @@ type ClusterInformer interface {
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
 	IsSchedulerExisted(name string) (bool, error)
 	IsSchedulerDisabled(name string) (bool, error)
+	CheckSchedulingAllowance() (bool, error)
 	GetPersistOptions() *config.PersistOptions
-	IsUnsafeRecovering() bool
 }
 
 // RegionHealthCluster is an aggregate interface that wraps multiple interfaces
