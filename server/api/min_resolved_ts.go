@@ -59,7 +59,7 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 		return
 	}
 	value := c.GetStoreMinResolvedTS(storeID)
-	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
+	persistInterval := c.GetOpts().GetPDServerConfig().MinResolvedTSPersistenceInterval
 	h.rd.JSON(w, http.StatusOK, minResolvedTS{
 		MinResolvedTS:   value,
 		PersistInterval: persistInterval,
