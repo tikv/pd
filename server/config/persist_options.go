@@ -184,13 +184,6 @@ func (o *PersistOptions) SetPlacementRulesCacheEnabled(enabled bool) {
 	o.SetReplicationConfig(v)
 }
 
-// SetWitnessEnabled set EanbleWitness
-func (o *PersistOptions) SetWitnessEnabled(enabled bool) {
-	v := o.GetScheduleConfig().Clone()
-	v.EnableWitness = enabled
-	o.SetScheduleConfig(v)
-}
-
 // GetStrictlyMatchLabel returns whether check label strict.
 func (o *PersistOptions) GetStrictlyMatchLabel() bool {
 	return o.GetReplicationConfig().StrictlyMatchLabel
@@ -925,4 +918,16 @@ func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clien
 		err = o.SetTTLData(ctx, client, "default-remove-peer", fmt.Sprint(ratePerMin), ttl)
 	}
 	return err
+}
+
+// SetHaltScheduling set HaltScheduling.
+func (o *PersistOptions) SetHaltScheduling(halt bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.HaltScheduling = halt
+	o.SetScheduleConfig(v)
+}
+
+// IsSchedulingHalted returns if PD scheduling is halted.
+func (o *PersistOptions) IsSchedulingHalted() bool {
+	return o.GetScheduleConfig().HaltScheduling
 }

@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -185,7 +184,7 @@ func (p *solver) getTolerantResource() int64 {
 func adjustTolerantRatio(cluster sche.ClusterInformer, kind constant.ScheduleKind) float64 {
 	var tolerantSizeRatio float64
 	switch c := cluster.(type) {
-	case *schedule.RangeCluster:
+	case *rangeCluster:
 		// range cluster use a separate configuration
 		tolerantSizeRatio = c.GetTolerantSizeRatio()
 	default:

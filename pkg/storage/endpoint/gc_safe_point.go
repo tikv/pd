@@ -87,7 +87,7 @@ func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSaf
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
-		if ssp.ServiceID == gcWorkerServiceSafePointID {
+		if ssp.ServiceID == GCWorkerServiceSafePointID {
 			hasGCWorker = true
 			// If gc_worker's expire time is incorrectly set, fix it.
 			if ssp.ExpiredAt != math.MaxInt64 {
@@ -125,7 +125,7 @@ func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSaf
 
 func (se *StorageEndpoint) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
 	ssp := &ServiceSafePoint{
-		ServiceID: gcWorkerServiceSafePointID,
+		ServiceID: GCWorkerServiceSafePointID,
 		SafePoint: initialValue,
 		ExpiredAt: math.MaxInt64,
 	}
@@ -165,7 +165,7 @@ func (se *StorageEndpoint) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
 
-	if ssp.ServiceID == gcWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
+	if ssp.ServiceID == GCWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
 		return errors.New("TTL of gc_worker's service safe point must be infinity")
 	}
 
@@ -180,7 +180,7 @@ func (se *StorageEndpoint) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 
 // RemoveServiceGCSafePoint removes a GC safepoint for the service
 func (se *StorageEndpoint) RemoveServiceGCSafePoint(serviceID string) error {
-	if serviceID == gcWorkerServiceSafePointID {
+	if serviceID == GCWorkerServiceSafePointID {
 		return errors.New("cannot remove service safe point of gc_worker")
 	}
 	key := gcSafePointServicePath(serviceID)

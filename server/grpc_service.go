@@ -1500,34 +1500,6 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	}, nil
 }
 
-// GetGCSafePointV2 implements gRPC PDServer.
-// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
-// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
-func (s *GrpcServer) GetGCSafePointV2(_ context.Context, _ *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointV2Response, error) {
-	return nil, errors.New("not implemented")
-}
-
-// WatchGCSafePointV2 implements gRPC PDServer.
-// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
-// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
-func (s *GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, server pdpb.PD_WatchGCSafePointV2Server) error {
-	return errors.New("not implemented")
-}
-
-// UpdateGCSafePointV2 implements gRPC PDServer.
-// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
-// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
-func (s *GrpcServer) UpdateGCSafePointV2(_ context.Context, _ *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointV2Response, error) {
-	return nil, errors.New("not implemented")
-}
-
-// UpdateServiceSafePointV2 implements gRPC PDServer.
-// Note: we need latest version of kvproto/master, but there was earlier commit https://github.com/pingcap/kvproto/pull/1111
-// whose server side implementation hasn't been merged, so we add this method to avoid compile error.
-func (s *GrpcServer) UpdateServiceSafePointV2(_ context.Context, _ *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceSafePointV2Response, error) {
-	return nil, errors.New("not implemented")
-}
-
 // GetOperator gets information about the operator belonging to the specify region.
 func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
@@ -2151,6 +2123,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 					}
 				}
 			}
+
 			if len(cfgs) > 0 {
 				if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs, Revision: res.Header.GetRevision()}); err != nil {
 					return err

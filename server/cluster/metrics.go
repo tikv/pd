@@ -41,38 +41,6 @@ var (
 			Help:      "Counter of the bucket event",
 		}, []string{"event"})
 
-	schedulerStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "status",
-			Help:      "Status of the scheduler.",
-		}, []string{"kind", "type"})
-
-	hotSpotStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "hotspot",
-			Name:      "status",
-			Help:      "Status of the hotspot.",
-		}, []string{"address", "store", "type"})
-
-	hotPendingSum = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "hot_pending_sum",
-			Help:      "Pending influence sum of store in hot region scheduler.",
-		}, []string{"store", "rw", "dim"})
-
-	patrolCheckRegionsGauge = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "checker",
-			Name:      "patrol_regions_time",
-			Help:      "Time spent of patrol checks region.",
-		})
-
 	updateStoreStatsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -95,14 +63,6 @@ var (
 			Name:      "cluster_state_current",
 			Help:      "Current state of the cluster",
 		}, []string{"state"})
-
-	regionListGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "checker",
-			Name:      "region_list",
-			Help:      "Number of region in waiting list",
-		}, []string{"type"})
 
 	storesProgressGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -135,17 +95,22 @@ var (
 			Name:      "store_sync",
 			Help:      "The state of store sync config",
 		}, []string{"address", "state"})
+
+	schedulingAllowanceStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "scheduling",
+			Name:      "allowance_status",
+			Help:      "Status of the scheduling allowance.",
+		}, []string{"kind"})
 )
 
 func init() {
 	prometheus.MustRegister(regionEventCounter)
 	prometheus.MustRegister(healthStatusGauge)
-	prometheus.MustRegister(schedulerStatusGauge)
-	prometheus.MustRegister(hotSpotStatusGauge)
-	prometheus.MustRegister(patrolCheckRegionsGauge)
+	prometheus.MustRegister(schedulingAllowanceStatusGauge)
 	prometheus.MustRegister(clusterStateCPUGauge)
 	prometheus.MustRegister(clusterStateCurrent)
-	prometheus.MustRegister(regionListGauge)
 	prometheus.MustRegister(bucketEventCounter)
 	prometheus.MustRegister(storesProgressGauge)
 	prometheus.MustRegister(storesSpeedGauge)

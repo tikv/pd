@@ -37,14 +37,14 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 
-	c.coordinator.opController.Dispatch(region, operator.DispatchFromHeartBeat)
+	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat)
 	return nil
 }
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
-	if c.GetUnsafeRecoveryController().IsRunning() {
-		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	if allowed, err := c.CheckSchedulingAllowance(); !allowed {
+		return nil, err
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
@@ -105,8 +105,8 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 
 // HandleAskBatchSplit handles the batch split request.
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
-	if c.GetUnsafeRecoveryController().IsRunning() {
-		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	if allowed, err := c.CheckSchedulingAllowance(); !allowed {
+		return nil, err
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()

@@ -710,7 +710,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":20000},"state":{"initialized":false}}},"priority":0}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":20000},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":10000},"action":1}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -719,10 +719,16 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 						},
 					},
 				}
+				gs.RunawaySettings = &rmpb.RunawaySettings{
+					Rule: &rmpb.RunawayRule{
+						ExecElapsedTimeMs: 10000,
+					},
+					Action: rmpb.RunawayAction_CoolDown,
+				}
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":1000},"action":2,"watch":{"last_duration_ms":100000,"type":1}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -730,6 +736,16 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 							FillRate:   30000,
 							BurstLimit: -1,
 						},
+					},
+				}
+				gs.RunawaySettings = &rmpb.RunawaySettings{
+					Rule: &rmpb.RunawayRule{
+						ExecElapsedTimeMs: 1000,
+					},
+					Action: rmpb.RunawayAction_Kill,
+					Watch: &rmpb.RunawayWatch{
+						Type:           rmpb.RunawayWatchType_Similar,
+						LastDurationMs: 100000,
 					},
 				}
 			},
