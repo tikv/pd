@@ -687,7 +687,7 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 ) *KeyspaceGroupManager {
 	return NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+		0, legacySvcRootPath, tsoSvcRootPath, suite.cfg)
 }
 
 // runTestLoadMultipleKeyspaceGroupsAssignment tests the loading of multiple keyspace group assignment.
