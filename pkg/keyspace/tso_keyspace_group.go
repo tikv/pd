@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/balancer"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -149,6 +150,10 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 	ticker := time.NewTicker(allocNodesToKeyspaceGroupsInterval)
+	failpoint.Inject("acceleratedAllocNodes", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(time.Millisecond * 100)
+	})
 	defer ticker.Stop()
 	for {
 		select {
@@ -626,9 +631,12 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 	defer cancel()
 	ticker := time.NewTicker(allocNodesInterval)
 	defer ticker.Stop()
+
+	var kg *endpoint.KeyspaceGroup
 	nodes := make([]endpoint.KeyspaceGroupMember, 0, desiredReplicaCount)
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		kg, err := m.store.LoadKeyspaceGroup(txn, id)
+		var err error
+		kg, err = m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
 			return err
 		}
@@ -672,6 +680,7 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 	if err != nil {
 		return nil, err
 	}
+	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
 	log.Info("alloc nodes for keyspace group", zap.Uint32("id", id), zap.Reflect("nodes", nodes))
 	return nodes, nil
 }

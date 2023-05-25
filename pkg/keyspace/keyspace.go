@@ -390,7 +390,9 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 		}
 		return nil
 	})
-	meta.Id = spaceID
+	if meta != nil {
+		meta.Id = spaceID
+	}
 	return meta, err
 }
 
@@ -671,8 +673,10 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 		)
 	}()
 	for moreToPatrol {
+		var defaultKeyspaceGroup *endpoint.KeyspaceGroup
 		err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-			defaultKeyspaceGroup, err := manager.kgm.store.LoadKeyspaceGroup(txn, utils.DefaultKeyspaceGroupID)
+			var err error
+			defaultKeyspaceGroup, err = manager.kgm.store.LoadKeyspaceGroup(txn, utils.DefaultKeyspaceGroupID)
 			if err != nil {
 				return err
 			}
@@ -752,6 +756,7 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 		if err != nil {
 			return err
 		}
+		manager.kgm.groups[endpoint.StringUserKind(defaultKeyspaceGroup.UserKind)].Put(defaultKeyspaceGroup)
 		// If all keyspaces in the current batch are assigned, update the next start ID.
 		manager.nextPatrolStartID = nextStartID
 	}

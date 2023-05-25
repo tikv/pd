@@ -79,7 +79,8 @@ func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, na
 	return true, meta.KeyspaceMeta
 }
 
-func mustCreateKeyspace(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceParams) *keyspacepb.KeyspaceMeta {
+// MustCreateKeyspace creates a keyspace with HTTP API.
+func MustCreateKeyspace(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceParams) *keyspacepb.KeyspaceMeta {
 	data, err := json.Marshal(request)
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix, bytes.NewBuffer(data))
