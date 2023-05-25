@@ -81,12 +81,13 @@ type Config interface {
 	IsDebugMetricsEnabled() bool
 	GetClusterVersion() *semver.Version
 	GetStoreLimitVersion() string
+	IsDiagnosticAllowed() bool
 	// for test purpose
 	SetPlacementRuleEnabled(bool)
 	SetSplitMergeInterval(time.Duration)
 	SetMaxReplicas(int)
 	SetPlacementRulesCacheEnabled(bool)
-	SetWitnessEnabled(bool)
+	SetEnableWitness(bool)
 	// only for store configuration
 	UseRaftV2()
 }

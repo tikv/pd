@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -192,7 +191,7 @@ func (l *scatterRangeScheduler) allowBalanceRegion(cluster sche.ClusterInformer)
 func (l *scatterRangeScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	scatterRangeCounter.Inc()
 	// isolate a new cluster according to the key range
-	c := schedule.GenRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())
+	c := genRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())
 	c.SetTolerantSizeRatio(2)
 	if l.allowBalanceLeader(cluster) {
 		ops, _ := l.balanceLeader.Schedule(c, false)

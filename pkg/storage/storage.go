@@ -40,7 +40,7 @@ type Storage interface {
 	endpoint.GCSafePointStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
-	endpoint.KeyspaceGCSafePointStorage
+	endpoint.SafePointV2Storage
 	endpoint.KeyspaceStorage
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage

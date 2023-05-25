@@ -151,6 +151,8 @@ type Client interface {
 	MetaStorageClient
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
+	// GCClient manages gcSafePointV2 and serviceSafePointV2
+	GCClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
 	// Close closes the client.

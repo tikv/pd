@@ -96,6 +96,11 @@ error = '''
 TiKV cluster not bootstrapped, please start TiKV first
 '''
 
+["PD:cluster:ErrSchedulingIsHalted"]
+error = '''
+scheduling is halted
+'''
+
 ["PD:cluster:ErrStoreIsUp"]
 error = '''
 store is still up, please remove store gracefully
