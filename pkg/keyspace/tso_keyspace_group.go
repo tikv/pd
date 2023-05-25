@@ -167,7 +167,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 		}
 		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
 		if err != nil {
-			log.Error("failed to load the all keyspace groups", zap.Error(err))
+			log.Error("failed to load all keyspace groups", zap.Error(err))
 			continue
 		}
 		withError := false
@@ -681,7 +681,7 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 		return nil, err
 	}
 	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
-	log.Info("alloc nodes for keyspace group", zap.Uint32("id", id), zap.Reflect("nodes", nodes))
+	log.Info("alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", id), zap.Reflect("nodes", nodes))
 	return nodes, nil
 }
 
