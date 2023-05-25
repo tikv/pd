@@ -91,7 +91,6 @@ func (s *TSODispatcher) dispatch(
 	defer ctxCancel()
 	defer s.dispatchChs.Delete(forwardedHost)
 
-	log.Info("create tso forward stream", zap.String("forwarded-host", forwardedHost))
 	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(ctx, clientConn)
 	if err != nil || forwardStream == nil {
 		log.Error("create tso forwarding stream error",
