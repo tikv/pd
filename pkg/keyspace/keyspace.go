@@ -649,6 +649,10 @@ func (manager *Manager) allocID() (uint32, error) {
 // PatrolKeyspaceAssignment is used to patrol all keyspaces and assign them to the keyspace groups.
 func (manager *Manager) PatrolKeyspaceAssignment() error {
 	var (
+		// Some statistics info.
+		start                  = time.Now()
+		patrolledKeyspaceCount uint64
+		assignedKeyspaceCount  uint64
 		// The current start ID of the patrol, used for logging.
 		currentStartID = manager.nextPatrolStartID
 		// The next start ID of the patrol, used for the next patrol.
@@ -656,6 +660,16 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 		moreToPatrol = true
 		err          error
 	)
+	defer func() {
+		log.Debug("[keyspace] patrol keyspace assignment finished",
+			zap.Duration("cost", time.Since(start)),
+			zap.Uint64("patrolled-keyspace-count", patrolledKeyspaceCount),
+			zap.Uint64("assigned-keyspace-count", assignedKeyspaceCount),
+			zap.Int("batch-size", keyspacePatrolBatchSize),
+			zap.Uint32("current-start-id", currentStartID),
+			zap.Uint32("next-start-id", nextStartID),
+		)
+	}()
 	for moreToPatrol {
 		err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			defaultKeyspaceGroup, err := manager.kgm.store.LoadKeyspaceGroup(txn, utils.DefaultKeyspaceGroupID)
@@ -694,6 +708,7 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 				if ks == nil {
 					continue
 				}
+				patrolledKeyspaceCount++
 				manager.metaLock.Lock(ks.Id)
 				if ks.Config == nil {
 					ks.Config = make(map[string]string, 1)
@@ -720,6 +735,7 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 						zap.Uint32("keyspace-id", ks.Id), zap.Error(err))
 					return err
 				}
+				assignedKeyspaceCount++
 			}
 			if assigned {
 				err = manager.kgm.store.SaveKeyspaceGroup(txn, defaultKeyspaceGroup)
