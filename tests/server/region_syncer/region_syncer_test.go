@@ -49,7 +49,7 @@ func TestRegionSyncer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/syncer/noFastExitSync", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
 
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
@@ -151,7 +151,7 @@ func TestRegionSyncer(t *testing.T) {
 		re.Equal(region.GetLeader(), r.GetLeader())
 		re.Equal(region.GetBuckets(), r.GetBuckets())
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/syncer/noFastExitSync"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/noFastExitSync"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush"))
 }
 
