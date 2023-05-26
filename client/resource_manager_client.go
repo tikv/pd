@@ -51,6 +51,7 @@ type ResourceManagerClient interface {
 	LoadResourcrGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	WatchResourceGroup(ctx context.Context, revision int64) (chan []*rmpb.ResourceGroup, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
+	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error)
 }
 
 // resourceManagerClient gets the ResourceManager client of current PD leader.
