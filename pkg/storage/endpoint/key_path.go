@@ -53,11 +53,10 @@ const (
 	resourceGroupStatesPath   = "states"
 	controllerConfigPath      = "controller"
 	// tso storage endpoint has prefix `tso`
-	microserviceKey = "ms"
-	tsoServiceKey   = utils.TSOServiceName
-	timestampKey    = "timestamp"
+	tsoServiceKey = utils.TSOServiceName
+	timestampKey  = "timestamp"
 
-	tsoKeyspaceGroupPrefix     = "tso/keyspace_groups"
+	tsoKeyspaceGroupPrefix     = tsoServiceKey + "/" + utils.KeyspaceGroupsKey
 	keyspaceGroupMembershipKey = "membership"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
@@ -238,20 +237,10 @@ func KeyspaceGroupIDPath(id uint32) string {
 	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey, encodeKeyspaceGroupID(id))
 }
 
-// ExtractKeyspaceGroupIDFromPath extracts keyspace group id from the given path, which contains
-// the pattern of `tso/keyspace_groups/membership/(\d{5})$`.
-func ExtractKeyspaceGroupIDFromPath(path string) (uint32, error) {
+// GetCompiledKeyspaceGroupIDRegexp returns the compiled regular expression for matching keyspace group id.
+func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 	pattern := strings.Join([]string{KeyspaceGroupIDPrefix(), `(\d{5})$`}, "/")
-	re := regexp.MustCompile(pattern)
-	match := re.FindStringSubmatch(path)
-	if match == nil {
-		return 0, fmt.Errorf("invalid keyspace group id path: %s", path)
-	}
-	id, err := strconv.ParseUint(match[1], 10, 32)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse keyspace group ID: %v", err)
-	}
-	return uint32(id), nil
+	return regexp.MustCompile(pattern)
 }
 
 // encodeKeyspaceGroupID from uint32 to string.

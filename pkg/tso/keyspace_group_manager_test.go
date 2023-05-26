@@ -183,7 +183,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/delayLoad", "return(3)"))
 	err := mgr.Initialize()
 	// If loading keyspace groups timeout, the initialization should fail with ErrLoadKeyspaceGroupsTerminated.
-	re.Equal(errs.ErrLoadKeyspaceGroupsTerminated, err)
+	re.Contains(err.Error(), errs.ErrLoadKeyspaceGroupsTerminated.Error())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/delayLoad"))
 }
 
@@ -592,9 +592,8 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 	electionNamePrefix, legacySvcRootPath, tsoSvcRootPath string,
 ) *KeyspaceGroupManager {
 	return NewKeyspaceGroupManager(
-		suite.ctx, tsoServiceID, suite.etcdClient, nil,
-		electionNamePrefix, legacySvcRootPath, tsoSvcRootPath,
-		suite.cfg)
+		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
+		legacySvcRootPath, tsoSvcRootPath, suite.cfg)
 }
 
 // runTestLoadMultipleKeyspaceGroupsAssignment tests the loading of multiple keyspace group assignment.
