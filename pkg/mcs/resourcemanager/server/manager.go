@@ -367,7 +367,11 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if name == reservedDefaultGroupName {
 					continue
 				}
-				availableRUCounter.WithLabelValues(name).Set(group.getRUToken())
+				ru := group.getRUToken()
+				if ru < 0 {
+					ru = 0
+				}
+				availableRUCounter.WithLabelValues(name).Set(ru)
 			}
 			m.RUnlock()
 		}
