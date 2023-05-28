@@ -394,6 +394,7 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
+	log.Info("[tso] grpc server starts serving", zap.String("address", l.Addr().String()))
 	err := s.grpcServer.Serve(l)
 	if s.IsClosed() {
 		log.Info("[tso] grpc server stopped")
@@ -406,6 +407,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
+	log.Info("http server starts serving", zap.String("address", l.Addr().String()))
 	err := s.httpServer.Serve(l)
 	if s.IsClosed() {
 		log.Info("http server stopped")
@@ -414,7 +416,7 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	}
 }
 
-func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
+func (s *Server) startGRPCAndHTTPServers(serverReadyChan chan<- struct{}, l net.Listener) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
@@ -441,6 +443,7 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 	s.serverLoopWg.Add(1)
 	go s.startHTTPServer(s.httpListener)
 
+	serverReadyChan <- struct{}{}
 	if err := mux.Serve(); err != nil {
 		if s.IsClosed() {
 			log.Info("[tso] mux stopped serving", errs.ZapError(err))
@@ -461,7 +464,6 @@ func (s *Server) stopHTTPServer() {
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
-		log.Warn("[tso] http server graceful shutdown timeout, forcing close")
 		s.httpServer.Shutdown(ctx)
 	}()
 
@@ -469,6 +471,7 @@ func (s *Server) stopHTTPServer() {
 	case <-ch:
 	case <-ctx.Done():
 		// Took too long, manually close open transports
+		log.Warn("[tso] http server graceful shutdown timeout, forcing close")
 		s.httpServer.Close()
 		// concurrent Graceful Shutdown should be interrupted
 		<-ch
@@ -557,8 +560,11 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 
+	serverReadyChan := make(chan struct{})
+	defer close(serverReadyChan)
 	s.serverLoopWg.Add(1)
-	go s.startGRPCAndHTTPServers(s.muxListener)
+	go s.startGRPCAndHTTPServers(serverReadyChan, s.muxListener)
+	<-serverReadyChan
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
