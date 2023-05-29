@@ -526,11 +526,33 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 	err := mgr.Initialize()
 	re.NoError(err)
 
-	// Should fail because keyspace 0 is not in keyspace group 1 and the API returns
-	// the keyspace group 0 to which the keyspace 0 belongs.
+	// Wait until the keyspace group 0 is ready for serving tso requests.
+	testutil.Eventually(re, func() bool {
+		member, err := mgr.GetElectionMember(0, 0)
+		if err != nil {
+			return false
+		}
+		return member.IsLeader()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// Should succeed because keyspace 0 is actually in keyspace group 0, which is served
+	// by the current keyspace group manager, instead of keyspace group 1 in ask, and
+	// keyspace group 0 is returned in the response.
 	_, keyspaceGroupBelongTo, err := mgr.HandleTSORequest(0, 1, GlobalDCLocation, 1)
-	re.Error(err)
+	re.NoError(err)
 	re.Equal(uint32(0), keyspaceGroupBelongTo)
+
+	// Should succeed because keyspace 100 doesn't belong to any keyspace group, so it will
+	// be served by the default keyspace group 0, and keyspace group 0 is returned in the response.
+	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(100, 0, GlobalDCLocation, 1)
+	re.NoError(err)
+	re.Equal(uint32(0), keyspaceGroupBelongTo)
+
+	// Should fail because keyspace 100 doesn't belong to any keyspace group, and the keyspace group
+	// 1 in ask doesn't exist.
+	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(100, 1, GlobalDCLocation, 1)
+	re.Error(err)
+	re.Equal(uint32(1), keyspaceGroupBelongTo)
 }
 
 type etcdEvent struct {
