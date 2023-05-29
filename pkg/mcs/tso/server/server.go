@@ -422,7 +422,7 @@ func (s *Server) startGRPCAndHTTPServers(serverReadyChan chan<- struct{}, l net.
 
 	mux := cmux.New(l)
 	// Don't hang on matcher after closing listener
-	mux.SetReadTimeout(time.Second)
+	mux.SetReadTimeout(3 * time.Second)
 	grpcL := mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
 	if s.secure {
 		s.httpListener = mux.Match(cmux.Any())
@@ -438,9 +438,8 @@ func (s *Server) startGRPCAndHTTPServers(serverReadyChan chan<- struct{}, l net.
 
 	handler, _ := SetUpRestHandler(s.service)
 	s.httpServer = &http.Server{
-		Handler:           handler,
-		ReadTimeout:       5 * time.Minute,
-		ReadHeaderTimeout: 5 * time.Second,
+		Handler:     handler,
+		ReadTimeout: 3 * time.Second,
 	}
 	s.serverLoopWg.Add(1)
 	go s.startHTTPServer(s.httpListener)
