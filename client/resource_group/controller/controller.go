@@ -57,10 +57,9 @@ const (
 
 // ResourceGroupQuarantineManager
 type ResourceGroupQuarantineManager interface {
-	//
 	Watch(resourceGroupName string, convict interface{}) error
-	Action(resourceGroupName string) (rmpb.RunawayAction, error)
-	Examine(resourceGroupName string, convict interface{}) (bool, rmpb.RunawayAction, error)
+	RunawaySettings(resourceGroupName string) (*rmpb.RunawaySettings, error)
+	Examine(resourceGroupName string, convict interface{}) (bool, rmpb.RunawayAction)
 }
 
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
@@ -358,7 +357,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		gc.mu.Lock()
 		latestConsumption := *gc.mu.consumption
 		gc.mu.Unlock()
-		if equalRU(latestConsumption, *gc.run.consumption) {
+		if equalRU(latestConsumption, *gc.run.consumption) && (gc.convicts == nil || gc.convicts.Len() == 0) {
 			if gc.tombstone {
 				c.groupsController.Delete(resourceGroupName)
 				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName)
@@ -474,17 +473,31 @@ func (c *ResourceGroupsController) OnResponse(
 
 // Watch
 func (c *ResourceGroupsController) Watch(resourceGroupName string, convict interface{}) error {
-	return nil
+	tmp, ok := c.groupsController.Load(resourceGroupName)
+	if !ok {
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
+		return errors.Errorf("no resource group")
+	}
+	return tmp.(*groupCostController).watch(convict)
 }
 
-// Action
-func (c *ResourceGroupsController) Action(resourceGroupName string) (rmpb.RunawayAction, error) {
-	return 0, nil
+// RunawaySettings
+func (c *ResourceGroupsController) RunawaySettings(resourceGroupName string) (*rmpb.RunawaySettings, error) {
+	tmp, ok := c.groupsController.Load(resourceGroupName)
+	if !ok {
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
+		return nil, errors.Errorf("no resource group")
+	}
+	return tmp.(*groupCostController).runawaySettings()
 }
 
 // Examine
-func (c *ResourceGroupsController) Examine(resourceGroupName string, convict interface{}) (bool, rmpb.RunawayAction, error) {
-	return false, 0, nil
+func (c *ResourceGroupsController) Examine(resourceGroupName string, convict interface{}) (bool, rmpb.RunawayAction) {
+	tmp, ok := c.groupsController.Load(resourceGroupName)
+	if !ok {
+		return false, 0
+	}
+	return tmp.(*groupCostController).examine(convict)
 }
 
 type groupCostController struct {
@@ -1225,7 +1238,7 @@ func (gc *groupCostController) getKVCalculator() *KVCalculator {
 }
 
 // Watch
-func (gc *groupCostController) Watch(convict interface{}) error {
+func (gc *groupCostController) watch(convict interface{}) error {
 	gc.metaLock.RLock()
 	defer gc.metaLock.RUnlock()
 	if gc.convicts == nil {
@@ -1239,22 +1252,21 @@ func (gc *groupCostController) Watch(convict interface{}) error {
 	return nil
 }
 
-// Action
-func (gc *groupCostController) Action() (rmpb.RunawayAction, error) {
+func (gc *groupCostController) runawaySettings() (*rmpb.RunawaySettings, error) {
 	gc.metaLock.RLock()
 	defer gc.metaLock.RUnlock()
 	if gc.meta.RunawaySettings == nil {
-		return 0, errors.Errorf("no runaway settings")
+		return nil, errors.Errorf("no runaway settings")
 	}
-	return gc.meta.RunawaySettings.Action, nil
+	return gc.meta.RunawaySettings, nil
 }
 
 // Examine
-func (gc *groupCostController) Examine(convict interface{}) (bool, rmpb.RunawayAction, error) {
+func (gc *groupCostController) examine(convict interface{}) (bool, rmpb.RunawayAction) {
 	gc.metaLock.RLock()
 	defer gc.metaLock.RUnlock()
 	if gc.convicts == nil {
-		return false, 0, errors.Errorf("no runaway settings")
+		return false, 0
 	}
-	return gc.convicts.Exists(convict), gc.meta.RunawaySettings.Action, nil
+	return gc.convicts.Exists(convict), gc.meta.RunawaySettings.Action
 }
