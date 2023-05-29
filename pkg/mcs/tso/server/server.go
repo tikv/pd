@@ -394,12 +394,12 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
-	log.Info("[tso] grpc server starts serving", zap.String("address", l.Addr().String()))
+	log.Info("grpc server starts serving", zap.String("address", l.Addr().String()))
 	err := s.grpcServer.Serve(l)
 	if s.IsClosed() {
-		log.Info("[tso] grpc server stopped")
+		log.Info("grpc server stopped")
 	} else {
-		log.Fatal("[tso] grpc server stopped unexpectedly", errs.ZapError(err))
+		log.Fatal("grpc server stopped unexpectedly", errs.ZapError(err))
 	}
 }
 
@@ -447,16 +447,16 @@ func (s *Server) startGRPCAndHTTPServers(serverReadyChan chan<- struct{}, l net.
 	serverReadyChan <- struct{}{}
 	if err := mux.Serve(); err != nil {
 		if s.IsClosed() {
-			log.Info("[tso] mux stopped serving", errs.ZapError(err))
+			log.Info("mux stopped serving", errs.ZapError(err))
 		} else {
-			log.Fatal("[tso] mux stopped serving unexpectedly", errs.ZapError(err))
+			log.Fatal("mux stopped serving unexpectedly", errs.ZapError(err))
 		}
 	}
 }
 
 func (s *Server) stopHTTPServer() {
-	log.Info("[tso] stopping http server")
-	defer log.Info("[tso] http server stopped")
+	log.Info("stopping http server")
+	defer log.Info("http server stopped")
 
 	ctx, cancel := context.WithTimeout(context.Background(), mcsutils.DefaultHTTPGracefulShutdownTimeout)
 	defer cancel()
@@ -472,7 +472,7 @@ func (s *Server) stopHTTPServer() {
 	case <-ch:
 	case <-ctx.Done():
 		// Took too long, manually close open transports
-		log.Warn("[tso] http server graceful shutdown timeout, forcing close")
+		log.Warn("http server graceful shutdown timeout, forcing close")
 		s.httpServer.Close()
 		// concurrent Graceful Shutdown should be interrupted
 		<-ch
@@ -480,8 +480,8 @@ func (s *Server) stopHTTPServer() {
 }
 
 func (s *Server) stopGRPCServer() {
-	log.Info("[tso] stopping grpc server")
-	defer log.Info("[tso] grpc server stopped")
+	log.Info("stopping grpc server")
+	defer log.Info("grpc server stopped")
 
 	// Do not grpc.Server.GracefulStop with TLS enabled etcd server
 	// See https://github.com/grpc/grpc-go/issues/1384#issuecomment-317124531
@@ -509,7 +509,7 @@ func (s *Server) stopGRPCServer() {
 	case <-ctx.Done():
 		// Took too long, manually close open transports
 		// e.g. watch streams
-		log.Warn("[tso] grpc server graceful shutdown timeout, forcing close")
+		log.Warn("grpc server graceful shutdown timeout, forcing close")
 		s.grpcServer.Stop()
 		// concurrent GracefulStop should be interrupted
 		<-ch
