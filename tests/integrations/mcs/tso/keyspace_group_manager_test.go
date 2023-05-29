@@ -195,7 +195,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 
 						// Make sure every keyspace group is using the right timestamp path
 						// for loading/saving timestamp from/to etcd and the right primary path
-						// for leader election.
+						// for primary election.
 						var (
 							timestampPath string
 							primaryPath   string
