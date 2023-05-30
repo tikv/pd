@@ -48,7 +48,7 @@ type ResourceManagerClient interface {
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
-	LoadResourcrGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
+	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	WatchResourceGroup(ctx context.Context, revision int64) (chan []*rmpb.ResourceGroup, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error)
@@ -163,7 +163,7 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	return resp.GetBody(), nil
 }
 
-func (c *client) LoadResourcrGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
+func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
 	resp, err := c.Get(ctx, GroupSettingsPathPrefixBytes, WithPrefix())
 	if err != nil {
 		return nil, 0, err

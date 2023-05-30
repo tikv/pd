@@ -198,7 +198,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		re.NoError(err)
 		re.Contains(resp, "Success!")
 	}
-	lresp, revision, err := cli.LoadResourcrGroups(suite.ctx)
+	lresp, revision, err := cli.LoadResourceGroups(suite.ctx)
 	re.NoError(err)
 	re.Equal(len(lresp), 4)
 	re.Greater(revision, int64(0))
@@ -233,9 +233,10 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/watchStreamError", "return(true)"))
 	for i := 0; i < 2; i++ {
 		if i == 1 {
-			time.Sleep(10 * time.Millisecond)
-			meta = controller.GetActiveResourceGroup("test0")
-			re.Equal(meta.RUSettings.RU.Settings.FillRate, uint64(20000))
+			testutil.Eventually(re, func() bool {
+				meta = controller.GetActiveResourceGroup("test0")
+				return meta.RUSettings.RU.Settings.FillRate == uint64(20000)
+			}, testutil.WithTickInterval(50*time.Millisecond))
 			re.NoError(failpoint.Enable("github.com/tikv/pd/client/watchStreamError", "return(true)"))
 		}
 		group.Name = "test" + strconv.Itoa(i)
@@ -248,9 +249,10 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	meta = controller.GetActiveResourceGroup("test1")
 	re.Equal(meta.RUSettings.RU.Settings.FillRate, uint64(10000))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/watchStreamError"))
-	time.Sleep(time.Millisecond * 500)
-	meta = controller.GetActiveResourceGroup("test1")
-	re.Equal(meta.RUSettings.RU.Settings.FillRate, uint64(20000))
+	testutil.Eventually(re, func() bool {
+		meta = controller.GetActiveResourceGroup("test1")
+		return meta.RUSettings.RU.Settings.FillRate == uint64(20000)
+	}, testutil.WithTickInterval(100*time.Millisecond))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/watchStreamError"))
 
 	for i := 2; i < 9; i++ {

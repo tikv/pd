@@ -68,7 +68,7 @@ type ResourceGroupProvider interface {
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]pd.GlobalConfigItem, int64, error)
-	LoadResourcrGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
+	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	Watch(ctx context.Context, key []byte, opts ...pd.OpOption) (chan []*meta_storagepb.Event, error)
 }
 
@@ -208,7 +208,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker = time.NewTicker(time.Millisecond * 100)
 		})
 
-		_, revision, err := c.provider.LoadResourcrGroups(ctx)
+		_, revision, err := c.provider.LoadResourceGroups(ctx)
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
