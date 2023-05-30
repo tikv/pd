@@ -103,6 +103,14 @@ var (
 			Name:      "request_count",
 			Help:      "The number of read/write requests for all resource groups.",
 		}, []string{resourceGroupNameLabel, typeLabel})
+
+	availableRUCounter = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "available_ru",
+			Help:      "Counter of the available RU for all resource groups.",
+		}, []string{resourceGroupNameLabel})
 )
 
 func init() {
@@ -115,4 +123,5 @@ func init() {
 	prometheus.MustRegister(kvCPUCost)
 	prometheus.MustRegister(sqlCPUCost)
 	prometheus.MustRegister(requestCount)
+	prometheus.MustRegister(availableRUCounter)
 }
