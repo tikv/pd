@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -46,9 +47,9 @@ import (
 )
 
 const (
-	// primaryElectionSuffix is the suffix of the key for keyspace group primary election
-	primaryElectionSuffix = "primary"
-	defaultRetryInterval  = 500 * time.Millisecond
+	keyspaceGroupsElectionPath = mcsutils.KeyspaceGroupsKey + "/election"
+	// primaryKey is the key for keyspace group primary election.
+	primaryKey = "primary"
 )
 
 type state struct {
@@ -147,6 +148,32 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 		mcsutils.DefaultKeyspaceGroupID, nil
 }
 
+// kgPrimaryPathBuilder builds the path for keyspace group primary election.
+// default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
+// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
+type kgPrimaryPathBuilder struct {
+	// rootPath is "/ms/{cluster_id}/tso".
+	rootPath string
+	// defaultKeyspaceGroupIDPath is "/ms/{cluster_id}/tso/00000".
+	defaultKeyspaceGroupIDPath string
+}
+
+// getKeyspaceGroupIDPath returns the keyspace group primary ID path.
+// default keyspace group: "/ms/{cluster_id}/tso/00000".
+// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}".
+func (p *kgPrimaryPathBuilder) getKeyspaceGroupIDPath(keyspaceGroupID uint32) string {
+	if keyspaceGroupID == mcsutils.DefaultKeyspaceGroupID {
+		return p.defaultKeyspaceGroupIDPath
+	}
+	return path.Join(p.rootPath, keyspaceGroupsElectionPath, fmt.Sprintf("%05d", keyspaceGroupID))
+}
+
+// getCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
+func (p *kgPrimaryPathBuilder) getCompiledNonDefaultIDRegexp() *regexp.Regexp {
+	pattern := strings.Join([]string{p.rootPath, keyspaceGroupsElectionPath, `(\d{5})`, primaryKey + `$`}, "/")
+	return regexp.MustCompile(pattern)
+}
+
 // KeyspaceGroupManager manages the members of the keyspace groups assigned to this host.
 // The replicas campaign for the leaders which provide the tso service for the corresponding
 // keyspace groups.
@@ -183,7 +210,9 @@ type KeyspaceGroupManager struct {
 	// tsoSvcRootPath defines the root path for all etcd paths used in the tso microservices.
 	// It is in the format of "/ms/<cluster-id>/tso".
 	// The main paths for different usages include:
-	// 1. The path for keyspace group primary election. Format: "/ms/{cluster_id}/tso/{group}/primary"
+	// 1. The path for keyspace group primary election.
+	//    default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
+	//    non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
 	// 2. The path for LoadTimestamp/SaveTimestamp in the storage endpoint for all the non-default
 	//    keyspace groups.
 	//    Key: /ms/{cluster_id}/tso/{group}/gta/timestamp
@@ -204,10 +233,14 @@ type KeyspaceGroupManager struct {
 	loadKeyspaceGroupsBatchSize int64
 	loadFromEtcdMaxRetryTimes   int
 
+	// compiledKGMembershipIDRegexp is the compiled regular expression for matching keyspace group id in the
+	// keyspace group membership path.
+	compiledKGMembershipIDRegexp *regexp.Regexp
 	// groupUpdateRetryList is the list of keyspace groups which failed to update and need to retry.
 	groupUpdateRetryList map[uint32]*endpoint.KeyspaceGroup
+	groupWatcher         *etcdutil.LoopWatcher
 
-	groupWatcher *etcdutil.LoopWatcher
+	primaryPathBuilder *kgPrimaryPathBuilder
 }
 
 // NewKeyspaceGroupManager creates a new Keyspace Group Manager.
@@ -244,6 +277,11 @@ func NewKeyspaceGroupManager(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
 	kgm.tsoSvcStorage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.tsoSvcRootPath), nil)
+	kgm.compiledKGMembershipIDRegexp = endpoint.GetCompiledKeyspaceGroupIDRegexp()
+	kgm.primaryPathBuilder = &kgPrimaryPathBuilder{
+		rootPath:                   kgm.tsoSvcRootPath,
+		defaultKeyspaceGroupIDPath: path.Join(kgm.tsoSvcRootPath, "00000"),
+	}
 	kgm.state.initialize()
 	return kgm
 }
@@ -268,7 +306,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		groupID, err := endpoint.ExtractKeyspaceGroupIDFromPath(string(kv.Key))
+		groupID, err := ExtractKeyspaceGroupIDFromPath(kgm.compiledKGMembershipIDRegexp, string(kv.Key))
 		if err != nil {
 			return err
 		}
@@ -303,6 +341,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 	if kgm.loadKeyspaceGroupsBatchSize > 0 {
 		kgm.groupWatcher.SetLoadBatchSize(kgm.loadKeyspaceGroupsBatchSize)
 	}
+
 	kgm.wg.Add(1)
 	go kgm.groupWatcher.StartWatchLoop()
 
@@ -310,7 +349,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		log.Error("failed to initialize keyspace group manager", errs.ZapError(err))
 		// We might have partially loaded/initialized the keyspace groups. Close the manager to clean up.
 		kgm.Close()
-		return errs.ErrLoadKeyspaceGroupsTerminated
+		return errs.ErrLoadKeyspaceGroupsTerminated.Wrap(err)
 	}
 
 	if !defaultKGConfigured {
@@ -388,8 +427,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	// Initialize the participant info to join the primary election.
 	participant := member.NewParticipant(kgm.etcdClient)
 	participant.InitInfo(
-		uniqueName, uniqueID, path.Join(kgm.tsoSvcRootPath, fmt.Sprintf("%05d", group.ID)),
-		primaryElectionSuffix, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
+		uniqueName, uniqueID, kgm.primaryPathBuilder.getKeyspaceGroupIDPath(group.ID),
+		primaryKey, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
