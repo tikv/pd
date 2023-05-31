@@ -39,8 +39,10 @@ const (
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 
-	defaultReadBaseCost  = 0.25
-	defaultWriteBaseCost = 1
+	defaultReadBaseCost          = 1. / 8
+	defaultReadPerBatchBaseCost  = 1. / 2
+	defaultWriteBaseCost         = 1
+	defaultWritePerBatchBaseCost = 1
 	// 1 RU = 64 KiB read bytes
 	defaultReadCostPerByte = 1. / (64 * 1024)
 	// 1 RU = 1 KiB written bytes
@@ -104,16 +106,21 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
-// the RRU and WRU cost.
+// the RRU and WRU cost. This configuration should be modified carefully.
+// TODO: use common config with client size.
 type RequestUnitConfig struct {
 	// ReadBaseCost is the base cost for a read request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	ReadBaseCost float64 `toml:"read-base-cost" json:"read-base-cost"`
+	// ReadPerBatchBaseCost is the base cost for a read request with batch.
+	ReadPerBatchBaseCost float64 `toml:"read-per-batch-base-cost" json:"read-per-batch-base-cost"`
 	// ReadCostPerByte is the cost for each byte read. It's 1 RU = 64 KiB by default.
 	ReadCostPerByte float64 `toml:"read-cost-per-byte" json:"read-cost-per-byte"`
 	// WriteBaseCost is the base cost for a write request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	WriteBaseCost float64 `toml:"write-base-cost" json:"write-base-cost"`
+	// WritePerBatchBaseCost is the base cost for a write request with batch.
+	WritePerBatchBaseCost float64 `toml:"write-per-batch-base-cost" json:"write-per-batch-base-cost"`
 	// WriteCostPerByte is the cost for each byte written. It's 1 RU = 1 KiB by default.
 	WriteCostPerByte float64 `toml:"write-cost-per-byte" json:"write-cost-per-byte"`
 	// CPUMsCost is the cost for each millisecond of CPU time taken.
@@ -129,11 +136,17 @@ func (ruc *RequestUnitConfig) Adjust() {
 	if ruc.ReadBaseCost == 0 {
 		ruc.ReadBaseCost = defaultReadBaseCost
 	}
+	if ruc.ReadPerBatchBaseCost == 0 {
+		ruc.ReadPerBatchBaseCost = defaultReadPerBatchBaseCost
+	}
 	if ruc.ReadCostPerByte == 0 {
 		ruc.ReadCostPerByte = defaultReadCostPerByte
 	}
 	if ruc.WriteBaseCost == 0 {
 		ruc.WriteBaseCost = defaultWriteBaseCost
+	}
+	if ruc.WritePerBatchBaseCost == 0 {
+		ruc.WritePerBatchBaseCost = defaultWritePerBatchBaseCost
 	}
 	if ruc.WriteCostPerByte == 0 {
 		ruc.WriteCostPerByte = defaultWriteCostPerByte
