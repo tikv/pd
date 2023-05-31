@@ -74,7 +74,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	}
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
-	startKey := path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix())
+	startKey := path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()) + "/"
 
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0)
 	putFn := func(kv *mvccpb.KeyValue) error {
@@ -106,7 +106,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		putFn,
 		deleteFn,
 		postEventFn,
-		clientv3.WithPrefix(),
+		clientv3.WithRange(clientv3.GetPrefixRangeEnd(startKey)),
 	)
 	s.serverLoopWg.Add(1)
 	go watcher.StartWatchLoop()

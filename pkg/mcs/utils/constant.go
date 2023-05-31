@@ -49,12 +49,16 @@ const (
 	// We also reserved 0 for the keyspace group for the same purpose.
 	DefaultKeyspaceGroupID = uint32(0)
 
+	// MicroserviceKey is the key of microservice.
+	MicroserviceKey = "ms"
 	// APIServiceName is the name of api server.
 	APIServiceName = "api"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
 	// ResourceManagerServiceName is the name of resource manager server.
 	ResourceManagerServiceName = "resource_manager"
+	// KeyspaceGroupsKey is the path component of keyspace groups.
+	KeyspaceGroupsKey = "keyspace_groups"
 
 	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
 	// is the sharding unit, i.e., by the definition here, the max count of the shards

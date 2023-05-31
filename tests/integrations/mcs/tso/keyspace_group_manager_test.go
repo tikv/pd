@@ -23,16 +23,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/pkg/election"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -193,16 +194,24 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						re.NotNil(am)
 
 						// Make sure every keyspace group is using the right timestamp path
-						// for loading/saving timestamp from/to etcd.
-						var timestampPath string
+						// for loading/saving timestamp from/to etcd and the right primary path
+						// for primary election.
+						var (
+							timestampPath string
+							primaryPath   string
+						)
 						clusterID := strconv.FormatUint(suite.pdLeaderServer.GetClusterID(), 10)
 						if param.keyspaceGroupID == mcsutils.DefaultKeyspaceGroupID {
 							timestampPath = fmt.Sprintf("/pd/%s/timestamp", clusterID)
+							primaryPath = fmt.Sprintf("/ms/%s/tso/00000/primary", clusterID)
 						} else {
 							timestampPath = fmt.Sprintf("/ms/%s/tso/%05d/gta/timestamp",
 								clusterID, param.keyspaceGroupID)
+							primaryPath = fmt.Sprintf("/ms/%s/tso/%s/election/%05d/primary",
+								clusterID, mcsutils.KeyspaceGroupsKey, param.keyspaceGroupID)
 						}
-						re.Equal(timestampPath, am.GetTimestampPath(""))
+						re.Equal(timestampPath, am.GetTimestampPath(tsopkg.GlobalDCLocation))
+						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
 
 						served = true
 					}
@@ -424,4 +433,35 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 	// Stop the client.
 	cancel()
 	wg.Wait()
+}
+
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
+	re.Equal(uint32(0), kg.ID)
+	re.Equal([]uint32{0}, kg.Keyspaces)
+	re.False(kg.IsSplitting())
+	// wait for finishing alloc nodes
+	testutil.Eventually(re, func() bool {
+		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
+		return len(kg.Members) == 2
+	})
+	testConfig := map[string]string{
+		"config":                "1",
+		"tso_keyspace_group_id": "0",
+		"user_kind":             "basic",
+	}
+	handlersutil.MustCreateKeyspace(re, suite.pdLeaderServer, &handlers.CreateKeyspaceParams{
+		Name:   "test_keyspace",
+		Config: testConfig,
+	})
+	kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
+	testutil.Eventually(re, func() bool {
+		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
+		return len(kg.Members) == 2
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }

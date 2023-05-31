@@ -451,12 +451,59 @@ func TestMixedTSODeployment(t *testing.T) {
 	wg.Wait()
 }
 
+// TestUpgradingAPIandTSOClusters tests the scenario that after we restart the API cluster
+// then restart the TSO cluster, the TSO service can still serve TSO requests normally.
+func TestUpgradingAPIandTSOClusters(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Create an API cluster which has 3 servers
+	apiCluster, err := tests.NewTestAPICluster(ctx, 3)
+	re.NoError(err)
+	err = apiCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := apiCluster.WaitLeader()
+	pdLeader := apiCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+
+	// Create a pd client in PD mode to let the API leader to forward requests to the TSO cluster.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+	re.NoError(err)
+
+	// Create a TSO cluster which has 2 servers
+	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, backendEndpoints)
+	re.NoError(err)
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+	// The TSO service should be eventually healthy
+	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
+
+	// Restart the API cluster
+	apiCluster, err = tests.RestartTestAPICluster(ctx, apiCluster)
+	re.NoError(err)
+	// The TSO service should be eventually healthy
+	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
+
+	// Restart the TSO cluster
+	tsoCluster, err = mcs.RestartTestTSOCluster(ctx, tsoCluster)
+	re.NoError(err)
+	// The TSO service should be eventually healthy
+	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
+
+	tsoCluster.Destroy()
+	apiCluster.Destroy()
+	cancel()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
+}
+
 func checkTSO(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, backendEndpoints string) {
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
 			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","))
+			defer cli.Close()
 			var ts, lastTS uint64
 			for {
 				select {

@@ -135,6 +135,7 @@ func NewResourceGroupController(
 	if requestUnitConfig != nil {
 		controllerConfig.RequestUnit = *requestUnitConfig
 	}
+	log.Info("load resource controller config", zap.Reflect("config", controllerConfig))
 	config := GenerateConfig(controllerConfig)
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
