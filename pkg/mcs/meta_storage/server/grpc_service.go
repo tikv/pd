@@ -126,7 +126,14 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 
 			events := make([]*meta_storagepb.Event, 0, len(res.Events))
 			for _, e := range res.Events {
-				event := &meta_storagepb.Event{Kv: &meta_storagepb.KeyValue{Key: e.Kv.Key, Value: e.Kv.Value}, Type: meta_storagepb.Event_EventType(e.Type)}
+				event := &meta_storagepb.Event{Kv: &meta_storagepb.KeyValue{
+					Key:            e.Kv.Key,
+					Value:          e.Kv.Value,
+					ModRevision:    e.Kv.ModRevision,
+					CreateRevision: e.Kv.CreateRevision,
+					Version:        e.Kv.Version,
+					Lease:          e.Kv.Lease,
+				}, Type: meta_storagepb.Event_EventType(e.Type)}
 				if e.PrevKv != nil {
 					event.PrevKv = &meta_storagepb.KeyValue{Key: e.PrevKv.Key, Value: e.PrevKv.Value}
 				}
