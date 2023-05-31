@@ -55,11 +55,14 @@ const (
 )
 
 const (
-	// 1RU = 2 storage read requests
+
+	// 1 RU = 8 storage read requests
 	defaultReadBaseCost = 1. / 8 // 0.125
-	// 1RU = 8 storage read requests
-	defaultReadPerBatchBaseCost  = 1. / 2 // 0.5
-	defaultWriteBaseCost         = 1
+	// 1 RU = 2 storage read batch requests
+	defaultReadPerBatchBaseCost = 1. / 2 // 0.5
+	// 1 RU = 1 storage write request
+	defaultWriteBaseCost = 1
+	// 1 RU = 1 storage write batch request
 	defaultWritePerBatchBaseCost = 1
 	// 1 RU = 64 KiB read bytes
 	defaultReadCostPerByte = 1. / (64 * 1024)

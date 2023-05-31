@@ -35,6 +35,7 @@ type RequestUnit float64
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
+	ReplicaNums() int
 	StoreID() uint64
 }
 
@@ -94,7 +95,8 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes += writeBytes
-	consumption.WRU += float64(kc.WriteBaseCost) + float64(kc.WritePerBatchBaseCost)*defaultAvgBatchProportion + float64(kc.WriteBytesCost)*writeBytes
+	// write request cost need consider the replicas, due to write data will be replicate to all replicas.
+	consumption.WRU += (float64(kc.WriteBaseCost) + float64(kc.WritePerBatchBaseCost)*defaultAvgBatchProportion + float64(kc.WriteBytesCost)*writeBytes) * float64(req.ReplicaNums())
 }
 
 // AfterKVRequest ...

@@ -39,9 +39,13 @@ const (
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 
-	defaultReadBaseCost          = 1. / 8
-	defaultReadPerBatchBaseCost  = 1. / 2
-	defaultWriteBaseCost         = 1
+	// 1 RU = 8 storage read requests
+	defaultReadBaseCost = 1. / 8
+	// 1 RU = 2 storage read batch requests
+	defaultReadPerBatchBaseCost = 1. / 2
+	// 1 RU = 1 storage write request
+	defaultWriteBaseCost = 1
+	// 1 RU = 1 storage write batch request
 	defaultWritePerBatchBaseCost = 1
 	// 1 RU = 64 KiB read bytes
 	defaultReadCostPerByte = 1. / (64 * 1024)
