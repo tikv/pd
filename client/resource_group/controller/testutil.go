@@ -53,7 +53,7 @@ func (tri *TestRequestInfo) StoreID() uint64 {
 
 // ReplicaNums implements the RequestInfo interface.
 func (tri *TestRequestInfo) ReplicaNums() int64 {
-	return 3
+	return 1
 }
 
 // TestResponseInfo is used to test the response info interface.
