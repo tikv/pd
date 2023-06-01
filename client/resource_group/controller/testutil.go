@@ -51,6 +51,11 @@ func (tri *TestRequestInfo) StoreID() uint64 {
 	return tri.storeID
 }
 
+// ReplicaNums implements the RequestInfo interface.
+func (tri *TestRequestInfo) ReplicaNumber() int64 {
+	return 1
+}
+
 // TestResponseInfo is used to test the response info interface.
 type TestResponseInfo struct {
 	readBytes uint64

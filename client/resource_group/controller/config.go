@@ -55,8 +55,15 @@ const (
 )
 
 const (
-	defaultReadBaseCost  = 0.25
+
+	// 1 RU = 8 storage read requests
+	defaultReadBaseCost = 1. / 8 // 0.125
+	// 1 RU = 2 storage read batch requests
+	defaultReadPerBatchBaseCost = 1. / 2 // 0.5
+	// 1 RU = 1 storage write request
 	defaultWriteBaseCost = 1
+	// 1 RU = 1 storage write batch request
+	defaultWritePerBatchBaseCost = 1
 	// 1 RU = 64 KiB read bytes
 	defaultReadCostPerByte = 1. / (64 * 1024)
 	// 1 RU = 1 KiB written bytes
@@ -67,6 +74,7 @@ const (
 	// Because the resource manager has not been deployed in microservice mode,
 	// do not enable this function.
 	defaultDegradedModeWaitDuration = "0s"
+	defaultAvgBatchProportion       = 0.7
 )
 
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
@@ -93,11 +101,15 @@ type RequestUnitConfig struct {
 	// ReadBaseCost is the base cost for a read request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	ReadBaseCost float64 `toml:"read-base-cost" json:"read-base-cost"`
+	// ReadPerBatchBaseCost is the base cost for a read request with batch.
+	ReadPerBatchBaseCost float64 `toml:"read-per-batch-base-cost" json:"read-per-batch-base-cost"`
 	// ReadCostPerByte is the cost for each byte read. It's 1 RU = 64 KiB by default.
 	ReadCostPerByte float64 `toml:"read-cost-per-byte" json:"read-cost-per-byte"`
 	// WriteBaseCost is the base cost for a write request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	WriteBaseCost float64 `toml:"write-base-cost" json:"write-base-cost"`
+	// WritePerBatchBaseCost is the base cost for a write request with batch.
+	WritePerBatchBaseCost float64 `toml:"write-per-batch-base-cost" json:"write-per-batch-base-cost"`
 	// WriteCostPerByte is the cost for each byte written. It's 1 RU = 1 KiB by default.
 	WriteCostPerByte float64 `toml:"write-cost-per-byte" json:"write-cost-per-byte"`
 	// CPUMsCost is the cost for each millisecond of CPU time taken.
@@ -108,11 +120,13 @@ type RequestUnitConfig struct {
 // DefaultRequestUnitConfig returns the default request unit configuration.
 func DefaultRequestUnitConfig() RequestUnitConfig {
 	return RequestUnitConfig{
-		ReadBaseCost:     defaultReadBaseCost,
-		ReadCostPerByte:  defaultReadCostPerByte,
-		WriteBaseCost:    defaultWriteBaseCost,
-		WriteCostPerByte: defaultWriteCostPerByte,
-		CPUMsCost:        defaultCPUMsCost,
+		ReadBaseCost:          defaultReadBaseCost,
+		ReadPerBatchBaseCost:  defaultReadPerBatchBaseCost,
+		ReadCostPerByte:       defaultReadCostPerByte,
+		WriteBaseCost:         defaultWriteBaseCost,
+		WritePerBatchBaseCost: defaultWritePerBatchBaseCost,
+		WriteCostPerByte:      defaultWriteCostPerByte,
+		CPUMsCost:             defaultCPUMsCost,
 	}
 }
 
@@ -121,11 +135,13 @@ func DefaultRequestUnitConfig() RequestUnitConfig {
 // or `RequestResourceConfig`.
 type Config struct {
 	// RU model config
-	ReadBaseCost   RequestUnit
-	ReadBytesCost  RequestUnit
-	WriteBaseCost  RequestUnit
-	WriteBytesCost RequestUnit
-	CPUMsCost      RequestUnit
+	ReadBaseCost          RequestUnit
+	ReadPerBatchBaseCost  RequestUnit
+	ReadBytesCost         RequestUnit
+	WriteBaseCost         RequestUnit
+	WritePerBatchBaseCost RequestUnit
+	WriteBytesCost        RequestUnit
+	CPUMsCost             RequestUnit
 	// The CPU statistics need to distinguish between different environments.
 	isSingleGroupByKeyspace  bool
 	maxWaitDuration          time.Duration
@@ -142,12 +158,14 @@ func DefaultConfig() *Config {
 // GenerateConfig generates the configuration by the given request unit configuration.
 func GenerateConfig(config *ControllerConfig) *Config {
 	cfg := &Config{
-		ReadBaseCost:    RequestUnit(config.RequestUnit.ReadBaseCost),
-		ReadBytesCost:   RequestUnit(config.RequestUnit.ReadCostPerByte),
-		WriteBaseCost:   RequestUnit(config.RequestUnit.WriteBaseCost),
-		WriteBytesCost:  RequestUnit(config.RequestUnit.WriteCostPerByte),
-		CPUMsCost:       RequestUnit(config.RequestUnit.CPUMsCost),
-		maxWaitDuration: defaultMaxWaitDuration,
+		ReadBaseCost:          RequestUnit(config.RequestUnit.ReadBaseCost),
+		ReadPerBatchBaseCost:  RequestUnit(config.RequestUnit.ReadPerBatchBaseCost),
+		ReadBytesCost:         RequestUnit(config.RequestUnit.ReadCostPerByte),
+		WriteBaseCost:         RequestUnit(config.RequestUnit.WriteBaseCost),
+		WritePerBatchBaseCost: RequestUnit(config.RequestUnit.WritePerBatchBaseCost),
+		WriteBytesCost:        RequestUnit(config.RequestUnit.WriteCostPerByte),
+		CPUMsCost:             RequestUnit(config.RequestUnit.CPUMsCost),
+		maxWaitDuration:       defaultMaxWaitDuration,
 	}
 	duration, err := time.ParseDuration(config.DegradedModeWaitDuration)
 	if err != nil {

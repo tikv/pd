@@ -151,7 +151,7 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 //
 //	@Tags		ResourceManager
 //	@Summary	Get resource group by name.
-//	@Success	200		{string}	json	format	of	rmpb.ResourceGroup
+//	@Success	200		{string}	json	format	of	rmserver.ResourceGroup
 //	@Failure	404		{string}	error
 //	@Param		name	path		string	true	"groupName"
 //	@Router		/config/group/{name} [GET]
@@ -167,7 +167,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //
 //	@Tags		ResourceManager
 //	@Summary	get all resource group with a list.
-//	@Success	200	{string}	json	format	of	[]rmpb.ResourceGroup
+//	@Success	200	{string}	json	format	of	[]rmserver.ResourceGroup
 //	@Failure	404	{string}	error
 //	@Router		/config/groups [GET]
 func (s *Service) getResourceGroupList(c *gin.Context) {
