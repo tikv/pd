@@ -746,8 +746,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 					},
 					Action: rmpb.RunawayAction_Kill,
 					Watch: &rmpb.RunawayWatch{
-						Type:           rmpb.RunawayWatchType_Similar,
-						LastDurationMs: 100000,
+						Type:              rmpb.RunawayWatchType_Similar,
+						LastingDurationMs: 100000,
 					},
 				}
 			},
