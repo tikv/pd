@@ -31,7 +31,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/util"
 	"go.uber.org/zap"
 )
 
@@ -43,9 +42,7 @@ const (
 	needTokensAmplification = 1.1
 	trickleReserveDuration  = 1250 * time.Millisecond
 
-	watchRetryInterval      = 30 * time.Second
-	defaultWatchGCIntervcal = time.Second * 30
-	maxWatchNumber          = 10000
+	watchRetryInterval = 30 * time.Second
 )
 
 type selectType int
@@ -54,13 +51,6 @@ const (
 	periodicReport selectType = 0
 	lowToken       selectType = 1
 )
-
-// ResourceGroupQuarantineManager
-type ResourceGroupQuarantineManager interface {
-	Watch(resourceGroupName string, convict interface{}) error
-	RunawaySettings(resourceGroupName string) (*rmpb.RunawaySettings, error)
-	Examine(resourceGroupName string, convict interface{}) (bool, rmpb.RunawayAction)
-}
 
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
@@ -100,7 +90,6 @@ func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
 }
 
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
-var _ ResourceGroupQuarantineManager = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController impls ResourceGroupKVInterceptor.
 type ResourceGroupsController struct {
@@ -335,7 +324,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err := newGroupCostController(c.loopCtx, group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +347,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		gc.mu.Lock()
 		latestConsumption := *gc.mu.consumption
 		gc.mu.Unlock()
-		if equalRU(latestConsumption, *gc.run.consumption) && (gc.convicts == nil || gc.convicts.Len() == 0) {
+		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.tombstone {
 				c.groupsController.Delete(resourceGroupName)
 				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName)
@@ -472,32 +461,13 @@ func (c *ResourceGroupsController) OnResponse(
 	return tmp.(*groupCostController).onResponse(req, resp)
 }
 
-// Watch
-func (c *ResourceGroupsController) Watch(resourceGroupName string, convict interface{}) error {
-	tmp, ok := c.groupsController.Load(resourceGroupName)
-	if !ok {
-		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
-		return errors.Errorf("no resource group")
-	}
-	return tmp.(*groupCostController).watch(convict)
-}
-
-// RunawaySettings
+// RunawaySettings returns the runaway settings of the given resource group name.
 func (c *ResourceGroupsController) RunawaySettings(resourceGroupName string) (*rmpb.RunawaySettings, error) {
 	gc, err := c.tryGetResourceGroup(c.loopCtx, resourceGroupName)
 	if err != nil {
 		return nil, err
 	}
 	return gc.runawaySettings()
-}
-
-// Examine
-func (c *ResourceGroupsController) Examine(resourceGroupName string, convict interface{}) (bool, rmpb.RunawayAction) {
-	tmp, ok := c.groupsController.Load(resourceGroupName)
-	if !ok {
-		return false, 0
-	}
-	return tmp.(*groupCostController).examine(convict)
 }
 
 type groupCostController struct {
@@ -508,10 +478,6 @@ type groupCostController struct {
 	// meta info
 	meta     *rmpb.ResourceGroup
 	metaLock sync.RWMutex
-	// following fields are used for runaway watch.
-	// controlled by metaLock
-	convicts  *util.TTLKey
-	ttlCancel context.CancelFunc
 
 	// following fields are used for token limiter.
 	calculators    []ResourceCalculator
@@ -596,7 +562,6 @@ type tokenCounter struct {
 }
 
 func newGroupCostController(
-	ctx context.Context,
 	group *rmpb.ResourceGroup,
 	mainCfg *Config,
 	lowRUNotifyChan chan struct{},
@@ -626,17 +591,6 @@ func newGroupCostController(
 		tokenBucketUpdateChan: tokenBucketUpdateChan,
 		lowRUNotifyChan:       lowRUNotifyChan,
 		burstable:             &atomic.Bool{},
-	}
-	if group.RunawaySettings != nil && group.RunawaySettings.Watch != nil {
-		watchSetting := group.RunawaySettings.Watch
-		runawayCtx, cancel := context.WithCancel(ctx)
-		gc.ttlCancel = cancel
-		ttl := time.Duration(watchSetting.LastingDurationMs) * time.Millisecond
-		gcInterval := defaultWatchGCIntervcal
-		if ttl < gcInterval*2 {
-			gcInterval = ttl / 2
-		}
-		gc.convicts = util.NewTTLKey(runawayCtx, gcInterval, ttl)
 	}
 
 	switch gc.mode {
@@ -1237,21 +1191,6 @@ func (gc *groupCostController) getKVCalculator() *KVCalculator {
 	return nil
 }
 
-// Watch
-func (gc *groupCostController) watch(convict interface{}) error {
-	gc.metaLock.RLock()
-	defer gc.metaLock.RUnlock()
-	if gc.convicts == nil {
-		return errors.Errorf("no watch")
-	}
-	conv, ok := convict.(string)
-	if !ok {
-		return errors.Errorf("error watch object")
-	}
-	gc.convicts.Put(conv)
-	return nil
-}
-
 func (gc *groupCostController) runawaySettings() (*rmpb.RunawaySettings, error) {
 	gc.metaLock.RLock()
 	defer gc.metaLock.RUnlock()
@@ -1259,14 +1198,4 @@ func (gc *groupCostController) runawaySettings() (*rmpb.RunawaySettings, error) 
 		return nil, errors.Errorf("no runaway settings")
 	}
 	return gc.meta.RunawaySettings, nil
-}
-
-// Examine
-func (gc *groupCostController) examine(convict interface{}) (bool, rmpb.RunawayAction) {
-	gc.metaLock.RLock()
-	defer gc.metaLock.RUnlock()
-	if gc.convicts == nil {
-		return false, 0
-	}
-	return gc.convicts.Exists(convict), gc.meta.RunawaySettings.Action
 }
