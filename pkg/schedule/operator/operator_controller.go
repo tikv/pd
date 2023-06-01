@@ -29,7 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
-	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -56,7 +56,8 @@ var (
 type Controller struct {
 	syncutil.RWMutex
 	ctx             context.Context
-	cluster         sche.ClusterInformer
+	config          config.Config
+	cluster         *core.BasicCluster
 	operators       map[uint64]*Operator
 	hbStreams       *hbstream.HeartbeatStreams
 	fastOperators   *cache.TTLUint64
@@ -68,10 +69,11 @@ type Controller struct {
 }
 
 // NewController creates a Controller.
-func NewController(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Controller {
+func NewController(ctx context.Context, cluster *core.BasicCluster, config config.Config, hbStreams *hbstream.HeartbeatStreams) *Controller {
 	return &Controller{
 		ctx:             ctx,
 		cluster:         cluster,
+		config:          config,
 		operators:       make(map[uint64]*Operator),
 		hbStreams:       hbStreams,
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
@@ -89,8 +91,8 @@ func (oc *Controller) Ctx() context.Context {
 	return oc.ctx
 }
 
-// GetCluster exports cluster to evict-scheduler for check store status.
-func (oc *Controller) GetCluster() sche.ClusterInformer {
+// GetCluster exports basic cluster to evict-scheduler for check store status.
+func (oc *Controller) GetCluster() *core.BasicCluster {
 	oc.RLock()
 	defer oc.RUnlock()
 	return oc.cluster
@@ -102,7 +104,7 @@ func (oc *Controller) GetHBStreams() *hbstream.HeartbeatStreams {
 }
 
 // Dispatch is used to dispatch the operator of a region.
-func (oc *Controller) Dispatch(region *core.RegionInfo, source string) {
+func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpStepWithTTL func(regionID uint64)) {
 	// Check existed
 	if op := oc.GetOperator(region.GetID()); op != nil {
 		failpoint.Inject("concurrentRemoveOperator", func() {
@@ -121,7 +123,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string) {
 			oc.SendScheduleCommand(region, step, source)
 		case SUCCESS:
 			if op.ContainNonWitnessStep() {
-				oc.cluster.RecordOpStepWithTTL(op.RegionID())
+				recordOpStepWithTTL(op.RegionID())
 			}
 			if oc.RemoveOperator(op) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
@@ -158,7 +160,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string) {
 }
 
 func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core.RegionInfo) bool {
-	err := step.CheckInProgress(oc.cluster, region)
+	err := step.CheckInProgress(oc.cluster, oc.config, region)
 	if err != nil {
 		if oc.RemoveOperator(op, zap.String("reason", err.Error())) {
 			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
@@ -244,7 +246,7 @@ func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 }
 
 // PushOperators periodically pushes the unfinished operator to the executor(TiKV).
-func (oc *Controller) PushOperators() {
+func (oc *Controller) PushOperators(recordOpStepWithTTL func(regionID uint64)) {
 	for {
 		r, next := oc.pollNeedDispatchRegion()
 		if !next {
@@ -254,7 +256,7 @@ func (oc *Controller) PushOperators() {
 			continue
 		}
 
-		oc.Dispatch(r, DispatchFromNotifierQueue)
+		oc.Dispatch(r, DispatchFromNotifierQueue, recordOpStepWithTTL)
 	}
 }
 
@@ -416,8 +418,8 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) bool 
 			operatorWaitCounter.WithLabelValues(op.Desc(), "unexpected-status").Inc()
 			return false
 		}
-		if !isPromoting && oc.wopStatus.ops[op.Desc()] >= oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator() {
-			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.cluster.GetOpts().GetSchedulerMaxWaitingOperator()))
+		if !isPromoting && oc.wopStatus.ops[op.Desc()] >= oc.config.GetSchedulerMaxWaitingOperator() {
+			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.config.GetSchedulerMaxWaitingOperator()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
 			return false
 		}
@@ -661,7 +663,7 @@ func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, 
 		zap.Stringer("step", step),
 		zap.String("source", source))
 
-	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.cluster.GetOpts().GetClusterVersion(), versioninfo.ConfChangeV2)
+	useConfChangeV2 := versioninfo.IsFeatureSupported(oc.config.GetClusterVersion(), versioninfo.ConfChangeV2)
 	cmd := step.GetCmd(region, useConfChangeV2)
 	if cmd == nil {
 		return
@@ -718,7 +720,7 @@ func (oc *Controller) OperatorCount(kind OpKind) uint64 {
 }
 
 // GetOpInfluence gets OpInfluence.
-func (oc *Controller) GetOpInfluence(cluster sche.ClusterInformer) OpInfluence {
+func (oc *Controller) GetOpInfluence(cluster *core.BasicCluster) OpInfluence {
 	influence := OpInfluence{
 		StoresInfluence: make(map[uint64]*StoreInfluence),
 	}
@@ -736,7 +738,7 @@ func (oc *Controller) GetOpInfluence(cluster sche.ClusterInformer) OpInfluence {
 }
 
 // GetFastOpInfluence get fast finish operator influence
-func (oc *Controller) GetFastOpInfluence(cluster sche.ClusterInformer, influence OpInfluence) {
+func (oc *Controller) GetFastOpInfluence(cluster *core.BasicCluster, influence OpInfluence) {
 	for _, id := range oc.fastOperators.GetAllID() {
 		value, ok := oc.fastOperators.Get(id)
 		if !ok {
@@ -751,13 +753,13 @@ func (oc *Controller) GetFastOpInfluence(cluster sche.ClusterInformer, influence
 }
 
 // AddOpInfluence add operator influence for cluster
-func AddOpInfluence(op *Operator, influence OpInfluence, cluster sche.ClusterInformer) {
+func AddOpInfluence(op *Operator, influence OpInfluence, cluster *core.BasicCluster) {
 	region := cluster.GetRegion(op.RegionID())
 	op.TotalInfluence(influence, region)
 }
 
 // NewTotalOpInfluence creates a OpInfluence.
-func NewTotalOpInfluence(operators []*Operator, cluster sche.ClusterInformer) OpInfluence {
+func NewTotalOpInfluence(operators []*Operator, cluster *core.BasicCluster) OpInfluence {
 	influence := *NewOpInfluence()
 
 	for _, op := range operators {
@@ -865,7 +867,7 @@ func (oc *Controller) exceedStoreLimitLocked(ops ...*Operator) bool {
 
 // getOrCreateStoreLimit is used to get or create the limit of a store.
 func (oc *Controller) getOrCreateStoreLimit(storeID uint64, limitType storelimit.Type) storelimit.StoreLimit {
-	ratePerSec := oc.cluster.GetOpts().GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
+	ratePerSec := oc.config.GetStoreLimitByType(storeID, limitType) / StoreBalanceBaseTime
 	s := oc.cluster.GetStore(storeID)
 	if s == nil {
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
@@ -873,7 +875,7 @@ func (oc *Controller) getOrCreateStoreLimit(storeID uint64, limitType storelimit
 	}
 	// The other limits do not need to update by config exclude StoreRateLimit.
 	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok && limit.Rate(limitType) != ratePerSec {
-		oc.cluster.GetBasicCluster().ResetStoreLimit(storeID, limitType, ratePerSec)
+		oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
 	return s.GetStoreLimit()
 }

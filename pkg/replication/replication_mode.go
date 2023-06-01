@@ -605,7 +605,7 @@ func (m *ModeManager) updateProgress() {
 				key = r.GetEndKey()
 			}
 			m.drSampleTotalRegion = len(sampleRegions)
-			m.drTotalRegion = m.cluster.GetRegionCount()
+			m.drTotalRegion = m.cluster.GetTotalRegionCount()
 			return
 		}
 	}

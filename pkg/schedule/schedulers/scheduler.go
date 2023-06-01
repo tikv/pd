@@ -89,7 +89,7 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 }
 
 // CreateSchedulerFunc is for creating scheduler.
-type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder) (Scheduler, error)
+type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
 var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
@@ -114,13 +114,13 @@ func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) 
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(typ string, opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder) (Scheduler, error) {
+func CreateScheduler(typ string, oc *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
 	}
 
-	s, err := fn(opController, storage, dec)
+	s, err := fn(oc, storage, dec, removeSchedulerCb...)
 	if err != nil {
 		return nil, err
 	}

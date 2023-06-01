@@ -22,7 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/movingaverage"
-	sche "github.com/tikv/pd/pkg/schedule/core"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -56,28 +56,30 @@ var DiagnosableSummaryFunc = map[string]plan.Summary{
 }
 
 type diagnosticManager struct {
-	cluster   sche.ClusterInformer
-	recorders map[string]*diagnosticRecorder
+	coordinator *Coordinator
+	config      sc.Config
+	recorders   map[string]*diagnosticRecorder
 }
 
-func newDiagnosticManager(cluster sche.ClusterInformer) *diagnosticManager {
+func newDiagnosticManager(coordinator *Coordinator, config sc.Config) *diagnosticManager {
 	recorders := make(map[string]*diagnosticRecorder)
 	for name := range DiagnosableSummaryFunc {
-		recorders[name] = newDiagnosticRecorder(name, cluster)
+		recorders[name] = newDiagnosticRecorder(name, coordinator, config)
 	}
 	return &diagnosticManager{
-		cluster:   cluster,
-		recorders: recorders,
+		coordinator: coordinator,
+		config:      config,
+		recorders:   recorders,
 	}
 }
 
 func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult, error) {
-	if !d.cluster.GetOpts().IsDiagnosticAllowed() {
+	if !d.config.IsDiagnosticAllowed() {
 		return nil, errs.ErrDiagnosticDisabled
 	}
 
-	isSchedulerExisted, _ := d.cluster.IsSchedulerExisted(name)
-	isDisabled, _ := d.cluster.IsSchedulerDisabled(name)
+	isSchedulerExisted, _ := d.coordinator.IsSchedulerExisted(name)
+	isDisabled, _ := d.coordinator.IsSchedulerDisabled(name)
 	if !isSchedulerExisted || isDisabled {
 		ts := uint64(time.Now().Unix())
 		res := &DiagnosticResult{Name: name, Timestamp: ts, Status: disabled}
@@ -102,20 +104,22 @@ func (d *diagnosticManager) getRecorder(name string) *diagnosticRecorder {
 // diagnosticRecorder is used to manage diagnostic for one scheduler.
 type diagnosticRecorder struct {
 	schedulerName string
-	cluster       sche.ClusterInformer
+	coordinator   *Coordinator
+	config        sc.Config
 	summaryFunc   plan.Summary
 	results       *cache.FIFO
 }
 
-func newDiagnosticRecorder(name string, cluster sche.ClusterInformer) *diagnosticRecorder {
+func newDiagnosticRecorder(name string, coordinator *Coordinator, config sc.Config) *diagnosticRecorder {
 	summaryFunc, ok := DiagnosableSummaryFunc[name]
 	if !ok {
 		log.Error("can't find summary function", zap.String("scheduler-name", name))
 		return nil
 	}
 	return &diagnosticRecorder{
-		cluster:       cluster,
+		coordinator:   coordinator,
 		schedulerName: name,
+		config:        config,
 		summaryFunc:   summaryFunc,
 		results:       cache.NewFIFO(maxDiagnosticResultNum),
 	}
@@ -125,7 +129,7 @@ func (d *diagnosticRecorder) isAllowed() bool {
 	if d == nil {
 		return false
 	}
-	return d.cluster.GetOpts().IsDiagnosticAllowed()
+	return d.config.IsDiagnosticAllowed()
 }
 
 func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {

@@ -248,7 +248,7 @@ func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, key
 
 // RegionSetInformer provides access to a shared informer of regions.
 type RegionSetInformer interface {
-	GetRegionCount() int
+	GetTotalRegionCount() int
 	RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
 	RandLeaderRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
 	RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo

@@ -52,7 +52,7 @@ func TestInfluenceAmp(t *testing.T) {
 	R := int64(96)
 	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
 
-	influence := oc.GetOpInfluence(tc)
+	influence := oc.GetOpInfluence(tc.GetBasicCluster())
 	influence.GetStoreInfluence(1).RegionSize = R
 	influence.GetStoreInfluence(2).RegionSize = -R
 	tc.SetTolerantSizeRatio(1)
@@ -150,7 +150,7 @@ func TestShouldBalance(t *testing.T) {
 		tc.SetLeaderSchedulePolicy(testCase.kind.String())
 		kind := constant.NewScheduleKind(constant.LeaderKind, testCase.kind)
 		basePlan := NewBalanceSchedulerPlan()
-		solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
+		solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc.GetBasicCluster()))
 		solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 		solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 		re.Equal(testCase.expectedResult, solver.shouldBalance(""))
@@ -164,7 +164,7 @@ func TestShouldBalance(t *testing.T) {
 			tc.PutRegion(region)
 			kind := constant.NewScheduleKind(constant.RegionKind, testCase.kind)
 			basePlan := NewBalanceSchedulerPlan()
-			solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc))
+			solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc.GetBasicCluster()))
 			solver.source, solver.target, solver.region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 			solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 			re.Equal(testCase.expectedResult, solver.shouldBalance(""))

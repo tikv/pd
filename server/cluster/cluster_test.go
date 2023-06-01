@@ -74,7 +74,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	for _, region := range regions {
 		re.NoError(cluster.putRegion(region))
 	}
-	re.Equal(int(n), cluster.GetRegionCount())
+	re.Equal(int(n), cluster.GetTotalRegionCount())
 
 	for i, store := range stores {
 		req := &pdpb.StoreHeartbeatRequest{}
@@ -320,7 +320,7 @@ func TestSetOfflineWithReplica(t *testing.T) {
 
 func addEvictLeaderScheduler(cluster *RaftCluster, storeID uint64) (evictScheduler schedulers.Scheduler, err error) {
 	args := []string{fmt.Sprintf("%d", storeID)}
-	evictScheduler, err = schedulers.CreateScheduler(schedulers.EvictLeaderType, cluster.GetOperatorController(), cluster.storage, schedulers.ConfigSliceDecoder(schedulers.EvictLeaderType, args))
+	evictScheduler, err = schedulers.CreateScheduler(schedulers.EvictLeaderType, cluster.GetOperatorController(), cluster.storage, schedulers.ConfigSliceDecoder(schedulers.EvictLeaderType, args), cluster.GetCoordinator().RemoveScheduler)
 	if err != nil {
 		return
 	}
@@ -2112,7 +2112,7 @@ func checkRegions(re *require.Assertions, cache *core.BasicCluster, regions []*c
 		}
 	}
 
-	re.Equal(len(regions), cache.GetRegionCount())
+	re.Equal(len(regions), cache.GetTotalRegionCount())
 	for id, count := range regionCount {
 		re.Equal(count, cache.GetStoreRegionCount(id))
 	}
@@ -2343,7 +2343,7 @@ func dispatchHeartbeat(co *schedule.Coordinator, region *core.RegionInfo, stream
 	if err := co.GetCluster().(*RaftCluster).putRegion(region.Clone()); err != nil {
 		return err
 	}
-	co.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat)
+	co.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, nil)
 	return nil
 }
 
@@ -2859,12 +2859,12 @@ func TestAddScheduler(t *testing.T) {
 	batch := data["batch"].(float64)
 	re.Equal(4, int(batch))
 
-	gls, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}))
+	gls, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}), co.RemoveScheduler)
 	re.NoError(err)
 	re.NotNil(co.AddScheduler(gls))
 	re.NotNil(co.RemoveScheduler(gls.GetName()))
 
-	gls, err = schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls, err = schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), co.RemoveScheduler)
 	re.NoError(err)
 	re.NoError(co.AddScheduler(gls))
 
@@ -2910,10 +2910,10 @@ func TestPersistScheduler(t *testing.T) {
 	oc := co.GetOperatorController()
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), co.RemoveScheduler)
 	re.NoError(err)
 	re.NoError(co.AddScheduler(gls1, "1"))
-	evict, err := schedulers.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}))
+	evict, err := schedulers.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}), co.RemoveScheduler)
 	re.NoError(err)
 	re.NoError(co.AddScheduler(evict, "2"))
 	re.Len(co.GetSchedulers(), defaultCount+2)
@@ -3017,7 +3017,7 @@ func TestRemoveScheduler(t *testing.T) {
 	oc := co.GetOperatorController()
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}))
+	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), co.RemoveScheduler)
 	re.NoError(err)
 	re.NoError(co.AddScheduler(gls1, "1"))
 	re.Len(co.GetSchedulers(), defaultCount+1)

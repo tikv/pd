@@ -112,19 +112,8 @@ func (mc *Cluster) GetPersistOptions() *config.PersistOptions {
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
 func (mc *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {}
 
-// IsSchedulerExisted checks if the scheduler with name is existed or not.
-func (mc *Cluster) IsSchedulerExisted(name string) (bool, error) { return false, nil }
-
-// IsSchedulerDisabled checks if the scheduler with name is disabled or not.
-func (mc *Cluster) IsSchedulerDisabled(name string) (bool, error) { return false, nil }
-
 // CheckSchedulingAllowance checks if the cluster allows scheduling currently.
 func (mc *Cluster) CheckSchedulingAllowance() (bool, error) { return true, nil }
-
-// ScanRegions scans region with start key, until number greater than limit.
-func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
-	return mc.ScanRange(startKey, endKey, limit)
-}
 
 // LoadRegion puts region info without leader
 func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
@@ -817,11 +806,6 @@ func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
 	mc.AddLabelsStore(id, 0, labels)
 }
 
-// RemoveScheduler mocks method.
-func (mc *Cluster) RemoveScheduler(name string) error {
-	return nil
-}
-
 // MockRegionInfo returns a mock region
 // If leaderStoreID is zero, the regions would have no leader
 func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
@@ -950,6 +934,3 @@ func (mc *Cluster) ObserveRegionsStats() {
 	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
 	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
 }
-
-// RecordOpStepWithTTL records OpStep with TTL
-func (mc *Cluster) RecordOpStepWithTTL(regionID uint64) {}

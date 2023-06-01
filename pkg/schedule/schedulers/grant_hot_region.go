@@ -23,6 +23,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -54,7 +55,7 @@ var (
 type grantHotRegionSchedulerConfig struct {
 	mu            syncutil.RWMutex
 	storage       endpoint.ConfigStorage
-	cluster       sche.ClusterInformer
+	cluster       *core.BasicCluster
 	StoreIDs      []uint64 `json:"store-id"`
 	StoreLeaderID uint64   `json:"store-leader-id"`
 }
