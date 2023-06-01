@@ -484,12 +484,11 @@ func (c *ResourceGroupsController) Watch(resourceGroupName string, convict inter
 
 // RunawaySettings
 func (c *ResourceGroupsController) RunawaySettings(resourceGroupName string) (*rmpb.RunawaySettings, error) {
-	tmp, ok := c.groupsController.Load(resourceGroupName)
-	if !ok {
-		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
-		return nil, errors.Errorf("no resource group")
+	gc, err := c.tryGetResourceGroup(c.loopCtx, resourceGroupName)
+	if err != nil {
+		return nil, err
 	}
-	return tmp.(*groupCostController).runawaySettings()
+	return gc.runawaySettings()
 }
 
 // Examine
@@ -632,7 +631,7 @@ func newGroupCostController(
 		watchSetting := group.RunawaySettings.Watch
 		runawayCtx, cancel := context.WithCancel(ctx)
 		gc.ttlCancel = cancel
-		ttl := time.Duration(watchSetting.LastDurationMs) * time.Millisecond
+		ttl := time.Duration(watchSetting.LastingDurationMs) * time.Millisecond
 		gcInterval := defaultWatchGCIntervcal
 		if ttl < gcInterval*2 {
 			gcInterval = ttl / 2
