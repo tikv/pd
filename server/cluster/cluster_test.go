@@ -3335,7 +3335,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 

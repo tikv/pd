@@ -75,7 +75,7 @@ func (s *labelScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *labelScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (s *labelScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -83,7 +83,7 @@ func (s *labelScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	return allowed
 }
 
-func (s *labelScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *labelScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	labelCounter.Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})

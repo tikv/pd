@@ -77,7 +77,7 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
@@ -93,7 +93,7 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInform
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
 
-func (s *shuffleHotRegionScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *shuffleHotRegionScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
@@ -101,7 +101,7 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster sche.ClusterInformer, dryRu
 	return operators, nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.ClusterInformer, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.ScheduleCluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
 	for _, detail := range loadDetail {
 		if len(detail.HotPeers) < 1 {
 			continue

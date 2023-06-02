@@ -433,7 +433,7 @@ func (conf *hotRegionSchedulerConfig) persistLocked() error {
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }
 
-func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.ClusterInformer) bool {
+func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.ScheduleCluster) bool {
 	querySupport := versioninfo.IsFeatureSupported(cluster.GetOpts().GetClusterVersion(), versioninfo.HotScheduleWithQuery)
 	conf.Lock()
 	defer conf.Unlock()

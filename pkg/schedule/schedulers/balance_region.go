@@ -113,7 +113,7 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
@@ -121,7 +121,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInformer)
 	return allowed
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *balanceRegionScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {

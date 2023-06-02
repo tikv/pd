@@ -40,7 +40,7 @@ import (
 // according to various constraints.
 type Builder struct {
 	// basic info
-	sche.ClusterInformer
+	sche.ScheduleCluster
 	desc            string
 	regionID        uint64
 	regionEpoch     *metapb.RegionEpoch
@@ -92,10 +92,10 @@ func SkipPlacementRulesCheck(b *Builder) {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, ci sche.ClusterInformer, region *core.RegionInfo, opts ...BuilderOption) *Builder {
+func NewBuilder(desc string, ci sche.ScheduleCluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
 		desc:            desc,
-		ClusterInformer: ci,
+		ScheduleCluster: ci,
 		regionID:        region.GetID(),
 		regionEpoch:     region.GetRegionEpoch(),
 		approximateSize: region.GetApproximateSize(),
