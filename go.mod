@@ -16,6 +16,7 @@ require (
 	github.com/docker/go-units v0.4.0
 	github.com/elliotchance/pie/v2 v2.1.0
 	github.com/gin-contrib/cors v1.4.0
+	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-gonic/gin v1.8.1
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.2
