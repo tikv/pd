@@ -35,7 +35,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/splitter"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -78,8 +80,8 @@ type Coordinator struct {
 	cluster           sche.ClusterInformer
 	prepareChecker    *prepareChecker
 	checkers          *checker.Controller
-	regionScatterer   *RegionScatterer
-	regionSplitter    *RegionSplitter
+	regionScatterer   *scatter.RegionScatterer
+	regionSplitter    *splitter.RegionSplitter
 	schedulers        map[string]*scheduleController
 	opController      *operator.Controller
 	hbStreams         *hbstream.HeartbeatStreams
@@ -98,8 +100,8 @@ func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams
 		cluster:         cluster,
 		prepareChecker:  newPrepareChecker(),
 		checkers:        checker.NewController(ctx, cluster, cluster.GetOpts(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController),
-		regionScatterer: NewRegionScatterer(ctx, cluster, opController),
-		regionSplitter:  NewRegionSplitter(cluster, NewSplitRegionsHandler(cluster, opController)),
+		regionScatterer: scatter.NewRegionScatterer(ctx, cluster, opController),
+		regionSplitter:  splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController)),
 		schedulers:      schedulers,
 		opController:    opController,
 		hbStreams:       hbStreams,
@@ -879,12 +881,12 @@ func (c *Coordinator) IsCheckerPaused(name string) (bool, error) {
 }
 
 // GetRegionScatterer returns the region scatterer.
-func (c *Coordinator) GetRegionScatterer() *RegionScatterer {
+func (c *Coordinator) GetRegionScatterer() *scatter.RegionScatterer {
 	return c.regionScatterer
 }
 
 // GetRegionSplitter returns the region splitter.
-func (c *Coordinator) GetRegionSplitter() *RegionSplitter {
+func (c *Coordinator) GetRegionSplitter() *splitter.RegionSplitter {
 	return c.regionSplitter
 }
 

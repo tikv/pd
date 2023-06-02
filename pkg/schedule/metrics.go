@@ -17,22 +17,6 @@ package schedule
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	scatterCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "scatter_operators_count",
-			Help:      "Counter of region scatter operators.",
-		}, []string{"type", "event"})
-
-	scatterDistributionCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "scatter_distribution",
-			Help:      "Counter of the distribution in scatter.",
-		}, []string{"store", "is_leader", "engine"})
-
 	hotSpotStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -67,8 +51,6 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(scatterCounter)
-	prometheus.MustRegister(scatterDistributionCounter)
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(regionListGauge)

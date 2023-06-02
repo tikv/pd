@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package splitter
 
 import (
 	"bytes"
@@ -34,8 +34,10 @@ import (
 )
 
 const (
-	watchInterval = 100 * time.Millisecond
-	timeout       = time.Minute
+	watchInterval        = 100 * time.Millisecond
+	timeout              = time.Minute
+	maxSleepDuration     = time.Minute
+	initialSleepDuration = 100 * time.Millisecond
 )
 
 // SplitRegionsHandler used to handle region splitting

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package scatter
 
 import (
 	"context"
@@ -439,9 +439,9 @@ func TestScatterForManyRegion(t *testing.T) {
 	}
 	failures := map[uint64]error{}
 	group := "group"
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatterHbStreamsDrain", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain", `return(true)`))
 	scatterer.scatterRegions(regions, failures, group, 3)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatterHbStreamsDrain"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain"))
 	re.Len(failures, 0)
 }
 
@@ -470,7 +470,7 @@ func TestScattersGroup(t *testing.T) {
 			failure: false,
 		},
 	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatterHbStreamsDrain", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain", `return(true)`))
 	for id, testCase := range testCases {
 		group := fmt.Sprintf("gourp-%d", id)
 		t.Log(testCase.name)
@@ -481,7 +481,7 @@ func TestScattersGroup(t *testing.T) {
 		}
 		failures := map[uint64]error{}
 		if testCase.failure {
-			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatterFail", `return(true)`))
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterFail", `return(true)`))
 		}
 
 		scatterer.scatterRegions(regions, failures, group, 3)
@@ -505,12 +505,12 @@ func TestScattersGroup(t *testing.T) {
 			re.Len(failures, 1)
 			_, ok := failures[1]
 			re.True(ok)
-			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatterFail"))
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterFail"))
 		} else {
 			re.Empty(failures)
 		}
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatterHbStreamsDrain"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain"))
 }
 
 func TestSelectedStoreGC(t *testing.T) {
