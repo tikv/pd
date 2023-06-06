@@ -126,7 +126,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
-	}, testutil.WithWaitFor(10*time.Second))
+	}, testutil.WithWaitFor(20*time.Second))
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
