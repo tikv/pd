@@ -18,12 +18,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
@@ -81,4 +87,43 @@ func TestKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	re.Equal(uint32(2), keyspaceGroup.ID)
 	re.Equal(keyspaceGroup.Keyspaces, []uint32{222, 333})
+}
+
+func TestSplitKeyspaceGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	tc, err := tests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
+		conf.Keyspace.PreAlloc = []string{"keyspace_a", "keyspace_b"}
+	})
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	pdAddr := tc.GetConfig().GetClientURL()
+
+	_, tsoServerCleanup1, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
+	defer tsoServerCleanup1()
+	re.NoError(err)
+	_, tsoServerCleanup2, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
+	defer tsoServerCleanup2()
+	re.NoError(err)
+	cmd := pdctlCmd.GetRootCmd()
+
+	time.Sleep(2 * time.Second)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+
+	// split keyspace group.
+	testutil.Eventually(re, func() bool {
+		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		return strings.Contains(string(output), "Success")
+	})
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }

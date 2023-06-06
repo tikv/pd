@@ -621,13 +621,13 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	oldTSOClient.Close()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
-	if newTSOSvcDiscovery != nil {
-		c.tsoSvcDiscovery = newTSOSvcDiscovery
-		// Close the old TSO service discovery safely after both the old client
-		// and service discovery are replaced.
-		if oldTSOSvcDiscovery != nil {
-			oldTSOSvcDiscovery.Close()
-		}
+	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD service mode and
+	// no tso microservice discovery is needed.
+	c.tsoSvcDiscovery = newTSOSvcDiscovery
+	// Close the old TSO service discovery safely after both the old client and service discovery are replaced.
+	if oldTSOSvcDiscovery != nil {
+		// We are switching from API service mode to PD service mode, so delete the old tso microservice discovery.
+		oldTSOSvcDiscovery.Close()
 	}
 	oldMode := c.serviceMode
 	c.serviceMode = newMode

@@ -559,13 +559,14 @@ func (s *Server) Run() error {
 	if err := s.startEtcd(s.ctx); err != nil {
 		return err
 	}
-	failpoint.Inject("delayStartServer", func() {
-		time.Sleep(2 * time.Second)
-	})
+
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
 
+	failpoint.Inject("delayStartServerLoop", func() {
+		time.Sleep(2 * time.Second)
+	})
 	s.startServerLoop(s.ctx)
 
 	return nil

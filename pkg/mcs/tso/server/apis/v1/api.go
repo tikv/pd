@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
+	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -88,6 +89,7 @@ func NewService(srv *tsoserver.Service) *Service {
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
+	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
 		srv:              srv,
