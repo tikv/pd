@@ -492,10 +492,11 @@ func removeDownPeers(region *core.RegionInfo, removePeer *metapb.Peer) core.Regi
 }
 
 type snapshotStat struct {
-	action     snapAction
-	remainSize int64
-	status     snapStatus
-	start      time.Time
+	action        snapAction
+	remainSize    int64
+	status        snapStatus
+	start         time.Time
+	generateStart time.Time
 }
 
 func newSnapshotState(size int64, action snapAction) *snapshotStat {
@@ -522,6 +523,7 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 			return false
 		}
 		stat.status = running
+		stat.generateStart = time.Now()
 		// If the statement is true, it will start to send or Receive the snapshot.
 		if stat.action == generate {
 			n.stats.SendingSnapCount++
@@ -542,6 +544,9 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 	}
 	if stat.status == running {
 		stat.status = finished
+		totalSec := time.Since(stat.start).Seconds()
+		generateSec := time.Since(stat.generateStart).Seconds()
+		n.registerSnapStats(uint64(generateSec), 0, uint64(totalSec))
 		if stat.action == generate {
 			n.stats.SendingSnapCount--
 		} else {
