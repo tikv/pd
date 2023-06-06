@@ -56,6 +56,8 @@ func (s *PDProtoFactory) createForwardStream(ctx context.Context, clientConn *gr
 type stream interface {
 	// process sends a request and receives the response through the stream
 	process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32, dcLocation string) (response, error)
+	// closeSend closes the stream on the sender side
+	closeSend()
 }
 
 type tsoStream struct {
@@ -83,6 +85,11 @@ func (s *tsoStream) process(clusterID uint64, count, keyspaceID, keyspaceGroupID
 	return resp, nil
 }
 
+// closeSend closes the stream on the sender side
+func (s *tsoStream) closeSend() {
+	s.stream.CloseSend()
+}
+
 type pdStream struct {
 	stream pdpb.PD_TsoClient
 }
@@ -104,4 +111,9 @@ func (s *pdStream) process(clusterID uint64, count, _, _ uint32, dcLocation stri
 		return nil, err
 	}
 	return resp, nil
+}
+
+// closeSend closes the stream on the sender side
+func (s *pdStream) closeSend() {
+	s.stream.CloseSend()
 }

@@ -15,6 +15,8 @@
 package tsoutil
 
 import (
+	"context"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -31,10 +33,14 @@ type Request interface {
 	// getCount returns the count of timestamps to retrieve
 	getCount() uint32
 	// process sends request and receive response via stream.
-	// count defins the count of timestamps to retrieve.
+	// count defines the count of timestamps to retrieve.
 	process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error)
-	// postProcess sends the response back to the sender of the request
-	postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error)
+	// sendResponseAsync sends the response back to the sender of the request
+	sendResponseAsync(countSum, physical, firstLogical int64, suffixBits uint32) int64
+	// sendErrorResponseAsync creates an tso error response and sends it back to the client asynchronously.
+	sendErrorResponseAsync(err error)
+	// isResponseSent returns whether the response has been sent
+	isResponseSent() bool
 }
 
 // response is an interface wrapping tsopb.TsoResponse and pdpb.TsoResponse
@@ -44,19 +50,24 @@ type response interface {
 
 // TSOProtoRequest wraps the request and stream channel in the TSO grpc service
 type TSOProtoRequest struct {
-	forwardedHost string
-	clientConn    *grpc.ClientConn
-	request       *tsopb.TsoRequest
-	stream        tsopb.TSO_TsoServer
+	grpcSvrStreamCtx context.Context
+	forwardedHost    string
+	clientConn       *grpc.ClientConn
+	request          *tsopb.TsoRequest
+	responseCh       chan *tsopb.TsoResponse
+	responseSent     bool
 }
 
-// NewTSOProtoRequest creats a TSOProtoRequest and returns as a Request
-func NewTSOProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *tsopb.TsoRequest, stream tsopb.TSO_TsoServer) Request {
+// NewTSOProtoRequest creates a TSOProtoRequest and returns as a Request
+func NewTSOProtoRequest(
+	grpcSvrStreamCtx context.Context, forwardedHost string, clientConn *grpc.ClientConn,
+	request *tsopb.TsoRequest, responseCh chan *tsopb.TsoResponse) Request {
 	tsoRequest := &TSOProtoRequest{
-		forwardedHost: forwardedHost,
-		clientConn:    clientConn,
-		request:       request,
-		stream:        stream,
+		grpcSvrStreamCtx: grpcSvrStreamCtx,
+		forwardedHost:    forwardedHost,
+		clientConn:       clientConn,
+		request:          request,
+		responseCh:       responseCh,
 	}
 	return tsoRequest
 }
@@ -77,14 +88,14 @@ func (r *TSOProtoRequest) getCount() uint32 {
 }
 
 // process sends request and receive response via stream.
-// count defins the count of timestamps to retrieve.
+// count defines the count of timestamps to retrieve.
 func (r *TSOProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
 		r.request.GetHeader().GetKeyspaceId(), r.request.GetHeader().GetKeyspaceGroupId(), r.request.GetDcLocation())
 }
 
-// postProcess sends the response back to the sender of the request
-func (r *TSOProtoRequest) postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error) {
+// sendResponseAsync sends the response back to the sender of the request
+func (r *TSOProtoRequest) sendResponseAsync(countSum, physical, firstLogical int64, suffixBits uint32) int64 {
 	count := r.request.GetCount()
 	countSum += int64(count)
 	response := &tsopb.TsoResponse{
@@ -96,28 +107,65 @@ func (r *TSOProtoRequest) postProcess(countSum, physical, firstLogical int64, su
 			SuffixBits: suffixBits,
 		},
 	}
-	// Send back to the client.
-	if err := r.stream.Send(response); err != nil {
-		return countSum, err
+	// Asynchronously send response back to the client. No blocking.
+	select {
+	case <-r.grpcSvrStreamCtx.Done():
+	case r.responseCh <- response:
+		r.responseSent = true
 	}
-	return countSum, nil
+	return countSum
+}
+
+// sendErrorResponseAsync creates an tso error response and sends it back to the client asynchronously.
+func (r *TSOProtoRequest) sendErrorResponseAsync(err error) {
+	if r.isResponseSent() {
+		return
+	}
+	response := &tsopb.TsoResponse{
+		Header: &tsopb.ResponseHeader{
+			ClusterId: r.request.GetHeader().GetClusterId(),
+			Error: &tsopb.Error{
+				Type:    tsopb.ErrorType_UNKNOWN,
+				Message: err.Error(),
+			},
+		},
+		Timestamp: &pdpb.Timestamp{},
+		Count:     0,
+	}
+	// Asynchronously send response back to the client.
+	select {
+	case <-r.grpcSvrStreamCtx.Done():
+	case r.responseCh <- response:
+		r.responseSent = true
+	}
+}
+
+// isResponseSent returns whether the response has been sent
+func (r *TSOProtoRequest) isResponseSent() bool {
+	return r.responseSent
 }
 
 // PDProtoRequest wraps the request and stream channel in the PD grpc service
 type PDProtoRequest struct {
-	forwardedHost string
-	clientConn    *grpc.ClientConn
-	request       *pdpb.TsoRequest
-	stream        pdpb.PD_TsoServer
+	grpcSvrStreamCtx context.Context
+	forwardedHost    string
+	clientConn       *grpc.ClientConn
+	request          *pdpb.TsoRequest
+	responseCh       chan *pdpb.TsoResponse
+	responseSent     bool
 }
 
-// NewPDProtoRequest creats a PDProtoRequest and returns as a Request
-func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, stream pdpb.PD_TsoServer) Request {
+// NewPDProtoRequest creates a PDProtoRequest and returns as a Request
+func NewPDProtoRequest(
+	grpcSvrStreamCtx context.Context, forwardedHost string, clientConn *grpc.ClientConn,
+	request *pdpb.TsoRequest, responseCh chan *pdpb.TsoResponse,
+) Request {
 	tsoRequest := &PDProtoRequest{
-		forwardedHost: forwardedHost,
-		clientConn:    clientConn,
-		request:       request,
-		stream:        stream,
+		grpcSvrStreamCtx: grpcSvrStreamCtx,
+		forwardedHost:    forwardedHost,
+		clientConn:       clientConn,
+		request:          request,
+		responseCh:       responseCh,
 	}
 	return tsoRequest
 }
@@ -138,14 +186,14 @@ func (r *PDProtoRequest) getCount() uint32 {
 }
 
 // process sends request and receive response via stream.
-// count defins the count of timestamps to retrieve.
+// count defines the count of timestamps to retrieve.
 func (r *PDProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
 		utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID, r.request.GetDcLocation())
 }
 
-// postProcess sends the response back to the sender of the request
-func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error) {
+// sendResponseAsync sends the response back to the sender of the request
+func (r *PDProtoRequest) sendResponseAsync(countSum, physical, firstLogical int64, suffixBits uint32) int64 {
 	count := r.request.GetCount()
 	countSum += int64(count)
 	response := &pdpb.TsoResponse{
@@ -157,9 +205,43 @@ func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64, suf
 			SuffixBits: suffixBits,
 		},
 	}
-	// Send back to the client.
-	if err := r.stream.Send(response); err != nil {
-		return countSum, err
+	// Asynchronously send response back to the client. Though responseCh is a buffered channel
+	// with size 1, in TSO streaming process routine, it calls stream.Recv() followed by stream.Send()
+	// in a loop and strictly follows this order, so the responseCh is always empty and the outputting
+	// the response to the channel is always non-blocking.
+	select {
+	case <-r.grpcSvrStreamCtx.Done():
+	case r.responseCh <- response:
+		r.responseSent = true
 	}
-	return countSum, nil
+	return countSum
+}
+
+// sendErrorResponseAsync creates an tso error response and sends it back to the client asynchronously.
+func (r *PDProtoRequest) sendErrorResponseAsync(err error) {
+	if r.isResponseSent() {
+		return
+	}
+	response := &pdpb.TsoResponse{
+		Header: &pdpb.ResponseHeader{
+			ClusterId: r.request.GetHeader().GetClusterId(),
+			Error: &pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: err.Error(),
+			},
+		},
+		Timestamp: &pdpb.Timestamp{},
+		Count:     0,
+	}
+	// Asynchronously send response back to the client.
+	select {
+	case <-r.grpcSvrStreamCtx.Done():
+	case r.responseCh <- response:
+		r.responseSent = true
+	}
+}
+
+// isResponseSent returns whether the response has been sent
+func (r *PDProtoRequest) isResponseSent() bool {
+	return r.responseSent
 }
