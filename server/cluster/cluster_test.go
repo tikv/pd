@@ -2157,7 +2157,7 @@ func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind oper
 }
 
 func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	id, err := c.GetAllocator().Alloc()
+	id, err := c.AllocID()
 	if err != nil {
 		return nil, err
 	}

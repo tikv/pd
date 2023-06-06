@@ -707,9 +707,9 @@ func (c *RaftCluster) PauseOrResumeChecker(name string, t int64) error {
 	return c.coordinator.PauseOrResumeChecker(name, t)
 }
 
-// GetAllocator returns cluster's id allocator.
-func (c *RaftCluster) GetAllocator() id.Allocator {
-	return c.id
+// AllocID returns a global unique ID.
+func (c *RaftCluster) AllocID() (uint64, error) {
+	return c.id.Alloc()
 }
 
 // GetRegionSyncer returns the region syncer.

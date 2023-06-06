@@ -92,6 +92,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		}
 		// establish client.
 		conn := grpcutil.CreateClientConn(ctx, addr, s.tlsConfig)
+		// it means the context is canceled.
+		if conn == nil {
+			return
+		}
 		defer conn.Close()
 
 		// Start syncing data.

@@ -204,6 +204,7 @@ func establish(ctx context.Context, addr string, tlsConfig *TLSConfig) (*grpc.Cl
 	return cc, nil
 }
 
+// CreateClientConn creates a client connection to the given target.
 func CreateClientConn(ctx context.Context, addr string, tlsConfig *TLSConfig) *grpc.ClientConn {
 	var (
 		conn *grpc.ClientConn
