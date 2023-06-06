@@ -247,6 +247,7 @@ const (
 	defaultEnableGRPCGateway    = true
 	defaultDisableErrorVerbose  = true
 	defaultEnableWitness        = false
+	defaultHaltScheduling       = false
 
 	defaultDashboardAddress = "auto"
 
@@ -772,6 +773,10 @@ type ScheduleConfig struct {
 
 	// EnableWitness is the option to enable using witness
 	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
+
+	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
+	// and any other scheduling configs will be ignored.
+	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -893,6 +898,10 @@ func (c *ScheduleConfig) adjust(meta *configMetaData, reloading bool) error {
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
 		adjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
+	}
+
+	if !meta.IsDefined("halt-scheduling") {
+		c.HaltScheduling = defaultHaltScheduling
 	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)

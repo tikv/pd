@@ -95,6 +95,9 @@ func (mc *Cluster) GetAllocator() id.Allocator {
 	return mc.IDAllocator
 }
 
+// CheckSchedulingAllowance checks if the cluster allows scheduling currently.
+func (mc *Cluster) CheckSchedulingAllowance() (bool, error) { return true, nil }
+
 // ScanRegions scans region with start key, until number greater than limit.
 func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
 	return mc.ScanRange(startKey, endKey, limit)
