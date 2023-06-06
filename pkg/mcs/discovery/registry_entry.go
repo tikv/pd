@@ -23,7 +23,7 @@ import (
 
 // ServiceRegistryEntry is the registry entry of a service
 type ServiceRegistryEntry struct {
-	ServiceAddr string `json:"serviceAddr"`
+	ServiceAddr string `json:"service-addr"`
 }
 
 // Serialize this service registry entry

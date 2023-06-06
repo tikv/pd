@@ -112,7 +112,7 @@ func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map
 
 func TestTSOServerStartFirst(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServer", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -171,5 +171,5 @@ func TestTSOServerStartFirst(t *testing.T) {
 	re.Len(group.Keyspaces, 2)
 	re.Len(group.Members, 2)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServer"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
