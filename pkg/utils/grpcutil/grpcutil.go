@@ -19,17 +19,28 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"net/url"
+	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/log"
+	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/pkg/transport"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 )
 
-// ForwardMetadataKey is used to record the forwarded host of PD.
-const ForwardMetadataKey = "pd-forwarded-host"
+const (
+	// ForwardMetadataKey is used to record the forwarded host of PD.
+	ForwardMetadataKey = "pd-forwarded-host"
+	msgSize            = 8 * units.MiB
+	keepaliveTime      = 10 * time.Second
+	keepaliveTimeout   = 3 * time.Second
+)
 
 // TLSConfig is the configuration for supporting tls.
 type TLSConfig struct {
@@ -159,4 +170,57 @@ func GetForwardedHost(ctx context.Context) string {
 		return t[0]
 	}
 	return ""
+}
+
+func establish(ctx context.Context, addr string, tlsConfig *TLSConfig) (*grpc.ClientConn, error) {
+	tlsCfg, err := tlsConfig.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	cc, err := GetClientConn(
+		ctx,
+		addr,
+		tlsCfg,
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:    keepaliveTime,
+			Timeout: keepaliveTimeout,
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: backoff.Config{
+				BaseDelay:  time.Second,     // Default was 1s.
+				Multiplier: 1.6,             // Default
+				Jitter:     0.2,             // Default
+				MaxDelay:   3 * time.Second, // Default was 120s.
+			},
+			MinConnectTimeout: 5 * time.Second,
+		}),
+		// WithBlock will block the dial step until success or cancel the context.
+		grpc.WithBlock(),
+	)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return cc, nil
+}
+
+func CreateClientConn(ctx context.Context, addr string, tlsConfig *TLSConfig) *grpc.ClientConn {
+	var (
+		conn *grpc.ClientConn
+		err  error
+	)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		conn, err = establish(ctx, addr, tlsConfig)
+		if err != nil {
+			log.Error("cannot establish connection", zap.String("addr", addr), errs.ZapError(err))
+			continue
+		}
+		break
+	}
+	return conn
 }

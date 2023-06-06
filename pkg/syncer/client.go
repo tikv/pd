@@ -18,7 +18,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -29,15 +28,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
-)
-
-const (
-	keepaliveTime    = 10 * time.Second
-	keepaliveTimeout = 3 * time.Second
 )
 
 // StopSyncWithLeader stop to sync the region with leader.
@@ -54,38 +46,6 @@ func (s *RegionSyncer) reset() {
 		s.mu.clientCancel()
 	}
 	s.mu.clientCancel, s.mu.clientCtx = nil, nil
-}
-
-func (s *RegionSyncer) establish(ctx context.Context, addr string) (*grpc.ClientConn, error) {
-	tlsCfg, err := s.tlsConfig.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	cc, err := grpcutil.GetClientConn(
-		ctx,
-		addr,
-		tlsCfg,
-		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:    keepaliveTime,
-			Timeout: keepaliveTimeout,
-		}),
-		grpc.WithConnectParams(grpc.ConnectParams{
-			Backoff: backoff.Config{
-				BaseDelay:  time.Second,     // Default was 1s.
-				Multiplier: 1.6,             // Default
-				Jitter:     0.2,             // Default
-				MaxDelay:   3 * time.Second, // Default was 120s.
-			},
-			MinConnectTimeout: 5 * time.Second,
-		}),
-		// WithBlock will block the dial step until success or cancel the context.
-		grpc.WithBlock(),
-	)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	return cc, nil
 }
 
 func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (ClientStream, error) {
@@ -131,20 +91,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			log.Warn("failed to load regions", errs.ZapError(err))
 		}
 		// establish client.
-		var conn *grpc.ClientConn
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			conn, err = s.establish(ctx, addr)
-			if err != nil {
-				log.Error("cannot establish connection with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
-				continue
-			}
-			break
-		}
+		conn := grpcutil.CreateClientConn(ctx, addr, s.tlsConfig)
 		defer conn.Close()
 
 		// Start syncing data.
