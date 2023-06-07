@@ -318,6 +318,9 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	if err != nil {
 		return nil, err
 	}
+	if group == nil {
+		return nil, errors.Errorf("%s does not exists", name)
+	}
 	// Check again to prevent initializing the same resource group concurrently.
 	if tmp, ok := c.groupsController.Load(name); ok {
 		gc := tmp.(*groupCostController)
