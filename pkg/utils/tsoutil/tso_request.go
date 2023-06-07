@@ -23,8 +23,8 @@ import (
 	"google.golang.org/grpc"
 )
 
-// Request is an interface wrapping tsopb.TsoRequest and pdpb.TsoRequest so
-// they can be generally handled by the TSO dispatcher
+// Request is an interface wrapping tsopb.TsoRequest and pdpb.TsoRequest
+// so that they can be generally handled by the TSO dispatcher
 type Request interface {
 	// getForwardedHost returns the forwarded host
 	getForwardedHost() string
@@ -107,7 +107,10 @@ func (r *TSOProtoRequest) sendResponseAsync(countSum, physical, firstLogical int
 			SuffixBits: suffixBits,
 		},
 	}
-	// Asynchronously send response back to the client. No blocking.
+	// Asynchronously send response back to the client. Though responseCh is a buffered channel
+	// with size 1, in TSO streaming process routine, it calls stream.Recv() followed by stream.Send()
+	// in a loop and strictly follows this order, so the responseCh is always empty and the outputting
+	// the response to the channel is always non-blocking.
 	select {
 	case <-r.grpcSvrStreamCtx.Done():
 	case r.responseCh <- response:

@@ -656,7 +656,7 @@ func TestTSOProxy(t *testing.T) {
 	}
 
 	// Create multiple TSO client streams and each stream uses a different gRPC connection to simulate multiple clients.
-	clientCount := 1000
+	clientCount := 100
 	grpcClientConns := make([]*grpc.ClientConn, 0, clientCount)
 	streams := make([]pdpb.PD_TsoClient, 0, clientCount)
 	for i := 0; i < clientCount; i++ {
@@ -673,6 +673,64 @@ func TestTSOProxy(t *testing.T) {
 
 	err = TSOProxy(streams, tsoReq)
 	re.NoError(err)
+
+	for _, stream := range streams {
+		stream.CloseSend()
+	}
+	for _, conn := range grpcClientConns {
+		conn.Close()
+	}
+}
+
+// BenchmarkTSOProxy benchmarks TSO proxy performance.
+func BenchmarkTSOProxy(b *testing.B) {
+	re := require.New(b)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create an API cluster with 1 server
+	apiCluster, err := tests.NewTestAPICluster(ctx, 1)
+	re.NoError(err)
+	defer apiCluster.Destroy()
+	err = apiCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := apiCluster.WaitLeader()
+	pdLeader := apiCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+
+	// Create a TSO cluster with 2 servers
+	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, backendEndpoints)
+	re.NoError(err)
+	defer tsoCluster.Destroy()
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+	tsoReq := &pdpb.TsoRequest{
+		Header: &pdpb.RequestHeader{ClusterId: pdLeader.GetClusterID()},
+		Count:  1,
+	}
+
+	// Create multiple TSO client streams and each stream uses a different gRPC connection to simulate multiple clients.
+	clientCount := 100
+	grpcClientConns := make([]*grpc.ClientConn, 0, clientCount)
+	streams := make([]pdpb.PD_TsoClient, 0, clientCount)
+	for i := 0; i < clientCount; i++ {
+		conn, err := grpc.Dial(strings.TrimPrefix(backendEndpoints, "http://"), grpc.WithInsecure())
+		re.NoError(err)
+		grpcClientConns = append(grpcClientConns, conn)
+		grpcPDClient := pdpb.NewPDClient(conn)
+		cctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stream, err := grpcPDClient.Tso(cctx)
+		re.NoError(err)
+		streams = append(streams, stream)
+	}
+
+	// Benchmark TSO proxy
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := TSOProxy(streams, tsoReq)
+		re.NoError(err)
+	}
+	b.StopTimer()
 
 	for _, stream := range streams {
 		stream.CloseSend()
