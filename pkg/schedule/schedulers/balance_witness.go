@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -105,7 +105,7 @@ func (conf *balanceWitnessSchedulerConfig) Clone() *balanceWitnessSchedulerConfi
 }
 
 func (conf *balanceWitnessSchedulerConfig) persistLocked() error {
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -146,7 +146,6 @@ type balanceWitnessScheduler struct {
 	name          string
 	conf          *balanceWitnessSchedulerConfig
 	handler       http.Handler
-	opController  *schedule.OperatorController
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
@@ -154,7 +153,7 @@ type balanceWitnessScheduler struct {
 
 // newBalanceWitnessScheduler creates a scheduler that tends to keep witnesses on
 // each store balanced.
-func newBalanceWitnessScheduler(opController *schedule.OperatorController, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) schedule.Scheduler {
+func newBalanceWitnessScheduler(opController *operator.Controller, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) Scheduler {
 	base := NewBaseScheduler(opController)
 	s := &balanceWitnessScheduler{
 		BaseScheduler: base,
@@ -162,7 +161,6 @@ func newBalanceWitnessScheduler(opController *schedule.OperatorController, conf 
 		name:          BalanceWitnessName,
 		conf:          conf,
 		handler:       newbalanceWitnessHandler(conf),
-		opController:  opController,
 		counter:       balanceWitnessCounter,
 		filterCounter: filter.NewCounter(filter.BalanceWitness.String()),
 	}
@@ -208,18 +206,18 @@ func (b *balanceWitnessScheduler) GetType() string {
 func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 	b.conf.mu.RLock()
 	defer b.conf.mu.RUnlock()
-	return schedule.EncodeConfig(b.conf)
+	return EncodeConfig(b.conf)
 }
 
-func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	allowed := b.opController.OperatorCount(operator.OpWitness) < cluster.GetOpts().GetWitnessScheduleLimit()
+func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+	allowed := b.OpController.OperatorCount(operator.OpWitness) < cluster.GetOpts().GetWitnessScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(b.GetType(), operator.OpWitness.String()).Inc()
 	}
 	return allowed
 }
 
-func (b *balanceWitnessScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (b *balanceWitnessScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	b.conf.mu.RLock()
 	defer b.conf.mu.RUnlock()
 	basePlan := NewBalanceSchedulerPlan()
@@ -230,7 +228,7 @@ func (b *balanceWitnessScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 	batch := b.conf.Batch
 	schedulerCounter.WithLabelValues(b.GetName(), "schedule").Inc()
 
-	opInfluence := b.opController.GetOpInfluence(cluster)
+	opInfluence := b.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	kind := constant.NewScheduleKind(constant.WitnessKind, constant.ByCount)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 

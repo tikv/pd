@@ -183,7 +183,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/delayLoad", "return(3)"))
 	err := mgr.Initialize()
 	// If loading keyspace groups timeout, the initialization should fail with ErrLoadKeyspaceGroupsTerminated.
-	re.Equal(errs.ErrLoadKeyspaceGroupsTerminated, err)
+	re.Contains(err.Error(), errs.ErrLoadKeyspaceGroupsTerminated.Error())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/delayLoad"))
 }
 
@@ -395,34 +395,39 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	err = mgr.Initialize()
 	re.NoError(err)
 
-	// Should be able to get AM for keyspace 0, 1, 2 in keyspace group 0.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(0, 0)
+	// Should be able to get AM for the default/null keyspace and keyspace 1, 2 in keyspace group 0.
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(mcsutils.DefaultKeyspaceID, 0)
 	re.NoError(err)
-	re.Equal(uint32(0), kgid)
+	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.NotNil(am)
+	re.NotNil(kg)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(mcsutils.NullKeyspaceID, 0)
+	re.NoError(err)
+	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(1, 0)
 	re.NoError(err)
-	re.Equal(uint32(0), kgid)
+	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(2, 0)
 	re.NoError(err)
-	re.Equal(uint32(0), kgid)
+	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should still succeed even keyspace 3 isn't explicitly assigned to any
 	// keyspace group. It will be assigned to the default keyspace group.
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0)
 	re.NoError(err)
-	re.Equal(uint32(0), kgid)
+	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should succeed and get the meta of keyspace group 0, because keyspace 0
 	// belongs to group 0, though the specified group 1 doesn't exist.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(0, 1)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(mcsutils.DefaultKeyspaceID, 1)
 	re.NoError(err)
-	re.Equal(uint32(0), kgid)
+	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should fail because keyspace 3 isn't explicitly assigned to any keyspace
@@ -521,11 +526,33 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 	err := mgr.Initialize()
 	re.NoError(err)
 
-	// Should fail because keyspace 0 is not in keyspace group 1 and the API returns
-	// the keyspace group 0 to which the keyspace 0 belongs.
+	// Wait until the keyspace group 0 is ready for serving tso requests.
+	testutil.Eventually(re, func() bool {
+		member, err := mgr.GetElectionMember(0, 0)
+		if err != nil {
+			return false
+		}
+		return member.IsLeader()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// Should succeed because keyspace 0 is actually in keyspace group 0, which is served
+	// by the current keyspace group manager, instead of keyspace group 1 in ask, and
+	// keyspace group 0 is returned in the response.
 	_, keyspaceGroupBelongTo, err := mgr.HandleTSORequest(0, 1, GlobalDCLocation, 1)
-	re.Error(err)
+	re.NoError(err)
 	re.Equal(uint32(0), keyspaceGroupBelongTo)
+
+	// Should succeed because keyspace 100 doesn't belong to any keyspace group, so it will
+	// be served by the default keyspace group 0, and keyspace group 0 is returned in the response.
+	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(100, 0, GlobalDCLocation, 1)
+	re.NoError(err)
+	re.Equal(uint32(0), keyspaceGroupBelongTo)
+
+	// Should fail because keyspace 100 doesn't belong to any keyspace group, and the keyspace group
+	// 1 in ask doesn't exist.
+	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(100, 1, GlobalDCLocation, 1)
+	re.Error(err)
+	re.Equal(uint32(1), keyspaceGroupBelongTo)
 }
 
 type etcdEvent struct {
@@ -587,9 +614,8 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 	electionNamePrefix, legacySvcRootPath, tsoSvcRootPath string,
 ) *KeyspaceGroupManager {
 	return NewKeyspaceGroupManager(
-		suite.ctx, tsoServiceID, suite.etcdClient, nil,
-		electionNamePrefix, legacySvcRootPath, tsoSvcRootPath,
-		suite.cfg)
+		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
+		legacySvcRootPath, tsoSvcRootPath, suite.cfg)
 }
 
 // runTestLoadMultipleKeyspaceGroupsAssignment tests the loading of multiple keyspace group assignment.

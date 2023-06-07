@@ -25,17 +25,18 @@ import (
 )
 
 const (
-	clusterPath                = "raft"
-	configPath                 = "config"
-	serviceMiddlewarePath      = "service_middleware"
-	schedulePath               = "schedule"
-	gcPath                     = "gc"
-	rulesPath                  = "rules"
-	ruleGroupPath              = "rule_group"
-	regionLabelPath            = "region_label"
-	replicationPath            = "replication_mode"
-	customScheduleConfigPath   = "scheduler_config"
-	gcWorkerServiceSafePointID = "gc_worker"
+	clusterPath              = "raft"
+	configPath               = "config"
+	serviceMiddlewarePath    = "service_middleware"
+	schedulePath             = "schedule"
+	gcPath                   = "gc"
+	rulesPath                = "rules"
+	ruleGroupPath            = "rule_group"
+	regionLabelPath          = "region_label"
+	replicationPath          = "replication_mode"
+	customScheduleConfigPath = "scheduler_config"
+	// GCWorkerServiceSafePointID is the service id of GC worker.
+	GCWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
 	externalTimeStamp          = "external_timestamp"
 	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
@@ -44,17 +45,18 @@ const (
 	keyspaceMetaInfix          = "meta"
 	keyspaceIDInfix            = "id"
 	keyspaceAllocID            = "alloc_id"
+	gcSafePointInfix           = "gc_safe_point"
+	serviceSafePointInfix      = "service_safe_point"
 	regionPathPrefix           = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
 	resourceGroupSettingsPath = "settings"
 	resourceGroupStatesPath   = "states"
 	controllerConfigPath      = "controller"
 	// tso storage endpoint has prefix `tso`
-	microserviceKey = "ms"
-	tsoServiceKey   = utils.TSOServiceName
-	timestampKey    = "timestamp"
+	tsoServiceKey = utils.TSOServiceName
+	timestampKey  = "timestamp"
 
-	tsoKeyspaceGroupPrefix     = "tso/keyspace_groups"
+	tsoKeyspaceGroupPrefix     = tsoServiceKey + "/" + utils.KeyspaceGroupsKey
 	keyspaceGroupMembershipKey = "membership"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
@@ -165,34 +167,29 @@ func ExternalTimestampPath() string {
 	return path.Join(clusterPath, externalTimeStamp)
 }
 
-// KeyspaceServiceSafePointPrefix returns the prefix of given service's service safe point.
-// Prefix: /keyspaces/gc_safepoint/{space_id}/service/
-func KeyspaceServiceSafePointPrefix(spaceID string) string {
-	return path.Join(keyspaceSafePointPrefix, spaceID, "service") + "/"
+// GCSafePointV2Path is the storage path of gc safe point v2.
+// Path: keyspaces/gc_safe_point/{keyspaceID}
+func GCSafePointV2Path(keyspaceID uint32) string {
+	return buildPath(false, keyspacePrefix, gcSafePointInfix, EncodeKeyspaceID(keyspaceID))
 }
 
-// KeyspaceGCSafePointPath returns the gc safe point's path of the given key-space.
-// Path: /keyspaces/gc_safepoint/{space_id}/gc
-func KeyspaceGCSafePointPath(spaceID string) string {
-	return path.Join(keyspaceSafePointPrefix, spaceID, keyspaceGCSafePointSuffix)
+// GCSafePointV2Prefix is the path prefix to all gc safe point v2.
+// Prefix: keyspaces/gc_safe_point/
+func GCSafePointV2Prefix() string {
+	return buildPath(true, keyspacePrefix, gcSafePointInfix)
 }
 
-// KeyspaceServiceSafePointPath returns the path of given service's service safe point.
-// Path: /keyspaces/gc_safepoint/{space_id}/service/{service_id}
-func KeyspaceServiceSafePointPath(spaceID, serviceID string) string {
-	return path.Join(KeyspaceServiceSafePointPrefix(spaceID), serviceID)
+// ServiceSafePointV2Path is the storage path of service safe point v2.
+// Path: keyspaces/service_safe_point/{spaceID}/{serviceID}
+func ServiceSafePointV2Path(keyspaceID uint32, serviceID string) string {
+	return buildPath(false, keyspacePrefix, serviceSafePointInfix, EncodeKeyspaceID(keyspaceID), serviceID)
 }
 
-// KeyspaceSafePointPrefix returns prefix for all key-spaces' safe points.
-// Path: /keyspaces/gc_safepoint/
-func KeyspaceSafePointPrefix() string {
-	return keyspaceSafePointPrefix + "/"
-}
-
-// KeyspaceGCSafePointSuffix returns the suffix for any gc safepoint.
-// Postfix: /gc
-func KeyspaceGCSafePointSuffix() string {
-	return "/" + keyspaceGCSafePointSuffix
+// ServiceSafePointV2Prefix is the path prefix of all service safe point that belongs to a specific keyspace.
+// Can be used to retrieve keyspace's service safe point at once.
+// Path: keyspaces/service_safe_point/{spaceID}/
+func ServiceSafePointV2Prefix(keyspaceID uint32) string {
+	return buildPath(true, keyspacePrefix, serviceSafePointInfix, EncodeKeyspaceID(keyspaceID))
 }
 
 // KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
@@ -204,7 +201,7 @@ func KeyspaceMetaPrefix() string {
 // KeyspaceMetaPath returns the path to the given keyspace's metadata.
 // Path: keyspaces/meta/{space_id}
 func KeyspaceMetaPath(spaceID uint32) string {
-	idStr := encodeKeyspaceID(spaceID)
+	idStr := EncodeKeyspaceID(spaceID)
 	return path.Join(KeyspaceMetaPrefix(), idStr)
 }
 
@@ -220,11 +217,11 @@ func KeyspaceIDAlloc() string {
 	return path.Join(keyspacePrefix, keyspaceAllocID)
 }
 
-// encodeKeyspaceID from uint32 to string.
+// EncodeKeyspaceID from uint32 to string.
 // It adds extra padding to make encoded ID ordered.
 // Encoded ID can be decoded directly with strconv.ParseUint.
 // Width of the padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
-func encodeKeyspaceID(spaceID uint32) string {
+func EncodeKeyspaceID(spaceID uint32) string {
 	return fmt.Sprintf("%08d", spaceID)
 }
 
@@ -240,23 +237,27 @@ func KeyspaceGroupIDPath(id uint32) string {
 	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey, encodeKeyspaceGroupID(id))
 }
 
-// ExtractKeyspaceGroupIDFromPath extracts keyspace group id from the given path, which contains
-// the pattern of `tso/keyspace_groups/membership/(\d{5})$`.
-func ExtractKeyspaceGroupIDFromPath(path string) (uint32, error) {
+// GetCompiledKeyspaceGroupIDRegexp returns the compiled regular expression for matching keyspace group id.
+func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 	pattern := strings.Join([]string{KeyspaceGroupIDPrefix(), `(\d{5})$`}, "/")
-	re := regexp.MustCompile(pattern)
-	match := re.FindStringSubmatch(path)
-	if match == nil {
-		return 0, fmt.Errorf("invalid keyspace group id path: %s", path)
-	}
-	id, err := strconv.ParseUint(match[1], 10, 32)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse keyspace group ID: %v", err)
-	}
-	return uint32(id), nil
+	return regexp.MustCompile(pattern)
 }
 
 // encodeKeyspaceGroupID from uint32 to string.
 func encodeKeyspaceGroupID(groupID uint32) string {
 	return fmt.Sprintf("%05d", groupID)
+}
+
+func buildPath(withSuffix bool, str ...string) string {
+	var sb strings.Builder
+	for i := 0; i < len(str); i++ {
+		if i != 0 {
+			sb.WriteString("/")
+		}
+		sb.WriteString(str[i])
+	}
+	if withSuffix {
+		sb.WriteString("/")
+	}
+	return sb.String()
 }

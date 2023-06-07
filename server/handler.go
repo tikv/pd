@@ -100,7 +100,7 @@ func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
 }
 
 // GetOperatorController returns OperatorController.
-func (h *Handler) GetOperatorController() (*schedule.OperatorController, error) {
+func (h *Handler) GetOperatorController() (*operator.Controller, error) {
 	rc := h.s.GetRaftCluster()
 	if rc == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
@@ -114,7 +114,7 @@ func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.IsSchedulerPaused(name)
+	return rc.GetCoordinator().IsSchedulerPaused(name)
 }
 
 // IsSchedulerDisabled returns whether scheduler is disabled.
@@ -123,7 +123,7 @@ func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.IsSchedulerDisabled(name)
+	return rc.GetCoordinator().IsSchedulerDisabled(name)
 }
 
 // IsSchedulerExisted returns whether scheduler is existed.
@@ -132,7 +132,7 @@ func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.IsSchedulerExisted(name)
+	return rc.GetCoordinator().IsSchedulerExisted(name)
 }
 
 // GetScheduleConfig returns ScheduleConfig.
@@ -155,7 +155,7 @@ func (h *Handler) IsCheckerPaused(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.IsCheckerPaused(name)
+	return rc.GetCoordinator().IsCheckerPaused(name)
 }
 
 // GetStores returns all stores in the cluster.
@@ -221,7 +221,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		return err
 	}
 
-	s, err := schedule.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedule.ConfigSliceDecoder(name, args))
+	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().RemoveScheduler)
 	if err != nil {
 		return err
 	}
@@ -393,7 +393,7 @@ func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
 }
 
 // GetOperatorStatus returns the status of the region operator.
-func (h *Handler) GetOperatorStatus(regionID uint64) (*schedule.OperatorWithStatus, error) {
+func (h *Handler) GetOperatorStatus(regionID uint64) (*operator.OpWithStatus, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
@@ -983,7 +983,7 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 	h.pluginChMapLock.Lock()
 	defer h.pluginChMapLock.Unlock()
 	if ch, ok := h.pluginChMap[pluginPath]; ok {
-		ch <- cluster.PluginUnload
+		ch <- schedule.PluginUnload
 		return nil
 	}
 	return ErrPluginNotFound(pluginPath)

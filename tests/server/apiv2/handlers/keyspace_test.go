@@ -152,7 +152,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, cou
 			Name:   fmt.Sprintf("test_keyspace_%d", i),
 			Config: testConfig,
 		}
-		resultMeta[i] = mustCreateKeyspace(re, server, createRequest)
+		resultMeta[i] = MustCreateKeyspace(re, server, createRequest)
 	}
 	return resultMeta
 }

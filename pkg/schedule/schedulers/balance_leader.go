@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -120,7 +120,7 @@ func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig 
 }
 
 func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -161,7 +161,6 @@ type balanceLeaderScheduler struct {
 	name          string
 	conf          *balanceLeaderSchedulerConfig
 	handler       http.Handler
-	opController  *schedule.OperatorController
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
@@ -169,7 +168,7 @@ type balanceLeaderScheduler struct {
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
-func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) schedule.Scheduler {
+func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) Scheduler {
 	base := NewBaseScheduler(opController)
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
@@ -177,7 +176,6 @@ func newBalanceLeaderScheduler(opController *schedule.OperatorController, conf *
 		name:          BalanceLeaderName,
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
-		opController:  opController,
 		counter:       balanceLeaderCounter,
 		filterCounter: filter.NewCounter(filter.BalanceLeader.String()),
 	}
@@ -223,11 +221,11 @@ func (l *balanceLeaderScheduler) GetType() string {
 func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
-	return schedule.EncodeConfig(l.conf)
+	return EncodeConfig(l.conf)
 }
 
-func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	allowed := l.opController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+	allowed := l.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
 	}
@@ -326,7 +324,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 	}
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (l *balanceLeaderScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
 	basePlan := NewBalanceSchedulerPlan()
@@ -338,7 +336,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	balanceLeaderScheduleCounter.Inc()
 
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
-	opInfluence := l.opController.GetOpInfluence(cluster)
+	opInfluence := l.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
@@ -421,7 +419,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 		storesIDs := candidate.binarySearchStores(plan.source, plan.target)
 		candidateUpdateStores[id] = storesIDs
 	}
-	schedule.AddOpInfluence(op, plan.opInfluence, plan.Cluster)
+	operator.AddOpInfluence(op, plan.opInfluence, plan.ClusterInformer.GetBasicCluster())
 	for id, candidate := range candidates {
 		for _, pos := range candidateUpdateStores[id] {
 			candidate.resortStoreWithPos(pos)

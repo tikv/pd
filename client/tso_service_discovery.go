@@ -143,9 +143,10 @@ type tsoServiceDiscovery struct {
 
 	checkMembershipCh chan struct{}
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	wg                   sync.WaitGroup
+	printFallbackLogOnce sync.Once
 
 	tlsCfg *tlsutil.TLSConfig
 
@@ -269,6 +270,11 @@ func (c *tsoServiceDiscovery) GetClusterID() uint64 {
 // GetKeyspaceID returns the ID of the keyspace
 func (c *tsoServiceDiscovery) GetKeyspaceID() uint32 {
 	return c.keyspaceID
+}
+
+// SetKeyspaceID sets the ID of the keyspace
+func (c *tsoServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
+	c.keyspaceID = keyspaceID
 }
 
 // GetKeyspaceGroupID returns the ID of the keyspace group. If the keyspace group is unknown,
@@ -434,9 +440,11 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		// processes and returns GetClusterInfoResponse.TsoUrls. In this case,
 		// we fall back to the old way of discovering the tso primary addresses
 		// from etcd directly.
-		log.Warn("[tso] no tso server address found,"+
-			" fallback to the legacy path to discover from etcd directly",
-			zap.String("discovery-key", c.defaultDiscoveryKey))
+		c.printFallbackLogOnce.Do(func() {
+			log.Warn("[tso] no tso server address found,"+
+				" fallback to the legacy path to discover from etcd directly",
+				zap.String("discovery-key", c.defaultDiscoveryKey))
+		})
 		addrs, err := c.discoverWithLegacyPath()
 		if err != nil {
 			return err
@@ -480,16 +488,14 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 	}
 
-	oldPrimary, primarySwitched, secondaryChanged :=
+	oldPrimary, primarySwitched, _ :=
 		c.keyspaceGroupSD.update(keyspaceGroup, primaryAddr, secondaryAddrs, addrs)
 	if primarySwitched {
+		log.Info("[tso] updated keyspace group service discovery info",
+			zap.String("keyspace-group-service", keyspaceGroup.String()))
 		if err := c.afterPrimarySwitched(oldPrimary, primaryAddr); err != nil {
 			return err
 		}
-	}
-	if primarySwitched || secondaryChanged {
-		log.Info("[tso] updated keyspace group service discovery info",
-			zap.String("keyspace-group-service", keyspaceGroup.String()))
 	}
 
 	// Even if the primary address is empty, we still updated other returned info above, including the

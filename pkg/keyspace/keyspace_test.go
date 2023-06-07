@@ -434,3 +434,47 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 		re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 }
+
+// Benchmark the keyspace assignment patrol.
+func BenchmarkPatrolKeyspaceAssignment1000(b *testing.B) {
+	benchmarkPatrolKeyspaceAssignmentN(1000, b)
+}
+
+func BenchmarkPatrolKeyspaceAssignment10000(b *testing.B) {
+	benchmarkPatrolKeyspaceAssignmentN(10000, b)
+}
+
+func BenchmarkPatrolKeyspaceAssignment100000(b *testing.B) {
+	benchmarkPatrolKeyspaceAssignmentN(100000, b)
+}
+
+func benchmarkPatrolKeyspaceAssignmentN(
+	n int, b *testing.B,
+) {
+	suite := new(keyspaceTestSuite)
+	suite.SetT(&testing.T{})
+	suite.SetupSuite()
+	suite.SetupTest()
+	re := suite.Require()
+	// Create some keyspaces without any keyspace group.
+	for i := 1; i <= n; i++ {
+		now := time.Now().Unix()
+		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+			Id:             uint32(i),
+			Name:           strconv.Itoa(i),
+			State:          keyspacepb.KeyspaceState_ENABLED,
+			CreatedAt:      now,
+			StateChangedAt: now,
+		})
+		re.NoError(err)
+	}
+	// Benchmark the keyspace assignment patrol.
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		err := suite.manager.PatrolKeyspaceAssignment()
+		re.NoError(err)
+	}
+	b.StopTimer()
+	suite.TearDownTest()
+	suite.TearDownSuite()
+}
