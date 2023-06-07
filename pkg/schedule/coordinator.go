@@ -145,7 +145,7 @@ func (c *Coordinator) PatrolRegions() {
 			log.Info("patrol regions has been stopped")
 			return
 		}
-		if !c.isSchedulingHalted() {
+		if c.isSchedulingHalted() {
 			continue
 		}
 
