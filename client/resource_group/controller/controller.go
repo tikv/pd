@@ -461,13 +461,13 @@ func (c *ResourceGroupsController) OnResponse(
 	return tmp.(*groupCostController).onResponse(req, resp)
 }
 
-// RunawaySettings returns the runaway settings of the given resource group name.
-func (c *ResourceGroupsController) RunawaySettings(resourceGroupName string) (*rmpb.RunawaySettings, error) {
+// GetResourceGroup returns the meta setting of the given resource group name.
+func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*rmpb.ResourceGroup, error) {
 	gc, err := c.tryGetResourceGroup(c.loopCtx, resourceGroupName)
 	if err != nil {
 		return nil, err
 	}
-	return gc.runawaySettings()
+	return gc.getMeta(), nil
 }
 
 type groupCostController struct {
@@ -1033,7 +1033,6 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	return req
 }
 
-// This is used for test only.
 func (gc *groupCostController) getMeta() *rmpb.ResourceGroup {
 	gc.metaLock.Lock()
 	defer gc.metaLock.Unlock()
@@ -1189,13 +1188,4 @@ func (gc *groupCostController) getKVCalculator() *KVCalculator {
 		}
 	}
 	return nil
-}
-
-func (gc *groupCostController) runawaySettings() (*rmpb.RunawaySettings, error) {
-	gc.metaLock.RLock()
-	defer gc.metaLock.RUnlock()
-	if gc.meta.RunawaySettings == nil {
-		return nil, errors.Errorf("no runaway settings")
-	}
-	return gc.meta.RunawaySettings, nil
 }
