@@ -34,7 +34,7 @@ type Request interface {
 	getCount() uint32
 	// process sends request and receive response via stream.
 	// count defines the count of timestamps to retrieve.
-	process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error)
+	process(ctx context.Context, forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error)
 	// sendResponseAsync sends the response back to the sender of the request
 	sendResponseAsync(countSum, physical, firstLogical int64, suffixBits uint32) int64
 	// sendErrorResponseAsync creates an tso error response and sends it back to the client asynchronously.
@@ -89,8 +89,10 @@ func (r *TSOProtoRequest) getCount() uint32 {
 
 // process sends request and receive response via stream.
 // count defines the count of timestamps to retrieve.
-func (r *TSOProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
-	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
+func (r *TSOProtoRequest) process(
+	ctx context.Context, forwardStream stream, count uint32, tsoProtoFactory ProtoFactory,
+) (tsoResp, error) {
+	return forwardStream.process(ctx, r.request.GetHeader().GetClusterId(), count,
 		r.request.GetHeader().GetKeyspaceId(), r.request.GetHeader().GetKeyspaceGroupId(), r.request.GetDcLocation())
 }
 
@@ -190,8 +192,10 @@ func (r *PDProtoRequest) getCount() uint32 {
 
 // process sends request and receive response via stream.
 // count defines the count of timestamps to retrieve.
-func (r *PDProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
-	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
+func (r *PDProtoRequest) process(
+	ctx context.Context, forwardStream stream, count uint32, tsoProtoFactory ProtoFactory,
+) (tsoResp, error) {
+	return forwardStream.process(ctx, r.request.GetHeader().GetClusterId(), count,
 		utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID, r.request.GetDcLocation())
 }
 

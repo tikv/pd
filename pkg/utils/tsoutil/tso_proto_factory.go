@@ -55,7 +55,7 @@ func (s *PDProtoFactory) createForwardStream(ctx context.Context, clientConn *gr
 
 type stream interface {
 	// process sends a request and receives the response through the stream
-	process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32, dcLocation string) (response, error)
+	process(ctx context.Context, clusterID uint64, count, keyspaceID, keyspaceGroupID uint32, dcLocation string) (response, error)
 	// closeSend closes the stream on the sender side
 	closeSend()
 }
@@ -65,7 +65,9 @@ type tsoStream struct {
 }
 
 // process sends a request and receives the response through the stream
-func (s *tsoStream) process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32, dcLocation string) (response, error) {
+func (s *tsoStream) process(
+	ctx context.Context, clusterID uint64, count, keyspaceID, keyspaceGroupID uint32, dcLocation string,
+) (response, error) {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       clusterID,
@@ -75,8 +77,22 @@ func (s *tsoStream) process(clusterID uint64, count, keyspaceID, keyspaceGroupID
 		Count:      count,
 		DcLocation: dcLocation,
 	}
+
+	// check if context is cancelled, e.g., timeout
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	if err := s.stream.Send(req); err != nil {
 		return nil, err
+	}
+
+	// check if context is cancelled, e.g., timeout
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 	resp, err := s.stream.Recv()
 	if err != nil {
@@ -95,7 +111,9 @@ type pdStream struct {
 }
 
 // process sends a request and receives the response through the stream
-func (s *pdStream) process(clusterID uint64, count, _, _ uint32, dcLocation string) (response, error) {
+func (s *pdStream) process(
+	ctx context.Context, clusterID uint64, count, _, _ uint32, dcLocation string,
+) (response, error) {
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
@@ -103,8 +121,22 @@ func (s *pdStream) process(clusterID uint64, count, _, _ uint32, dcLocation stri
 		Count:      count,
 		DcLocation: dcLocation,
 	}
+
+	// check if context is cancelled, e.g., timeout
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
 	if err := s.stream.Send(req); err != nil {
 		return nil, err
+	}
+
+	// check if context is cancelled, e.g., timeout
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 	resp, err := s.stream.Recv()
 	if err != nil {

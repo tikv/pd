@@ -141,9 +141,6 @@ func (s *TSODispatcher) startDispatchLoop(
 		return
 	}
 
-	tsDeadlineCh := make(chan deadline, 1)
-	go watchTSDeadline(ctx, forwardedHost, tsDeadlineCh)
-
 	for {
 		select {
 		case first := <-tsoRequestCh:
@@ -153,7 +150,7 @@ func (s *TSODispatcher) startDispatchLoop(
 				pendingRequests[i] = <-tsoRequestCh
 			}
 			forwardErr = s.processRequestsWithDeadLine(
-				ctx, tsDeadlineCh, forwardStream, pendingRequests[:pendingTSOReqCount], tsoProtoFactory)
+				ctx, forwardStream, pendingRequests[:pendingTSOReqCount], tsoProtoFactory)
 			if forwardErr != nil {
 				log.Error("proxy forward tso error",
 					zap.String("forwarded-host", forwardedHost),
@@ -170,28 +167,28 @@ func (s *TSODispatcher) startDispatchLoop(
 }
 
 func (s *TSODispatcher) processRequestsWithDeadLine(
-	ctx context.Context, tsDeadlineCh chan<- deadline, forwardStream stream,
+	ctx context.Context, forwardStream stream,
 	requests []Request, tsoProtoFactory ProtoFactory,
 ) error {
-	cctx, cancel := context.WithCancel(ctx)
+	// Create a context with deadline for processing the requests in a batch.
+	ctxTimeout, cancel := context.WithTimeout(ctx, DefaultTSOProxyTimeout)
 	defer cancel()
-	done := make(chan struct{})
-	dl := deadline{
-		timer:  time.After(DefaultTSOProxyTimeout),
-		done:   done,
-		cancel: cancel,
-	}
+
+	// used to receive the result from doSomething function
+	errCh := make(chan error)
+	go s.processRequestsAsync(ctxTimeout, forwardStream, requests, tsoProtoFactory, errCh)
 	select {
-	case tsDeadlineCh <- dl:
-	case <-cctx.Done():
-		return nil
+	case <-ctxTimeout.Done():
+		return ctxTimeout.Err()
+	case err := <-errCh:
+		return err
 	}
-	err := s.processRequests(forwardStream, requests, tsoProtoFactory)
-	close(done)
-	return err
 }
 
-func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request, tsoProtoFactory ProtoFactory) error {
+func (s *TSODispatcher) processRequestsAsync(
+	ctx context.Context, forwardStream stream, requests []Request,
+	tsoProtoFactory ProtoFactory, errCh chan<- error,
+) {
 	// Merge the requests
 	count := uint32(0)
 	for _, request := range requests {
@@ -199,10 +196,20 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	}
 
 	start := time.Now()
-	resp, err := requests[0].process(forwardStream, count, tsoProtoFactory)
+	resp, err := requests[0].process(ctx, forwardStream, count, tsoProtoFactory)
 	if err != nil {
-		return err
+		errCh <- err
+		return
 	}
+
+	// check if context is cancelled, e.g., timeout
+	select {
+	case <-ctx.Done():
+		errCh <- ctx.Err()
+		return
+	default:
+	}
+
 	s.tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
 	s.tsoProxyBatchSize.Observe(float64(count))
 	// Split the response
@@ -213,7 +220,7 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	// count is 5, then the splitting results should be 5 and 10.
 	firstLogical := addLogical(logical, -int64(count), suffixBits)
 	s.finishRequest(requests, physical, firstLogical, suffixBits)
-	return nil
+	errCh <- nil
 }
 
 // Because of the suffix, we need to shift the count before we add it to the logical part.
@@ -225,42 +232,6 @@ func (s *TSODispatcher) finishRequest(requests []Request, physical, firstLogical
 	countSum := int64(0)
 	for i := 0; i < len(requests); i++ {
 		countSum = requests[i].sendResponseAsync(countSum, physical, firstLogical, suffixBits)
-	}
-}
-
-type deadline struct {
-	timer  <-chan time.Time
-	done   chan struct{}
-	cancel context.CancelFunc
-}
-
-func watchTSDeadline(ctx context.Context, forwardedHost string, tsDeadlineCh <-chan deadline) {
-	defer logutil.LogPanic()
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	log.Info("start to watch tso proxy request deadline", zap.String("forwarded-host", forwardedHost))
-	defer func() {
-		log.Info("tso proxy request deadline watch loop is closed",
-			zap.String("forwarded-host", forwardedHost))
-	}()
-
-	for {
-		select {
-		case d := <-tsDeadlineCh:
-			select {
-			case <-d.timer:
-				log.Error("tso proxy request processing is canceled due to timeout",
-					errs.ZapError(errs.ErrProxyTSOTimeout))
-				d.cancel()
-			case <-d.done:
-				continue
-			case <-ctx.Done():
-				return
-			}
-		case <-ctx.Done():
-			return
-		}
 	}
 }
 
