@@ -29,7 +29,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
-	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -213,6 +213,7 @@ const (
 	defaultEnableGRPCGateway    = true
 	defaultDisableErrorVerbose  = true
 	defaultEnableWitness        = false
+	defaultHaltScheduling       = false
 
 	defaultDashboardAddress = "auto"
 
@@ -676,6 +677,10 @@ type ScheduleConfig struct {
 	// v1: which is based on the region count by rate limit.
 	// v2: which is based on region size by window size.
 	StoreLimitVersion string `toml:"store-limit-version" json:"store-limit-version,omitempty"`
+
+	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
+	// and any other scheduling configs will be ignored.
+	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -807,6 +812,10 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 		configutil.AdjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
 	}
 
+	if !meta.IsDefined("halt-scheduling") {
+		c.HaltScheduling = defaultHaltScheduling
+	}
+
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
 	for k, b := range c.migrateConfigurationMap() {
@@ -830,7 +839,7 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 		configutil.AdjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
-	if !meta.IsDefined("SlowStoreEvictingAffectedStoreRatioThreshold") {
+	if !meta.IsDefined("slow-store-evicting-affected-store-ratio-threshold") {
 		configutil.AdjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
 	}
 	return c.Validate()

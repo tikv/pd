@@ -75,9 +75,10 @@ type StoreStatus struct {
 	RegionWeight       float64            `json:"region_weight"`
 	RegionScore        float64            `json:"region_score"`
 	RegionSize         int64              `json:"region_size"`
-	WitnessCount       int                `json:"witness_count"`
-	SlowScore          uint64             `json:"slow_score"`
-	SlowTrend          SlowTrend          `json:"slow_trend"`
+	LearnerCount       int                `json:"learner_count,omitempty"`
+	WitnessCount       int                `json:"witness_count,omitempty"`
+	SlowScore          uint64             `json:"slow_score,omitempty"`
+	SlowTrend          *SlowTrend         `json:"slow_trend,omitempty"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	IsBusy             bool               `json:"is_busy,omitempty"`
@@ -98,10 +99,10 @@ const (
 )
 
 func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
-	var slowTrend SlowTrend
+	var slowTrend *SlowTrend
 	coreSlowTrend := store.GetSlowTrend()
 	if coreSlowTrend != nil {
-		slowTrend = SlowTrend{coreSlowTrend.CauseValue, coreSlowTrend.CauseRate, coreSlowTrend.ResultValue, coreSlowTrend.ResultRate}
+		slowTrend = &SlowTrend{coreSlowTrend.CauseValue, coreSlowTrend.CauseRate, coreSlowTrend.ResultValue, coreSlowTrend.ResultRate}
 	}
 	s := &StoreInfo{
 		Store: &MetaStore{
@@ -120,6 +121,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			RegionWeight:       store.GetRegionWeight(),
 			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
 			RegionSize:         store.GetRegionSize(),
+			LearnerCount:       store.GetLearnerCount(),
 			WitnessCount:       store.GetWitnessCount(),
 			SlowScore:          store.GetSlowScore(),
 			SlowTrend:          slowTrend,

@@ -44,7 +44,7 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 // @Summary  Get a Region's pending operator.
 // @Param    region_id  path  int  true  "A Region's Id"
 // @Produce  json
-// @Success  200  {object}  schedule.OperatorWithStatus
+// @Success  200  {object}  operator.OpWithStatus
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /operators/{region_id} [get]

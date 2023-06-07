@@ -16,21 +16,24 @@ package tso
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/pkg/election"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -98,20 +101,22 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	// a keyspace group before, will be served by the default keyspace group.
 	re := suite.Require()
 	testutil.Eventually(re, func() bool {
-		for _, server := range suite.tsoCluster.GetServers() {
-			allServed := true
-			for _, keyspaceID := range []uint32{0, 1, 2} {
+		for _, keyspaceID := range []uint32{0, 1, 2} {
+			served := false
+			for _, server := range suite.tsoCluster.GetServers() {
 				if server.IsKeyspaceServing(keyspaceID, mcsutils.DefaultKeyspaceGroupID) {
 					tam, err := server.GetTSOAllocatorManager(mcsutils.DefaultKeyspaceGroupID)
 					re.NoError(err)
 					re.NotNil(tam)
-				} else {
-					allServed = false
+					served = true
+					break
 				}
 			}
-			return allServed
+			if !served {
+				return false
+			}
 		}
-		return false
+		return true
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Any keyspace that was assigned to a keyspace group before, except default keyspace,
@@ -132,6 +137,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 		}
 	}
 
+	// Create a client for each keyspace and make sure they can successfully discover the service
+	// provided by the default keyspace group.
 	keyspaceIDs := []uint32{0, 1, 2, 3, 1000}
 	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
@@ -146,6 +153,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 	// on a tso server.
 	re := suite.Require()
 
+	// Create keyspace groups.
 	params := []struct {
 		keyspaceGroupID uint32
 		keyspaceIDs     []uint32
@@ -174,15 +182,37 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 		})
 	}
 
+	// Wait until all keyspace groups are ready.
 	testutil.Eventually(re, func() bool {
 		for _, param := range params {
 			for _, keyspaceID := range param.keyspaceIDs {
 				served := false
 				for _, server := range suite.tsoCluster.GetServers() {
 					if server.IsKeyspaceServing(keyspaceID, param.keyspaceGroupID) {
-						tam, err := server.GetTSOAllocatorManager(param.keyspaceGroupID)
+						am, err := server.GetTSOAllocatorManager(param.keyspaceGroupID)
 						re.NoError(err)
-						re.NotNil(tam)
+						re.NotNil(am)
+
+						// Make sure every keyspace group is using the right timestamp path
+						// for loading/saving timestamp from/to etcd and the right primary path
+						// for primary election.
+						var (
+							timestampPath string
+							primaryPath   string
+						)
+						clusterID := strconv.FormatUint(suite.pdLeaderServer.GetClusterID(), 10)
+						if param.keyspaceGroupID == mcsutils.DefaultKeyspaceGroupID {
+							timestampPath = fmt.Sprintf("/pd/%s/timestamp", clusterID)
+							primaryPath = fmt.Sprintf("/ms/%s/tso/00000/primary", clusterID)
+						} else {
+							timestampPath = fmt.Sprintf("/ms/%s/tso/%05d/gta/timestamp",
+								clusterID, param.keyspaceGroupID)
+							primaryPath = fmt.Sprintf("/ms/%s/tso/%s/election/%05d/primary",
+								clusterID, mcsutils.KeyspaceGroupsKey, param.keyspaceGroupID)
+						}
+						re.Equal(timestampPath, am.GetTimestampPath(tsopkg.GlobalDCLocation))
+						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
+
 						served = true
 					}
 				}
@@ -194,6 +224,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 		return true
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
+	// Create a client for each keyspace and make sure they can successfully discover the service
+	// provided by the corresponding keyspace group.
 	keyspaceIDs := make([]uint32, 0)
 	for _, param := range params {
 		keyspaceIDs = append(keyspaceIDs, param.keyspaceIDs...)
@@ -252,9 +284,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 		splitTS, err = suite.requestTSO(re, 1, 222, 2)
 		return err == nil && tsoutil.CompareTimestamp(&splitTS, &pdpb.Timestamp{}) > 0
 	})
+	splitTS, err = suite.requestTSO(re, 1, 222, 2)
 	re.Greater(tsoutil.CompareTimestamp(&splitTS, &ts), 0)
-	// Finish the split.
-	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, 2)
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
@@ -262,10 +293,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 	count, keyspaceID, keyspaceGroupID uint32,
 ) (pdpb.Timestamp, error) {
 	primary := suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
-	tam, err := primary.GetTSOAllocatorManager(keyspaceGroupID)
+	kgm := primary.GetKeyspaceGroupManager()
+	re.NotNil(kgm)
+	ts, _, err := kgm.HandleTSORequest(keyspaceID, keyspaceGroupID, tsopkg.GlobalDCLocation, count)
 	re.NoError(err)
-	re.NotNil(tam)
-	return tam.HandleRequest(tsopkg.GlobalDCLocation, count)
+	return ts, err
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection() {
@@ -401,4 +433,35 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 	// Stop the client.
 	cancel()
 	wg.Wait()
+}
+
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
+	re.Equal(uint32(0), kg.ID)
+	re.Equal([]uint32{0}, kg.Keyspaces)
+	re.False(kg.IsSplitting())
+	// wait for finishing alloc nodes
+	testutil.Eventually(re, func() bool {
+		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
+		return len(kg.Members) == 2
+	})
+	testConfig := map[string]string{
+		"config":                "1",
+		"tso_keyspace_group_id": "0",
+		"user_kind":             "basic",
+	}
+	handlersutil.MustCreateKeyspace(re, suite.pdLeaderServer, &handlers.CreateKeyspaceParams{
+		Name:   "test_keyspace",
+		Config: testConfig,
+	})
+	kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
+	testutil.Eventually(re, func() bool {
+		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
+		return len(kg.Members) == 2
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }

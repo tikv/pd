@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/balancer"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -149,10 +150,16 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 	ticker := time.NewTicker(allocNodesToKeyspaceGroupsInterval)
+	failpoint.Inject("acceleratedAllocNodes", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(time.Millisecond * 100)
+	})
 	defer ticker.Stop()
+	log.Info("start to alloc nodes to all keyspace groups")
 	for {
 		select {
 		case <-m.ctx.Done():
+			log.Info("stop to alloc nodes to all keyspace groups")
 			return
 		case <-ticker.C:
 		}
@@ -162,7 +169,11 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 		}
 		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
 		if err != nil {
-			log.Error("failed to load the all keyspace group", zap.Error(err))
+			log.Error("failed to load all keyspace groups", zap.Error(err))
+			continue
+		}
+		// if the default keyspace is not initialized, we should wait for the default keyspace to be initialized.
+		if len(groups) == 0 {
 			continue
 		}
 		withError := false
@@ -171,7 +182,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, utils.KeyspaceGroupDefaultReplicaCount)
 				if err != nil {
 					withError = true
-					log.Error("failed to alloc nodes for keyspace group", zap.Error(err))
+					log.Error("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.ID), zap.Error(err))
 					continue
 				}
 				group.Members = nodes
@@ -179,6 +190,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 		}
 		if !withError {
 			// all keyspace groups have equal or more than default replica count
+			log.Info("all keyspace groups have equal or more than default replica count, stop to alloc node")
 			return
 		}
 	}
@@ -186,7 +198,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 
 func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client, clusterID uint64) {
 	tsoServiceKey := discovery.TSOPath(clusterID)
-	tsoServiceEndKey := clientv3.GetPrefixRangeEnd(tsoServiceKey) + "/"
+	tsoServiceEndKey := clientv3.GetPrefixRangeEnd(tsoServiceKey)
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		s := &discovery.ServiceRegistryEntry{}
@@ -626,9 +638,12 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 	defer cancel()
 	ticker := time.NewTicker(allocNodesInterval)
 	defer ticker.Stop()
+
+	var kg *endpoint.KeyspaceGroup
 	nodes := make([]endpoint.KeyspaceGroupMember, 0, desiredReplicaCount)
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		kg, err := m.store.LoadKeyspaceGroup(txn, id)
+		var err error
+		kg, err = m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
 			return err
 		}
@@ -672,7 +687,8 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 	if err != nil {
 		return nil, err
 	}
-	log.Info("alloc nodes for keyspace group", zap.Uint32("id", id), zap.Reflect("nodes", nodes))
+	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
+	log.Info("alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", id), zap.Reflect("nodes", nodes))
 	return nodes, nil
 }
 

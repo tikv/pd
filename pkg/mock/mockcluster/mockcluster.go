@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
@@ -47,6 +48,7 @@ const (
 
 // Cluster is used to mock a cluster for test purpose.
 type Cluster struct {
+	ctx context.Context
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
@@ -57,12 +59,13 @@ type Cluster struct {
 	suspectRegions map[uint64]struct{}
 	*config.StoreConfigManager
 	*buckets.HotBucketCache
-	ctx context.Context
+	storage.Storage
 }
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
-	clus := &Cluster{
+	c := &Cluster{
+		ctx:                ctx,
 		BasicCluster:       core.NewBasicCluster(),
 		IDAllocator:        mockid.NewIDAllocator(),
 		HotStat:            statistics.NewHotStat(ctx),
@@ -70,15 +73,15 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		PersistOptions:     opts,
 		suspectRegions:     map[uint64]struct{}{},
 		StoreConfigManager: config.NewTestStoreConfigManager(nil),
-		ctx:                ctx,
+		Storage:            storage.NewStorageWithMemoryBackend(),
 	}
-	if clus.PersistOptions.GetReplicationConfig().EnablePlacementRules {
-		clus.initRuleManager()
+	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
+		c.initRuleManager()
 	}
 	// It should be updated to the latest feature version.
-	clus.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
-	clus.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, storage.NewStorageWithMemoryBackend(), time.Second*5)
-	return clus
+	c.PersistOptions.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
+	c.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, c.Storage, time.Second*5)
+	return c
 }
 
 // GetStoreConfig returns the store config.
@@ -91,15 +94,26 @@ func (mc *Cluster) GetOpts() sc.Config {
 	return mc.PersistOptions
 }
 
+// GetStorage returns the storage.
+func (mc *Cluster) GetStorage() storage.Storage {
+	return mc.Storage
+}
+
 // GetAllocator returns the ID allocator.
 func (mc *Cluster) GetAllocator() id.Allocator {
 	return mc.IDAllocator
 }
 
-// ScanRegions scans region with start key, until number greater than limit.
-func (mc *Cluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
-	return mc.ScanRange(startKey, endKey, limit)
+// GetPersistOptions returns the persist options.
+func (mc *Cluster) GetPersistOptions() *config.PersistOptions {
+	return mc.PersistOptions
 }
+
+// UpdateRegionsLabelLevelStats updates the label level stats for the regions.
+func (mc *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {}
+
+// CheckSchedulingAllowance checks if the cluster allows scheduling currently.
+func (mc *Cluster) CheckSchedulingAllowance() (bool, error) { return true, nil }
 
 // LoadRegion puts region info without leader
 func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
@@ -188,7 +202,7 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
-		mc.RuleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), mc, mc.GetOpts())
+		mc.RuleManager = placement.NewRuleManager(mc.GetStorage(), mc, mc.GetOpts())
 		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels)
 	}
 }
@@ -252,6 +266,22 @@ func (mc *Cluster) SetStoreBusy(storeID uint64, busy bool) {
 	mc.PutStore(newStore)
 }
 
+// BuryStore marks a store as tombstone in cluster.
+func (mc *Cluster) BuryStore(storeID uint64, forceBury bool) error {
+	store := mc.GetStore(storeID)
+	if store.IsUp() {
+		if !forceBury {
+			return errs.ErrStoreIsUp.FastGenByArgs()
+		} else if !store.IsDisconnected() {
+			return errors.Errorf("The store %v is not offline nor disconnected", storeID)
+		}
+	}
+
+	newStore := store.Clone(core.TombstoneStore())
+	mc.PutStore(newStore)
+	return nil
+}
+
 // AddLeaderStore adds store with specified count of leader.
 func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes ...int64) {
 	stats := &pdpb.StoreStats{}
@@ -278,7 +308,13 @@ func (mc *Cluster) AddLeaderStore(storeID uint64, leaderCount int, leaderSizes .
 }
 
 // AddRegionStore adds store with specified count of region.
-func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
+func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int, regionSizes ...uint64) {
+	var regionSize uint64
+	if len(regionSizes) == 0 {
+		regionSize = uint64(int64(regionCount) * defaultRegionSize / units.MiB)
+	} else {
+		regionSize = regionSizes[0]
+	}
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = defaultStoreCapacity
 	stats.UsedSize = uint64(regionCount) * defaultRegionSize
@@ -292,8 +328,8 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int) {
 		}},
 		core.SetStoreStats(stats),
 		core.SetRegionCount(regionCount),
-		core.SetRegionSize(int64(regionCount)*defaultRegionSize/units.MiB),
 		core.SetLastHeartbeatTS(time.Now()),
+		core.SetRegionSize(int64(regionSize)),
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
@@ -352,6 +388,13 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 	)
 	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
 	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+	mc.PutStore(store)
+}
+
+// AddLabersStoreWithLearnerCount adds store with specified count of region, learner and labels.
+func (mc *Cluster) AddLabersStoreWithLearnerCount(storeID uint64, regionCount int, learnerCount int, labels map[string]string) {
+	mc.AddLabelsStore(storeID, regionCount, labels)
+	store := mc.GetStore(storeID).Clone(core.SetLearnerCount(learnerCount))
 	mc.PutStore(store)
 }
 
@@ -506,6 +549,11 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	}
 	mc.PutRegion(r)
 	return items
+}
+
+// DropCacheAllRegion removes all regions from the cache.
+func (mc *Cluster) DropCacheAllRegion() {
+	mc.ResetRegionCache()
 }
 
 // UpdateStoreLeaderWeight updates store leader weight.
@@ -758,11 +806,6 @@ func (mc *Cluster) PutStoreWithLabels(id uint64, labelPairs ...string) {
 	mc.AddLabelsStore(id, 0, labels)
 }
 
-// RemoveScheduler mocks method.
-func (mc *Cluster) RemoveScheduler(name string) error {
-	return nil
-}
-
 // MockRegionInfo returns a mock region
 // If leaderStoreID is zero, the regions would have no leader
 func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
@@ -806,10 +849,6 @@ func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
 	for _, id := range ids {
 		mc.suspectRegions[id] = struct{}{}
 	}
-}
-
-// SetHotPendingInfluenceMetrics mock method
-func (mc *Cluster) SetHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64) {
 }
 
 // GetBasicCluster mock method
@@ -895,6 +934,3 @@ func (mc *Cluster) ObserveRegionsStats() {
 	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
 	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
 }
-
-// RecordOpStepWithTTL records OpStep with TTL
-func (mc *Cluster) RecordOpStepWithTTL(regionID uint64) {}

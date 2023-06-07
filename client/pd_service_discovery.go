@@ -59,10 +59,12 @@ type ServiceDiscovery interface {
 	GetClusterID() uint64
 	// GetKeyspaceID returns the ID of the keyspace
 	GetKeyspaceID() uint32
+	// SetKeyspaceID sets the ID of the keyspace
+	SetKeyspaceID(keyspaceID uint32)
 	// GetKeyspaceGroupID returns the ID of the keyspace group
 	GetKeyspaceGroupID() uint32
 	// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
-	DiscoverMicroservice(svcType serviceType) []string
+	DiscoverMicroservice(svcType serviceType) ([]string, error)
 	// GetServiceURLs returns the URLs of the servers providing the service
 	GetServiceURLs() []string
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
@@ -147,7 +149,8 @@ type pdServiceDiscovery struct {
 	cancel    context.CancelFunc
 	closeOnce sync.Once
 
-	tlsCfg *tlsutil.TLSConfig
+	keyspaceID uint32
+	tlsCfg     *tlsutil.TLSConfig
 	// Client option.
 	option *option
 }
@@ -157,6 +160,7 @@ func newPDServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup,
 	serviceModeUpdateCb func(pdpb.ServiceMode),
+	keyspaceID uint32,
 	urls []string, tlsCfg *tlsutil.TLSConfig, option *option,
 ) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
@@ -165,6 +169,7 @@ func newPDServiceDiscovery(
 		cancel:              cancel,
 		wg:                  wg,
 		serviceModeUpdateCb: serviceModeUpdateCb,
+		keyspaceID:          keyspaceID,
 		tlsCfg:              tlsCfg,
 		option:              option,
 	}
@@ -288,8 +293,12 @@ func (c *pdServiceDiscovery) GetClusterID() uint64 {
 
 // GetKeyspaceID returns the ID of the keyspace
 func (c *pdServiceDiscovery) GetKeyspaceID() uint32 {
-	// PD/API service only supports the default keyspace
-	return defaultKeyspaceID
+	return c.keyspaceID
+}
+
+// SetKeyspaceID sets the ID of the keyspace
+func (c *pdServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
+	c.keyspaceID = keyspaceID
 }
 
 // GetKeyspaceGroupID returns the ID of the keyspace group
@@ -299,7 +308,7 @@ func (c *pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
 }
 
 // DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
-func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) (urls []string) {
+func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) (urls []string, err error) {
 	switch svcType {
 	case apiService:
 		urls = c.GetServiceURLs()
@@ -310,17 +319,18 @@ func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) (urls []s
 			if err != nil {
 				log.Error("[pd] failed to get cluster info",
 					zap.String("leader-addr", leaderAddr), errs.ZapError(err))
-				return nil
+				return nil, err
 			}
 			urls = clusterInfo.TsoUrls
 		} else {
-			log.Error("[pd] failed to get leader addr")
+			err = errors.New("failed to get leader addr")
+			return nil, err
 		}
 	default:
 		panic("invalid service type")
 	}
 
-	return urls
+	return urls, nil
 }
 
 // GetServiceURLs returns the URLs of the servers.

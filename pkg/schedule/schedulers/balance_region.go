@@ -23,7 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -58,7 +58,6 @@ type balanceRegionScheduler struct {
 	*BaseScheduler
 	*retryQuota
 	conf          *balanceRegionSchedulerConfig
-	opController  *schedule.OperatorController
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
@@ -66,13 +65,12 @@ type balanceRegionScheduler struct {
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
-func newBalanceRegionScheduler(opController *schedule.OperatorController, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) schedule.Scheduler {
+func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) Scheduler {
 	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
-		opController:  opController,
 		counter:       balanceRegionCounter,
 		filterCounter: filter.NewCounter(filter.BalanceRegion.String()),
 	}
@@ -112,18 +110,18 @@ func (s *balanceRegionScheduler) GetType() string {
 }
 
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
-func (s *balanceRegionScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	allowed := s.opController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
+func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *balanceRegionScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {
@@ -135,8 +133,8 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	snapshotFilter := filter.NewSnapshotSendFilter(stores, constant.Medium)
 	faultTargets := filter.SelectUnavailableTargetStores(stores, s.filters, opts, collector, s.filterCounter)
 	sourceStores := filter.SelectSourceStores(stores, s.filters, opts, collector, s.filterCounter)
-	opInfluence := s.opController.GetOpInfluence(cluster)
-	s.OpController.GetFastOpInfluence(cluster, opInfluence)
+	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster())
+	s.OpController.GetFastOpInfluence(cluster.GetBasicCluster(), opInfluence)
 	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
@@ -152,7 +150,7 @@ func (s *balanceRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
 	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter}
 	switch cluster.(type) {
-	case *schedule.RangeCluster:
+	case *rangeCluster:
 		// allow empty region to be scheduled in range cluster
 	default:
 		baseRegionFilters = append(baseRegionFilters, filter.NewRegionEmptyFilter(cluster))

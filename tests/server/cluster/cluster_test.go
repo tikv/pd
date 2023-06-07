@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -44,7 +45,6 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -626,7 +626,6 @@ func TestConcurrentHandleRegion(t *testing.T) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	stores := make([]*metapb.Store, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -831,7 +830,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(testStorage.SaveStore(store))
+		re.NoError(testStorage.SaveStoreMeta(store))
 	}
 
 	regions := make([]*metapb.Region, 0, n)
@@ -862,7 +861,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	for _, store := range raftCluster.GetMetaStores() {
 		re.Equal(stores[store.GetId()], store)
 	}
-	re.Equal(n, raftCluster.GetRegionCount())
+	re.Equal(n, raftCluster.GetTotalRegionCount())
 	for _, region := range raftCluster.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
 	}
@@ -883,7 +882,7 @@ func TestLoadClusterInfo(t *testing.T) {
 		re.NoError(testStorage.SaveRegion(region))
 	}
 	re.NoError(storage.TryLoadRegionsOnce(ctx, testStorage, raftCluster.GetBasicCluster().PutRegion))
-	re.Equal(n, raftCluster.GetRegionCount())
+	re.Equal(n, raftCluster.GetTotalRegionCount())
 }
 
 func TestTiFlashWithPlacementRules(t *testing.T) {
@@ -1056,7 +1055,6 @@ func TestOfflineStoreLimit(t *testing.T) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()
@@ -1148,7 +1146,6 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up, "test/store1")
 	resp, err := putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)
@@ -1208,7 +1205,6 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	peers := make([]*metapb.Peer, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -1450,7 +1446,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(storage.SaveStore(store))
+		re.NoError(storage.SaveStoreMeta(store))
 	}
 	rc, err = rc.LoadClusterInfo()
 	re.NoError(err)

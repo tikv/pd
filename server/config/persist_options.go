@@ -17,7 +17,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -185,13 +184,6 @@ func (o *PersistOptions) SetPlacementRulesCacheEnabled(enabled bool) {
 	o.SetReplicationConfig(v)
 }
 
-// SetWitnessEnabled set EanbleWitness
-func (o *PersistOptions) SetWitnessEnabled(enabled bool) {
-	v := o.GetScheduleConfig().Clone()
-	v.EnableWitness = enabled
-	o.SetScheduleConfig(v)
-}
-
 // GetStrictlyMatchLabel returns whether check label strict.
 func (o *PersistOptions) GetStrictlyMatchLabel() bool {
 	return o.GetReplicationConfig().StrictlyMatchLabel
@@ -212,11 +204,9 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 // UseRaftV2 set some config for raft store v2 by default temporary.
 // todo: remove this after raft store support this.
 // disable merge check
-// disable split buckets
 func (o *PersistOptions) UseRaftV2() {
 	v := o.GetScheduleConfig().Clone()
 	v.MaxMergeRegionSize = 0
-	v.MaxMovableHotPeerSize = math.MaxInt64
 	o.SetScheduleConfig(v)
 }
 
@@ -923,4 +913,16 @@ func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clien
 		err = o.SetTTLData(ctx, client, "default-remove-peer", fmt.Sprint(ratePerMin), ttl)
 	}
 	return err
+}
+
+// SetHaltScheduling set HaltScheduling.
+func (o *PersistOptions) SetHaltScheduling(halt bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.HaltScheduling = halt
+	o.SetScheduleConfig(v)
+}
+
+// IsSchedulingHalted returns if PD scheduling is halted.
+func (o *PersistOptions) IsSchedulingHalted() bool {
+	return o.GetScheduleConfig().HaltScheduling
 }
