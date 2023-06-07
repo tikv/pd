@@ -80,13 +80,8 @@ func (s *TSODispatcher) DispatchRequest(req Request, tsoProtoFactory ProtoFactor
 	reqCh <- req
 }
 
-// startDispatchLoop starts the dispatch loop for the forwarded host
-func (s *TSODispatcher) cleanup(
-	forwardedHost string, finalForwardErr error,
-	unprocessedRequests []Request, unprocessedReqCount int,
-) {
-	pendingReqCount := unprocessedReqCount
-	pendingRequests := unprocessedRequests[:unprocessedReqCount]
+// cleanup cleans up the pending requests for the forwarded host
+func (s *TSODispatcher) cleanup(forwardedHost string, finalForwardErr error, pendingRequests []Request) {
 	val, loaded := s.dispatchChs.LoadAndDelete(forwardedHost)
 	if loaded {
 		reqCh := val.(chan Request)
@@ -94,22 +89,22 @@ func (s *TSODispatcher) cleanup(
 		for i := 0; i < waitingReqCount; i++ {
 			req := <-reqCh
 			pendingRequests = append(pendingRequests, req)
-			pendingReqCount++
 		}
 	}
 	if finalForwardErr != nil {
-		for i := 0; i < pendingReqCount; i++ {
-			if pendingRequests[i] != nil {
-				pendingRequests[i].sendErrorResponseAsync(finalForwardErr)
+		for _, pendingRequest := range pendingRequests {
+			if pendingRequest != nil {
+				pendingRequest.sendErrorResponseAsync(finalForwardErr)
 			}
 		}
-	} else if pendingReqCount > 0 {
+	} else if len(pendingRequests) > 0 {
 		log.Warn("the dispatch loop exited with pending requests unprocessed",
 			zap.String("forwarded-host", forwardedHost),
-			zap.Int("pending-requests-count", pendingReqCount))
+			zap.Int("pending-requests-count", len(pendingRequests)))
 	}
 }
 
+// startDispatchLoop starts the dispatch loop for the forwarded host
 func (s *TSODispatcher) startDispatchLoop(
 	forwardedHost string, clientConn *grpc.ClientConn,
 	tsoRequestCh <-chan Request, tsoProtoFactory ProtoFactory,
@@ -133,7 +128,7 @@ func (s *TSODispatcher) startDispatchLoop(
 		if forwardStream != nil {
 			forwardStream.closeSend()
 		}
-		s.cleanup(forwardedHost, forwardErr, pendingRequests, pendingTSOReqCount)
+		s.cleanup(forwardedHost, forwardErr, pendingRequests[:pendingTSOReqCount])
 		log.Info("the dispatch loop exited", zap.String("forwarded-host", forwardedHost))
 	}()
 
