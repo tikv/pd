@@ -186,7 +186,6 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid empty keyspaces")
 		return
 	}
-
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	patrolKeyspaceAssignmentState.Lock()
 	if !patrolKeyspaceAssignmentState.patrolled {

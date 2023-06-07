@@ -186,7 +186,7 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.Info("closing tso server ...")
+	log.Info("closing tso server")
 	// close tso service loops in the keyspace group manager
 	s.keyspaceGroupManager.Close()
 	s.serviceRegister.Deregister()

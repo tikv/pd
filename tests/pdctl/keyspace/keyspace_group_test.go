@@ -24,6 +24,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -95,8 +96,8 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	keyspaces := make([]string, 0)
-	for i := 0; i < 500; i++ {
+	var keyspaces []string
+	for i := 0; i < 130; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := tests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
@@ -120,14 +121,38 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
 
+	var splitKeyspaces []string
+	for i := 1; i <= 130; i++ {
+		splitKeyspaces = append(splitKeyspaces, fmt.Sprintf("%d", i))
+	}
 	// split keyspace group.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
+		args := append([]string{"-u", pdAddr, "keyspace-group", "split", "0", "1"}, splitKeyspaces...)
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
-	}, testutil.WithWaitFor(20*time.Second))
+	})
 
+	// delete keyspace group.
+	k, err := leaderServer.GetServer().GetKeyspaceManager().LoadKeyspaceByID(1)
+	re.NoError(err)
+	re.Equal("1", k.Config[keyspace.TSOKeyspaceGroupIDKey])
+	k, err = leaderServer.GetServer().GetKeyspaceManager().LoadKeyspaceByID(130)
+	re.NoError(err)
+	re.Equal("1", k.Config[keyspace.TSOKeyspaceGroupIDKey])
+	re.NoError(leaderServer.GetServer().GetKeyspaceGroupManager().FinishSplitKeyspaceByID(1))
+	args := []string{"-u", pdAddr, "keyspace-group", "delete", "1"}
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success")
+
+	k, err = leaderServer.GetServer().GetKeyspaceManager().LoadKeyspaceByID(1)
+	re.NoError(err)
+	re.Empty(k.Config[keyspace.TSOKeyspaceGroupIDKey])
+	k, err = leaderServer.GetServer().GetKeyspaceManager().LoadKeyspaceByID(130)
+	re.NoError(err)
+	re.Empty(k.Config[keyspace.TSOKeyspaceGroupIDKey])
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+
 }

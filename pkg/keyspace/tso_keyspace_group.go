@@ -71,6 +71,8 @@ type GroupManager struct {
 	serviceRegistryMap map[string]string
 	// tsoNodesWatcher is the watcher for the registered tso servers.
 	tsoNodesWatcher *etcdutil.LoopWatcher
+
+	km *Manager
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
@@ -79,6 +81,7 @@ func NewKeyspaceGroupManager(
 	store endpoint.KeyspaceGroupStorage,
 	client *clientv3.Client,
 	clusterID uint64,
+	km *Manager,
 ) *GroupManager {
 	ctx, cancel := context.WithCancel(ctx)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
@@ -92,6 +95,7 @@ func NewKeyspaceGroupManager(
 		groups:             groups,
 		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
 		serviceRegistryMap: make(map[string]string),
+		km:                 km,
 	}
 
 	// If the etcd client is not nil, start the watch loop for the registered tso servers.
@@ -286,33 +290,70 @@ func (m *GroupManager) GetKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup,
 // DeleteKeyspaceGroupByID deletes the keyspace group by ID.
 func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup, error) {
 	var (
-		kg  *endpoint.KeyspaceGroup
-		err error
+		kg           *endpoint.KeyspaceGroup
+		err          error
+		moreToDelete = true
 	)
 
 	m.Lock()
 	defer m.Unlock()
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		kg, err = m.store.LoadKeyspaceGroup(txn, id)
+	for moreToDelete {
+		err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+			kg, err = m.store.LoadKeyspaceGroup(txn, id)
+			if err != nil {
+				return err
+			}
+			if kg == nil {
+				return nil
+			}
+			if kg.IsSplitting() {
+				return ErrKeyspaceGroupInSplit
+			}
+
+			var (
+				keyspaceIDsToUnlock = make([]uint32, 0, maxTxnOps)
+				deleteKeyspaceCount = 0
+			)
+			defer func() {
+				for _, id := range keyspaceIDsToUnlock {
+					m.km.metaLock.Unlock(id)
+				}
+			}()
+			for _, id := range kg.Keyspaces {
+				if deleteKeyspaceCount >= maxTxnOps {
+					moreToDelete = true
+					kg.Keyspaces = kg.Keyspaces[deleteKeyspaceCount:]
+					return m.store.SaveKeyspaceGroup(txn, kg)
+				}
+				deleteKeyspaceCount++
+
+				m.km.metaLock.Lock(id)
+				keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, id)
+
+				ks, err := m.km.store.LoadKeyspaceMeta(txn, id)
+				if err != nil {
+					return err
+				}
+				if ks.Config == nil {
+					continue
+				}
+				delete(ks.Config, TSOKeyspaceGroupIDKey)
+
+				err = m.km.store.SaveKeyspaceMeta(txn, ks)
+				if err != nil {
+					log.Error("failed to save keyspace meta during removing keyspace group", zap.Uint32("keyspace-id", ks.Id), zap.Error(err))
+					return err
+				}
+			}
+			moreToDelete = false
+			return m.store.DeleteKeyspaceGroup(txn, id)
+		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if kg == nil {
-			return nil
-		}
-		if kg.IsSplitting() {
-			return ErrKeyspaceGroupInSplit
-		}
-		return m.store.DeleteKeyspaceGroup(txn, id)
-	}); err != nil {
-		return nil, err
+		m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
 	}
-
-	userKind := endpoint.StringUserKind(kg.UserKind)
-	// TODO: move out the keyspace to another group
-	// we don't need the keyspace group as the return value
-	m.groups[userKind].Remove(id)
-
+	m.groups[endpoint.StringUserKind(kg.UserKind)].Remove(id)
 	return kg, nil
 }
 

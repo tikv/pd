@@ -32,7 +32,17 @@ func NewKeyspaceGroupCommand() *cobra.Command {
 		Run:   showKeyspaceGroupCommandFunc,
 	}
 	cmd.AddCommand(newSplitKeyspaceGroupCommand())
+	cmd.AddCommand(newDeleteKeyspaceGroupCommand())
 	return cmd
+}
+
+func newDeleteKeyspaceGroupCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "delete <keyspace_group_id>",
+		Short: "delete the keyspace group with the given ID",
+		Run:   deleteKeyspaceGroupCommandFunc,
+	}
+	return r
 }
 
 func newSplitKeyspaceGroupCommand() *cobra.Command {
@@ -80,4 +90,18 @@ func splitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 		"new-id":    uint32(newID),
 		"keyspaces": keyspaces,
 	})
+}
+
+func deleteKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 {
+		cmd.Usage()
+		return
+	}
+	// delete keyspace group by its ID
+	_, err := doRequest(cmd, fmt.Sprintf("%s/%s", keyspaceGroupsPrefix, args[0]), http.MethodDelete, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to delete keyspace group %s: %s\n", args[0], err)
+		return
+	}
+	cmd.Println("Success!")
 }

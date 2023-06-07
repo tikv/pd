@@ -44,10 +44,12 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
 	idAllocator := mockid.NewIDAllocator()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
-	suite.kg = NewKeyspaceManager(suite.ctx, store, cluster, idAllocator, &mockConfig{}, suite.kgm)
+	suite.kg = NewKeyspaceManager(suite.ctx, store, cluster, idAllocator, &mockConfig{})
+	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store, nil, 0, suite.kg)
+	suite.kg.SetKeyspaceGroupManager(suite.kgm)
+
 	suite.NoError(suite.kgm.Bootstrap())
 }
 

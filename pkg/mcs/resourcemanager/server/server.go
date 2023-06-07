@@ -201,7 +201,7 @@ func (s *Server) Close() {
 		return
 	}
 
-	log.Info("closing resource manager server ...")
+	log.Info("closing resource manager server")
 	s.serviceRegister.Deregister()
 	s.muxListener.Close()
 	s.serverLoopCancel()

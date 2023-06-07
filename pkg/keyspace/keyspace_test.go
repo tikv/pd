@@ -78,8 +78,9 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
-	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
+	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{})
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil, 0, suite.manager)
+	suite.manager.SetKeyspaceGroupManager(kgm)
 	suite.NoError(kgm.Bootstrap())
 	suite.NoError(suite.manager.Bootstrap())
 }
@@ -405,7 +406,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	re := suite.Require()
 	// Create some keyspaces without any keyspace group.
-	for i := 1; i < keyspacePatrolBatchSize*2+1; i++ {
+	for i := 1; i < maxTxnOps*2+1; i++ {
 		now := time.Now().Unix()
 		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
 			Id:             uint32(i),
@@ -420,7 +421,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < keyspacePatrolBatchSize*2+1; i++ {
+	for i := 1; i < maxTxnOps*2+1; i++ {
 		re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 	// Patrol the keyspace assignment.
@@ -430,7 +431,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < keyspacePatrolBatchSize*2+1; i++ {
+	for i := 1; i < maxTxnOps*2+1; i++ {
 		re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 }

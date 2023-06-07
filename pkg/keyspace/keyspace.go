@@ -49,10 +49,9 @@ const (
 	UserKindKey = "user_kind"
 	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
-	// keyspacePatrolBatchSize is the batch size for keyspace assignment patrol.
-	// the limit of etcd txn op is 128, keyspacePatrolBatchSize need to be less than it.
+	// maxTxnOps is the batch size for operating etcd. The limit of etcd txn op is 128.
 	// See: https://github.com/etcd-io/etcd/blob/d3e43d4de6f6d9575b489dd7850a85e37e0f6b6c/server/embed/config.go#L61
-	keyspacePatrolBatchSize = 120
+	maxTxnOps = 120
 )
 
 // Config is the interface for keyspace config.
@@ -103,7 +102,6 @@ func NewKeyspaceManager(
 	cluster core.ClusterInformer,
 	idAllocator id.Allocator,
 	config Config,
-	kgm *GroupManager,
 ) *Manager {
 	return &Manager{
 		ctx:               ctx,
@@ -112,7 +110,6 @@ func NewKeyspaceManager(
 		store:             store,
 		cluster:           cluster,
 		config:            config,
-		kgm:               kgm,
 		nextPatrolStartID: utils.DefaultKeyspaceID,
 	}
 }
@@ -669,7 +666,7 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 			zap.Duration("cost", time.Since(start)),
 			zap.Uint64("patrolled-keyspace-count", patrolledKeyspaceCount),
 			zap.Uint64("assigned-keyspace-count", assignedKeyspaceCount),
-			zap.Int("batch-size", keyspacePatrolBatchSize),
+			zap.Int("batch-size", maxTxnOps),
 			zap.Uint32("current-start-id", currentStartID),
 			zap.Uint32("next-start-id", nextStartID),
 		)
@@ -688,7 +685,7 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 			if defaultKeyspaceGroup.IsSplitting() {
 				return ErrKeyspaceGroupInSplit
 			}
-			keyspaces, err := manager.store.LoadRangeKeyspace(txn, manager.nextPatrolStartID, keyspacePatrolBatchSize)
+			keyspaces, err := manager.store.LoadRangeKeyspace(txn, manager.nextPatrolStartID, maxTxnOps)
 			if err != nil {
 				return err
 			}
@@ -698,9 +695,9 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 				currentStartID = keyspaces[0].GetId()
 				nextStartID = keyspaces[keyspaceNum-1].GetId() + 1
 			}
-			// If there are less than `keyspacePatrolBatchSize` keyspaces,
+			// If there are less than `maxTxnOps`,
 			// we have reached the end of the keyspace list.
-			moreToPatrol = keyspaceNum == keyspacePatrolBatchSize
+			moreToPatrol = keyspaceNum == maxTxnOps
 			var (
 				assigned            = false
 				keyspaceIDsToUnlock = make([]uint32, 0, keyspaceNum)
@@ -735,7 +732,7 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 				err = manager.store.SaveKeyspaceMeta(txn, ks)
 				if err != nil {
 					log.Error("[keyspace] failed to save keyspace meta during patrol",
-						zap.Int("batch-size", keyspacePatrolBatchSize),
+						zap.Int("batch-size", maxTxnOps),
 						zap.Uint32("current-start-id", currentStartID),
 						zap.Uint32("next-start-id", nextStartID),
 						zap.Uint32("keyspace-id", ks.Id), zap.Error(err))
@@ -747,7 +744,7 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 				err = manager.kgm.store.SaveKeyspaceGroup(txn, defaultKeyspaceGroup)
 				if err != nil {
 					log.Error("[keyspace] failed to save default keyspace group meta during patrol",
-						zap.Int("batch-size", keyspacePatrolBatchSize),
+						zap.Int("batch-size", maxTxnOps),
 						zap.Uint32("current-start-id", currentStartID),
 						zap.Uint32("next-start-id", nextStartID), zap.Error(err))
 					return err
@@ -763,4 +760,9 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 		manager.nextPatrolStartID = nextStartID
 	}
 	return nil
+}
+
+// SetKeyspaceGroupManager sets the keyspace group manager.
+func (manager *Manager) SetKeyspaceGroupManager(kgm *GroupManager) {
+	manager.kgm = kgm
 }
