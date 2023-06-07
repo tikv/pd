@@ -39,7 +39,6 @@ type ClusterInformer interface {
 	GetRegionLabeler() *labeler.RegionLabeler
 	GetStorage() storage.Storage
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
-	CheckSchedulingAllowance() (bool, error)
 	AddSuspectRegions(ids ...uint64)
 	GetPersistOptions() *config.PersistOptions
 }

@@ -920,14 +920,26 @@ func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clien
 	return err
 }
 
+var haltSchedulingStatus = schedulingAllowanceStatusGauge.WithLabelValues("halt-scheduling")
+
 // SetHaltScheduling set HaltScheduling.
-func (o *PersistOptions) SetHaltScheduling(halt bool) {
+func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
 	v := o.GetScheduleConfig().Clone()
 	v.HaltScheduling = halt
 	o.SetScheduleConfig(v)
+	if halt {
+		haltSchedulingStatus.Set(1)
+		schedulingAllowanceStatusGauge.WithLabelValues(source).Set(1)
+	} else {
+		haltSchedulingStatus.Set(0)
+		schedulingAllowanceStatusGauge.WithLabelValues(source).Set(0)
+	}
 }
 
 // IsSchedulingHalted returns if PD scheduling is halted.
 func (o *PersistOptions) IsSchedulingHalted() bool {
+	if o == nil {
+		return false
+	}
 	return o.GetScheduleConfig().HaltScheduling
 }
