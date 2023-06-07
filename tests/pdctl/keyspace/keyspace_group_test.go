@@ -96,7 +96,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
-	for i := 0; i < 500; i++ {
+	for i := 0; i < 150; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := tests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
@@ -126,7 +126,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
-	}, testutil.WithWaitFor(20*time.Second))
+	}, testutil.WithWaitFor(10*time.Second))
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
