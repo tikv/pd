@@ -16,7 +16,10 @@ package tso
 
 import (
 	"context"
+	"fmt"
+	"math/rand"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -36,65 +39,105 @@ type tsoProxyTestSuite struct {
 	backendEndpoints string
 	tsoCluster       *mcs.TestTSOCluster
 	defaultReq       *pdpb.TsoRequest
+	grpcClientConns  []*grpc.ClientConn
+	streams          []pdpb.PD_TsoClient
+	cancelFuncs      []context.CancelFunc
 }
 
 func TestTSOProxyTestSuite(t *testing.T) {
 	suite.Run(t, new(tsoProxyTestSuite))
 }
 
-func (suite *tsoProxyTestSuite) SetupSuite() {
-	re := suite.Require()
+func (s *tsoProxyTestSuite) SetupSuite() {
+	re := s.Require()
 
 	var err error
-	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	s.ctx, s.cancel = context.WithCancel(context.Background())
 	// Create an API cluster with 1 server
-	suite.apiCluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	s.apiCluster, err = tests.NewTestAPICluster(s.ctx, 1)
 	re.NoError(err)
-	err = suite.apiCluster.RunInitialServers()
+	err = s.apiCluster.RunInitialServers()
 	re.NoError(err)
-	leaderName := suite.apiCluster.WaitLeader()
-	suite.apiLeader = suite.apiCluster.GetServer(leaderName)
-	suite.backendEndpoints = suite.apiLeader.GetAddr()
-	suite.NoError(suite.apiLeader.BootstrapCluster())
+	leaderName := s.apiCluster.WaitLeader()
+	s.apiLeader = s.apiCluster.GetServer(leaderName)
+	s.backendEndpoints = s.apiLeader.GetAddr()
+	s.NoError(s.apiLeader.BootstrapCluster())
 
 	// Create a TSO cluster with 2 servers
-	suite.tsoCluster, err = mcs.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	s.tsoCluster, err = mcs.NewTestTSOCluster(s.ctx, 2, s.backendEndpoints)
 	re.NoError(err)
-	suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	s.tsoCluster.WaitForDefaultPrimaryServing(re)
 
-	suite.defaultReq = &pdpb.TsoRequest{
-		Header: &pdpb.RequestHeader{ClusterId: suite.apiLeader.GetClusterID()},
+	s.defaultReq = &pdpb.TsoRequest{
+		Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
 		Count:  1,
 	}
+
+	// Create some TSO client streams with the same context.
+	s.grpcClientConns, s.streams, s.cancelFuncs = createTSOStreams(re, s.ctx, s.backendEndpoints, 100, true)
+	// Create some TSO client streams with the different context.
+	grpcClientConns, streams, cancelFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 100, false)
+	s.grpcClientConns = append(s.grpcClientConns, grpcClientConns...)
+	s.streams = append(s.streams, streams...)
+	s.cancelFuncs = append(s.cancelFuncs, cancelFuncs...)
 }
 
-func (suite *tsoProxyTestSuite) TearDownSuite() {
-	suite.tsoCluster.Destroy()
-	suite.apiCluster.Destroy()
-	suite.cancel()
+func (s *tsoProxyTestSuite) TearDownSuite() {
+	s.cleanupGRPCStreams(s.grpcClientConns, s.streams, s.cancelFuncs)
+	s.tsoCluster.Destroy()
+	s.apiCluster.Destroy()
+	s.cancel()
 }
 
-// TestTSOProxy tests the TSO Proxy.
-func (suite *tsoProxyTestSuite) TestTSOProxy() {
-	re := suite.Require()
+// TestTSOProxyBasic tests the TSO Proxy's basic function to forward TSO requests to TSO microservice.
+func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
+	s.verifyTSOProxy(s.streams, 100)
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	grpcClientConns, streams, cancelFuns := createTSOStreams(re, ctx, suite.backendEndpoints, 100, true)
-
-	err := tsoProxy(streams, suite.defaultReq)
-	re.NoError(err)
-
+func (s *tsoProxyTestSuite) cleanupGRPCStreams(
+	grpcClientConns []*grpc.ClientConn, streams []pdpb.PD_TsoClient, cancelFuncs []context.CancelFunc,
+) {
 	for _, stream := range streams {
 		stream.CloseSend()
 	}
 	for _, conn := range grpcClientConns {
 		conn.Close()
 	}
-	for _, cancelFun := range cancelFuns {
+	for _, cancelFun := range cancelFuncs {
 		cancelFun()
 	}
+}
+
+func (s *tsoProxyTestSuite) verifyTSOProxy(
+	streams []pdpb.PD_TsoClient, requestsPerClient int,
+) {
+	re := s.Require()
+	reqs := make([]*pdpb.TsoRequest, requestsPerClient)
+	for i := 0; i < requestsPerClient; i++ {
+		reqs[i] = &pdpb.TsoRequest{
+			Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
+			Count:  uint32(i) + 1, // Make sure the count is not zero.
+		}
+	}
+
+	wg := &sync.WaitGroup{}
+	for _, stream := range streams {
+		streamCopy := stream
+		wg.Add(1)
+		go func(streamCopy pdpb.PD_TsoClient) {
+			defer wg.Done()
+			for i := 0; i < requestsPerClient; i++ {
+				req := reqs[rand.Intn(requestsPerClient)]
+				err := streamCopy.Send(req)
+				re.NoError(err)
+				resp, err := streamCopy.Recv()
+				re.NoError(err)
+				re.Equal(req.GetCount(), resp.GetCount())
+				fmt.Printf("client %v, req %v, resp %v\n", streamCopy, req, resp)
+			}
+		}(streamCopy)
+	}
+	wg.Wait()
 }
 
 // createTSOStreams creates multiple TSO client streams and each stream uses a different gRPC connection
@@ -105,7 +148,7 @@ func createTSOStreams(
 ) ([]*grpc.ClientConn, []pdpb.PD_TsoClient, []context.CancelFunc) {
 	grpcClientConns := make([]*grpc.ClientConn, 0, clientCount)
 	streams := make([]pdpb.PD_TsoClient, 0, clientCount)
-	cancelFuns := make([]context.CancelFunc, 0, clientCount)
+	cancelFuncs := make([]context.CancelFunc, 0, clientCount)
 
 	for i := 0; i < clientCount; i++ {
 		conn, err := grpc.Dial(strings.TrimPrefix(backendEndpoints, "http://"), grpc.WithInsecure())
@@ -118,26 +161,70 @@ func createTSOStreams(
 			re.NoError(err)
 		} else {
 			cctx, cancel := context.WithCancel(ctx)
-			cancelFuns = append(cancelFuns, cancel)
+			cancelFuncs = append(cancelFuncs, cancel)
 			stream, err = grpcPDClient.Tso(cctx)
 			re.NoError(err)
 		}
 		streams = append(streams, stream)
 	}
 
-	return grpcClientConns, streams, cancelFuns
+	return grpcClientConns, streams, cancelFuncs
 }
 
-func tsoProxy(streams []pdpb.PD_TsoClient, tsoReq *pdpb.TsoRequest) error {
-	for _, stream := range streams {
-		if err := stream.Send(tsoReq); err != nil {
-			return err
+func tsoProxy(
+	tsoReq *pdpb.TsoRequest, streams []pdpb.PD_TsoClient,
+	concurrentClient bool, requestsPerClient int,
+) error {
+	if concurrentClient {
+		wg := &sync.WaitGroup{}
+		errsReturned := make([]error, len(streams))
+		for index, stream := range streams {
+			streamCopy := stream
+			wg.Add(1)
+			go func(index int, streamCopy pdpb.PD_TsoClient) {
+				defer wg.Done()
+				for i := 0; i < requestsPerClient; i++ {
+					if err := streamCopy.Send(tsoReq); err != nil {
+						errsReturned[index] = err
+						return
+					}
+					if _, err := streamCopy.Recv(); err != nil {
+						return
+					}
+				}
+			}(index, streamCopy)
 		}
-		if _, err := stream.Recv(); err != nil {
-			return err
+		wg.Wait()
+		for _, err := range errsReturned {
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		for _, stream := range streams {
+			for i := 0; i < requestsPerClient; i++ {
+				if err := stream.Send(tsoReq); err != nil {
+					return err
+				}
+				if _, err := stream.Recv(); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	return nil
+}
+
+var benmarkTSOProxyTable = []struct {
+	concurrentClient  bool
+	requestsPerClient int
+}{
+	{true, 2},
+	{true, 10},
+	{true, 100},
+	{false, 2},
+	{false, 10},
+	{false, 100},
 }
 
 // BenchmarkTSOProxy10ClientsSameContext benchmarks TSO proxy performance with 10 clients and the same context.
@@ -184,9 +271,19 @@ func benchmarkTSOProxyNClients(clientCount int, sameContext bool, b *testing.B) 
 
 	// Benchmark TSO proxy
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		err := tsoProxy(streams, suite.defaultReq)
-		re.NoError(err)
+	for _, t := range benmarkTSOProxyTable {
+		var builder strings.Builder
+		if t.concurrentClient {
+			builder.WriteString("ConcurrentClients_")
+		} else {
+			builder.WriteString("SequentialClients_")
+		}
+		b.Run(fmt.Sprintf("%s_%dReqsPerClient", builder.String(), t.requestsPerClient), func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				err := tsoProxy(suite.defaultReq, streams, t.concurrentClient, t.requestsPerClient)
+				re.NoError(err)
+			}
+		})
 	}
 	b.StopTimer()
 
