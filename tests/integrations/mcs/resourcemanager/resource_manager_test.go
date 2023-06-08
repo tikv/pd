@@ -208,10 +208,16 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	defer controller.Stop()
 	controller.OnRequestWait(suite.ctx, "test0", tcs.makeReadRequest())
 	meta := controller.GetActiveResourceGroup("test0")
+	metaShadow, err := controller.GetResourceGroup("test0")
+	re.NoError(err)
 	re.Equal(meta.RUSettings.RU, group.RUSettings.RU)
+	re.Equal(metaShadow.RUSettings.RU, group.RUSettings.RU)
 	controller.OnRequestWait(suite.ctx, "test1", tcs.makeReadRequest())
 	meta = controller.GetActiveResourceGroup("test1")
+	metaShadow, err = controller.GetResourceGroup("test1")
+	re.NoError(err)
 	re.Equal(meta.RUSettings.RU, group.RUSettings.RU)
+	re.Equal(metaShadow.RUSettings.RU, group.RUSettings.RU)
 	suite.NoError(err)
 	// Mock add resource groups
 	for i := 3; i < 9; i++ {
