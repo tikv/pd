@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/client/tsoutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
 	"google.golang.org/grpc"
@@ -126,6 +127,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 		wg.Add(1)
 		go func(streamCopy pdpb.PD_TsoClient) {
 			defer wg.Done()
+			lastPhysical, lastLogical := int64(0), int64(0)
 			for i := 0; i < requestsPerClient; i++ {
 				req := reqs[rand.Intn(requestsPerClient)]
 				err := streamCopy.Send(req)
@@ -133,7 +135,11 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 				resp, err := streamCopy.Recv()
 				re.NoError(err)
 				re.Equal(req.GetCount(), resp.GetCount())
-				fmt.Printf("client %v, req %v, resp %v\n", streamCopy, req, resp)
+				ts := resp.GetTimestamp()
+				count := int64(resp.GetCount())
+				physical, largestLogic, suffixBits := ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
+				firstLogical := tsoutil.AddLogical(largestLogic, -count+1, suffixBits)
+				re.False(tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical))
 			}
 		}(streamCopy)
 	}

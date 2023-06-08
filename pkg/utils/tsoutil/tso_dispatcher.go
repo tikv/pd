@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
@@ -33,10 +32,6 @@ const (
 	// DefaultTSOProxyTimeout defines the default timeout value of TSP Proxying
 	DefaultTSOProxyTimeout = 3 * time.Second
 )
-
-type tsoResp interface {
-	GetTimestamp() *pdpb.Timestamp
-}
 
 // TSODispatcher dispatches the TSO requests to the corresponding forwarding TSO channels.
 type TSODispatcher struct {
