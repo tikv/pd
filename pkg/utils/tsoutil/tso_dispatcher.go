@@ -38,6 +38,8 @@ type TSODispatcher struct {
 	tsoProxyHandleDuration prometheus.Histogram
 	tsoProxyBatchSize      prometheus.Histogram
 
+	*TSODispatchingStats
+
 	ctx context.Context
 	// dispatchChs is used to dispatch different TSO requests to the corresponding forwarding TSO channels.
 	dispatchChs sync.Map // Store as map[string]chan Request (forwardedHost -> dispatch channel)
@@ -53,6 +55,7 @@ func NewTSODispatcher(
 		ctx:                    ctx,
 		tsoProxyHandleDuration: tsoProxyHandleDuration,
 		tsoProxyBatchSize:      tsoProxyBatchSize,
+		TSODispatchingStats:    &TSODispatchingStats{},
 	}
 	return tsoDispatcher
 }
@@ -117,6 +120,8 @@ func (s *TSODispatcher) startDispatchLoop(
 	pendingTSOReqCount := 0
 
 	log.Info("start the dispatch loop", zap.String("forwarded-host", forwardedHost))
+	s.EnterDispatcher()
+
 	defer func() {
 		log.Info("exiting from the dispatch loop. cleaning up the pending requests",
 			zap.String("forwarded-host", forwardedHost))
@@ -124,6 +129,7 @@ func (s *TSODispatcher) startDispatchLoop(
 			forwardStream.closeSend()
 		}
 		s.cleanup(forwardedHost, forwardErr, pendingRequests[:pendingTSOReqCount])
+		s.LeaveDispatcher()
 		log.Info("the dispatch loop exited", zap.String("forwarded-host", forwardedHost))
 	}()
 

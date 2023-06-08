@@ -369,6 +369,11 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 // forwardTSO forwards the incoming TSO requests to the TSO microservice.
 func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
+	if s.IsAPIServiceMode() {
+		s.tsoDispatcher.EnterTSOStreamingRoutine()
+		defer s.tsoDispatcher.LeaveTSOStreamingRoutine()
+	}
+
 	streamCtx := stream.Context()
 	responseCh := make(chan *pdpb.TsoResponse, 1)
 

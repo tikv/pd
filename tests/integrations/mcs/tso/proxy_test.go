@@ -92,7 +92,7 @@ func (s *tsoProxyTestSuite) TearDownSuite() {
 
 // TestTSOProxyBasic tests the TSO Proxy's basic function to forward TSO requests to TSO microservice.
 func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
-	s.verifyTSOProxy(s.streams, 100)
+	s.verifyTSOProxy(s.streams, 1000)
 }
 
 func (s *tsoProxyTestSuite) cleanupGRPCStreams(
@@ -117,7 +117,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 	for i := 0; i < requestsPerClient; i++ {
 		reqs[i] = &pdpb.TsoRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
-			Count:  uint32(i) + 1, // Make sure the count is not zero.
+			Count:  uint32(i) + 1, // Make sure the count is positive.
 		}
 	}
 
@@ -273,7 +273,7 @@ func benchmarkTSOProxyNClients(clientCount int, sameContext bool, b *testing.B) 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	grpcClientConns, streams, cancelFuns := createTSOStreams(re, ctx, suite.backendEndpoints, clientCount, sameContext)
+	grpcClientConns, streams, cancelFuncs := createTSOStreams(re, ctx, suite.backendEndpoints, clientCount, sameContext)
 
 	// Benchmark TSO proxy
 	b.ResetTimer()
@@ -293,15 +293,7 @@ func benchmarkTSOProxyNClients(clientCount int, sameContext bool, b *testing.B) 
 	}
 	b.StopTimer()
 
-	for _, stream := range streams {
-		stream.CloseSend()
-	}
-	for _, conn := range grpcClientConns {
-		conn.Close()
-	}
-	for _, cancelFun := range cancelFuns {
-		cancelFun()
-	}
+	suite.cleanupGRPCStreams(grpcClientConns, streams, cancelFuncs)
 
 	suite.TearDownSuite()
 }
