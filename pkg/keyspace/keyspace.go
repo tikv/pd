@@ -50,7 +50,9 @@ const (
 	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
 	// keyspacePatrolBatchSize is the batch size for keyspace assignment patrol.
-	keyspacePatrolBatchSize = 256
+	// the limit of etcd txn op is 128, keyspacePatrolBatchSize need to be less than it.
+	// See: https://github.com/etcd-io/etcd/blob/d3e43d4de6f6d9575b489dd7850a85e37e0f6b6c/server/embed/config.go#L61
+	keyspacePatrolBatchSize = 120
 )
 
 // Config is the interface for keyspace config.

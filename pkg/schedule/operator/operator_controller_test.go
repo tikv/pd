@@ -58,7 +58,8 @@ func (suite *operatorControllerTestSuite) TearDownSuite() {
 func (suite *operatorControllerTestSuite) TestCacheInfluence() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	oc := NewController(suite.ctx, tc, nil)
+	bc := tc.GetBasicCluster()
+	oc := NewController(suite.ctx, bc, tc.GetOpts(), nil)
 	tc.AddLeaderStore(2, 1)
 	region := tc.AddLeaderRegion(1, 1, 2)
 
@@ -69,20 +70,20 @@ func (suite *operatorControllerTestSuite) TestCacheInfluence() {
 	oc.SetOperator(op)
 	suite.True(op.Start())
 	influence := NewOpInfluence()
-	AddOpInfluence(op, *influence, tc)
+	AddOpInfluence(op, *influence, bc)
 	suite.Equal(int64(-96), influence.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is same even if the region size changed.
 	region = region.Clone(core.SetApproximateSize(100))
 	tc.PutRegion(region)
 	influence1 := NewOpInfluence()
-	AddOpInfluence(op, *influence1, tc)
+	AddOpInfluence(op, *influence1, bc)
 	suite.Equal(int64(-96), influence1.GetStoreInfluence(2).RegionSize)
 
 	// case: influence is valid even if the region is removed.
 	tc.RemoveRegion(region)
 	influence2 := NewOpInfluence()
-	AddOpInfluence(op, *influence2, tc)
+	AddOpInfluence(op, *influence2, bc)
 	suite.Equal(int64(-96), influence2.GetStoreInfluence(2).RegionSize)
 }
 
@@ -90,7 +91,7 @@ func (suite *operatorControllerTestSuite) TestCacheInfluence() {
 func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	oc := NewController(suite.ctx, tc, nil)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), nil)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
 	tc.AddLeaderRegion(2, 1, 2)
@@ -121,7 +122,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 			case <-ctx.Done():
 				return
 			default:
-				oc.GetOpInfluence(tc)
+				oc.GetOpInfluence(tc.GetBasicCluster())
 			}
 		}
 	}(suite.ctx)
@@ -133,7 +134,7 @@ func (suite *operatorControllerTestSuite) TestOperatorStatus() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderRegion(1, 1, 2)
@@ -155,12 +156,12 @@ func (suite *operatorControllerTestSuite) TestOperatorStatus() {
 	op1.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime-FastStepWaitTime))
 	region2 = ApplyOperatorStep(region2, op2)
 	tc.PutRegion(region2)
-	oc.Dispatch(region1, "test")
-	oc.Dispatch(region2, "test")
+	oc.Dispatch(region1, "test", nil)
+	oc.Dispatch(region2, "test", nil)
 	suite.Equal(pdpb.OperatorStatus_TIMEOUT, oc.GetOperatorStatus(1).Status)
 	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(2).Status)
 	ApplyOperator(tc, op2)
-	oc.Dispatch(region2, "test")
+	oc.Dispatch(region2, "test", nil)
 	suite.Equal(pdpb.OperatorStatus_SUCCESS, oc.GetOperatorStatus(2).Status)
 }
 
@@ -168,7 +169,7 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
@@ -181,18 +182,18 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
 	suite.True(op.Start())
 	oc.SetOperator(op)
-	oc.Dispatch(region, "test")
+	oc.Dispatch(region, "test", nil)
 	suite.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 	// change the leader
 	region = region.Clone(core.WithLeader(region.GetPeer(2)))
-	oc.Dispatch(region, DispatchFromHeartBeat)
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
 	suite.Equal(CANCELED, op.Status())
 	suite.Nil(oc.GetOperator(region.GetID()))
 
 	// transfer leader to an illegal store.
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 5})
 	oc.SetOperator(op)
-	oc.Dispatch(region, DispatchFromHeartBeat)
+	oc.Dispatch(region, DispatchFromHeartBeat, nil)
 	suite.Equal(CANCELED, op.Status())
 	suite.Nil(oc.GetOperator(region.GetID()))
 }
@@ -202,7 +203,7 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
@@ -222,7 +223,7 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 2, 1)
@@ -287,7 +288,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 2, 1)
@@ -308,7 +309,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
-		oc.Dispatch(region1, "test")
+		oc.Dispatch(region1, "test", nil)
 		wg.Done()
 	}()
 	go func() {
@@ -328,7 +329,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 1)
 	tc.AddLeaderRegion(1, 1, 2)
@@ -401,7 +402,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	tc.AddLeaderStore(1, 0)
 	tc.UpdateLeaderCount(1, 1000)
 	tc.AddLeaderStore(2, 0)
@@ -468,7 +469,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewController(suite.ctx, cluster, stream)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetOpts(), stream)
 
 	cluster.AddLeaderStore(1, 2)
 	cluster.AddLeaderStore(2, 0)
@@ -487,7 +488,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	region := cluster.MockRegionInfo(1, 2, []uint64{1, 2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
-	controller.Dispatch(region, DispatchFromHeartBeat)
+	controller.Dispatch(region, DispatchFromHeartBeat, nil)
 	suite.Equal(uint64(0), op.ConfVerChanged(region))
 	suite.Equal(2, stream.MsgLength())
 
@@ -495,7 +496,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	region = cluster.MockRegionInfo(1, 2, []uint64{2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 0, Version: 0})
 
-	controller.Dispatch(region, DispatchFromHeartBeat)
+	controller.Dispatch(region, DispatchFromHeartBeat, nil)
 	suite.Equal(uint64(1), op.ConfVerChanged(region))
 	suite.Equal(2, stream.MsgLength())
 
@@ -509,7 +510,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	// report region with an abnormal confver
 	region = cluster.MockRegionInfo(1, 1, []uint64{1, 2}, []uint64{},
 		&metapb.RegionEpoch{ConfVer: 1, Version: 0})
-	controller.Dispatch(region, DispatchFromHeartBeat)
+	controller.Dispatch(region, DispatchFromHeartBeat, nil)
 	suite.Equal(uint64(0), op.ConfVerChanged(region))
 	// no new step
 	suite.Equal(3, stream.MsgLength())
@@ -518,7 +519,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewController(suite.ctx, cluster, stream)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetOpts(), stream)
 
 	epoch := &metapb.RegionEpoch{ConfVer: 0, Version: 0}
 	region := cluster.MockRegionInfo(1, 1, []uint64{2}, []uint64{}, epoch)
@@ -546,7 +547,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 		suite.Equal(si.StepCost[storelimit.RemovePeer], expect.StepCost[storelimit.RemovePeer])
 	}
 
-	influence := controller.GetOpInfluence(cluster)
+	influence := controller.GetOpInfluence(cluster.GetBasicCluster())
 	check(influence, 1, &StoreInfluence{
 		LeaderSize:  -20,
 		LeaderCount: -1,
@@ -573,7 +574,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	suite.True(steps[0].IsFinish(region2))
 	op.Check(region2)
 
-	influence = controller.GetOpInfluence(cluster)
+	influence = controller.GetOpInfluence(cluster.GetBasicCluster())
 	check(influence, 1, &StoreInfluence{
 		LeaderSize:  -20,
 		LeaderCount: -1,
@@ -595,7 +596,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewController(suite.ctx, cluster, stream)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetOpts(), stream)
 
 	// Create a new region with epoch(0, 0)
 	// the region has two peers with its peer id allocated incrementally.
@@ -644,7 +645,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 		suite.NotNil(region2.GetPendingPeers())
 
 		suite.False(steps[0].IsFinish(region2))
-		controller.Dispatch(region2, DispatchFromHeartBeat)
+		controller.Dispatch(region2, DispatchFromHeartBeat, nil)
 
 		// In this case, the conf version has been changed, but the
 		// peer added is in pending state, the operator should not be
@@ -663,7 +664,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 			core.WithIncConfVer(),
 		)
 		suite.True(steps[0].IsFinish(region3))
-		controller.Dispatch(region3, DispatchFromHeartBeat)
+		controller.Dispatch(region3, DispatchFromHeartBeat, nil)
 		suite.Equal(uint64(1), op.ConfVerChanged(region3))
 		suite.Equal(2, stream.MsgLength())
 
@@ -672,7 +673,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 			core.WithIncConfVer(),
 		)
 		suite.True(steps[1].IsFinish(region4))
-		controller.Dispatch(region4, DispatchFromHeartBeat)
+		controller.Dispatch(region4, DispatchFromHeartBeat, nil)
 		suite.Equal(uint64(2), op.ConfVerChanged(region4))
 		suite.Equal(3, stream.MsgLength())
 
@@ -681,7 +682,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 			core.WithLeader(region4.GetStorePeer(3)),
 		)
 		suite.True(steps[2].IsFinish(region5))
-		controller.Dispatch(region5, DispatchFromHeartBeat)
+		controller.Dispatch(region5, DispatchFromHeartBeat, nil)
 		suite.Equal(uint64(2), op.ConfVerChanged(region5))
 		suite.Equal(4, stream.MsgLength())
 
@@ -691,7 +692,7 @@ func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 			core.WithIncConfVer(),
 		)
 		suite.True(steps[3].IsFinish(region6))
-		controller.Dispatch(region6, DispatchFromHeartBeat)
+		controller.Dispatch(region6, DispatchFromHeartBeat, nil)
 		suite.Equal(uint64(3), op.ConfVerChanged(region6))
 
 		// The Operator has finished, so no message should be sent
@@ -732,7 +733,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(suite.ctx, opts)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
-	controller := NewController(suite.ctx, cluster, stream)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetOpts(), stream)
 	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
@@ -801,7 +802,7 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := NewController(suite.ctx, tc, stream)
+	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// If PD and store 3 are gone, PD will not have info of store 3 after recreating it.
 	tc.AddRegionStore(1, 1)
 	tc.AddRegionStore(2, 1)

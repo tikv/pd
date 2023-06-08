@@ -38,22 +38,23 @@ type ClusterInformer interface {
 	GetAllocator() id.Allocator
 	GetRegionLabeler() *labeler.RegionLabeler
 	GetStorage() storage.Storage
-	RemoveScheduler(name string) error
-	AddSuspectRegions(ids ...uint64)
-	RecordOpStepWithTTL(regionID uint64)
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
-	IsSchedulerExisted(name string) (bool, error)
-	IsSchedulerDisabled(name string) (bool, error)
 	CheckSchedulingAllowance() (bool, error)
+	AddSuspectRegions(ids ...uint64)
 	GetPersistOptions() *config.PersistOptions
 }
 
 // RegionHealthCluster is an aggregate interface that wraps multiple interfaces
 type RegionHealthCluster interface {
-	core.StoreSetInformer
-	core.StoreSetController
-	core.RegionSetInformer
+	BasicCluster
 
 	GetOpts() sc.Config
 	GetRuleManager() *placement.RuleManager
+}
+
+// BasicCluster is an aggregate interface that wraps multiple interfaces
+type BasicCluster interface {
+	core.StoreSetInformer
+	core.StoreSetController
+	core.RegionSetInformer
 }

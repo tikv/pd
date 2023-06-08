@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package scatter
 
 import (
 	"context"
@@ -52,6 +52,12 @@ var (
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
 	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
+)
+
+const (
+	maxSleepDuration     = time.Minute
+	initialSleepDuration = 100 * time.Millisecond
+	maxRetryLimit        = 30
 )
 
 type selectedStores struct {
@@ -170,10 +176,6 @@ func newEngineContext(ctx context.Context, filterFuncs ...filterFunc) engineCont
 		selectedLeader: newSelectedStores(ctx),
 	}
 }
-
-const maxSleepDuration = time.Minute
-const initialSleepDuration = 100 * time.Millisecond
-const maxRetryLimit = 30
 
 // ScatterRegionsByRange directly scatter regions by ScatterRegions
 func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group string, retryLimit int) (int, map[uint64]error, error) {

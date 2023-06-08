@@ -45,7 +45,7 @@ func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.
 	} else {
 		stream = hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, needToRunStream[0])
 	}
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	return cancel, opt, tc, oc
 }
 
@@ -110,7 +110,7 @@ func TestRejectLeader(t *testing.T) {
 	re.Empty(ops)
 
 	// Can't evict leader from store2, neither.
-	el, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"2"}))
+	el, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"2"}), func(string) error { return nil })
 	re.NoError(err)
 	ops, _ = el.Schedule(tc, false)
 	re.Empty(ops)
@@ -136,7 +136,7 @@ func TestRemoveRejectLeader(t *testing.T) {
 	defer cancel()
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 1)
-	el, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
+	el, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 	tc.DeleteStore(tc.GetStore(1))
 	succ, _ := el.(*evictLeaderScheduler).conf.removeStore(1)

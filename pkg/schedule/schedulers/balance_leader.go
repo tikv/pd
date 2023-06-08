@@ -161,7 +161,6 @@ type balanceLeaderScheduler struct {
 	name          string
 	conf          *balanceLeaderSchedulerConfig
 	handler       http.Handler
-	opController  *operator.Controller
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
@@ -177,7 +176,6 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		name:          BalanceLeaderName,
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
-		opController:  opController,
 		counter:       balanceLeaderCounter,
 		filterCounter: filter.NewCounter(filter.BalanceLeader.String()),
 	}
@@ -227,7 +225,7 @@ func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
-	allowed := l.opController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	allowed := l.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
 	}
@@ -338,7 +336,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.ClusterInformer, dryRun b
 	balanceLeaderScheduleCounter.Inc()
 
 	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
-	opInfluence := l.opController.GetOpInfluence(cluster)
+	opInfluence := l.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
@@ -421,7 +419,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 		storesIDs := candidate.binarySearchStores(plan.source, plan.target)
 		candidateUpdateStores[id] = storesIDs
 	}
-	operator.AddOpInfluence(op, plan.opInfluence, plan.ClusterInformer)
+	operator.AddOpInfluence(op, plan.opInfluence, plan.ClusterInformer.GetBasicCluster())
 	for id, candidate := range candidates {
 		for _, pos := range candidateUpdateStores[id] {
 			candidate.resortStoreWithPos(pos)

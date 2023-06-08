@@ -47,7 +47,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/splitter"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -216,7 +218,7 @@ func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 }
 
 func (c *RaftCluster) isInitialized() bool {
-	if c.core.GetRegionCount() > 1 {
+	if c.core.GetTotalRegionCount() > 1 {
 		return true
 	}
 	region := c.core.GetRegionByKey(nil)
@@ -488,7 +490,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		return nil, err
 	}
 	log.Info("load regions",
-		zap.Int("count", c.core.GetRegionCount()),
+		zap.Int("count", c.core.GetTotalRegionCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
 	for _, store := range c.GetStores() {
@@ -656,12 +658,12 @@ func (c *RaftCluster) SetPrepared() {
 }
 
 // GetRegionScatter returns the region scatter.
-func (c *RaftCluster) GetRegionScatter() *schedule.RegionScatterer {
+func (c *RaftCluster) GetRegionScatter() *scatter.RegionScatterer {
 	return c.coordinator.GetRegionScatterer()
 }
 
 // GetRegionSplitter returns the region splitter
-func (c *RaftCluster) GetRegionSplitter() *schedule.RegionSplitter {
+func (c *RaftCluster) GetRegionSplitter() *splitter.RegionSplitter {
 	return c.coordinator.GetRegionSplitter()
 }
 
@@ -673,11 +675,6 @@ func (c *RaftCluster) GetMergeChecker() *checker.MergeChecker {
 // GetRuleChecker returns rule checker.
 func (c *RaftCluster) GetRuleChecker() *checker.RuleChecker {
 	return c.coordinator.GetRuleChecker()
-}
-
-// RecordOpStepWithTTL records OpStep with TTL
-func (c *RaftCluster) RecordOpStepWithTTL(regionID uint64) {
-	c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
 }
 
 // GetSchedulers gets all schedulers.
@@ -705,34 +702,9 @@ func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
 	return c.coordinator.PauseOrResumeScheduler(name, t)
 }
 
-// IsSchedulerPaused checks if a scheduler is paused.
-func (c *RaftCluster) IsSchedulerPaused(name string) (bool, error) {
-	return c.coordinator.IsSchedulerPaused(name)
-}
-
-// IsSchedulerDisabled checks if a scheduler is disabled.
-func (c *RaftCluster) IsSchedulerDisabled(name string) (bool, error) {
-	return c.coordinator.IsSchedulerDisabled(name)
-}
-
-// IsSchedulerAllowed checks if a scheduler is allowed.
-func (c *RaftCluster) IsSchedulerAllowed(name string) (bool, error) {
-	return c.coordinator.IsSchedulerAllowed(name)
-}
-
-// IsSchedulerExisted checks if a scheduler is existed.
-func (c *RaftCluster) IsSchedulerExisted(name string) (bool, error) {
-	return c.coordinator.IsSchedulerExisted(name)
-}
-
 // PauseOrResumeChecker pauses or resumes checker.
 func (c *RaftCluster) PauseOrResumeChecker(name string, t int64) error {
 	return c.coordinator.PauseOrResumeChecker(name, t)
-}
-
-// IsCheckerPaused returns if checker is paused
-func (c *RaftCluster) IsCheckerPaused(name string) (bool, error) {
-	return c.coordinator.IsCheckerPaused(name)
 }
 
 // GetAllocator returns cluster's id allocator.
@@ -1127,7 +1099,7 @@ func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) *core.RegionInfo {
 // ScanRegions scans region with start key, until the region contains endKey, or
 // total number greater than limit.
 func (c *RaftCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
-	return c.core.ScanRange(startKey, endKey, limit)
+	return c.core.ScanRegions(startKey, endKey, limit)
 }
 
 // GetRegion searches for a region by ID.
@@ -1145,9 +1117,9 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	return c.core.GetRegions()
 }
 
-// GetRegionCount returns total count of regions
-func (c *RaftCluster) GetRegionCount() int {
-	return c.core.GetRegionCount()
+// GetTotalRegionCount returns total count of regions
+func (c *RaftCluster) GetTotalRegionCount() int {
+	return c.core.GetTotalRegionCount()
 }
 
 // GetStoreRegions returns all regions' information with a given storeID.
@@ -1744,7 +1716,7 @@ func (c *RaftCluster) checkStores() {
 
 		storeID := store.GetID()
 		if store.IsPreparing() {
-			if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetRegionCount() < core.InitClusterRegionThreshold {
+			if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetTotalRegionCount() < core.InitClusterRegionThreshold {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
@@ -2241,13 +2213,13 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 
 // GetRegionStats returns region statistics from cluster.
 func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
-	return statistics.GetRegionStats(c.core.ScanRange(startKey, endKey, -1))
+	return statistics.GetRegionStats(c.core.ScanRegions(startKey, endKey, -1))
 }
 
-// GetRangeCount returns the number of regions in the range.
-func (c *RaftCluster) GetRangeCount(startKey, endKey []byte) *statistics.RegionStats {
+// GetRegionCount returns the number of regions in the range.
+func (c *RaftCluster) GetRegionCount(startKey, endKey []byte) *statistics.RegionStats {
 	stats := &statistics.RegionStats{}
-	stats.Count = c.core.GetRangeCount(startKey, endKey)
+	stats.Count = c.core.GetRegionCount(startKey, endKey)
 	return stats
 }
 

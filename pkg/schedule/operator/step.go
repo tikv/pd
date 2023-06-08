@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
@@ -54,7 +54,7 @@ type OpStep interface {
 	fmt.Stringer
 	ConfVerChanged(region *core.RegionInfo) uint64
 	IsFinish(region *core.RegionInfo) bool
-	CheckInProgress(ci sche.ClusterInformer, region *core.RegionInfo) error
+	CheckInProgress(ci *core.BasicCluster, config config.Config, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	Timeout(regionSize int64) time.Duration
 	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse
@@ -88,7 +88,7 @@ func (tl TransferLeader) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (tl TransferLeader) CheckInProgress(ci sche.ClusterInformer, region *core.RegionInfo) error {
+func (tl TransferLeader) CheckInProgress(ci *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
 	errList := make([]error, 0, len(tl.ToStores)+1)
 	for _, storeID := range append(tl.ToStores, tl.ToStore) {
 		peer := region.GetStorePeer(tl.ToStore)
@@ -100,7 +100,7 @@ func (tl TransferLeader) CheckInProgress(ci sche.ClusterInformer, region *core.R
 			errList = append(errList, errors.New("peer already is a learner"))
 			continue
 		}
-		if err := validateStore(ci, storeID); err != nil {
+		if err := validateStore(ci, config, storeID); err != nil {
 			errList = append(errList, err)
 			continue
 		}
@@ -193,8 +193,8 @@ func (ap AddPeer) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (ap AddPeer) CheckInProgress(ci sche.ClusterInformer, region *core.RegionInfo) error {
-	if err := validateStore(ci, ap.ToStore); err != nil {
+func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
+	if err := validateStore(ci, config, ap.ToStore); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(ap.ToStore)
@@ -247,8 +247,8 @@ func (bw BecomeWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bw BecomeWitness) CheckInProgress(ci sche.ClusterInformer, region *core.RegionInfo) error {
-	if err := validateStore(ci, bw.StoreID); err != nil {
+func (bw BecomeWitness) CheckInProgress(ci *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
+	if err := validateStore(ci, config, bw.StoreID); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(bw.StoreID)
@@ -309,8 +309,8 @@ func (bn BecomeNonWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bn BecomeNonWitness) CheckInProgress(ci sche.ClusterInformer, region *core.RegionInfo) error {
-	if err := validateStore(ci, bn.StoreID); err != nil {
+func (bn BecomeNonWitness) CheckInProgress(ci *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
+	if err := validateStore(ci, config, bn.StoreID); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(bn.StoreID)
@@ -395,14 +395,14 @@ func (bsw BatchSwitchWitness) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (bsw BatchSwitchWitness) CheckInProgress(ci sche.ClusterInformer, region *core.RegionInfo) error {
+func (bsw BatchSwitchWitness) CheckInProgress(ci *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
 	for _, w := range bsw.ToWitnesses {
-		if err := w.CheckInProgress(ci, region); err != nil {
+		if err := w.CheckInProgress(ci, config, region); err != nil {
 			return err
 		}
 	}
 	for _, nw := range bsw.ToNonWitnesses {
-		if err := nw.CheckInProgress(ci, region); err != nil {
+		if err := nw.CheckInProgress(ci, config, region); err != nil {
 			return err
 		}
 	}
@@ -478,8 +478,8 @@ func (al AddLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (al AddLearner) CheckInProgress(ci sche.ClusterInformer, region *core.RegionInfo) error {
-	if err := validateStore(ci, al.ToStore); err != nil {
+func (al AddLearner) CheckInProgress(ci *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
+	if err := validateStore(ci, config, al.ToStore); err != nil {
 		return err
 	}
 	peer := region.GetStorePeer(al.ToStore)
@@ -564,7 +564,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (pl PromoteLearner) CheckInProgress(_ sche.ClusterInformer, region *core.RegionInfo) error {
+func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
@@ -615,7 +615,7 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (rp RemovePeer) CheckInProgress(_ sche.ClusterInformer, region *core.RegionInfo) error {
+func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
 	if rp.FromStore == region.GetLeader().GetStoreId() {
 		return errors.New("cannot remove leader peer")
 	}
@@ -685,7 +685,7 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (mr MergeRegion) CheckInProgress(_ sche.ClusterInformer, _ *core.RegionInfo) error {
+func (mr MergeRegion) CheckInProgress(_ *core.BasicCluster, config config.Config, _ *core.RegionInfo) error {
 	return nil
 }
 
@@ -753,7 +753,7 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (sr SplitRegion) CheckInProgress(_ sche.ClusterInformer, _ *core.RegionInfo) error {
+func (sr SplitRegion) CheckInProgress(_ *core.BasicCluster, config config.Config, _ *core.RegionInfo) error {
 	return nil
 }
 
@@ -878,7 +878,7 @@ func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpe ChangePeerV2Enter) CheckInProgress(_ sche.ClusterInformer, region *core.RegionInfo) error {
+func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
 	inJointState, notInJointState := false, false
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
@@ -1007,7 +1007,7 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpl ChangePeerV2Leave) CheckInProgress(_ sche.ClusterInformer, region *core.RegionInfo) error {
+func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, config config.Config, region *core.RegionInfo) error {
 	inJointState, notInJointState, demoteLeader := false, false, false
 	leaderStoreID := region.GetLeader().GetStoreId()
 
@@ -1085,12 +1085,12 @@ func (cpl ChangePeerV2Leave) GetCmd(region *core.RegionInfo, useConfChangeV2 boo
 	}
 }
 
-func validateStore(ci sche.ClusterInformer, id uint64) error {
-	store := ci.GetBasicCluster().GetStore(id)
+func validateStore(ci *core.BasicCluster, config config.Config, id uint64) error {
+	store := ci.GetStore(id)
 	if store == nil {
 		return errors.New("target store does not exist")
 	}
-	if store.DownTime() > ci.GetOpts().GetMaxStoreDownTime() {
+	if store.DownTime() > config.GetMaxStoreDownTime() {
 		return errors.New("target store is down")
 	}
 	return nil

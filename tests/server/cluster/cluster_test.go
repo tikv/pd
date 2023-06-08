@@ -861,7 +861,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	for _, store := range raftCluster.GetMetaStores() {
 		re.Equal(stores[store.GetId()], store)
 	}
-	re.Equal(n, raftCluster.GetRegionCount())
+	re.Equal(n, raftCluster.GetTotalRegionCount())
 	for _, region := range raftCluster.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
 	}
@@ -882,7 +882,7 @@ func TestLoadClusterInfo(t *testing.T) {
 		re.NoError(testStorage.SaveRegion(region))
 	}
 	re.NoError(storage.TryLoadRegionsOnce(ctx, testStorage, raftCluster.GetBasicCluster().PutRegion))
-	re.Equal(n, raftCluster.GetRegionCount())
+	re.Equal(n, raftCluster.GetTotalRegionCount())
 }
 
 func TestTiFlashWithPlacementRules(t *testing.T) {

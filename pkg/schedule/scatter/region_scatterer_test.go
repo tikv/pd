@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package scatter
 
 import (
 	"context"
@@ -91,7 +91,7 @@ func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
 	// Add ordinary stores.
@@ -148,7 +148,7 @@ func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores,
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
 	// Add ordinary stores.
@@ -226,7 +226,7 @@ func TestStoreLimit(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 
 	// Add stores 1~6.
 	for i := uint64(1); i <= 5; i++ {
@@ -258,7 +258,7 @@ func TestScatterCheck(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
@@ -307,7 +307,7 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 5 connected stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
@@ -352,7 +352,7 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
@@ -424,7 +424,7 @@ func TestScatterForManyRegion(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 60 stores.
 	for i := uint64(1); i <= 60; i++ {
 		tc.AddRegionStore(i, 0)
@@ -439,9 +439,9 @@ func TestScatterForManyRegion(t *testing.T) {
 	}
 	failures := map[uint64]error{}
 	group := "group"
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatterHbStreamsDrain", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain", `return(true)`))
 	scatterer.scatterRegions(regions, failures, group, 3)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatterHbStreamsDrain"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain"))
 	re.Len(failures, 0)
 }
 
@@ -452,7 +452,7 @@ func TestScattersGroup(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
@@ -470,7 +470,7 @@ func TestScattersGroup(t *testing.T) {
 			failure: false,
 		},
 	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatterHbStreamsDrain", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain", `return(true)`))
 	for id, testCase := range testCases {
 		group := fmt.Sprintf("gourp-%d", id)
 		t.Log(testCase.name)
@@ -481,7 +481,7 @@ func TestScattersGroup(t *testing.T) {
 		}
 		failures := map[uint64]error{}
 		if testCase.failure {
-			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatterFail", `return(true)`))
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterFail", `return(true)`))
 		}
 
 		scatterer.scatterRegions(regions, failures, group, 3)
@@ -505,12 +505,12 @@ func TestScattersGroup(t *testing.T) {
 			re.Len(failures, 1)
 			_, ok := failures[1]
 			re.True(ok)
-			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatterFail"))
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterFail"))
 		} else {
 			re.Empty(failures)
 		}
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatterHbStreamsDrain"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain"))
 }
 
 func TestSelectedStoreGC(t *testing.T) {
@@ -541,7 +541,7 @@ func TestRegionFromDifferentGroups(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 6 stores.
 	storeCount := 6
 	for i := uint64(1); i <= uint64(storeCount); i++ {
@@ -577,7 +577,7 @@ func TestRegionHasLearner(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 8 stores.
 	voterCount := uint64(6)
 	storeCount := uint64(8)
@@ -665,7 +665,7 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 4 stores.
 	for i := uint64(1); i <= 4; i++ {
 		tc.AddRegionStore(i, 0)
@@ -702,7 +702,7 @@ func TestSelectedStoresTooManyPeers(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 4 stores.
 	for i := uint64(1); i <= 5; i++ {
 		tc.AddRegionStore(i, 0)
@@ -740,7 +740,7 @@ func TestBalanceRegion(t *testing.T) {
 	opt.SetLocationLabels([]string{"host"})
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc, stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 	// Add 6 stores in 3 hosts.
 	for i := uint64(2); i <= 7; i++ {
 		tc.AddLabelsStore(i, 0, map[string]string{"host": strconv.FormatUint(i/2, 10)})
