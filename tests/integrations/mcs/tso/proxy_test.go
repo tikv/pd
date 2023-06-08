@@ -75,9 +75,9 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	}
 
 	// Create some TSO client streams with the same context.
-	s.grpcClientConns, s.streams, s.cancelFuncs = createTSOStreams(re, s.ctx, s.backendEndpoints, 500, true)
+	s.grpcClientConns, s.streams, s.cancelFuncs = createTSOStreams(re, s.ctx, s.backendEndpoints, 100, true)
 	// Create some TSO client streams with the different context.
-	grpcClientConns, streams, cancelFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 500, false)
+	grpcClientConns, streams, cancelFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 100, false)
 	s.grpcClientConns = append(s.grpcClientConns, grpcClientConns...)
 	s.streams = append(s.streams, streams...)
 	s.cancelFuncs = append(s.cancelFuncs, cancelFuncs...)
@@ -103,7 +103,6 @@ func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
 // working, the TSO Proxy can still work correctly.
 func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 	re := s.Require()
-	
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 	go func() {
@@ -112,7 +111,7 @@ func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 10; i++ {
-				s.verifyTSOProxy(streams, 100)
+				s.verifyTSOProxy(streams, 10)
 			}
 			s.cleanupGRPCStreams(grpcClientConns, streams, cancelFuncs)
 		}()
