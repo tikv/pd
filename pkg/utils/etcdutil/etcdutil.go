@@ -531,17 +531,19 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					if err := lw.putFn(event.Kv); err != nil {
 						log.Error("put failed in watch loop", zap.String("name", lw.name),
 							zap.String("key", lw.key), zap.Error(err))
+					} else {
+						log.Debug("put in watch loop", zap.String("name", lw.name),
+							zap.ByteString("key", event.Kv.Key),
+							zap.ByteString("value", event.Kv.Value))
 					}
-					log.Debug("put in watch loop", zap.String("name", lw.name),
-						zap.ByteString("key", event.Kv.Key),
-						zap.ByteString("value", event.Kv.Value))
 				case clientv3.EventTypeDelete:
 					if err := lw.deleteFn(event.Kv); err != nil {
 						log.Error("delete failed in watch loop", zap.String("name", lw.name),
 							zap.String("key", lw.key), zap.Error(err))
+					} else {
+						log.Debug("delete in watch loop", zap.String("name", lw.name),
+							zap.ByteString("key", event.Kv.Key))
 					}
-					log.Debug("delete in watch loop", zap.String("name", lw.name),
-						zap.ByteString("key", event.Kv.Key))
 				}
 			}
 			if err := lw.postEventFn(); err != nil {
@@ -592,7 +594,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
 					zap.String("key", lw.key), zap.Error(err))
 			}
-			log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 			return resp.Header.Revision + 1, err
 		}
 	}
