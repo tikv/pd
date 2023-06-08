@@ -404,7 +404,6 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		forwardStream     tsopb.TSO_TsoClient
 		cancel            context.CancelFunc
 		lastForwardedHost string
-		errCh             chan error
 	)
 	defer func() {
 		// cancel the forward stream
@@ -414,6 +413,14 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 	}()
 
 	for {
+		select {
+		case <-s.ctx.Done():
+			return errors.WithStack(s.ctx.Err())
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		default:
+		}
+
 		request, err := server.Recv()
 		if err == io.EOF {
 			return nil
@@ -439,14 +446,11 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			if err != nil {
 				return errors.WithStack(err)
 			}
-			log.Info("create TSO forward stream", zap.String("forwarded-host", forwardedHost))
 			forwardStream, cancel, err = s.createTSOForwardStream(clientConn)
 			if err != nil {
 				return errors.WithStack(err)
 			}
 			lastForwardedHost = forwardedHost
-			errCh = make(chan error, 1)
-			go forwardTSOClientToServer(forwardStream, server, errCh)
 		}
 
 		tsoReq := &tsopb.TsoRequest{
@@ -463,10 +467,42 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 
-		select {
-		case err := <-errCh:
-			return err
-		default:
+		tsopbResp, err := forwardStream.Recv()
+		if err != nil {
+			if strings.Contains(err.Error(), errs.NotLeaderErr) {
+				s.tsoPrimaryWatcher.ForceLoad()
+			}
+			return errors.WithStack(err)
+		}
+
+		// The error types defined for tsopb and pdpb are different, so we need to convert them.
+		var pdpbErr *pdpb.Error
+		tsopbErr := tsopbResp.GetHeader().GetError()
+		if tsopbErr != nil {
+			if tsopbErr.Type == tsopb.ErrorType_OK {
+				pdpbErr = &pdpb.Error{
+					Type:    pdpb.ErrorType_OK,
+					Message: tsopbErr.GetMessage(),
+				}
+			} else {
+				// TODO: specify FORWARD FAILURE error type instead of UNKNOWN.
+				pdpbErr = &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: tsopbErr.GetMessage(),
+				}
+			}
+		}
+
+		response := &pdpb.TsoResponse{
+			Header: &pdpb.ResponseHeader{
+				ClusterId: tsopbResp.GetHeader().GetClusterId(),
+				Error:     pdpbErr,
+			},
+			Count:     tsopbResp.GetCount(),
+			Timestamp: tsopbResp.GetTimestamp(),
+		}
+		if err := server.Send(response); err != nil {
+			return errors.WithStack(err)
 		}
 	}
 }
@@ -1995,49 +2031,6 @@ func (s *GrpcServer) createTSOForwardStream(client *grpc.ClientConn) (tsopb.TSO_
 	forwardStream, err := tsopb.NewTSOClient(client).Tso(ctx)
 	done <- struct{}{}
 	return forwardStream, cancel, err
-}
-
-func forwardTSOClientToServer(forwardStream tsopb.TSO_TsoClient, server *tsoServer, errCh chan error) {
-	defer logutil.LogPanic()
-	defer close(errCh)
-	for {
-		resp, err := forwardStream.Recv()
-		if err != nil {
-			errCh <- errors.WithStack(err)
-			return
-		}
-
-		// The error types defined for tsopb and pdpb are different, so we need to convert them.
-		var pdpbErr *pdpb.Error
-		tsopbErr := resp.GetHeader().GetError()
-		if tsopbErr != nil {
-			if tsopbErr.Type == tsopb.ErrorType_OK {
-				pdpbErr = &pdpb.Error{
-					Type:    pdpb.ErrorType_OK,
-					Message: tsopbErr.GetMessage(),
-				}
-			} else {
-				// TODO: specify FORWARD FAILURE error type instead of UNKNOWN.
-				pdpbErr = &pdpb.Error{
-					Type:    pdpb.ErrorType_UNKNOWN,
-					Message: tsopbErr.GetMessage(),
-				}
-			}
-		}
-
-		tsoResp := &pdpb.TsoResponse{
-			Header: &pdpb.ResponseHeader{
-				ClusterId: resp.GetHeader().GetClusterId(),
-				Error:     pdpbErr,
-			},
-			Count:     resp.GetCount(),
-			Timestamp: resp.GetTimestamp(),
-		}
-		if err := server.Send(tsoResp); err != nil {
-			errCh <- errors.WithStack(err)
-			return
-		}
-	}
 }
 
 func (s *GrpcServer) createReportBucketsForwardStream(client *grpc.ClientConn) (pdpb.PD_ReportBucketsClient, context.CancelFunc, error) {

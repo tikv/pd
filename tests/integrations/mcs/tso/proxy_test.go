@@ -75,9 +75,9 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	}
 
 	// Create some TSO client streams with the same context.
-	s.grpcClientConns, s.streams, s.cancelFuncs = createTSOStreams(re, s.ctx, s.backendEndpoints, 100, true)
+	s.grpcClientConns, s.streams, s.cancelFuncs = createTSOStreams(re, s.ctx, s.backendEndpoints, 500, true)
 	// Create some TSO client streams with the different context.
-	grpcClientConns, streams, cancelFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 100, false)
+	grpcClientConns, streams, cancelFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 500, false)
 	s.grpcClientConns = append(s.grpcClientConns, grpcClientConns...)
 	s.streams = append(s.streams, streams...)
 	s.cancelFuncs = append(s.cancelFuncs, cancelFuncs...)
@@ -91,8 +91,12 @@ func (s *tsoProxyTestSuite) TearDownSuite() {
 }
 
 // TestTSOProxyBasic tests the TSO Proxy's basic function to forward TSO requests to TSO microservice.
+// It also verifies the correctness of the TSO Proxy's TSO response, such as the count of timestamps
+// to retrieve in one TSO request and the monotonicity of the returned timestamps.
 func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
-	s.verifyTSOProxy(s.streams, 800)
+	for i := 0; i < 10; i++ {
+		s.verifyTSOProxy(s.streams, 100)
+	}
 }
 
 func (s *tsoProxyTestSuite) cleanupGRPCStreams(
