@@ -99,6 +99,30 @@ func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
 	}
 }
 
+// TestTSOProxyWithLargeCount tests while some grpc streams being cancelled and the others are still
+// working, the TSO Proxy can still work correctly.
+func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
+	re := s.Require()
+	
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		grpcClientConns, streams, cancelFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 10, false)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				s.verifyTSOProxy(streams, 100)
+			}
+			s.cleanupGRPCStreams(grpcClientConns, streams, cancelFuncs)
+		}()
+		for i := 0; i < 10; i++ {
+			s.verifyTSOProxy(s.streams, 100)
+		}
+	}()
+	wg.Wait()
+}
+
 func (s *tsoProxyTestSuite) cleanupGRPCStreams(
 	grpcClientConns []*grpc.ClientConn, streams []pdpb.PD_TsoClient, cancelFuncs []context.CancelFunc,
 ) {
