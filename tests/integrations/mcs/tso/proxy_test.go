@@ -107,15 +107,17 @@ func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		grpcClientConns, streams, cancelFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 10, false)
 		go func() {
 			defer wg.Done()
-			for i := 0; i < 10; i++ {
-				s.verifyTSOProxy(streams, 10)
+			for i := 0; i < 5; i++ {
+				grpcClientConns, streams, cancelFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 10, false)
+				for j := 0; j < 10; j++ {
+					s.verifyTSOProxy(streams, 10)
+				}
+				s.cleanupGRPCStreams(grpcClientConns, streams, cancelFuncs)
 			}
-			s.cleanupGRPCStreams(grpcClientConns, streams, cancelFuncs)
 		}()
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 20; i++ {
 			s.verifyTSOProxy(s.streams, 100)
 		}
 	}()
