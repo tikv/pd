@@ -114,9 +114,6 @@ type Server struct {
 	keyspaceGroupManager *tso.KeyspaceGroupManager
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
-	// tsoDispatcher is used to dispatch the TSO requests to
-	// the corresponding forwarding TSO channels.
-	tsoDispatcher *tsoutil.TSODispatcher
 	// tsoProtoFactory is the abstract factory for creating tso
 	// related data structures defined in the tso grpc protocol
 	tsoProtoFactory *tsoutil.TSOProtoFactory

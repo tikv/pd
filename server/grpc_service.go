@@ -324,21 +324,14 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
-	var (
-		doneCh chan struct{}
-		errCh  chan error
-	)
-	ctx, cancel := context.WithCancel(stream.Context())
-	defer cancel()
+	// Forward to the leader or to the TSO microservice if necessary.
+	if forwardedHost, err := s.getForwardedHost(stream.Context()); err != nil {
+		return errors.WithStack(err)
+	} else if len(forwardedHost) > 0 {
+		return s.forwardTSO(stream)
+	}
+
 	for {
-		// Prevent unnecessary performance overhead of the channel.
-		if errCh != nil {
-			select {
-			case err := <-errCh:
-				return errors.WithStack(err)
-			default:
-			}
-		}
 		request, err := stream.Recv()
 		if err == io.EOF {
 			return nil
@@ -347,39 +340,15 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 
-		if forwardedHost, err := s.getForwardedHost(ctx, stream.Context()); err != nil {
-			return err
-		} else if len(forwardedHost) > 0 {
-			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
-			if err != nil {
-				return errors.WithStack(err)
-			}
-
-			if errCh == nil {
-				doneCh = make(chan struct{})
-				defer close(doneCh)
-				errCh = make(chan error)
-			}
-
-			var tsoProtoFactory tsoutil.ProtoFactory
-			if s.IsAPIServiceMode() {
-				tsoProtoFactory = s.tsoProtoFactory
-			} else {
-				tsoProtoFactory = s.pdProtoFactory
-			}
-
-			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
-			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory, doneCh, errCh, s.tsoPrimaryWatcher)
-			continue
-		}
-
 		start := time.Now()
 		// TSO uses leader lease to determine validity. No need to check leader here.
 		if s.IsClosed() {
 			return status.Errorf(codes.Unknown, "server not started")
 		}
 		if request.GetHeader().GetClusterId() != s.clusterID {
-			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
+			return status.Errorf(codes.FailedPrecondition,
+				"mismatch cluster id, need %d but got %d",
+				s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
 		ts, err := s.tsoAllocatorManager.HandleRequest(request.GetDcLocation(), count)
@@ -398,14 +367,77 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	}
 }
 
-func (s *GrpcServer) getForwardedHost(ctx, streamCtx context.Context) (forwardedHost string, err error) {
+// forwardTSO forwards the incoming TSO requests to the TSO microservice.
+func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
+	if s.IsAPIServiceMode() {
+		s.tsoDispatcher.EnterTSOStreamingRoutine()
+		defer s.tsoDispatcher.LeaveTSOStreamingRoutine()
+	}
+
+	streamCtx := stream.Context()
+	responseCh := make(chan *pdpb.TsoResponse, 1)
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return errors.WithStack(s.ctx.Err())
+		case <-streamCtx.Done():
+			return streamCtx.Err()
+		default:
+		}
+
+		// Receive a TSO request from the client.
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		forwardedHost, err := s.getForwardedHost(streamCtx)
+		if err != nil {
+			return err
+		}
+		clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		lastError := s.tsoDispatcher.GetAndDeleteLastError(forwardedHost)
+		if lastError != nil && strings.Contains(lastError.Error(), errs.NotLeaderErr) {
+			s.tsoPrimaryWatcher.ForceLoad()
+		}
+
+		var tsoProtoFactory tsoutil.ProtoFactory
+		if s.IsAPIServiceMode() {
+			tsoProtoFactory = s.tsoProtoFactory
+		} else {
+			tsoProtoFactory = s.pdProtoFactory
+		}
+
+		tsoRequest := tsoutil.NewPDProtoRequest(streamCtx, forwardedHost, clientConn, request, responseCh)
+		s.tsoDispatcher.DispatchRequest(tsoRequest, tsoProtoFactory)
+		select {
+		case <-s.ctx.Done():
+			return errors.WithStack(s.ctx.Err())
+		case <-streamCtx.Done():
+			return streamCtx.Err()
+		case response := <-responseCh:
+			if err := stream.Send(response); err != nil {
+				return errors.WithStack(err)
+			}
+		}
+	}
+}
+
+func (s *GrpcServer) getForwardedHost(ctx context.Context) (forwardedHost string, err error) {
 	if s.IsAPIServiceMode() {
 		var ok bool
 		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
 		if !ok || len(forwardedHost) == 0 {
 			return "", ErrNotFoundTSOAddr
 		}
-	} else if fh := grpcutil.GetForwardedHost(streamCtx); !s.isLocalRequest(fh) {
+	} else if fh := grpcutil.GetForwardedHost(ctx); !s.isLocalRequest(fh) {
 		forwardedHost = fh
 	}
 	return forwardedHost, nil
