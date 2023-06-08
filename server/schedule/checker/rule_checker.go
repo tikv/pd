@@ -427,10 +427,18 @@ loopFits:
 	// If hasUnhealthyFit is true, try to remove unhealthy orphan peers only if number of OrphanPeers is >= 2.
 	// Ref https://github.com/tikv/pd/issues/4045
 	if len(fit.OrphanPeers) >= 2 {
+		hasHealthPeer := false
 		for _, orphanPeer := range fit.OrphanPeers {
 			if isUnhealthyPeer(orphanPeer.GetId()) {
 				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
+			} else {
+				if hasHealthPeer {
+					// there already exists a healthy orphan peer, so we can remove other orphan Peers.
+					ruleCheckerRemoveOrphanPeerCounter.Inc()
+					return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
+				}
+				hasHealthPeer = true
 			}
 		}
 	}
