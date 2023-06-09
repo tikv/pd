@@ -131,7 +131,6 @@ func (suite *keyspaceGroupTestSuite) TestLoadKeyspaceGroup() {
 }
 
 func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
-	suite.T().Skip("skip this super flaky split keyspace group test which impacts everyone's productivity.")
 	re := suite.Require()
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
