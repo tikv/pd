@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,9 +52,11 @@ const (
 
 // GroupManager is the manager of keyspace group related data.
 type GroupManager struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	client    *clientv3.Client
+	clusterID uint64
 
 	sync.RWMutex
 	// groups is the cache of keyspace group related information.
@@ -90,19 +93,19 @@ func NewKeyspaceGroupManager(
 		cancel:             cancel,
 		store:              store,
 		groups:             groups,
+		client:             client,
+		clusterID:          clusterID,
 		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
 		serviceRegistryMap: make(map[string]string),
 	}
 
 	// If the etcd client is not nil, start the watch loop for the registered tso servers.
 	// The PD(TSO) Client relies on this info to discover tso servers.
-	if client != nil {
-		m.initTSONodesWatcher(client, clusterID)
-		m.wg.Add(2)
+	if m.client != nil {
+		m.initTSONodesWatcher(m.client, m.clusterID)
+		m.wg.Add(1)
 		go m.tsoNodesWatcher.StartWatchLoop()
-		go m.allocNodesToAllKeyspaceGroups()
 	}
-
 	return m
 }
 
@@ -137,6 +140,11 @@ func (m *GroupManager) Bootstrap() error {
 		m.groups[userKind].Put(group)
 	}
 
+	// It will only alloc node when the group manager is on API leader.
+	if m.client != nil {
+		m.wg.Add(1)
+		go m.allocNodesToAllKeyspaceGroups()
+	}
 	return nil
 }
 
@@ -352,6 +360,32 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 	})
 }
 
+// saveGroupWithUpdateKeyspace will try to save the given keyspace groups into the storage.
+// It only update the keyspace field for the keyspace group.
+func (m *GroupManager) saveGroupWithUpdateKeyspace(keyspaceGroup *endpoint.KeyspaceGroup) error {
+	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
+		if err != nil {
+			return err
+		}
+		if oldKG.IsSplitting() {
+			return ErrKeyspaceGroupInSplit
+		}
+		newKG := oldKG
+		newKG.Keyspaces = keyspaceGroup.Keyspaces
+		if oldKG.IsSplitting() {
+			newKG.SplitState = &endpoint.SplitState{
+				SplitSource: oldKG.SplitState.SplitSource,
+			}
+		}
+		err = m.store.SaveKeyspaceGroup(txn, newKG)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
 func (m *GroupManager) GetKeyspaceConfigByKind(userKind endpoint.UserKind) (map[string]string, error) {
 	// when server is not in API mode, we don't need to return the keyspace config
@@ -391,6 +425,10 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 		return err
 	}
 
+	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
+		addrs := val.(string)
+		m.SetNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
+	})
 	m.Lock()
 	defer m.Unlock()
 	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)
@@ -422,7 +460,7 @@ func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, 
 	}
 
 	if changed {
-		if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true); err != nil {
+		if err := m.saveGroupWithUpdateKeyspace(kg); err != nil {
 			return err
 		}
 
