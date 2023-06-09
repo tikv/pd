@@ -78,8 +78,9 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
-	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
+	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{})
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil, 0, suite.manager)
+	suite.manager.SetKeyspaceGroupManager(kgm)
 	suite.NoError(kgm.Bootstrap())
 	suite.NoError(suite.manager.Bootstrap())
 }

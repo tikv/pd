@@ -71,6 +71,8 @@ type GroupManager struct {
 	serviceRegistryMap map[string]string
 	// tsoNodesWatcher is the watcher for the registered tso servers.
 	tsoNodesWatcher *etcdutil.LoopWatcher
+
+	km *Manager
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
@@ -79,6 +81,7 @@ func NewKeyspaceGroupManager(
 	store endpoint.KeyspaceGroupStorage,
 	client *clientv3.Client,
 	clusterID uint64,
+	km *Manager,
 ) *GroupManager {
 	ctx, cancel := context.WithCancel(ctx)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
@@ -92,6 +95,7 @@ func NewKeyspaceGroupManager(
 		groups:             groups,
 		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
 		serviceRegistryMap: make(map[string]string),
+		km:                 km,
 	}
 
 	// If the etcd client is not nil, start the watch loop for the registered tso servers.
@@ -551,6 +555,29 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 		}
 		if err = m.store.SaveKeyspaceGroup(txn, splitSourceKg); err != nil {
 			return err
+		}
+		// Iterate the keyspaces to update the config key.
+		keyspaceIDsToUnlock := make([]uint32, 0, len(keyspaces))
+		defer func() {
+			for _, id := range keyspaceIDsToUnlock {
+				m.km.metaLock.Unlock(id)
+			}
+		}()
+		for _, keyspace := range keyspaces {
+			m.km.metaLock.Lock(keyspace)
+			keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, keyspace)
+			keyspaceMeta, err := m.km.LoadKeyspaceByID(keyspace)
+			if err != nil {
+				return err
+			}
+			if keyspaceMeta.Config == nil {
+				keyspaceMeta.Config = make(map[string]string, 1)
+			}
+			keyspaceMeta.Config[TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(splitTargetID), 10)
+			err = m.km.store.SaveKeyspaceMeta(txn, keyspaceMeta)
+			if err != nil {
+				return err
+			}
 		}
 		splitTargetKg = &endpoint.KeyspaceGroup{
 			ID: splitTargetID,

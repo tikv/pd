@@ -17,9 +17,11 @@ package keyspace
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -44,10 +46,12 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
 	idAllocator := mockid.NewIDAllocator()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
-	suite.kg = NewKeyspaceManager(suite.ctx, store, cluster, idAllocator, &mockConfig{}, suite.kgm)
+	suite.kg = NewKeyspaceManager(suite.ctx, store, cluster, idAllocator, &mockConfig{})
+	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store, nil, 0, suite.kg)
+	suite.kg.SetKeyspaceGroupManager(suite.kgm)
+
 	suite.NoError(suite.kgm.Bootstrap())
 }
 
@@ -234,6 +238,23 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspace() {
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re := suite.Require()
 
+	keyspaces := []uint32{111, 222, 333}
+	for _, keyspace := range keyspaces {
+		now := time.Now().Unix()
+		err := suite.kg.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+			Id:             keyspace,
+			Name:           strconv.Itoa(int(keyspace)),
+			State:          keyspacepb.KeyspaceState_ENABLED,
+			CreatedAt:      now,
+			StateChangedAt: now,
+			Config: map[string]string{
+				TSOKeyspaceGroupIDKey: "2",
+			},
+		})
+		re.NoError(err)
+	}
+	err := suite.kg.PatrolKeyspaceAssignment()
+	re.NoError(err)
 	keyspaceGroups := []*endpoint.KeyspaceGroup{
 		{
 			ID:       uint32(1),
@@ -242,11 +263,11 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 		{
 			ID:        uint32(2),
 			UserKind:  endpoint.Standard.String(),
-			Keyspaces: []uint32{111, 222, 333},
+			Keyspaces: keyspaces,
 			Members:   make([]endpoint.KeyspaceGroupMember, utils.KeyspaceGroupDefaultReplicaCount),
 		},
 	}
-	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
+	err = suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
 	re.NoError(err)
 	// split the keyspace group 1 to 4
 	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{333})
@@ -302,11 +323,21 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.Equal(uint32(2), kg2.ID)
 	re.Equal([]uint32{111, 222}, kg2.Keyspaces)
 	re.False(kg2.IsSplitting())
+	for _, keyspace := range kg2.Keyspaces {
+		keyspaceMeta, err := suite.kg.LoadKeyspaceByID(keyspace)
+		re.NoError(err)
+		re.Equal("2", keyspaceMeta.GetConfig()[TSOKeyspaceGroupIDKey])
+	}
 	kg4, err = suite.kgm.GetKeyspaceGroupByID(4)
 	re.NoError(err)
 	re.Equal(uint32(4), kg4.ID)
 	re.Equal([]uint32{333}, kg4.Keyspaces)
 	re.False(kg4.IsSplitting())
+	for _, keyspace := range kg4.Keyspaces {
+		keyspaceMeta, err := suite.kg.LoadKeyspaceByID(keyspace)
+		re.NoError(err)
+		re.Equal("4", keyspaceMeta.GetConfig()[TSOKeyspaceGroupIDKey])
+	}
 	re.Equal(kg2.UserKind, kg4.UserKind)
 	re.Equal(kg2.Members, kg4.Members)
 

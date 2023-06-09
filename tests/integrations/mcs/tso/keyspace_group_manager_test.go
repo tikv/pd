@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/keyspace"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -241,51 +242,61 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	re := suite.Require()
-	// Create the keyspace group 1 with keyspaces [111, 222, 333].
-	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
-		KeyspaceGroups: []*endpoint.KeyspaceGroup{
-			{
-				ID:        1,
-				UserKind:  endpoint.Standard.String(),
-				Members:   suite.tsoCluster.GetKeyspaceGroupMember(),
-				Keyspaces: []uint32{111, 222, 333},
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	// Create keyspaces [1, 2, 3].
+	keyspaces := []uint32{0, 1, 2, 3}
+	for _, k := range keyspaces[1:] {
+		handlersutil.MustCreateKeyspace(re, suite.pdLeaderServer, &handlers.CreateKeyspaceParams{
+			Name: fmt.Sprintf("test_keyspace_%d", k),
+			Config: map[string]string{
+				keyspace.TSOKeyspaceGroupIDKey: "0",
+				"user_kind":                    "basic",
 			},
-		},
+		})
+	}
+	kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID)
+	re.Equal(mcsutils.DefaultKeyspaceGroupID, kg.ID)
+	re.Equal(keyspaces, kg.Keyspaces)
+	re.False(kg.IsSplitting())
+	// Wait for finishing alloc nodes
+	testutil.Eventually(re, func() bool {
+		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID)
+		return len(kg.Members) == 2
 	})
-	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 1)
-	re.Equal(uint32(1), kg1.ID)
-	re.Equal([]uint32{111, 222, 333}, kg1.Keyspaces)
-	re.False(kg1.IsSplitting())
-	// Get a TSO from the keyspace group 1.
+	// Get a TSO from the default keyspace group.
 	var (
 		ts  pdpb.Timestamp
 		err error
 	)
 	testutil.Eventually(re, func() bool {
-		ts, err = suite.requestTSO(re, 1, 222, 1)
+		ts, err = suite.requestTSO(re, 1, 2, mcsutils.DefaultKeyspaceGroupID)
 		return err == nil && tsoutil.CompareTimestamp(&ts, &pdpb.Timestamp{}) > 0
 	})
 	ts.Physical += time.Hour.Milliseconds()
-	// Set the TSO of the keyspace group 1 to a large value.
-	err = suite.tsoCluster.GetPrimaryServer(222, 1).GetHandler().ResetTS(tsoutil.GenerateTS(&ts), false, true, 1)
+	// Set the TSO of the default keyspace group to a large value.
+	err = suite.tsoCluster.GetPrimaryServer(2, mcsutils.DefaultKeyspaceGroupID).
+		GetHandler().ResetTS(tsoutil.GenerateTS(&ts), false, true, mcsutils.DefaultKeyspaceGroupID)
 	re.NoError(err)
-	// Split the keyspace group 1 to 2.
-	handlersutil.MustSplitKeyspaceGroup(re, suite.pdLeaderServer, 1, &handlers.SplitKeyspaceGroupByIDParams{
-		NewID:     2,
-		Keyspaces: []uint32{222, 333},
+	// Split the default keyspace group to 1.
+	handlersutil.MustSplitKeyspaceGroup(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, &handlers.SplitKeyspaceGroupByIDParams{
+		NewID:     1,
+		Keyspaces: []uint32{2, 3},
 	})
-	kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
-	re.Equal(uint32(2), kg2.ID)
-	re.Equal([]uint32{222, 333}, kg2.Keyspaces)
-	re.True(kg2.IsSplitTarget())
-	// Check the split TSO from keyspace group 2.
+	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 1)
+	re.Equal(uint32(1), kg1.ID)
+	re.Equal([]uint32{2, 3}, kg1.Keyspaces)
+	re.True(kg1.IsSplitTarget())
+	// Check the split TSO from keyspace group 1.
 	var splitTS pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
-		splitTS, err = suite.requestTSO(re, 1, 222, 2)
+		splitTS, err = suite.requestTSO(re, 1, 2, 1)
 		return err == nil && tsoutil.CompareTimestamp(&splitTS, &pdpb.Timestamp{}) > 0
 	})
-	splitTS, err = suite.requestTSO(re, 1, 222, 2)
+	splitTS, err = suite.requestTSO(re, 1, 2, 1)
 	re.Greater(tsoutil.CompareTimestamp(&splitTS, &ts), 0)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(

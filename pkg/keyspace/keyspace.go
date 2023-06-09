@@ -103,7 +103,6 @@ func NewKeyspaceManager(
 	cluster core.ClusterInformer,
 	idAllocator id.Allocator,
 	config Config,
-	kgm *GroupManager,
 ) *Manager {
 	return &Manager{
 		ctx:               ctx,
@@ -112,7 +111,6 @@ func NewKeyspaceManager(
 		store:             store,
 		cluster:           cluster,
 		config:            config,
-		kgm:               kgm,
 		nextPatrolStartID: utils.DefaultKeyspaceID,
 	}
 }
@@ -763,4 +761,9 @@ func (manager *Manager) PatrolKeyspaceAssignment() error {
 		manager.nextPatrolStartID = nextStartID
 	}
 	return nil
+}
+
+// SetKeyspaceGroupManager sets the keyspace group manager.
+func (manager *Manager) SetKeyspaceGroupManager(kgm *GroupManager) {
+	manager.kgm = kgm
 }

@@ -88,9 +88,9 @@ func MustCreateKeyspace(re *require.Assertions, server *tests.TestServer, reques
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
-	re.Equal(http.StatusOK, resp.StatusCode)
 	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
 	meta := &handlers.KeyspaceMeta{}
 	re.NoError(json.Unmarshal(data, meta))
 	checkCreateRequest(re, request, meta.KeyspaceMeta)
