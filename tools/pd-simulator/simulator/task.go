@@ -415,13 +415,14 @@ func (a *addPeer) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *
 		pendingPeers := append(region.GetPendingPeers(), a.peer)
 		return region.Clone(core.WithAddPeer(a.peer), core.WithIncConfVer(), core.WithPendingPeers(pendingPeers)), false
 	}
+	speed := engine.storeConfig.speed()
 	// Step 2: Process Snapshot
-	if !processSnapshot(sendNode, a.sendingStat) {
+	if !processSnapshot(sendNode, a.sendingStat, speed) {
 		return nil, false
 	}
 	sendStoreID := fmt.Sprintf("store-%d", sendNode.Id)
 	snapshotCounter.WithLabelValues(sendStoreID, "send").Inc()
-	if !processSnapshot(recvNode, a.receivingStat) {
+	if !processSnapshot(recvNode, a.receivingStat, speed) {
 		return nil, false
 	}
 	recvStoreID := fmt.Sprintf("store-%d", recvNode.Id)
@@ -511,7 +512,7 @@ func newSnapshotState(size int64, action snapAction) *snapshotStat {
 	}
 }
 
-func processSnapshot(n *Node, stat *snapshotStat) bool {
+func processSnapshot(n *Node, stat *snapshotStat, speed uint64) bool {
 	if stat.status == finished {
 		return true
 	}
@@ -544,9 +545,9 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 	}
 	if stat.status == running {
 		stat.status = finished
-		totalSec := time.Since(stat.start).Seconds()
-		generateSec := time.Since(stat.generateStart).Seconds()
-		n.registerSnapStats(uint64(generateSec), 0, uint64(totalSec))
+		totalSec := uint64(time.Since(stat.start).Seconds()) * speed
+		generateSec := uint64(time.Since(stat.generateStart).Seconds()) * speed
+		n.registerSnapStats(generateSec, 0, totalSec)
 		if stat.action == generate {
 			n.stats.SendingSnapCount--
 		} else {
