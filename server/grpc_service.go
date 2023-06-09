@@ -50,26 +50,31 @@ import (
 )
 
 const (
-	heartbeatSendTimeout          = 5 * time.Second
-	maxRetryTimesRequestTSOServer = 3
-	retryIntervalRequestTSOServer = 500 * time.Millisecond
-	getMinTSFromTSOServerTimeout  = 1 * time.Second
+	heartbeatSendTimeout                   = 5 * time.Second
+	maxRetryTimesRequestTSOServer          = 3
+	retryIntervalRequestTSOServer          = 500 * time.Millisecond
+	getMinTSFromTSOServerTimeout           = 1 * time.Second
+	defaultMaxConcurrentTSOProxyStreamings = 5000
+	defaultTSOProxyClientRecvTimeout       = 1 * time.Hour
 )
 
 // gRPC errors
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
 	// TODO: work as proxy.
-	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
-	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
-	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
-	ErrNotFoundTSOAddr      = status.Errorf(codes.NotFound, "not found tso address")
-	ErrForwardTSOTimeout    = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
+	ErrNotLeader                        = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted                       = status.Errorf(codes.Unavailable, "server not started")
+	ErrSendHeartbeatTimeout             = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
+	ErrNotFoundTSOAddr                  = status.Errorf(codes.NotFound, "not found tso address")
+	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
+	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
+	ErrTSOProxyClientRecvTimeout        = status.Errorf(codes.DeadlineExceeded, "tso proxy client recv timeout. stream closed by server")
 )
 
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
 	*Server
+	concurrentTSOProxyRoutines atomic.Int32
 }
 
 type request interface {
@@ -406,6 +411,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		lastForwardedHost string
 	)
 	defer func() {
+		s.concurrentTSOProxyRoutines.Add(-1)
 		if forwardStream != nil {
 			forwardStream.CloseSend()
 		}
@@ -414,6 +420,9 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			cancel()
 		}
 	}()
+	if newCount := s.concurrentTSOProxyRoutines.Add(1); newCount > defaultMaxConcurrentTSOProxyStreamings {
+		return errors.WithStack(ErrMaxCountTSOProxyRoutinesExceeded)
+	}
 
 	for {
 		select {
@@ -520,6 +529,11 @@ type tsoServer struct {
 	closed int32
 }
 
+type tsoRequest struct {
+	request *pdpb.TsoRequest
+	err     error
+}
+
 func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
@@ -545,12 +559,23 @@ func (s *tsoServer) Recv() (*pdpb.TsoRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
-	req, err := s.stream.Recv()
-	if err != nil {
+	requestCh := make(chan *tsoRequest, 1)
+	go func() {
+		defer logutil.LogPanic()
+		request, err := s.stream.Recv()
+		requestCh <- &tsoRequest{request: request, err: err}
+	}()
+	select {
+	case req := <-requestCh:
+		if req.err != nil {
+			atomic.StoreInt32(&s.closed, 1)
+			return nil, errors.WithStack(req.err)
+		}
+		return req.request, nil
+	case <-time.After(defaultTSOProxyClientRecvTimeout):
 		atomic.StoreInt32(&s.closed, 1)
-		return nil, errors.WithStack(err)
+		return nil, ErrTSOProxyClientRecvTimeout
 	}
-	return req, nil
 }
 
 func (s *GrpcServer) getForwardedHost(ctx, streamCtx context.Context) (forwardedHost string, err error) {
