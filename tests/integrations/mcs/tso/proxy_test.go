@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -95,7 +96,7 @@ func (s *tsoProxyTestSuite) TearDownSuite() {
 // to retrieve in one TSO request and the monotonicity of the returned timestamps.
 func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
 	for i := 0; i < 10; i++ {
-		s.verifyTSOProxy(s.streams, 100)
+		s.verifyTSOProxy(s.streams, 100, true)
 	}
 }
 
@@ -112,16 +113,44 @@ func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 			for i := 0; i < 5; i++ {
 				grpcClientConns, streams, cancelFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 10, false)
 				for j := 0; j < 10; j++ {
-					s.verifyTSOProxy(streams, 10)
+					s.verifyTSOProxy(streams, 10, true)
 				}
 				s.cleanupGRPCStreams(grpcClientConns, streams, cancelFuncs)
 			}
 		}()
 		for i := 0; i < 20; i++ {
-			s.verifyTSOProxy(s.streams, 100)
+			s.verifyTSOProxy(s.streams, 100, true)
 		}
 	}()
 	wg.Wait()
+}
+
+// TestTSOProxyStress tests the TSO Proxy can work correctly under the stress. gPRC and TSO failures are allowed,
+// but the TSO Proxy should not panic, blocked or deadlocked, and if it returns a timestamp, it should be a valid
+// timestamp monotonic increasing. After the stress, the TSO Proxy should still work correctly.
+func (s *tsoProxyTestSuite) TestTSOProxyStress() {
+	s.T().Skip("skip the stress test temporarily")
+	re := s.Require()
+	// Add 1000 concurrent clients each round; 2 runs in total, and 2000 concurrent clients are created in total.
+	grpcClientConns := make([]*grpc.ClientConn, 0)
+	streams := make([]pdpb.PD_TsoClient, 0)
+	cancelFuncs := make([]context.CancelFunc, 0)
+	for i := 0; i < 2; i++ {
+		fmt.Printf("Start the %dth round of stress test with %d concurrent clients.\n", i, len(streams)+1000)
+		grpcClientConnsTemp, streamsTemp, cancelFuncsTemp := createTSOStreams(re, s.ctx, s.backendEndpoints, 1000, false)
+		grpcClientConns = append(grpcClientConns, grpcClientConnsTemp...)
+		streams = append(streams, streamsTemp...)
+		cancelFuncs = append(cancelFuncs, cancelFuncsTemp...)
+		s.verifyTSOProxy(streams, 50, false)
+	}
+	s.cleanupGRPCStreams(grpcClientConns, streams, cancelFuncs)
+
+	// Wait for the TSO Proxy to recover from the stress. Treat 3 seconds as our SLA.
+	time.Sleep(3 * time.Second)
+
+	for i := 0; i < 10; i++ {
+		s.verifyTSOProxy(s.streams, 100, true)
+	}
 }
 
 func (s *tsoProxyTestSuite) cleanupGRPCStreams(
@@ -138,17 +167,19 @@ func (s *tsoProxyTestSuite) cleanupGRPCStreams(
 	}
 }
 
+// verifyTSOProxy verifies the TSO Proxy can work correctly.
+//
+//  1. If mustReliable == true
+//     no gPRC or TSO failures, the TSO Proxy should return a valid timestamp monotonic increasing.
+//
+//  2. If mustReliable == false
+//     gPRC and TSO failures are allowed, but the TSO Proxy should not panic, blocked or deadlocked.
+//     If it returns a timestamp, it should be a valid timestamp monotonic increasing.
 func (s *tsoProxyTestSuite) verifyTSOProxy(
-	streams []pdpb.PD_TsoClient, requestsPerClient int,
+	streams []pdpb.PD_TsoClient, requestsPerClient int, mustReliable bool,
 ) {
 	re := s.Require()
-	reqs := make([]*pdpb.TsoRequest, requestsPerClient)
-	for i := 0; i < requestsPerClient; i++ {
-		reqs[i] = &pdpb.TsoRequest{
-			Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
-			Count:  uint32(i) + 1, // Make sure the count is positive.
-		}
-	}
+	reqs := s.generateRequests(requestsPerClient)
 
 	wg := &sync.WaitGroup{}
 	for _, stream := range streams {
@@ -160,8 +191,14 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 			for i := 0; i < requestsPerClient; i++ {
 				req := reqs[rand.Intn(requestsPerClient)]
 				err := streamCopy.Send(req)
+				if err != nil && !mustReliable {
+					continue
+				}
 				re.NoError(err)
 				resp, err := streamCopy.Recv()
+				if err != nil && !mustReliable {
+					continue
+				}
 				re.NoError(err)
 				re.Equal(req.GetCount(), resp.GetCount())
 				ts := resp.GetTimestamp()
@@ -175,7 +212,18 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 	wg.Wait()
 }
 
-// createTSOStreams creates multiple TSO client streams and each stream uses a different gRPC connection
+func (s *tsoProxyTestSuite) generateRequests(requestsPerClient int) []*pdpb.TsoRequest {
+	reqs := make([]*pdpb.TsoRequest, requestsPerClient)
+	for i := 0; i < requestsPerClient; i++ {
+		reqs[i] = &pdpb.TsoRequest{
+			Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
+			Count:  uint32(i) + 1, // Make sure the count is positive.
+		}
+	}
+	return reqs
+}
+
+// createTSOStreams creates multiple TSO client streams, and each stream uses a different gRPC connection
 // to simulate multiple clients.
 func createTSOStreams(
 	re *require.Assertions, ctx context.Context,
