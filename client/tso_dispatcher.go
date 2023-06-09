@@ -739,8 +739,10 @@ func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical i
 	// to compare with the new TSO's first logical. For example, if we have a TSO resp with logical 10, count 5, then
 	// all TSOs we get will be [6, 7, 8, 9, 10].
 	if tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
-		panic(errors.Errorf("%s timestamp fallback, newly acquired ts (%d, %d) is less or equal to last one (%d, %d)",
-			dcLocation, physical, firstLogical, lastPhysical, lastLogical))
+		panic(errors.Errorf(
+			"%s timestamp fallback, new ts (%d, %d) <= the last one (%d, %d). keyspace: %d, keyspace group: %d",
+			dcLocation, physical, firstLogical, lastPhysical, lastLogical,
+			c.svcDiscovery.GetKeyspaceID(), c.svcDiscovery.GetKeyspaceGroupID()))
 	}
 	lastTSOPointer.physical = physical
 	// Same as above, we save the largest logical part here.
