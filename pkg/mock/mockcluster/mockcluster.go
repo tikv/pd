@@ -112,9 +112,6 @@ func (mc *Cluster) GetPersistOptions() *config.PersistOptions {
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
 func (mc *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {}
 
-// CheckSchedulingAllowance checks if the cluster allows scheduling currently.
-func (mc *Cluster) CheckSchedulingAllowance() (bool, error) { return true, nil }
-
 // LoadRegion puts region info without leader
 func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 	//  regions load from etcd will have no leader

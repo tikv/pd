@@ -209,7 +209,7 @@ func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(b.conf)
 }
 
-func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	allowed := b.OpController.OperatorCount(operator.OpWitness) < cluster.GetOpts().GetWitnessScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(b.GetType(), operator.OpWitness.String()).Inc()
@@ -217,7 +217,7 @@ func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.ClusterInformer
 	return allowed
 }
 
-func (b *balanceWitnessScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (b *balanceWitnessScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	b.conf.mu.RLock()
 	defer b.conf.mu.RUnlock()
 	basePlan := NewBalanceSchedulerPlan()

@@ -942,7 +942,7 @@ func (c *Coordinator) RecordOpStepWithTTL(regionID uint64) {
 // scheduleController is used to manage a scheduler to schedulers.
 type scheduleController struct {
 	schedulers.Scheduler
-	cluster            sche.ClusterInformer
+	cluster            sche.ScheduleCluster
 	opController       *operator.Controller
 	nextInterval       time.Duration
 	ctx                context.Context
@@ -1056,7 +1056,7 @@ func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 }
 
 func (s *scheduleController) isSchedulingHalted() bool {
-	return s.cluster.GetPersistOptions().IsSchedulingHalted()
+	return s.cluster.GetOpts().IsSchedulingHalted()
 }
 
 // isPaused returns if a scheduler is paused.
@@ -1127,7 +1127,7 @@ func (c *Coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
 
 // cacheCluster include cache info to improve the performance.
 type cacheCluster struct {
-	sche.ClusterInformer
+	sche.ScheduleCluster
 	stores []*core.StoreInfo
 }
 
@@ -1137,9 +1137,9 @@ func (c *cacheCluster) GetStores() []*core.StoreInfo {
 }
 
 // newCacheCluster constructor for cache
-func newCacheCluster(c sche.ClusterInformer) *cacheCluster {
+func newCacheCluster(c sche.ScheduleCluster) *cacheCluster {
 	return &cacheCluster{
-		ClusterInformer: c,
+		ScheduleCluster: c,
 		stores:          c.GetStores(),
 	}
 }

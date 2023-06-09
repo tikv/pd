@@ -31,7 +31,7 @@ type Request interface {
 	// getCount returns the count of timestamps to retrieve
 	getCount() uint32
 	// process sends request and receive response via stream.
-	// count defins the count of timestamps to retrieve.
+	// count defines the count of timestamps to retrieve.
 	process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error)
 	// postProcess sends the response back to the sender of the request
 	postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error)
@@ -50,7 +50,7 @@ type TSOProtoRequest struct {
 	stream        tsopb.TSO_TsoServer
 }
 
-// NewTSOProtoRequest creats a TSOProtoRequest and returns as a Request
+// NewTSOProtoRequest creates a TSOProtoRequest and returns as a Request
 func NewTSOProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *tsopb.TsoRequest, stream tsopb.TSO_TsoServer) Request {
 	tsoRequest := &TSOProtoRequest{
 		forwardedHost: forwardedHost,
@@ -77,7 +77,7 @@ func (r *TSOProtoRequest) getCount() uint32 {
 }
 
 // process sends request and receive response via stream.
-// count defins the count of timestamps to retrieve.
+// count defines the count of timestamps to retrieve.
 func (r *TSOProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
 		r.request.GetHeader().GetKeyspaceId(), r.request.GetHeader().GetKeyspaceGroupId(), r.request.GetDcLocation())
@@ -111,7 +111,7 @@ type PDProtoRequest struct {
 	stream        pdpb.PD_TsoServer
 }
 
-// NewPDProtoRequest creats a PDProtoRequest and returns as a Request
+// NewPDProtoRequest creates a PDProtoRequest and returns as a Request
 func NewPDProtoRequest(forwardedHost string, clientConn *grpc.ClientConn, request *pdpb.TsoRequest, stream pdpb.PD_TsoServer) Request {
 	tsoRequest := &PDProtoRequest{
 		forwardedHost: forwardedHost,
@@ -138,7 +138,7 @@ func (r *PDProtoRequest) getCount() uint32 {
 }
 
 // process sends request and receive response via stream.
-// count defins the count of timestamps to retrieve.
+// count defines the count of timestamps to retrieve.
 func (r *PDProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
 		utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID, r.request.GetDcLocation())

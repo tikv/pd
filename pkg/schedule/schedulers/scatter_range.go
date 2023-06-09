@@ -168,11 +168,11 @@ func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(l.config)
 }
 
-func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	return l.allowBalanceLeader(cluster) || l.allowBalanceRegion(cluster)
 }
 
-func (l *scatterRangeScheduler) allowBalanceLeader(cluster sche.ClusterInformer) bool {
+func (l *scatterRangeScheduler) allowBalanceLeader(cluster sche.ScheduleCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
@@ -180,7 +180,7 @@ func (l *scatterRangeScheduler) allowBalanceLeader(cluster sche.ClusterInformer)
 	return allowed
 }
 
-func (l *scatterRangeScheduler) allowBalanceRegion(cluster sche.ClusterInformer) bool {
+func (l *scatterRangeScheduler) allowBalanceRegion(cluster sche.ScheduleCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpRegion.String()).Inc()
@@ -188,7 +188,7 @@ func (l *scatterRangeScheduler) allowBalanceRegion(cluster sche.ClusterInformer)
 	return allowed
 }
 
-func (l *scatterRangeScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (l *scatterRangeScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	scatterRangeCounter.Inc()
 	// isolate a new cluster according to the key range
 	c := genRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())

@@ -28,27 +28,28 @@ import (
 
 // ClusterInformer provides the necessary information of a cluster.
 type ClusterInformer interface {
-	RegionHealthCluster
-	statistics.RegionStatInformer
-	statistics.StoreStatInformer
-	buckets.BucketStatInformer
+	ScheduleCluster
 
-	GetBasicCluster() *core.BasicCluster
-	GetStoreConfig() sc.StoreConfig
-	GetAllocator() id.Allocator
-	GetRegionLabeler() *labeler.RegionLabeler
 	GetStorage() storage.Storage
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
 	AddSuspectRegions(ids ...uint64)
 	GetPersistOptions() *config.PersistOptions
 }
 
-// RegionHealthCluster is an aggregate interface that wraps multiple interfaces
-type RegionHealthCluster interface {
+// ScheduleCluster is an aggregate interface that wraps multiple interfaces for schedulers use
+type ScheduleCluster interface {
 	BasicCluster
+
+	statistics.StoreStatInformer
+	statistics.RegionStatInformer
+	buckets.BucketStatInformer
 
 	GetOpts() sc.Config
 	GetRuleManager() *placement.RuleManager
+	GetRegionLabeler() *labeler.RegionLabeler
+	GetBasicCluster() *core.BasicCluster
+	GetStoreConfig() sc.StoreConfig
+	GetAllocator() id.Allocator
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces

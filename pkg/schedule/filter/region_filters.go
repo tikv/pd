@@ -100,12 +100,12 @@ func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 
 // RegionReplicatedFilter filters all unreplicated regions.
 type RegionReplicatedFilter struct {
-	cluster sche.RegionHealthCluster
+	cluster sche.ScheduleCluster
 	fit     *placement.RegionFit
 }
 
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
-func NewRegionReplicatedFilter(cluster sche.RegionHealthCluster) RegionFilter {
+func NewRegionReplicatedFilter(cluster sche.ScheduleCluster) RegionFilter {
 	return &RegionReplicatedFilter{cluster: cluster}
 }
 
@@ -132,11 +132,11 @@ func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 type regionEmptyFilter struct {
-	cluster sche.RegionHealthCluster
+	cluster sche.ScheduleCluster
 }
 
 // NewRegionEmptyFilter returns creates a RegionFilter that filters all empty regions.
-func NewRegionEmptyFilter(cluster sche.RegionHealthCluster) RegionFilter {
+func NewRegionEmptyFilter(cluster sche.ScheduleCluster) RegionFilter {
 	return &regionEmptyFilter{cluster: cluster}
 }
 
@@ -148,7 +148,7 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
-func isEmptyRegionAllowBalance(cluster sche.RegionHealthCluster, region *core.RegionInfo) bool {
+func isEmptyRegionAllowBalance(cluster sche.ScheduleCluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetTotalRegionCount() < core.InitClusterRegionThreshold
 }
 
