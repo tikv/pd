@@ -1056,7 +1056,7 @@ func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 }
 
 func (s *scheduleController) isSchedulingHalted() bool {
-	return s.cluster.GetPersistOptions().IsSchedulingHalted()
+	return s.cluster.GetOpts().IsSchedulingHalted()
 }
 
 // isPaused returns if a scheduler is paused.

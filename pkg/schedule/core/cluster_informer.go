@@ -50,8 +50,6 @@ type ScheduleCluster interface {
 	GetBasicCluster() *core.BasicCluster
 	GetStoreConfig() sc.StoreConfig
 	GetAllocator() id.Allocator
-
-	CheckSchedulingAllowance() (bool, error)
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces
