@@ -95,9 +95,7 @@ func (s *tsoProxyTestSuite) TearDownSuite() {
 // It also verifies the correctness of the TSO Proxy's TSO response, such as the count of timestamps
 // to retrieve in one TSO request and the monotonicity of the returned timestamps.
 func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
-	for i := 0; i < 10; i++ {
-		s.verifyTSOProxy(s.streams, 100, true)
-	}
+	s.verifyTSOProxy(s.streams, 100, true)
 }
 
 // TestTSOProxyWithLargeCount tests while some grpc streams being cancelled and the others are still
@@ -129,15 +127,22 @@ func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 // but the TSO Proxy should not panic, blocked or deadlocked, and if it returns a timestamp, it should be a valid
 // timestamp monotonic increasing. After the stress, the TSO Proxy should still work correctly.
 func (s *tsoProxyTestSuite) TestTSOProxyStress() {
-	s.T().Skip("skip the stress test temporarily")
 	re := s.Require()
-	// Add 1000 concurrent clients each round; 2 runs in total, and 2000 concurrent clients are created in total.
+	const (
+		totalRounds = 3
+		clientsIncr = 1000
+		// The graceful period for TSO Proxy to recover from gPRC and TSO failures.
+		recoverySLA = 5 * time.Second
+	)
 	grpcClientConns := make([]*grpc.ClientConn, 0)
 	streams := make([]pdpb.PD_TsoClient, 0)
 	cancelFuncs := make([]context.CancelFunc, 0)
-	for i := 0; i < 2; i++ {
-		fmt.Printf("Start the %dth round of stress test with %d concurrent clients.\n", i, len(streams)+1000)
-		grpcClientConnsTemp, streamsTemp, cancelFuncsTemp := createTSOStreams(re, s.ctx, s.backendEndpoints, 1000, false)
+
+	// Push load from many concurrent clients in multiple rounds and increase the #client each round.
+	for i := 0; i < totalRounds; i++ {
+		fmt.Printf("Start the %dth round of stress test with %d concurrent clients.\n", i, len(streams)+clientsIncr)
+		grpcClientConnsTemp, streamsTemp, cancelFuncsTemp :=
+			createTSOStreams(re, s.ctx, s.backendEndpoints, clientsIncr, false)
 		grpcClientConns = append(grpcClientConns, grpcClientConnsTemp...)
 		streams = append(streams, streamsTemp...)
 		cancelFuncs = append(cancelFuncs, cancelFuncsTemp...)
@@ -145,12 +150,11 @@ func (s *tsoProxyTestSuite) TestTSOProxyStress() {
 	}
 	s.cleanupGRPCStreams(grpcClientConns, streams, cancelFuncs)
 
-	// Wait for the TSO Proxy to recover from the stress. Treat 3 seconds as our SLA.
-	time.Sleep(3 * time.Second)
+	// Wait for the TSO Proxy to recover from the stress.
+	time.Sleep(recoverySLA)
 
-	for i := 0; i < 10; i++ {
-		s.verifyTSOProxy(s.streams, 100, true)
-	}
+	// Verify the TSO Proxy can still work correctly after the stress.
+	s.verifyTSOProxy(s.streams, 100, true)
 }
 
 func (s *tsoProxyTestSuite) cleanupGRPCStreams(
