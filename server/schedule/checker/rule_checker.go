@@ -435,7 +435,7 @@ loopFits:
 			}
 			if hasHealthPeer {
 				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
-				ruleCheckerRemoveOrphanPeerCounter.Inc()
+				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
 			hasHealthPeer = true
