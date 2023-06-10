@@ -557,6 +557,7 @@ func (s *GrpcServer) forwardTSORequestAsync(
 			s.tsoPrimaryWatcher.ForceLoad()
 		}
 		tsoRespCh <- &tsopbTSOResponse{err: err}
+		return
 	}
 
 	tsoRespCh <- &tsopbTSOResponse{response: response, err: nil}
