@@ -540,13 +540,16 @@ func (s *GrpcServer) forwardTSORequestAsync(
 		DcLocation: request.GetDcLocation(),
 	}
 	if err := forwardStream.Send(tsopbReq); err != nil {
-		tsoRespCh <- &tsopbTSOResponse{err: err}
+		select {
+		case <-ctxTimeout.Done():
+			return
+		case tsoRespCh <- &tsopbTSOResponse{err: err}:
+		}
 		return
 	}
 
 	select {
 	case <-ctxTimeout.Done():
-		tsoRespCh <- &tsopbTSOResponse{err: ErrForwardTSOTimeout}
 		return
 	default:
 	}
@@ -556,11 +559,19 @@ func (s *GrpcServer) forwardTSORequestAsync(
 		if strings.Contains(err.Error(), errs.NotLeaderErr) {
 			s.tsoPrimaryWatcher.ForceLoad()
 		}
-		tsoRespCh <- &tsopbTSOResponse{err: err}
+		select {
+		case <-ctxTimeout.Done():
+			return
+		case tsoRespCh <- &tsopbTSOResponse{err: err}:
+		}
 		return
 	}
 
-	tsoRespCh <- &tsopbTSOResponse{response: response, err: nil}
+	select {
+	case <-ctxTimeout.Done():
+		return
+	case tsoRespCh <- &tsopbTSOResponse{response: response}:
+	}
 }
 
 type tsopbTSOResponse struct {

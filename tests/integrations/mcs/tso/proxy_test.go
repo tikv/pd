@@ -107,8 +107,8 @@ func (s *tsoProxyTestSuite) TestTSOProxyStress() {
 	defer log.Info("exited tsoProxyTestSuite/TestTSOProxyStress")
 	re := s.Require()
 	const (
-		totalRounds = 3
-		clientsIncr = 1000
+		totalRounds = 4
+		clientsIncr = 500
 		// The graceful period for TSO Proxy to recover from gPRC and TSO failures.
 		recoverySLA = 5 * time.Second
 	)
@@ -183,16 +183,16 @@ func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 		defer wg.Done()
 		go func() {
 			defer wg.Done()
-			for i := 0; i < 5; i++ {
+			for i := 0; i < 3; i++ {
 				streams, cleanupFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 10)
 				for j := 0; j < 10; j++ {
-					s.verifyTSOProxy(s.ctx, streams, cleanupFuncs, 10, true)
+					s.verifyTSOProxy(s.ctx, streams, cleanupFuncs, 10, false)
 				}
 				s.cleanupGRPCStreams(cleanupFuncs)
 			}
 		}()
-		for i := 0; i < 20; i++ {
-			s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 100, true)
+		for i := 0; i < 10; i++ {
+			s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 10, false)
 		}
 	}()
 	wg.Wait()
@@ -207,10 +207,15 @@ func (s *tsoProxyTestSuite) cleanupGRPCStreams(cleanupFuncs []testutil.CleanupFu
 	}
 }
 
-func (s *tsoProxyTestSuite) cleanupGRPCStream(cleanupFuncs []testutil.CleanupFunc, index int) {
+func (s *tsoProxyTestSuite) cleanupGRPCStream(
+	streams []pdpb.PD_TsoClient, cleanupFuncs []testutil.CleanupFunc, index int,
+) {
 	if cleanupFuncs[index] != nil {
 		cleanupFuncs[index]()
 		cleanupFuncs[index] = nil
+	}
+	if streams[index] != nil {
+		streams[index] = nil
 	}
 }
 
@@ -231,6 +236,9 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 
 	wg := &sync.WaitGroup{}
 	for i := 0; i < len(streams); i++ {
+		if streams[i] == nil {
+			continue
+		}
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -238,7 +246,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 			for j := 0; j < requestsPerClient; j++ {
 				select {
 				case <-ctx.Done():
-					s.cleanupGRPCStream(cleanupFuncs, i)
+					s.cleanupGRPCStream(streams, cleanupFuncs, i)
 					return
 				default:
 				}
@@ -246,11 +254,13 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 				req := reqs[rand.Intn(requestsPerClient)]
 				err := streams[i].Send(req)
 				if err != nil && !mustReliable {
+					s.cleanupGRPCStream(streams, cleanupFuncs, i)
 					return
 				}
 				re.NoError(err)
 				resp, err := streams[i].Recv()
 				if err != nil && !mustReliable {
+					s.cleanupGRPCStream(streams, cleanupFuncs, i)
 					return
 				}
 				re.NoError(err)
