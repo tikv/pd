@@ -98,14 +98,44 @@ func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
 	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 100, true)
 }
 
+// TestTSOProxyWithLargeCount tests while some grpc streams being cancelled and the others are still
+// working, the TSO Proxy can still work correctly.
+func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
+	log.Info("entering tsoProxyTestSuite/TestTSOProxyWorksWithCancellation")
+	defer log.Info("exited tsoProxyTestSuite/TestTSOProxyWorksWithCancellation")
+	re := s.Require()
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 3; i++ {
+				streams, cleanupFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 10)
+				for j := 0; j < 10; j++ {
+					s.verifyTSOProxy(s.ctx, streams, cleanupFuncs, 10, true)
+				}
+				s.cleanupGRPCStreams(cleanupFuncs)
+			}
+		}()
+		for i := 0; i < 10; i++ {
+			s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 10, true)
+		}
+	}()
+	wg.Wait()
+}
+
 // TestTSOProxyStress tests the TSO Proxy can work correctly under the stress. gPRC and TSO failures are allowed,
 // but the TSO Proxy should not panic, blocked or deadlocked, and if it returns a timestamp, it should be a valid
 // timestamp monotonic increasing. After the stress, the TSO Proxy should still work correctly.
-func (s *tsoProxyTestSuite) TestTSOProxyStress() {
-	// s.T().Skip("Skip stress test to see if the next test can pass.")
+func TestTSOProxyStress(t *testing.T) {
 	log.Info("entering tsoProxyTestSuite/TestTSOProxyStress")
 	defer log.Info("exited tsoProxyTestSuite/TestTSOProxyStress")
+	s := new(tsoProxyTestSuite)
+	s.SetT(&testing.T{})
+	s.SetupSuite()
 	re := s.Require()
+
 	const (
 		totalRounds = 4
 		clientsIncr = 500
@@ -137,6 +167,7 @@ func (s *tsoProxyTestSuite) TestTSOProxyStress() {
 
 	// Verify the TSO Proxy can still work correctly after the stress.
 	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 100, true)
+	s.TearDownSuite()
 	fmt.Println("verified that the TSO Proxy can still work correctly after the stress.")
 }
 
@@ -169,33 +200,6 @@ func (s *tsoProxyTestSuite) TestTSOProxyClientsWithSameContext() {
 
 	s.verifyTSOProxy(ctx, streams, cleanupFuncs, 100, true)
 	s.cleanupGRPCStreams(cleanupFuncs)
-}
-
-// TestTSOProxyWithLargeCount tests while some grpc streams being cancelled and the others are still
-// working, the TSO Proxy can still work correctly.
-func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
-	log.Info("entering tsoProxyTestSuite/TestTSOProxyWorksWithCancellation")
-	defer log.Info("exited tsoProxyTestSuite/TestTSOProxyWorksWithCancellation")
-	re := s.Require()
-	wg := &sync.WaitGroup{}
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 3; i++ {
-				streams, cleanupFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 10)
-				for j := 0; j < 10; j++ {
-					s.verifyTSOProxy(s.ctx, streams, cleanupFuncs, 10, false)
-				}
-				s.cleanupGRPCStreams(cleanupFuncs)
-			}
-		}()
-		for i := 0; i < 10; i++ {
-			s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 10, false)
-		}
-	}()
-	wg.Wait()
 }
 
 func (s *tsoProxyTestSuite) cleanupGRPCStreams(cleanupFuncs []testutil.CleanupFunc) {
