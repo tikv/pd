@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -81,28 +82,22 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 }
 
 func (s *tsoProxyTestSuite) TearDownSuite() {
-	log.Info("exiting tsoProxyTestSuite")
 	s.cleanupGRPCStreams(s.cleanupFuncs)
 	s.tsoCluster.Destroy()
 	s.apiCluster.Destroy()
 	s.cancel()
-	log.Info("exited tsoProxyTestSuite")
 }
 
 // TestTSOProxyBasic tests the TSO Proxy's basic function to forward TSO requests to TSO microservice.
 // It also verifies the correctness of the TSO Proxy's TSO response, such as the count of timestamps
 // to retrieve in one TSO request and the monotonicity of the returned timestamps.
 func (s *tsoProxyTestSuite) TestTSOProxyBasic() {
-	log.Info("entering tsoProxyTestSuite/TestTSOProxyBasic")
-	defer log.Info("exited tsoProxyTestSuite/TestTSOProxyBasic")
 	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 100, true)
 }
 
 // TestTSOProxyWithLargeCount tests while some grpc streams being cancelled and the others are still
 // working, the TSO Proxy can still work correctly.
 func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
-	log.Info("entering tsoProxyTestSuite/TestTSOProxyWorksWithCancellation")
-	defer log.Info("exited tsoProxyTestSuite/TestTSOProxyWorksWithCancellation")
 	re := s.Require()
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
@@ -129,8 +124,6 @@ func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 // but the TSO Proxy should not panic, blocked or deadlocked, and if it returns a timestamp, it should be a valid
 // timestamp monotonic increasing. After the stress, the TSO Proxy should still work correctly.
 func TestTSOProxyStress(t *testing.T) {
-	log.Info("entering tsoProxyTestSuite/TestTSOProxyStress")
-	defer log.Info("exited tsoProxyTestSuite/TestTSOProxyStress")
 	s := new(tsoProxyTestSuite)
 	s.SetT(&testing.T{})
 	s.SetupSuite()
@@ -151,8 +144,8 @@ func TestTSOProxyStress(t *testing.T) {
 
 	// Push load from many concurrent clients in multiple rounds and increase the #client each round.
 	for i := 0; i < totalRounds; i++ {
-		fmt.Printf("start the %dth round of stress test with %d concurrent clients.\n",
-			i, len(streams)+clientsIncr)
+		log.Info("start a new round of stress test",
+			zap.Int("round-id", i), zap.Int("clients-count", len(streams)+clientsIncr))
 		streamsTemp, cleanupFuncsTemp :=
 			createTSOStreams(re, s.ctx, s.backendEndpoints, clientsIncr)
 		streams = append(streams, streamsTemp...)
@@ -160,7 +153,7 @@ func TestTSOProxyStress(t *testing.T) {
 		s.verifyTSOProxy(ctxTimeout, streams, cleanupFuncs, 50, false)
 	}
 	s.cleanupGRPCStreams(cleanupFuncs)
-	fmt.Println("the stress test completed.")
+	log.Info("the stress test completed.")
 
 	// Wait for the TSO Proxy to recover from the stress.
 	time.Sleep(recoverySLA)
@@ -168,14 +161,11 @@ func TestTSOProxyStress(t *testing.T) {
 	// Verify the TSO Proxy can still work correctly after the stress.
 	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 100, true)
 	s.TearDownSuite()
-	fmt.Println("verified that the TSO Proxy can still work correctly after the stress.")
 }
 
 // TestTSOProxyClientsWithSameContext tests the TSO Proxy can work correctly while the grpc streams
 // are created with the same context.
 func (s *tsoProxyTestSuite) TestTSOProxyClientsWithSameContext() {
-	log.Info("entering tsoProxyTestSuite/TestTSOProxyClientsWithSameContext")
-	defer log.Info("exited tsoProxyTestSuite/TestTSOProxyClientsWithSameContext")
 	re := s.Require()
 	const clientCount = 1000
 	cleanupFuncs := make([]testutil.CleanupFunc, clientCount)

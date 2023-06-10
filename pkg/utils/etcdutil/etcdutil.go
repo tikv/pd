@@ -608,10 +608,10 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 
 // ForceLoad forces to load the key.
 func (lw *LoopWatcher) ForceLoad() {
-	// When NotLeader error happened, a large volume of force load requests will be received here,
-	// so the minimal force load interval is used to avoid the congestion and two-phase locking is
-	// used to let most of the requests return directly without acquiring the write lock and causing
-	// the system to choke.
+	// When NotLeader error happens, a large volume of force load requests will be received here,
+	// so the minimal interval between two force loads (from etcd) is used to avoid the congestion.
+	// Two-phase locking is also used to let most of the requests return directly without acquiring
+	// the write lock and causing the system to choke.
 	lw.forceLoadMu.RLock()
 	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
 		lw.forceLoadMu.RUnlock()

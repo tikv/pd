@@ -56,6 +56,7 @@ const (
 	getMinTSFromTSOServerTimeout           = 1 * time.Second
 	defaultMaxConcurrentTSOProxyStreamings = 5000
 	defaultTSOProxyClientRecvTimeout       = 1 * time.Hour
+	defaultGRPCDialTimeout                 = 3 * time.Second
 )
 
 // gRPC errors
@@ -2056,19 +2057,30 @@ func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAll
 
 func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
 	client, ok := s.clientConns.Load(forwardedHost)
-	if !ok {
-		tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
-		if err != nil {
-			return nil, err
-		}
-		cc, err := grpcutil.GetClientConn(ctx, forwardedHost, tlsConfig)
-		if err != nil {
-			return nil, err
-		}
-		client = cc
-		s.clientConns.Store(forwardedHost, cc)
+	if ok {
+		// Mostly, the connection is already established, and return it directly.
+		return client.(*grpc.ClientConn), nil
 	}
-	return client.(*grpc.ClientConn), nil
+
+	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	ctxTimeout, cancel := context.WithTimeout(ctx, defaultGRPCDialTimeout)
+	defer cancel()
+	newConn, err := grpcutil.GetClientConn(ctxTimeout, forwardedHost, tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	conn, loaded := s.clientConns.LoadOrStore(forwardedHost, newConn)
+	if !loaded {
+		// Successfully stored the connection we created.
+		return newConn, nil
+	}
+	// Loaded a connection created/stored by another goroutine, so close the one we created
+	// and return the one we loaded.
+	newConn.Close()
+	return conn.(*grpc.ClientConn), nil
 }
 
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
