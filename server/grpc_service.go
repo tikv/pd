@@ -468,25 +468,8 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			lastForwardedHost = forwardedHost
 		}
 
-		tsoReq := &tsopb.TsoRequest{
-			Header: &tsopb.RequestHeader{
-				ClusterId:       request.GetHeader().GetClusterId(),
-				SenderId:        request.GetHeader().GetSenderId(),
-				KeyspaceId:      utils.DefaultKeyspaceID,
-				KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
-			},
-			Count:      request.GetCount(),
-			DcLocation: request.GetDcLocation(),
-		}
-		if err := forwardStream.Send(tsoReq); err != nil {
-			return errors.WithStack(err)
-		}
-
-		tsopbResp, err := forwardStream.Recv()
+		tsopbResp, err := s.forwardTSORequestWithDeadLine(stream.Context(), request, forwardStream)
 		if err != nil {
-			if strings.Contains(err.Error(), errs.NotLeaderErr) {
-				s.tsoPrimaryWatcher.ForceLoad()
-			}
 			return errors.WithStack(err)
 		}
 
@@ -522,6 +505,68 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 	}
 }
 
+func (s *GrpcServer) forwardTSORequestWithDeadLine(
+	ctx context.Context, request *pdpb.TsoRequest, forwardStream tsopb.TSO_TsoClient,
+) (*tsopb.TsoResponse, error) {
+	// Create a context with deadline for forwarding TSO request to TSO service.
+	ctxTimeout, cancel := context.WithTimeout(ctx, tsoutil.DefaultTSOProxyTimeout)
+	defer cancel()
+
+	// used to receive the result from doSomething function
+	tsoRespCh := make(chan *tsopbTSOResponse)
+	go s.forwardTSORequestAsync(ctxTimeout, request, forwardStream, tsoRespCh)
+	select {
+	case <-ctxTimeout.Done():
+		return nil, ErrForwardTSOTimeout
+	case tsoResp := <-tsoRespCh:
+		return tsoResp.response, tsoResp.err
+	}
+}
+
+func (s *GrpcServer) forwardTSORequestAsync(
+	ctxTimeout context.Context,
+	request *pdpb.TsoRequest,
+	forwardStream tsopb.TSO_TsoClient,
+	tsoRespCh chan<- *tsopbTSOResponse,
+) {
+	tsopbReq := &tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId:       request.GetHeader().GetClusterId(),
+			SenderId:        request.GetHeader().GetSenderId(),
+			KeyspaceId:      utils.DefaultKeyspaceID,
+			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
+		},
+		Count:      request.GetCount(),
+		DcLocation: request.GetDcLocation(),
+	}
+	if err := forwardStream.Send(tsopbReq); err != nil {
+		tsoRespCh <- &tsopbTSOResponse{err: err}
+		return
+	}
+
+	select {
+	case <-ctxTimeout.Done():
+		tsoRespCh <- &tsopbTSOResponse{err: ErrForwardTSOTimeout}
+		return
+	default:
+	}
+
+	response, err := forwardStream.Recv()
+	if err != nil {
+		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+			s.tsoPrimaryWatcher.ForceLoad()
+		}
+		tsoRespCh <- &tsopbTSOResponse{err: err}
+	}
+
+	tsoRespCh <- &tsopbTSOResponse{response: response, err: nil}
+}
+
+type tsopbTSOResponse struct {
+	response *tsopb.TsoResponse
+	err      error
+}
+
 // tsoServer wraps PD_TsoServer to ensure when any error
 // occurs on Send() or Recv(), both endpoints will be closed.
 type tsoServer struct {
@@ -529,7 +574,7 @@ type tsoServer struct {
 	closed int32
 }
 
-type tsoRequest struct {
+type pdpbTSORequest struct {
 	request *pdpb.TsoRequest
 	err     error
 }
@@ -559,11 +604,11 @@ func (s *tsoServer) Recv() (*pdpb.TsoRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
-	requestCh := make(chan *tsoRequest, 1)
+	requestCh := make(chan *pdpbTSORequest, 1)
 	go func() {
 		defer logutil.LogPanic()
 		request, err := s.stream.Recv()
-		requestCh <- &tsoRequest{request: request, err: err}
+		requestCh <- &pdpbTSORequest{request: request, err: err}
 	}()
 	select {
 	case req := <-requestCh:
