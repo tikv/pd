@@ -50,13 +50,11 @@ import (
 )
 
 const (
-	heartbeatSendTimeout                   = 5 * time.Second
-	maxRetryTimesRequestTSOServer          = 3
-	retryIntervalRequestTSOServer          = 500 * time.Millisecond
-	getMinTSFromTSOServerTimeout           = 1 * time.Second
-	defaultMaxConcurrentTSOProxyStreamings = 5000
-	defaultTSOProxyClientRecvTimeout       = 1 * time.Hour
-	defaultGRPCDialTimeout                 = 3 * time.Second
+	heartbeatSendTimeout          = 5 * time.Second
+	maxRetryTimesRequestTSOServer = 3
+	retryIntervalRequestTSOServer = 500 * time.Millisecond
+	getMinTSFromTSOServerTimeout  = 1 * time.Second
+	defaultGRPCDialTimeout        = 3 * time.Second
 )
 
 // gRPC errors
@@ -75,7 +73,7 @@ var (
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
 	*Server
-	concurrentTSOProxyRoutines atomic.Int32
+	concurrentTSOProxyStreamings atomic.Int32
 }
 
 type request interface {
@@ -412,7 +410,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		lastForwardedHost string
 	)
 	defer func() {
-		s.concurrentTSOProxyRoutines.Add(-1)
+		s.concurrentTSOProxyStreamings.Add(-1)
 		if forwardStream != nil {
 			forwardStream.CloseSend()
 		}
@@ -421,8 +419,11 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			cancel()
 		}
 	}()
-	if newCount := s.concurrentTSOProxyRoutines.Add(1); newCount > defaultMaxConcurrentTSOProxyStreamings {
-		return errors.WithStack(ErrMaxCountTSOProxyRoutinesExceeded)
+	maxConcurrentTSOProxyStreamings := int32(s.GetMaxConcurrentTSOProxyStreamings())
+	if maxConcurrentTSOProxyStreamings >= 0 {
+		if newCount := s.concurrentTSOProxyStreamings.Add(1); newCount > maxConcurrentTSOProxyStreamings {
+			return errors.WithStack(ErrMaxCountTSOProxyRoutinesExceeded)
+		}
 	}
 
 	for {
@@ -434,7 +435,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		default:
 		}
 
-		request, err := server.Recv()
+		request, err := server.Recv(s.GetTSOProxyClientRecvTimeout())
 		if err == io.EOF {
 			return nil
 		}
@@ -613,7 +614,7 @@ func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	}
 }
 
-func (s *tsoServer) Recv() (*pdpb.TsoRequest, error) {
+func (s *tsoServer) Recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
@@ -630,7 +631,7 @@ func (s *tsoServer) Recv() (*pdpb.TsoRequest, error) {
 			return nil, errors.WithStack(req.err)
 		}
 		return req.request, nil
-	case <-time.After(defaultTSOProxyClientRecvTimeout):
+	case <-time.After(timeout):
 		atomic.StoreInt32(&s.closed, 1)
 		return nil, ErrTSOProxyClientRecvTimeout
 	}
