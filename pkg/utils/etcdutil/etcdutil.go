@@ -378,7 +378,7 @@ type LoopWatcher struct {
 	postEventFn func() error
 
 	// forceLoadMu is used to ensure two force loads have minimal interval.
-	forceLoadMu sync.Mutex
+	forceLoadMu sync.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
 	lastTimeForceLoad time.Time
 
@@ -608,6 +608,17 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 
 // ForceLoad forces to load the key.
 func (lw *LoopWatcher) ForceLoad() {
+	// When NotLeader error happens, a large volume of force load requests will be received here,
+	// so the minimal interval between two force loads (from etcd) is used to avoid the congestion.
+	// Two-phase locking is also used to let most of the requests return directly without acquiring
+	// the write lock and causing the system to choke.
+	lw.forceLoadMu.RLock()
+	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
+		lw.forceLoadMu.RUnlock()
+		return
+	}
+	lw.forceLoadMu.RUnlock()
+
 	lw.forceLoadMu.Lock()
 	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
 		lw.forceLoadMu.Unlock()
