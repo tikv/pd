@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -155,11 +156,12 @@ func TestTSOProxyStress(t *testing.T) {
 	s.cleanupGRPCStreams(cleanupFuncs)
 	log.Info("the stress test completed.")
 
-	// Wait for the TSO Proxy to recover from the stress.
-	time.Sleep(recoverySLA)
-
 	// Verify the TSO Proxy can still work correctly after the stress.
-	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 100, true)
+	testutil.Eventually(re, func() bool {
+		err := s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, false)
+		return err == nil
+	}, testutil.WithWaitFor(recoverySLA), testutil.WithTickInterval(500*time.Millisecond))
+
 	s.TearDownSuite()
 }
 
@@ -224,9 +226,11 @@ func (s *tsoProxyTestSuite) cleanupGRPCStream(
 func (s *tsoProxyTestSuite) verifyTSOProxy(
 	ctx context.Context, streams []pdpb.PD_TsoClient,
 	cleanupFuncs []testutil.CleanupFunc, requestsPerClient int, mustReliable bool,
-) {
+) error {
 	re := s.Require()
 	reqs := s.generateRequests(requestsPerClient)
+
+	var respErr atomic.Value
 
 	wg := &sync.WaitGroup{}
 	for i := 0; i < len(streams); i++ {
@@ -240,6 +244,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 			for j := 0; j < requestsPerClient; j++ {
 				select {
 				case <-ctx.Done():
+					respErr.Store(ctx.Err())
 					s.cleanupGRPCStream(streams, cleanupFuncs, i)
 					return
 				default:
@@ -248,12 +253,14 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 				req := reqs[rand.Intn(requestsPerClient)]
 				err := streams[i].Send(req)
 				if err != nil && !mustReliable {
+					respErr.Store(err)
 					s.cleanupGRPCStream(streams, cleanupFuncs, i)
 					return
 				}
 				re.NoError(err)
 				resp, err := streams[i].Recv()
 				if err != nil && !mustReliable {
+					respErr.Store(err)
 					s.cleanupGRPCStream(streams, cleanupFuncs, i)
 					return
 				}
@@ -268,6 +275,11 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 		}(i)
 	}
 	wg.Wait()
+
+	if val := respErr.Load(); val != nil {
+		return val.(error)
+	}
+	return nil
 }
 
 func (s *tsoProxyTestSuite) generateRequests(requestsPerClient int) []*pdpb.TsoRequest {
