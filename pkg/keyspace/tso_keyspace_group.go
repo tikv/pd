@@ -346,11 +346,6 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 				Members:   keyspaceGroup.Members,
 				Keyspaces: keyspaceGroup.Keyspaces,
 			}
-			if oldKG.IsSplitting() {
-				newKG.SplitState = &endpoint.SplitState{
-					SplitSource: oldKG.SplitState.SplitSource,
-				}
-			}
 			err = m.store.SaveKeyspaceGroup(txn, newKG)
 			if err != nil {
 				return err
@@ -373,11 +368,6 @@ func (m *GroupManager) saveGroupWithUpdateKeyspace(keyspaceGroup *endpoint.Keysp
 		}
 		newKG := oldKG
 		newKG.Keyspaces = keyspaceGroup.Keyspaces
-		if oldKG.IsSplitting() {
-			newKG.SplitState = &endpoint.SplitState{
-				SplitSource: oldKG.SplitState.SplitSource,
-			}
-		}
 		err = m.store.SaveKeyspaceGroup(txn, newKG)
 		if err != nil {
 			return err
