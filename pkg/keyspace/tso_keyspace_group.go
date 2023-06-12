@@ -110,7 +110,7 @@ func NewKeyspaceGroupManager(
 }
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
-func (m *GroupManager) Bootstrap() error {
+func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	// Force the membership restriction that the default keyspace must belong to default keyspace group.
 	// Have no information to specify the distribution of the default keyspace group replicas, so just
 	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica
@@ -143,7 +143,7 @@ func (m *GroupManager) Bootstrap() error {
 	// It will only alloc node when the group manager is on API leader.
 	if m.client != nil {
 		m.wg.Add(1)
-		go m.allocNodesToAllKeyspaceGroups()
+		go m.allocNodesToAllKeyspaceGroups(ctx)
 	}
 	return nil
 }
@@ -154,7 +154,7 @@ func (m *GroupManager) Close() {
 	m.wg.Wait()
 }
 
-func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
+func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 	ticker := time.NewTicker(allocNodesToKeyspaceGroupsInterval)
@@ -166,6 +166,9 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups() {
 	log.Info("start to alloc nodes to all keyspace groups")
 	for {
 		select {
+		case <-ctx.Done():
+			log.Info("stop to alloc nodes to all keyspace groups")
+			return
 		case <-m.ctx.Done():
 			log.Info("stop to alloc nodes to all keyspace groups")
 			return
@@ -355,27 +358,6 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 	})
 }
 
-// saveGroupWithUpdateKeyspace will try to save the given keyspace groups into the storage.
-// It only update the keyspace field for the keyspace group.
-func (m *GroupManager) saveGroupWithUpdateKeyspace(keyspaceGroup *endpoint.KeyspaceGroup) error {
-	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
-		if err != nil {
-			return err
-		}
-		if oldKG.IsSplitting() {
-			return ErrKeyspaceGroupInSplit
-		}
-		newKG := oldKG
-		newKG.Keyspaces = keyspaceGroup.Keyspaces
-		err = m.store.SaveKeyspaceGroup(txn, newKG)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-}
-
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
 func (m *GroupManager) GetKeyspaceConfigByKind(userKind endpoint.UserKind) (map[string]string, error) {
 	// when server is not in API mode, we don't need to return the keyspace config
@@ -454,10 +436,9 @@ func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, 
 	}
 
 	if changed {
-		if err := m.saveGroupWithUpdateKeyspace(kg); err != nil {
+		if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true); err != nil {
 			return err
 		}
-
 		m.groups[userKind].Put(kg)
 	}
 	return nil
@@ -728,8 +709,10 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error {
 	m.Lock()
 	defer m.Unlock()
-	return m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		kg, err := m.store.LoadKeyspaceGroup(txn, id)
+	var kg *endpoint.KeyspaceGroup
+	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		var err error
+		kg, err = m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
 			return err
 		}
@@ -746,6 +729,11 @@ func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error
 		kg.Members = members
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	})
+	if err != nil {
+		return err
+	}
+	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
+	return nil
 }
 
 // IsExistNode checks if the node exists.
