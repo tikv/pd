@@ -404,6 +404,8 @@ func (m *GroupManager) getKeyspaceConfigByKindLocked(userKind endpoint.UserKind)
 	return config, nil
 }
 
+var failpointOnce sync.Once
+
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
 func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation int) error {
 	// when server is not in API mode, we don't need to update the keyspace for keyspace group
@@ -416,8 +418,10 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	}
 
 	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
-		addrs := val.(string)
-		m.SetNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
+		failpointOnce.Do(func() {
+			addrs := val.(string)
+			m.SetNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
+		})
 	})
 	m.Lock()
 	defer m.Unlock()
