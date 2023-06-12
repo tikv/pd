@@ -510,17 +510,25 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 func (s *GrpcServer) forwardTSORequestWithDeadLine(
 	ctx context.Context, request *pdpb.TsoRequest, forwardStream tsopb.TSO_TsoClient,
 ) (*tsopb.TsoResponse, error) {
+	defer logutil.LogPanic()
 	// Create a context with deadline for forwarding TSO request to TSO service.
 	ctxTimeout, cancel := context.WithTimeout(ctx, tsoutil.DefaultTSOProxyTimeout)
 	defer cancel()
 
+	tsoProxyBatchSize.Observe(float64(request.GetCount()))
+
 	// used to receive the result from doSomething function
-	tsoRespCh := make(chan *tsopbTSOResponse)
+	tsoRespCh := make(chan *tsopbTSOResponse, 1)
+	start := time.Now()
 	go s.forwardTSORequestAsync(ctxTimeout, request, forwardStream, tsoRespCh)
 	select {
 	case <-ctxTimeout.Done():
+		tsoProxyForwardTimeoutCounter.Inc()
 		return nil, ErrForwardTSOTimeout
 	case tsoResp := <-tsoRespCh:
+		if tsoResp.err == nil {
+			tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
+		}
 		return tsoResp.response, tsoResp.err
 	}
 }
@@ -541,6 +549,7 @@ func (s *GrpcServer) forwardTSORequestAsync(
 		Count:      request.GetCount(),
 		DcLocation: request.GetDcLocation(),
 	}
+
 	if err := forwardStream.Send(tsopbReq); err != nil {
 		select {
 		case <-ctxTimeout.Done():
