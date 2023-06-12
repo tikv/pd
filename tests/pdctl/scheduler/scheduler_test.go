@@ -31,7 +31,6 @@ import (
 )
 
 func TestScheduler(t *testing.T) {
-	t.Skip("skip this super unstable test which impacts everyone's productivity")
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

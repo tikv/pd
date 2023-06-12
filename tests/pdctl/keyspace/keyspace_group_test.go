@@ -90,7 +90,6 @@ func TestKeyspaceGroup(t *testing.T) {
 }
 
 func TestSplitKeyspaceGroup(t *testing.T) {
-	t.Skip("skip this super flaky split keyspace group test which impacts everyone's productivity.")
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
