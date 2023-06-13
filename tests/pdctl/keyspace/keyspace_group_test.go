@@ -96,7 +96,8 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
-	for i := 0; i < 129; i++ { // 128 is the default max txn ops limit in etcd.
+	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
+	for i := 0; i < 129; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := tests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
