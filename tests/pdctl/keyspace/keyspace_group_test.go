@@ -96,7 +96,8 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
-	for i := 0; i < 500; i++ {
+	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
+	for i := 0; i < 129; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := tests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
@@ -126,8 +127,53 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
-	}, testutil.WithWaitFor(20*time.Second))
+	})
 
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+}
+
+func TestExternalAllocNodeWhenStart(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// external alloc node for keyspace group, when keyspace manager update keyspace info to keyspace group
+	// we hope the keyspace group can be updated correctly.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/externalAllocNode", `return("127.0.0.1:2379,127.0.0.1:2380")`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	keyspaces := make([]string, 0)
+	for i := 0; i < 10; i++ {
+		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
+	}
+	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, serverName string) {
+		conf.Keyspace.PreAlloc = keyspaces
+	})
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	pdAddr := tc.GetConfig().GetClientURL()
+
+	cmd := pdctlCmd.GetRootCmd()
+
+	time.Sleep(2 * time.Second)
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+
+	// check keyspace group information.
+	defaultKeyspaceGroupID := fmt.Sprintf("%d", utils.DefaultKeyspaceGroupID)
+	args := []string{"-u", pdAddr, "keyspace-group"}
+	testutil.Eventually(re, func() bool {
+		output, err := pdctl.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
+		re.NoError(err)
+		var keyspaceGroup endpoint.KeyspaceGroup
+		err = json.Unmarshal(output, &keyspaceGroup)
+		re.NoError(err)
+		return len(keyspaceGroup.Keyspaces) == len(keyspaces)+1 && len(keyspaceGroup.Members) == 2
+	})
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/externalAllocNode"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }

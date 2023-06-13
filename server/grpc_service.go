@@ -54,22 +54,26 @@ const (
 	maxRetryTimesRequestTSOServer = 3
 	retryIntervalRequestTSOServer = 500 * time.Millisecond
 	getMinTSFromTSOServerTimeout  = 1 * time.Second
+	defaultGRPCDialTimeout        = 3 * time.Second
 )
 
 // gRPC errors
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
 	// TODO: work as proxy.
-	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
-	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
-	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
-	ErrNotFoundTSOAddr      = status.Errorf(codes.NotFound, "not found tso address")
-	ErrForwardTSOTimeout    = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
+	ErrNotLeader                        = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted                       = status.Errorf(codes.Unavailable, "server not started")
+	ErrSendHeartbeatTimeout             = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
+	ErrNotFoundTSOAddr                  = status.Errorf(codes.NotFound, "not found tso address")
+	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
+	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
+	ErrTSOProxyClientRecvTimeout        = status.Errorf(codes.DeadlineExceeded, "tso proxy client recv timeout. stream closed by server")
 )
 
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
 	*Server
+	concurrentTSOProxyStreamings atomic.Int32
 }
 
 type request interface {
@@ -406,6 +410,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		lastForwardedHost string
 	)
 	defer func() {
+		s.concurrentTSOProxyStreamings.Add(-1)
 		if forwardStream != nil {
 			forwardStream.CloseSend()
 		}
@@ -414,6 +419,12 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			cancel()
 		}
 	}()
+	maxConcurrentTSOProxyStreamings := int32(s.GetMaxConcurrentTSOProxyStreamings())
+	if maxConcurrentTSOProxyStreamings >= 0 {
+		if newCount := s.concurrentTSOProxyStreamings.Add(1); newCount > maxConcurrentTSOProxyStreamings {
+			return errors.WithStack(ErrMaxCountTSOProxyRoutinesExceeded)
+		}
+	}
 
 	for {
 		select {
@@ -424,7 +435,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		default:
 		}
 
-		request, err := server.Recv()
+		request, err := server.Recv(s.GetTSOProxyClientRecvTimeout())
 		if err == io.EOF {
 			return nil
 		}
@@ -459,25 +470,8 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			lastForwardedHost = forwardedHost
 		}
 
-		tsoReq := &tsopb.TsoRequest{
-			Header: &tsopb.RequestHeader{
-				ClusterId:       request.GetHeader().GetClusterId(),
-				SenderId:        request.GetHeader().GetSenderId(),
-				KeyspaceId:      utils.DefaultKeyspaceID,
-				KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
-			},
-			Count:      request.GetCount(),
-			DcLocation: request.GetDcLocation(),
-		}
-		if err := forwardStream.Send(tsoReq); err != nil {
-			return errors.WithStack(err)
-		}
-
-		tsopbResp, err := forwardStream.Recv()
+		tsopbResp, err := s.forwardTSORequestWithDeadLine(stream.Context(), request, forwardStream)
 		if err != nil {
-			if strings.Contains(err.Error(), errs.NotLeaderErr) {
-				s.tsoPrimaryWatcher.ForceLoad()
-			}
 			return errors.WithStack(err)
 		}
 
@@ -513,11 +507,99 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 	}
 }
 
+func (s *GrpcServer) forwardTSORequestWithDeadLine(
+	ctx context.Context, request *pdpb.TsoRequest, forwardStream tsopb.TSO_TsoClient,
+) (*tsopb.TsoResponse, error) {
+	defer logutil.LogPanic()
+	// Create a context with deadline for forwarding TSO request to TSO service.
+	ctxTimeout, cancel := context.WithTimeout(ctx, tsoutil.DefaultTSOProxyTimeout)
+	defer cancel()
+
+	tsoProxyBatchSize.Observe(float64(request.GetCount()))
+
+	// used to receive the result from doSomething function
+	tsoRespCh := make(chan *tsopbTSOResponse, 1)
+	start := time.Now()
+	go s.forwardTSORequestAsync(ctxTimeout, request, forwardStream, tsoRespCh)
+	select {
+	case <-ctxTimeout.Done():
+		tsoProxyForwardTimeoutCounter.Inc()
+		return nil, ErrForwardTSOTimeout
+	case tsoResp := <-tsoRespCh:
+		if tsoResp.err == nil {
+			tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
+		}
+		return tsoResp.response, tsoResp.err
+	}
+}
+
+func (s *GrpcServer) forwardTSORequestAsync(
+	ctxTimeout context.Context,
+	request *pdpb.TsoRequest,
+	forwardStream tsopb.TSO_TsoClient,
+	tsoRespCh chan<- *tsopbTSOResponse,
+) {
+	tsopbReq := &tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId:       request.GetHeader().GetClusterId(),
+			SenderId:        request.GetHeader().GetSenderId(),
+			KeyspaceId:      utils.DefaultKeyspaceID,
+			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
+		},
+		Count:      request.GetCount(),
+		DcLocation: request.GetDcLocation(),
+	}
+
+	if err := forwardStream.Send(tsopbReq); err != nil {
+		select {
+		case <-ctxTimeout.Done():
+			return
+		case tsoRespCh <- &tsopbTSOResponse{err: err}:
+		}
+		return
+	}
+
+	select {
+	case <-ctxTimeout.Done():
+		return
+	default:
+	}
+
+	response, err := forwardStream.Recv()
+	if err != nil {
+		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+			s.tsoPrimaryWatcher.ForceLoad()
+		}
+		select {
+		case <-ctxTimeout.Done():
+			return
+		case tsoRespCh <- &tsopbTSOResponse{err: err}:
+		}
+		return
+	}
+
+	select {
+	case <-ctxTimeout.Done():
+		return
+	case tsoRespCh <- &tsopbTSOResponse{response: response}:
+	}
+}
+
+type tsopbTSOResponse struct {
+	response *tsopb.TsoResponse
+	err      error
+}
+
 // tsoServer wraps PD_TsoServer to ensure when any error
 // occurs on Send() or Recv(), both endpoints will be closed.
 type tsoServer struct {
 	stream pdpb.PD_TsoServer
 	closed int32
+}
+
+type pdpbTSORequest struct {
+	request *pdpb.TsoRequest
+	err     error
 }
 
 func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
@@ -541,16 +623,27 @@ func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	}
 }
 
-func (s *tsoServer) Recv() (*pdpb.TsoRequest, error) {
+func (s *tsoServer) Recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
-	req, err := s.stream.Recv()
-	if err != nil {
+	requestCh := make(chan *pdpbTSORequest, 1)
+	go func() {
+		defer logutil.LogPanic()
+		request, err := s.stream.Recv()
+		requestCh <- &pdpbTSORequest{request: request, err: err}
+	}()
+	select {
+	case req := <-requestCh:
+		if req.err != nil {
+			atomic.StoreInt32(&s.closed, 1)
+			return nil, errors.WithStack(req.err)
+		}
+		return req.request, nil
+	case <-time.After(timeout):
 		atomic.StoreInt32(&s.closed, 1)
-		return nil, errors.WithStack(err)
+		return nil, ErrTSOProxyClientRecvTimeout
 	}
-	return req, nil
 }
 
 func (s *GrpcServer) getForwardedHost(ctx, streamCtx context.Context) (forwardedHost string, err error) {
@@ -1974,19 +2067,30 @@ func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAll
 
 func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
 	client, ok := s.clientConns.Load(forwardedHost)
-	if !ok {
-		tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
-		if err != nil {
-			return nil, err
-		}
-		cc, err := grpcutil.GetClientConn(ctx, forwardedHost, tlsConfig)
-		if err != nil {
-			return nil, err
-		}
-		client = cc
-		s.clientConns.Store(forwardedHost, cc)
+	if ok {
+		// Mostly, the connection is already established, and return it directly.
+		return client.(*grpc.ClientConn), nil
 	}
-	return client.(*grpc.ClientConn), nil
+
+	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	ctxTimeout, cancel := context.WithTimeout(ctx, defaultGRPCDialTimeout)
+	defer cancel()
+	newConn, err := grpcutil.GetClientConn(ctxTimeout, forwardedHost, tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	conn, loaded := s.clientConns.LoadOrStore(forwardedHost, newConn)
+	if !loaded {
+		// Successfully stored the connection we created.
+		return newConn, nil
+	}
+	// Loaded a connection created/stored by another goroutine, so close the one we created
+	// and return the one we loaded.
+	newConn.Close()
+	return conn.(*grpc.ClientConn), nil
 }
 
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {

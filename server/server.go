@@ -1903,6 +1903,17 @@ func (s *Server) IsLocalTSOEnabled() bool {
 	return s.cfg.IsLocalTSOEnabled()
 }
 
+// GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
+// If the value is negative, there is no limit.
+func (s *Server) GetMaxConcurrentTSOProxyStreamings() int {
+	return s.cfg.GetMaxConcurrentTSOProxyStreamings()
+}
+
+// GetTSOProxyClientRecvTimeout returns the TSO proxy client receive timeout.
+func (s *Server) GetTSOProxyClientRecvTimeout() time.Duration {
+	return s.cfg.GetTSOProxyClientRecvTimeout()
+}
+
 // GetLeaderLease returns the leader lease.
 func (s *Server) GetLeaderLease() int64 {
 	return s.cfg.GetLeaderLease()
