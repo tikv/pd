@@ -169,9 +169,6 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 		case <-ctx.Done():
 			log.Info("stop to alloc nodes to all keyspace groups")
 			return
-		case <-m.ctx.Done():
-			log.Info("stop to alloc nodes to all keyspace groups")
-			return
 		case <-ticker.C:
 		}
 		countOfNodes := m.GetNodesCount()
