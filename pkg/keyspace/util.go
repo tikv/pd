@@ -54,6 +54,10 @@ var (
 	ErrKeyspaceGroupInSplit = errors.New("keyspace group is in split state")
 	// ErrKeyspaceGroupNotInSplit is used to indicate target keyspace group is not in split state.
 	ErrKeyspaceGroupNotInSplit = errors.New("keyspace group is not in split state")
+	// ErrKeyspaceGroupInMerging is used to indicate target keyspace group is in merging state.
+	ErrKeyspaceGroupInMerging = errors.New("keyspace group is in merging state")
+	// ErrKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
+	ErrKeyspaceGroupNotInMerging = errors.New("keyspace group is not in merging state")
 	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
 	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
 	// ErrKeyspaceGroupNotEnoughReplicas is used to indicate not enough replicas in the keyspace group.
