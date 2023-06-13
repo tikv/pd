@@ -80,6 +80,15 @@ type Config struct {
 	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
 	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
 
+	// MaxConcurrentTSOProxyStreamings is the maximum number of concurrent TSO proxy streaming process routines allowed.
+	// Exceeding this limit will result in an error being returned to the client when a new client starts a TSO streaming.
+	// Set this to 0 will disable TSO Proxy.
+	// Set this to the negative value to disable the limit.
+	MaxConcurrentTSOProxyStreamings int `toml:"max-concurrent-tso-proxy-streamings" json:"max-concurrent-tso-proxy-streamings"`
+	// TSOProxyClientRecvTimeout is the timeout for the TSO proxy to receive a tso request from a client via grpc TSO stream.
+	// After the timeout, the TSO proxy will close the grpc TSO stream.
+	TSOProxyClientRecvTimeout typeutil.Duration `toml:"tso-proxy-client-recv-timeout" json:"tso-proxy-client-recv-timeout"`
+
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
@@ -218,6 +227,9 @@ const (
 	defaultDashboardAddress = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
+
+	defaultMaxConcurrentTSOProxyStreamings = 5000
+	defaultTSOProxyClientRecvTimeout       = 1 * time.Hour
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
@@ -442,10 +454,11 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		}
 	}
 
+	configutil.AdjustInt(&c.MaxConcurrentTSOProxyStreamings, defaultMaxConcurrentTSOProxyStreamings)
+	configutil.AdjustDuration(&c.TSOProxyClientRecvTimeout, defaultTSOProxyClientRecvTimeout)
+
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
-
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
-
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
@@ -1250,6 +1263,17 @@ func (c *Config) GetLeaderLease() int64 {
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO
+}
+
+// GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
+// If the value is negative, there is no limit.
+func (c *Config) GetMaxConcurrentTSOProxyStreamings() int {
+	return c.MaxConcurrentTSOProxyStreamings
+}
+
+// GetTSOProxyClientRecvTimeout returns the TSO proxy client receive timeout.
+func (c *Config) GetTSOProxyClientRecvTimeout() time.Duration {
+	return c.TSOProxyClientRecvTimeout.Duration
 }
 
 // GetTSOUpdatePhysicalInterval returns TSO update physical interval.
