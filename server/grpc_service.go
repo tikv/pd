@@ -411,9 +411,6 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 	)
 	defer func() {
 		s.concurrentTSOProxyStreamings.Add(-1)
-		if forwardStream != nil {
-			forwardStream.CloseSend()
-		}
 		// cancel the forward stream
 		if cancel != nil {
 			cancel()
@@ -452,9 +449,6 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(ErrNotFoundTSOAddr)
 		}
 		if forwardStream == nil || lastForwardedHost != forwardedHost {
-			if forwardStream != nil {
-				forwardStream.CloseSend()
-			}
 			if cancel != nil {
 				cancel()
 			}
