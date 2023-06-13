@@ -628,7 +628,8 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			// if kid == kg.ID, it means the keyspace still belongs to this keyspace group,
 			//     so we decouple the relationship in the global keyspace lookup table.
 			// if kid != kg.ID, it means the keyspace has been moved to another keyspace group
-			//     which has already declared the ownership of the keyspace.
+			//     which has already declared the ownership of the keyspace, so we don't need
+			//     delete it from the global keyspace lookup table and overwrite the ownership.
 			if kid == kg.ID {
 				delete(kgm.keyspaceLookupTable, kid)
 			}
