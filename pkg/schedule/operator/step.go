@@ -588,6 +588,7 @@ func (pl PromoteLearner) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *pdpb.
 // RemovePeer is an OpStep that removes a region peer.
 type RemovePeer struct {
 	FromStore, PeerID uint64
+	IsLightWeight     bool
 	IsDownStore       bool
 }
 
@@ -632,6 +633,10 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	peer := region.GetStorePeer(rp.FromStore)
 	if peer != nil && peer.IsWitness {
 		from.WitnessCount--
+		return
+	}
+
+	if rp.IsLightWeight {
 		return
 	}
 

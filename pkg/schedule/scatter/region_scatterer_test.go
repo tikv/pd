@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -780,4 +781,38 @@ func isPeerCountChanged(op *operator.Operator) bool {
 		}
 	}
 	return add != remove
+}
+
+func TestRemoveStoreLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
+
+	// Add stores 1~6.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+		tc.SetStoreLimit(i, storelimit.AddPeer, 1)
+		tc.SetStoreLimit(i, storelimit.RemovePeer, 1)
+	}
+
+	// Add regions 1~4.
+	seq := newSequencer(3)
+	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	for i := uint64(2); i <= 5; i++ {
+		tc.AddLeaderRegion(i, seq.next(), seq.next(), seq.next())
+	}
+
+	scatterer := NewRegionScatterer(ctx, tc, oc)
+
+	for i := uint64(1); i <= 5; i++ {
+		region := tc.GetRegion(i)
+		if op, _ := scatterer.Scatter(region, ""); op != nil {
+			re.True(oc.AddOperator(op))
+		}
+	}
 }

@@ -795,7 +795,11 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	if store != nil {
 		isDownStore = store.DownTime() > b.GetSharedConfig().GetMaxStoreDownTime()
 	}
-	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore})
+	if b.lightWeight {
+		b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore, IsLightWeight: b.lightWeight})
+	} else {
+		b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore})
+	}
 	delete(b.currentPeers, removeStoreID)
 	delete(b.toRemove, removeStoreID)
 }
