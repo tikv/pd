@@ -67,7 +67,7 @@ var (
 	ErrNotFoundTSOAddr                  = status.Errorf(codes.NotFound, "not found tso address")
 	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
 	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
-	ErrTSOProxyClientRecvTimeout        = status.Errorf(codes.DeadlineExceeded, "tso proxy client recv timeout. stream closed by server")
+	ErrTSOProxyRecvFromClientTimeout    = status.Errorf(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server")
 )
 
 // GrpcServer wraps Server to provide grpc service.
@@ -435,7 +435,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		default:
 		}
 
-		request, err := server.Recv(s.GetTSOProxyClientRecvTimeout())
+		request, err := server.Recv(s.GetTSOProxyRecvFromClientTimeout())
 		if err == io.EOF {
 			return nil
 		}
@@ -550,6 +550,11 @@ func (s *GrpcServer) forwardTSORequestAsync(
 		DcLocation: request.GetDcLocation(),
 	}
 
+	failpoint.Inject("tsoProxySendToTSOTimeout", func() {
+		<-ctxTimeout.Done()
+		failpoint.Return()
+	})
+
 	if err := forwardStream.Send(tsopbReq); err != nil {
 		select {
 		case <-ctxTimeout.Done():
@@ -565,23 +570,21 @@ func (s *GrpcServer) forwardTSORequestAsync(
 	default:
 	}
 
+	failpoint.Inject("tsoProxyRecvFromTSOTimeout", func() {
+		<-ctxTimeout.Done()
+		failpoint.Return()
+	})
+
 	response, err := forwardStream.Recv()
 	if err != nil {
 		if strings.Contains(err.Error(), errs.NotLeaderErr) {
 			s.tsoPrimaryWatcher.ForceLoad()
 		}
-		select {
-		case <-ctxTimeout.Done():
-			return
-		case tsoRespCh <- &tsopbTSOResponse{err: err}:
-		}
-		return
 	}
-
 	select {
 	case <-ctxTimeout.Done():
 		return
-	case tsoRespCh <- &tsopbTSOResponse{response: response}:
+	case tsoRespCh <- &tsopbTSOResponse{response: response, err: err}:
 	}
 }
 
@@ -609,6 +612,10 @@ func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	done := make(chan error, 1)
 	go func() {
 		defer logutil.LogPanic()
+		failpoint.Inject("tsoProxyFailToSendToClient", func() {
+			done <- errors.New("injected error")
+			failpoint.Return()
+		})
 		done <- s.stream.Send(m)
 	}()
 	select {
@@ -627,6 +634,11 @@ func (s *tsoServer) Recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
+	failpoint.Inject("tsoProxyRecvFromClientTimeout", func(val failpoint.Value) {
+		if customTimeoutInSeconds, ok := val.(int); ok {
+			timeout = time.Duration(customTimeoutInSeconds) * time.Second
+		}
+	})
 	requestCh := make(chan *pdpbTSORequest, 1)
 	go func() {
 		defer logutil.LogPanic()
@@ -642,7 +654,7 @@ func (s *tsoServer) Recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 		return req.request, nil
 	case <-time.After(timeout):
 		atomic.StoreInt32(&s.closed, 1)
-		return nil, ErrTSOProxyClientRecvTimeout
+		return nil, ErrTSOProxyRecvFromClientTimeout
 	}
 }
 
