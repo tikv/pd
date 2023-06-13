@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
@@ -192,6 +193,79 @@ func (s *tsoProxyTestSuite) TestTSOProxyClientsWithSameContext() {
 
 	s.verifyTSOProxy(ctx, streams, cleanupFuncs, 100, true)
 	s.cleanupGRPCStreams(cleanupFuncs)
+}
+
+// TestTSOProxyRecvFromClientTimeout tests the TSO Proxy can properly close the grpc stream on the server side
+// when the client does not send any request to the server for a long time.
+func (s *tsoProxyTestSuite) TestTSOProxyRecvFromClientTimeout() {
+	re := s.Require()
+
+	// Enable the failpoint to make the TSO Proxy's grpc stream timeout on the server side to be 1 second.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tsoProxyRecvFromClientTimeout", `return(1)`))
+	streams, cleanupFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 1)
+	// Sleep 2 seconds to make the TSO Proxy's grpc stream timeout on the server side.
+	time.Sleep(2 * time.Second)
+	err := streams[0].Send(s.defaultReq)
+	re.Error(err)
+	s.cleanupGRPCStreams(cleanupFuncs)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tsoProxyRecvFromClientTimeout"))
+
+	// Verify the streams with no fault injection can work correctly.
+	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+}
+
+// TestTSOProxyFailToSendToClient tests the TSO Proxy can properly close the grpc stream on the server side
+// when it fails to send the response to the client.
+func (s *tsoProxyTestSuite) TestTSOProxyFailToSendToClient() {
+	re := s.Require()
+
+	// Enable the failpoint to make the TSO Proxy's grpc stream timeout on the server side to be 1 second.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tsoProxyFailToSendToClient", `return(true)`))
+	streams, cleanupFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 1)
+	err := streams[0].Send(s.defaultReq)
+	re.NoError(err)
+	_, err = streams[0].Recv()
+	re.Error(err)
+	s.cleanupGRPCStreams(cleanupFuncs)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tsoProxyFailToSendToClient"))
+
+	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+}
+
+// TestTSOProxySendToTSOTimeout tests the TSO Proxy can properly close the grpc stream on the server side
+// when it sends the request to the TSO service and encounters timeout.
+func (s *tsoProxyTestSuite) TestTSOProxySendToTSOTimeout() {
+	re := s.Require()
+
+	// Enable the failpoint to make the TSO Proxy's grpc stream timeout on the server side to be 1 second.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tsoProxySendToTSOTimeout", `return(true)`))
+	streams, cleanupFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 1)
+	err := streams[0].Send(s.defaultReq)
+	re.NoError(err)
+	_, err = streams[0].Recv()
+	re.Error(err)
+	s.cleanupGRPCStreams(cleanupFuncs)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tsoProxySendToTSOTimeout"))
+
+	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
+}
+
+// TestTSOProxyRecvFromTSOTimeout tests the TSO Proxy can properly close the grpc stream on the server side
+// when it receives the response from the TSO service and encounters timeout.
+func (s *tsoProxyTestSuite) TestTSOProxyRecvFromTSOTimeout() {
+	re := s.Require()
+
+	// Enable the failpoint to make the TSO Proxy's grpc stream timeout on the server side to be 1 second.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tsoProxyRecvFromTSOTimeout", `return(true)`))
+	streams, cleanupFuncs := createTSOStreams(re, s.ctx, s.backendEndpoints, 1)
+	err := streams[0].Send(s.defaultReq)
+	re.NoError(err)
+	_, err = streams[0].Recv()
+	re.Error(err)
+	s.cleanupGRPCStreams(cleanupFuncs)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tsoProxyRecvFromTSOTimeout"))
+
+	s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 1, true)
 }
 
 func (s *tsoProxyTestSuite) cleanupGRPCStreams(cleanupFuncs []testutil.CleanupFunc) {
