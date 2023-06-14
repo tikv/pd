@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -765,6 +766,9 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	if mergeListNum == 0 {
 		return nil
 	}
+	if mergeListNum > maxEtcdTxnOps {
+		return ErrExceedMaxEtcdTxnOps
+	}
 	var (
 		groups        = make(map[uint32]*endpoint.KeyspaceGroup, mergeListNum+1)
 		mergeTargetKg *endpoint.KeyspaceGroup
@@ -792,18 +796,28 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 			groups[kgID] = kg
 		}
 		mergeTargetKg = groups[mergeTargetID]
+		keyspaces := make(map[uint32]struct{}, len(mergeTargetKg.Keyspaces))
+		for _, keyspace := range mergeTargetKg.Keyspaces {
+			keyspaces[keyspace] = struct{}{}
+		}
 		// Delete the keyspace groups in merge list and move the keyspaces in it to the target keyspace group.
 		for _, kgID := range mergeList {
 			kg := groups[kgID]
 			for _, keyspace := range kg.Keyspaces {
-				if !slice.Contains(mergeTargetKg.Keyspaces, keyspace) {
-					mergeTargetKg.Keyspaces = append(mergeTargetKg.Keyspaces, keyspace)
-				}
+				keyspaces[keyspace] = struct{}{}
 			}
 			if err := m.store.DeleteKeyspaceGroup(txn, kg.ID); err != nil {
 				return err
 			}
 		}
+		mergedKeyspaces := make([]uint32, 0, len(keyspaces))
+		for keyspace := range keyspaces {
+			mergedKeyspaces = append(mergedKeyspaces, keyspace)
+		}
+		sort.Slice(mergedKeyspaces, func(i, j int) bool {
+			return mergedKeyspaces[i] < mergedKeyspaces[j]
+		})
+		mergeTargetKg.Keyspaces = mergedKeyspaces
 		// Update the merge state of the target keyspace group.
 		mergeTargetKg.MergeState = &endpoint.MergeState{
 			MergeList: mergeList,

@@ -63,9 +63,11 @@ var (
 	// ErrKeyspaceGroupNotEnoughReplicas is used to indicate not enough replicas in the keyspace group.
 	ErrKeyspaceGroupNotEnoughReplicas = errors.New("not enough replicas in the keyspace group")
 	// ErrNoAvailableNode is used to indicate no available node in the keyspace group.
-	ErrNoAvailableNode  = errors.New("no available node")
-	errModifyDefault    = errors.New("cannot modify default keyspace's state")
-	errIllegalOperation = errors.New("unknown operation")
+	ErrNoAvailableNode = errors.New("no available node")
+	// ErrExceedMaxEtcdTxnOps is used to indicate the number of etcd txn operations exceeds the limit.
+	ErrExceedMaxEtcdTxnOps = errors.New("exceed max etcd txn operations")
+	errModifyDefault       = errors.New("cannot modify default keyspace's state")
+	errIllegalOperation    = errors.New("unknown operation")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
