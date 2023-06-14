@@ -563,7 +563,14 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 				i++
 				j++
 			} else if i < oldLen && j < newLen && oldKeyspaces[i] < newKeyspaces[j] || j == newLen {
-				delete(kgm.keyspaceLookupTable, oldKeyspaces[i])
+				// kgm.keyspaceLookupTable is a global lookup table for all keyspace groups, storing the
+				// keyspace group ID for each keyspace. If the keyspace group of this keyspace in this
+				// lookup table isn't the current keyspace group, it means the keyspace has been moved
+				// to another keyspace group which has already declared the ownership of the keyspace,
+				// and we shouldn't delete and overwrite the ownership.
+				if curGroupID, ok := kgm.keyspaceLookupTable[oldKeyspaces[i]]; ok && curGroupID == groupID {
+					delete(kgm.keyspaceLookupTable, oldKeyspaces[i])
+				}
 				i++
 			} else {
 				newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
@@ -621,7 +628,8 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			// if kid == kg.ID, it means the keyspace still belongs to this keyspace group,
 			//     so we decouple the relationship in the global keyspace lookup table.
 			// if kid != kg.ID, it means the keyspace has been moved to another keyspace group
-			//     which has already declared the ownership of the keyspace.
+			//     which has already declared the ownership of the keyspace, so we don't need
+			//     delete it from the global keyspace lookup table and overwrite the ownership.
 			if kid == kg.ID {
 				delete(kgm.keyspaceLookupTable, kid)
 			}
