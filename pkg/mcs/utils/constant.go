@@ -74,4 +74,7 @@ const (
 
 	// KeyspaceGroupDefaultReplicaCount is the default replica count of keyspace group.
 	KeyspaceGroupDefaultReplicaCount = 2
+
+	// DefaultPriority is the default priority of tso server in  keyspace group.
+	DefaultPriority = 100
 )

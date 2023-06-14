@@ -73,7 +73,8 @@ func IsUserKindValid(kind string) bool {
 
 // KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
 type KeyspaceGroupMember struct {
-	Address string `json:"address"`
+	Address  string `json:"address"`
+	Priority int    `json:"priority"`
 }
 
 // SplitState defines the split state of a keyspace group.
