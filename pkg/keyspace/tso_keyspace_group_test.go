@@ -387,4 +387,11 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	re.Equal([]uint32{111, 222, 333, 444, 555}, kg1.Keyspaces)
 	re.False(kg1.IsSplitting())
 	re.False(kg1.IsMerging())
+
+	// merge a non-existing keyspace group
+	err = suite.kgm.MergeKeyspaceGroups(4, []uint32{5})
+	re.ErrorIs(err, ErrKeyspaceGroupNotExists)
+	// merge with the number of keyspace groups exceeds the limit
+	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, maxEtcdTxnOps/2))
+	re.ErrorIs(err, ErrExceedMaxEtcdTxnOps)
 }

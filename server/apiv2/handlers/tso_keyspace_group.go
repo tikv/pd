@@ -207,12 +207,12 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		patrolKeyspaceAssignmentState.patrolled = true
 	}
 	patrolKeyspaceAssignmentState.Unlock()
-	// Split keyspace group.
 	groupManager := svr.GetKeyspaceGroupManager()
 	if groupManager == nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
 		return
 	}
+	// Split keyspace group.
 	err = groupManager.SplitKeyspaceGroupByID(id, splitParams.NewID, splitParams.Keyspaces)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -269,12 +269,12 @@ func MergeKeyspaceGroups(c *gin.Context) {
 	}
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	// Split keyspace group.
 	groupManager := svr.GetKeyspaceGroupManager()
 	if groupManager == nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
 		return
 	}
+	// Merge keyspace group.
 	err = groupManager.MergeKeyspaceGroups(id, mergeParams.MergeList)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())

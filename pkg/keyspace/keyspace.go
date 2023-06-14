@@ -49,7 +49,7 @@ const (
 	UserKindKey = "user_kind"
 	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
-	// maxEtcdTxnOps is the batch size for operating etcd. The limit of etcd txn op is 128.
+	// maxEtcdTxnOps is the max value of operations in an etcd txn. The default limit of etcd txn op is 128.
 	// We use 120 here to leave some space for other operations.
 	// See: https://github.com/etcd-io/etcd/blob/d3e43d4de6f6d9575b489dd7850a85e37e0f6b6c/server/embed/config.go#L61
 	maxEtcdTxnOps = 120

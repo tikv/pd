@@ -766,7 +766,11 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	if mergeListNum == 0 {
 		return nil
 	}
-	if mergeListNum > maxEtcdTxnOps {
+	// The transaction below will:
+	//   - Load and delete the keyspace groups in the merge list.
+	//   - Load and update the target keyspace group.
+	// So we pre-check the number of operations to avoid exceeding the maximum number of etcd transaction.
+	if (mergeListNum+1)*2 > maxEtcdTxnOps {
 		return ErrExceedMaxEtcdTxnOps
 	}
 	var (
@@ -796,7 +800,7 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 			groups[kgID] = kg
 		}
 		mergeTargetKg = groups[mergeTargetID]
-		keyspaces := make(map[uint32]struct{}, len(mergeTargetKg.Keyspaces))
+		keyspaces := make(map[uint32]struct{})
 		for _, keyspace := range mergeTargetKg.Keyspaces {
 			keyspaces[keyspace] = struct{}{}
 		}
