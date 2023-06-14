@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	"github.com/tikv/pd/pkg/mcs/utils"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -359,7 +358,7 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 			ID: mcsutils.DefaultKeyspaceGroupID,
 			Members: []endpoint.KeyspaceGroupMember{{
 				Address:  kgm.tsoServiceID.ServiceAddr,
-				Priority: utils.DefaultPriority,
+				Priority: mcsutils.DefaultPriority,
 			}},
 			Keyspaces: []uint32{mcsutils.DefaultKeyspaceID},
 		}
@@ -406,7 +405,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		// TODO: fill members with all tso nodes/pods.
 		group.Members = []endpoint.KeyspaceGroupMember{{
 			Address:  kgm.tsoServiceID.ServiceAddr,
-			Priority: utils.DefaultPriority,
+			Priority: mcsutils.DefaultPriority,
 		}}
 	}
 
@@ -621,7 +620,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			ID: mcsutils.DefaultKeyspaceGroupID,
 			Members: []endpoint.KeyspaceGroupMember{{
 				Address:  kgm.tsoServiceID.ServiceAddr,
-				Priority: utils.DefaultPriority,
+				Priority: mcsutils.DefaultPriority,
 			}},
 			Keyspaces: []uint32{mcsutils.DefaultKeyspaceID},
 		}
