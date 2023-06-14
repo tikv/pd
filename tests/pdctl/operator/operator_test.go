@@ -87,7 +87,7 @@ func TestOperator(t *testing.T) {
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
 	}))
-	pdctl.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("c"), core.SetPeers([]*metapb.Peer{
+	pdctl.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
 		{Id: 3, StoreId: 1},
 		{Id: 4, StoreId: 2},
 	}))
@@ -160,6 +160,13 @@ func TestOperator(t *testing.T) {
 			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=approximate"},
 			show:   []string{"-u", pdAddr, "operator", "check", "3"},
 			expect: "status: RUNNING",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
+		},
+		{
+			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--key=xxx]
+			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=usekey", "--key=c"},
+			show:   []string{"-u", pdAddr, "operator", "show"},
+			expect: "split region with policy USEKEY",
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
 	}
