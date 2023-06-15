@@ -119,6 +119,7 @@ func newTSOClient(
 }
 
 func (c *tsoClient) Setup() {
+	log.Info("setup tso client", zap.Uint32("keyspace-id", c.keyspaceID))
 	c.svcDiscovery.CheckMemberChanged()
 	c.updateTSODispatcher()
 

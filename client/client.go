@@ -437,6 +437,7 @@ func NewAPIContextV2(keyspaceName string) APIContext {
 	if len(keyspaceName) == 0 {
 		keyspaceName = defaultKeyspaceName
 	}
+	log.Info("[pd] create pd client with keyspace", zap.String("keyspace-name", keyspaceName))
 	return &apiContextV2{keyspaceName: keyspaceName}
 }
 
@@ -511,7 +512,7 @@ func newClientWithKeyspaceName(
 		return nil, err
 	}
 	c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
-
+	log.Info("[pd] create pd client with keyspace", zap.String("keyspace-name", keyspaceName), zap.Uint32("keyspace-id", c.keyspaceID))
 	return c, nil
 }
 
@@ -533,8 +534,10 @@ func (c *client) initRetry(f func(s string) error, str string) error {
 func (c *client) loadKeyspaceMeta(keyspace string) error {
 	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
 	if err != nil {
+		log.Info("[pd] load keyspace meta failed", zap.String("keyspace-name", keyspace), zap.Error(err))
 		return err
 	}
+	log.Info("[pd] load keyspace meta", zap.String("keyspace-name", keyspace), zap.Uint32("keyspace-id", keyspaceMeta.GetId()), zap.Any("keyspace-meta", keyspaceMeta))
 	c.keyspaceID = keyspaceMeta.GetId()
 	return nil
 }
@@ -585,7 +588,8 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	}
 	log.Info("[pd] changing service mode",
 		zap.String("old-mode", c.serviceMode.String()),
-		zap.String("new-mode", newMode.String()))
+		zap.String("new-mode", newMode.String()),
+		zap.Uint32("keyspace-id", c.keyspaceID))
 	// Re-create a new TSO client.
 	var (
 		newTSOCli          *tsoClient
@@ -633,7 +637,8 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	c.serviceMode = newMode
 	log.Info("[pd] service mode changed",
 		zap.String("old-mode", oldMode.String()),
-		zap.String("new-mode", newMode.String()))
+		zap.String("new-mode", newMode.String()),
+		zap.Uint32("keyspace-id", c.keyspaceID))
 }
 
 func (c *client) getTSOClient() *tsoClient {
