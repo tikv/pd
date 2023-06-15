@@ -469,6 +469,14 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 	}
 
+	oldGroupID := c.GetKeyspaceGroupID()
+	if oldGroupID != keyspaceGroup.Id {
+		log.Info("[tso] the keyspace group changed",
+			zap.Uint32("keyspace-id", keyspaceGroup.Id),
+			zap.Uint32("new-keyspace-group-id", keyspaceGroup.Id),
+			zap.Uint32("old-keyspace-group-id", oldGroupID))
+	}
+
 	// Initialize the serving addresses from the returned keyspace group info.
 	primaryAddr := ""
 	secondaryAddrs := make([]string, 0)
