@@ -62,6 +62,8 @@ var (
 	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
 	// ErrKeyspaceGroupNotEnoughReplicas is used to indicate not enough replicas in the keyspace group.
 	ErrKeyspaceGroupNotEnoughReplicas = errors.New("not enough replicas in the keyspace group")
+	// ErrModifyDefaultKeyspaceGroup is used to indicate that default keyspace group cannot be modified.
+	ErrModifyDefaultKeyspaceGroup = errors.New("default keyspace group cannot be modified")
 	// ErrNoAvailableNode is used to indicate no available node in the keyspace group.
 	ErrNoAvailableNode = errors.New("no available node")
 	// ErrExceedMaxEtcdTxnOps is used to indicate the number of etcd txn operations exceeds the limit.

@@ -773,6 +773,9 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	if (mergeListNum+1)*2 > maxEtcdTxnOps {
 		return ErrExceedMaxEtcdTxnOps
 	}
+	if slice.Contains(mergeList, utils.DefaultKeyspaceGroupID) {
+		return ErrModifyDefaultKeyspaceGroup
+	}
 	var (
 		groups        = make(map[uint32]*endpoint.KeyspaceGroup, mergeListNum+1)
 		mergeTargetKg *endpoint.KeyspaceGroup

@@ -394,4 +394,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	// merge with the number of keyspace groups exceeds the limit
 	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, maxEtcdTxnOps/2))
 	re.ErrorIs(err, ErrExceedMaxEtcdTxnOps)
+	// merge the default keyspace group
+	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{utils.DefaultKeyspaceGroupID})
+	re.ErrorIs(err, ErrModifyDefaultKeyspaceGroup)
 }
