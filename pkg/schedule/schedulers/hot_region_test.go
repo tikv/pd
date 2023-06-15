@@ -211,23 +211,18 @@ func TestSplitRegionInIfRegionIsTooHot(t *testing.T) {
 	tc.SetHotRegionCacheHitsThreshold(1)
 	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	// the hot range is [a,c],[e,f]
 	b := &metapb.Buckets{
 		RegionId:   1,
 		PeriodInMs: 1000,
 		Keys: [][]byte{[]byte(fmt.Sprintf("%21d", 11)),
-			[]byte(fmt.Sprintf("%21d", 12)),
-			[]byte(fmt.Sprintf("%21d", 13)),
-			[]byte(fmt.Sprintf("%21d", 14)),
-			[]byte(fmt.Sprintf("%21d", 15)),
-			[]byte(fmt.Sprintf("%21d", 16))},
+			[]byte(fmt.Sprintf("%21d", 12))},
 		Stats: &metapb.BucketStats{
-			ReadBytes:  []uint64{10 * units.KiB, 10 * units.KiB, 0, 10 * units.KiB, 10 * units.KiB},
-			ReadKeys:   []uint64{256, 256, 0, 256, 256},
-			ReadQps:    []uint64{0, 0, 0, 0, 0},
-			WriteBytes: []uint64{0, 0, 0, 0, 0},
-			WriteQps:   []uint64{0, 0, 0, 0, 0},
-			WriteKeys:  []uint64{0, 0, 0, 0, 0},
+			ReadBytes:  []uint64{10 * units.KiB},
+			ReadKeys:   []uint64{256},
+			ReadQps:    []uint64{0},
+			WriteBytes: []uint64{0},
+			WriteQps:   []uint64{0},
+			WriteKeys:  []uint64{0},
 		},
 	}
 
@@ -248,6 +243,23 @@ func TestSplitRegionInIfRegionIsTooHot(t *testing.T) {
 	})
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
+	re.Equal(operator.OpSplit, ops[0].Kind())
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 0)
+
+	tc.UpdateStorageWrittenBytes(1, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 1*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 1*units.MiB*statistics.StoreHeartBeatReportInterval)
+	// Region 1, 2 and 3 are hot regions.
+	addRegionInfo(tc, statistics.Write, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
+	})
+	hb, err = CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(operator.OpSplit, ops[0].Kind())
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 0)
 }
 
 func TestSplitBuckets(t *testing.T) {
