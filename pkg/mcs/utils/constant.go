@@ -76,5 +76,8 @@ const (
 	DefaultKeyspaceGroupReplicaCount = 2
 
 	// DefaultKeyspaceGroupReplicaPriority is the default priority of a keyspace group replica.
+	// It's used in keyspace group primary weighted-election to balance primaries' distribution.
+	// Among multiple replicas of a keyspace group, the higher the priority, the more likely
+	// the replica is to be elected as primary.
 	DefaultKeyspaceGroupReplicaPriority = 0
 )

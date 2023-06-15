@@ -497,7 +497,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 
 	// Init api server config but not start.
-	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, serverName string) {
+	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
@@ -536,7 +536,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	// Wait pd clients are ready.
 	testutil.Eventually(re, func() bool {
 		count := 0
-		clients.Range(func(key, value interface{}) bool {
+		clients.Range(func(_, _ interface{}) bool {
 			count++
 			return true
 		})
