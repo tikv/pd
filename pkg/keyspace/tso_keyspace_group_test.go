@@ -84,11 +84,12 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	re.NoError(err)
 	re.Len(kgs, 2)
 	// get the default keyspace group
-	kg, err := suite.kgm.GetKeyspaceGroupByID(0)
+	kg, err := suite.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(uint32(0), kg.ID)
 	re.Equal(endpoint.Basic.String(), kg.UserKind)
 	re.False(kg.IsSplitting())
+	// get the keyspace group 3
 	kg, err = suite.kgm.GetKeyspaceGroupByID(3)
 	re.NoError(err)
 	re.Equal(uint32(3), kg.ID)
@@ -319,4 +320,81 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	// split with the wrong keyspaces.
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 5, []uint32{111, 222, 444})
 	re.ErrorIs(err, ErrKeyspaceNotInKeyspaceGroup)
+}
+
+func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
+	re := suite.Require()
+
+	keyspaceGroups := []*endpoint.KeyspaceGroup{
+		{
+			ID:        uint32(1),
+			UserKind:  endpoint.Basic.String(),
+			Keyspaces: []uint32{111, 222, 333},
+			Members:   make([]endpoint.KeyspaceGroupMember, utils.KeyspaceGroupDefaultReplicaCount),
+		},
+		{
+			ID:        uint32(3),
+			UserKind:  endpoint.Basic.String(),
+			Keyspaces: []uint32{444, 555},
+		},
+	}
+	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
+	re.NoError(err)
+	// split the keyspace group 1 to 2
+	err = suite.kgm.SplitKeyspaceGroupByID(1, 2, []uint32{333})
+	re.NoError(err)
+	// finish the split of the keyspace group 2
+	err = suite.kgm.FinishSplitKeyspaceByID(2)
+	re.NoError(err)
+	// check the keyspace group 1 and 2
+	kg1, err := suite.kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Equal(uint32(1), kg1.ID)
+	re.Equal([]uint32{111, 222}, kg1.Keyspaces)
+	re.False(kg1.IsSplitting())
+	re.False(kg1.IsMerging())
+	kg2, err := suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Equal(uint32(2), kg2.ID)
+	re.Equal([]uint32{333}, kg2.Keyspaces)
+	re.False(kg2.IsSplitting())
+	re.False(kg2.IsMerging())
+	re.Equal(kg1.UserKind, kg2.UserKind)
+	re.Equal(kg1.Members, kg2.Members)
+	// merge the keyspace group 2 and 3 back into 1
+	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{2, 3})
+	re.NoError(err)
+	// check the keyspace group 2 and 3
+	kg2, err = suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Nil(kg2)
+	kg3, err := suite.kgm.GetKeyspaceGroupByID(3)
+	re.NoError(err)
+	re.Nil(kg3)
+	// check the keyspace group 1
+	kg1, err = suite.kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Equal(uint32(1), kg1.ID)
+	re.Equal([]uint32{111, 222, 333, 444, 555}, kg1.Keyspaces)
+	re.False(kg1.IsSplitting())
+	re.True(kg1.IsMerging())
+	// finish the merging
+	err = suite.kgm.FinishMergeKeyspaceByID(1)
+	re.NoError(err)
+	kg1, err = suite.kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Equal(uint32(1), kg1.ID)
+	re.Equal([]uint32{111, 222, 333, 444, 555}, kg1.Keyspaces)
+	re.False(kg1.IsSplitting())
+	re.False(kg1.IsMerging())
+
+	// merge a non-existing keyspace group
+	err = suite.kgm.MergeKeyspaceGroups(4, []uint32{5})
+	re.ErrorIs(err, ErrKeyspaceGroupNotExists)
+	// merge with the number of keyspace groups exceeds the limit
+	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, maxEtcdTxnOps/2))
+	re.ErrorIs(err, ErrExceedMaxEtcdTxnOps)
+	// merge the default keyspace group
+	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{utils.DefaultKeyspaceGroupID})
+	re.ErrorIs(err, ErrModifyDefaultKeyspaceGroup)
 }

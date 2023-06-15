@@ -85,9 +85,9 @@ type Config struct {
 	// Set this to 0 will disable TSO Proxy.
 	// Set this to the negative value to disable the limit.
 	MaxConcurrentTSOProxyStreamings int `toml:"max-concurrent-tso-proxy-streamings" json:"max-concurrent-tso-proxy-streamings"`
-	// TSOProxyClientRecvTimeout is the timeout for the TSO proxy to receive a tso request from a client via grpc TSO stream.
+	// TSOProxyRecvFromClientTimeout is the timeout for the TSO proxy to receive a tso request from a client via grpc TSO stream.
 	// After the timeout, the TSO proxy will close the grpc TSO stream.
-	TSOProxyClientRecvTimeout typeutil.Duration `toml:"tso-proxy-client-recv-timeout" json:"tso-proxy-client-recv-timeout"`
+	TSOProxyRecvFromClientTimeout typeutil.Duration `toml:"tso-proxy-recv-from-client-timeout" json:"tso-proxy-recv-from-client-timeout"`
 
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
@@ -229,7 +229,7 @@ const (
 	defaultDRWaitStoreTimeout = time.Minute
 
 	defaultMaxConcurrentTSOProxyStreamings = 5000
-	defaultTSOProxyClientRecvTimeout       = 1 * time.Hour
+	defaultTSOProxyRecvFromClientTimeout   = 1 * time.Hour
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
@@ -455,7 +455,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	}
 
 	configutil.AdjustInt(&c.MaxConcurrentTSOProxyStreamings, defaultMaxConcurrentTSOProxyStreamings)
-	configutil.AdjustDuration(&c.TSOProxyClientRecvTimeout, defaultTSOProxyClientRecvTimeout)
+	configutil.AdjustDuration(&c.TSOProxyRecvFromClientTimeout, defaultTSOProxyRecvFromClientTimeout)
 
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
@@ -1271,9 +1271,9 @@ func (c *Config) GetMaxConcurrentTSOProxyStreamings() int {
 	return c.MaxConcurrentTSOProxyStreamings
 }
 
-// GetTSOProxyClientRecvTimeout returns the TSO proxy client receive timeout.
-func (c *Config) GetTSOProxyClientRecvTimeout() time.Duration {
-	return c.TSOProxyClientRecvTimeout.Duration
+// GetTSOProxyRecvFromClientTimeout returns timeout value for TSO proxy receiving from the client.
+func (c *Config) GetTSOProxyRecvFromClientTimeout() time.Duration {
+	return c.TSOProxyRecvFromClientTimeout.Duration
 }
 
 // GetTSOUpdatePhysicalInterval returns TSO update physical interval.

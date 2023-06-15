@@ -1909,9 +1909,9 @@ func (s *Server) GetMaxConcurrentTSOProxyStreamings() int {
 	return s.cfg.GetMaxConcurrentTSOProxyStreamings()
 }
 
-// GetTSOProxyClientRecvTimeout returns the TSO proxy client receive timeout.
-func (s *Server) GetTSOProxyClientRecvTimeout() time.Duration {
-	return s.cfg.GetTSOProxyClientRecvTimeout()
+// GetTSOProxyRecvFromClientTimeout returns timeout value for TSO proxy receiving from the client.
+func (s *Server) GetTSOProxyRecvFromClientTimeout() time.Duration {
+	return s.cfg.GetTSOProxyRecvFromClientTimeout()
 }
 
 // GetLeaderLease returns the leader lease.

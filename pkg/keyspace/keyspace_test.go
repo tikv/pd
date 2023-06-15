@@ -405,7 +405,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	re := suite.Require()
 	// Create some keyspaces without any keyspace group.
-	for i := 1; i < keyspacePatrolBatchSize*2+1; i++ {
+	for i := 1; i < maxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
 		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
 			Id:             uint32(i),
@@ -420,7 +420,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < keyspacePatrolBatchSize*2+1; i++ {
+	for i := 1; i < maxEtcdTxnOps*2+1; i++ {
 		re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 	// Patrol the keyspace assignment.
@@ -430,7 +430,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < keyspacePatrolBatchSize*2+1; i++ {
+	for i := 1; i < maxEtcdTxnOps*2+1; i++ {
 		re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 }
