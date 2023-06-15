@@ -277,6 +277,14 @@ type serviceModeKeeper struct {
 	tsoSvcDiscovery ServiceDiscovery
 }
 
+func (k *serviceModeKeeper) SetKeyspaceID(keyspaceID uint32) {
+	k.Lock()
+	defer k.Unlock()
+	if k.serviceMode == pdpb.ServiceMode_API_SVC_MODE {
+		k.tsoSvcDiscovery.SetKeyspaceID(keyspaceID)
+	}
+}
+
 func (k *serviceModeKeeper) close() {
 	k.Lock()
 	defer k.Unlock()
@@ -471,9 +479,6 @@ func newClientWithKeyspaceName(
 	ctx context.Context, keyspaceName string, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	log.Info("[pd] create pd client with endpoints and keyspace",
-		zap.Strings("pd-address", svrAddrs), zap.String("keyspace-name", keyspaceName))
-
 	tlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
@@ -511,7 +516,9 @@ func newClientWithKeyspaceName(
 		return nil, err
 	}
 	c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
-
+	c.serviceModeKeeper.SetKeyspaceID(c.keyspaceID)
+	log.Info("[pd] create pd client with endpoints and keyspace",
+		zap.Strings("pd-address", svrAddrs), zap.String("keyspace-name", keyspaceName), zap.Uint32("keyspace-id", c.keyspaceID))
 	return c, nil
 }
 
@@ -593,7 +600,7 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	)
 	switch newMode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
-		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
+		newTSOCli = newTSOClient(c.ctx, c.option,
 			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = newTSOServiceDiscovery(
@@ -601,7 +608,7 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 			c.GetClusterID(c.ctx), c.keyspaceID, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
-		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
+		newTSOCli = newTSOClient(c.ctx, c.option,
 			newTSOSvcDiscovery, &tsoTSOStreamBuilderFactory{})
 		if err := newTSOSvcDiscovery.Init(); err != nil {
 			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
