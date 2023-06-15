@@ -30,14 +30,14 @@ const (
 	smallInfluence = 200
 )
 
-// RegionInfluence represents the influence of a operator step, which is used by store limit.
+// RegionInfluence represents the influence of an operator step, which is used by store limit.
 var RegionInfluence = []int64{
 	AddPeer:      influence,
 	RemovePeer:   influence,
 	SendSnapshot: influence,
 }
 
-// SmallRegionInfluence represents the influence of a operator step
+// SmallRegionInfluence represents the influence of an operator step
 // when the region size is smaller than smallRegionThreshold, which is used by store limit.
 var SmallRegionInfluence = []int64{
 	AddPeer:    smallInfluence,
