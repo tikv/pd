@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -496,16 +495,14 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	defer tc.Destroy()
-	tsoServer, tsoServerCleanup1, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
-	defer tsoServerCleanup1()
-	re.NoError(err)
-	_, tsoServerCleanup2, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
-	defer tsoServerCleanup2()
-	re.NoError(err)
-	time.Sleep(2 * time.Second)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
+
+	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, pdAddr)
+	re.NoError(err)
+	defer tsoCluster.Destroy()
+	tsoCluster.WaitForDefaultPrimaryServing(re)
 
 	// First split keyspace group 0 to 1 with keyspace 2.
 	kgm := leaderServer.GetServer().GetKeyspaceGroupManager()
@@ -519,8 +516,8 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	cli := <-done
 	defer cli.Close()
 	physical, logical, err := cli.GetTS(ctx)
-	physical += time.Hour.Milliseconds()
-	tsoServer.GetHandler().ResetTS(tsoutil.GenerateTS(&pdpb.Timestamp{
+	physical += time.Second.Milliseconds()
+	tsoCluster.GetPrimaryServer(0, 0).GetHandler().ResetTS(tsoutil.GenerateTS(&pdpb.Timestamp{
 		Physical: physical,
 		Logical:  logical,
 	}), false, true, 0)

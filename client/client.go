@@ -515,6 +515,8 @@ func newClientWithKeyspaceName(
 	if err := c.initRetry(c.loadKeyspaceMeta, keyspaceName); err != nil {
 		return nil, err
 	}
+	// We call "c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)" after service mode already switching to API mode
+	// and tso service discovery already initialized, so here we need to set the tso_service_discovery's keyspace id too.
 	c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
 	c.serviceModeKeeper.SetKeyspaceID(c.keyspaceID)
 	log.Info("[pd] create pd client with endpoints and keyspace",
