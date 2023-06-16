@@ -483,12 +483,18 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	pdAddr := tc.GetConfig().GetClientURL()
 
 	// Start pd client and wait pd server start.
-	done := make(chan pd.Client)
+	var clients sync.Map
 	go func() {
 		apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
 		cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
 		re.NoError(err)
-		done <- cli
+		clients.Store("keyspace_b", cli)
+	}()
+	go func() {
+		apiCtx := pd.NewAPIContextV2("keyspace_a") // its keyspace id is 1.
+		cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
+		re.NoError(err)
+		clients.Store("keyspace_a", cli)
 	}()
 
 	// Start api server and tso server.
@@ -504,6 +510,20 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	defer tsoCluster.Destroy()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 
+	// wait client ready.
+	testutil.Eventually(re, func() bool {
+		count := 0
+		clients.Range(func(key, value interface{}) bool {
+			count++
+			return true
+		})
+		return count == 2
+	})
+	client_a, ok := clients.Load("keyspace_a")
+	re.True(ok)
+	client_b, ok := clients.Load("keyspace_b")
+	re.True(ok)
+
 	// First split keyspace group 0 to 1 with keyspace 2.
 	kgm := leaderServer.GetServer().GetKeyspaceGroupManager()
 	re.NotNil(kgm)
@@ -513,21 +533,30 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	})
 
 	// Trigger checkTSOSplit to ensure the split is finished.
-	cli := <-done
-	defer cli.Close()
 	testutil.Eventually(re, func() bool {
-		_, _, err = cli.GetTS(ctx)
+		_, _, err = client_b.(pd.Client).GetTS(ctx)
 		re.NoError(err)
 		kg, err := kgm.GetKeyspaceGroupByID(mcsutils.DefaultKeyspaceGroupID)
 		re.NoError(err)
 		return !kg.IsSplitting()
 	})
+	client_b.(pd.Client).Close()
 
 	// Then split keyspace group 0 to 2 with keyspace 1.
 	testutil.Eventually(re, func() bool {
 		err = kgm.SplitKeyspaceGroupByID(0, 2, []uint32{1})
 		return err == nil
 	})
+
+	// Trigger checkTSOSplit to ensure the split is finished.
+	testutil.Eventually(re, func() bool {
+		_, _, err = client_a.(pd.Client).GetTS(ctx)
+		re.NoError(err)
+		kg, err := kgm.GetKeyspaceGroupByID(mcsutils.DefaultKeyspaceGroupID)
+		re.NoError(err)
+		return !kg.IsSplitting()
+	})
+	client_a.(pd.Client).Close()
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
