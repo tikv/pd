@@ -16,7 +16,6 @@ package core
 
 import (
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/id"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -49,7 +48,7 @@ type ScheduleCluster interface {
 	GetRegionLabeler() *labeler.RegionLabeler
 	GetBasicCluster() *core.BasicCluster
 	GetStoreConfig() sc.StoreConfig
-	GetAllocator() id.Allocator
+	AllocID() (uint64, error)
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces
