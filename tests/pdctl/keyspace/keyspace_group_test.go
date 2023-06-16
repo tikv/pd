@@ -66,7 +66,7 @@ func TestKeyspaceGroup(t *testing.T) {
 			{
 				ID:        1,
 				UserKind:  endpoint.Standard.String(),
-				Members:   make([]endpoint.KeyspaceGroupMember, utils.KeyspaceGroupDefaultReplicaCount),
+				Members:   make([]endpoint.KeyspaceGroupMember, utils.DefaultKeyspaceGroupReplicaCount),
 				Keyspaces: []uint32{111, 222, 333},
 			},
 		},

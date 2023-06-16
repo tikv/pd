@@ -327,7 +327,7 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < utils.KeyspaceGroupDefaultReplicaCount {
+	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < utils.DefaultKeyspaceGroupReplicaCount {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [2, nodes_num]")
 		return
 	}
@@ -381,7 +381,7 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 		return
 	}
 	// check if nodes is less than default replica count
-	if len(setParams.Nodes) < utils.KeyspaceGroupDefaultReplicaCount {
+	if len(setParams.Nodes) < utils.DefaultKeyspaceGroupReplicaCount {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid num of nodes")
 		return
 	}

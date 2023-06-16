@@ -173,7 +173,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 		case <-ticker.C:
 		}
 		countOfNodes := m.GetNodesCount()
-		if countOfNodes < utils.KeyspaceGroupDefaultReplicaCount {
+		if countOfNodes < utils.DefaultKeyspaceGroupReplicaCount {
 			continue
 		}
 		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
@@ -187,8 +187,8 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 		}
 		withError := false
 		for _, group := range groups {
-			if len(group.Members) < utils.KeyspaceGroupDefaultReplicaCount {
-				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, utils.KeyspaceGroupDefaultReplicaCount)
+			if len(group.Members) < utils.DefaultKeyspaceGroupReplicaCount {
+				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, utils.DefaultKeyspaceGroupReplicaCount)
 				if err != nil {
 					withError = true
 					log.Error("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.ID), zap.Error(err))
@@ -531,7 +531,7 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 			return ErrKeyspaceGroupInMerging
 		}
 		// Check if the source keyspace group has enough replicas.
-		if len(splitSourceKg.Members) < utils.KeyspaceGroupDefaultReplicaCount {
+		if len(splitSourceKg.Members) < utils.DefaultKeyspaceGroupReplicaCount {
 			return ErrKeyspaceGroupNotEnoughReplicas
 		}
 		// Check if the new keyspace group already exists.
@@ -704,7 +704,7 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 			exists[addr] = struct{}{}
 			nodes = append(nodes, endpoint.KeyspaceGroupMember{
 				Address:  addr,
-				Priority: utils.DefaultPriority,
+				Priority: utils.DefaultKeyspaceGroupReplicaPriority,
 			})
 		}
 		kg.Members = nodes
@@ -742,7 +742,7 @@ func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error
 		for _, node := range nodes {
 			members = append(members, endpoint.KeyspaceGroupMember{
 				Address:  node,
-				Priority: utils.DefaultPriority,
+				Priority: utils.DefaultKeyspaceGroupReplicaPriority,
 			})
 		}
 		kg.Members = members
