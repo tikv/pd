@@ -510,7 +510,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	defer tsoCluster.Destroy()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 
-	// wait client ready.
+	// Wait pd clients are ready.
 	testutil.Eventually(re, func() bool {
 		count := 0
 		clients.Range(func(key, value interface{}) bool {
@@ -519,9 +519,9 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		})
 		return count == 2
 	})
-	client_a, ok := clients.Load("keyspace_a")
+	clientA, ok := clients.Load("keyspace_a")
 	re.True(ok)
-	client_b, ok := clients.Load("keyspace_b")
+	clientB, ok := clients.Load("keyspace_b")
 	re.True(ok)
 
 	// First split keyspace group 0 to 1 with keyspace 2.
@@ -534,12 +534,12 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 
 	// Trigger checkTSOSplit to ensure the split is finished.
 	testutil.Eventually(re, func() bool {
-		_, _, err = client_b.(pd.Client).GetTS(ctx)
+		_, _, err = clientB.(pd.Client).GetTS(ctx)
 		re.NoError(err)
 		kg := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 		return !kg.IsSplitting()
 	})
-	client_b.(pd.Client).Close()
+	clientB.(pd.Client).Close()
 
 	// Then split keyspace group 0 to 2 with keyspace 1.
 	testutil.Eventually(re, func() bool {
@@ -549,12 +549,12 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 
 	// Trigger checkTSOSplit to ensure the split is finished.
 	testutil.Eventually(re, func() bool {
-		_, _, err = client_a.(pd.Client).GetTS(ctx)
+		_, _, err = clientA.(pd.Client).GetTS(ctx)
 		re.NoError(err)
 		kg := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 		return !kg.IsSplitting()
 	})
-	client_a.(pd.Client).Close()
+	clientA.(pd.Client).Close()
 
 	// Check the keyspace group 0 is split to 1 and 2.
 	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
