@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -263,7 +264,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 		err error
 	)
 	testutil.Eventually(re, func() bool {
-		ts, err = suite.requestTSO(re, 1, 222, 1)
+		ts, err = suite.requestTSO(re, 222, 1)
 		return err == nil && tsoutil.CompareTimestamp(&ts, &pdpb.Timestamp{}) > 0
 	})
 	ts.Physical += time.Hour.Milliseconds()
@@ -282,22 +283,22 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	// Check the split TSO from keyspace group 2.
 	var splitTS pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
-		splitTS, err = suite.requestTSO(re, 1, 222, 2)
+		splitTS, err = suite.requestTSO(re, 222, 2)
 		return err == nil && tsoutil.CompareTimestamp(&splitTS, &pdpb.Timestamp{}) > 0
 	})
-	splitTS, err = suite.requestTSO(re, 1, 222, 2)
+	splitTS, err = suite.requestTSO(re, 222, 2)
+	re.NoError(err)
 	re.Greater(tsoutil.CompareTimestamp(&splitTS, &ts), 0)
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 	re *require.Assertions,
-	count, keyspaceID, keyspaceGroupID uint32,
+	keyspaceID, keyspaceGroupID uint32,
 ) (pdpb.Timestamp, error) {
 	primary := suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
 	kgm := primary.GetKeyspaceGroupManager()
 	re.NotNil(kgm)
-	ts, _, err := kgm.HandleTSORequest(keyspaceID, keyspaceGroupID, tsopkg.GlobalDCLocation, count)
-	re.NoError(err)
+	ts, _, err := kgm.HandleTSORequest(keyspaceID, keyspaceGroupID, tsopkg.GlobalDCLocation, 1)
 	return ts, err
 }
 
@@ -573,4 +574,57 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re.False(kg2.IsSplitting())
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+}
+
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
+	re := suite.Require()
+	// Create the keyspace group 1 and 2 with keyspaces [111, 222] and [333].
+	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:        1,
+				UserKind:  endpoint.Standard.String(),
+				Members:   suite.tsoCluster.GetKeyspaceGroupMember(),
+				Keyspaces: []uint32{111, 222},
+			},
+			{
+				ID:        2,
+				UserKind:  endpoint.Standard.String(),
+				Members:   suite.tsoCluster.GetKeyspaceGroupMember(),
+				Keyspaces: []uint32{333},
+			},
+		},
+	})
+	// Get a TSO from the keyspace group 1.
+	var (
+		ts  pdpb.Timestamp
+		err error
+	)
+	testutil.Eventually(re, func() bool {
+		ts, err = suite.requestTSO(re, 222, 1)
+		return err == nil && tsoutil.CompareTimestamp(&ts, &pdpb.Timestamp{}) > 0
+	})
+	ts.Physical += time.Hour.Milliseconds()
+	// Set the TSO of the keyspace group 1 to a large value.
+	err = suite.tsoCluster.GetPrimaryServer(222, 1).GetHandler().ResetTS(tsoutil.GenerateTS(&ts), false, true, 1)
+	re.NoError(err)
+	// Merge the keyspace group 1 and 2 to the default keyspace group.
+	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
+		MergeList: []uint32{1, 2},
+	})
+	// Check the keyspace group 1 and 2 are merged to the default keyspace group.
+	kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID)
+	re.Equal(mcsutils.DefaultKeyspaceGroupID, kg.ID)
+	re.Equal([]uint32{mcsutils.DefaultKeyspaceID, 111, 222, 333}, kg.Keyspaces)
+	re.True(kg.IsMergeTarget())
+	// Check the merged TSO from the default keyspace group is greater than the TSO from the keyspace group 1.
+	var mergedTS pdpb.Timestamp
+	testutil.Eventually(re, func() bool {
+		mergedTS, err = suite.requestTSO(re, 333, mcsutils.DefaultKeyspaceGroupID)
+		if err != nil {
+			re.ErrorIs(err, errs.ErrKeyspaceGroupIsMerging)
+		}
+		return err == nil && tsoutil.CompareTimestamp(&mergedTS, &pdpb.Timestamp{}) > 0
+	}, testutil.WithTickInterval(5*time.Second), testutil.WithWaitFor(time.Minute))
+	re.Greater(tsoutil.CompareTimestamp(&mergedTS, &ts), 0)
 }
