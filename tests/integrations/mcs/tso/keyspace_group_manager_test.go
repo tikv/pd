@@ -512,18 +512,9 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		return err == nil
 	})
 
-	// Set the TSO of the keyspace group 0 to a large value to make test stable.
+	// Trigger checkTSOSplit to ensure the split is finished.
 	cli := <-done
 	defer cli.Close()
-	physical, logical, err := cli.GetTS(ctx)
-	physical += time.Second.Milliseconds()
-	tsoCluster.GetPrimaryServer(0, 0).GetHandler().ResetTS(tsoutil.GenerateTS(&pdpb.Timestamp{
-		Physical: physical,
-		Logical:  logical,
-	}), false, true, 0)
-	re.NoError(err)
-
-	// Trigger checkTSOSplit to ensure the split is finished.
 	testutil.Eventually(re, func() bool {
 		_, _, err = cli.GetTS(ctx)
 		re.NoError(err)
