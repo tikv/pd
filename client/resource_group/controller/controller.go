@@ -326,6 +326,9 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	if err != nil {
 		return nil, err
 	}
+	if group == nil {
+		return nil, errors.Errorf("%s does not exists", name)
+	}
 	// Check again to prevent initializing the same resource group concurrently.
 	if tmp, ok := c.groupsController.Load(name); ok {
 		gc := tmp.(*groupCostController)
@@ -469,6 +472,15 @@ func (c *ResourceGroupsController) OnResponse(
 	return tmp.(*groupCostController).onResponse(req, resp)
 }
 
+// GetResourceGroup returns the meta setting of the given resource group name.
+func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*rmpb.ResourceGroup, error) {
+	gc, err := c.tryGetResourceGroup(c.loopCtx, resourceGroupName)
+	if err != nil {
+		return nil, err
+	}
+	return gc.getMeta(), nil
+}
+
 type groupCostController struct {
 	// invariant attributes
 	name    string
@@ -478,6 +490,7 @@ type groupCostController struct {
 	meta     *rmpb.ResourceGroup
 	metaLock sync.RWMutex
 
+	// following fields are used for token limiter.
 	calculators    []ResourceCalculator
 	handleRespFunc func(*rmpb.TokenBucketResponse)
 
@@ -636,9 +649,7 @@ func (gc *groupCostController) initRunState() {
 	case rmpb.GroupMode_RUMode:
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitLimitTypeList {
-			tb := getRUTokenBucketSetting(gc.meta, typ)
-			cfg := cfgFunc(tb)
-			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
+			limiter := NewLimiterWithCfg(now, cfgFunc(getRUTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
 			counter := &tokenCounter{
 				limiter:     limiter,
 				avgRUPerSec: 0,
@@ -652,9 +663,7 @@ func (gc *groupCostController) initRunState() {
 	case rmpb.GroupMode_RawMode:
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceLimitTypeList {
-			tb := getRawResourceTokenBucketSetting(gc.meta, typ)
-			cfg := cfgFunc(tb)
-			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
+			limiter := NewLimiterWithCfg(now, cfgFunc(getRawResourceTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
 			counter := &tokenCounter{
 				limiter:     limiter,
 				avgRUPerSec: 0,
@@ -1035,7 +1044,6 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	return req
 }
 
-// This is used for test only.
 func (gc *groupCostController) getMeta() *rmpb.ResourceGroup {
 	gc.metaLock.Lock()
 	defer gc.metaLock.Unlock()

@@ -1278,8 +1278,8 @@ func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, le
 		r.learners[storeID].length(), r.pendingPeers[storeID].length(), r.leaders[storeID].TotalSize(), r.getStoreRegionSizeLocked(storeID)
 }
 
-// GetRegionCount gets the total count of RegionInfo of regionMap
-func (r *RegionsInfo) GetRegionCount() int {
+// GetTotalRegionCount gets the total count of RegionInfo of regionMap
+func (r *RegionsInfo) GetTotalRegionCount() int {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	return len(r.regions)
@@ -1473,8 +1473,8 @@ func (r *RegionInfo) GetWriteLoads() []float64 {
 	}
 }
 
-// GetRangeCount returns the number of regions that overlap with the range [startKey, endKey).
-func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
+// GetRegionCount returns the number of regions that overlap with the range [startKey, endKey).
+func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
@@ -1496,9 +1496,9 @@ func (r *RegionsInfo) GetRangeCount(startKey, endKey []byte) int {
 	return endIndex - startIndex + 1
 }
 
-// ScanRange scans regions intersecting [start key, end key), returns at most
+// ScanRegions scans regions intersecting [start key, end key), returns at most
 // `limit` regions. limit <= 0 means no limit.
-func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInfo {
+func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	var res []*RegionInfo
@@ -1515,9 +1515,9 @@ func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInf
 	return res
 }
 
-// ScanRangeWithIterator scans from the first region containing or behind start key,
+// ScanRegionWithIterator scans from the first region containing or behind start key,
 // until iterator returns false.
-func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(region *RegionInfo) bool) {
+func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(region *RegionInfo) bool) {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	r.tree.scanRange(startKey, iterator)

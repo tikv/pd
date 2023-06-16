@@ -168,6 +168,39 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeers() {
 	suite.Equal(uint64(4), op.Step(0).(operator.RemovePeer).FromStore)
 }
 
+func (suite *ruleCheckerTestSuite) TestFixToManyOrphanPeers() {
+	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderStore(2, 1)
+	suite.cluster.AddLeaderStore(3, 1)
+	suite.cluster.AddLeaderStore(4, 1)
+	suite.cluster.AddLeaderStore(5, 1)
+	suite.cluster.AddLeaderStore(6, 1)
+	suite.cluster.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{4, 5, 6})
+	// Case1:
+	// store 4, 5, 6 are orphan peers, and peer on store 3 is pending and down peer.
+	region := suite.cluster.GetRegion(1)
+	region = region.Clone(
+		core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(3), DownSeconds: 60000}}),
+		core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(3)}))
+	suite.cluster.PutRegion(region)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("remove-orphan-peer", op.Desc())
+	suite.Equal(uint64(5), op.Step(0).(operator.RemovePeer).FromStore)
+
+	// Case2:
+	// store 4, 5, 6 are orphan peers, and peer on store 3 is down peer. and peer on store 4, 5 are pending.
+	region = suite.cluster.GetRegion(1)
+	region = region.Clone(
+		core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(3), DownSeconds: 60000}}),
+		core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(4), region.GetStorePeer(5)}))
+	suite.cluster.PutRegion(region)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("remove-orphan-peer", op.Desc())
+	suite.Equal(uint64(4), op.Step(0).(operator.RemovePeer).FromStore)
+}
+
 func (suite *ruleCheckerTestSuite) TestFixOrphanPeers2() {
 	// check orphan peers can only be handled when all rules are satisfied.
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"foo": "bar"})
@@ -312,7 +345,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "follower"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
-	suite.cluster.AddLeaderRegion(1, 1, 2)
+	suite.cluster.AddLeaderRegion(1, 1)
 
 	suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:   "pd",
@@ -329,6 +362,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness() {
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
+	fmt.Println(op)
 	suite.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 	suite.True(op.Step(0).(operator.AddLearner).IsWitness)
 }
@@ -337,24 +371,25 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness2() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "voter"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"D": "voter"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3, 4)
 
 	suite.ruleManager.SetRule(&placement.Rule{
 		GroupID:   "pd",
 		ID:        "r1",
 		Index:     100,
-		Override:  true,
+		Override:  false,
 		Role:      placement.Voter,
 		Count:     1,
 		IsWitness: true,
 		LabelConstraints: []placement.LabelConstraint{
-			{Key: "C", Op: "in", Values: []string{"voter"}},
+			{Key: "D", Op: "in", Values: []string{"voter"}},
 		},
 	})
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("fix-witness-peer", op.Desc())
-	suite.Equal(uint64(3), op.Step(0).(operator.BecomeWitness).StoreID)
+	suite.Equal(uint64(4), op.Step(0).(operator.BecomeWitness).StoreID)
 }
 
 func (suite *ruleCheckerTestSuite) TestFixRuleWitness3() {
@@ -366,7 +401,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness3() {
 	r := suite.cluster.GetRegion(1)
 	// set peer3 to witness
 	r = r.Clone(core.WithWitnesses([]*metapb.Peer{r.GetPeer(3)}))
-
+	suite.cluster.PutRegion(r)
 	op := suite.rc.Check(r)
 	suite.NotNil(op)
 	suite.Equal("fix-non-witness-peer", op.Desc())

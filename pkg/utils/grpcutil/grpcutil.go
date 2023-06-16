@@ -21,15 +21,19 @@ import (
 	"net/url"
 
 	"github.com/pingcap/log"
+	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/pkg/transport"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 )
 
-// ForwardMetadataKey is used to record the forwarded host of PD.
-const ForwardMetadataKey = "pd-forwarded-host"
+const (
+	// ForwardMetadataKey is used to record the forwarded host of PD.
+	ForwardMetadataKey = "pd-forwarded-host"
+)
 
 // TLSConfig is the configuration for supporting tls.
 type TLSConfig struct {
@@ -159,4 +163,43 @@ func GetForwardedHost(ctx context.Context) string {
 		return t[0]
 	}
 	return ""
+}
+
+func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
+	tlsCfg, err := tlsConfig.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	cc, err := GetClientConn(
+		ctx,
+		addr,
+		tlsCfg,
+		do...,
+	)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return cc, nil
+}
+
+// CreateClientConn creates a client connection to the given target.
+func CreateClientConn(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) *grpc.ClientConn {
+	var (
+		conn *grpc.ClientConn
+		err  error
+	)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		conn, err = establish(ctx, addr, tlsConfig, do...)
+		if err != nil {
+			log.Error("cannot establish connection", zap.String("addr", addr), errs.ZapError(err))
+			continue
+		}
+		break
+	}
+	return conn
 }

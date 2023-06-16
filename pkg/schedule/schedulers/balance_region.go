@@ -58,7 +58,6 @@ type balanceRegionScheduler struct {
 	*BaseScheduler
 	*retryQuota
 	conf          *balanceRegionSchedulerConfig
-	opController  *operator.Controller
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
@@ -72,7 +71,6 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
-		opController:  opController,
 		counter:       balanceRegionCounter,
 		filterCounter: filter.NewCounter(filter.BalanceRegion.String()),
 	}
@@ -115,15 +113,15 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
-	allowed := s.opController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
+func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *balanceRegionScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {
@@ -135,8 +133,8 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.ClusterInformer, dryRun b
 	snapshotFilter := filter.NewSnapshotSendFilter(stores, constant.Medium)
 	faultTargets := filter.SelectUnavailableTargetStores(stores, s.filters, opts, collector, s.filterCounter)
 	sourceStores := filter.SelectSourceStores(stores, s.filters, opts, collector, s.filterCounter)
-	opInfluence := s.opController.GetOpInfluence(cluster)
-	s.OpController.GetFastOpInfluence(cluster, opInfluence)
+	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster())
+	s.OpController.GetFastOpInfluence(cluster.GetBasicCluster(), opInfluence)
 	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 

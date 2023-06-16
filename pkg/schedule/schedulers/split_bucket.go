@@ -166,7 +166,7 @@ func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 // IsScheduleAllowed return true if the sum of executing opSplit operator is less  .
-func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	if !cluster.GetStoreConfig().IsEnableRegionBucket() {
 		splitBucketDisableCounter.Inc()
 		return false
@@ -181,13 +181,13 @@ func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) b
 
 type splitBucketPlan struct {
 	hotBuckets         map[uint64][]*buckets.BucketStat
-	cluster            sche.ClusterInformer
+	cluster            sche.ScheduleCluster
 	conf               *splitBucketSchedulerConfig
 	hotRegionSplitSize int64
 }
 
 // Schedule return operators if some bucket is too hot.
-func (s *splitBucketScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *splitBucketScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	splitBucketScheduleCounter.Inc()
 	conf := s.conf.Clone()
 	plan := &splitBucketPlan{

@@ -40,6 +40,8 @@ const (
 	defaultRegionSplitSize    = 96 * units.MiB
 	defaultCapacity           = 1 * units.TiB
 	defaultExtraUsedSpace     = 0
+	// TSO Proxy related
+	defaultMaxConcurrentTSOProxyStreamings = 5000
 	// server
 	defaultLeaderLease                 = 3
 	defaultTSOSaveInterval             = 200 * time.Millisecond
@@ -104,6 +106,8 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustByteSize(&sc.RaftStore.ExtraUsedSpace, defaultExtraUsedSpace)
 	configutil.AdjustUint64(&sc.Coprocessor.RegionSplitKey, defaultRegionSplitKeys)
 	configutil.AdjustByteSize(&sc.Coprocessor.RegionSplitSize, defaultRegionSplitSize)
+
+	configutil.AdjustInt(&sc.ServerConfig.MaxConcurrentTSOProxyStreamings, defaultMaxConcurrentTSOProxyStreamings)
 
 	configutil.AdjustInt64(&sc.ServerConfig.LeaderLease, defaultLeaderLease)
 	configutil.AdjustDuration(&sc.ServerConfig.TSOSaveInterval, defaultTSOSaveInterval)
