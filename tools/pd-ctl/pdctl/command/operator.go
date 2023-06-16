@@ -387,7 +387,7 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 	input["policy"] = policy
 	keys := cmd.Flags().Lookup("keys").Value.String()
 	if len(keys) > 0 {
-		input["keys"] = keys
+		input["keys"] = []string{keys}
 	}
 	postJSON(cmd, operatorsPrefix, input)
 }

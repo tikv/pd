@@ -16,6 +16,7 @@ package operator_test
 
 import (
 	"context"
+	"encoding/hex"
 	"strconv"
 	"strings"
 	"testing"
@@ -163,10 +164,11 @@ func TestOperator(t *testing.T) {
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
 		{
-			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--key=xxx]
-			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=usekey", "--key=c"},
+			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--keys=xxx]
+			cmd: []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=usekey",
+				"--keys=" + hex.EncodeToString([]byte("c"))},
 			show:   []string{"-u", pdAddr, "operator", "show"},
-			expect: "split region with policy USEKEY",
+			expect: "split: region 3 use policy USEKEY and keys [" + hex.EncodeToString([]byte("c")) + "]",
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
 	}
