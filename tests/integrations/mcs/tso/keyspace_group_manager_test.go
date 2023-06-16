@@ -536,8 +536,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		_, _, err = client_b.(pd.Client).GetTS(ctx)
 		re.NoError(err)
-		kg, err := kgm.GetKeyspaceGroupByID(mcsutils.DefaultKeyspaceGroupID)
-		re.NoError(err)
+		kg := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 		return !kg.IsSplitting()
 	})
 	client_b.(pd.Client).Close()
@@ -552,11 +551,21 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		_, _, err = client_a.(pd.Client).GetTS(ctx)
 		re.NoError(err)
-		kg, err := kgm.GetKeyspaceGroupByID(mcsutils.DefaultKeyspaceGroupID)
-		re.NoError(err)
+		kg := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 		return !kg.IsSplitting()
 	})
 	client_a.(pd.Client).Close()
+
+	// Check the keyspace group 0 is split to 1 and 2.
+	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
+	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 1)
+	kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 2)
+	re.Equal([]uint32{0}, kg0.Keyspaces)
+	re.Equal([]uint32{2}, kg1.Keyspaces)
+	re.Equal([]uint32{1}, kg2.Keyspaces)
+	re.False(kg0.IsSplitting())
+	re.False(kg1.IsSplitting())
+	re.False(kg2.IsSplitting())
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
