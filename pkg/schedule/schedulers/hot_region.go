@@ -206,6 +206,7 @@ const (
 
 	minHotScheduleInterval = time.Second
 	maxHotScheduleInterval = 20 * time.Second
+	regionTooHotThreshold  = 0.3
 )
 
 var (
@@ -667,7 +668,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				}
 			}
 			bs.cur.mainPeerStat = mainPeerStat
-			if regionIsTooHot(srcStore, mainPeerStat) {
+			if regionTooHot(srcStore, mainPeerStat) {
 				hotSchedulerRegionIsTooHotCounter.Inc()
 				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region})
 				if len(ops) > 0 {
@@ -1821,9 +1822,9 @@ func prioritiesToDim(priorities []string) (firstPriority int, secondPriority int
 	return stringToDim(priorities[0]), stringToDim(priorities[1])
 }
 
-// regionIsTooHot returns true if any dim of the hot region is greater than the store threshold.
-func regionIsTooHot(store *statistics.StoreLoadDetail, region *statistics.HotPeerStat) bool {
+// regionTooHot returns true if any dim of the hot region is greater than the store threshold.
+func regionTooHot(store *statistics.StoreLoadDetail, region *statistics.HotPeerStat) bool {
 	return slice.AnyOf(store.LoadPred.Current.Loads, func(i int) bool {
-		return region.Loads[i] > store.LoadPred.Current.Loads[i]*0.3
+		return region.Loads[i] > store.LoadPred.Current.Loads[i]*regionTooHotThreshold
 	})
 }
