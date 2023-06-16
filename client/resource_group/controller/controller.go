@@ -212,9 +212,12 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
-		watchChannel, err := c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix())
+		var watchChannel chan []*meta_storagepb.Event
+		if !c.config.isSingleGroupByKeyspace {
+			watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix())
+		}
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
-		if err == nil {
+		if err == nil || c.config.isSingleGroupByKeyspace {
 			watchRetryTimer.Stop()
 		}
 		defer watchRetryTimer.Stop()
@@ -254,6 +257,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case <-emergencyTokenAcquisitionTicker.C:
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			case resp, ok := <-watchChannel:
+				failpoint.Inject("disableWatch", func() {
+					if c.config.isSingleGroupByKeyspace {
+						panic("disableWatch")
+					}
+				})
 				if !ok {
 					watchChannel = nil
 					watchRetryTimer.Reset(watchRetryInterval)
