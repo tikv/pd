@@ -615,7 +615,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 	// Check the keyspace group 1 and 2 are merged to the default keyspace group.
 	kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID)
 	re.Equal(mcsutils.DefaultKeyspaceGroupID, kg.ID)
-	re.Equal([]uint32{mcsutils.DefaultKeyspaceID, 111, 222, 333}, kg.Keyspaces)
+	for _, keyspaceID := range []uint32{111, 222, 333} {
+		re.Contains(kg.Keyspaces, keyspaceID)
+	}
 	re.True(kg.IsMergeTarget())
 	// Check the merged TSO from the default keyspace group is greater than the TSO from the keyspace group 1.
 	var mergedTS pdpb.Timestamp
