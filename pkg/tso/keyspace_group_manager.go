@@ -418,15 +418,16 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		return
 	}
 
-	// If this host owns a replica of the keyspace group which is the merge target, it should
-	// run the merging checker.
-	if group.IsMergeTarget() {
+	oldAM, oldGroup := kgm.getKeyspaceGroupMeta(group.ID)
+	// If this host owns a replica of the keyspace group which is the merge target,
+	// it should run the merging checker when the merge state first time changes.
+	if !oldGroup.IsMergeTarget() && group.IsMergeTarget() {
 		go kgm.mergingChecker(kgm.ctx, group.ID, group.MergeState.MergeList)
 	}
 
 	// If this host is already assigned a replica of this keyspace group, i.e., the election member
 	// is already initialized, just update the meta.
-	if oldAM, oldGroup := kgm.getKeyspaceGroupMeta(group.ID); oldAM != nil {
+	if oldAM != nil {
 		kgm.updateKeyspaceGroupMembership(oldGroup, group, true)
 		return
 	}
