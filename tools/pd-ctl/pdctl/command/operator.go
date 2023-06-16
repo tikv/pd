@@ -356,7 +356,7 @@ func NewSplitRegionCommand() *cobra.Command {
 		Run:   splitRegionCommandFunc,
 	}
 	c.Flags().String("policy", "scan", "the policy to get region split key")
-	c.Flags().String("keys", "", "the split key")
+	c.Flags().String("keys", "", "the split key, hex encoded")
 	return c
 }
 

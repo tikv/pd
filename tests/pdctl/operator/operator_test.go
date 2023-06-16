@@ -164,7 +164,7 @@ func TestOperator(t *testing.T) {
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
 		{
-			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--keys=xxx]
+			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--keys=xxx(xxx is hex encoded string)]
 			cmd: []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=usekey",
 				"--keys=" + hex.EncodeToString([]byte("c"))},
 			show:   []string{"-u", pdAddr, "operator", "show"},
