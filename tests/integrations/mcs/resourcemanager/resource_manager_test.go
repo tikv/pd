@@ -203,12 +203,22 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	re.Equal(len(lresp), 4)
 	re.Greater(revision, int64(0))
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 100}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/disableWatch", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/disableWatch"))
+	}()
+	controllerKeySpace, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, controller.EnableSingleGroupByKeyspace())
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
 	controller.Start(suite.ctx)
 	defer controller.Stop()
 	controller.OnRequestWait(suite.ctx, "test0", tcs.makeReadRequest())
 	meta := controller.GetActiveResourceGroup("test0")
 	re.Equal(meta.RUSettings.RU, group.RUSettings.RU)
+
+	controllerKeySpace.OnRequestWait(suite.ctx, "test0", tcs.makeReadRequest())
+	metaKeySpace := controllerKeySpace.GetActiveResourceGroup("test0")
+	re.Equal(metaKeySpace.RUSettings.RU, group.RUSettings.RU)
+
 	controller.OnRequestWait(suite.ctx, "test1", tcs.makeReadRequest())
 	meta = controller.GetActiveResourceGroup("test1")
 	re.Equal(meta.RUSettings.RU, group.RUSettings.RU)
@@ -237,6 +247,8 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 				meta = controller.GetActiveResourceGroup("test0")
 				return meta.RUSettings.RU.Settings.FillRate == uint64(20000)
 			}, testutil.WithTickInterval(50*time.Millisecond))
+			metaKeySpace = controllerKeySpace.GetActiveResourceGroup("test0")
+			re.Equal(metaKeySpace.RUSettings.RU.Settings.FillRate, uint64(10000))
 			re.NoError(failpoint.Enable("github.com/tikv/pd/client/watchStreamError", "return(true)"))
 		}
 		group.Name = "test" + strconv.Itoa(i)
