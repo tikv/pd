@@ -39,6 +39,23 @@ func TestLockGroup(t *testing.T) {
 	re.LessOrEqual(len(group.entries), 16)
 }
 
+func TestLockGroupWithRemoveEntryOnUnlock(t *testing.T) {
+	re := require.New(t)
+	group := NewLockGroup(WithRemoveEntryOnUnlock(true))
+	concurrency := 50
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func(spaceID uint32) {
+			defer wg.Done()
+			mustSequentialUpdateSingle(re, spaceID, group)
+		}(rand.Uint32())
+	}
+	wg.Wait()
+	// Check that size of the lock group is limited.
+	re.LessOrEqual(len(group.entries), 16)
+}
+
 // mustSequentialUpdateSingle checks that for any given update, update is sequential.
 func mustSequentialUpdateSingle(re *require.Assertions, spaceID uint32, group *LockGroup) {
 	concurrency := 50
