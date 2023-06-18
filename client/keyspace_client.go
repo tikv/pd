@@ -89,8 +89,10 @@ func (c *client) WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.Keyspac
 		close(keyspaceWatcherChan)
 		return nil, err
 	}
+	c.wg.Add(1)
 	go func() {
 		defer func() {
+			defer c.wg.Done()
 			close(keyspaceWatcherChan)
 			if r := recover(); r != nil {
 				log.Error("[pd] panic in keyspace client `WatchKeyspaces`", zap.Any("error", r))
