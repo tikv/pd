@@ -107,7 +107,7 @@ func NewKeyspaceManager(
 ) *Manager {
 	return &Manager{
 		ctx: ctx,
-		// Remove the lock of the given key from the lock group when unlock to 
+		// Remove the lock of the given key from the lock group when unlock to
 		// keep minimal working set, which is suited for low qps, non-time-critical
 		// and non-consecutive large key space scenarios. One of scenarios for
 		// last use case is keyspace group split loads non-consecutive keyspace meta
