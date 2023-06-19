@@ -203,7 +203,6 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	cmd := pdctlCmd.GetRootCmd()
 
-	time.Sleep(2 * time.Second)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
@@ -228,7 +227,6 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 			}
 			output, err := pdctl.ExecuteCommand(cmd, args...)
 			re.NoError(err)
-			fmt.Println(string(output))
 			return strings.Contains(string(output), "Success")
 		})
 
