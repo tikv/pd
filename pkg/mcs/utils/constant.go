@@ -76,5 +76,5 @@ const (
 	DefaultKeyspaceGroupReplicaCount = 2
 
 	// DefaultKeyspaceGroupReplicaPriority is the default priority of a keyspace group replica.
-	DefaultKeyspaceGroupReplicaPriority = 100
+	DefaultKeyspaceGroupReplicaPriority = 0
 )

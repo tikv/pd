@@ -59,7 +59,7 @@ func newSetNodesKeyspaceGroupCommand() *cobra.Command {
 func newSetPriorityKeyspaceGroupCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "set-priority <keyspace_group_id> <tso_node_addr> <priority>",
-		Short: "set the priority of tso nodes for keyspace group with the given ID",
+		Short: "set the priority of tso nodes for keyspace group with the given ID. If the priority is negative, it need to add a prefix with -- to avoid identified as flag.",
 		Run:   setPriorityKeyspaceGroupCommandFunc,
 	}
 	return r
@@ -150,7 +150,7 @@ func setPriorityKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	priority, err := strconv.ParseUint(args[2], 10, 32)
+	priority, err := strconv.ParseInt(args[2], 10, 32)
 	if err != nil {
 		cmd.Printf("Failed to parse the priority: %s\n", err)
 		return

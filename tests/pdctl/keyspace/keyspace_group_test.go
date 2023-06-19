@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -217,35 +218,45 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	})
 
 	// set-priority keyspace group.
-	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, s1.GetAddr(), "200"}
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		fmt.Println(string(output))
-		return strings.Contains(string(output), "Success")
-	})
+	checkPriority := func(p int) {
+		testutil.Eventually(re, func() bool {
+			args := []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, s1.GetAddr()}
+			if p >= 0 {
+				args = append(args, strconv.Itoa(p))
+			} else {
+				args = append(args, "--", strconv.Itoa(p))
+			}
+			output, err := pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			fmt.Println(string(output))
+			return strings.Contains(string(output), "Success")
+		})
 
-	// check keyspace group information.
-	args := []string{"-u", pdAddr, "keyspace-group"}
-	output, err := pdctl.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
-	re.NoError(err)
-	var keyspaceGroup endpoint.KeyspaceGroup
-	err = json.Unmarshal(output, &keyspaceGroup)
-	re.NoError(err)
-	re.Equal(utils.DefaultKeyspaceGroupID, keyspaceGroup.ID)
-	re.Len(keyspaceGroup.Members, 2)
-	for _, member := range keyspaceGroup.Members {
-		re.Contains([]string{s1.GetAddr(), s2.GetAddr()}, member.Address)
-		if member.Address == s1.GetAddr() {
-			re.Equal(200, member.Priority)
-		} else {
-			re.Equal(100, member.Priority)
+		// check keyspace group information.
+		args := []string{"-u", pdAddr, "keyspace-group"}
+		output, err := pdctl.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
+		re.NoError(err)
+		var keyspaceGroup endpoint.KeyspaceGroup
+		err = json.Unmarshal(output, &keyspaceGroup)
+		re.NoError(err)
+		re.Equal(utils.DefaultKeyspaceGroupID, keyspaceGroup.ID)
+		re.Len(keyspaceGroup.Members, 2)
+		for _, member := range keyspaceGroup.Members {
+			re.Contains([]string{s1.GetAddr(), s2.GetAddr()}, member.Address)
+			if member.Address == s1.GetAddr() {
+				re.Equal(p, member.Priority)
+			} else {
+				re.Equal(0, member.Priority)
+			}
 		}
 	}
 
+	checkPriority(200)
+	checkPriority(-200)
+
 	// params error for set-node.
-	args = []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, s1.GetAddr()}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
+	args := []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, s1.GetAddr()}
+	output, err := pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "invalid num of nodes")
 	args = []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, "", ""}
