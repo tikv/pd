@@ -186,7 +186,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedulers.EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster sche.ClusterInformer) error {
+func (s *evictLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -198,7 +198,7 @@ func (s *evictLeaderScheduler) Prepare(cluster sche.ClusterInformer) error {
 	return res
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster sche.ClusterInformer) {
+func (s *evictLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
@@ -206,7 +206,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster sche.ClusterInformer) {
 	}
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -214,7 +214,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) b
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWitRanges))
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()

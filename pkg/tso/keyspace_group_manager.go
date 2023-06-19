@@ -355,8 +355,11 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 	if !defaultKGConfigured {
 		log.Info("initializing default keyspace group")
 		group := &endpoint.KeyspaceGroup{
-			ID:        mcsutils.DefaultKeyspaceGroupID,
-			Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
+			ID: mcsutils.DefaultKeyspaceGroupID,
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  kgm.tsoServiceID.ServiceAddr,
+				Priority: mcsutils.DefaultKeyspaceGroupReplicaPriority,
+			}},
 			Keyspaces: []uint32{mcsutils.DefaultKeyspaceID},
 		}
 		kgm.updateKeyspaceGroup(group)
@@ -400,7 +403,10 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	// If the default keyspace group isn't assigned to any tso node/pod, assign it to everyone.
 	if group.ID == mcsutils.DefaultKeyspaceGroupID && len(group.Members) == 0 {
 		// TODO: fill members with all tso nodes/pods.
-		group.Members = []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}}
+		group.Members = []endpoint.KeyspaceGroupMember{{
+			Address:  kgm.tsoServiceID.ServiceAddr,
+			Priority: mcsutils.DefaultKeyspaceGroupReplicaPriority,
+		}}
 	}
 
 	if !kgm.isAssignedToMe(group) {
@@ -493,12 +499,12 @@ func validateSplit(
 	// could not be modified during the split process, so we can only check the
 	// member count of the source group here.
 	memberCount := len(sourceGroup.Members)
-	if memberCount < mcsutils.KeyspaceGroupDefaultReplicaCount {
+	if memberCount < mcsutils.DefaultKeyspaceGroupReplicaCount {
 		log.Error("the split source keyspace group does not have enough members",
 			zap.Uint32("target", targetGroup.ID),
 			zap.Uint32("source", splitSourceID),
 			zap.Int("member-count", memberCount),
-			zap.Int("replica-count", mcsutils.KeyspaceGroupDefaultReplicaCount))
+			zap.Int("replica-count", mcsutils.DefaultKeyspaceGroupReplicaCount))
 		return false
 	}
 	return true
@@ -563,7 +569,14 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 				i++
 				j++
 			} else if i < oldLen && j < newLen && oldKeyspaces[i] < newKeyspaces[j] || j == newLen {
-				delete(kgm.keyspaceLookupTable, oldKeyspaces[i])
+				// kgm.keyspaceLookupTable is a global lookup table for all keyspace groups, storing the
+				// keyspace group ID for each keyspace. If the keyspace group of this keyspace in this
+				// lookup table isn't the current keyspace group, it means the keyspace has been moved
+				// to another keyspace group which has already declared the ownership of the keyspace,
+				// and we shouldn't delete and overwrite the ownership.
+				if curGroupID, ok := kgm.keyspaceLookupTable[oldKeyspaces[i]]; ok && curGroupID == groupID {
+					delete(kgm.keyspaceLookupTable, oldKeyspaces[i])
+				}
 				i++
 			} else {
 				newGroup.KeyspaceLookupTable[newKeyspaces[j]] = struct{}{}
@@ -604,8 +617,11 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 		log.Info("removed default keyspace group meta config from the storage. " +
 			"now every tso node/pod will initialize it")
 		group := &endpoint.KeyspaceGroup{
-			ID:        mcsutils.DefaultKeyspaceGroupID,
-			Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
+			ID: mcsutils.DefaultKeyspaceGroupID,
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  kgm.tsoServiceID.ServiceAddr,
+				Priority: mcsutils.DefaultKeyspaceGroupReplicaPriority,
+			}},
 			Keyspaces: []uint32{mcsutils.DefaultKeyspaceID},
 		}
 		kgm.updateKeyspaceGroup(group)
@@ -621,7 +637,8 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 			// if kid == kg.ID, it means the keyspace still belongs to this keyspace group,
 			//     so we decouple the relationship in the global keyspace lookup table.
 			// if kid != kg.ID, it means the keyspace has been moved to another keyspace group
-			//     which has already declared the ownership of the keyspace.
+			//     which has already declared the ownership of the keyspace, so we don't need
+			//     delete it from the global keyspace lookup table and overwrite the ownership.
 			if kid == kg.ID {
 				delete(kgm.keyspaceLookupTable, kid)
 			}
@@ -821,6 +838,12 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 		return err
 	}
 	if tsoutil.CompareTimestamp(&splitSourceTSO, &splitTSO) <= 0 {
+		log.Debug("the split source TSO is not greater than the newly split TSO",
+			zap.Int64("split-source-tso-physical", splitSourceTSO.Physical),
+			zap.Int64("split-source-tso-logical", splitSourceTSO.Logical),
+			zap.Int64("split-tso-physical", splitTSO.Physical),
+			zap.Int64("split-tso-logical", splitTSO.Logical),
+		)
 		return nil
 	}
 	// If the split source TSO is greater than the newly split TSO, we need to update the split

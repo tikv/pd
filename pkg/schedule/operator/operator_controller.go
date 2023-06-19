@@ -520,7 +520,7 @@ func (oc *Controller) ack(op *Operator) {
 	}
 }
 
-// RemoveOperator removes a operator from the running operators.
+// RemoveOperator removes an operator from the running operators.
 func (oc *Controller) RemoveOperator(op *Operator, extraFields ...zap.Field) bool {
 	oc.Lock()
 	removed := oc.removeOperatorLocked(op)
@@ -629,7 +629,7 @@ func (oc *Controller) GetOperatorStatus(id uint64) *OpWithStatus {
 	return oc.records.Get(id)
 }
 
-// GetOperator gets a operator from the given region.
+// GetOperator gets an operator from the given region.
 func (oc *Controller) GetOperator(regionID uint64) *Operator {
 	oc.RLock()
 	defer oc.RUnlock()

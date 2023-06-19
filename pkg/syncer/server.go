@@ -39,7 +39,6 @@ import (
 )
 
 const (
-	msgSize                  = 8 * units.MiB
 	defaultBucketRate        = 20 * units.MiB // 20MB/s
 	defaultBucketCapacity    = 20 * units.MiB // 20MB
 	maxSyncRegionBatchSize   = 100

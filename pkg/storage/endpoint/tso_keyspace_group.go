@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -71,8 +72,12 @@ func IsUserKindValid(kind string) bool {
 }
 
 // KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
+// Its `Priority` is used in keyspace group primary weighted-election to balance primaries' distribution.
+// Among multiple replicas of a keyspace group, the higher the priority, the more likely
+// the replica is to be elected as primary.
 type KeyspaceGroupMember struct {
-	Address string `json:"address"`
+	Address  string `json:"address"`
+	Priority int    `json:"priority"`
 }
 
 // SplitState defines the split state of a keyspace group.
@@ -83,12 +88,20 @@ type SplitState struct {
 	SplitSource uint32 `json:"split-source"`
 }
 
+// MergeState defines the merging state of a keyspace group.
+type MergeState struct {
+	// MergeList is the list of keyspace group IDs which are merging to this target keyspace group.
+	MergeList []uint32 `json:"merge-list"`
+}
+
 // KeyspaceGroup is the keyspace group.
 type KeyspaceGroup struct {
 	ID       uint32 `json:"id"`
 	UserKind string `json:"user-kind"`
 	// SplitState is the current split state of the keyspace group.
 	SplitState *SplitState `json:"split-state,omitempty"`
+	// MergeState is the current merging state of the keyspace group.
+	MergeState *MergeState `json:"merge-state,omitempty"`
 	// Members are the election members which campaign for the primary of the keyspace group.
 	Members []KeyspaceGroupMember `json:"members"`
 	// Keyspaces are the keyspace IDs which belong to the keyspace group.
@@ -120,6 +133,21 @@ func (kg *KeyspaceGroup) SplitSource() uint32 {
 		return kg.SplitState.SplitSource
 	}
 	return 0
+}
+
+// IsMerging checks if the keyspace group is in merging state.
+func (kg *KeyspaceGroup) IsMerging() bool {
+	return kg != nil && kg.MergeState != nil
+}
+
+// IsMergeTarget checks if the keyspace group is in merging state and is the merge target.
+func (kg *KeyspaceGroup) IsMergeTarget() bool {
+	return kg.IsMerging() && !slice.Contains(kg.MergeState.MergeList, kg.ID)
+}
+
+// IsMergeSource checks if the keyspace group is in merging state and is the merge source.
+func (kg *KeyspaceGroup) IsMergeSource() bool {
+	return kg.IsMerging() && slice.Contains(kg.MergeState.MergeList, kg.ID)
 }
 
 // KeyspaceGroupStorage is the interface for keyspace group storage.
