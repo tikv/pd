@@ -636,7 +636,7 @@ func (o *PersistOptions) IsDebugMetricsEnabled() bool {
 	return o.GetScheduleConfig().EnableDebugMetrics
 }
 
-// IsUseJointConsensus returns if using joint consensus as a operator step is enabled.
+// IsUseJointConsensus returns if using joint consensus as an operator step is enabled.
 func (o *PersistOptions) IsUseJointConsensus() bool {
 	return o.GetScheduleConfig().EnableJointConsensus
 }

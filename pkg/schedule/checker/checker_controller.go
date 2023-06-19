@@ -121,7 +121,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		}
 	}
 	// skip the joint checker, split checker and rule checker when region label is set to "schedule=deny".
-	// those checkers is help to make region health, it's necessary to skip them when region is set to deny.
+	// those checkers are help to make region health, it's necessary to skip them when region is set to deny.
 	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
 		l := cl.GetRegionLabeler()
 		if l.ScheduleDisabled(region) {

@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
@@ -108,7 +107,7 @@ type cluster interface {
 	core.StoreSetInformer
 
 	DropCacheAllRegion()
-	GetAllocator() id.Allocator
+	AllocID() (uint64, error)
 	BuryStore(storeID uint64, forceBury bool) error
 	GetPersistOptions() *config.PersistOptions
 }
@@ -1135,11 +1134,11 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 	hasPlan := false
 
 	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
-		regionID, err := u.cluster.GetAllocator().Alloc()
+		regionID, err := u.cluster.AllocID()
 		if err != nil {
 			return nil, err
 		}
-		peerID, err := u.cluster.GetAllocator().Alloc()
+		peerID, err := u.cluster.AllocID()
 		if err != nil {
 			return nil, err
 		}
