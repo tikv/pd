@@ -48,7 +48,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		return true
 	}
 	// The number of active regions should be more than total region of all stores * collectFactor
-	if float64(c.GetRegionCount())*collectFactor > float64(checker.sum) {
+	if float64(c.GetTotalRegionCount())*collectFactor > float64(checker.sum) {
 		return false
 	}
 	for _, store := range c.GetStores() {

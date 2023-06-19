@@ -218,7 +218,7 @@ func TestLoadRegions(t *testing.T) {
 	regions := mustSaveRegions(re, storage, n)
 	re.NoError(storage.LoadRegions(context.Background(), cache.CheckAndPutRegion))
 
-	re.Equal(n, cache.GetRegionCount())
+	re.Equal(n, cache.GetTotalRegionCount())
 	for _, region := range cache.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
 	}
@@ -255,7 +255,7 @@ func TestLoadRegionsToCache(t *testing.T) {
 	regions := mustSaveRegions(re, storage, n)
 	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.CheckAndPutRegion))
 
-	re.Equal(n, cache.GetRegionCount())
+	re.Equal(n, cache.GetTotalRegionCount())
 	for _, region := range cache.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
 	}
@@ -263,7 +263,7 @@ func TestLoadRegionsToCache(t *testing.T) {
 	n = 20
 	mustSaveRegions(re, storage, n)
 	re.NoError(TryLoadRegionsOnce(context.Background(), storage, cache.CheckAndPutRegion))
-	re.Equal(n, cache.GetRegionCount())
+	re.Equal(n, cache.GetTotalRegionCount())
 }
 
 func TestLoadRegionsExceedRangeLimit(t *testing.T) {
@@ -275,7 +275,7 @@ func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 	n := 1000
 	regions := mustSaveRegions(re, storage, n)
 	re.NoError(storage.LoadRegions(context.Background(), cache.CheckAndPutRegion))
-	re.Equal(n, cache.GetRegionCount())
+	re.Equal(n, cache.GetTotalRegionCount())
 	for _, region := range cache.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
 	}

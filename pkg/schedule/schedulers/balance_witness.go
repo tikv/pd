@@ -146,7 +146,6 @@ type balanceWitnessScheduler struct {
 	name          string
 	conf          *balanceWitnessSchedulerConfig
 	handler       http.Handler
-	opController  *operator.Controller
 	filters       []filter.Filter
 	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
@@ -162,7 +161,6 @@ func newBalanceWitnessScheduler(opController *operator.Controller, conf *balance
 		name:          BalanceWitnessName,
 		conf:          conf,
 		handler:       newbalanceWitnessHandler(conf),
-		opController:  opController,
 		counter:       balanceWitnessCounter,
 		filterCounter: filter.NewCounter(filter.BalanceWitness.String()),
 	}
@@ -211,15 +209,15 @@ func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(b.conf)
 }
 
-func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
-	allowed := b.opController.OperatorCount(operator.OpWitness) < cluster.GetOpts().GetWitnessScheduleLimit()
+func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
+	allowed := b.OpController.OperatorCount(operator.OpWitness) < cluster.GetOpts().GetWitnessScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(b.GetType(), operator.OpWitness.String()).Inc()
 	}
 	return allowed
 }
 
-func (b *balanceWitnessScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (b *balanceWitnessScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	b.conf.mu.RLock()
 	defer b.conf.mu.RUnlock()
 	basePlan := NewBalanceSchedulerPlan()
@@ -230,7 +228,7 @@ func (b *balanceWitnessScheduler) Schedule(cluster sche.ClusterInformer, dryRun 
 	batch := b.conf.Batch
 	schedulerCounter.WithLabelValues(b.GetName(), "schedule").Inc()
 
-	opInfluence := b.opController.GetOpInfluence(cluster)
+	opInfluence := b.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	kind := constant.NewScheduleKind(constant.WitnessKind, constant.ByCount)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 

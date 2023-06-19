@@ -77,7 +77,7 @@ func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetOpts().GetMergeScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpMerge.String()).Inc()
@@ -85,7 +85,7 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) b
 	return allowed
 }
 
-func (s *randomMergeScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *randomMergeScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	randomMergeCounter.Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
@@ -128,7 +128,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.ClusterInformer, dryRun boo
 	return ops, nil
 }
 
-func (s *randomMergeScheduler) allowMerge(cluster sche.ClusterInformer, region, target *core.RegionInfo) bool {
+func (s *randomMergeScheduler) allowMerge(cluster sche.ScheduleCluster, region, target *core.RegionInfo) bool {
 	if !filter.IsRegionHealthy(region) || !filter.IsRegionHealthy(target) {
 		return false
 	}

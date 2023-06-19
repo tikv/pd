@@ -43,7 +43,7 @@ const (
 
 type solver struct {
 	*balanceSchedulerPlan
-	sche.ClusterInformer
+	sche.ScheduleCluster
 	kind              constant.ScheduleKind
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
@@ -54,10 +54,10 @@ type solver struct {
 	targetScore float64
 }
 
-func newSolver(basePlan *balanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.ClusterInformer, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *balanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.ScheduleCluster, opInfluence operator.OpInfluence) *solver {
 	return &solver{
 		balanceSchedulerPlan: basePlan,
-		ClusterInformer:      cluster,
+		ScheduleCluster:      cluster,
 		kind:                 kind,
 		opInfluence:          opInfluence,
 		tolerantSizeRatio:    adjustTolerantRatio(cluster, kind),
@@ -181,7 +181,7 @@ func (p *solver) getTolerantResource() int64 {
 	return p.tolerantSource
 }
 
-func adjustTolerantRatio(cluster sche.ClusterInformer, kind constant.ScheduleKind) float64 {
+func adjustTolerantRatio(cluster sche.ScheduleCluster, kind constant.ScheduleKind) float64 {
 	var tolerantSizeRatio float64
 	switch c := cluster.(type) {
 	case *rangeCluster:

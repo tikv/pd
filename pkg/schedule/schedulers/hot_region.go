@@ -118,7 +118,7 @@ func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
 
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store, only update read or write load detail
-func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.ClusterInformer) {
+func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.ScheduleCluster) {
 	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
 	h.summaryPendingInfluence()
 	h.storesLoads = cluster.GetStoresLoads()
@@ -263,7 +263,7 @@ func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
 
-func (h *hotScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (h *hotScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetOpts().GetHotRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
@@ -271,13 +271,13 @@ func (h *hotScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
 	return allowed
 }
 
-func (h *hotScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (h *hotScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	hotSchedulerCounter.Inc()
 	rw := h.randomRWType()
 	return h.dispatch(rw, cluster), nil
 }
 
-func (h *hotScheduler) dispatch(typ statistics.RWType, cluster sche.ClusterInformer) []*operator.Operator {
+func (h *hotScheduler) dispatch(typ statistics.RWType, cluster sche.ScheduleCluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 	h.prepareForBalance(typ, cluster)
@@ -311,7 +311,7 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore, d
 	return true
 }
 
-func (h *hotScheduler) balanceHotReadRegions(cluster sche.ClusterInformer) []*operator.Operator {
+func (h *hotScheduler) balanceHotReadRegions(cluster sche.ScheduleCluster) []*operator.Operator {
 	leaderSolver := newBalanceSolver(h, cluster, statistics.Read, transferLeader)
 	leaderOps := leaderSolver.solve()
 	peerSolver := newBalanceSolver(h, cluster, statistics.Read, movePeer)
@@ -354,7 +354,7 @@ func (h *hotScheduler) balanceHotReadRegions(cluster sche.ClusterInformer) []*op
 	return nil
 }
 
-func (h *hotScheduler) balanceHotWriteRegions(cluster sche.ClusterInformer) []*operator.Operator {
+func (h *hotScheduler) balanceHotWriteRegions(cluster sche.ScheduleCluster) []*operator.Operator {
 	// prefer to balance by peer
 	s := h.r.Intn(100)
 	switch {
@@ -443,7 +443,7 @@ func isAvailableV1(s *solution) bool {
 }
 
 type balanceSolver struct {
-	sche.ClusterInformer
+	sche.ScheduleCluster
 	sche         *hotScheduler
 	stLoadDetail map[uint64]*statistics.StoreLoadDetail
 	rwTy         statistics.RWType
@@ -564,7 +564,7 @@ func (bs *balanceSolver) isSelectedDim(dim int) bool {
 }
 
 func (bs *balanceSolver) getPriorities() []string {
-	querySupport := bs.sche.conf.checkQuerySupport(bs.ClusterInformer)
+	querySupport := bs.sche.conf.checkQuerySupport(bs.ScheduleCluster)
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	switch bs.resourceTy {
@@ -579,9 +579,9 @@ func (bs *balanceSolver) getPriorities() []string {
 	return []string{}
 }
 
-func newBalanceSolver(sche *hotScheduler, cluster sche.ClusterInformer, rwTy statistics.RWType, opTy opType) *balanceSolver {
+func newBalanceSolver(sche *hotScheduler, cluster sche.ScheduleCluster, rwTy statistics.RWType, opTy opType) *balanceSolver {
 	bs := &balanceSolver{
-		ClusterInformer: cluster,
+		ScheduleCluster: cluster,
 		sche:            sche,
 		rwTy:            rwTy,
 		opTy:            opTy,
@@ -591,7 +591,7 @@ func newBalanceSolver(sche *hotScheduler, cluster sche.ClusterInformer, rwTy sta
 }
 
 func (bs *balanceSolver) isValid() bool {
-	if bs.ClusterInformer == nil || bs.sche == nil || bs.stLoadDetail == nil {
+	if bs.ScheduleCluster == nil || bs.sche == nil || bs.stLoadDetail == nil {
 		return false
 	}
 	return true
@@ -910,7 +910,7 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
-	if !filter.IsRegionReplicated(bs.ClusterInformer, region) {
+	if !filter.IsRegionReplicated(bs.ScheduleCluster, region) {
 		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
 		hotSchedulerAbnormalReplicaCounter.Inc()
 		return false
@@ -1483,7 +1483,7 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 	for i, region := range regions {
 		ids[i] = region.GetID()
 	}
-	hotBuckets := bs.ClusterInformer.BucketsStats(bs.minHotDegree, ids...)
+	hotBuckets := bs.ScheduleCluster.BucketsStats(bs.minHotDegree, ids...)
 	operators := make([]*operator.Operator, 0)
 
 	createFunc := func(region *core.RegionInfo) {

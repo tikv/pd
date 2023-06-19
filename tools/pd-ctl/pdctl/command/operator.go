@@ -46,7 +46,7 @@ const (
 `
 )
 
-// NewOperatorCommand returns a operator command.
+// NewOperatorCommand returns an operator command.
 func NewOperatorCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "operator",

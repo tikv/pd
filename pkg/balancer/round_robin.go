@@ -51,7 +51,8 @@ func (r *RoundRobin[T]) Next() (t T) {
 func (r *RoundRobin[T]) GetAll() []T {
 	r.RLock()
 	defer r.RUnlock()
-	return r.nodes
+	// return a copy to avoid data race
+	return append(r.nodes[:0:0], r.nodes...)
 }
 
 // Put puts one into balancer.
