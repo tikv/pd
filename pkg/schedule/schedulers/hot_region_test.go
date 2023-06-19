@@ -203,7 +203,7 @@ func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
 }
 
-func TestSplitRegionInIfRegionIsTooHot(t *testing.T) {
+func TestSplitIfRegionTooHot(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -254,7 +254,7 @@ func TestSplitRegionInIfRegionIsTooHot(t *testing.T) {
 	addRegionInfo(tc, statistics.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
 	})
-	hb, err = CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	hb, _ = CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	re.Equal(operator.OpSplit, ops[0].Kind())
