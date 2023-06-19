@@ -23,6 +23,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -40,6 +41,7 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router.DELETE("/:id", DeleteKeyspaceGroupByID)
 	router.POST("/:id/alloc", AllocNodesForKeyspaceGroup)
 	router.POST("/:id/nodes", SetNodesForKeyspaceGroup)
+	router.POST("/:id/priority", SetPriorityForKeyspaceGroup)
 	router.POST("/:id/split", SplitKeyspaceGroupByID)
 	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
 	router.POST("/:id/merge", MergeKeyspaceGroups)
@@ -325,7 +327,7 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < utils.KeyspaceGroupDefaultReplicaCount {
+	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < utils.DefaultKeyspaceGroupReplicaCount {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [2, nodes_num]")
 		return
 	}
@@ -347,7 +349,7 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, nodes)
 }
 
-// SetNodesForKeyspaceGroupParams defines the params for setting nodes for keyspace groups.
+// SetNodesForKeyspaceGroupParams defines the params for setting nodes for keyspace group.
 // Notes: it should be used carefully.
 type SetNodesForKeyspaceGroupParams struct {
 	Nodes []string `json:"nodes"`
@@ -379,7 +381,7 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 		return
 	}
 	// check if nodes is less than default replica count
-	if len(setParams.Nodes) < utils.KeyspaceGroupDefaultReplicaCount {
+	if len(setParams.Nodes) < utils.DefaultKeyspaceGroupReplicaCount {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid num of nodes")
 		return
 	}
@@ -392,6 +394,53 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 	}
 	// set nodes
 	err = manager.SetNodesForKeyspaceGroup(id, setParams.Nodes)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, nil)
+}
+
+// SetPriorityForKeyspaceGroupParams defines the params for setting priority of tso node for the keyspace group.
+type SetPriorityForKeyspaceGroupParams struct {
+	Node     string `json:"node"`
+	Priority int    `json:"priority"`
+}
+
+// SetPriorityForKeyspaceGroup sets priority of tso node for the keyspace group.
+func SetPriorityForKeyspaceGroup(c *gin.Context) {
+	id, err := validateKeyspaceGroupID(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
+	setParams := &SetPriorityForKeyspaceGroupParams{}
+	err = c.BindJSON(setParams)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		return
+	}
+	// check if keyspace group exists
+	kg, err := manager.GetKeyspaceGroupByID(id)
+	if err != nil || kg == nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "keyspace group does not exist")
+		return
+	}
+	// check if node exists
+	members := kg.Members
+	if slice.NoneOf(members, func(i int) bool {
+		return members[i].Address == setParams.Node
+	}) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "tso node does not exist in the keyspace group")
+	}
+	// set priority
+	err = manager.SetPriorityForKeyspaceGroup(id, setParams.Node, setParams.Priority)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return

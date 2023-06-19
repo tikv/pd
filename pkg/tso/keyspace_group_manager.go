@@ -355,8 +355,11 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 	if !defaultKGConfigured {
 		log.Info("initializing default keyspace group")
 		group := &endpoint.KeyspaceGroup{
-			ID:        mcsutils.DefaultKeyspaceGroupID,
-			Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
+			ID: mcsutils.DefaultKeyspaceGroupID,
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  kgm.tsoServiceID.ServiceAddr,
+				Priority: mcsutils.DefaultKeyspaceGroupReplicaPriority,
+			}},
 			Keyspaces: []uint32{mcsutils.DefaultKeyspaceID},
 		}
 		kgm.updateKeyspaceGroup(group)
@@ -400,7 +403,10 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	// If the default keyspace group isn't assigned to any tso node/pod, assign it to everyone.
 	if group.ID == mcsutils.DefaultKeyspaceGroupID && len(group.Members) == 0 {
 		// TODO: fill members with all tso nodes/pods.
-		group.Members = []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}}
+		group.Members = []endpoint.KeyspaceGroupMember{{
+			Address:  kgm.tsoServiceID.ServiceAddr,
+			Priority: mcsutils.DefaultKeyspaceGroupReplicaPriority,
+		}}
 	}
 
 	if !kgm.isAssignedToMe(group) {
@@ -493,12 +499,12 @@ func validateSplit(
 	// could not be modified during the split process, so we can only check the
 	// member count of the source group here.
 	memberCount := len(sourceGroup.Members)
-	if memberCount < mcsutils.KeyspaceGroupDefaultReplicaCount {
+	if memberCount < mcsutils.DefaultKeyspaceGroupReplicaCount {
 		log.Error("the split source keyspace group does not have enough members",
 			zap.Uint32("target", targetGroup.ID),
 			zap.Uint32("source", splitSourceID),
 			zap.Int("member-count", memberCount),
-			zap.Int("replica-count", mcsutils.KeyspaceGroupDefaultReplicaCount))
+			zap.Int("replica-count", mcsutils.DefaultKeyspaceGroupReplicaCount))
 		return false
 	}
 	return true
@@ -611,8 +617,11 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 		log.Info("removed default keyspace group meta config from the storage. " +
 			"now every tso node/pod will initialize it")
 		group := &endpoint.KeyspaceGroup{
-			ID:        mcsutils.DefaultKeyspaceGroupID,
-			Members:   []endpoint.KeyspaceGroupMember{{Address: kgm.tsoServiceID.ServiceAddr}},
+			ID: mcsutils.DefaultKeyspaceGroupID,
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  kgm.tsoServiceID.ServiceAddr,
+				Priority: mcsutils.DefaultKeyspaceGroupReplicaPriority,
+			}},
 			Keyspaces: []uint32{mcsutils.DefaultKeyspaceID},
 		}
 		kgm.updateKeyspaceGroup(group)
