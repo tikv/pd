@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
@@ -116,7 +115,6 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	cmd := pdctlCmd.GetRootCmd()
 
-	time.Sleep(2 * time.Second)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
@@ -156,7 +154,6 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 
 	cmd := pdctlCmd.GetRootCmd()
 
-	time.Sleep(2 * time.Second)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
