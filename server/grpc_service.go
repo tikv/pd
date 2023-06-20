@@ -1089,6 +1089,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	if rc == nil {
 		return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
+	log.Info("start ScanRegions", zap.Reflect("request", request))
 	regions := rc.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
 	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
 	for _, r := range regions {
@@ -1106,6 +1107,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 			PendingPeers: r.GetPendingPeers(),
 		})
 	}
+	log.Info("end ScanRegions", zap.Reflect("resp", resp))
 	return resp, nil
 }
 
