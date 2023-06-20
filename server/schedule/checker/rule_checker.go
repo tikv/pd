@@ -361,17 +361,24 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 }
 
 func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
-	if len(rf.Rule.LocationLabels) == 0 || rf.Rule.Count <= 1 {
+	if len(rf.Rule.LocationLabels) == 0 {
 		return nil, nil
 	}
 
 	strategy := c.strategy(region, rf.Rule)
-	ruleStores := c.getRuleFitStores(rf)
-	oldStore := strategy.SelectStoreToRemove(ruleStores)
+	regionStores := c.cluster.GetRegionStores(region)
+	oldStore := strategy.SelectStoreToRemove(regionStores)
 	if oldStore == 0 {
 		return nil, nil
 	}
-	newStore, filterByTempState := strategy.SelectStoreToImprove(ruleStores, oldStore)
+	var coLocationStores []*core.StoreInfo
+	for _, s := range regionStores {
+		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
+			coLocationStores = append(coLocationStores, s)
+		}
+	}
+
+	newStore, filterByTempState := strategy.SelectStoreToImprove(coLocationStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		c.handleFilterState(region, filterByTempState)
