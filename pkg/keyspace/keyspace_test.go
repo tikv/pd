@@ -393,7 +393,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 	re.NotNil(defaultKeyspaceGroup)
 	re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(111))
 	// Patrol the keyspace assignment.
-	err = suite.manager.PatrolKeyspaceAssignment()
+	err = suite.manager.PatrolKeyspaceAssignment(0, 0)
 	re.NoError(err)
 	// Check if the keyspace is attached to the default group.
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
@@ -424,7 +424,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 		re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 	// Patrol the keyspace assignment.
-	err = suite.manager.PatrolKeyspaceAssignment()
+	err = suite.manager.PatrolKeyspaceAssignment(0, 0)
 	re.NoError(err)
 	// Check if all the keyspaces are attached to the default group.
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
@@ -432,6 +432,43 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	re.NotNil(defaultKeyspaceGroup)
 	for i := 1; i < maxEtcdTxnOps*2+1; i++ {
 		re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(i))
+	}
+}
+
+func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
+	re := suite.Require()
+	// Create some keyspaces without any keyspace group.
+	for i := 1; i < maxEtcdTxnOps*2+1; i++ {
+		now := time.Now().Unix()
+		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+			Id:             uint32(i),
+			Name:           strconv.Itoa(i),
+			State:          keyspacepb.KeyspaceState_ENABLED,
+			CreatedAt:      now,
+			StateChangedAt: now,
+		})
+		re.NoError(err)
+	}
+	// Check if all the keyspaces are not attached to the default group.
+	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(defaultKeyspaceGroup)
+	for i := 1; i < maxEtcdTxnOps*2+1; i++ {
+		re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
+	}
+	// Patrol the keyspace assignment with range [10, 20]
+	err = suite.manager.PatrolKeyspaceAssignment(10, 20)
+	re.NoError(err)
+	// Check if only the keyspaces within the range are attached to the default group.
+	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(defaultKeyspaceGroup)
+	for i := 1; i < maxEtcdTxnOps*2+1; i++ {
+		if i >= 10 && i <= 20 {
+			re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(i))
+		} else {
+			re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
+		}
 	}
 }
 
@@ -471,7 +508,7 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	// Benchmark the keyspace assignment patrol.
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := suite.manager.PatrolKeyspaceAssignment()
+		err := suite.manager.PatrolKeyspaceAssignment(0, 0)
 		re.NoError(err)
 	}
 	b.StopTimer()

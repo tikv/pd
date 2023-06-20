@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -322,6 +323,57 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.ErrorIs(err, ErrKeyspaceNotInKeyspaceGroup)
 }
 
+func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplitRange() {
+	re := suite.Require()
+
+	keyspaceGroups := []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(1),
+			UserKind: endpoint.Basic.String(),
+		},
+		{
+			ID:        uint32(2),
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{111, 333, 444, 555, 666},
+			Members:   make([]endpoint.KeyspaceGroupMember, utils.DefaultKeyspaceGroupReplicaCount),
+		},
+	}
+	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
+	re.NoError(err)
+	// split the keyspace group 2 to 4 with keyspace range [222, 555]
+	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, nil, 222, 555)
+	re.NoError(err)
+	kg2, err := suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Equal(uint32(2), kg2.ID)
+	re.Equal([]uint32{111, 666}, kg2.Keyspaces)
+	re.True(kg2.IsSplitSource())
+	re.Equal(kg2.ID, kg2.SplitSource())
+	kg4, err := suite.kgm.GetKeyspaceGroupByID(4)
+	re.NoError(err)
+	re.Equal(uint32(4), kg4.ID)
+	re.Equal([]uint32{333, 444, 555}, kg4.Keyspaces)
+	re.True(kg4.IsSplitTarget())
+	re.Equal(kg2.ID, kg4.SplitSource())
+	re.Equal(kg2.UserKind, kg4.UserKind)
+	re.Equal(kg2.Members, kg4.Members)
+	// finish the split of keyspace group 4
+	err = suite.kgm.FinishSplitKeyspaceByID(4)
+	re.NoError(err)
+	kg2, err = suite.kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.Equal(uint32(2), kg2.ID)
+	re.Equal([]uint32{111, 666}, kg2.Keyspaces)
+	re.False(kg2.IsSplitting())
+	kg4, err = suite.kgm.GetKeyspaceGroupByID(4)
+	re.NoError(err)
+	re.Equal(uint32(4), kg4.ID)
+	re.Equal([]uint32{333, 444, 555}, kg4.Keyspaces)
+	re.False(kg4.IsSplitting())
+	re.Equal(kg2.UserKind, kg4.UserKind)
+	re.Equal(kg2.Members, kg4.Members)
+}
+
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	re := suite.Require()
 
@@ -397,4 +449,70 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	// merge the default keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{utils.DefaultKeyspaceGroupID})
 	re.ErrorIs(err, ErrModifyDefaultKeyspaceGroup)
+}
+
+func TestBuildSplitKeyspaces(t *testing.T) {
+	re := require.New(t)
+	testCases := []struct {
+		old             []uint32
+		new             []uint32
+		startKeyspaceID uint32
+		endKeyspaceID   uint32
+		expectedOld     []uint32
+		expectedNew     []uint32
+		err             error
+	}{
+		{
+			old:         []uint32{1, 2, 3, 4, 5},
+			new:         []uint32{1, 2, 3, 4, 5},
+			expectedOld: []uint32{},
+			expectedNew: []uint32{1, 2, 3, 4, 5},
+		},
+		{
+			old:         []uint32{1, 2, 3, 4, 5},
+			new:         []uint32{1},
+			expectedOld: []uint32{2, 3, 4, 5},
+			expectedNew: []uint32{1},
+		},
+		{
+			old: []uint32{1, 2, 3, 4, 5},
+			new: []uint32{6},
+			err: ErrKeyspaceNotInKeyspaceGroup,
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 2,
+			endKeyspaceID:   4,
+			expectedOld:     []uint32{1, 5},
+			expectedNew:     []uint32{2, 3, 4},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 2,
+			endKeyspaceID:   6,
+			expectedOld:     []uint32{1},
+			expectedNew:     []uint32{2, 3, 4, 5},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 0,
+			endKeyspaceID:   6,
+			expectedOld:     []uint32{},
+			expectedNew:     []uint32{1, 2, 3, 4, 5},
+		},
+		{
+			old: []uint32{1, 2, 3, 4, 5},
+			err: ErrKeyspaceNotInKeyspaceGroup,
+		},
+	}
+	for idx, testCase := range testCases {
+		old, new, err := buildSplitKeyspaces(testCase.old, testCase.new, testCase.startKeyspaceID, testCase.endKeyspaceID)
+		if testCase.err != nil {
+			re.ErrorIs(testCase.err, err, "test case %d", idx)
+		} else {
+			re.NoError(err, "test case %d", idx)
+			re.Equal(testCase.expectedOld, old, "test case %d", idx)
+			re.Equal(testCase.expectedNew, new, "test case %d", idx)
+		}
+	}
 }
