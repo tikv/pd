@@ -244,7 +244,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 			ID:        uint32(2),
 			UserKind:  endpoint.Standard.String(),
 			Keyspaces: []uint32{111, 222, 333},
-			Members:   make([]endpoint.KeyspaceGroupMember, utils.KeyspaceGroupDefaultReplicaCount),
+			Members:   make([]endpoint.KeyspaceGroupMember, utils.DefaultKeyspaceGroupReplicaCount),
 		},
 	}
 	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
@@ -330,7 +330,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 			ID:        uint32(1),
 			UserKind:  endpoint.Basic.String(),
 			Keyspaces: []uint32{111, 222, 333},
-			Members:   make([]endpoint.KeyspaceGroupMember, utils.KeyspaceGroupDefaultReplicaCount),
+			Members:   make([]endpoint.KeyspaceGroupMember, utils.DefaultKeyspaceGroupReplicaCount),
 		},
 		{
 			ID:        uint32(3),
