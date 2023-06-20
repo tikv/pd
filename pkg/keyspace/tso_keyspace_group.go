@@ -173,7 +173,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 		case <-ticker.C:
 		}
 		countOfNodes := m.GetNodesCount()
-		if countOfNodes < utils.KeyspaceGroupDefaultReplicaCount {
+		if countOfNodes < utils.DefaultKeyspaceGroupReplicaCount {
 			continue
 		}
 		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
@@ -187,8 +187,8 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 		}
 		withError := false
 		for _, group := range groups {
-			if len(group.Members) < utils.KeyspaceGroupDefaultReplicaCount {
-				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, utils.KeyspaceGroupDefaultReplicaCount)
+			if len(group.Members) < utils.DefaultKeyspaceGroupReplicaCount {
+				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, utils.DefaultKeyspaceGroupReplicaCount)
 				if err != nil {
 					withError = true
 					log.Error("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.ID), zap.Error(err))
@@ -531,7 +531,7 @@ func (m *GroupManager) SplitKeyspaceGroupByID(splitSourceID, splitTargetID uint3
 			return ErrKeyspaceGroupInMerging
 		}
 		// Check if the source keyspace group has enough replicas.
-		if len(splitSourceKg.Members) < utils.KeyspaceGroupDefaultReplicaCount {
+		if len(splitSourceKg.Members) < utils.DefaultKeyspaceGroupReplicaCount {
 			return ErrKeyspaceGroupNotEnoughReplicas
 		}
 		// Check if the new keyspace group already exists.
@@ -702,7 +702,10 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 				continue
 			}
 			exists[addr] = struct{}{}
-			nodes = append(nodes, endpoint.KeyspaceGroupMember{Address: addr})
+			nodes = append(nodes, endpoint.KeyspaceGroupMember{
+				Address:  addr,
+				Priority: utils.DefaultKeyspaceGroupReplicaPriority,
+			})
 		}
 		kg.Members = nodes
 		return m.store.SaveKeyspaceGroup(txn, kg)
@@ -737,7 +740,52 @@ func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error
 		}
 		members := make([]endpoint.KeyspaceGroupMember, 0, len(nodes))
 		for _, node := range nodes {
-			members = append(members, endpoint.KeyspaceGroupMember{Address: node})
+			members = append(members, endpoint.KeyspaceGroupMember{
+				Address:  node,
+				Priority: utils.DefaultKeyspaceGroupReplicaPriority,
+			})
+		}
+		kg.Members = members
+		return m.store.SaveKeyspaceGroup(txn, kg)
+	})
+	if err != nil {
+		return err
+	}
+	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
+	return nil
+}
+
+// SetPriorityForKeyspaceGroup sets the priority of node for the keyspace group.
+func (m *GroupManager) SetPriorityForKeyspaceGroup(id uint32, node string, priority int) error {
+	m.Lock()
+	defer m.Unlock()
+	var kg *endpoint.KeyspaceGroup
+	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		var err error
+		kg, err = m.store.LoadKeyspaceGroup(txn, id)
+		if err != nil {
+			return err
+		}
+		if kg == nil {
+			return ErrKeyspaceGroupNotExists
+		}
+		if kg.IsSplitting() {
+			return ErrKeyspaceGroupInSplit
+		}
+		if kg.IsMerging() {
+			return ErrKeyspaceGroupInMerging
+		}
+		inKeyspaceGroup := false
+		members := make([]endpoint.KeyspaceGroupMember, 0, len(kg.Members))
+		for _, member := range kg.Members {
+			if member.Address == node {
+				inKeyspaceGroup = true
+				member.Priority = priority
+			}
+			members = append(members, member)
+		}
+		if !inKeyspaceGroup {
+			return ErrNodeNotInKeyspaceGroup
 		}
 		kg.Members = members
 		return m.store.SaveKeyspaceGroup(txn, kg)

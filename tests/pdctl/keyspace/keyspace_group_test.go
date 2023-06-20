@@ -18,9 +18,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
@@ -66,7 +66,7 @@ func TestKeyspaceGroup(t *testing.T) {
 			{
 				ID:        1,
 				UserKind:  endpoint.Standard.String(),
-				Members:   make([]endpoint.KeyspaceGroupMember, utils.KeyspaceGroupDefaultReplicaCount),
+				Members:   make([]endpoint.KeyspaceGroupMember, utils.DefaultKeyspaceGroupReplicaCount),
 				Keyspaces: []uint32{111, 222, 333},
 			},
 		},
@@ -116,7 +116,6 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	cmd := pdctlCmd.GetRootCmd()
 
-	time.Sleep(2 * time.Second)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
@@ -156,7 +155,6 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 
 	cmd := pdctlCmd.GetRootCmd()
 
-	time.Sleep(2 * time.Second)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
@@ -176,4 +174,106 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/externalAllocNode"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+}
+
+func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	keyspaces := make([]string, 0)
+	for i := 0; i < 10; i++ {
+		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
+	}
+	tc, err := tests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
+		conf.Keyspace.PreAlloc = keyspaces
+	})
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	pdAddr := tc.GetConfig().GetClientURL()
+
+	s1, tsoServerCleanup1, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
+	defer tsoServerCleanup1()
+	re.NoError(err)
+	s2, tsoServerCleanup2, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
+	defer tsoServerCleanup2()
+	re.NoError(err)
+	cmd := pdctlCmd.GetRootCmd()
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+
+	// set-node keyspace group.
+	defaultKeyspaceGroupID := fmt.Sprintf("%d", utils.DefaultKeyspaceGroupID)
+	testutil.Eventually(re, func() bool {
+		args := []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, s1.GetAddr(), s2.GetAddr()}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		return strings.Contains(string(output), "Success")
+	})
+
+	// set-priority keyspace group.
+	checkPriority := func(p int) {
+		testutil.Eventually(re, func() bool {
+			args := []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, s1.GetAddr()}
+			if p >= 0 {
+				args = append(args, strconv.Itoa(p))
+			} else {
+				args = append(args, "--", strconv.Itoa(p))
+			}
+			output, err := pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			return strings.Contains(string(output), "Success")
+		})
+
+		// check keyspace group information.
+		args := []string{"-u", pdAddr, "keyspace-group"}
+		output, err := pdctl.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
+		re.NoError(err)
+		var keyspaceGroup endpoint.KeyspaceGroup
+		err = json.Unmarshal(output, &keyspaceGroup)
+		re.NoError(err)
+		re.Equal(utils.DefaultKeyspaceGroupID, keyspaceGroup.ID)
+		re.Len(keyspaceGroup.Members, 2)
+		for _, member := range keyspaceGroup.Members {
+			re.Contains([]string{s1.GetAddr(), s2.GetAddr()}, member.Address)
+			if member.Address == s1.GetAddr() {
+				re.Equal(p, member.Priority)
+			} else {
+				re.Equal(0, member.Priority)
+			}
+		}
+	}
+
+	checkPriority(200)
+	checkPriority(-200)
+
+	// params error for set-node.
+	args := []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, s1.GetAddr()}
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "invalid num of nodes")
+	args = []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, "", ""}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Failed to parse the tso node address")
+	args = []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, s1.GetAddr(), "http://pingcap.com"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "node does not exist")
+
+	// params error for set-priority.
+	args = []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, "", "200"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Failed to parse the tso node address")
+	args = []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, "http://pingcap.com", "200"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "node does not exist")
+	args = []string{"-u", pdAddr, "keyspace-group", "set-priority", defaultKeyspaceGroupID, s1.GetAddr(), "xxx"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Failed to parse the priority")
 }
