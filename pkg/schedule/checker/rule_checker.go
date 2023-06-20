@@ -403,14 +403,14 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	if oldStore == 0 {
 		return nil, nil
 	}
-	var newStores []*core.StoreInfo
+	var coLocationStores []*core.StoreInfo
 	for _, s := range regionStores {
 		if s.GetID() != oldStore && placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
-			newStores = append(newStores, s)
+			coLocationStores = append(coLocationStores, s)
 		}
 	}
 
-	newStore, filterByTempState := strategy.SelectStoreToImprove(newStores, oldStore)
+	newStore, filterByTempState := strategy.SelectStoreToImprove(coLocationStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		c.handleFilterState(region, filterByTempState)
