@@ -405,7 +405,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	}
 	var coLocationStores []*core.StoreInfo
 	for _, s := range regionStores {
-		if s.GetID() != oldStore && placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
+		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
 			coLocationStores = append(coLocationStores, s)
 		}
 	}
