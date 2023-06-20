@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -54,6 +55,7 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
 	cluster, err := tests.NewTestAPICluster(suite.ctx, 1)
@@ -77,6 +79,7 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	suite.cleanupFunc()
 	suite.cluster.Destroy()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
 
 func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
@@ -292,9 +295,12 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	mcs.WaitForPrimaryServing(suite.Require(), nodes)
 
 	// the default keyspace group is exist.
-	time.Sleep(2 * time.Second)
-	kg, code := suite.tryGetKeyspaceGroup(utils.DefaultKeyspaceGroupID)
-	suite.Equal(http.StatusOK, code)
+	var kg *endpoint.KeyspaceGroup
+	var code int
+	testutil.Eventually(suite.Require(), func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(utils.DefaultKeyspaceGroupID)
+		return code == http.StatusOK && kg != nil
+	}, testutil.WithWaitFor(time.Second*1))
 	suite.Equal(utils.DefaultKeyspaceGroupID, kg.ID)
 	suite.Len(kg.Members, utils.DefaultKeyspaceGroupReplicaCount)
 	for _, member := range kg.Members {

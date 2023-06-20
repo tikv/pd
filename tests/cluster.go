@@ -62,6 +62,8 @@ var (
 	WaitLeaderReturnDelay = 20 * time.Millisecond
 	// WaitLeaderCheckInterval represents the time interval of WaitLeader running check.
 	WaitLeaderCheckInterval = 500 * time.Millisecond
+	// WaitLeaderRetryTimes represents the maximum number of loops of WaitLeader.
+	WaitLeaderRetryTimes = 100
 )
 
 // TestServer is only for test.
@@ -440,7 +442,7 @@ func (s *TestServer) BootstrapCluster() error {
 // make a test know the PD leader has been elected as soon as possible.
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
-	for i := 0; i < 100; i++ {
+	for i := 0; i < WaitLeaderRetryTimes; i++ {
 		if s.server.GetMember().IsLeader() {
 			return true
 		}
@@ -649,7 +651,7 @@ func (c *TestCluster) GetFollower() string {
 // If it exceeds the maximum number of loops, it will return an empty string.
 func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 	option := &WaitOp{
-		retryTimes:   100,
+		retryTimes:   WaitLeaderRetryTimes,
 		waitInterval: WaitLeaderCheckInterval,
 	}
 	for _, op := range ops {
@@ -716,7 +718,7 @@ func (c *TestCluster) ResignLeader() error {
 // If it exceeds the maximum number of loops, it will return an empty string.
 func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) string {
 	option := &WaitOp{
-		retryTimes:   100,
+		retryTimes:   WaitLeaderRetryTimes,
 		waitInterval: WaitLeaderCheckInterval,
 	}
 	for _, op := range ops {
