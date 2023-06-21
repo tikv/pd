@@ -338,12 +338,12 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	// start client
-	s.client, s.httpClient, err = startClient(s.cfg)
+	s.client, s.httpClient, err = s.startClient()
 	if err != nil {
 		return err
 	}
 
-	s.electionClient, err = startElectionClient(s.cfg)
+	s.electionClient, err = s.startElectionClient()
 	if err != nil {
 		return err
 	}
@@ -370,29 +370,29 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	return nil
 }
 
-func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
-	tlsConfig, err := cfg.Security.ToTLSConfig()
+func (s *Server) startClient() (*clientv3.Client, *http.Client, error) {
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return nil, nil, err
 	}
-	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
 	if err != nil {
 		return nil, nil, err
 	}
-	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls[0])
+	return etcdutil.CreateClients(s.ctx, tlsConfig, etcdCfg.ACUrls)
 }
 
-func startElectionClient(cfg *config.Config) (*clientv3.Client, error) {
-	tlsConfig, err := cfg.Security.ToTLSConfig()
+func (s *Server) startElectionClient() (*clientv3.Client, error) {
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return nil, err
 	}
-	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	return etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls[0])
+	return etcdutil.CreateEtcdClient(s.ctx, tlsConfig, etcdCfg.ACUrls)
 }
 
 // AddStartCallback adds a callback in the startServer phase.

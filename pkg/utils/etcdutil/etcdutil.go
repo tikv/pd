@@ -17,9 +17,11 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"net/url"
+	"sort"
 	"sync"
 	"time"
 
@@ -27,11 +29,13 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver"
+	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
@@ -40,9 +44,6 @@ import (
 const (
 	// defaultEtcdClientTimeout is the default timeout for etcd client.
 	defaultEtcdClientTimeout = 3 * time.Second
-
-	// defaultAutoSyncInterval is the interval to sync etcd cluster.
-	defaultAutoSyncInterval = 60 * time.Second
 
 	// defaultDialKeepAliveTime is the time after which client pings the server to see if transport is alive.
 	defaultDialKeepAliveTime = 10 * time.Second
@@ -196,9 +197,241 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
 }
 
+var etcdStateGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "server",
+		Name:      "etcd_client",
+		Help:      "Etcd raft states.",
+	}, []string{"type"})
+
+func init() {
+	prometheus.MustRegister(etcdStateGauge)
+}
+
+func newClient(tlsConfig *tls.Config, acURL ...string) (*clientv3.Client, error) {
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
+	client, err := clientv3.New(clientv3.Config{
+		Endpoints:            acURL,
+		DialTimeout:          defaultEtcdClientTimeout,
+		TLS:                  tlsConfig,
+		LogConfig:            &lgc,
+		DialKeepAliveTime:    defaultDialKeepAliveTime,
+		DialKeepAliveTimeout: defaultDialKeepAliveTimeout,
+	})
+	return client, err
+}
+
+// CreateEtcdClient creates etcd v3 client with detecting endpoints.
+func CreateEtcdClient(ctx context.Context, tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client, error) {
+	urls := make([]string, 0, len(acURLs))
+	for _, u := range acURLs {
+		urls = append(urls, u.String())
+	}
+	client, err := newClient(tlsConfig, urls...)
+	if err != nil {
+		return nil, err
+	}
+	checker := &healthyChecker{
+		tlsConfig: tlsConfig,
+	}
+	eps := syncUrls(ctx, client)
+	checker.update(eps)
+	tickerInterval := defaultDialKeepAliveTime
+	failpoint.Inject("fastTick", func() {
+		tickerInterval = 100 * time.Millisecond
+	})
+	failpoint.Inject("closeTick", func() {
+		tickerInterval = 0
+	})
+	if tickerInterval == 0 {
+		return client, err
+	}
+
+	go func(ctx context.Context, client *clientv3.Client) {
+		defer logutil.LogPanic()
+		ticker := time.NewTicker(tickerInterval)
+		defer ticker.Stop()
+		lastReset := time.Now()
+		lastAvailable := time.Now()
+		for {
+			select {
+			case <-client.Ctx().Done():
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				usedEps := client.Endpoints()
+				healthyEps := checker.patrol(ctx)
+				if len(healthyEps) == 0 {
+					// when all endpoints are unhealthy, try to reset endpoints rather than delete them
+					// to avoid blocking there is no any endpoint in client.
+					if time.Since(lastAvailable) > 60*time.Second && time.Since(lastReset) > 10*time.Second { // reset endpoints after 60s
+						log.Info("[etcd client] no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
+						client.SetEndpoints(healthyEps...)
+						client.SetEndpoints(usedEps...)
+						lastReset = time.Now()
+					}
+				} else {
+					if !isEqual(healthyEps, usedEps) {
+						client.SetEndpoints(healthyEps...)
+						change := fmt.Sprintf("%d->%d", len(usedEps), len(healthyEps))
+						etcdStateGauge.WithLabelValues("ep").Set(float64(len(healthyEps)))
+						log.Info("[etcd client] update endpoints", zap.String("num-change", change),
+							zap.Strings("last-endpoints", usedEps), zap.Strings("endpoints", client.Endpoints()))
+					}
+					lastAvailable = time.Now()
+				}
+			}
+		}
+	}(ctx, client)
+
+	// Notes: use another goroutine to update endpoints to avoid blocking health check in the first goroutine.
+	go func(ctx context.Context, client *clientv3.Client) {
+		defer logutil.LogPanic()
+		ticker := time.NewTicker(tickerInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-client.Ctx().Done():
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				eps := syncUrls(ctx, client)
+				checker.update(eps)
+			}
+		}
+	}(ctx, client)
+
+	return client, err
+}
+
+// offlineTimeout is the timeout for an unhealthy etcd endpoint to be offline from healthy checker.
+const offlineTimeout = 120 * time.Minute
+const disconnectedTimeout = 1 * time.Minute
+
+type healthyClient struct {
+	*clientv3.Client
+	lastHealth time.Time
+}
+
+type healthyChecker struct {
+	sync.Map  // map[string]*healthyClient
+	tlsConfig *tls.Config
+}
+
+func (checker *healthyChecker) patrol(ctx context.Context) []string {
+	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105
+	var wg sync.WaitGroup
+	count := 0
+	checker.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	hch := make(chan string, count)
+	healthyList := make([]string, 0, count)
+	checker.Range(func(key, value interface{}) bool {
+		wg.Add(1)
+		go func(key, value interface{}) {
+			defer wg.Done()
+			defer logutil.LogPanic()
+			ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(ctx), DefaultRequestTimeout)
+			defer cancel()
+			ep := key.(string)
+			client := value.(*healthyClient)
+			_, err := client.Get(ctx, "health")
+			// permission denied is OK since proposal goes through consensus to get it
+			if err == nil || err == rpctypes.ErrPermissionDenied {
+				hch <- ep
+				checker.Store(ep, &healthyClient{
+					Client:     client.Client,
+					lastHealth: time.Now(),
+				})
+				return
+			}
+		}(key, value)
+		return true
+	})
+	wg.Wait()
+	close(hch)
+	for h := range hch {
+		healthyList = append(healthyList, h)
+	}
+	return healthyList
+}
+
+func (checker *healthyChecker) update(eps []string) {
+	for _, ep := range eps {
+		// check if client exists, if not, create one, if exists, check if it's offline
+		if client, ok := checker.Load(ep); ok {
+			lastHealthy := client.(*healthyClient).lastHealth
+			if time.Since(lastHealthy) > offlineTimeout {
+				log.Info("[etcd client] some endpoint maybe offline", zap.String("endpoint", ep))
+				checker.Delete(ep)
+			}
+			if time.Since(lastHealthy) > disconnectedTimeout {
+				// try to update client
+				checker.addClient(ep, lastHealthy)
+			}
+			continue
+		}
+		checker.addClient(ep, time.Now())
+	}
+}
+
+func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
+	client, err := newClient(checker.tlsConfig, ep)
+	if err != nil {
+		log.Error("[etcd client] failed to create etcd healthy client", zap.Error(err))
+		return
+	}
+	checker.Store(ep, &healthyClient{
+		Client:     client,
+		lastHealth: lastHealth,
+	})
+}
+
+func syncUrls(ctx context.Context, client *clientv3.Client) []string {
+	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/clientv3/client.go#L170
+	ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(ctx), DefaultRequestTimeout)
+	defer cancel()
+	now := time.Now()
+	mresp, err := client.MemberList(ctx)
+	if err != nil {
+		log.Error("[etcd client] failed to list members", errs.ZapError(err))
+		return []string{}
+	}
+	if time.Since(now) > defaultEtcdClientTimeout {
+		log.Warn("[etcd client] sync etcd members slow", zap.Duration("cost", time.Since(now)), zap.Int("members", len(mresp.Members)))
+	}
+	var eps []string
+	for _, m := range mresp.Members {
+		if len(m.Name) != 0 && !m.IsLearner {
+			eps = append(eps, m.ClientURLs...)
+		}
+	}
+	return eps
+}
+
+func isEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	sort.Strings(a)
+	sort.Strings(b)
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // CreateClients creates etcd v3 client and http client.
-func CreateClients(tlsConfig *tls.Config, acUrls url.URL) (*clientv3.Client, *http.Client, error) {
-	client, err := CreateEtcdClient(tlsConfig, acUrls)
+func CreateClients(ctx context.Context, tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
+	client, err := CreateEtcdClient(ctx, tlsConfig, acUrls)
 	if err != nil {
 		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
@@ -206,62 +439,7 @@ func CreateClients(tlsConfig *tls.Config, acUrls url.URL) (*clientv3.Client, *ht
 	return client, httpClient, nil
 }
 
-// createEtcdClientWithMultiEndpoint creates etcd v3 client.
-// Note: it will be used by micro service server and support multi etcd endpoints.
-// FIXME: But it cannot switch etcd endpoints as soon as possible when one of endpoints is with io hang.
-func createEtcdClientWithMultiEndpoint(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, error) {
-	if len(acUrls) == 0 {
-		return nil, errs.ErrNewEtcdClient.FastGenByArgs("no available etcd address")
-	}
-	endpoints := make([]string, 0, len(acUrls))
-	for _, u := range acUrls {
-		endpoints = append(endpoints, u.String())
-	}
-	lgc := zap.NewProductionConfig()
-	lgc.Encoding = log.ZapEncodingName
-	autoSyncInterval := defaultAutoSyncInterval
-	dialKeepAliveTime := defaultDialKeepAliveTime
-	dialKeepAliveTimeout := defaultDialKeepAliveTimeout
-	failpoint.Inject("autoSyncInterval", func() {
-		autoSyncInterval = 10 * time.Millisecond
-	})
-	failpoint.Inject("closeKeepAliveCheck", func() {
-		autoSyncInterval = 0
-		dialKeepAliveTime = 0
-		dialKeepAliveTimeout = 0
-	})
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:            endpoints,
-		DialTimeout:          defaultEtcdClientTimeout,
-		AutoSyncInterval:     autoSyncInterval,
-		TLS:                  tlsConfig,
-		LogConfig:            &lgc,
-		DialKeepAliveTime:    dialKeepAliveTime,
-		DialKeepAliveTimeout: dialKeepAliveTimeout,
-	})
-	if err == nil {
-		log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints))
-	}
-	return client, err
-}
-
-// CreateEtcdClient creates etcd v3 client.
-// Note: it will be used by legacy pd-server, and only connect to leader only.
-func CreateEtcdClient(tlsConfig *tls.Config, acURL url.URL) (*clientv3.Client, error) {
-	lgc := zap.NewProductionConfig()
-	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{acURL.String()},
-		DialTimeout: defaultEtcdClientTimeout,
-		TLS:         tlsConfig,
-		LogConfig:   &lgc,
-	})
-	if err == nil {
-		log.Info("create etcd v3 client", zap.String("endpoints", acURL.String()))
-	}
-	return client, err
-}
-
+// createHTTPClient creates a http client with the given tls config.
 func createHTTPClient(tlsConfig *tls.Config) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
