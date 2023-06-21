@@ -154,6 +154,7 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793 // indirect
+	go.etcd.io/etcd/api/v3 v3.5.9 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
