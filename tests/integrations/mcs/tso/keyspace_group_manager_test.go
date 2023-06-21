@@ -427,8 +427,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 	re.Equal(uint32(2), kg2.ID)
 	re.Equal([]uint32{222, 333}, kg2.Keyspaces)
 	re.True(kg2.IsSplitTarget())
-	// Finish the split.
-	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, 2)
 	// Wait for a while to make sure the client has received the new TSO.
 	time.Sleep(time.Second)
 	// Stop the client.
