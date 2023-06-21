@@ -741,6 +741,14 @@ func (c *tsoClient) compareAndSwapTS(
 	lastKeyspaceGroupID := lastTSOPointer.keyspaceGroupID
 	lastPhysical := lastTSOPointer.physical
 	lastLogical := lastTSOPointer.logical
+
+	if lastKeyspaceGroupID != respKeyspaceGroupID {
+		log.Info("[tso] keyspace group changed",
+			zap.String("dc-location", dcLocation),
+			zap.Uint32("old-group-id", lastKeyspaceGroupID),
+			zap.Uint32("new-group-id", respKeyspaceGroupID))
+	}
+
 	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical
 	// to compare with the new TSO's first logical. For example, if we have a TSO resp with logical 10, count 5, then
 	// all TSOs we get will be [6, 7, 8, 9, 10].
