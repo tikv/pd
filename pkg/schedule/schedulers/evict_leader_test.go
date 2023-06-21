@@ -41,7 +41,7 @@ func TestEvictLeader(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 1)
 	tc.AddLeaderRegion(3, 3, 1)
 
-	sl, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
+	sl, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 	re.True(sl.IsScheduleAllowed(tc))
 	ops, _ := sl.Schedule(tc, false)
@@ -54,7 +54,7 @@ func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sl, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}))
+	sl, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 
 	// Add stores 1, 2, 3

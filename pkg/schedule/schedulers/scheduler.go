@@ -40,10 +40,10 @@ type Scheduler interface {
 	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster sche.ClusterInformer) error
-	Cleanup(cluster sche.ClusterInformer)
-	Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan)
-	IsScheduleAllowed(cluster sche.ClusterInformer) bool
+	Prepare(cluster sche.ScheduleCluster) error
+	Cleanup(cluster sche.ScheduleCluster)
+	Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
+	IsScheduleAllowed(cluster sche.ScheduleCluster) bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.
@@ -89,7 +89,7 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 }
 
 // CreateSchedulerFunc is for creating scheduler.
-type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder) (Scheduler, error)
+type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error)
 
 var schedulerMap = make(map[string]CreateSchedulerFunc)
 var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
@@ -114,13 +114,13 @@ func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) 
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(typ string, opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder) (Scheduler, error) {
+func CreateScheduler(typ string, oc *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
 	}
 
-	s, err := fn(opController, storage, dec)
+	s, err := fn(oc, storage, dec, removeSchedulerCb...)
 	if err != nil {
 		return nil, err
 	}

@@ -23,9 +23,9 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     outputs:
-      job-total: 10
+      job-total: 13
     steps:
       - uses: actions/setup-go@v3
         with:
@@ -44,9 +44,10 @@ jobs:
       - name: Make Test
         env:
           WORKER_ID: ${{ matrix.worker_id }}
-          WORKER_COUNT: 10
+          WORKER_COUNT: 13
+          JOB_COUNT: 10 # 11, 12 13 are for other integrations jobs
         run: |
-          make ci-test-job JOB_COUNT=$(($WORKER_COUNT)) JOB_INDEX=$WORKER_ID
+          make ci-test-job JOB_COUNT=$(($JOB_COUNT)) JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID
           sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
       - name: Upload coverage result ${{ matrix.worker_id }}

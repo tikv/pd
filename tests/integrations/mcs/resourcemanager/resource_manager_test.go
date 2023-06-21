@@ -203,15 +203,31 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	re.Equal(len(lresp), 4)
 	re.Greater(revision, int64(0))
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 100}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/disableWatch", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/disableWatch"))
+	}()
+	controllerKeySpace, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, controller.EnableSingleGroupByKeyspace())
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
 	controller.Start(suite.ctx)
 	defer controller.Stop()
 	controller.OnRequestWait(suite.ctx, "test0", tcs.makeReadRequest())
 	meta := controller.GetActiveResourceGroup("test0")
+	metaShadow, err := controller.GetResourceGroup("test0")
+	re.NoError(err)
 	re.Equal(meta.RUSettings.RU, group.RUSettings.RU)
+	re.Equal(metaShadow.RUSettings.RU, group.RUSettings.RU)
+
+	controllerKeySpace.OnRequestWait(suite.ctx, "test0", tcs.makeReadRequest())
+	metaKeySpace := controllerKeySpace.GetActiveResourceGroup("test0")
+	re.Equal(metaKeySpace.RUSettings.RU, group.RUSettings.RU)
+
 	controller.OnRequestWait(suite.ctx, "test1", tcs.makeReadRequest())
 	meta = controller.GetActiveResourceGroup("test1")
+	metaShadow, err = controller.GetResourceGroup("test1")
+	re.NoError(err)
 	re.Equal(meta.RUSettings.RU, group.RUSettings.RU)
+	re.Equal(metaShadow.RUSettings.RU, group.RUSettings.RU)
 	suite.NoError(err)
 	// Mock add resource groups
 	for i := 3; i < 9; i++ {
@@ -237,6 +253,8 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 				meta = controller.GetActiveResourceGroup("test0")
 				return meta.RUSettings.RU.Settings.FillRate == uint64(20000)
 			}, testutil.WithTickInterval(50*time.Millisecond))
+			metaKeySpace = controllerKeySpace.GetActiveResourceGroup("test0")
+			re.Equal(metaKeySpace.RUSettings.RU.Settings.FillRate, uint64(10000))
 			re.NoError(failpoint.Enable("github.com/tikv/pd/client/watchStreamError", "return(true)"))
 		}
 		group.Name = "test" + strconv.Itoa(i)
@@ -730,7 +748,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":1000},"action":2,"watch":{"last_duration_ms":100000,"type":1}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":1000},"action":2,"watch":{"lasting_duration_ms":100000,"type":1}}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -746,8 +764,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 					},
 					Action: rmpb.RunawayAction_Kill,
 					Watch: &rmpb.RunawayWatch{
-						Type:           rmpb.RunawayWatchType_Similar,
-						LastDurationMs: 100000,
+						Type:              rmpb.RunawayWatchType_Similar,
+						LastingDurationMs: 100000,
 					},
 				}
 			},

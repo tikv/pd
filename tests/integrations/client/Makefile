@@ -32,7 +32,7 @@ test: failpoint-enable
 	$(MAKE) failpoint-disable
 
 ci-test-job:
-	CGO_ENABLED=1 go test -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=$(ROOT_PATH)/... github.com/tikv/pd/tests/integrations/client
+	CGO_ENABLED=1 go test -v -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=$(ROOT_PATH)/... github.com/tikv/pd/tests/integrations/client
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools

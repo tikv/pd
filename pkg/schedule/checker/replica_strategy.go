@@ -93,6 +93,9 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 // SelectStoreToFix returns a store to replace down/offline old peer. The location
 // placement after scheduling is allowed to be worse than original.
 func (s *ReplicaStrategy) SelectStoreToFix(coLocationStores []*core.StoreInfo, old uint64) (uint64, bool) {
+	if len(coLocationStores) == 0 {
+		return 0, false
+	}
 	// trick to avoid creating a slice with `old` removed.
 	s.swapStoreToFirst(coLocationStores, old)
 	return s.SelectStoreToAdd(coLocationStores[1:])
@@ -101,6 +104,9 @@ func (s *ReplicaStrategy) SelectStoreToFix(coLocationStores []*core.StoreInfo, o
 // SelectStoreToImprove returns a store to replace oldStore. The location
 // placement after scheduling should be better than original.
 func (s *ReplicaStrategy) SelectStoreToImprove(coLocationStores []*core.StoreInfo, old uint64) (uint64, bool) {
+	if len(coLocationStores) == 0 {
+		return 0, false
+	}
 	// trick to avoid creating a slice with `old` removed.
 	s.swapStoreToFirst(coLocationStores, old)
 	oldStore := s.cluster.GetStore(old)

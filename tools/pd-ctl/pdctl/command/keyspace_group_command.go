@@ -17,6 +17,7 @@ package command
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/spf13/cobra"
@@ -32,6 +33,8 @@ func NewKeyspaceGroupCommand() *cobra.Command {
 		Run:   showKeyspaceGroupCommandFunc,
 	}
 	cmd.AddCommand(newSplitKeyspaceGroupCommand())
+	cmd.AddCommand(newSetNodesKeyspaceGroupCommand())
+	cmd.AddCommand(newSetPriorityKeyspaceGroupCommand())
 	return cmd
 }
 
@@ -40,6 +43,24 @@ func newSplitKeyspaceGroupCommand() *cobra.Command {
 		Use:   "split <keyspace_group_id> <new_keyspace_group_id> [<keyspace_id>]",
 		Short: "split the keyspace group with the given ID and transfer the keyspaces into the newly split one",
 		Run:   splitKeyspaceGroupCommandFunc,
+	}
+	return r
+}
+
+func newSetNodesKeyspaceGroupCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "set-node <keyspace_group_id> <tso_node_addr> [<tso_node_addr>...]",
+		Short: "set the address of tso nodes for keyspace group with the given ID",
+		Run:   setNodesKeyspaceGroupCommandFunc,
+	}
+	return r
+}
+
+func newSetPriorityKeyspaceGroupCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "set-priority <keyspace_group_id> <tso_node_addr> <priority>",
+		Short: "set the priority of tso nodes for keyspace group with the given ID. If the priority is negative, it need to add a prefix with -- to avoid identified as flag.",
+		Run:   setPriorityKeyspaceGroupCommandFunc,
 	}
 	return r
 }
@@ -62,6 +83,11 @@ func splitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
+	_, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		cmd.Printf("Failed to parse the old keyspace group ID: %s\n", err)
+		return
+	}
 	newID, err := strconv.ParseUint(args[1], 10, 32)
 	if err != nil {
 		cmd.Printf("Failed to parse the new keyspace group ID: %s\n", err)
@@ -79,5 +105,59 @@ func splitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, fmt.Sprintf("%s/%s/split", keyspaceGroupsPrefix, args[0]), map[string]interface{}{
 		"new-id":    uint32(newID),
 		"keyspaces": keyspaces,
+	})
+}
+
+func setNodesKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 2 {
+		cmd.Usage()
+		return
+	}
+	_, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		cmd.Printf("Failed to parse the keyspace group ID: %s\n", err)
+		return
+	}
+	addresses := make([]string, 0, len(args)-1)
+	for _, arg := range args[1:] {
+		u, err := url.ParseRequestURI(arg)
+		if u == nil || err != nil {
+			cmd.Printf("Failed to parse the tso node address: %s\n", err)
+			return
+		}
+		addresses = append(addresses, arg)
+	}
+	postJSON(cmd, fmt.Sprintf("%s/%s/nodes", keyspaceGroupsPrefix, args[0]), map[string]interface{}{
+		"Nodes": addresses,
+	})
+}
+
+func setPriorityKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 3 {
+		cmd.Usage()
+		return
+	}
+	_, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		cmd.Printf("Failed to parse the keyspace group ID: %s\n", err)
+		return
+	}
+
+	address := args[1]
+	u, err := url.ParseRequestURI(address)
+	if u == nil || err != nil {
+		cmd.Printf("Failed to parse the tso node address: %s\n", err)
+		return
+	}
+
+	priority, err := strconv.ParseInt(args[2], 10, 32)
+	if err != nil {
+		cmd.Printf("Failed to parse the priority: %s\n", err)
+		return
+	}
+
+	postJSON(cmd, fmt.Sprintf("%s/%s/priority", keyspaceGroupsPrefix, args[0]), map[string]interface{}{
+		"Node":     address,
+		"Priority": priority,
 	})
 }

@@ -463,7 +463,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 
 	mc := NewMergeChecker(suite.ctx, tc, tc.GetOpts())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := operator.NewController(suite.ctx, tc, stream)
+	oc := operator.NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
 
 	regions[2] = regions[2].Clone(
 		core.SetPeers([]*metapb.Peer{

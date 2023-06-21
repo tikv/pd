@@ -70,7 +70,6 @@ type tsoClient struct {
 	wg     sync.WaitGroup
 	option *option
 
-	keyspaceID   uint32
 	svcDiscovery ServiceDiscovery
 	tsoStreamBuilderFactory
 	// tsoAllocators defines the mapping {dc-location -> TSO allocator leader URL}
@@ -94,7 +93,7 @@ type tsoClient struct {
 
 // newTSOClient returns a new TSO client.
 func newTSOClient(
-	ctx context.Context, option *option, keyspaceID uint32,
+	ctx context.Context, option *option,
 	svcDiscovery ServiceDiscovery, factory tsoStreamBuilderFactory,
 ) *tsoClient {
 	ctx, cancel := context.WithCancel(ctx)
@@ -102,7 +101,6 @@ func newTSOClient(
 		ctx:                       ctx,
 		cancel:                    cancel,
 		option:                    option,
-		keyspaceID:                keyspaceID,
 		svcDiscovery:              svcDiscovery,
 		tsoStreamBuilderFactory:   factory,
 		checkTSDeadlineCh:         make(chan struct{}),
