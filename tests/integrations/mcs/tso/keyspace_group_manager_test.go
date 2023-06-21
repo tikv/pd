@@ -361,6 +361,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient() {
 	re := suite.Require()
+	// Enable the failpoint to slow down the system time to test whether the TSO is monotonic.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/systemTimeSlow", `return(true)`))
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -376,8 +378,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 	re.Equal(uint32(1), kg1.ID)
 	re.Equal([]uint32{111, 222, 333}, kg1.Keyspaces)
 	re.False(kg1.IsSplitting())
+	// Make sure the leader of the keyspace group 2 is elected.
+	member, err := suite.tsoCluster.WaitForPrimaryServing(re, 222, 2).GetMember(222, 2)
+	re.NoError(err)
+	re.NotNil(member)
 	// Prepare the client for keyspace 222.
-	var tsoClient pd.TSOClient
 	tsoClient, err := pd.NewClientWithKeyspace(suite.ctx, 222, []string{suite.pdLeaderServer.GetAddr()}, pd.SecurityOption{})
 	re.NoError(err)
 	re.NotNil(tsoClient)
@@ -423,17 +428,17 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 		NewID:     2,
 		Keyspaces: []uint32{222, 333},
 	})
-	kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
-	re.Equal(uint32(2), kg2.ID)
-	re.Equal([]uint32{222, 333}, kg2.Keyspaces)
-	re.True(kg2.IsSplitTarget())
-	// Finish the split.
-	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, 2)
-	// Wait for a while to make sure the client has received the new TSO.
-	time.Sleep(time.Second)
+	// Wait for the keyspace group 2 to finish the split.
+	testutil.Eventually(re, func() bool {
+		kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
+		re.Equal(uint32(2), kg2.ID)
+		re.Equal([]uint32{222, 333}, kg2.Keyspaces)
+		return !kg2.IsSplitTarget()
+	})
 	// Stop the client.
 	cancel()
 	wg.Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/systemTimeSlow"))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
