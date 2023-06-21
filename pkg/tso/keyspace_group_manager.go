@@ -837,18 +837,23 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	if err != nil {
 		return err
 	}
+	// If the split source TSO is not greater than the newly split TSO, we don't need to do anything.
 	if tsoutil.CompareTimestamp(&splitSourceTSO, &splitTSO) <= 0 {
-		log.Debug("the split source TSO is not greater than the newly split TSO",
+		log.Info("the split source tso is less than the newly split tso",
 			zap.Int64("split-source-tso-physical", splitSourceTSO.Physical),
 			zap.Int64("split-source-tso-logical", splitSourceTSO.Logical),
 			zap.Int64("split-tso-physical", splitTSO.Physical),
-			zap.Int64("split-tso-logical", splitTSO.Logical),
-		)
-		return nil
+			zap.Int64("split-tso-logical", splitTSO.Logical))
+		return kgm.finishSplitKeyspaceGroup(keyspaceGroupID)
 	}
 	// If the split source TSO is greater than the newly split TSO, we need to update the split
 	// TSO to make sure the following TSO will be greater than the split keyspaces ever had
 	// in the past.
+	log.Info("the split source tso is greater than the newly split tso",
+		zap.Int64("split-source-tso-physical", splitSourceTSO.Physical),
+		zap.Int64("split-source-tso-logical", splitSourceTSO.Logical),
+		zap.Int64("split-tso-physical", splitTSO.Physical),
+		zap.Int64("split-tso-logical", splitTSO.Logical))
 	splitSourceTSO.Physical += 1
 	err = splitAllocator.SetTSO(tsoutil.GenerateTS(&splitSourceTSO), true, true)
 	if err != nil {
