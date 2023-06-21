@@ -274,6 +274,44 @@ func TestEtcdClientSync(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/autoSyncInterval"))
 }
 
+func TestEtcdClientSync2(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start a etcd server.
+	cfg1 := NewTestSingleConfig(t)
+	etcd1, err := embed.StartEtcd(cfg1)
+	defer func() {
+		etcd1.Close()
+	}()
+	re.NoError(err)
+
+	// Create a etcd client with etcd1 as endpoint.
+	ep1 := cfg1.LCUrls[0].String()
+	urls, err := types.NewURLs([]string{ep1})
+	re.NoError(err)
+	client1, err := CreateEtcdClient(ctx, nil, urls[0])
+	defer func() {
+		client1.Close()
+	}()
+	re.NoError(err)
+	<-etcd1.Server.ReadyNotify()
+	// Add a new member.
+	etcd2 := checkAddEtcdMember(t, cfg1, client1)
+	defer etcd2.Close()
+	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
+	time.Sleep(5 * time.Second)
+	// Remove the first member and close the etcd1.
+	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	re.NoError(err)
+	etcd1.Close()
+	time.Sleep(5 * time.Second)
+	// Check the client can get the new member with the new endpoints.
+	checkMembers(re, client1, []*embed.Etcd{etcd2})
+	time.Sleep(5 * time.Second)
+}
+
 func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	re := require.New(t)
 	var err error
@@ -305,12 +343,12 @@ func TestEtcdScaleInAndOutWithoutMultiPoint(t *testing.T) {
 	// Create two etcd clients with etcd1 as endpoint.
 	urls, err := types.NewURLs([]string{ep1})
 	re.NoError(err)
-	client1, err := CreateEtcdClient(nil, urls[0]) // execute member change operation with this client
+	client1, err := CreateEtcdClient(context.Background(), nil, urls[0]) // execute member change operation with this client
 	defer func() {
 		client1.Close()
 	}()
 	re.NoError(err)
-	client2, err := CreateEtcdClient(nil, urls[0]) // check member change with this client
+	client2, err := CreateEtcdClient(context.Background(), nil, urls[0]) // check member change with this client
 	defer func() {
 		client2.Close()
 	}()
@@ -482,7 +520,7 @@ func (suite *loopWatcherTestSuite) SetupSuite() {
 	ep1 := suite.config.LCUrls[0].String()
 	urls, err := types.NewURLs([]string{ep1})
 	suite.NoError(err)
-	suite.client, err = CreateEtcdClient(nil, urls[0])
+	suite.client, err = CreateEtcdClient(context.Background(), nil, urls[0])
 	suite.NoError(err)
 	suite.cleans = append(suite.cleans, func() {
 		suite.client.Close()
@@ -685,7 +723,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case2: close the etcd client and put a new value after watcher restarts
 	suite.client.Close()
-	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls[0])
+	suite.client, err = CreateEtcdClient(context.Background(), nil, suite.config.LCUrls[0])
 	suite.NoError(err)
 	watcher.updateClientCh <- suite.client
 	suite.put("TestWatcherBreak", "2")
@@ -693,7 +731,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case3: close the etcd client and put a new value before watcher restarts
 	suite.client.Close()
-	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls[0])
+	suite.client, err = CreateEtcdClient(context.Background(), nil, suite.config.LCUrls[0])
 	suite.NoError(err)
 	suite.put("TestWatcherBreak", "3")
 	watcher.updateClientCh <- suite.client
@@ -701,7 +739,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case4: close the etcd client and put a new value with compact
 	suite.client.Close()
-	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls[0])
+	suite.client, err = CreateEtcdClient(context.Background(), nil, suite.config.LCUrls[0])
 	suite.NoError(err)
 	suite.put("TestWatcherBreak", "4")
 	resp, err := EtcdKVGet(suite.client, "TestWatcherBreak")
