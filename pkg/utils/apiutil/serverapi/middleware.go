@@ -30,6 +30,7 @@ import (
 const (
 	PDRedirectorHeader    = "PD-Redirector"
 	PDAllowFollowerHandle = "PD-Allow-follower-handle"
+	ForwardedForHeader    = "X-Forwarded-For"
 )
 
 type runtimeServiceValidator struct {
@@ -144,6 +145,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	}
 
 	r.Header.Set(PDRedirectorHeader, h.s.Name())
+	r.Header.Add(ForwardedForHeader, r.RemoteAddr)
 
 	var clientUrls []string
 	if matchedFlag {
