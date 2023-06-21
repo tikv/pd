@@ -155,6 +155,7 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
+	go.etcd.io/etcd/api/v3 v3.5.9 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
