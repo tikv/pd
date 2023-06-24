@@ -159,6 +159,7 @@ func (c *coordinator) patrolRegions() {
 
 func (c *coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
 	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
+	log.Info("check regions", zap.ByteString("start-key", startKey), zap.Int("region-count", len(regions)))
 	if len(regions) == 0 {
 		// Resets the scan key.
 		key = nil

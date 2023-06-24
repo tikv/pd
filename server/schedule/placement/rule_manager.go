@@ -330,6 +330,10 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) *Reg
 			return fit
 		}
 	}
+	log.Info("start to fit region",
+		zap.Any("rules", rules),
+		zap.Uint64("region-id", region.GetID()),
+		zap.Any("peers", region.GetPeers()))
 	fit := fitRegion(regionStores, region, rules, m.opt.IsWitnessAllowed())
 	fit.regionStores = regionStores
 	fit.rules = rules

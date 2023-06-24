@@ -15,13 +15,16 @@
 package placement
 
 import (
+	"fmt"
 	"math"
 	"math/bits"
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
+	"go.uber.org/zap"
 )
 
 const replicaBaseScore = 100
@@ -242,6 +245,10 @@ func (w *fitWorker) fitRule(index int) bool {
 		return false
 	}
 	if index >= len(w.rules) {
+		log.Info("fit rule index reach the end",
+			zap.Int("index", index),
+			zap.String("w", fmt.Sprintf("%+v", w)),
+			zap.Bool("w.bestFit.IsSatisfied", w.bestFit.IsSatisfied()))
 		// If there is no isolation level and we already find one solution, we can early exit searching instead of
 		// searching the whole cases.
 		if !w.needIsolation && w.bestFit.IsSatisfied() {
@@ -268,7 +275,15 @@ func (w *fitWorker) fitRule(index int) bool {
 		count = len(candidates)
 	}
 
-	return w.fixRuleWithCandidates(candidates, index, count)
+	better := w.fixRuleWithCandidates(candidates, index, count)
+	log.Info("finish fix rule with candidates",
+		zap.Int("index", index),
+		zap.Int("count", count),
+		zap.Bool("better", better),
+		zap.Any("candidates", candidates),
+		zap.String("rule", w.rules[index].String()),
+		zap.String("w", fmt.Sprintf("%+v", w)))
+	return better
 }
 
 // Pick the most suitable peer combination for the rule with candidates.
