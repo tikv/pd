@@ -15,7 +15,6 @@
 package placement
 
 import (
-	"fmt"
 	"math"
 	"math/bits"
 	"sort"
@@ -192,6 +191,7 @@ func fitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule,
 }
 
 type fitWorker struct {
+	regionID       uint64
 	stores         []*core.StoreInfo
 	bestFit        RegionFit  // update during execution
 	peers          []*fitPeer // p.selected is updated during execution.
@@ -223,6 +223,7 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
 	})
 	return &fitWorker{
+		regionID:       region.GetID(),
 		stores:         stores,
 		bestFit:        RegionFit{RuleFits: make([]*RuleFit, len(rules))},
 		peers:          peers,
@@ -246,8 +247,9 @@ func (w *fitWorker) fitRule(index int) bool {
 	}
 	if index >= len(w.rules) {
 		log.Info("fit rule index reach the end",
+			zap.Uint64("region-id", w.regionID),
 			zap.Int("index", index),
-			zap.String("w", fmt.Sprintf("%+v", w)),
+			zap.Bool("w.needIsolation", w.needIsolation),
 			zap.Bool("w.bestFit.IsSatisfied", w.bestFit.IsSatisfied()))
 		// If there is no isolation level and we already find one solution, we can early exit searching instead of
 		// searching the whole cases.
@@ -275,14 +277,16 @@ func (w *fitWorker) fitRule(index int) bool {
 		count = len(candidates)
 	}
 
-	better := w.fixRuleWithCandidates(candidates, index, count)
-	log.Info("finish fix rule with candidates",
+	log.Info("start fix rule with candidates",
+		zap.Uint64("region-id", w.regionID),
 		zap.Int("index", index),
 		zap.Int("count", count),
-		zap.Bool("better", better),
 		zap.Any("candidates", candidates),
-		zap.String("rule", w.rules[index].String()),
-		zap.String("w", fmt.Sprintf("%+v", w)))
+		zap.String("rule", w.rules[index].String()))
+	better := w.fixRuleWithCandidates(candidates, index, count)
+	log.Info("finish fix rule with candidates",
+		zap.Uint64("region-id", w.regionID),
+		zap.Bool("better", better))
 	return better
 }
 
@@ -296,6 +300,13 @@ func (w *fitWorker) fixRuleWithCandidates(candidates []*fitPeer, index int, coun
 	var better bool
 	limit := uint(1<<len(candidates) - 1)
 	binaryInt := uint(1<<count - 1)
+	log.Info("calculate limit and binary int",
+		zap.Uint64("region-id", w.regionID),
+		zap.Uint("limit", limit),
+		zap.Uint("binaryInt", binaryInt),
+		zap.Int("candidates.len", len(candidates)),
+		zap.Int("count", count),
+		zap.Int("index", index))
 	for ; binaryInt <= limit; binaryInt++ {
 		// there should be exactly `count` number in current binary number `binaryInt`
 		if bits.OnesCount(binaryInt) != count {
