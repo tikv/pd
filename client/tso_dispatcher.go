@@ -41,8 +41,9 @@ type tsoDispatcher struct {
 }
 
 type lastTSO struct {
-	physical int64
-	logical  int64
+	keyspaceGroupID uint32
+	physical        int64
+	logical         int64
 }
 
 const (
@@ -708,7 +709,7 @@ func (c *tsoClient) processRequests(
 
 	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
-	physical, logical, suffixBits, err := stream.processRequests(
+	respKeyspaceGroupID, physical, logical, suffixBits, err := stream.processRequests(
 		c.svcDiscovery.GetClusterID(), c.svcDiscovery.GetKeyspaceID(), c.svcDiscovery.GetKeyspaceGroupID(),
 		dcLocation, requests, tbc.batchStartTime)
 	if err != nil {
@@ -717,15 +718,19 @@ func (c *tsoClient) processRequests(
 	}
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 	firstLogical := tsoutil.AddLogical(logical, -count+1, suffixBits)
-	c.compareAndSwapTS(dcLocation, physical, firstLogical, suffixBits, count)
+	c.compareAndSwapTS(dcLocation, respKeyspaceGroupID, physical, firstLogical, suffixBits, count)
 	c.finishRequest(requests, physical, firstLogical, suffixBits, nil)
 	return nil
 }
 
-func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical int64, suffixBits uint32, count int64) {
+func (c *tsoClient) compareAndSwapTS(
+	dcLocation string, respKeyspaceGroupID uint32,
+	physical, firstLogical int64, suffixBits uint32, count int64,
+) {
 	largestLogical := tsoutil.AddLogical(firstLogical, count-1, suffixBits)
 	lastTSOInterface, loaded := c.lastTSMap.LoadOrStore(dcLocation, &lastTSO{
-		physical: physical,
+		keyspaceGroupID: respKeyspaceGroupID,
+		physical:        physical,
 		// Save the largest logical part here
 		logical: largestLogical,
 	})
@@ -733,17 +738,30 @@ func (c *tsoClient) compareAndSwapTS(dcLocation string, physical, firstLogical i
 		return
 	}
 	lastTSOPointer := lastTSOInterface.(*lastTSO)
+	lastKeyspaceGroupID := lastTSOPointer.keyspaceGroupID
 	lastPhysical := lastTSOPointer.physical
 	lastLogical := lastTSOPointer.logical
+
+	if lastKeyspaceGroupID != respKeyspaceGroupID {
+		log.Info("[tso] keyspace group changed",
+			zap.String("dc-location", dcLocation),
+			zap.Uint32("old-group-id", lastKeyspaceGroupID),
+			zap.Uint32("new-group-id", respKeyspaceGroupID))
+	}
+
 	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical
 	// to compare with the new TSO's first logical. For example, if we have a TSO resp with logical 10, count 5, then
 	// all TSOs we get will be [6, 7, 8, 9, 10].
 	if tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical) {
 		panic(errors.Errorf(
-			"%s timestamp fallback, new ts (%d, %d) <= the last one (%d, %d). keyspace: %d, keyspace group: %d",
+			"%s timestamp fallback, new ts (%d, %d) <= the last one (%d, %d). "+
+				"last keyspace group: %d, keyspace in request: %d, "+
+				"keyspace group in request: %d, keyspace group in response: %d",
 			dcLocation, physical, firstLogical, lastPhysical, lastLogical,
-			c.svcDiscovery.GetKeyspaceID(), c.svcDiscovery.GetKeyspaceGroupID()))
+			lastKeyspaceGroupID, c.svcDiscovery.GetKeyspaceID(),
+			c.svcDiscovery.GetKeyspaceGroupID(), respKeyspaceGroupID))
 	}
+	lastTSOPointer.keyspaceGroupID = respKeyspaceGroupID
 	lastTSOPointer.physical = physical
 	// Same as above, we save the largest logical part here.
 	lastTSOPointer.logical = largestLogical

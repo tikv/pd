@@ -683,6 +683,7 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 	// Update the keyspace group cache.
 	m.groups[endpoint.StringUserKind(splitTargetKg.UserKind)].Put(splitTargetKg)
 	m.groups[endpoint.StringUserKind(splitSourceKg.UserKind)].Put(splitSourceKg)
+	log.Info("finish split keyspace group", zap.Uint32("split-source-id", splitSourceKg.ID), zap.Uint32("split-target-id", splitTargetID))
 	return nil
 }
 

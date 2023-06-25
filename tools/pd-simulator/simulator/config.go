@@ -117,6 +117,9 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 
 	return sc.ServerConfig.Adjust(meta, false)
 }
+func (sc *SimConfig) speed() uint64 {
+	return uint64(time.Second / sc.SimTickInterval.Duration)
+}
 
 // PDConfig saves some config which may be changed in PD.
 type PDConfig struct {

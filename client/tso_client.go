@@ -209,7 +209,7 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 			return err
 		}
 		c.tsoAllocators.Store(dcLocation, addr)
-		log.Info("[tso] switch dc tso allocator serving address",
+		log.Info("[tso] switch dc tso local allocator serving address",
 			zap.String("dc-location", dcLocation),
 			zap.String("new-address", addr),
 			zap.String("old-address", oldAddr))
@@ -227,7 +227,7 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 
 func (c *tsoClient) updateTSOGlobalServAddr(addr string) error {
 	c.tsoAllocators.Store(globalDCLocation, addr)
-	log.Info("[tso] switch dc tso allocator serving address",
+	log.Info("[tso] switch dc tso global allocator serving address",
 		zap.String("dc-location", globalDCLocation),
 		zap.String("new-address", addr))
 	c.scheduleCheckTSODispatcher()
