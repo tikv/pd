@@ -29,7 +29,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -197,23 +196,18 @@ func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value
 	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
 }
 
-var etcdStateGauge = prometheus.NewGaugeVec(
-	prometheus.GaugeOpts{
-		Namespace: "pd",
-		Subsystem: "server",
-		Name:      "etcd_client",
-		Help:      "Etcd raft states.",
-	}, []string{"type"})
+const (
+	// etcdServerOfflineTimeout is the timeout for an unhealthy etcd endpoint to be offline from healthy checker.
+	etcdServerOfflineTimeout = 30 * time.Minute
+	// etcdServerDisconnectedTimeout is the timeout for an unhealthy etcd endpoint to be disconnected from healthy checker.
+	etcdServerDisconnectedTimeout = 1 * time.Minute
+)
 
-func init() {
-	prometheus.MustRegister(etcdStateGauge)
-}
-
-func newClient(tlsConfig *tls.Config, acURL ...string) (*clientv3.Client, error) {
+func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, error) {
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
-		Endpoints:            acURL,
+		Endpoints:            endpoints,
 		DialTimeout:          defaultEtcdClientTimeout,
 		TLS:                  tlsConfig,
 		LogConfig:            &lgc,
@@ -233,11 +227,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 	if err != nil {
 		return nil, err
 	}
-	checker := &healthyChecker{
-		tlsConfig: tlsConfig,
-	}
-	eps := syncUrls(client)
-	checker.update(eps)
+
 	tickerInterval := defaultDialKeepAliveTime
 	failpoint.Inject("fastTick", func() {
 		tickerInterval = 100 * time.Millisecond
@@ -249,11 +239,17 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		return client, err
 	}
 
+	checker := &healthyChecker{
+		tlsConfig: tlsConfig,
+	}
+	eps := syncUrls(client)
+	checker.update(eps)
+
+	// Create a goroutine to check the health of etcd endpoints periodically.
 	go func(client *clientv3.Client) {
 		defer logutil.LogPanic()
 		ticker := time.NewTicker(tickerInterval)
 		defer ticker.Stop()
-		lastReset := time.Now()
 		lastAvailable := time.Now()
 		for {
 			select {
@@ -263,19 +259,18 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 				usedEps := client.Endpoints()
 				healthyEps := checker.patrol(client.Ctx())
 				if len(healthyEps) == 0 {
-					// when all endpoints are unhealthy, try to reset endpoints rather than delete them
-					// to avoid blocking there is no any endpoint in client.
-					if time.Since(lastAvailable) > 60*time.Second && time.Since(lastReset) > 10*time.Second { // reset endpoints after 60s
+					// when all endpoints are unhealthy, try to reset endpoints to update connect
+					// rather than delete them to avoid there is no any endpoint in client.
+					if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
 						log.Info("[etcd client] no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
-						client.SetEndpoints(healthyEps...)
+						client.SetEndpoints([]string{}...)
 						client.SetEndpoints(usedEps...)
-						lastReset = time.Now()
 					}
 				} else {
 					if !isEqual(healthyEps, usedEps) {
 						client.SetEndpoints(healthyEps...)
 						change := fmt.Sprintf("%d->%d", len(usedEps), len(healthyEps))
-						etcdStateGauge.WithLabelValues("ep").Set(float64(len(healthyEps)))
+						etcdStateGauge.WithLabelValues("endpoints").Set(float64(len(healthyEps)))
 						log.Info("[etcd client] update endpoints", zap.String("num-change", change),
 							zap.Strings("last-endpoints", usedEps), zap.Strings("endpoints", client.Endpoints()))
 					}
@@ -304,10 +299,6 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 	return client, err
 }
 
-// offlineTimeout is the timeout for an unhealthy etcd endpoint to be offline from healthy checker.
-const offlineTimeout = 120 * time.Minute
-const disconnectedTimeout = 1 * time.Minute
-
 type healthyClient struct {
 	*clientv3.Client
 	lastHealth time.Time
@@ -319,7 +310,7 @@ type healthyChecker struct {
 }
 
 func (checker *healthyChecker) patrol(ctx context.Context) []string {
-	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105
+	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105-L145
 	var wg sync.WaitGroup
 	count := 0
 	checker.Range(func(key, value interface{}) bool {
@@ -360,15 +351,15 @@ func (checker *healthyChecker) patrol(ctx context.Context) []string {
 
 func (checker *healthyChecker) update(eps []string) {
 	for _, ep := range eps {
-		// check if client exists, if not, create one, if exists, check if it's offline
+		// check if client exists, if not, create one, if exists, check if it's offline or disconnected.
 		if client, ok := checker.Load(ep); ok {
 			lastHealthy := client.(*healthyClient).lastHealth
-			if time.Since(lastHealthy) > offlineTimeout {
-				log.Info("[etcd client] some endpoint maybe offline", zap.String("endpoint", ep))
+			if time.Since(lastHealthy) > etcdServerOfflineTimeout {
+				log.Info("[etcd client] some etcd server maybe offline", zap.String("endpoint", ep))
 				checker.Delete(ep)
 			}
-			if time.Since(lastHealthy) > disconnectedTimeout {
-				// try to update client
+			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
+				// try to update client to trigger reconnect
 				checker.addClient(ep, lastHealthy)
 			}
 			continue
@@ -390,7 +381,7 @@ func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
 }
 
 func syncUrls(client *clientv3.Client) []string {
-	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/clientv3/client.go#L170
+	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/clientv3/client.go#L170-L183
 	ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(client.Ctx()), DefaultRequestTimeout)
 	defer cancel()
 	now := time.Now()

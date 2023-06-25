@@ -31,6 +31,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const watchLoopUnhealthyTimeout = 60 * time.Second
+
 // GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
 	leader := &pdpb.Member{}
@@ -193,12 +195,11 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		watchChanCtx, watchChanCancel := context.WithCancel(clientv3.WithRequireLeader(serverCtx))
 		defer watchChanCancel()
 
-		// when etcd is not available, the watcher.Watch will block.
+		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.
 		if _, err := etcdutil.EtcdKVGet(ls.client, ls.leaderKey); err != nil {
-			// If the watcher is unhealthy for more than 60 seconds, we should exit.
-			if time.Since(lastHealthyTime) > 60*time.Second {
-				log.Error("leadership watcher is unhealthy",
+			if time.Since(lastHealthyTime) > watchLoopUnhealthyTimeout {
+				log.Error("the connect of leadership watcher is unhealthy",
 					zap.Int64("revision", revision),
 					zap.String("leader-key", ls.leaderKey),
 					zap.String("purpose", ls.purpose))
@@ -209,8 +210,8 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			watchChanCancel()
 			continue
 		}
-		lastHealthyTime = time.Now()
 		watchChan := watcher.Watch(watchChanCtx, ls.leaderKey, clientv3.WithRev(revision))
+		lastHealthyTime = time.Now()
 
 		select {
 		case <-serverCtx.Done():
