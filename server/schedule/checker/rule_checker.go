@@ -366,12 +366,13 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	}
 
 	strategy := c.strategy(region, rf.Rule)
-	regionStores := c.cluster.GetRegionStores(region)
-	oldStore := strategy.SelectStoreToRemove(regionStores)
+	ruleStores := c.getRuleFitStores(rf)
+	oldStore := strategy.SelectStoreToRemove(ruleStores)
 	if oldStore == 0 {
 		return nil, nil
 	}
 	var coLocationStores []*core.StoreInfo
+	regionStores := c.cluster.GetRegionStores(region)
 	for _, s := range regionStores {
 		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
 			coLocationStores = append(coLocationStores, s)
