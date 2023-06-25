@@ -248,7 +248,7 @@ type KeyspaceGroupManager struct {
 	primaryPathBuilder *kgPrimaryPathBuilder
 
 	// mergeCheckerCancelMap is the cancel function map for the merge checker of each keyspace group.
-	mergeCheckerCancelMap map[uint32]context.CancelFunc
+	mergeCheckerCancelMap sync.Map // GroupID -> context.CancelFunc
 }
 
 // NewKeyspaceGroupManager creates a new Keyspace Group Manager.
@@ -270,17 +270,16 @@ func NewKeyspaceGroupManager(
 
 	ctx, cancel := context.WithCancel(ctx)
 	kgm := &KeyspaceGroupManager{
-		ctx:                   ctx,
-		cancel:                cancel,
-		tsoServiceID:          tsoServiceID,
-		etcdClient:            etcdClient,
-		httpClient:            httpClient,
-		electionNamePrefix:    electionNamePrefix,
-		legacySvcRootPath:     legacySvcRootPath,
-		tsoSvcRootPath:        tsoSvcRootPath,
-		cfg:                   cfg,
-		groupUpdateRetryList:  make(map[uint32]*endpoint.KeyspaceGroup),
-		mergeCheckerCancelMap: make(map[uint32]context.CancelFunc),
+		ctx:                  ctx,
+		cancel:               cancel,
+		tsoServiceID:         tsoServiceID,
+		etcdClient:           etcdClient,
+		httpClient:           httpClient,
+		electionNamePrefix:   electionNamePrefix,
+		legacySvcRootPath:    legacySvcRootPath,
+		tsoSvcRootPath:       tsoSvcRootPath,
+		cfg:                  cfg,
+		groupUpdateRetryList: make(map[uint32]*endpoint.KeyspaceGroup),
 	}
 	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
@@ -427,15 +426,14 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	// it should run the merging checker when the merge state first time changes.
 	if !oldGroup.IsMergeTarget() && group.IsMergeTarget() {
 		ctx, cancel := context.WithCancel(kgm.ctx)
-		kgm.mergeCheckerCancelMap[group.ID] = cancel
+		kgm.mergeCheckerCancelMap.Store(group.ID, cancel)
 		kgm.wg.Add(1)
 		go kgm.mergingChecker(ctx, group.ID, group.MergeState.MergeList)
 	}
 	// If the merge state has been finished, cancel its merging checker.
 	if oldGroup.IsMergeTarget() && !group.IsMergeTarget() {
-		if cancel, ok := kgm.mergeCheckerCancelMap[group.ID]; ok {
-			cancel()
-			delete(kgm.mergeCheckerCancelMap, group.ID)
+		if cancel, loaded := kgm.mergeCheckerCancelMap.LoadAndDelete(group.ID); loaded && cancel != nil {
+			cancel.(context.CancelFunc)()
 		}
 	}
 
