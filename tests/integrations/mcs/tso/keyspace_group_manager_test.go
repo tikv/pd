@@ -83,10 +83,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 }
 
-func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownTest() {
-	cleanupKeyspaceGroups(suite.Require(), suite.pdLeaderServer)
-}
-
 func cleanupKeyspaceGroups(re *require.Assertions, server *tests.TestServer) {
 	keyspaceGroups := handlersutil.MustLoadKeyspaceGroups(re, server, "0", "0")
 	for _, group := range keyspaceGroups {
@@ -102,6 +98,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	// There is only default keyspace group. Any keyspace, which hasn't been assigned to
 	// a keyspace group before, will be served by the default keyspace group.
 	re := suite.Require()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	testutil.Eventually(re, func() bool {
 		for _, keyspaceID := range []uint32{0, 1, 2} {
 			served := false
@@ -154,6 +151,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 	// Create multiple keyspace groups, and every keyspace should be served by one of them
 	// on a tso server.
 	re := suite.Require()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 
 	// Create keyspace groups.
 	params := []struct {
@@ -243,6 +241,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	re := suite.Require()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -304,6 +303,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection() {
 	re := suite.Require()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -362,6 +362,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient() {
 	re := suite.Require()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	// Enable the failpoint to slow down the system time to test whether the TSO is monotonic.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/systemTimeSlow", `return(true)`))
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
@@ -429,12 +430,18 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 		NewID:     2,
 		Keyspaces: []uint32{222, 333},
 	})
-	// Wait for the keyspace group 2 to finish the split.
+	// Wait for the keyspace groups to finish the split.
 	testutil.Eventually(re, func() bool {
 		kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
 		re.Equal(uint32(2), kg2.ID)
 		re.Equal([]uint32{222, 333}, kg2.Keyspaces)
 		return !kg2.IsSplitTarget()
+	})
+	testutil.Eventually(re, func() bool {
+		kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
+		re.Equal(uint32(1), kg1.ID)
+		re.Equal([]uint32{111}, kg1.Keyspaces)
+		return !kg1.IsSplitSource()
 	})
 	// Stop the client.
 	cancel()
@@ -444,6 +451,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
 	re := suite.Require()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
@@ -578,6 +586,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 	re := suite.Require()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	// Create the keyspace group 1 and 2 with keyspaces [111, 222] and [333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -633,6 +642,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeClient() {
 	re := suite.Require()
+	defer cleanupKeyspaceGroups(re, suite.pdLeaderServer)
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
