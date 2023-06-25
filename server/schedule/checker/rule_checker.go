@@ -365,13 +365,31 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 		return nil, nil
 	}
 
+<<<<<<< HEAD:server/schedule/checker/rule_checker.go
 	strategy := c.strategy(region, rf.Rule)
+=======
+	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
+	// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
+	strategy := c.strategy(region, rf.Rule, isWitness)
+>>>>>>> f4d774ae4 (checker: fix the conflict between tiflash learner and location labels (#6660)):pkg/schedule/checker/rule_checker.go
 	ruleStores := c.getRuleFitStores(rf)
 	oldStore := strategy.SelectStoreToRemove(ruleStores)
 	if oldStore == 0 {
 		return nil, nil
 	}
+<<<<<<< HEAD:server/schedule/checker/rule_checker.go
 	newStore, filterByTempState := strategy.SelectStoreToImprove(ruleStores, oldStore)
+=======
+	var coLocationStores []*core.StoreInfo
+	regionStores := c.cluster.GetRegionStores(region)
+	for _, s := range regionStores {
+		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
+			coLocationStores = append(coLocationStores, s)
+		}
+	}
+
+	newStore, filterByTempState := strategy.SelectStoreToImprove(coLocationStores, oldStore)
+>>>>>>> f4d774ae4 (checker: fix the conflict between tiflash learner and location labels (#6660)):pkg/schedule/checker/rule_checker.go
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		c.handleFilterState(region, filterByTempState)
