@@ -290,7 +290,7 @@ func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeTick"))
 }
 
-func TestEtcdScaleInAndOutWithoutMultiPoint(t *testing.T) {
+func TestEtcdScaleInAndOut(t *testing.T) {
 	re := require.New(t)
 	// Start a etcd server.
 	cfg1 := NewTestSingleConfig(t)

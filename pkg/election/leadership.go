@@ -31,7 +31,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const watchLoopUnhealthyTimeout = 60 * time.Second
+const (
+	watchLoopUnhealthyTimeout = 60 * time.Second
+	detectHealthyInterval     = 10 * time.Second
+)
 
 // GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
@@ -185,7 +188,17 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	if ls == nil {
 		return
 	}
+
+	interval := detectHealthyInterval
+	timeout := watchLoopUnhealthyTimeout
+	failpoint.Inject("fastTick", func() {
+		timeout = 5 * time.Second
+		interval = 1 * time.Second
+	})
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	lastHealthyTime := time.Now()
+
 	watcher := clientv3.NewWatcher(ls.client)
 	defer watcher.Close()
 	for {
@@ -198,25 +211,34 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.
 		if _, err := etcdutil.EtcdKVGet(ls.client, ls.leaderKey); err != nil {
-			if time.Since(lastHealthyTime) > watchLoopUnhealthyTimeout {
+			if time.Since(lastHealthyTime) > timeout {
 				log.Error("the connect of leadership watcher is unhealthy",
 					zap.Int64("revision", revision),
 					zap.String("leader-key", ls.leaderKey),
 					zap.String("purpose", ls.purpose))
 				return
 			}
-			// If the watcher is unhealthy, we should cancel the watchChan and retry.
-			// Because the etcdutil.EtcdKVGet has a timeout, we don't need to sleep here.
-			watchChanCancel()
-			continue
+			select {
+			case <-serverCtx.Done():
+				// server closed, return
+				return
+			case <-ticker.C:
+				watchChanCancel()
+				continue
+			}
 		}
+
 		watchChan := watcher.Watch(watchChanCtx, ls.leaderKey, clientv3.WithRev(revision))
 		lastHealthyTime = time.Now()
-
 		select {
 		case <-serverCtx.Done():
 			// server closed, return
 			return
+		case <-ticker.C:
+			if _, err := etcdutil.EtcdKVGet(ls.client, ls.leaderKey); err != nil {
+				watchChanCancel()
+				continue
+			}
 		case wresp := <-watchChan:
 			// meet compacted error, use the compact revision.
 			if wresp.CompactRevision != 0 {
