@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -41,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
@@ -50,6 +52,9 @@ const (
 	keyspaceGroupsElectionPath = mcsutils.KeyspaceGroupsKey + "/election"
 	// primaryKey is the key for keyspace group primary election.
 	primaryKey = "primary"
+	// mergingCheckInterval is the interval for merging check to see if the keyspace groups
+	// merging process could be moved forward.
+	mergingCheckInterval = 5 * time.Second
 )
 
 type state struct {
@@ -241,6 +246,9 @@ type KeyspaceGroupManager struct {
 	groupWatcher         *etcdutil.LoopWatcher
 
 	primaryPathBuilder *kgPrimaryPathBuilder
+
+	// mergeCheckerCancelMap is the cancel function map for the merge checker of each keyspace group.
+	mergeCheckerCancelMap sync.Map // GroupID -> context.CancelFunc
 }
 
 // NewKeyspaceGroupManager creates a new Keyspace Group Manager.
@@ -384,12 +392,9 @@ func (kgm *KeyspaceGroupManager) Close() {
 }
 
 func (kgm *KeyspaceGroupManager) isAssignedToMe(group *endpoint.KeyspaceGroup) bool {
-	for _, member := range group.Members {
-		if member.Address == kgm.tsoServiceID.ServiceAddr {
-			return true
-		}
-	}
-	return false
+	return slice.AnyOf(group.Members, func(i int) bool {
+		return group.Members[i].Address == kgm.tsoServiceID.ServiceAddr
+	})
 }
 
 // updateKeyspaceGroup applies the given keyspace group. If the keyspace group is just assigned to
@@ -416,9 +421,25 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		return
 	}
 
+	oldAM, oldGroup := kgm.getKeyspaceGroupMeta(group.ID)
+	// If this host owns a replica of the keyspace group which is the merge target,
+	// it should run the merging checker when the merge state first time changes.
+	if !oldGroup.IsMergeTarget() && group.IsMergeTarget() {
+		ctx, cancel := context.WithCancel(kgm.ctx)
+		kgm.mergeCheckerCancelMap.Store(group.ID, cancel)
+		kgm.wg.Add(1)
+		go kgm.mergingChecker(ctx, group.ID, group.MergeState.MergeList)
+	}
+	// If the merge state has been finished, cancel its merging checker.
+	if oldGroup.IsMergeTarget() && !group.IsMergeTarget() {
+		if cancel, loaded := kgm.mergeCheckerCancelMap.LoadAndDelete(group.ID); loaded && cancel != nil {
+			cancel.(context.CancelFunc)()
+		}
+	}
+
 	// If this host is already assigned a replica of this keyspace group, i.e., the election member
 	// is already initialized, just update the meta.
-	if oldAM, oldGroup := kgm.getKeyspaceGroupMeta(group.ID); oldAM != nil {
+	if oldAM != nil {
 		kgm.updateKeyspaceGroupMembership(oldGroup, group, true)
 		return
 	}
@@ -738,6 +759,10 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
+	err = kgm.checkTSOMerge(curKeyspaceGroupID)
+	if err != nil {
+		return pdpb.Timestamp{}, curKeyspaceGroupID, err
+	}
 	ts, err = am.HandleRequest(dcLocation, count)
 	return ts, curKeyspaceGroupID, err
 }
@@ -897,4 +922,181 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	splitGroup.SplitState = nil
 	kgm.kgs[id] = splitGroup
 	return nil
+}
+
+func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
+	kgm.Lock()
+	defer kgm.Unlock()
+	// Check if the keyspace group is in the merging state.
+	mergeTarget := kgm.kgs[id]
+	if !mergeTarget.IsMergeTarget() {
+		return nil
+	}
+	// Check if the HTTP client is initialized.
+	if kgm.httpClient == nil {
+		return nil
+	}
+	statusCode, err := apiutil.DoDelete(
+		kgm.httpClient,
+		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/merge", id))
+	if err != nil {
+		return err
+	}
+	if statusCode != http.StatusOK {
+		log.Warn("failed to finish merging keyspace group",
+			zap.Uint32("keyspace-group-id", id),
+			zap.Int("status-code", statusCode))
+		return errs.ErrSendRequest.FastGenByArgs()
+	}
+	// Pre-update the split keyspace group split state in memory.
+	mergeTarget.MergeState = nil
+	kgm.kgs[id] = mergeTarget
+	return nil
+}
+
+// mergingChecker is used to check if the keyspace group is in merge state, and if so, it will
+// make sure the newly merged TSO keep consistent with the original ones.
+func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTargetID uint32, mergeList []uint32) {
+	log.Info("start to merge the keyspace group",
+		zap.String("member", kgm.tsoServiceID.ServiceAddr),
+		zap.Uint32("merge-target-id", mergeTargetID),
+		zap.Any("merge-list", mergeList))
+	defer logutil.LogPanic()
+	defer kgm.wg.Done()
+
+	checkTicker := time.NewTicker(mergingCheckInterval)
+	defer checkTicker.Stop()
+	// Prepare the merge map.
+	mergeMap := make(map[uint32]struct{}, len(mergeList))
+	for _, id := range mergeList {
+		mergeMap[id] = struct{}{}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("merging checker is closed",
+				zap.String("member", kgm.tsoServiceID.ServiceAddr),
+				zap.Uint32("merge-target-id", mergeTargetID),
+				zap.Any("merge-list", mergeList))
+			return
+		case <-checkTicker.C:
+		}
+		// Check if current TSO node is the merge target TSO primary node.
+		am, err := kgm.GetAllocatorManager(mergeTargetID)
+		if err != nil {
+			log.Warn("unable to get the merge target allocator manager",
+				zap.String("member", kgm.tsoServiceID.ServiceAddr),
+				zap.Uint32("keyspace-group-id", mergeTargetID),
+				zap.Any("merge-list", mergeList),
+				zap.Error(err))
+			continue
+		}
+		// If the current TSO node is not the merge target TSO primary node,
+		// we still need to keep this loop running to avoid unexpected primary changes.
+		if !am.IsLeader() {
+			log.Debug("current tso node is not the merge target primary",
+				zap.String("member", kgm.tsoServiceID.ServiceAddr),
+				zap.Uint32("merge-target-id", mergeTargetID),
+				zap.Any("merge-list", mergeList))
+			continue
+		}
+		// Check if the keyspace group primaries in the merge map are all gone.
+		if len(mergeMap) != 0 {
+			for id := range mergeMap {
+				leaderPath := path.Join(kgm.primaryPathBuilder.getKeyspaceGroupIDPath(id), primaryKey)
+				val, err := kgm.tsoSvcStorage.Load(leaderPath)
+				if err != nil {
+					log.Error("failed to check if the keyspace group primary in the merge list has gone",
+						zap.String("member", kgm.tsoServiceID.ServiceAddr),
+						zap.Uint32("merge-target-id", mergeTargetID),
+						zap.Any("merge-list", mergeList),
+						zap.Uint32("merge-id", id),
+						zap.Any("remaining", mergeMap),
+						zap.Error(err))
+					continue
+				}
+				if len(val) == 0 {
+					delete(mergeMap, id)
+				}
+			}
+		}
+		if len(mergeMap) > 0 {
+			continue
+		}
+		// All the keyspace group primaries in the merge list are gone,
+		// update the newly merged TSO to make sure it is greater than the original ones.
+		var mergedTS time.Time
+		for _, id := range mergeList {
+			ts, err := kgm.tsoSvcStorage.LoadTimestamp(am.getKeyspaceGroupTSPath(id))
+			if err != nil || ts == typeutil.ZeroTime {
+				log.Error("failed to load the keyspace group TSO",
+					zap.String("member", kgm.tsoServiceID.ServiceAddr),
+					zap.Uint32("merge-target-id", mergeTargetID),
+					zap.Any("merge-list", mergeList),
+					zap.Uint32("merge-id", id),
+					zap.Time("ts", ts),
+					zap.Error(err))
+				mergedTS = typeutil.ZeroTime
+				break
+			}
+			if ts.After(mergedTS) {
+				mergedTS = ts
+			}
+		}
+		if mergedTS == typeutil.ZeroTime {
+			continue
+		}
+		// Update the newly merged TSO.
+		// TODO: support the Local TSO Allocator.
+		allocator, err := am.GetAllocator(GlobalDCLocation)
+		if err != nil {
+			log.Error("failed to get the allocator",
+				zap.String("member", kgm.tsoServiceID.ServiceAddr),
+				zap.Uint32("merge-target-id", mergeTargetID),
+				zap.Any("merge-list", mergeList),
+				zap.Error(err))
+			continue
+		}
+		err = allocator.SetTSO(
+			tsoutil.GenerateTS(tsoutil.GenerateTimestamp(mergedTS, 1)),
+			true, true)
+		if err != nil {
+			log.Error("failed to update the newly merged TSO",
+				zap.String("member", kgm.tsoServiceID.ServiceAddr),
+				zap.Uint32("merge-target-id", mergeTargetID),
+				zap.Any("merge-list", mergeList),
+				zap.Time("merged-ts", mergedTS),
+				zap.Error(err))
+			continue
+		}
+		// Finish the merge.
+		err = kgm.finishMergeKeyspaceGroup(mergeTargetID)
+		if err != nil {
+			log.Error("failed to finish the merge",
+				zap.String("member", kgm.tsoServiceID.ServiceAddr),
+				zap.Uint32("merge-target-id", mergeTargetID),
+				zap.Any("merge-list", mergeList),
+				zap.Error(err))
+			continue
+		}
+		log.Info("finished merging keyspace group",
+			zap.String("member", kgm.tsoServiceID.ServiceAddr),
+			zap.Uint32("merge-target-id", mergeTargetID),
+			zap.Any("merge-list", mergeList),
+			zap.Time("merged-ts", mergedTS))
+		return
+	}
+}
+
+// Reject any request if the keyspace group is in merging state,
+// we need to wait for the merging checker to finish the TSO merging.
+func (kgm *KeyspaceGroupManager) checkTSOMerge(
+	keyspaceGroupID uint32,
+) error {
+	_, group := kgm.getKeyspaceGroupMeta(keyspaceGroupID)
+	if !group.IsMerging() {
+		return nil
+	}
+	return errs.ErrKeyspaceGroupIsMerging.FastGenByArgs(keyspaceGroupID)
 }
