@@ -571,7 +571,10 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 					case <-ctx.Done():
 					default:
 						member.ResetLeader()
-						log.Info("reset primary", zap.Uint32("keyspace-group-id", kg.ID))
+						log.Info("reset primary",
+							zap.String("local-address", kgm.tsoServiceID.ServiceAddr),
+							zap.Uint32("keyspace-group-id", kg.ID),
+							zap.Int("local-priority", localPriority))
 					}
 				} else {
 					log.Warn("no need to reset primary as the replicas with higher priority are offline",
