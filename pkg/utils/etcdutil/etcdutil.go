@@ -224,7 +224,7 @@ func newClient(tlsConfig *tls.Config, acURL ...string) (*clientv3.Client, error)
 }
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
-func CreateEtcdClient(ctx context.Context, tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client, error) {
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
@@ -236,7 +236,7 @@ func CreateEtcdClient(ctx context.Context, tlsConfig *tls.Config, acURLs []url.U
 	checker := &healthyChecker{
 		tlsConfig: tlsConfig,
 	}
-	eps := syncUrls(ctx, client)
+	eps := syncUrls(client)
 	checker.update(eps)
 	tickerInterval := defaultDialKeepAliveTime
 	failpoint.Inject("fastTick", func() {
@@ -249,7 +249,7 @@ func CreateEtcdClient(ctx context.Context, tlsConfig *tls.Config, acURLs []url.U
 		return client, err
 	}
 
-	go func(ctx context.Context, client *clientv3.Client) {
+	go func(client *clientv3.Client) {
 		defer logutil.LogPanic()
 		ticker := time.NewTicker(tickerInterval)
 		defer ticker.Stop()
@@ -259,11 +259,9 @@ func CreateEtcdClient(ctx context.Context, tlsConfig *tls.Config, acURLs []url.U
 			select {
 			case <-client.Ctx().Done():
 				return
-			case <-ctx.Done():
-				return
 			case <-ticker.C:
 				usedEps := client.Endpoints()
-				healthyEps := checker.patrol(ctx)
+				healthyEps := checker.patrol(client.Ctx())
 				if len(healthyEps) == 0 {
 					// when all endpoints are unhealthy, try to reset endpoints rather than delete them
 					// to avoid blocking there is no any endpoint in client.
@@ -285,10 +283,10 @@ func CreateEtcdClient(ctx context.Context, tlsConfig *tls.Config, acURLs []url.U
 				}
 			}
 		}
-	}(ctx, client)
+	}(client)
 
 	// Notes: use another goroutine to update endpoints to avoid blocking health check in the first goroutine.
-	go func(ctx context.Context, client *clientv3.Client) {
+	go func(client *clientv3.Client) {
 		defer logutil.LogPanic()
 		ticker := time.NewTicker(tickerInterval)
 		defer ticker.Stop()
@@ -296,14 +294,12 @@ func CreateEtcdClient(ctx context.Context, tlsConfig *tls.Config, acURLs []url.U
 			select {
 			case <-client.Ctx().Done():
 				return
-			case <-ctx.Done():
-				return
 			case <-ticker.C:
-				eps := syncUrls(ctx, client)
+				eps := syncUrls(client)
 				checker.update(eps)
 			}
 		}
-	}(ctx, client)
+	}(client)
 
 	return client, err
 }
@@ -393,9 +389,9 @@ func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
 	})
 }
 
-func syncUrls(ctx context.Context, client *clientv3.Client) []string {
+func syncUrls(client *clientv3.Client) []string {
 	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/clientv3/client.go#L170
-	ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(ctx), DefaultRequestTimeout)
+	ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(client.Ctx()), DefaultRequestTimeout)
 	defer cancel()
 	now := time.Now()
 	mresp, err := client.MemberList(ctx)
@@ -430,8 +426,8 @@ func isEqual(a, b []string) bool {
 }
 
 // CreateClients creates etcd v3 client and http client.
-func CreateClients(ctx context.Context, tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
-	client, err := CreateEtcdClient(ctx, tlsConfig, acUrls)
+func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
+	client, err := CreateEtcdClient(tlsConfig, acUrls)
 	if err != nil {
 		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}

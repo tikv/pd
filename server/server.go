@@ -379,7 +379,7 @@ func (s *Server) startClient() (*clientv3.Client, *http.Client, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return etcdutil.CreateClients(s.ctx, tlsConfig, etcdCfg.ACUrls)
+	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls)
 }
 
 func (s *Server) startElectionClient() (*clientv3.Client, error) {
@@ -392,7 +392,7 @@ func (s *Server) startElectionClient() (*clientv3.Client, error) {
 		return nil, err
 	}
 
-	return etcdutil.CreateEtcdClient(s.ctx, tlsConfig, etcdCfg.ACUrls)
+	return etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
 }
 
 // AddStartCallback adds a callback in the startServer phase.
