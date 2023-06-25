@@ -456,18 +456,24 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	for i := 1; i < maxEtcdTxnOps*2+1; i++ {
 		re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
-	// Patrol the keyspace assignment with range [10, 20]
-	err = suite.manager.PatrolKeyspaceAssignment(10, 20)
+	// Patrol the keyspace assignment with range [maxEtcdTxnOps/2, maxEtcdTxnOps/2+maxEtcdTxnOps+1]
+	// to make sure the range crossing the boundary of etcd transaction operation limit.
+	var (
+		startKeyspaceID = uint32(maxEtcdTxnOps / 2)
+		endKeyspaceID   = startKeyspaceID + maxEtcdTxnOps + 1
+	)
+	err = suite.manager.PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID)
 	re.NoError(err)
 	// Check if only the keyspaces within the range are attached to the default group.
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
 	for i := 1; i < maxEtcdTxnOps*2+1; i++ {
-		if i >= 10 && i <= 20 {
-			re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(i))
+		keyspaceID := uint32(i)
+		if keyspaceID >= startKeyspaceID && keyspaceID <= endKeyspaceID {
+			re.Contains(defaultKeyspaceGroup.Keyspaces, keyspaceID)
 		} else {
-			re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
+			re.NotContains(defaultKeyspaceGroup.Keyspaces, keyspaceID)
 		}
 	}
 }

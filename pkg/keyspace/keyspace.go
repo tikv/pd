@@ -661,6 +661,9 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 		manager.nextPatrolStartID = startKeyspaceID
 	}
 	if endKeyspaceID != 0 && endKeyspaceID < manager.nextPatrolStartID {
+		log.Info("[keyspace] end keyspace id is smaller than the next patrol start id, skip patrol",
+			zap.Uint32("end-keyspace-id", endKeyspaceID),
+			zap.Uint32("next-patrol-start-id", manager.nextPatrolStartID))
 		return nil
 	}
 	var (
