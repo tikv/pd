@@ -24,15 +24,17 @@ const (
 	registryKey    = "registry"
 )
 
-func registryPath(clusterID, serviceName, serviceAddr string) string {
+// RegistryPath returns the full path to store microservice addresses.
+func RegistryPath(clusterID, serviceName, serviceAddr string) string {
 	return strings.Join([]string{registryPrefix, clusterID, serviceName, registryKey, serviceAddr}, "/")
 }
 
-func discoveryPath(clusterID, serviceName string) string {
+// ServicePath returns the path to store microservice addresses.
+func ServicePath(clusterID, serviceName string) string {
 	return strings.Join([]string{registryPrefix, clusterID, serviceName, registryKey}, "/")
 }
 
 // TSOPath returns the path to store TSO addresses.
 func TSOPath(clusterID uint64) string {
-	return discoveryPath(strconv.FormatUint(clusterID, 10), "tso") + "/"
+	return ServicePath(strconv.FormatUint(clusterID, 10), "tso") + "/"
 }
