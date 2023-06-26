@@ -583,7 +583,7 @@ func (oc *Controller) removeOperatorLocked(op *Operator) bool {
 	return false
 }
 
-func (oc *Controller) buryOperator(op *Operator, extraFields ...zap.Field) {
+func (oc *Controller) buryOperator(op *Operator) {
 	st := op.Status()
 
 	if !IsEndStatus(st) {
@@ -637,7 +637,7 @@ func (oc *Controller) buryOperator(op *Operator, extraFields ...zap.Field) {
 			zap.Reflect("operator", op),
 			zap.String("additional-info", op.GetAdditionalInfo()),
 		}
-		fields = append(fields, extraFields...)
+		fields = append(fields)
 		log.Info("operator canceled",
 			fields...,
 		)

@@ -32,7 +32,7 @@ const (
 	// OperatorExpireTime is the duration that when an operator is not started
 	// after it, the operator will be considered expired.
 	OperatorExpireTime = 3 * time.Second
-	CancelReason       = "cancel-reason"
+	cancelReason       = "cancel-reason"
 )
 
 type CancelReasonType string
@@ -248,8 +248,8 @@ func (o *Operator) CheckSuccess() bool {
 
 // Cancel marks the operator canceled.
 func (o *Operator) Cancel(reason CancelReasonType) bool {
-	if _, ok := o.AdditionalInfos[CancelReason]; !ok {
-		o.AdditionalInfos[CancelReason] = string(reason)
+	if _, ok := o.AdditionalInfos[cancelReason]; !ok {
+		o.AdditionalInfos[cancelReason] = string(reason)
 	}
 	return o.status.To(CANCELED)
 }
