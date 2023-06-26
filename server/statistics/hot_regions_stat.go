@@ -14,15 +14,7 @@
 
 package statistics
 
-<<<<<<< HEAD:server/statistics/hot_regions_stat.go
-import (
-	"time"
-
-	"github.com/tikv/pd/server/core"
-)
-=======
 import "time"
->>>>>>> cd5b1cebe (pd-ctl: fix hot region show (#6650)):pkg/statistics/hot_regions_stat.go
 
 // HotPeersStat records all hot regions statistics
 type HotPeersStat struct {

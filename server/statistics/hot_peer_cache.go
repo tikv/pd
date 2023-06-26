@@ -206,21 +206,17 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		}
 	}
 
+	peers := region.GetPeers()
 	newItem := &HotPeerStat{
 		StoreID:    storeID,
 		RegionID:   regionID,
 		Loads:      f.kind.GetLoadRatesFromPeer(peer),
 		isLeader:   region.GetLeader().GetStoreId() == storeID,
 		actionType: Update,
-		stores:     make([]uint64, len(region.GetPeers())),
+		stores:     make([]uint64, len(peers)),
 	}
-<<<<<<< HEAD:server/statistics/hot_peer_cache.go
-	for _, peer := range region.GetPeers() {
-		newItem.stores = append(newItem.stores, peer.GetStoreId())
-=======
 	for i, peer := range peers {
 		newItem.stores[i] = peer.GetStoreId()
->>>>>>> cd5b1cebe (pd-ctl: fix hot region show (#6650)):pkg/statistics/hot_peer_cache.go
 	}
 
 	if oldItem == nil {
