@@ -52,9 +52,10 @@ func newSplitKeyspaceGroupCommand() *cobra.Command {
 
 func newFinishSplitKeyspaceGroupCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "finish-split <keyspace_group_id>",
-		Short: "finish split the keyspace group with the given ID",
-		Run:   finishSplitKeyspaceGroupCommandFunc,
+		Use:    "finish-split <keyspace_group_id>",
+		Short:  "finish split the keyspace group with the given ID",
+		Run:    finishSplitKeyspaceGroupCommandFunc,
+		Hidden: true,
 	}
 	return r
 }
@@ -70,9 +71,10 @@ func newMergeKeyspaceGroupCommand() *cobra.Command {
 
 func newFinishMergeKeyspaceGroupCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "finish-merge <keyspace_group_id>",
-		Short: "finish merge the keyspace group with the given ID",
-		Run:   finishMergeKeyspaceGroupCommandFunc,
+		Use:    "finish-merge <keyspace_group_id>",
+		Short:  "finish merge the keyspace group with the given ID",
+		Run:    finishMergeKeyspaceGroupCommandFunc,
+		Hidden: true,
 	}
 	return r
 }
