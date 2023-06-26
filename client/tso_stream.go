@@ -102,7 +102,7 @@ type tsoStream interface {
 	processRequests(
 		clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
 		requests []*tsoRequest, batchStartTime time.Time,
-	) (physical, logical int64, suffixBits uint32, err error)
+	) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error)
 }
 
 type pdTSOStream struct {
@@ -111,7 +111,7 @@ type pdTSOStream struct {
 
 func (s *pdTSOStream) processRequests(
 	clusterID uint64, _, _ uint32, dcLocation string, requests []*tsoRequest, batchStartTime time.Time,
-) (physical, logical int64, suffixBits uint32, err error) {
+) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error) {
 	start := time.Now()
 	count := int64(len(requests))
 	req := &pdpb.TsoRequest{
@@ -149,6 +149,7 @@ func (s *pdTSOStream) processRequests(
 	}
 
 	ts := resp.GetTimestamp()
+	respKeyspaceGroupID = defaultKeySpaceGroupID
 	physical, logical, suffixBits = ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
 	return
 }
@@ -160,7 +161,7 @@ type tsoTSOStream struct {
 func (s *tsoTSOStream) processRequests(
 	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
 	requests []*tsoRequest, batchStartTime time.Time,
-) (physical, logical int64, suffixBits uint32, err error) {
+) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error) {
 	start := time.Now()
 	count := int64(len(requests))
 	req := &tsopb.TsoRequest{
@@ -200,6 +201,7 @@ func (s *tsoTSOStream) processRequests(
 	}
 
 	ts := resp.GetTimestamp()
+	respKeyspaceGroupID = resp.GetHeader().GetKeyspaceGroupId()
 	physical, logical, suffixBits = ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
 	return
 }

@@ -766,6 +766,11 @@ error = '''
 the keyspace group id is invalid, %s
 '''
 
+["PD:tso:ErrKeyspaceGroupIsMerging"]
+error = '''
+the keyspace group %d is merging
+'''
+
 ["PD:tso:ErrKeyspaceGroupNotInitialized"]
 error = '''
 the keyspace group %d isn't initialized

@@ -62,7 +62,7 @@ type FileReplicater interface {
 }
 
 const drStatusFile = "DR_STATE"
-const persistFileTimeout = time.Second * 10
+const persistFileTimeout = time.Second * 3
 
 // ModeManager is used to control how raft logs are synchronized between
 // different tikv nodes.

@@ -33,6 +33,9 @@ func NewKeyspaceGroupCommand() *cobra.Command {
 		Run:   showKeyspaceGroupCommandFunc,
 	}
 	cmd.AddCommand(newSplitKeyspaceGroupCommand())
+	cmd.AddCommand(newFinishSplitKeyspaceGroupCommand())
+	cmd.AddCommand(newMergeKeyspaceGroupCommand())
+	cmd.AddCommand(newFinishMergeKeyspaceGroupCommand())
 	cmd.AddCommand(newSetNodesKeyspaceGroupCommand())
 	cmd.AddCommand(newSetPriorityKeyspaceGroupCommand())
 	return cmd
@@ -43,6 +46,35 @@ func newSplitKeyspaceGroupCommand() *cobra.Command {
 		Use:   "split <keyspace_group_id> <new_keyspace_group_id> [<keyspace_id>]",
 		Short: "split the keyspace group with the given ID and transfer the keyspaces into the newly split one",
 		Run:   splitKeyspaceGroupCommandFunc,
+	}
+	return r
+}
+
+func newFinishSplitKeyspaceGroupCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:    "finish-split <keyspace_group_id>",
+		Short:  "finish split the keyspace group with the given ID",
+		Run:    finishSplitKeyspaceGroupCommandFunc,
+		Hidden: true,
+	}
+	return r
+}
+
+func newMergeKeyspaceGroupCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "merge <target_keyspace_group_id> [<keyspace_group_id>]",
+		Short: "merge the keyspace group with the given IDs into the target one",
+		Run:   mergeKeyspaceGroupCommandFunc,
+	}
+	return r
+}
+
+func newFinishMergeKeyspaceGroupCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:    "finish-merge <keyspace_group_id>",
+		Short:  "finish merge the keyspace group with the given ID",
+		Run:    finishMergeKeyspaceGroupCommandFunc,
+		Hidden: true,
 	}
 	return r
 }
@@ -106,6 +138,66 @@ func splitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 		"new-id":    uint32(newID),
 		"keyspaces": keyspaces,
 	})
+}
+
+func finishSplitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 {
+		cmd.Usage()
+		return
+	}
+	_, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		cmd.Printf("Failed to parse the keyspace group ID: %s\n", err)
+		return
+	}
+	_, err = doRequest(cmd, fmt.Sprintf("%s/%s/split", keyspaceGroupsPrefix, args[0]), http.MethodDelete, http.Header{})
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println("Success!")
+}
+
+func mergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 2 {
+		cmd.Usage()
+		return
+	}
+	_, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		cmd.Printf("Failed to parse the target keyspace group ID: %s\n", err)
+		return
+	}
+	groups := make([]uint32, 0, len(args)-1)
+	for _, arg := range args[1:] {
+		id, err := strconv.ParseUint(arg, 10, 32)
+		if err != nil {
+			cmd.Printf("Failed to parse the keyspace ID: %s\n", err)
+			return
+		}
+		groups = append(groups, uint32(id))
+	}
+	postJSON(cmd, fmt.Sprintf("%s/%s/merge", keyspaceGroupsPrefix, args[0]), map[string]interface{}{
+		"merge-list": groups,
+	})
+}
+
+func finishMergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 {
+		cmd.Usage()
+		return
+	}
+	_, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		cmd.Printf("Failed to parse the keyspace group ID: %s\n", err)
+		return
+	}
+	_, err = doRequest(cmd, fmt.Sprintf("%s/%s/merge", keyspaceGroupsPrefix, args[0]), http.MethodDelete, http.Header{})
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println("Success!")
 }
 
 func setNodesKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
