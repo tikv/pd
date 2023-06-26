@@ -614,6 +614,18 @@ func (oc *Controller) buryOperator(op *Operator, extraFields ...zap.Field) {
 			fields...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
+
+		if op.Kind()&OpMerge != 0 {
+			relatedID, _ := strconv.ParseUint(op.AdditionalInfos["merge-related-id"], 10, 64)
+			if relatedOp := oc.GetOperator(relatedID); relatedOp != nil && relatedOp.Status() != CANCELED {
+				log.Info("merge operator cancel related region",
+					zap.Uint64("region-id", relatedID),
+					zap.Duration("takes", relatedOp.RunningTime()),
+					zap.String("additional-info", relatedOp.GetAdditionalInfo()))
+				relatedOp.Cancel()
+				oc.RemoveOperator(relatedOp)
+			}
+		}
 	}
 
 	oc.records.Put(op)
