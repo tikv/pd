@@ -14,11 +14,15 @@
 
 package statistics
 
+<<<<<<< HEAD:server/statistics/hot_regions_stat.go
 import (
 	"time"
 
 	"github.com/tikv/pd/server/core"
 )
+=======
+import "time"
+>>>>>>> cd5b1cebe (pd-ctl: fix hot region show (#6650)):pkg/statistics/hot_regions_stat.go
 
 // HotPeersStat records all hot regions statistics
 type HotPeersStat struct {
@@ -44,14 +48,5 @@ type HotPeerStatShow struct {
 	KeyRate        float64   `json:"flow_keys"`
 	QueryRate      float64   `json:"flow_query"`
 	AntiCount      int       `json:"anti_count"`
-	LastUpdateTime time.Time `json:"last_update_time"`
-}
-
-// UpdateHotPeerStatShow updates the region information, such as `IsLearner` and `LastUpdateTime`.
-func (h *HotPeerStatShow) UpdateHotPeerStatShow(region *core.RegionInfo) {
-	if region == nil {
-		return
-	}
-	h.IsLearner = core.IsLearner(region.GetPeer(h.StoreID))
-	h.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
+	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
 }
