@@ -271,6 +271,7 @@ func TestSplitBuckets(t *testing.T) {
 	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, statistics.Read, transferLeader)
+	solve.cur = &solution{}
 	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
 
 	// the hot range is [a,c],[e,f]

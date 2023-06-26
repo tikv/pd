@@ -1557,7 +1557,7 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 	for _, region := range regions {
 		createFunc(region)
 	}
-	// the split buckets's priority is highest
+	// the split bucket's priority is highest
 	if len(operators) > 0 {
 		bs.cur.progressiveRank = -5
 	}
