@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -244,10 +245,7 @@ func TestEtcdClientSync(t *testing.T) {
 	re.NoError(err)
 
 	// Create a etcd client with etcd1 as endpoint.
-	ep1 := cfg1.LCUrls[0].String()
-	urls, err := types.NewURLs([]string{ep1})
-	re.NoError(err)
-	client1, err := CreateEtcdClient(nil, urls)
+	client1, err := CreateEtcdClient(nil, cfg1.LCUrls)
 	defer func() {
 		client1.Close()
 	}()
@@ -258,7 +256,10 @@ func TestEtcdClientSync(t *testing.T) {
 	etcd2 := checkAddEtcdMember(t, cfg1, client1)
 	defer etcd2.Close()
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
-	time.Sleep(200 * time.Millisecond) // wait for etcd client sync endpoints and client will be connected to etcd2
+	testutil.Eventually(re, func() bool {
+		// wait for etcd client sync endpoints
+		return len(client1.Endpoints()) == 2
+	})
 
 	// Remove the first member and close the etcd1.
 	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
@@ -267,10 +268,95 @@ func TestEtcdClientSync(t *testing.T) {
 
 	// Check the client can get the new member with the new endpoints.
 	testutil.Eventually(re, func() bool {
-		listResp, err := ListEtcdMembers(client1)
-		return err == nil && len(listResp.Members) == 1 && listResp.Members[0].ID == uint64(etcd2.Server.ID())
+		// wait for etcd client sync endpoints
+		return len(client1.Endpoints()) == 1
 	})
 
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+}
+
+func TestEtcdScaleInAndOut(t *testing.T) {
+	re := require.New(t)
+	// Start a etcd server.
+	cfg1 := NewTestSingleConfig(t)
+	etcd1, err := embed.StartEtcd(cfg1)
+	defer func() {
+		etcd1.Close()
+	}()
+	re.NoError(err)
+	<-etcd1.Server.ReadyNotify()
+
+	// Create two etcd clients with etcd1 as endpoint.
+	client1, err := CreateEtcdClient(nil, cfg1.LCUrls) // execute member change operation with this client
+	defer func() {
+		client1.Close()
+	}()
+	re.NoError(err)
+	client2, err := CreateEtcdClient(nil, cfg1.LCUrls) // check member change with this client
+	defer func() {
+		client2.Close()
+	}()
+	re.NoError(err)
+
+	// Add a new member and check members
+	etcd2 := checkAddEtcdMember(t, cfg1, client1)
+	defer func() {
+		etcd2.Close()
+	}()
+	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
+
+	// scale in etcd1
+	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	re.NoError(err)
+	checkMembers(re, client2, []*embed.Etcd{etcd2})
+}
+
+func TestRandomKillEtcd(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
+	// Start a etcd server.
+	cfg1 := NewTestSingleConfig(t)
+	etcd1, err := embed.StartEtcd(cfg1)
+	re.NoError(err)
+	<-etcd1.Server.ReadyNotify()
+	client1, err := CreateEtcdClient(nil, cfg1.LCUrls)
+	re.NoError(err)
+	defer func() {
+		client1.Close()
+	}()
+
+	etcd2 := checkAddEtcdMember(t, cfg1, client1)
+	cfg2 := etcd2.Config()
+	<-etcd2.Server.ReadyNotify()
+
+	etcd3 := checkAddEtcdMember(t, &cfg2, client1)
+	<-etcd3.Server.ReadyNotify()
+
+	time.Sleep(1 * time.Second)
+	re.Len(client1.Endpoints(), 3)
+
+	// Randomly kill an etcd server and restart it
+	etcds := []*embed.Etcd{etcd1, etcd2, etcd3}
+	cfgs := []embed.Config{etcd1.Config(), etcd2.Config(), etcd3.Config()}
+	for i := 0; i < 10; i++ {
+		killIndex := rand.Intn(len(etcds))
+		etcds[killIndex].Close()
+		testutil.Eventually(re, func() bool {
+			return IsHealthy(context.Background(), client1)
+		})
+		etcd, err := embed.StartEtcd(&cfgs[killIndex])
+		re.NoError(err)
+		<-etcd.Server.ReadyNotify()
+		etcds[killIndex] = etcd
+		testutil.Eventually(re, func() bool {
+			return IsHealthy(context.Background(), client1)
+		})
+	}
+	for _, etcd := range etcds {
+		if etcd != nil {
+			etcd.Close()
+		}
+	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }
 
@@ -288,45 +374,6 @@ func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	err = checkEtcdWithHangLeader(t)
 	re.Error(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeTick"))
-}
-
-func TestEtcdScaleInAndOut(t *testing.T) {
-	re := require.New(t)
-	// Start a etcd server.
-	cfg1 := NewTestSingleConfig(t)
-	etcd1, err := embed.StartEtcd(cfg1)
-	defer func() {
-		etcd1.Close()
-	}()
-	re.NoError(err)
-	ep1 := cfg1.LCUrls[0].String()
-	<-etcd1.Server.ReadyNotify()
-
-	// Create two etcd clients with etcd1 as endpoint.
-	urls, err := types.NewURLs([]string{ep1})
-	re.NoError(err)
-	client1, err := CreateEtcdClient(nil, urls) // execute member change operation with this client
-	defer func() {
-		client1.Close()
-	}()
-	re.NoError(err)
-	client2, err := CreateEtcdClient(nil, urls) // check member change with this client
-	defer func() {
-		client2.Close()
-	}()
-	re.NoError(err)
-
-	// Add a new member and check members
-	etcd2 := checkAddEtcdMember(t, cfg1, client1)
-	defer func() {
-		etcd2.Close()
-	}()
-	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
-
-	// scale in etcd1
-	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
-	re.NoError(err)
-	checkMembers(re, client2, []*embed.Etcd{etcd2})
 }
 
 func checkEtcdWithHangLeader(t *testing.T) error {
@@ -355,7 +402,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	}()
 	re.NoError(err)
 
-	// Add a new member and set the client endpoints to etcd1 and etcd2.
+	// Add a new member
 	etcd2 := checkAddEtcdMember(t, cfg1, client1)
 	defer etcd2.Close()
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
@@ -363,7 +410,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 
 	// Hang the etcd1 and wait for the client to connect to etcd2.
 	enableDiscard.Store(true)
-	time.Sleep(defaultDialKeepAliveTime + defaultDialKeepAliveTimeout*2)
+	time.Sleep(time.Second)
 	_, err = EtcdKVGet(client1, "test/key1")
 	return err
 }
@@ -473,16 +520,14 @@ func TestLoopWatcherTestSuite(t *testing.T) {
 }
 
 func (suite *loopWatcherTestSuite) SetupSuite() {
+	var err error
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cleans = make([]func(), 0)
 	// Start a etcd server and create a client with etcd1 as endpoint.
 	suite.config = NewTestSingleConfig(t)
 	suite.startEtcd()
-	ep1 := suite.config.LCUrls[0].String()
-	urls, err := types.NewURLs([]string{ep1})
-	suite.NoError(err)
-	suite.client, err = CreateEtcdClient(nil, urls)
+	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls)
 	suite.NoError(err)
 	suite.cleans = append(suite.cleans, func() {
 		suite.client.Close()

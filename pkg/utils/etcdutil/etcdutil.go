@@ -127,11 +127,7 @@ func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemov
 
 // EtcdKVGet returns the etcd GetResponse by given key or key prefix
 func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	timeout := DefaultRequestTimeout
-	failpoint.Inject("lessTimeout", func() {
-		timeout = 1 * time.Second
-	})
-	ctx, cancel := context.WithTimeout(c.Ctx(), timeout)
+	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
 	defer cancel()
 
 	start := time.Now()
@@ -146,6 +142,20 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 		return resp, e
 	}
 	return resp, nil
+}
+
+// IsHealthy checks if the etcd is healthy.
+func IsHealthy(ctx context.Context, client *clientv3.Client) bool {
+	timeout := DefaultRequestTimeout
+	failpoint.Inject("fastTick", func() {
+		timeout = 100 * time.Millisecond
+	})
+	ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(ctx), timeout)
+	defer cancel()
+	_, err := client.Get(ctx, "health")
+	// permission denied is OK since proposal goes through consensus to get it
+	// See: https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L124
+	return err == nil || err == rpctypes.ErrPermissionDenied
 }
 
 // GetValue gets value with key from etcd.
@@ -328,13 +338,9 @@ func (checker *healthyChecker) patrol(ctx context.Context) []string {
 		go func(key, value interface{}) {
 			defer wg.Done()
 			defer logutil.LogPanic()
-			ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(ctx), DefaultRequestTimeout)
-			defer cancel()
 			ep := key.(string)
 			client := value.(*healthyClient)
-			_, err := client.Get(ctx, "health")
-			// permission denied is OK since proposal goes through consensus to get it
-			if err == nil || err == rpctypes.ErrPermissionDenied {
+			if IsHealthy(ctx, client.Client) {
 				hch <- ep
 				checker.Store(ep, &healthyClient{
 					Client:     client.Client,

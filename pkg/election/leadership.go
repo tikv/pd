@@ -210,7 +210,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.
-		if _, err := etcdutil.EtcdKVGet(ls.client, ls.leaderKey); err != nil {
+		if !etcdutil.IsHealthy(serverCtx, ls.client) {
 			if time.Since(lastHealthyTime) > timeout {
 				log.Error("the connect of leadership watcher is unhealthy",
 					zap.Int64("revision", revision),
@@ -235,7 +235,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			// server closed, return
 			return
 		case <-ticker.C:
-			if _, err := etcdutil.EtcdKVGet(ls.client, ls.leaderKey); err != nil {
+			if !etcdutil.IsHealthy(serverCtx, ls.client) {
 				watchChanCancel()
 				continue
 			}
