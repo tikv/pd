@@ -61,8 +61,12 @@ type FileReplicater interface {
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 }
 
+<<<<<<< HEAD:server/replication/replication_mode.go
 // DrStatusFile is the file name that stores the dr status.
 const DrStatusFile = "DR_STATE"
+=======
+const drStatusFile = "DR_STATE"
+>>>>>>> eed021d6d (replication mode: tune persist file timeout (#6669)):pkg/replication/replication_mode.go
 const persistFileTimeout = time.Second * 3
 
 // ModeManager is used to control how raft logs are synchronized between
