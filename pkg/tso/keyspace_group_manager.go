@@ -165,7 +165,8 @@ func (s *state) getNextPrimaryToReset(
 	s.RLock()
 	defer s.RUnlock()
 
-	groupSize := len(s.ams)
+	// Both s.ams and s.kgs are arrays with the fixed size defined by the const value MaxKeyspaceGroupCountInUse.
+	groupSize := int(mcsutils.MaxKeyspaceGroupCountInUse)
 	groupID %= groupSize
 	for j := 0; j < groupSize; groupID, j = (groupID+1)%groupSize, j+1 {
 		am := s.ams[groupID]
