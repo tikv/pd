@@ -391,7 +391,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 }
 
 func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
-	if len(rf.Rule.LocationLabels) == 0 || rf.Rule.Count <= 1 {
+	if len(rf.Rule.LocationLabels) == 0 {
 		return nil, nil
 	}
 
@@ -403,7 +403,15 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	if oldStore == 0 {
 		return nil, nil
 	}
-	newStore, filterByTempState := strategy.SelectStoreToImprove(ruleStores, oldStore)
+	var coLocationStores []*core.StoreInfo
+	regionStores := c.cluster.GetRegionStores(region)
+	for _, s := range regionStores {
+		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
+			coLocationStores = append(coLocationStores, s)
+		}
+	}
+
+	newStore, filterByTempState := strategy.SelectStoreToImprove(coLocationStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		c.handleFilterState(region, filterByTempState)
@@ -455,11 +463,18 @@ loopFits:
 	// If hasUnhealthyFit is true, try to remove unhealthy orphan peers only if number of OrphanPeers is >= 2.
 	// Ref https://github.com/tikv/pd/issues/4045
 	if len(fit.OrphanPeers) >= 2 {
+		hasHealthPeer := false
 		for _, orphanPeer := range fit.OrphanPeers {
 			if isUnhealthyPeer(orphanPeer.GetId()) {
 				ruleCheckerRemoveOrphanPeerCounter.Inc()
 				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
+			if hasHealthPeer {
+				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
+				ruleCheckerRemoveOrphanPeerCounter.Inc()
+				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
+			}
+			hasHealthPeer = true
 		}
 	}
 	ruleCheckerSkipRemoveOrphanPeerCounter.Inc()

@@ -1406,3 +1406,16 @@ func (am *AllocatorManager) GetLeaderAddr() string {
 	}
 	return leaderAddrs[0]
 }
+
+// Construct the timestampOracle path prefix, which is:
+//  1. for the default keyspace group:
+//     "" in /pd/{cluster_id}/timestamp
+//  2. for the non-default keyspace groups:
+//     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
+func (am *AllocatorManager) getKeyspaceGroupTSPath(groupID uint32) string {
+	tsPath := ""
+	if am.kgID != mcsutils.DefaultKeyspaceGroupID {
+		tsPath = path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
+	}
+	return tsPath
+}

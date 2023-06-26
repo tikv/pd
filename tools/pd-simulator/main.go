@@ -43,7 +43,7 @@ import (
 )
 
 var (
-	pdAddr                      = flag.String("pd", "", "pd address")
+	pdAddr                      = flag.String("pd-endpoints", "", "pd address")
 	configFile                  = flag.String("config", "conf/simconfig.toml", "config file")
 	caseName                    = flag.String("case", "", "case name")
 	serverLogLevel              = flag.String("serverLog", "info", "pd server log level")

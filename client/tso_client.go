@@ -70,7 +70,6 @@ type tsoClient struct {
 	wg     sync.WaitGroup
 	option *option
 
-	keyspaceID   uint32
 	svcDiscovery ServiceDiscovery
 	tsoStreamBuilderFactory
 	// tsoAllocators defines the mapping {dc-location -> TSO allocator leader URL}
@@ -94,7 +93,7 @@ type tsoClient struct {
 
 // newTSOClient returns a new TSO client.
 func newTSOClient(
-	ctx context.Context, option *option, keyspaceID uint32,
+	ctx context.Context, option *option,
 	svcDiscovery ServiceDiscovery, factory tsoStreamBuilderFactory,
 ) *tsoClient {
 	ctx, cancel := context.WithCancel(ctx)
@@ -102,7 +101,6 @@ func newTSOClient(
 		ctx:                       ctx,
 		cancel:                    cancel,
 		option:                    option,
-		keyspaceID:                keyspaceID,
 		svcDiscovery:              svcDiscovery,
 		tsoStreamBuilderFactory:   factory,
 		checkTSDeadlineCh:         make(chan struct{}),
@@ -211,7 +209,7 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 			return err
 		}
 		c.tsoAllocators.Store(dcLocation, addr)
-		log.Info("[tso] switch dc tso allocator serving address",
+		log.Info("[tso] switch dc tso local allocator serving address",
 			zap.String("dc-location", dcLocation),
 			zap.String("new-address", addr),
 			zap.String("old-address", oldAddr))
@@ -229,7 +227,7 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 
 func (c *tsoClient) updateTSOGlobalServAddr(addr string) error {
 	c.tsoAllocators.Store(globalDCLocation, addr)
-	log.Info("[tso] switch dc tso allocator serving address",
+	log.Info("[tso] switch dc tso global allocator serving address",
 		zap.String("dc-location", globalDCLocation),
 		zap.String("new-address", addr))
 	c.scheduleCheckTSODispatcher()

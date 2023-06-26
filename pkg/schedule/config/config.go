@@ -29,6 +29,8 @@ func IsSchedulerRegistered(name string) bool {
 
 // Config is the interface that wraps the Config related methods.
 type Config interface {
+	IsSchedulingHalted() bool
+
 	GetReplicaScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
 	GetMergeScheduleLimit() uint64

@@ -52,7 +52,8 @@ type grantLeaderSchedulerConfig struct {
 	mu                syncutil.RWMutex
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster           sche.ClusterInformer
+	cluster           *core.BasicCluster
+	removeSchedulerCb func(name string) error
 }
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -177,7 +178,7 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *grantLeaderScheduler) Prepare(cluster sche.ClusterInformer) error {
+func (s *grantLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -189,7 +190,7 @@ func (s *grantLeaderScheduler) Prepare(cluster sche.ClusterInformer) error {
 	return res
 }
 
-func (s *grantLeaderScheduler) Cleanup(cluster sche.ClusterInformer) {
+func (s *grantLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
@@ -197,7 +198,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster sche.ClusterInformer) {
 	}
 }
 
-func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
@@ -205,7 +206,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) b
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *grantLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -301,7 +302,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.cluster.RemoveScheduler(GrantLeaderName); err != nil {
+			if err := handler.config.removeSchedulerCb(GrantLeaderName); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {

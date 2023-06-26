@@ -23,6 +23,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -40,8 +41,11 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router.DELETE("/:id", DeleteKeyspaceGroupByID)
 	router.POST("/:id/alloc", AllocNodesForKeyspaceGroup)
 	router.POST("/:id/nodes", SetNodesForKeyspaceGroup)
+	router.POST("/:id/priority", SetPriorityForKeyspaceGroup)
 	router.POST("/:id/split", SplitKeyspaceGroupByID)
 	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
+	router.POST("/:id/merge", MergeKeyspaceGroups)
+	router.DELETE("/:id/merge", FinishMergeKeyspaceByID)
 }
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.
@@ -157,6 +161,9 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 type SplitKeyspaceGroupByIDParams struct {
 	NewID     uint32   `json:"new-id"`
 	Keyspaces []uint32 `json:"keyspaces"`
+	// StartKeyspaceID and EndKeyspaceID are used to indicate the range of keyspaces to be split.
+	StartKeyspaceID uint32 `json:"start-keyspace-id"`
+	EndKeyspaceID   uint32 `json:"end-keyspace-id"`
 }
 
 var patrolKeyspaceAssignmentState struct {
@@ -182,8 +189,13 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 		return
 	}
-	if len(splitParams.Keyspaces) == 0 {
+	if len(splitParams.Keyspaces) == 0 && splitParams.StartKeyspaceID == 0 && splitParams.EndKeyspaceID == 0 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid empty keyspaces")
+		return
+	}
+	if splitParams.StartKeyspaceID < utils.DefaultKeyspaceID ||
+		splitParams.StartKeyspaceID > splitParams.EndKeyspaceID {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid start/end keyspace id")
 		return
 	}
 
@@ -196,7 +208,7 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
 			return
 		}
-		err = manager.PatrolKeyspaceAssignment()
+		err = manager.PatrolKeyspaceAssignment(splitParams.StartKeyspaceID, splitParams.EndKeyspaceID)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			patrolKeyspaceAssignmentState.Unlock()
@@ -205,13 +217,15 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		patrolKeyspaceAssignmentState.patrolled = true
 	}
 	patrolKeyspaceAssignmentState.Unlock()
-	// Split keyspace group.
 	groupManager := svr.GetKeyspaceGroupManager()
 	if groupManager == nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
 		return
 	}
-	err = groupManager.SplitKeyspaceGroupByID(id, splitParams.NewID, splitParams.Keyspaces)
+	// Split keyspace group.
+	err = groupManager.SplitKeyspaceGroupByID(
+		id, splitParams.NewID,
+		splitParams.Keyspaces, splitParams.StartKeyspaceID, splitParams.EndKeyspaceID)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -230,6 +244,68 @@ func FinishSplitKeyspaceByID(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
 	err = manager.FinishSplitKeyspaceByID(id)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, nil)
+}
+
+// MergeKeyspaceGroupsParams defines the params for merging the keyspace groups.
+type MergeKeyspaceGroupsParams struct {
+	MergeList []uint32 `json:"merge-list"`
+}
+
+// MergeKeyspaceGroups merges the keyspace groups in the merge list into the target keyspace group.
+func MergeKeyspaceGroups(c *gin.Context) {
+	id, err := validateKeyspaceGroupID(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+	mergeParams := &MergeKeyspaceGroupsParams{}
+	err = c.BindJSON(mergeParams)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		return
+	}
+	if len(mergeParams.MergeList) == 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid empty merge list")
+		return
+	}
+	for _, mergeID := range mergeParams.MergeList {
+		if !isValid(mergeID) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+			return
+		}
+	}
+
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	groupManager := svr.GetKeyspaceGroupManager()
+	if groupManager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
+	// Merge keyspace group.
+	err = groupManager.MergeKeyspaceGroups(id, mergeParams.MergeList)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, nil)
+}
+
+// FinishMergeKeyspaceByID finishes merging keyspace group by ID.
+func FinishMergeKeyspaceByID(c *gin.Context) {
+	id, err := validateKeyspaceGroupID(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceGroupManager()
+	err = manager.FinishMergeKeyspaceByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -261,7 +337,7 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < utils.KeyspaceGroupDefaultReplicaCount {
+	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < utils.DefaultKeyspaceGroupReplicaCount {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [2, nodes_num]")
 		return
 	}
@@ -283,7 +359,7 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, nodes)
 }
 
-// SetNodesForKeyspaceGroupParams defines the params for setting nodes for keyspace groups.
+// SetNodesForKeyspaceGroupParams defines the params for setting nodes for keyspace group.
 // Notes: it should be used carefully.
 type SetNodesForKeyspaceGroupParams struct {
 	Nodes []string `json:"nodes"`
@@ -315,7 +391,7 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 		return
 	}
 	// check if nodes is less than default replica count
-	if len(setParams.Nodes) < utils.KeyspaceGroupDefaultReplicaCount {
+	if len(setParams.Nodes) < utils.DefaultKeyspaceGroupReplicaCount {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid num of nodes")
 		return
 	}
@@ -328,6 +404,53 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 	}
 	// set nodes
 	err = manager.SetNodesForKeyspaceGroup(id, setParams.Nodes)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, nil)
+}
+
+// SetPriorityForKeyspaceGroupParams defines the params for setting priority of tso node for the keyspace group.
+type SetPriorityForKeyspaceGroupParams struct {
+	Node     string `json:"node"`
+	Priority int    `json:"priority"`
+}
+
+// SetPriorityForKeyspaceGroup sets priority of tso node for the keyspace group.
+func SetPriorityForKeyspaceGroup(c *gin.Context) {
+	id, err := validateKeyspaceGroupID(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
+	setParams := &SetPriorityForKeyspaceGroupParams{}
+	err = c.BindJSON(setParams)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		return
+	}
+	// check if keyspace group exists
+	kg, err := manager.GetKeyspaceGroupByID(id)
+	if err != nil || kg == nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "keyspace group does not exist")
+		return
+	}
+	// check if node exists
+	members := kg.Members
+	if slice.NoneOf(members, func(i int) bool {
+		return members[i].Address == setParams.Node
+	}) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "tso node does not exist in the keyspace group")
+	}
+	// set priority
+	err = manager.SetPriorityForKeyspaceGroup(id, setParams.Node, setParams.Priority)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
