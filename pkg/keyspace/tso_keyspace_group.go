@@ -615,7 +615,15 @@ func buildSplitKeyspaces(
 				oldSplit = append(oldSplit, keyspace)
 			}
 		}
-		return oldSplit, new, nil
+		// Dedup new keyspaces if it's necessary.
+		if newNum == len(newKeyspaceMap) {
+			return oldSplit, new, nil
+		}
+		newSplit := make([]uint32, 0, len(newKeyspaceMap))
+		for keyspace := range newKeyspaceMap {
+			newSplit = append(newSplit, keyspace)
+		}
+		return oldSplit, newSplit, nil
 	}
 	// Split according to the start and end keyspace ID.
 	if startKeyspaceID == 0 && endKeyspaceID == 0 {
