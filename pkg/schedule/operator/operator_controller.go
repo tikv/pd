@@ -550,9 +550,26 @@ func (oc *Controller) removeOperatorLocked(op *Operator) bool {
 		oc.updateCounts(oc.operators)
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
+
+		if op.Kind()&OpMerge != 0 {
+			oc.removeRelatedOperator(op)
+		}
+
 		return true
 	}
 	return false
+}
+
+func (oc *Controller) removeRelatedOperator(op *Operator) {
+	relatedID, _ := strconv.ParseUint(op.AdditionalInfos["related-region-id"], 10, 64)
+	if relatedOp := oc.operators[relatedID]; relatedOp != nil && relatedOp.Status() != CANCELED {
+		log.Info("operator cancel related region",
+			zap.Uint64("region-id", relatedID),
+			zap.Duration("takes", relatedOp.RunningTime()),
+			zap.String("additional-info", relatedOp.GetAdditionalInfo()))
+		relatedOp.Cancel()
+		oc.removeOperatorLocked(relatedOp)
+	}
 }
 
 func (oc *Controller) buryOperator(op *Operator, extraFields ...zap.Field) {
@@ -614,18 +631,6 @@ func (oc *Controller) buryOperator(op *Operator, extraFields ...zap.Field) {
 			fields...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
-
-		if op.Kind()&OpMerge != 0 {
-			relatedID, _ := strconv.ParseUint(op.AdditionalInfos["merge-related-id"], 10, 64)
-			if relatedOp := oc.operators[relatedID]; relatedOp != nil && relatedOp.Status() != CANCELED {
-				log.Info("merge operator cancel related region",
-					zap.Uint64("region-id", relatedID),
-					zap.Duration("takes", relatedOp.RunningTime()),
-					zap.String("additional-info", relatedOp.GetAdditionalInfo()))
-				relatedOp.Cancel()
-				oc.removeOperatorLocked(relatedOp)
-			}
-		}
 	}
 
 	oc.records.Put(op)

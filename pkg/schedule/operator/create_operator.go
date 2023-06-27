@@ -17,7 +17,6 @@ package operator
 import (
 	"fmt"
 	"math/rand"
-	"strconv"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -198,8 +197,6 @@ func CreateMergeRegionOperator(desc string, ci sche.ScheduleCluster, source *cor
 		IsPassive:  true,
 	})
 	op2.Sync(op1)
-	op2.AdditionalInfos["merge-related-id"] = strconv.FormatUint(source.GetID(), 10)
-	op1.AdditionalInfos["merge-related-id"] = strconv.FormatUint(target.GetID(), 10)
 
 	return []*Operator{op1, op2}, nil
 }

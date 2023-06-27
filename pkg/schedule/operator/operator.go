@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -84,6 +85,8 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 // Sync some attribute with the given timeout.
 func (o *Operator) Sync(other *Operator) {
 	o.timeout = other.timeout
+	o.AdditionalInfos["related-region-id"] = strconv.FormatUint(other.RegionID(), 10)
+	other.AdditionalInfos["related-region-id"] = strconv.FormatUint(o.RegionID(), 10)
 }
 
 func (o *Operator) String() string {
