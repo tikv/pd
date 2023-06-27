@@ -135,19 +135,19 @@ func (suite *statsTestSuite) TestRegionStats() {
 	// 3      ["t", "x")  1     1	  F                           L
 	// 4      ["x", "")   50    20                   	   L
 
-	//statsAll := &statistics.RegionStats{
-	//	Count:            4,
-	//	EmptyCount:       1,
-	//	StorageSize:      351,
-	//	StorageKeys:      221,
-	//	StoreLeaderCount: map[uint64]int{1: 1, 4: 2, 5: 1},
-	//	StorePeerCount:   map[uint64]int{1: 3, 2: 1, 3: 1, 4: 2, 5: 2},
-	//	StoreLeaderSize:  map[uint64]int64{1: 100, 4: 250, 5: 1},
-	//	StoreLeaderKeys:  map[uint64]int64{1: 50, 4: 170, 5: 1},
-	//	StorePeerSize:    map[uint64]int64{1: 301, 2: 100, 3: 100, 4: 250, 5: 201},
-	//	StorePeerKeys:    map[uint64]int64{1: 201, 2: 50, 3: 50, 4: 170, 5: 151},
-	//}
-	//
+	statsAll := &statistics.RegionStats{
+		Count:            4,
+		EmptyCount:       1,
+		StorageSize:      351,
+		StorageKeys:      221,
+		StoreLeaderCount: map[uint64]int{1: 1, 4: 2, 5: 1},
+		StorePeerCount:   map[uint64]int{1: 3, 2: 1, 3: 1, 4: 2, 5: 2},
+		StoreLeaderSize:  map[uint64]int64{1: 100, 4: 250, 5: 1},
+		StoreLeaderKeys:  map[uint64]int64{1: 50, 4: 170, 5: 1},
+		StorePeerSize:    map[uint64]int64{1: 301, 2: 100, 3: 100, 4: 250, 5: 201},
+		StorePeerKeys:    map[uint64]int64{1: 201, 2: 50, 3: 50, 4: 170, 5: 151},
+	}
+
 	stats23 := &statistics.RegionStats{
 		Count:            2,
 		EmptyCount:       1,
@@ -166,23 +166,18 @@ func (suite *statsTestSuite) TestRegionStats() {
 		endKey   string
 		expect   *statistics.RegionStats
 	}{
-		//{
-		//	startKey: "",
-		//	endKey:   "",
-		//	expect:   statsAll,
-		//}, {
-		//	startKey: url.QueryEscape("\x01\x02"),
-		//	endKey:   url.QueryEscape("xyz\x00\x00"),
-		//	expect:   statsAll,
-		//},
-		//{
-		//	startKey: url.QueryEscape("a"),
-		//	endKey:   url.QueryEscape("x"),
-		//	expect:   stats23,
-		//},
+		{
+			startKey: "",
+			endKey:   "",
+			expect:   statsAll,
+		}, {
+			startKey: url.QueryEscape("\x01\x02"),
+			endKey:   url.QueryEscape("xyz\x00\x00"),
+			expect:   statsAll,
+		},
 		{
 			startKey: url.QueryEscape("a"),
-			endKey:   url.QueryEscape("a"),
+			endKey:   url.QueryEscape("x"),
 			expect:   stats23,
 		},
 	}
