@@ -32,10 +32,11 @@ import (
 
 const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
-	storePersistInterval = 5 * time.Minute
-	initialMinSpace      = 8 * units.GiB // 2^33=8GB
-	slowStoreThreshold   = 80
-	awakenStoreInterval  = 10 * time.Minute // 2 * slowScoreRecoveryTime
+	storePersistInterval    = 5 * time.Minute
+	initialMinSpace         = 8 * units.GiB // 2^33=8GB
+	slowStorePauseThreshold = 20
+	slowStoreThreshold      = 80
+	awakenStoreInterval     = 10 * time.Minute // 2 * slowScoreRecoveryTime
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
@@ -537,6 +538,18 @@ func (s *StoreInfo) GetMinResolvedTS() uint64 {
 // be awaken or not.
 func (s *StoreInfo) NeedAwakenStore() bool {
 	return s.GetLastHeartbeatTS().Sub(s.lastAwakenTime) > awakenStoreInterval
+}
+
+func (s *StoreInfo) NeedPauseGrpc() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.rawStats.IsGrpcPaused && (s.slowTrendEvicted || s.rawStats.GetSlowScore() >= slowStorePauseThreshold)
+}
+
+func (s *StoreInfo) NeedResumeGrpc() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.IsGrpcPaused && (!s.slowTrendEvicted || s.rawStats.GetSlowScore() < slowStorePauseThreshold)
 }
 
 var (

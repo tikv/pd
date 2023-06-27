@@ -866,6 +866,20 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
 		}
 	}
+
+	// Whether it's necessary to PAUSE | RESUME the given store.
+	if newStore.NeedPauseGrpc() {
+		log.Info("forcely pause grpc server", zap.Uint64("store-id", storeID))
+		resp.ControlGrpc = &pdpb.ControlGrpc{
+			CtrlEvent: pdpb.ControlGrpcEvent_PAUSE,
+		}
+	} else if newStore.NeedResumeGrpc() {
+		log.Info("forcely resume grpc server", zap.Uint64("store-id", storeID))
+		resp.ControlGrpc = &pdpb.ControlGrpc{
+			CtrlEvent: pdpb.ControlGrpcEvent_RESUME,
+		}
+	}
+
 	if store := c.core.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
 	}

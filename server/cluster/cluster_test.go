@@ -1820,6 +1820,8 @@ func TestAwakenStore(t *testing.T) {
 	n := uint64(3)
 	stores := newTestStores(n, "6.5.0")
 	re.True(stores[0].NeedAwakenStore())
+	re.False(stores[0].NeedPauseGrpc())
+	re.False(stores[0].NeedResumeGrpc())
 	for _, store := range stores {
 		re.NoError(cluster.PutStore(store.GetMeta()))
 	}
