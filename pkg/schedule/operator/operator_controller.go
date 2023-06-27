@@ -330,7 +330,6 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 	// note: checkAddOperator uses false param for `isPromoting`.
 	// This is used to keep check logic before fixing issue #4946,
 	// but maybe user want to add operator when waiting queue is busy
-
 	if oc.exceedStoreLimitLocked(ops...) {
 		for _, op := range ops {
 			_ = op.Cancel(ExceedStoreLimit)
@@ -448,16 +447,14 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 			continue
 		}
 	}
-	expired := false
 	var reason CancelReasonType
 	for _, op := range ops {
 		if op.CheckExpired() {
-			expired = true
 			reason = Expired
 			operatorWaitCounter.WithLabelValues(op.Desc(), "expired").Inc()
 		}
 	}
-	return !expired, reason
+	return reason != Expired, reason
 }
 
 func isHigherPriorityOperator(new, old *Operator) bool {
@@ -631,15 +628,11 @@ func (oc *Controller) buryOperator(op *Operator) {
 			zap.String("additional-info", op.GetAdditionalInfo()))
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	case CANCELED:
-		fields := []zap.Field{
+		log.Info("operator canceled",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
 			zap.String("additional-info", op.GetAdditionalInfo()),
-		}
-		fields = append(fields)
-		log.Info("operator canceled",
-			fields...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}
