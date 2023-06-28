@@ -55,14 +55,9 @@ type Leadership struct {
 	leaderKey   string
 	leaderValue string
 
-<<<<<<< HEAD:server/election/leadership.go
-	keepAliveCtx        context.Context
-	keepAliceCancelFunc context.CancelFunc
-=======
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
 	keepAliveCancelFuncLock sync.Mutex
->>>>>>> 3bdfef1a3 (leadership: avoid potential data race (#6636)):pkg/election/leadership.go
 }
 
 // NewLeadership creates a new Leadership.
@@ -144,15 +139,10 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	if ls == nil {
 		return
 	}
-<<<<<<< HEAD:server/election/leadership.go
-	ls.keepAliveCtx, ls.keepAliceCancelFunc = context.WithCancel(ctx)
-	ls.getLease().KeepAlive(ls.keepAliveCtx)
-=======
 	ls.keepAliveCancelFuncLock.Lock()
 	ls.keepAliveCtx, ls.keepAliveCancelFunc = context.WithCancel(ctx)
 	ls.keepAliveCancelFuncLock.Unlock()
 	go ls.getLease().KeepAlive(ls.keepAliveCtx)
->>>>>>> 3bdfef1a3 (leadership: avoid potential data race (#6636)):pkg/election/leadership.go
 }
 
 // Check returns whether the leadership is still available.
@@ -244,14 +234,9 @@ func (ls *Leadership) Reset() {
 	if ls == nil || ls.getLease() == nil {
 		return
 	}
-<<<<<<< HEAD:server/election/leadership.go
-	if ls.keepAliceCancelFunc != nil {
-		ls.keepAliceCancelFunc()
-=======
 	ls.keepAliveCancelFuncLock.Lock()
 	if ls.keepAliveCancelFunc != nil {
 		ls.keepAliveCancelFunc()
->>>>>>> 3bdfef1a3 (leadership: avoid potential data race (#6636)):pkg/election/leadership.go
 	}
 	ls.keepAliveCancelFuncLock.Unlock()
 	ls.getLease().Close()
