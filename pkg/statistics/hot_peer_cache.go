@@ -234,8 +234,8 @@ func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInf
 		actionType: Update,
 		stores:     make([]uint64, len(peers)),
 	}
-	for _, peer := range peers {
-		newItem.stores = append(newItem.stores, peer.GetStoreId())
+	for i, peer := range peers {
+		newItem.stores[i] = peer.GetStoreId()
 	}
 
 	if oldItem == nil {

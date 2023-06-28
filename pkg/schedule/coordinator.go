@@ -519,11 +519,28 @@ func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.Sto
 	default:
 	}
 	// update params `IsLearner` and `LastUpdateTime`
-	for _, stores := range []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer} {
-		for _, store := range stores {
-			for _, hotPeer := range store.Stats {
-				region := c.cluster.GetRegion(hotPeer.RegionID)
-				hotPeer.UpdateHotPeerStatShow(region)
+	s := []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer}
+	for i, stores := range s {
+		for j, store := range stores {
+			for k := range store.Stats {
+				h := &s[i][j].Stats[k]
+				region := c.cluster.GetRegion(h.RegionID)
+				if region != nil {
+					h.IsLearner = core.IsLearner(region.GetPeer(h.StoreID))
+				}
+				switch typ {
+				case statistics.Write:
+					if region != nil {
+						h.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
+					}
+				case statistics.Read:
+					store := c.cluster.GetStore(h.StoreID)
+					if store != nil {
+						ts := store.GetMeta().GetLastHeartbeat()
+						h.LastUpdateTime = time.Unix(ts/1e9, ts%1e9)
+					}
+				default:
+				}
 			}
 		}
 	}
