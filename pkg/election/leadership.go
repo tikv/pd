@@ -230,6 +230,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 		watchChan := watcher.Watch(watchChanCtx, ls.leaderKey, clientv3.WithRev(revision))
 		lastHealthyTime = time.Now()
+	WatchChan:
 		select {
 		case <-serverCtx.Done():
 			// server closed, return
@@ -239,6 +240,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				watchChanCancel()
 				continue
 			}
+			goto WatchChan // use goto to avoid to create a new watchChan
 		case wresp := <-watchChan:
 			// meet compacted error, use the compact revision.
 			if wresp.CompactRevision != 0 {
@@ -267,8 +269,8 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				}
 			}
 			revision = wresp.Header.Revision + 1
+			goto WatchChan // use goto to avoid to create a new watchChan
 		}
-		watchChanCancel()
 	}
 }
 

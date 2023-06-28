@@ -124,6 +124,7 @@ func TestExitWatch(t *testing.T) {
 	re := require.New(t)
 	leaderKey := "/test_leader"
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/fastTick", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Case1: close the client before the watch loop starts
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) {
 		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
@@ -155,6 +156,7 @@ func TestExitWatch(t *testing.T) {
 		server.Close()
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/fastTick"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }
 
 func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embed.Etcd, client *clientv3.Client)) {

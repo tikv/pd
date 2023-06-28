@@ -675,13 +675,13 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	defer watcher.Close()
 
 	for {
-	WatchChan:
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
 		watchChanCtx, watchChanCancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
 		defer watchChanCancel()
 		opts := append(lw.opts, clientv3.WithRev(revision))
 		watchChan := watcher.Watch(watchChanCtx, lw.key, opts...)
+	WatchChan:
 		select {
 		case <-ctx.Done():
 			return revision, nil
@@ -692,7 +692,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.String("key", lw.key), zap.Error(err))
 			}
 			watchChanCancel()
-			goto WatchChan
+			continue
 		case wresp := <-watchChan:
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision in watch loop",
@@ -700,7 +700,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("compact-revision", wresp.CompactRevision))
 				revision = wresp.CompactRevision
 				watchChanCancel()
-				goto WatchChan
+				continue
 			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
 				log.Error("watcher is canceled in watch loop",
 					zap.Int64("revision", revision),
@@ -733,8 +733,8 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.String("key", lw.key), zap.Error(err))
 			}
 			revision = wresp.Header.Revision + 1
+			goto WatchChan // use goto to avoid to create a new watchChan
 		}
-		watchChanCancel()
 	}
 }
 
