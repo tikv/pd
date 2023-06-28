@@ -248,7 +248,7 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 		// finished op canceled
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 2})
 		suite.True(oc.checkAddOperator(false, op))
-		suite.True(op.Cancel())
+		suite.True(op.Cancel(AdminStop))
 		suite.False(oc.checkAddOperator(false, op))
 	}
 	{
