@@ -702,10 +702,10 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 				return errors.Errorf("default keyspace group %d not found", utils.DefaultKeyspaceGroupID)
 			}
 			if defaultKeyspaceGroup.IsSplitting() {
-				return ErrKeyspaceGroupInSplit
+				return ErrKeyspaceGroupInSplit(utils.DefaultKeyspaceGroupID)
 			}
 			if defaultKeyspaceGroup.IsMerging() {
-				return ErrKeyspaceGroupInMerging
+				return ErrKeyspaceGroupInMerging(utils.DefaultKeyspaceGroupID)
 			}
 			keyspaces, err := manager.store.LoadRangeKeyspace(txn, manager.nextPatrolStartID, maxEtcdTxnOps)
 			if err != nil {
