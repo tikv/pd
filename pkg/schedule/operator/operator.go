@@ -43,13 +43,13 @@ var (
 	RegionNotFound CancelReasonType = "region not found"
 	// EpochNotMatch is the cancel reason when the region epoch is not match.
 	EpochNotMatch CancelReasonType = "epoch not match"
-	// AlreadyFinished is the cancel reason when the operator is running.
+	// AlreadyExist is the cancel reason when the operator is running.
 	AlreadyExist CancelReasonType = "already exist"
 	// AdminStop is the cancel reason when the operator is stopped by adminer.
 	AdminStop CancelReasonType = "admin stop"
 	// NotInRunningState is the cancel reason when the operator is not in running state.
 	NotInRunningState CancelReasonType = "not in running state"
-	// Success is the cancel reason when the operator is finished successfully.
+	// Succeed is the cancel reason when the operator is finished successfully.
 	Succeed CancelReasonType = "succeed"
 	// Timeout is the cancel reason when the operator is timeout.
 	Timeout CancelReasonType = "timeout"
