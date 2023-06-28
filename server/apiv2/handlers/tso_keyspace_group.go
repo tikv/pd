@@ -108,8 +108,29 @@ func GetKeyspaceGroups(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
+	var kgs []*endpoint.KeyspaceGroup
+	state, set := c.GetQuery("state")
+	if set {
+		switch state {
+		case "merge":
+			for _, keyspaceGroup := range keyspaceGroups {
+				if keyspaceGroup.MergeState != nil {
+					kgs = append(kgs, keyspaceGroup)
+				}
+			}
+		case "split":
+			for _, keyspaceGroup := range keyspaceGroups {
+				if keyspaceGroup.SplitState != nil {
+					kgs = append(kgs, keyspaceGroup)
+				}
+			}
+		default:
+		}
+	} else {
+		kgs = keyspaceGroups
+	}
 
-	c.IndentedJSON(http.StatusOK, keyspaceGroups)
+	c.IndentedJSON(http.StatusOK, kgs)
 }
 
 // GetKeyspaceGroupByID gets keyspace group by ID.
