@@ -49,15 +49,25 @@ var (
 	// ErrKeyspaceGroupExists indicates target keyspace group already exists.
 	ErrKeyspaceGroupExists = errors.New("keyspace group already exists")
 	// ErrKeyspaceGroupNotExists is used to indicate target keyspace group does not exist.
-	ErrKeyspaceGroupNotExists = errors.New("keyspace group does not exist")
+	ErrKeyspaceGroupNotExists = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v does not exist", groupID)
+	}
 	// ErrKeyspaceGroupInSplit is used to indicate target keyspace group is in split state.
-	ErrKeyspaceGroupInSplit = errors.New("keyspace group is in split state")
+	ErrKeyspaceGroupInSplit = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v is in split state", groupID)
+	}
 	// ErrKeyspaceGroupNotInSplit is used to indicate target keyspace group is not in split state.
-	ErrKeyspaceGroupNotInSplit = errors.New("keyspace group is not in split state")
+	ErrKeyspaceGroupNotInSplit = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v is not in split state", groupID)
+	}
 	// ErrKeyspaceGroupInMerging is used to indicate target keyspace group is in merging state.
-	ErrKeyspaceGroupInMerging = errors.New("keyspace group is in merging state")
+	ErrKeyspaceGroupInMerging = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v is in merging state", groupID)
+	}
 	// ErrKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
-	ErrKeyspaceGroupNotInMerging = errors.New("keyspace group is not in merging state")
+	ErrKeyspaceGroupNotInMerging = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v is not in merging state", groupID)
+	}
 	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
 	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
 	// ErrNodeNotInKeyspaceGroup is used to indicate the tso node is not in this keyspace group.

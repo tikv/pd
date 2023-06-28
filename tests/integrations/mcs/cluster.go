@@ -202,7 +202,8 @@ func (tc *TestTSOCluster) GetServers() map[string]*tso.Server {
 func (tc *TestTSOCluster) GetKeyspaceGroupMember() (members []endpoint.KeyspaceGroupMember) {
 	for _, server := range tc.servers {
 		members = append(members, endpoint.KeyspaceGroupMember{
-			Address: server.GetAddr(),
+			Address:  server.GetAddr(),
+			Priority: mcsutils.DefaultKeyspaceGroupReplicaPriority,
 		})
 	}
 	return
