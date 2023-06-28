@@ -515,9 +515,9 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	// Changing the state of default keyspace is not allowed.
 	if name == utils.DefaultKeyspaceName {
 		log.Warn("[keyspace] failed to update keyspace config",
-			zap.Error(errModifyDefault),
+			zap.Error(ErrModifyDefaultKeyspace),
 		)
-		return nil, errModifyDefault
+		return nil, ErrModifyDefaultKeyspace
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -567,9 +567,9 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	// Changing the state of default keyspace is not allowed.
 	if id == utils.DefaultKeyspaceID {
 		log.Warn("[keyspace] failed to update keyspace config",
-			zap.Error(errModifyDefault),
+			zap.Error(ErrModifyDefaultKeyspace),
 		)
-		return nil, errModifyDefault
+		return nil, ErrModifyDefaultKeyspace
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	var err error

@@ -80,8 +80,9 @@ var (
 	ErrNoAvailableNode = errors.New("no available node")
 	// ErrExceedMaxEtcdTxnOps is used to indicate the number of etcd txn operations exceeds the limit.
 	ErrExceedMaxEtcdTxnOps = errors.New("exceed max etcd txn operations")
-	errModifyDefault       = errors.New("cannot modify default keyspace's state")
-	errIllegalOperation    = errors.New("unknown operation")
+	// ErrModifyDefaultKeyspace is used to indicate that default keyspace cannot be modified.
+	ErrModifyDefaultKeyspace = errors.New("cannot modify default keyspace's state")
+	errIllegalOperation      = errors.New("unknown operation")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
