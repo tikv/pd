@@ -162,12 +162,6 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if grouppb.GetPriority() > 16 {
 		return errs.ErrInvalidGroup
 	}
-	m.RLock()
-	_, ok := m.groups[grouppb.Name]
-	m.RUnlock()
-	if ok {
-		return errs.ErrResourceGroupAlreadyExists.FastGenByArgs(grouppb.Name)
-	}
 	group := FromProtoResourceGroup(grouppb)
 	m.Lock()
 	defer m.Unlock()
