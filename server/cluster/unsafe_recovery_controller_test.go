@@ -507,11 +507,117 @@ func (s *testUnsafeRecoverySuite) TestForceLeaderForCommitMerge(c *C) {
 	c.Assert(recoveryController.GetStage(), Equals, demoteFailedVoter)
 }
 
+<<<<<<< HEAD:server/cluster/unsafe_recovery_controller_test.go
 func (s *testUnsafeRecoverySuite) TestOneLearner(c *C) {
 	_, opt, _ := newTestScheduleConfig()
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = newCoordinator(s.ctx, cluster, hbstream.NewTestHeartbeatStreams(s.ctx, cluster.meta.GetId(), cluster, true))
 	cluster.coordinator.run()
+=======
+func TestAutoDetectMode(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+
+	reports := map[uint64]*pdpb.StoreReport{
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3}}}}},
+		}},
+	}
+
+	advanceUntilFinished(re, recoveryController, reports)
+
+	expects := map[uint64]*pdpb.StoreReport{
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 8, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner}}}}},
+		}},
+	}
+
+	for storeID, report := range reports {
+		if result, ok := expects[storeID]; ok {
+			re.Equal(result.PeerReports, report.PeerReports)
+		} else {
+			re.Empty(len(report.PeerReports))
+		}
+	}
+}
+
+// Failed learner replica store should be considered by auto-detect mode.
+func TestAutoDetectWithOneLearner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+
+	storeReport := pdpb.StoreReport{
+		PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner}}}}},
+		},
+	}
+	req := newStoreHeartbeat(1, &storeReport)
+	req.StoreReport.Step = 1
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	hasStore3AsFailedStore := false
+	for _, failedStore := range resp.RecoveryPlan.ForceLeader.FailedStores {
+		if failedStore == 3 {
+			hasStore3AsFailedStore = true
+			break
+		}
+	}
+	re.True(hasStore3AsFailedStore)
+}
+
+func TestOneLearner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
+>>>>>>> 610aee7db (unsafe recovery: Fix learner nodes got ignored in auto detect mode error (#6691)):pkg/unsaferecovery/unsafe_recovery_controller_test.go
 	for _, store := range newTestStores(3, "6.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
 	}

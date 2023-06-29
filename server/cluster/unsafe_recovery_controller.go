@@ -687,10 +687,14 @@ func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*meta
 
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
+<<<<<<< HEAD:server/cluster/unsafe_recovery_controller.go
 		if peer.Role == metapb.PeerRole_Learner || peer.Role == metapb.PeerRole_DemotingVoter {
 			continue
 		}
 		if _, ok := u.failedStores[peer.StoreId]; ok {
+=======
+		if u.isFailed(peer) {
+>>>>>>> 610aee7db (unsafe recovery: Fix learner nodes got ignored in auto detect mode error (#6691)):pkg/unsaferecovery/unsafe_recovery_controller.go
 			failedPeers = append(failedPeers, peer)
 		}
 	}
