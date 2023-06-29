@@ -64,6 +64,7 @@ require (
 	github.com/gin-contrib/gzip v0.0.1 // indirect
 	github.com/gin-contrib/pprof v1.4.0 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
+	github.com/gin-contrib/zap v0.1.0 // indirect
 	github.com/gin-gonic/gin v1.8.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
@@ -155,6 +156,8 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
+	go.opentelemetry.io/otel v1.10.0 // indirect
+	go.opentelemetry.io/otel/trace v1.10.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect

@@ -17,6 +17,7 @@ require (
 	github.com/elliotchance/pie/v2 v2.1.0
 	github.com/gin-contrib/cors v1.4.0
 	github.com/gin-contrib/pprof v1.4.0
+	github.com/gin-contrib/zap v0.1.0
 	github.com/gin-gonic/gin v1.8.1
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.2
@@ -173,6 +174,8 @@ require (
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
 	go.etcd.io/bbolt v1.3.6 // indirect
+	go.opentelemetry.io/otel v1.10.0 // indirect
+	go.opentelemetry.io/otel/trace v1.10.0 // indirect
 	go.uber.org/atomic v1.10.0
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect

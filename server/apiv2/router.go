@@ -15,16 +15,20 @@
 package apiv2
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"sync"
 
+	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/apiv2/middlewares"
+	"go.uber.org/zap"
 )
 
 var once sync.Once
@@ -61,6 +65,20 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 		c.Next()
 	})
 	router.Use(middlewares.Redirector())
+	router.Use(ginzap.GinzapWithConfig(svr.GetConfig().Logger, &ginzap.Config{
+		Context: ginzap.Fn(func(c *gin.Context) []zap.Field {
+			fields := []zap.Field{}
+			// log request body
+			var body []byte
+			var buf bytes.Buffer
+			tee := io.TeeReader(c.Request.Body, &buf)
+			body, _ = io.ReadAll(tee)
+			c.Request.Body = io.NopCloser(&buf)
+			fields = append(fields, zap.String("body", string(body)))
+
+			return fields
+		}),
+	}))
 	root := router.Group(apiV2Prefix)
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
