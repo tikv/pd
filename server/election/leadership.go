@@ -16,6 +16,7 @@ package election
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"github.com/pingcap/failpoint"
@@ -54,8 +55,9 @@ type Leadership struct {
 	leaderKey   string
 	leaderValue string
 
-	keepAliveCtx        context.Context
-	keepAliceCancelFunc context.CancelFunc
+	keepAliveCtx            context.Context
+	keepAliveCancelFunc     context.CancelFunc
+	keepAliveCancelFuncLock sync.Mutex
 }
 
 // NewLeadership creates a new Leadership.
@@ -137,8 +139,10 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	if ls == nil {
 		return
 	}
-	ls.keepAliveCtx, ls.keepAliceCancelFunc = context.WithCancel(ctx)
-	ls.getLease().KeepAlive(ls.keepAliveCtx)
+	ls.keepAliveCancelFuncLock.Lock()
+	ls.keepAliveCtx, ls.keepAliveCancelFunc = context.WithCancel(ctx)
+	ls.keepAliveCancelFuncLock.Unlock()
+	go ls.getLease().KeepAlive(ls.keepAliveCtx)
 }
 
 // Check returns whether the leadership is still available.
@@ -230,8 +234,10 @@ func (ls *Leadership) Reset() {
 	if ls == nil || ls.getLease() == nil {
 		return
 	}
-	if ls.keepAliceCancelFunc != nil {
-		ls.keepAliceCancelFunc()
+	ls.keepAliveCancelFuncLock.Lock()
+	if ls.keepAliveCancelFunc != nil {
+		ls.keepAliveCancelFunc()
 	}
+	ls.keepAliveCancelFuncLock.Unlock()
 	ls.getLease().Close()
 }
