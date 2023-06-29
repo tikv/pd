@@ -83,8 +83,8 @@ type tsoClient struct {
 	tsoDispatcher sync.Map // Same as map[string]chan *tsoRequest
 	// dc-location -> deadline
 	tsDeadline sync.Map // Same as map[string]chan deadline
-	// dc-location -> *lastTSO
-	lastTSMap sync.Map // Same as map[string]*lastTSO
+	// dc-location -> *tsoInfo while the tsoInfo is the last TSO info
+	lastTSOInfoMap sync.Map // Same as map[string]*tsoInfo
 
 	checkTSDeadlineCh         chan struct{}
 	checkTSODispatcherCh      chan struct{}
