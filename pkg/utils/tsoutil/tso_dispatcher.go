@@ -195,9 +195,15 @@ func (s *TSODispatcher) finishRequest(requests []Request, physical, firstLogical
 	return nil
 }
 
+var timerPool = sync.Pool{
+	New: func() interface{} {
+		return time.NewTimer(DefaultTSOProxyTimeout)
+	},
+}
+
 // TSDeadline is used to watch the deadline of each tso request.
 type TSDeadline struct {
-	timer  <-chan time.Time
+	timer  *time.Timer
 	done   chan struct{}
 	cancel context.CancelFunc
 }
@@ -208,8 +214,10 @@ func NewTSDeadline(
 	done chan struct{},
 	cancel context.CancelFunc,
 ) *TSDeadline {
+	timer := timerPool.Get().(*time.Timer)
+	timer.Reset(timeout)
 	return &TSDeadline{
-		timer:  time.After(timeout),
+		timer:  timer,
 		done:   done,
 		cancel: cancel,
 	}
@@ -224,11 +232,15 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 		select {
 		case d := <-tsDeadlineCh:
 			select {
-			case <-d.timer:
+			case <-d.timer.C:
 				log.Error("tso proxy request processing is canceled due to timeout",
 					errs.ZapError(errs.ErrProxyTSOTimeout))
 				d.cancel()
+				timerPool.Put(d.timer) // it's safe to put the timer back to the pool
+				continue
 			case <-d.done:
+				d.timer.Stop() // not received from timer.C, so we need to stop the timer
+				timerPool.Put(d.timer)
 				continue
 			case <-ctx.Done():
 				return
@@ -241,11 +253,12 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 
 func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
 	defer logutil.LogPanic()
-
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-done:
 		return
-	case <-time.After(3 * time.Second):
+	case <-timer.C:
 		cancel()
 	case <-streamCtx.Done():
 	}

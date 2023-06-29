@@ -109,6 +109,8 @@ func (l *lease) KeepAlive(ctx context.Context) {
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
 
 	var maxExpire time.Time
+	timer := time.NewTimer(l.leaseTimeout)
+	defer timer.Stop()
 	for {
 		select {
 		case t := <-timeCh:
@@ -122,7 +124,8 @@ func (l *lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
-		case <-time.After(l.leaseTimeout):
+			timer.Reset(l.leaseTimeout)
+		case <-timer.C:
 			log.Info("lease timeout", zap.Time("expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
 			return
 		case <-ctx.Done():

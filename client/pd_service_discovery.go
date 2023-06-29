@@ -206,6 +206,8 @@ func (c *pdServiceDiscovery) Init() error {
 
 func (c *pdServiceDiscovery) initRetry(f func() error) error {
 	var err error
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for i := 0; i < c.option.maxRetryTimes; i++ {
 		if err = f(); err == nil {
 			return nil
@@ -213,7 +215,7 @@ func (c *pdServiceDiscovery) initRetry(f func() error) error {
 		select {
 		case <-c.ctx.Done():
 			return err
-		case <-time.After(time.Second):
+		case <-ticker.C:
 		}
 	}
 	return errors.WithStack(err)

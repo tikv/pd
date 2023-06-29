@@ -138,10 +138,32 @@ func (c *tsoClient) updateTSODispatcher() {
 	})
 }
 
-type deadline struct {
-	timer  <-chan time.Time
+var timerPool = sync.Pool{
+	New: func() interface{} {
+		return time.NewTimer(defaultPDTimeout)
+	},
+}
+
+// TSDeadline is used to watch the deadline of each tso request.
+type TSDeadline struct {
+	timer  *time.Timer
 	done   chan struct{}
 	cancel context.CancelFunc
+}
+
+// NewTSDeadline creates a new TSDeadline.
+func NewTSDeadline(
+	timeout time.Duration,
+	done chan struct{},
+	cancel context.CancelFunc,
+) *TSDeadline {
+	timer := timerPool.Get().(*time.Timer)
+	timer.Reset(timeout)
+	return &TSDeadline{
+		timer:  timer,
+		done:   done,
+		cancel: cancel,
+	}
 }
 
 func (c *tsoClient) tsCancelLoop() {
@@ -172,17 +194,21 @@ func (c *tsoClient) tsCancelLoop() {
 
 func (c *tsoClient) watchTSDeadline(ctx context.Context, dcLocation string) {
 	if _, exist := c.tsDeadline.Load(dcLocation); !exist {
-		tsDeadlineCh := make(chan deadline, 1)
+		tsDeadlineCh := make(chan *TSDeadline, 1)
 		c.tsDeadline.Store(dcLocation, tsDeadlineCh)
-		go func(dc string, tsDeadlineCh <-chan deadline) {
+		go func(dc string, tsDeadlineCh <-chan *TSDeadline) {
 			for {
 				select {
 				case d := <-tsDeadlineCh:
 					select {
-					case <-d.timer:
+					case <-d.timer.C:
 						log.Error("[tso] tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
 						d.cancel()
+						timerPool.Put(d.timer) // it's safe to put the timer back to the pool
+						continue
 					case <-d.done:
+						d.timer.Stop() // not received from timer.C, so we need to stop the timer
+						timerPool.Put(d.timer)
 						continue
 					case <-ctx.Done():
 						return
@@ -234,6 +260,8 @@ func (c *tsoClient) checkAllocator(
 	}()
 	cc, u := c.GetTSOAllocatorClientConnByDCLocation(dc)
 	healthCli := healthpb.NewHealthClient(cc)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
 		// the pd/allocator leader change, we need to re-establish the stream
 		if u != url {
@@ -259,7 +287,7 @@ func (c *tsoClient) checkAllocator(
 		select {
 		case <-dispatcherCtx.Done():
 			return
-		case <-time.After(time.Second):
+		case <-ticker.C:
 			// To ensure we can get the latest allocator leader
 			// and once the leader is changed, we can exit this function.
 			_, u = c.GetTSOAllocatorClientConnByDCLocation(dc)
@@ -403,16 +431,19 @@ tsoBatchLoop:
 				if c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs) {
 					continue streamChoosingLoop
 				}
+				timer := time.NewTimer(retryInterval)
 				select {
 				case <-dispatcherCtx.Done():
+					timer.Stop()
 					return
 				case <-streamLoopTimer.C:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.svcDiscovery.ScheduleCheckMemberChanged()
 					c.finishRequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
+					timer.Stop()
 					continue tsoBatchLoop
-				case <-time.After(retryInterval):
+				case <-timer.C:
 					continue streamChoosingLoop
 				}
 			}
@@ -429,11 +460,7 @@ tsoBatchLoop:
 			}
 		}
 		done := make(chan struct{})
-		dl := deadline{
-			timer:  time.After(c.option.timeout),
-			done:   done,
-			cancel: cancel,
-		}
+		dl := NewTSDeadline(c.option.timeout, done, cancel)
 		tsDeadlineCh, ok := c.tsDeadline.Load(dc)
 		for !ok || tsDeadlineCh == nil {
 			c.scheduleCheckTSDeadline()
@@ -443,7 +470,7 @@ tsoBatchLoop:
 		select {
 		case <-dispatcherCtx.Done():
 			return
-		case tsDeadlineCh.(chan deadline) <- dl:
+		case tsDeadlineCh.(chan *TSDeadline) <- dl:
 		}
 		opts = extractSpanReference(tbc, opts[:0])
 		err = c.processRequests(stream, dc, tbc, opts)
@@ -558,6 +585,8 @@ func (c *tsoClient) tryConnectToTSO(
 	}
 	// retry several times before falling back to the follower when the network problem happens
 
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
@@ -587,7 +616,7 @@ func (c *tsoClient) tryConnectToTSO(
 		select {
 		case <-dispatcherCtx.Done():
 			return err
-		case <-time.After(retryInterval):
+		case <-ticker.C:
 		}
 	}
 
