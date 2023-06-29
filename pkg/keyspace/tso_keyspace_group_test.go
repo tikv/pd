@@ -238,8 +238,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 
 	keyspaceGroups := []*endpoint.KeyspaceGroup{
 		{
-			ID:       uint32(1),
-			UserKind: endpoint.Basic.String(),
+			ID:        uint32(1),
+			UserKind:  endpoint.Basic.String(),
+			Keyspaces: []uint32{444},
 		},
 		{
 			ID:        uint32(2),
@@ -250,8 +251,11 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	}
 	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
 	re.NoError(err)
+	// split the default keyspace
+	err = suite.kgm.SplitKeyspaceGroupByID(0, 4, []uint32{utils.DefaultKeyspaceID})
+	re.ErrorIs(err, ErrModifyDefaultKeyspace)
 	// split the keyspace group 1 to 4
-	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{333})
+	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{444})
 	re.ErrorIs(err, ErrKeyspaceGroupNotEnoughReplicas)
 	// split the keyspace group 2 to 4 without giving any keyspace
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{})
@@ -316,7 +320,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	err = suite.kgm.SplitKeyspaceGroupByID(3, 5, nil)
 	re.ErrorContains(err, ErrKeyspaceGroupNotExists(3).Error())
 	// split into an existing keyspace group
-	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, nil)
+	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{111})
 	re.ErrorIs(err, ErrKeyspaceGroupExists)
 	// split with the wrong keyspaces.
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 5, []uint32{111, 222, 444})
