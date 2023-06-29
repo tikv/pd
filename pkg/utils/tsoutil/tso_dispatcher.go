@@ -243,6 +243,8 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 				timerPool.Put(d.timer)
 				continue
 			case <-ctx.Done():
+				d.timer.Stop() // not received from timer.C, so we need to stop the timer
+				timerPool.Put(d.timer)
 				return
 			}
 		case <-ctx.Done():
