@@ -109,7 +109,12 @@ func (s *state) getKeyspaceGroupMeta(
 ) (*AllocatorManager, *endpoint.KeyspaceGroup) {
 	s.RLock()
 	defer s.RUnlock()
-	return s.ams[groupID], s.kgs[groupID]
+	am := s.ams[groupID]
+	if s.kgs[groupID] == nil {
+		return am, nil
+	}
+	kg := *s.kgs[groupID] // copy the keyspace group meta to avoid datarace
+	return am, &kg
 }
 
 // getKeyspaceGroupMetaWithCheck returns the keyspace group meta of the given keyspace.
