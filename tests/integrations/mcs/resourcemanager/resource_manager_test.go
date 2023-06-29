@@ -789,11 +789,16 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 		// Create Resource Group
 		resp, err := cli.AddResourceGroup(suite.ctx, group)
-		checkErr(err, tcase.addSuccess)
+		checkErr(err, true)
 		if tcase.addSuccess {
 			finalNum++
 			re.Contains(resp, "Success!")
 		}
+
+		// Get Resource Group After Create
+		gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
+		re.NoError(err)
+		re.Equal(group, gresp)
 
 		// Modify Resource Group
 		tcase.modifySettings(group)
@@ -803,8 +808,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			re.Contains(mresp, "Success!")
 		}
 
-		// Get Resource Group
-		gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
+		// Get Resource Group After Modify
+		gresp, err = cli.GetResourceGroup(suite.ctx, tcase.name)
 		re.NoError(err)
 		re.Equal(tcase.name, gresp.Name)
 		if tcase.modifySuccess {
