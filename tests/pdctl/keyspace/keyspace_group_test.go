@@ -128,6 +128,18 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 		return strings.Contains(string(output), "Success")
 	})
 
+	// get all keyspaces
+	args := []string{"-u", pdAddr, "keyspace-group"}
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	strings.Contains(string(output), "Success")
+	var keyspaceGroups []*endpoint.KeyspaceGroup
+	err = json.Unmarshal(output, &keyspaceGroups)
+	re.NoError(err)
+	re.Len(keyspaceGroups, 2)
+	re.Equal(keyspaceGroups[0].ID, uint32(0))
+	re.Equal(keyspaceGroups[1].ID, uint32(1))
+
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
