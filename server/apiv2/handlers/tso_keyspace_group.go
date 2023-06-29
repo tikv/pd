@@ -17,6 +17,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -111,6 +112,7 @@ func GetKeyspaceGroups(c *gin.Context) {
 	var kgs []*endpoint.KeyspaceGroup
 	state, set := c.GetQuery("state")
 	if set {
+		state := strings.ToLower(state)
 		switch state {
 		case "merge":
 			for _, keyspaceGroup := range keyspaceGroups {

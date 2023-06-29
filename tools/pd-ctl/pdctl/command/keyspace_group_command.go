@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -131,6 +132,7 @@ func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 			cmd.Printf("Failed to get state: %s\n", err)
 		}
 		stateValue := ""
+		state = strings.ToLower(state)
 		switch state {
 		case "merge", "split":
 			stateValue = fmt.Sprintf("state=%v", state)
