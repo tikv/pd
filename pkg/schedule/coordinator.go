@@ -140,6 +140,8 @@ func (c *Coordinator) PatrolRegions() {
 	for {
 		select {
 		case <-ticker.C:
+			// Note: we reset the ticker here to support updating configuration dynamically.
+			ticker.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
 		case <-c.ctx.Done():
 			log.Info("patrol regions has been stopped")
 			return
@@ -860,7 +862,8 @@ func (c *Coordinator) runScheduler(s *scheduleController) {
 				added := c.opController.AddWaitingOperator(op...)
 				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.Scheduler.GetName()))
 			}
-
+			// Note: we reset the ticker here to support updating configuration dynamically.
+			ticker.Reset(s.GetInterval())
 		case <-s.Ctx().Done():
 			log.Info("scheduler has been stopped",
 				zap.String("scheduler-name", s.Scheduler.GetName()),
