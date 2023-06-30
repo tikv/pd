@@ -214,11 +214,9 @@ func (c *tsoClient) watchTSDeadline(ctx context.Context, dcLocation string) {
 						log.Error("[tso] tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
 						d.cancel()
 						timerPool.Put(d.timer) // it's safe to put the timer back to the pool
-						continue
 					case <-d.done:
 						d.timer.Stop() // not received from timer.C, so we need to stop the timer
 						timerPool.Put(d.timer)
-						continue
 					case <-ctx.Done():
 						d.timer.Stop() // not received from timer.C, so we need to stop the timer
 						timerPool.Put(d.timer)

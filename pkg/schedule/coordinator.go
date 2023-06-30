@@ -128,8 +128,8 @@ func (c *Coordinator) PatrolRegions() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	timer := time.NewTimer(c.cluster.GetOpts().GetPatrolRegionInterval())
-	defer timer.Stop()
+	ticker := time.NewTicker(c.cluster.GetOpts().GetPatrolRegionInterval())
+	defer ticker.Stop()
 
 	log.Info("Coordinator starts patrol regions")
 	start := time.Now()
@@ -139,8 +139,7 @@ func (c *Coordinator) PatrolRegions() {
 	)
 	for {
 		select {
-		case <-timer.C:
-			timer.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
+		case <-ticker.C:
 		case <-c.ctx.Done():
 			log.Info("patrol regions has been stopped")
 			return
@@ -848,12 +847,11 @@ func (c *Coordinator) runScheduler(s *scheduleController) {
 	defer c.wg.Done()
 	defer s.Scheduler.Cleanup(c.cluster)
 
-	timer := time.NewTimer(s.GetInterval())
-	defer timer.Stop()
+	ticker := time.NewTicker(s.GetInterval())
+	defer ticker.Stop()
 	for {
 		select {
-		case <-timer.C:
-			timer.Reset(s.GetInterval())
+		case <-ticker.C:
 			diagnosable := s.diagnosticRecorder.isAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue

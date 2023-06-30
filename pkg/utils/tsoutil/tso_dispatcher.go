@@ -246,11 +246,9 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 					errs.ZapError(errs.ErrProxyTSOTimeout))
 				d.cancel()
 				timerPool.Put(d.timer) // it's safe to put the timer back to the pool
-				continue
 			case <-d.done:
 				d.timer.Stop() // not received from timer.C, so we need to stop the timer
 				timerPool.Put(d.timer)
-				continue
 			case <-ctx.Done():
 				d.timer.Stop() // not received from timer.C, so we need to stop the timer
 				timerPool.Put(d.timer)

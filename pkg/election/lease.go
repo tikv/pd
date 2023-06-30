@@ -124,6 +124,15 @@ func (l *lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
+			// Stop the timer if it's not stopped.
+			if !timer.Stop() {
+				select {
+				case <-timer.C: // try to drain from the channel
+				default:
+				}
+			}
+			// We need be careful here, see more details in the comments of Timer.Reset.
+			// https://pkg.go.dev/time@master#Timer.Reset
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
 			log.Info("lease timeout", zap.Time("expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
