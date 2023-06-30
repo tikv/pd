@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/timerpool"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
@@ -195,12 +196,6 @@ func (s *TSODispatcher) finishRequest(requests []Request, physical, firstLogical
 	return nil
 }
 
-var timerPool = sync.Pool{
-	New: func() interface{} {
-		return time.NewTimer(DefaultTSOProxyTimeout)
-	},
-}
-
 // TSDeadline is used to watch the deadline of each tso request.
 type TSDeadline struct {
 	timer  *time.Timer
@@ -214,17 +209,7 @@ func NewTSDeadline(
 	done chan struct{},
 	cancel context.CancelFunc,
 ) *TSDeadline {
-	timer := timerPool.Get().(*time.Timer)
-	// Stop the timer if it's not stopped.
-	if !timer.Stop() {
-		select {
-		case <-timer.C: // try to drain from the channel
-		default:
-		}
-	}
-	// We need be careful here, see more details in the comments of Timer.Reset.
-	// https://pkg.go.dev/time@master#Timer.Reset
-	timer.Reset(timeout)
+	timer := timerpool.GlobalTimerPool.Get(timeout)
 	return &TSDeadline{
 		timer:  timer,
 		done:   done,
@@ -245,13 +230,11 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 				log.Error("tso proxy request processing is canceled due to timeout",
 					errs.ZapError(errs.ErrProxyTSOTimeout))
 				d.cancel()
-				timerPool.Put(d.timer) // it's safe to put the timer back to the pool
+				timerpool.GlobalTimerPool.Put(d.timer)
 			case <-d.done:
-				d.timer.Stop() // not received from timer.C, so we need to stop the timer
-				timerPool.Put(d.timer)
+				timerpool.GlobalTimerPool.Put(d.timer)
 			case <-ctx.Done():
-				d.timer.Stop() // not received from timer.C, so we need to stop the timer
-				timerPool.Put(d.timer)
+				timerpool.GlobalTimerPool.Put(d.timer)
 				return
 			}
 		case <-ctx.Done():

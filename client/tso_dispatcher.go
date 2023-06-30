@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tsoutil"
+	"github.com/tikv/pd/pkg/timerpool"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -138,12 +139,6 @@ func (c *tsoClient) updateTSODispatcher() {
 	})
 }
 
-var timerPool = sync.Pool{
-	New: func() interface{} {
-		return time.NewTimer(defaultPDTimeout)
-	},
-}
-
 // TSDeadline is used to watch the deadline of each tso request.
 type TSDeadline struct {
 	timer  *time.Timer
@@ -157,17 +152,7 @@ func NewTSDeadline(
 	done chan struct{},
 	cancel context.CancelFunc,
 ) *TSDeadline {
-	timer := timerPool.Get().(*time.Timer)
-	// Stop the timer if it's not stopped.
-	if !timer.Stop() {
-		select {
-		case <-timer.C: // try to drain from the channel
-		default:
-		}
-	}
-	// We need be careful here, see more details in the comments of Timer.Reset.
-	// https://pkg.go.dev/time@master#Timer.Reset
-	timer.Reset(timeout)
+	timer := timerpool.GlobalTimerPool.Get(timeout)
 	return &TSDeadline{
 		timer:  timer,
 		done:   done,
@@ -213,13 +198,11 @@ func (c *tsoClient) watchTSDeadline(ctx context.Context, dcLocation string) {
 					case <-d.timer.C:
 						log.Error("[tso] tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
 						d.cancel()
-						timerPool.Put(d.timer) // it's safe to put the timer back to the pool
+						timerpool.GlobalTimerPool.Put(d.timer)
 					case <-d.done:
-						d.timer.Stop() // not received from timer.C, so we need to stop the timer
-						timerPool.Put(d.timer)
+						timerpool.GlobalTimerPool.Put(d.timer)
 					case <-ctx.Done():
-						d.timer.Stop() // not received from timer.C, so we need to stop the timer
-						timerPool.Put(d.timer)
+						timerpool.GlobalTimerPool.Put(d.timer)
 						return
 					}
 				case <-ctx.Done():
