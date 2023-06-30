@@ -484,6 +484,26 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 			err: ErrKeyspaceNotInKeyspaceGroup,
 		},
 		{
+			old: []uint32{1, 2},
+			new: []uint32{2, 2},
+			expectedOld: []uint32{1},
+			expectedNew: []uint32{2},
+		},
+		{
+			old:             []uint32{0, 1, 2, 3, 4, 5},
+			startKeyspaceID: 2,
+			endKeyspaceID:   4,
+			expectedOld:     []uint32{0, 1, 5},
+			expectedNew:     []uint32{2, 3, 4},
+		},
+		{
+			old:             []uint32{0, 1, 2, 3, 4, 5},
+			startKeyspaceID: 0,
+			endKeyspaceID:   4,
+			expectedOld:     []uint32{0, 5},
+			expectedNew:     []uint32{1, 2, 3, 4},
+		},
+		{
 			old:             []uint32{1, 2, 3, 4, 5},
 			startKeyspaceID: 2,
 			endKeyspaceID:   4,
