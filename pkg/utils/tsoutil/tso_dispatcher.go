@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/timerpool"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
@@ -197,7 +198,7 @@ func (s *TSODispatcher) finishRequest(requests []Request, physical, firstLogical
 
 // TSDeadline is used to watch the deadline of each tso request.
 type TSDeadline struct {
-	timer  <-chan time.Time
+	timer  *time.Timer
 	done   chan struct{}
 	cancel context.CancelFunc
 }
@@ -208,8 +209,9 @@ func NewTSDeadline(
 	done chan struct{},
 	cancel context.CancelFunc,
 ) *TSDeadline {
+	timer := timerpool.GlobalTimerPool.Get(timeout)
 	return &TSDeadline{
-		timer:  time.After(timeout),
+		timer:  timer,
 		done:   done,
 		cancel: cancel,
 	}
@@ -224,13 +226,15 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 		select {
 		case d := <-tsDeadlineCh:
 			select {
-			case <-d.timer:
+			case <-d.timer.C:
 				log.Error("tso proxy request processing is canceled due to timeout",
 					errs.ZapError(errs.ErrProxyTSOTimeout))
 				d.cancel()
+				timerpool.GlobalTimerPool.Put(d.timer)
 			case <-d.done:
-				continue
+				timerpool.GlobalTimerPool.Put(d.timer)
 			case <-ctx.Done():
+				timerpool.GlobalTimerPool.Put(d.timer)
 				return
 			}
 		case <-ctx.Done():
@@ -241,11 +245,12 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 
 func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
 	defer logutil.LogPanic()
-
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-done:
 		return
-	case <-time.After(3 * time.Second):
+	case <-timer.C:
 		cancel()
 	case <-streamCtx.Done():
 	}
