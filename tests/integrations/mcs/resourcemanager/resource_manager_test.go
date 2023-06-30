@@ -711,7 +711,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	testCasesSet1 := []struct {
 		name           string
 		mode           rmpb.GroupMode
-		addSuccess     bool
+		isNewGroup     bool
 		modifySuccess  bool
 		expectMarshal  string
 		modifySettings func(*rmpb.ResourceGroup)
@@ -790,7 +790,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		// Create Resource Group
 		resp, err := cli.AddResourceGroup(suite.ctx, group)
 		checkErr(err, true)
-		if tcase.addSuccess {
+		if tcase.isNewGroup {
 			finalNum++
 			re.Contains(resp, "Success!")
 		}
@@ -861,7 +861,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
-		if tcase.addSuccess {
+		if tcase.isNewGroup {
 			finalNum++
 		}
 
