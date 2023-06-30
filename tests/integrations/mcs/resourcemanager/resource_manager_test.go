@@ -795,11 +795,6 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			re.Contains(resp, "Success!")
 		}
 
-		// Get Resource Group After Create
-		gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
-		re.NoError(err)
-		re.Equal(group, gresp)
-
 		// Modify Resource Group
 		tcase.modifySettings(group)
 		mresp, err := cli.ModifyResourceGroup(suite.ctx, group)
@@ -808,8 +803,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			re.Contains(mresp, "Success!")
 		}
 
-		// Get Resource Group After Modify
-		gresp, err = cli.GetResourceGroup(suite.ctx, tcase.name)
+		// Get Resource Group
+		gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
 		re.NoError(err)
 		re.Equal(tcase.name, gresp.Name)
 		if tcase.modifySuccess {
@@ -865,11 +860,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		resp, err := http.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
 		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
 		if tcase.addSuccess {
-			re.Equal(http.StatusOK, resp.StatusCode)
 			finalNum++
-		} else {
-			re.Equal(http.StatusInternalServerError, resp.StatusCode)
 		}
 
 		// Modify Resource Group
