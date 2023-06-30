@@ -469,7 +469,7 @@ tsoBatchLoop:
 		select {
 		case <-dispatcherCtx.Done():
 			return
-		case tsDeadlineCh.(chan *TSDeadline) <- dl:
+		case tsDeadlineCh.(chan *deadline) <- dl:
 		}
 		opts = extractSpanReference(tbc, opts[:0])
 		err = c.processRequests(stream, dc, tbc, opts)
