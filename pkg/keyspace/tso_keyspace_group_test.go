@@ -484,8 +484,8 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 			err: ErrKeyspaceNotInKeyspaceGroup,
 		},
 		{
-			old: []uint32{1, 2},
-			new: []uint32{2, 2},
+			old:         []uint32{1, 2},
+			new:         []uint32{2, 2},
 			expectedOld: []uint32{1},
 			expectedNew: []uint32{2},
 		},
@@ -512,6 +512,13 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 		},
 		{
 			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 5,
+			endKeyspaceID:   6,
+			expectedOld:     []uint32{1, 2, 3, 4},
+			expectedNew:     []uint32{5},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
 			startKeyspaceID: 2,
 			endKeyspaceID:   6,
 			expectedOld:     []uint32{1},
@@ -519,10 +526,24 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 		},
 		{
 			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 1,
+			endKeyspaceID:   1,
+			expectedOld:     []uint32{2, 3, 4, 5},
+			expectedNew:     []uint32{1},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
 			startKeyspaceID: 0,
 			endKeyspaceID:   6,
 			expectedOld:     []uint32{},
 			expectedNew:     []uint32{1, 2, 3, 4, 5},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 7,
+			endKeyspaceID:   10,
+			expectedOld:     []uint32{1, 2, 3, 4, 5},
+			expectedNew:     []uint32{},
 		},
 		{
 			old: []uint32{1, 2, 3, 4, 5},
