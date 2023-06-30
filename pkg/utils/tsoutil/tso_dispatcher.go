@@ -215,6 +215,15 @@ func NewTSDeadline(
 	cancel context.CancelFunc,
 ) *TSDeadline {
 	timer := timerPool.Get().(*time.Timer)
+	// Stop the timer if it's not stopped.
+	if !timer.Stop() {
+		select {
+		case <-timer.C: // try to drain from the channel
+		default:
+		}
+	}
+	// We need be careful here, see more details in the comments of Timer.Reset.
+	// https://pkg.go.dev/time@master#Timer.Reset
 	timer.Reset(timeout)
 	return &TSDeadline{
 		timer:  timer,
