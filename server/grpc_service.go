@@ -606,13 +606,15 @@ func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 		})
 		done <- s.stream.Send(m)
 	}()
+	timer := time.NewTimer(tsoutil.DefaultTSOProxyTimeout)
+	defer timer.Stop()
 	select {
 	case err := <-done:
 		if err != nil {
 			atomic.StoreInt32(&s.closed, 1)
 		}
 		return errors.WithStack(err)
-	case <-time.After(tsoutil.DefaultTSOProxyTimeout):
+	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
 		return ErrForwardTSOTimeout
 	}
@@ -633,6 +635,8 @@ func (s *tsoServer) Recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 		request, err := s.stream.Recv()
 		requestCh <- &pdpbTSORequest{request: request, err: err}
 	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case req := <-requestCh:
 		if req.err != nil {
@@ -640,7 +644,7 @@ func (s *tsoServer) Recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 			return nil, errors.WithStack(req.err)
 		}
 		return req.request, nil
-	case <-time.After(timeout):
+	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
 		return nil, ErrTSOProxyRecvFromClientTimeout
 	}
@@ -2173,10 +2177,12 @@ func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient
 // TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
 func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
 	defer logutil.LogPanic()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-done:
 		return
-	case <-time.After(3 * time.Second):
+	case <-timer.C:
 		cancel()
 	case <-streamCtx.Done():
 	}

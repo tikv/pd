@@ -35,13 +35,13 @@ type tsoStreamBuilderFactory interface {
 type pdTSOStreamBuilderFactory struct{}
 
 func (f *pdTSOStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
-	return &pdTSOStreamBuilder{client: pdpb.NewPDClient(cc)}
+	return &pdTSOStreamBuilder{client: pdpb.NewPDClient(cc), serverAddr: cc.Target()}
 }
 
 type tsoTSOStreamBuilderFactory struct{}
 
 func (f *tsoTSOStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
-	return &tsoTSOStreamBuilder{client: tsopb.NewTSOClient(cc)}
+	return &tsoTSOStreamBuilder{client: tsopb.NewTSOClient(cc), serverAddr: cc.Target()}
 }
 
 // TSO Stream Builder
@@ -51,7 +51,8 @@ type tsoStreamBuilder interface {
 }
 
 type pdTSOStreamBuilder struct {
-	client pdpb.PDClient
+	serverAddr string
+	client     pdpb.PDClient
 }
 
 func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (tsoStream, error) {
@@ -61,13 +62,14 @@ func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFun
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return &pdTSOStream{stream: stream}, nil
+		return &pdTSOStream{stream: stream, serverAddr: b.serverAddr}, nil
 	}
 	return nil, err
 }
 
 type tsoTSOStreamBuilder struct {
-	client tsopb.TSOClient
+	serverAddr string
+	client     tsopb.TSOClient
 }
 
 func (b *tsoTSOStreamBuilder) build(
@@ -79,7 +81,7 @@ func (b *tsoTSOStreamBuilder) build(
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return &tsoTSOStream{stream: stream}, nil
+		return &tsoTSOStream{stream: stream, serverAddr: b.serverAddr}, nil
 	}
 	return nil, err
 }
@@ -98,6 +100,7 @@ func checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done cha
 // TSO Stream
 
 type tsoStream interface {
+	getServerAddr() string
 	// processRequests processes TSO requests in streaming mode to get timestamps
 	processRequests(
 		clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
@@ -106,7 +109,12 @@ type tsoStream interface {
 }
 
 type pdTSOStream struct {
-	stream pdpb.PD_TsoClient
+	serverAddr string
+	stream     pdpb.PD_TsoClient
+}
+
+func (s *pdTSOStream) getServerAddr() string {
+	return s.serverAddr
 }
 
 func (s *pdTSOStream) processRequests(
@@ -155,7 +163,12 @@ func (s *pdTSOStream) processRequests(
 }
 
 type tsoTSOStream struct {
-	stream tsopb.TSO_TsoClient
+	serverAddr string
+	stream     tsopb.TSO_TsoClient
+}
+
+func (s *tsoTSOStream) getServerAddr() string {
+	return s.serverAddr
 }
 
 func (s *tsoTSOStream) processRequests(
