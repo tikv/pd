@@ -356,6 +356,7 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 		err                    error
 		maxRetryTime           int           = 120
 		sleepIntervalOnFailure time.Duration = 1000 * time.Millisecond
+		totalSleepBeforeGetTS  time.Duration = 0
 	)
 	pdCli := pdClients[clientIdx]
 
@@ -376,14 +377,19 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 			pdClients[clientIdx] = pdCli
 		}
 
+		totalSleepBeforeGetTS = 0
 		start := time.Now()
 
 		i := 0
 		for ; i < maxRetryTime; i++ {
 			if *maxTSOSendIntervalMilliseconds > 0 {
+				sleepBeforeGetTS := time.Duration(rand.Intn(*maxTSOSendIntervalMilliseconds)) * time.Millisecond
+				ticker := time.NewTicker(sleepBeforeGetTS)
+				defer ticker.Stop()
 				select {
 				case <-reqCtx.Done():
-				case <-time.After(time.Duration(rand.Intn(*maxTSOSendIntervalMilliseconds)) * time.Millisecond):
+				case <-ticker.C:
+					totalSleepBeforeGetTS += sleepBeforeGetTS
 				}
 			}
 			_, _, err = pdCli.GetLocalTS(reqCtx, *dcLocation)
@@ -399,7 +405,7 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 		if err != nil {
 			log.Fatal(fmt.Sprintf("%v", err))
 		}
-		dur := time.Since(start) - time.Duration(i)*sleepIntervalOnFailure
+		dur := time.Since(start) - time.Duration(i)*sleepIntervalOnFailure - totalSleepBeforeGetTS
 
 		select {
 		case <-reqCtx.Done():
