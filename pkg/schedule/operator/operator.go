@@ -64,8 +64,8 @@ var (
 	ExceedStoreLimit CancelReasonType = "exceed store limit"
 	// ExceedWaitLimit is the cancel reason when the operator exceeds the waiting queue limit.
 	ExceedWaitLimit CancelReasonType = "exceed wait limit"
-	// RelatedRegionID is the cancel reason when the operator is related to another region.
-	RelatedRegionID CancelReasonType = "related region id"
+	// RelatedMergeRegion is the cancel reason when the operator is cancelled by related merge region.
+	RelatedMergeRegion CancelReasonType = "related merge region"
 	// Unknown is the cancel reason when the operator is cancelled by an unknown reason.
 	Unknown CancelReasonType = "unknown"
 )
@@ -120,8 +120,8 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 // Sync some attribute with the given timeout.
 func (o *Operator) Sync(other *Operator) {
 	o.timeout = other.timeout
-	o.AdditionalInfos[string(RelatedRegionID)] = strconv.FormatUint(other.RegionID(), 10)
-	other.AdditionalInfos[string(RelatedRegionID)] = strconv.FormatUint(o.RegionID(), 10)
+	o.AdditionalInfos[string(RelatedMergeRegion)] = strconv.FormatUint(other.RegionID(), 10)
+	other.AdditionalInfos[string(RelatedMergeRegion)] = strconv.FormatUint(o.RegionID(), 10)
 }
 
 func (o *Operator) String() string {
