@@ -139,21 +139,19 @@ func (c *tsoClient) updateTSODispatcher() {
 	})
 }
 
-// TSDeadline is used to watch the deadline of each tso request.
-type TSDeadline struct {
+type deadline struct {
 	timer  *time.Timer
 	done   chan struct{}
 	cancel context.CancelFunc
 }
 
-// NewTSDeadline creates a new TSDeadline.
-func NewTSDeadline(
+func newTSDeadline(
 	timeout time.Duration,
 	done chan struct{},
 	cancel context.CancelFunc,
-) *TSDeadline {
+) *deadline {
 	timer := timerpool.GlobalTimerPool.Get(timeout)
-	return &TSDeadline{
+	return &deadline{
 		timer:  timer,
 		done:   done,
 		cancel: cancel,
@@ -188,9 +186,9 @@ func (c *tsoClient) tsCancelLoop() {
 
 func (c *tsoClient) watchTSDeadline(ctx context.Context, dcLocation string) {
 	if _, exist := c.tsDeadline.Load(dcLocation); !exist {
-		tsDeadlineCh := make(chan *TSDeadline, 1)
+		tsDeadlineCh := make(chan *deadline, 1)
 		c.tsDeadline.Store(dcLocation, tsDeadlineCh)
-		go func(dc string, tsDeadlineCh <-chan *TSDeadline) {
+		go func(dc string, tsDeadlineCh <-chan *deadline) {
 			for {
 				select {
 				case d := <-tsDeadlineCh:
@@ -461,7 +459,7 @@ tsoBatchLoop:
 			}
 		}
 		done := make(chan struct{})
-		dl := NewTSDeadline(c.option.timeout, done, cancel)
+		dl := newTSDeadline(c.option.timeout, done, cancel)
 		tsDeadlineCh, ok := c.tsDeadline.Load(dc)
 		for !ok || tsDeadlineCh == nil {
 			c.scheduleCheckTSDeadline()
