@@ -596,11 +596,6 @@ error = '''
 invalid group settings, please check the group name, priority and the number of resources
 '''
 
-["PD:resourcemanager:ErrResourceGroupAlreadyExists"]
-error = '''
-the %s resource group already exists
-'''
-
 ["PD:schedule:ErrCreateOperator"]
 error = '''
 unable to create operator, %s
