@@ -526,6 +526,8 @@ func newClientWithKeyspaceName(
 
 func (c *client) initRetry(f func(s string) error, str string) error {
 	var err error
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for i := 0; i < c.option.maxRetryTimes; i++ {
 		if err = f(str); err == nil {
 			return nil
@@ -533,7 +535,7 @@ func (c *client) initRetry(f func(s string) error, str string) error {
 		select {
 		case <-c.ctx.Done():
 			return err
-		case <-time.After(time.Second):
+		case <-ticker.C:
 		}
 	}
 	return errors.WithStack(err)

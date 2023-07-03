@@ -87,10 +87,12 @@ func (b *tsoTSOStreamBuilder) build(
 }
 
 func checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done chan struct{}, timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-done:
 		return
-	case <-time.After(timeout):
+	case <-timer.C:
 		cancel()
 	case <-ctx.Done():
 	}
