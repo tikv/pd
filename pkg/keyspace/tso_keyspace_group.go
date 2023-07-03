@@ -622,7 +622,17 @@ func buildSplitKeyspaces(
 				oldSplit = append(oldSplit, keyspace)
 			}
 		}
-		return oldSplit, new, nil
+		// If newNum != len(newKeyspaceMap), it means the provided new keyspace list contains
+		// duplicate keyspaces, and we need to dedup them (https://github.com/tikv/pd/issues/6687);
+		// otherwise, we can just return the old split and new keyspace list.
+		if newNum == len(newKeyspaceMap) {
+			return oldSplit, new, nil
+		}
+		newSplit := make([]uint32, 0, len(newKeyspaceMap))
+		for keyspace := range newKeyspaceMap {
+			newSplit = append(newSplit, keyspace)
+		}
+		return oldSplit, newSplit, nil
 	}
 	// Split according to the start and end keyspace ID.
 	if startKeyspaceID == 0 && endKeyspaceID == 0 {
@@ -634,7 +644,9 @@ func buildSplitKeyspaces(
 	)
 	for _, keyspace := range old {
 		if keyspace == utils.DefaultKeyspaceID {
-			return nil, nil, ErrModifyDefaultKeyspace
+			// The source keyspace group must be the default keyspace group and we always keep the default
+			// keyspace in the default keyspace group.
+			continue
 		}
 		if startKeyspaceID <= keyspace && keyspace <= endKeyspaceID {
 			newSplit = append(newSplit, keyspace)
