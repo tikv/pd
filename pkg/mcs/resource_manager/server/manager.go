@@ -153,7 +153,7 @@ func (m *Manager) Init(ctx context.Context) {
 }
 
 // AddResourceGroup puts a resource group.
-// NOTE: AddResourceGroup should also be idempotent because tidb depengs
+// NOTE: AddResourceGroup should also be idempotent because tidb depends
 // on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	// Check the name.
