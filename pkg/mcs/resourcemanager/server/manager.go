@@ -154,6 +154,8 @@ func (m *Manager) Init(ctx context.Context) {
 }
 
 // AddResourceGroup puts a resource group.
+// NOTE: AddResourceGroup should also be idempotent because tidb depengs
+// on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	// Check the name.
 	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
