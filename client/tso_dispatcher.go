@@ -384,6 +384,7 @@ func (c *tsoClient) handleDispatcher(
 
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
+	defer streamLoopTimer.Stop()
 tsoBatchLoop:
 	for {
 		select {
@@ -443,6 +444,7 @@ tsoBatchLoop:
 					timer.Stop()
 					continue tsoBatchLoop
 				case <-timer.C:
+					timer.Stop()
 					continue streamChoosingLoop
 				}
 			}
