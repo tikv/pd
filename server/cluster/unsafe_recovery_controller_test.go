@@ -554,6 +554,48 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 	re.Equal(demoteFailedVoter, recoveryController.GetStage())
 }
 
+// Failed learner replica/ store should be considered by auto-recover.
+func TestAutoDetectModeWithOneLearner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, _ := newTestScheduleConfig()
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = newCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.meta.GetId(), cluster, true))
+	cluster.coordinator.run()
+	for _, store := range newTestStores(1, "6.0.0") {
+		re.NoError(cluster.PutStore(store.GetMeta()))
+	}
+	recoveryController := newUnsafeRecoveryController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+
+	storeReport := pdpb.StoreReport{
+		PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner}}}}},
+		},
+	}
+	req := newStoreHeartbeat(1, &storeReport)
+	req.StoreReport.Step = 1
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	hasStore3AsFailedStore := false
+	for _, failedStore := range resp.RecoveryPlan.ForceLeader.FailedStores {
+		if failedStore == 3 {
+			hasStore3AsFailedStore = true
+			break
+		}
+	}
+	re.True(hasStore3AsFailedStore)
+}
+
 func TestAutoDetectMode(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
