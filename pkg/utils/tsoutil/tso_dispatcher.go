@@ -69,7 +69,7 @@ func (s *TSODispatcher) DispatchRequest(
 	val, loaded := s.dispatchChs.LoadOrStore(req.getForwardedHost(), make(chan Request, maxMergeRequests))
 	reqCh := val.(chan Request)
 	if !loaded {
-		tsDeadlineCh := make(chan *TSDeadline, 1)
+		tsDeadlineCh := make(chan *deadline, 1)
 		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh, updateServicePrimaryAddrChs...)
 		go watchTSDeadline(ctx, tsDeadlineCh)
 	}
@@ -82,7 +82,7 @@ func (s *TSODispatcher) dispatch(
 	forwardedHost string,
 	clientConn *grpc.ClientConn,
 	tsoRequestCh <-chan Request,
-	tsDeadlineCh chan<- *TSDeadline,
+	tsDeadlineCh chan<- *deadline,
 	doneCh <-chan struct{},
 	errCh chan<- error,
 	updateServicePrimaryAddrChs ...chan<- struct{}) {
@@ -122,7 +122,7 @@ func (s *TSODispatcher) dispatch(
 				requests[i] = <-tsoRequestCh
 			}
 			done := make(chan struct{})
-			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
+			dl := newTSDeadline(DefaultTSOProxyTimeout, done, cancel)
 			select {
 			case tsDeadlineCh <- dl:
 			case <-dispatcherCtx.Done():
@@ -201,28 +201,26 @@ func (s *TSODispatcher) finishRequest(requests []Request, physical, firstLogical
 	return nil
 }
 
-// TSDeadline is used to watch the deadline of each tso request.
-type TSDeadline struct {
+type deadline struct {
 	timer  *time.Timer
 	done   chan struct{}
 	cancel context.CancelFunc
 }
 
-// NewTSDeadline creates a new TSDeadline.
-func NewTSDeadline(
+func newTSDeadline(
 	timeout time.Duration,
 	done chan struct{},
 	cancel context.CancelFunc,
-) *TSDeadline {
+) *deadline {
 	timer := timerutil.GlobalTimerPool.Get(timeout)
-	return &TSDeadline{
+	return &deadline{
 		timer:  timer,
 		done:   done,
 		cancel: cancel,
 	}
 }
 
-func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
+func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *deadline) {
 	defer logutil.LogPanic()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

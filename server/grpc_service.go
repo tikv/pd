@@ -564,13 +564,15 @@ func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 		defer logutil.LogPanic()
 		done <- b.stream.SendAndClose(bucket)
 	}()
+	timer := time.NewTimer(heartbeatSendTimeout)
+	defer timer.Stop()
 	select {
 	case err := <-done:
 		if err != nil {
 			atomic.StoreInt32(&b.closed, 1)
 		}
 		return err
-	case <-time.After(heartbeatSendTimeout):
+	case <-timer.C:
 		atomic.StoreInt32(&b.closed, 1)
 		return ErrSendHeartbeatTimeout
 	}
@@ -604,13 +606,15 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 		defer logutil.LogPanic()
 		done <- s.stream.Send(m)
 	}()
+	timer := time.NewTimer(heartbeatSendTimeout)
+	defer timer.Stop()
 	select {
 	case err := <-done:
 		if err != nil {
 			atomic.StoreInt32(&s.closed, 1)
 		}
 		return errors.WithStack(err)
-	case <-time.After(heartbeatSendTimeout):
+	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
 		return ErrSendHeartbeatTimeout
 	}

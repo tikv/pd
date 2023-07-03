@@ -612,9 +612,11 @@ func (s *Server) serverMetricsLoop() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
+	ticker := time.NewTicker(serverMetricsInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-time.After(serverMetricsInterval):
+		case <-ticker.C:
 			s.collectEtcdStateMetrics()
 		case <-ctx.Done():
 			log.Info("server is closed, exit metrics loop")
@@ -1652,10 +1654,14 @@ func (s *Server) etcdLeaderLoop() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
+	ticker := time.NewTicker(s.cfg.LeaderPriorityCheckInterval.Duration)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-time.After(s.cfg.LeaderPriorityCheckInterval.Duration):
+		case <-ticker.C:
 			s.member.CheckPriority(ctx)
+			// Note: we reset the ticker here to support updating configuration dynamically.
+			ticker.Reset(s.cfg.LeaderPriorityCheckInterval.Duration)
 		case <-ctx.Done():
 			log.Info("server is closed, exit etcd leader loop")
 			return
@@ -1796,6 +1802,8 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 // GetServicePrimaryAddr returns the primary address for a given service.
 // Note: This function will only return primary address without judging if it's alive.
 func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
+	ticker := time.NewTicker(retryIntervalGetServicePrimary)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
 		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
 			return v.(string), true
@@ -1805,7 +1813,7 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 			return "", false
 		case <-ctx.Done():
 			return "", false
-		case <-time.After(retryIntervalGetServicePrimary):
+		case <-ticker.C:
 		}
 	}
 	return "", false
@@ -1823,6 +1831,8 @@ func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 		revision int64
 		err      error
 	)
+	ticker := time.NewTicker(retryIntervalGetServicePrimary)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
 		revision, err = s.updateServicePrimaryAddr(serviceName)
 		if revision != 0 && err == nil { // update success
@@ -1831,7 +1841,7 @@ func (s *Server) startWatchServicePrimaryAddrLoop(serviceName string) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(retryIntervalGetServicePrimary):
+		case <-ticker.C:
 		}
 	}
 	if err != nil {
