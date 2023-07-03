@@ -756,7 +756,7 @@ func (c *tsoClient) compareAndSwapTS(
 	// to compare with the new TSO's first logical. For example, if we have a TSO resp with logical 10, count 5, then
 	// all TSOs we get will be [6, 7, 8, 9, 10]. lastTSOInfo.logical stores the logical part of the largest ts returned
 	// last time.
-	if tsoutil.TSLessEqual(physical, firstLogical, lastTSOInfo.physical, lastTSOInfo.logical) {
+	if tsoutil.TSLessEqual(physical, firstLogical, lastTSOInfo.physical, lastTSOInfo.logical) && !c.option.allowTSOFallback {
 		log.Panic("[tso] timestamp fallback",
 			zap.String("dc-location", dcLocation),
 			zap.Uint32("keyspace", c.svcDiscovery.GetKeyspaceID()),
