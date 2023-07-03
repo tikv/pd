@@ -1331,7 +1331,7 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 	}
 }
 
-// groupSplitPatroller is used to patrol the on-going groups that are in the
+// groupSplitPatroller is used to patrol the groups that are in the on-going
 // split state and to check if we could speed up the split process.
 func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 	defer kgm.wg.Done()
@@ -1350,12 +1350,12 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 			return
 		case <-ticker.C:
 		}
-		var splittingGroups []uint32
 		kgm.RLock()
 		if len(kgm.splittingGroups) == 0 {
 			kgm.RUnlock()
 			continue
 		}
+		var splittingGroups []uint32
 		for id := range kgm.splittingGroups {
 			splittingGroups = append(splittingGroups, id)
 		}
