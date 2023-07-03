@@ -576,17 +576,17 @@ func (oc *Controller) removeOperatorLocked(op *Operator) bool {
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
 		if op.Kind()&OpMerge != 0 {
-			oc.removeRelatedOperator(op)
+			oc.removeRelatedMergeOperator(op)
 		}
 		return true
 	}
 	return false
 }
 
-func (oc *Controller) removeRelatedOperator(op *Operator) {
+func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
 	relatedID, _ := strconv.ParseUint(op.AdditionalInfos[string(RelatedMergeRegion)], 10, 64)
 	if relatedOp := oc.operators[relatedID]; relatedOp != nil && relatedOp.Status() != CANCELED {
-		log.Info("operator canceled related region",
+		log.Info("operator canceled related merge region",
 			zap.Uint64("region-id", relatedOp.RegionID()),
 			zap.String("additional-info", relatedOp.GetAdditionalInfo()),
 			zap.Duration("takes", relatedOp.RunningTime()))
