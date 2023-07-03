@@ -154,6 +154,8 @@ func (m *Manager) Init(ctx context.Context) {
 }
 
 // AddResourceGroup puts a resource group.
+// NOTE: AddResourceGroup should also be idempotent because tidb depends
+// on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	// Check the name.
 	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
@@ -162,12 +164,6 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	// Check the Priority.
 	if grouppb.GetPriority() > 16 {
 		return errs.ErrInvalidGroup
-	}
-	m.RLock()
-	_, ok := m.groups[grouppb.Name]
-	m.RUnlock()
-	if ok {
-		return errs.ErrResourceGroupAlreadyExists.FastGenByArgs(grouppb.Name)
 	}
 	group := FromProtoResourceGroup(grouppb)
 	m.Lock()
