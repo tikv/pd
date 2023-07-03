@@ -63,6 +63,7 @@ func TestTSOKeyspaceGroupManager(t *testing.T) {
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -81,6 +82,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownSuite() {
 	suite.cancel()
 	suite.tsoCluster.Destroy()
 	suite.cluster.Destroy()
+	suite.Require().NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TearDownTest() {
@@ -243,7 +245,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -288,7 +289,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	splitTS, err := suite.requestTSO(re, 222, 2)
 	re.NoError(err)
 	re.Greater(tsoutil.CompareTimestamp(&splitTS, &ts), 0)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
@@ -356,8 +356,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitElection
 		return len(member1.GetLeaderListenUrls()) > 0 && len(member2.GetLeaderListenUrls()) > 0
 	})
 	re.Equal(member1.GetLeaderListenUrls(), member2.GetLeaderListenUrls())
-	// Finish the split.
-	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, 2)
 	// Wait for the keyspace groups to finish the split.
 	waitFinishSplit(re, suite.pdLeaderServer, 1, 2, []uint32{111}, []uint32{222, 333})
 }
