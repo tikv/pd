@@ -41,7 +41,7 @@ type ServiceRegister struct {
 // NewServiceRegister creates a new ServiceRegister.
 func NewServiceRegister(ctx context.Context, cli *clientv3.Client, clusterID, serviceName, serviceAddr, serializedValue string, ttl int64) *ServiceRegister {
 	cctx, cancel := context.WithCancel(ctx)
-	serviceKey := registryPath(clusterID, serviceName, serviceAddr)
+	serviceKey := RegistryPath(clusterID, serviceName, serviceAddr)
 	return &ServiceRegister{
 		ctx:    cctx,
 		cancel: cancel,

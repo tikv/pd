@@ -17,6 +17,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -108,8 +109,30 @@ func GetKeyspaceGroups(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
+	var kgs []*endpoint.KeyspaceGroup
+	state, set := c.GetQuery("state")
+	if set {
+		state := strings.ToLower(state)
+		switch state {
+		case "merge":
+			for _, keyspaceGroup := range keyspaceGroups {
+				if keyspaceGroup.MergeState != nil {
+					kgs = append(kgs, keyspaceGroup)
+				}
+			}
+		case "split":
+			for _, keyspaceGroup := range keyspaceGroups {
+				if keyspaceGroup.SplitState != nil {
+					kgs = append(kgs, keyspaceGroup)
+				}
+			}
+		default:
+		}
+	} else {
+		kgs = keyspaceGroups
+	}
 
-	c.IndentedJSON(http.StatusOK, keyspaceGroups)
+	c.IndentedJSON(http.StatusOK, kgs)
 }
 
 // GetKeyspaceGroupByID gets keyspace group by ID.
@@ -161,6 +184,9 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 type SplitKeyspaceGroupByIDParams struct {
 	NewID     uint32   `json:"new-id"`
 	Keyspaces []uint32 `json:"keyspaces"`
+	// StartKeyspaceID and EndKeyspaceID are used to indicate the range of keyspaces to be split.
+	StartKeyspaceID uint32 `json:"start-keyspace-id"`
+	EndKeyspaceID   uint32 `json:"end-keyspace-id"`
 }
 
 var patrolKeyspaceAssignmentState struct {
@@ -186,8 +212,13 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
 		return
 	}
-	if len(splitParams.Keyspaces) == 0 {
+	if len(splitParams.Keyspaces) == 0 && splitParams.StartKeyspaceID == 0 && splitParams.EndKeyspaceID == 0 {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid empty keyspaces")
+		return
+	}
+	if splitParams.StartKeyspaceID < utils.DefaultKeyspaceID ||
+		splitParams.StartKeyspaceID > splitParams.EndKeyspaceID {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid start/end keyspace id")
 		return
 	}
 
@@ -200,7 +231,7 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
 			return
 		}
-		err = manager.PatrolKeyspaceAssignment()
+		err = manager.PatrolKeyspaceAssignment(splitParams.StartKeyspaceID, splitParams.EndKeyspaceID)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			patrolKeyspaceAssignmentState.Unlock()
@@ -215,7 +246,9 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		return
 	}
 	// Split keyspace group.
-	err = groupManager.SplitKeyspaceGroupByID(id, splitParams.NewID, splitParams.Keyspaces)
+	err = groupManager.SplitKeyspaceGroupByID(
+		id, splitParams.NewID,
+		splitParams.Keyspaces, splitParams.StartKeyspaceID, splitParams.EndKeyspaceID)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return

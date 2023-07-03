@@ -60,8 +60,7 @@ type tsoObject struct {
 
 // timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
-	client   *clientv3.Client
-	rootPath string
+	client *clientv3.Client
 	// When tsPath is empty, it means that it is a global timestampOracle.
 	tsPath  string
 	storage endpoint.TSOStorage

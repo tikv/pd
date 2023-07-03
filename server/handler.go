@@ -419,7 +419,7 @@ func (h *Handler) RemoveOperator(regionID uint64) error {
 		return ErrOperatorNotFound
 	}
 
-	_ = c.RemoveOperator(op)
+	_ = c.RemoveOperator(op, operator.AdminStop)
 	return nil
 }
 

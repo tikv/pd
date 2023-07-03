@@ -1391,3 +1391,35 @@ func (suite *ruleCheckerTestSuite) TestLocationLabels() {
 	suite.NotNil(op)
 	suite.Equal("move-to-better-location", op.Desc())
 }
+
+func (suite *ruleCheckerTestSuite) TestTiFlashLocationLabels() {
+	suite.cluster.SetEnableUseJointConsensus(true)
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z2", "rack": "r3", "host": "h2"})
+	suite.cluster.AddLabelsStore(6, 1, map[string]string{"zone": "z2", "rack": "r3", "host": "h2"})
+	suite.cluster.AddLabelsStore(7, 1, map[string]string{"engine": "tiflash"})
+	suite.cluster.AddRegionWithLearner(1, 1, []uint64{3, 5}, []uint64{7})
+
+	rule1 := &placement.Rule{
+		GroupID: "tiflash",
+		ID:      "test1",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "engine",
+				Op:     placement.In,
+				Values: []string{"tiflash"},
+			},
+		},
+	}
+	suite.ruleManager.SetRule(rule1)
+	rule := suite.ruleManager.GetRule("pd", "default")
+	rule.LocationLabels = []string{"zone", "rack", "host"}
+	suite.ruleManager.SetRule(rule)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.Nil(op)
+}

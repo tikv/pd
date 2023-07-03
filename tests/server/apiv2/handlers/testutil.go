@@ -205,7 +205,7 @@ func MustDeleteKeyspaceGroup(re *require.Assertions, server *tests.TestServer, i
 	re.Equal(http.StatusOK, resp.StatusCode, string(data))
 }
 
-// MustSplitKeyspaceGroup updates a keyspace group with HTTP API.
+// MustSplitKeyspaceGroup splits a keyspace group with HTTP API.
 func MustSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id uint32, request *handlers.SplitKeyspaceGroupByIDParams) {
 	data, err := json.Marshal(request)
 	re.NoError(err)
@@ -229,6 +229,21 @@ func MustFinishSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServ
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+// MustMergeKeyspaceGroup merges keyspace groups with HTTP API.
+func MustMergeKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id uint32, request *handlers.MergeKeyspaceGroupsParams) {
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/merge", id), bytes.NewBuffer(data))
+	re.NoError(err)
+	// Send request.
+	resp, err := dialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode, string(data))
 }

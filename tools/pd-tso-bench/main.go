@@ -33,6 +33,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+)
+
+const (
+	keepaliveTime    = 10 * time.Second
+	keepaliveTimeout = 3 * time.Second
 )
 
 var (
@@ -95,11 +102,18 @@ func bench(mainCtx context.Context) {
 			err   error
 		)
 
+		opt := pd.WithGRPCDialOptions(
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:    keepaliveTime,
+				Timeout: keepaliveTimeout,
+			}),
+		)
+
 		pdCli, err = pd.NewClientWithContext(mainCtx, []string{*pdAddrs}, pd.SecurityOption{
 			CAPath:   *caPath,
 			CertPath: *certPath,
 			KeyPath:  *keyPath,
-		})
+		}, opt)
 
 		pdCli.UpdateOption(pd.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
 		pdCli.UpdateOption(pd.EnableTSOFollowerProxy, *enableTSOFollowerProxy)

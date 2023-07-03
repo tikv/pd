@@ -726,9 +726,6 @@ func (u *Controller) getFailedPeers(region *metapb.Region) []*metapb.Peer {
 
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
-		if peer.Role == metapb.PeerRole_Learner || peer.Role == metapb.PeerRole_DemotingVoter {
-			continue
-		}
 		if u.isFailed(peer) {
 			failedPeers = append(failedPeers, peer)
 		}

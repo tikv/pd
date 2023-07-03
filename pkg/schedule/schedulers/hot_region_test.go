@@ -145,7 +145,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 	}
 	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		infl := notDoneOpInfluence(region, ty)
-		infl.op.Cancel()
+		infl.op.Cancel(operator.AdminStop)
 		return infl
 	}
 	shouldRemoveOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
@@ -957,7 +957,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 4)
 				cnt++
 				if cnt == 3 {
-					re.True(op.Cancel())
+					re.True(op.Cancel(operator.AdminStop))
 				}
 			default:
 				re.FailNow("wrong op: " + op.String())
@@ -1367,14 +1367,14 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 		op2 := ops[0]
 		operatorutil.CheckTransferPeer(re, op2, operator.OpHotRegion, 1, 4)
 		// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | 6 | (5, 6)
-		re.True(op2.Cancel())
+		re.True(op2.Cancel(operator.AdminStop))
 
 		ops, _ = hb.Schedule(tc, false)
 		op2 = ops[0]
 		operatorutil.CheckTransferPeer(re, op2, operator.OpHotRegion, 1, 4)
 		// After move-peer, store byte/key rate (min, max): (6.1, 7.1) | 6.1 | (6, 6.5) | (5, 5.5)
 
-		re.True(op1.Cancel())
+		re.True(op1.Cancel(operator.AdminStop))
 		// store byte/key rate (min, max): (6.6, 7.1) | 6.1 | 6 | (5, 5.5)
 
 		ops, _ = hb.Schedule(tc, false)
