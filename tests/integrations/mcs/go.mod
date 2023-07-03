@@ -52,13 +52,13 @@ require (
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5 // indirect
 	github.com/cenkalti/backoff/v4 v4.0.2 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/cloudfoundry/gosigar v1.3.6 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f // indirect
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4 // indirect
-	github.com/elastic/gosigar v0.14.2 // indirect
 	github.com/elliotchance/pie/v2 v2.1.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/gin-contrib/cors v1.4.0 // indirect
