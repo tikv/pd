@@ -132,13 +132,15 @@ func showKeyspaceGroupsCommandFunc(cmd *cobra.Command, args []string) {
 			cmd.Printf("Failed to get state: %s\n", err)
 		}
 		stateValue := ""
-		state = strings.ToLower(state)
-		switch state {
-		case "merge", "split":
-			stateValue = fmt.Sprintf("state=%v", state)
-		default:
-			cmd.Println("Unknown state: " + state)
-			return
+		if len(state) != 0 {
+			state = strings.ToLower(state)
+			switch state {
+			case "merge", "split":
+				stateValue = fmt.Sprintf("state=%v", state)
+			default:
+				cmd.Println("Unknown state: " + state)
+				return
+			}
 		}
 
 		if len(stateValue) != 0 {
