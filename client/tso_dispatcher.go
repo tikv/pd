@@ -756,8 +756,23 @@ func (c *tsoClient) compareAndSwapTS(
 	// to compare with the new TSO's first logical. For example, if we have a TSO resp with logical 10, count 5, then
 	// all TSOs we get will be [6, 7, 8, 9, 10]. lastTSOInfo.logical stores the logical part of the largest ts returned
 	// last time.
-	if tsoutil.TSLessEqual(physical, firstLogical, lastTSOInfo.physical, lastTSOInfo.logical) && !c.option.allowTSOFallback {
-		log.Panic("[tso] timestamp fallback",
+	if tsoutil.TSLessEqual(physical, firstLogical, lastTSOInfo.physical, lastTSOInfo.logical) {
+		if !c.option.allowTSOFallback {
+			log.Panic("[tso] timestamp fallback",
+				zap.String("dc-location", dcLocation),
+				zap.Uint32("keyspace", c.svcDiscovery.GetKeyspaceID()),
+				zap.String("last-ts", fmt.Sprintf("(%d, %d)", lastTSOInfo.physical, lastTSOInfo.logical)),
+				zap.String("cur-ts", fmt.Sprintf("(%d, %d)", physical, firstLogical)),
+				zap.String("last-tso-server", lastTSOInfo.tsoServer),
+				zap.String("cur-tso-server", curTSOInfo.tsoServer),
+				zap.Uint32("last-keyspace-group-in-request", lastTSOInfo.reqKeyspaceGroupID),
+				zap.Uint32("cur-keyspace-group-in-request", curTSOInfo.reqKeyspaceGroupID),
+				zap.Uint32("last-keyspace-group-in-response", lastTSOInfo.respKeyspaceGroupID),
+				zap.Uint32("cur-keyspace-group-in-response", curTSOInfo.respKeyspaceGroupID),
+				zap.Time("last-response-received-at", lastTSOInfo.respReceivedAt),
+				zap.Time("cur-response-received-at", curTSOInfo.respReceivedAt))
+		}
+		log.Error("[tso] timestamp fallback",
 			zap.String("dc-location", dcLocation),
 			zap.Uint32("keyspace", c.svcDiscovery.GetKeyspaceID()),
 			zap.String("last-ts", fmt.Sprintf("(%d, %d)", lastTSOInfo.physical, lastTSOInfo.logical)),
@@ -769,8 +784,7 @@ func (c *tsoClient) compareAndSwapTS(
 			zap.Uint32("last-keyspace-group-in-response", lastTSOInfo.respKeyspaceGroupID),
 			zap.Uint32("cur-keyspace-group-in-response", curTSOInfo.respKeyspaceGroupID),
 			zap.Time("last-response-received-at", lastTSOInfo.respReceivedAt),
-			zap.Time("cur-response-received-at", curTSOInfo.respReceivedAt),
-		)
+			zap.Time("cur-response-received-at", curTSOInfo.respReceivedAt))
 	}
 	lastTSOInfo.tsoServer = curTSOInfo.tsoServer
 	lastTSOInfo.reqKeyspaceGroupID = curTSOInfo.reqKeyspaceGroupID
