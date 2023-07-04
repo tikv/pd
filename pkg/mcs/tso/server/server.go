@@ -595,6 +595,8 @@ func (s *Server) waitAPIServiceReady() error {
 		ready bool
 		err   error
 	)
+	ticker := time.NewTicker(retryIntervalWaitAPIService)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimesWaitAPIService; i++ {
 		ready, err = s.isAPIServiceReady()
 		if err == nil && ready {
@@ -604,7 +606,7 @@ func (s *Server) waitAPIServiceReady() error {
 		select {
 		case <-s.ctx.Done():
 			return errors.New("context canceled while waiting api server ready")
-		case <-time.After(retryIntervalWaitAPIService):
+		case <-ticker.C:
 		}
 	}
 	if err != nil {
