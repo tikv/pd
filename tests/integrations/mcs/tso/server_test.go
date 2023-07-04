@@ -204,7 +204,7 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 	var count int
 	for _, kv := range resp.Kvs {
 		key := strings.TrimSpace(string(kv.Key))
-		if !strings.HasSuffix(key, "timestamp") {
+		if !strings.HasSuffix(key, endpoint.TimestampKey) {
 			continue
 		}
 		count++

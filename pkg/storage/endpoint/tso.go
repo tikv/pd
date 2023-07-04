@@ -52,7 +52,7 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 	maxTSWindow := typeutil.ZeroTime
 	for i, key := range keys {
 		key := strings.TrimSpace(key)
-		if !strings.HasSuffix(key, timestampKey) {
+		if !strings.HasSuffix(key, TimestampKey) {
 			continue
 		}
 		tsWindow, err := typeutil.ParseTimestamp([]byte(values[i]))

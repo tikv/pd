@@ -1278,7 +1278,7 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 		// update the newly merged TSO to make sure it is greater than the original ones.
 		var mergedTS time.Time
 		for _, id := range mergeList {
-			ts, err := kgm.tsoSvcStorage.LoadTimestamp(getKeyspaceGroupTSPath(id))
+			ts, err := kgm.tsoSvcStorage.LoadTimestamp(endpoint.GetKeyspaceGroupTSPath(id))
 			if err != nil || ts == typeutil.ZeroTime {
 				log.Error("failed to load the keyspace group TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
@@ -1439,7 +1439,11 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 				zap.Uint32("keyspace-group-id", groupID))
 			// Clean up the remaining TSO keys.
 			// TODO: support the Local TSO Allocator.
-			err := kgm.tsoSvcStorage.DeleteTimestamp(path.Join(getKeyspaceGroupTSPath(groupID), "timestamp"))
+			err := kgm.tsoSvcStorage.DeleteTimestamp(
+				endpoint.GetTimestampPath(
+					endpoint.GetKeyspaceGroupTSPath(groupID),
+				),
+			)
 			if err != nil {
 				log.Warn("failed to delete the keyspace group tso key",
 					zap.Uint32("keyspace-group-id", groupID),
