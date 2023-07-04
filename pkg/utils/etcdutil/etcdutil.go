@@ -268,6 +268,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
+				log.Info("[etcd client] etcd client is closed, exit health check goroutine")
 				return
 			case <-ticker.C:
 				usedEps := client.Endpoints()
@@ -302,6 +303,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
+				log.Info("[etcd client] etcd client is closed, exit update endpoint goroutine")
 				return
 			case <-ticker.C:
 				eps := syncUrls(client)
@@ -371,6 +373,7 @@ func (checker *healthyChecker) update(eps []string) {
 			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
 				// try to update client to trigger reconnect
 				checker.addClient(ep, lastHealthy)
+				client.(*healthyClient).Close()
 			}
 			continue
 		}
@@ -394,14 +397,10 @@ func syncUrls(client *clientv3.Client) []string {
 	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/clientv3/client.go#L170-L183
 	ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(client.Ctx()), DefaultRequestTimeout)
 	defer cancel()
-	now := time.Now()
 	mresp, err := client.MemberList(ctx)
 	if err != nil {
 		log.Error("[etcd client] failed to list members", errs.ZapError(err))
 		return []string{}
-	}
-	if time.Since(now) > defaultEtcdClientTimeout {
-		log.Warn("[etcd client] sync etcd members slow", zap.Duration("cost", time.Since(now)), zap.Int("members", len(mresp.Members)))
 	}
 	var eps []string
 	for _, m := range mresp.Members {

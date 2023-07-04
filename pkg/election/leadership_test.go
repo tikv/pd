@@ -120,6 +120,7 @@ func TestLeadership(t *testing.T) {
 	re.NoError(lease1.Close())
 	re.NoError(lease2.Close())
 }
+
 func TestExitWatch(t *testing.T) {
 	re := require.New(t)
 	leaderKey := "/test_leader"
