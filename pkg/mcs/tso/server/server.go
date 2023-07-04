@@ -539,7 +539,8 @@ func (s *Server) startServer() (err error) {
 	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
 	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
-		s.serverLoopCtx, s.serviceID, s.etcdClient, s.httpClient, s.cfg.AdvertiseListenAddr, legacySvcRootPath, tsoSvcRootPath, s.cfg)
+		s.serverLoopCtx, s.serviceID, s.etcdClient, s.httpClient, s.cfg.AdvertiseListenAddr,
+		discovery.TSOPath(s.clusterID), legacySvcRootPath, tsoSvcRootPath, s.cfg)
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}
@@ -594,6 +595,8 @@ func (s *Server) waitAPIServiceReady() error {
 		ready bool
 		err   error
 	)
+	ticker := time.NewTicker(retryIntervalWaitAPIService)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimesWaitAPIService; i++ {
 		ready, err = s.isAPIServiceReady()
 		if err == nil && ready {
@@ -603,7 +606,7 @@ func (s *Server) waitAPIServiceReady() error {
 		select {
 		case <-s.ctx.Done():
 			return errors.New("context canceled while waiting api server ready")
-		case <-time.After(retryIntervalWaitAPIService):
+		case <-ticker.C:
 		}
 	}
 	if err != nil {

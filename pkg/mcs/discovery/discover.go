@@ -21,7 +21,7 @@ import (
 
 // Discover is used to get all the service instances of the specified service name.
 func Discover(cli *clientv3.Client, clusterID, serviceName string) ([]string, error) {
-	key := discoveryPath(clusterID, serviceName) + "/"
+	key := ServicePath(clusterID, serviceName) + "/"
 	endKey := clientv3.GetPrefixRangeEnd(key)
 
 	withRange := clientv3.WithRange(endKey)

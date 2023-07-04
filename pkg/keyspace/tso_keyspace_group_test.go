@@ -238,8 +238,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 
 	keyspaceGroups := []*endpoint.KeyspaceGroup{
 		{
-			ID:       uint32(1),
-			UserKind: endpoint.Basic.String(),
+			ID:        uint32(1),
+			UserKind:  endpoint.Basic.String(),
+			Keyspaces: []uint32{444},
 		},
 		{
 			ID:        uint32(2),
@@ -250,8 +251,11 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	}
 	err := suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
 	re.NoError(err)
+	// split the default keyspace
+	err = suite.kgm.SplitKeyspaceGroupByID(0, 4, []uint32{utils.DefaultKeyspaceID})
+	re.ErrorIs(err, ErrModifyDefaultKeyspace)
 	// split the keyspace group 1 to 4
-	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{333})
+	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{444})
 	re.ErrorIs(err, ErrKeyspaceGroupNotEnoughReplicas)
 	// split the keyspace group 2 to 4 without giving any keyspace
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{})
@@ -276,25 +280,25 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 
 	// finish the split of the keyspace group 2
 	err = suite.kgm.FinishSplitKeyspaceByID(2)
-	re.ErrorIs(err, ErrKeyspaceGroupNotInSplit)
+	re.ErrorContains(err, ErrKeyspaceGroupNotInSplit(2).Error())
 	// finish the split of a non-existing keyspace group
 	err = suite.kgm.FinishSplitKeyspaceByID(5)
-	re.ErrorIs(err, ErrKeyspaceGroupNotExists)
+	re.ErrorContains(err, ErrKeyspaceGroupNotExists(5).Error())
 	// split the in-split keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{333})
-	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+	re.ErrorContains(err, ErrKeyspaceGroupInSplit(2).Error())
 	// remove the in-split keyspace group
 	kg2, err = suite.kgm.DeleteKeyspaceGroupByID(2)
 	re.Nil(kg2)
-	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+	re.ErrorContains(err, ErrKeyspaceGroupInSplit(2).Error())
 	kg4, err = suite.kgm.DeleteKeyspaceGroupByID(4)
 	re.Nil(kg4)
-	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+	re.ErrorContains(err, ErrKeyspaceGroupInSplit(4).Error())
 	// update the in-split keyspace group
 	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "2", 444, opAdd)
-	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+	re.ErrorContains(err, ErrKeyspaceGroupInSplit(2).Error())
 	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "4", 444, opAdd)
-	re.ErrorIs(err, ErrKeyspaceGroupInSplit)
+	re.ErrorContains(err, ErrKeyspaceGroupInSplit(4).Error())
 
 	// finish the split of keyspace group 4
 	err = suite.kgm.FinishSplitKeyspaceByID(4)
@@ -314,9 +318,9 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 
 	// split a non-existing keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(3, 5, nil)
-	re.ErrorIs(err, ErrKeyspaceGroupNotExists)
+	re.ErrorContains(err, ErrKeyspaceGroupNotExists(3).Error())
 	// split into an existing keyspace group
-	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, nil)
+	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{111})
 	re.ErrorIs(err, ErrKeyspaceGroupExists)
 	// split with the wrong keyspaces.
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 5, []uint32{111, 222, 444})
@@ -442,7 +446,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 
 	// merge a non-existing keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(4, []uint32{5})
-	re.ErrorIs(err, ErrKeyspaceGroupNotExists)
+	re.ErrorContains(err, ErrKeyspaceGroupNotExists(5).Error())
 	// merge with the number of keyspace groups exceeds the limit
 	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, maxEtcdTxnOps/2))
 	re.ErrorIs(err, ErrExceedMaxEtcdTxnOps)
@@ -480,11 +484,38 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 			err: ErrKeyspaceNotInKeyspaceGroup,
 		},
 		{
+			old:         []uint32{1, 2},
+			new:         []uint32{2, 2},
+			expectedOld: []uint32{1},
+			expectedNew: []uint32{2},
+		},
+		{
+			old:             []uint32{0, 1, 2, 3, 4, 5},
+			startKeyspaceID: 2,
+			endKeyspaceID:   4,
+			expectedOld:     []uint32{0, 1, 5},
+			expectedNew:     []uint32{2, 3, 4},
+		},
+		{
+			old:             []uint32{0, 1, 2, 3, 4, 5},
+			startKeyspaceID: 0,
+			endKeyspaceID:   4,
+			expectedOld:     []uint32{0, 5},
+			expectedNew:     []uint32{1, 2, 3, 4},
+		},
+		{
 			old:             []uint32{1, 2, 3, 4, 5},
 			startKeyspaceID: 2,
 			endKeyspaceID:   4,
 			expectedOld:     []uint32{1, 5},
 			expectedNew:     []uint32{2, 3, 4},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 5,
+			endKeyspaceID:   6,
+			expectedOld:     []uint32{1, 2, 3, 4},
+			expectedNew:     []uint32{5},
 		},
 		{
 			old:             []uint32{1, 2, 3, 4, 5},
@@ -495,10 +526,24 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 		},
 		{
 			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 1,
+			endKeyspaceID:   1,
+			expectedOld:     []uint32{2, 3, 4, 5},
+			expectedNew:     []uint32{1},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
 			startKeyspaceID: 0,
 			endKeyspaceID:   6,
 			expectedOld:     []uint32{},
 			expectedNew:     []uint32{1, 2, 3, 4, 5},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 7,
+			endKeyspaceID:   10,
+			expectedOld:     []uint32{1, 2, 3, 4, 5},
+			expectedNew:     []uint32{},
 		},
 		{
 			old: []uint32{1, 2, 3, 4, 5},

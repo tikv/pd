@@ -165,7 +165,7 @@ func getEndpoints(cmd *cobra.Command) []string {
 	return strings.Split(addrs, ",")
 }
 
-func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]interface{}) {
 	data, err := json.Marshal(input)
 	if err != nil {
 		cmd.Println(err)
@@ -175,27 +175,47 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 	endpoints := getEndpoints(cmd)
 	err = tryURLs(cmd, endpoints, func(endpoint string) error {
 		var msg []byte
-		var r *http.Response
+		var req *http.Request
+		var resp *http.Response
 		url := endpoint + "/" + prefix
-		r, err = dialClient.Post(url, "application/json", bytes.NewBuffer(data))
-		if err != nil {
-			return err
-		}
-		defer r.Body.Close()
-		if r.StatusCode != http.StatusOK {
-			msg, err = io.ReadAll(r.Body)
+		switch method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodGet:
+			req, err = http.NewRequest(method, url, bytes.NewBuffer(data))
 			if err != nil {
 				return err
 			}
-			return errors.Errorf("[%d] %s", r.StatusCode, msg)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err = dialClient.Do(req)
+		default:
+			err := errors.Errorf("method %s not supported", method)
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			msg, err = io.ReadAll(resp.Body)
+			if err != nil {
+				return err
+			}
+			return errors.Errorf("[%d] %s", resp.StatusCode, msg)
 		}
 		return nil
 	})
 	if err != nil {
-		cmd.Printf("Failed! %s", err)
+		cmd.Printf("Failed! %s\n", err)
 		return
 	}
 	cmd.Println("Success!")
+}
+
+func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+	requestJSON(cmd, http.MethodPost, prefix, input)
+}
+
+func patchJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+	requestJSON(cmd, http.MethodPatch, prefix, input)
 }
 
 // do send a request to server. Default is Get.

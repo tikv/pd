@@ -565,7 +565,6 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 	} else if rewrite, _ := cmd.Flags().GetBool("rewrite"); rewrite {
 		prefix += "?force=true"
 	}
-	cmd.Println(prefix)
 	postJSON(cmd, prefix, labels)
 }
 

@@ -49,15 +49,25 @@ var (
 	// ErrKeyspaceGroupExists indicates target keyspace group already exists.
 	ErrKeyspaceGroupExists = errors.New("keyspace group already exists")
 	// ErrKeyspaceGroupNotExists is used to indicate target keyspace group does not exist.
-	ErrKeyspaceGroupNotExists = errors.New("keyspace group does not exist")
+	ErrKeyspaceGroupNotExists = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v does not exist", groupID)
+	}
 	// ErrKeyspaceGroupInSplit is used to indicate target keyspace group is in split state.
-	ErrKeyspaceGroupInSplit = errors.New("keyspace group is in split state")
+	ErrKeyspaceGroupInSplit = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v is in split state", groupID)
+	}
 	// ErrKeyspaceGroupNotInSplit is used to indicate target keyspace group is not in split state.
-	ErrKeyspaceGroupNotInSplit = errors.New("keyspace group is not in split state")
+	ErrKeyspaceGroupNotInSplit = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v is not in split state", groupID)
+	}
 	// ErrKeyspaceGroupInMerging is used to indicate target keyspace group is in merging state.
-	ErrKeyspaceGroupInMerging = errors.New("keyspace group is in merging state")
+	ErrKeyspaceGroupInMerging = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v is in merging state", groupID)
+	}
 	// ErrKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
-	ErrKeyspaceGroupNotInMerging = errors.New("keyspace group is not in merging state")
+	ErrKeyspaceGroupNotInMerging = func(groupID uint32) error {
+		return errors.Errorf("keyspace group %v is not in merging state", groupID)
+	}
 	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
 	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
 	// ErrNodeNotInKeyspaceGroup is used to indicate the tso node is not in this keyspace group.
@@ -70,8 +80,9 @@ var (
 	ErrNoAvailableNode = errors.New("no available node")
 	// ErrExceedMaxEtcdTxnOps is used to indicate the number of etcd txn operations exceeds the limit.
 	ErrExceedMaxEtcdTxnOps = errors.New("exceed max etcd txn operations")
-	errModifyDefault       = errors.New("cannot modify default keyspace's state")
-	errIllegalOperation    = errors.New("unknown operation")
+	// ErrModifyDefaultKeyspace is used to indicate that default keyspace cannot be modified.
+	ErrModifyDefaultKeyspace = errors.New("cannot modify default keyspace's state")
+	errIllegalOperation      = errors.New("unknown operation")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
@@ -124,7 +135,7 @@ func MaskKeyspaceID(id uint32) uint32 {
 	return id & 0xFF
 }
 
-// makeKeyRanges encodes keyspace ID to correct LabelRule data.
+// RegionBound represents the region boundary of the given keyspace.
 // For a keyspace with id ['a', 'b', 'c'], it has four boundaries:
 //
 //	Lower bound for raw mode: ['r', 'a', 'b', 'c']
@@ -136,23 +147,38 @@ func MaskKeyspaceID(id uint32) uint32 {
 // And shares upper bound with keyspace with id ['a', 'b', 'c + 1'].
 // These repeated bound will not cause any problem, as repetitive bound will be ignored during rangeListBuild,
 // but provides guard against hole in keyspace allocations should it occur.
-func makeKeyRanges(id uint32) []interface{} {
+type RegionBound struct {
+	RawLeftBound  []byte
+	RawRightBound []byte
+	TxnLeftBound  []byte
+	TxnRightBound []byte
+}
+
+// MakeRegionBound constructs the correct region boundaries of the given keyspace.
+func MakeRegionBound(id uint32) *RegionBound {
 	keyspaceIDBytes := make([]byte, 4)
 	nextKeyspaceIDBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
 	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
-	rawLeftBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...)))
-	rawRightBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...)))
-	txnLeftBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...)))
-	txnRightBound := hex.EncodeToString(codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...)))
+	return &RegionBound{
+		RawLeftBound:  codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...)),
+		RawRightBound: codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...)),
+		TxnLeftBound:  codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...)),
+		TxnRightBound: codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...)),
+	}
+}
+
+// makeKeyRanges encodes keyspace ID to correct LabelRule data.
+func makeKeyRanges(id uint32) []interface{} {
+	regionBound := MakeRegionBound(id)
 	return []interface{}{
 		map[string]interface{}{
-			"start_key": rawLeftBound,
-			"end_key":   rawRightBound,
+			"start_key": hex.EncodeToString(regionBound.RawLeftBound),
+			"end_key":   hex.EncodeToString(regionBound.RawRightBound),
 		},
 		map[string]interface{}{
-			"start_key": txnLeftBound,
-			"end_key":   txnRightBound,
+			"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
+			"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
 		},
 	}
 }

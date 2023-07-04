@@ -128,8 +128,8 @@ func (c *Coordinator) PatrolRegions() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	timer := time.NewTimer(c.cluster.GetOpts().GetPatrolRegionInterval())
-	defer timer.Stop()
+	ticker := time.NewTicker(c.cluster.GetOpts().GetPatrolRegionInterval())
+	defer ticker.Stop()
 
 	log.Info("Coordinator starts patrol regions")
 	start := time.Now()
@@ -139,8 +139,9 @@ func (c *Coordinator) PatrolRegions() {
 	)
 	for {
 		select {
-		case <-timer.C:
-			timer.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
+		case <-ticker.C:
+			// Note: we reset the ticker here to support updating configuration dynamically.
+			ticker.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
 		case <-c.ctx.Done():
 			log.Info("patrol regions has been stopped")
 			return
@@ -519,11 +520,28 @@ func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.Sto
 	default:
 	}
 	// update params `IsLearner` and `LastUpdateTime`
-	for _, stores := range []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer} {
-		for _, store := range stores {
-			for _, hotPeer := range store.Stats {
-				region := c.cluster.GetRegion(hotPeer.RegionID)
-				hotPeer.UpdateHotPeerStatShow(region)
+	s := []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer}
+	for i, stores := range s {
+		for j, store := range stores {
+			for k := range store.Stats {
+				h := &s[i][j].Stats[k]
+				region := c.cluster.GetRegion(h.RegionID)
+				if region != nil {
+					h.IsLearner = core.IsLearner(region.GetPeer(h.StoreID))
+				}
+				switch typ {
+				case statistics.Write:
+					if region != nil {
+						h.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
+					}
+				case statistics.Read:
+					store := c.cluster.GetStore(h.StoreID)
+					if store != nil {
+						ts := store.GetMeta().GetLastHeartbeat()
+						h.LastUpdateTime = time.Unix(ts/1e9, ts%1e9)
+					}
+				default:
+				}
 			}
 		}
 	}
@@ -831,12 +849,11 @@ func (c *Coordinator) runScheduler(s *scheduleController) {
 	defer c.wg.Done()
 	defer s.Scheduler.Cleanup(c.cluster)
 
-	timer := time.NewTimer(s.GetInterval())
-	defer timer.Stop()
+	ticker := time.NewTicker(s.GetInterval())
+	defer ticker.Stop()
 	for {
 		select {
-		case <-timer.C:
-			timer.Reset(s.GetInterval())
+		case <-ticker.C:
 			diagnosable := s.diagnosticRecorder.isAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue
@@ -845,7 +862,8 @@ func (c *Coordinator) runScheduler(s *scheduleController) {
 				added := c.opController.AddWaitingOperator(op...)
 				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.Scheduler.GetName()))
 			}
-
+			// Note: we reset the ticker here to support updating configuration dynamically.
+			ticker.Reset(s.GetInterval())
 		case <-s.Ctx().Done():
 			log.Info("scheduler has been stopped",
 				zap.String("scheduler-name", s.Scheduler.GetName()),
