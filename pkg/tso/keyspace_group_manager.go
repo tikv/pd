@@ -119,6 +119,28 @@ func (s *state) getKeyspaceGroupMeta(
 	return s.ams[groupID], s.kgs[groupID]
 }
 
+// getSplittingGroups returns the IDs of the splitting keyspace groups.
+func (s *state) getSplittingGroups() []uint32 {
+	s.RLock()
+	defer s.RUnlock()
+	groups := make([]uint32, 0, len(s.splittingGroups))
+	for groupID := range s.splittingGroups {
+		groups = append(groups, groupID)
+	}
+	return groups
+}
+
+// getDeletedGroups returns the IDs of the deleted keyspace groups.
+func (s *state) getDeletedGroups() []uint32 {
+	s.RLock()
+	defer s.RUnlock()
+	groups := make([]uint32, 0, len(s.deletedGroups))
+	for groupID := range s.deletedGroups {
+		groups = append(groups, groupID)
+	}
+	return groups
+}
+
 func (s *state) checkTSOSplit(
 	targetGroupID uint32,
 ) (splitTargetAM, splitSourceAM *AllocatorManager, err error) {
@@ -1358,17 +1380,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 			return
 		case <-ticker.C:
 		}
-		kgm.RLock()
-		if len(kgm.splittingGroups) == 0 {
-			kgm.RUnlock()
-			continue
-		}
-		var splittingGroups []uint32
-		for id := range kgm.splittingGroups {
-			splittingGroups = append(splittingGroups, id)
-		}
-		kgm.RUnlock()
-		for _, groupID := range splittingGroups {
+		for _, groupID := range kgm.getSplittingGroups() {
 			am, group := kgm.getKeyspaceGroupMeta(groupID)
 			if !am.IsLeader() {
 				continue
@@ -1413,17 +1425,7 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			return
 		case <-ticker.C:
 		}
-		kgm.RLock()
-		if len(kgm.deletedGroups) == 0 {
-			kgm.RUnlock()
-			continue
-		}
-		var deletedGroups []uint32
-		for id := range kgm.deletedGroups {
-			deletedGroups = append(deletedGroups, id)
-		}
-		kgm.RUnlock()
-		for _, groupID := range deletedGroups {
+		for _, groupID := range kgm.getDeletedGroups() {
 			// Do not clean the default keyspace group data.
 			if groupID == mcsutils.DefaultKeyspaceGroupID {
 				continue
