@@ -568,6 +568,8 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 		kgm.primaryPriorityCheckInterval = 200 * time.Millisecond
 	})
 
+	ticker := time.NewTicker(kgm.primaryPriorityCheckInterval)
+	defer ticker.Stop()
 	ctx, cancel := context.WithCancel(kgm.ctx)
 	defer cancel()
 	groupID := 0
@@ -576,7 +578,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 		case <-ctx.Done():
 			log.Info("exit primary priority check loop")
 			return
-		case <-time.After(kgm.primaryPriorityCheckInterval):
+		case <-ticker.C:
 			// Every primaryPriorityCheckInterval, we only reset the primary of one keyspace group
 			member, kg, localPriority, nextGroupID := kgm.getNextPrimaryToReset(groupID, kgm.tsoServiceID.ServiceAddr)
 			if member != nil {

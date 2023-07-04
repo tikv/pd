@@ -40,9 +40,9 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router.GET("", GetKeyspaceGroups)
 	router.GET("/:id", GetKeyspaceGroupByID)
 	router.DELETE("/:id", DeleteKeyspaceGroupByID)
+	router.PATCH("/:id", SetNodesForKeyspaceGroup)          // only to support set nodes
+	router.PATCH("/:id/*node", SetPriorityForKeyspaceGroup) // only to support set priority
 	router.POST("/:id/alloc", AllocNodesForKeyspaceGroup)
-	router.POST("/:id/nodes", SetNodesForKeyspaceGroup)
-	router.POST("/:id/priority", SetPriorityForKeyspaceGroup)
 	router.POST("/:id/split", SplitKeyspaceGroupByID)
 	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
 	router.POST("/:id/merge", MergeKeyspaceGroups)
@@ -436,8 +436,7 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 
 // SetPriorityForKeyspaceGroupParams defines the params for setting priority of tso node for the keyspace group.
 type SetPriorityForKeyspaceGroupParams struct {
-	Node     string `json:"node"`
-	Priority int    `json:"priority"`
+	Priority int `json:"priority"`
 }
 
 // SetPriorityForKeyspaceGroup sets priority of tso node for the keyspace group.
@@ -445,6 +444,11 @@ func SetPriorityForKeyspaceGroup(c *gin.Context) {
 	id, err := validateKeyspaceGroupID(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
+		return
+	}
+	node, err := parseNodeAddress(c)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid node address")
 		return
 	}
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
@@ -468,12 +472,12 @@ func SetPriorityForKeyspaceGroup(c *gin.Context) {
 	// check if node exists
 	members := kg.Members
 	if slice.NoneOf(members, func(i int) bool {
-		return members[i].Address == setParams.Node
+		return members[i].Address == node
 	}) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "tso node does not exist in the keyspace group")
 	}
 	// set priority
-	err = manager.SetPriorityForKeyspaceGroup(id, setParams.Node, setParams.Priority)
+	err = manager.SetPriorityForKeyspaceGroup(id, node, setParams.Priority)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -490,6 +494,19 @@ func validateKeyspaceGroupID(c *gin.Context) (uint32, error) {
 		return 0, errors.Errorf("invalid keyspace group id: %d", id)
 	}
 	return uint32(id), nil
+}
+
+func parseNodeAddress(c *gin.Context) (string, error) {
+	node := c.Param("node")
+	if node == "" {
+		return "", errors.New("invalid node address")
+	}
+	// In pd-ctl, we use url.PathEscape to escape the node address and replace the % to \%.
+	// But in the gin framework, it will unescape the node address automatically.
+	// So we need to replace the \/ to /.
+	node = strings.ReplaceAll(node, "\\/", "/")
+	node = strings.TrimPrefix(node, "/")
+	return node, nil
 }
 
 func isValid(id uint32) bool {

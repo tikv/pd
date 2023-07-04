@@ -2570,6 +2570,47 @@ func TestCheckerIsBusy(t *testing.T) {
 	checkRegionAndOperator(re, tc, co, num, 0)
 }
 
+func TestMergeRegionCancelOneOperator(t *testing.T) {
+	re := require.New(t)
+	tc, co, cleanup := prepare(nil, nil, nil, re)
+	defer cleanup()
+
+	source := core.NewRegionInfo(
+		&metapb.Region{
+			Id:       1,
+			StartKey: []byte(""),
+			EndKey:   []byte("a"),
+		},
+		nil,
+	)
+	target := core.NewRegionInfo(
+		&metapb.Region{
+			Id:       2,
+			StartKey: []byte("a"),
+			EndKey:   []byte("t"),
+		},
+		nil,
+	)
+	re.NoError(tc.putRegion(source))
+	re.NoError(tc.putRegion(target))
+
+	// Cancel source region.
+	ops, err := operator.CreateMergeRegionOperator("merge-region", tc, source, target, operator.OpMerge)
+	re.NoError(err)
+	re.Len(ops, co.GetOperatorController().AddWaitingOperator(ops...))
+	// Cancel source operator.
+	co.GetOperatorController().RemoveOperator(co.GetOperatorController().GetOperator(source.GetID()))
+	re.Len(co.GetOperatorController().GetOperators(), 0)
+
+	// Cancel target region.
+	ops, err = operator.CreateMergeRegionOperator("merge-region", tc, source, target, operator.OpMerge)
+	re.NoError(err)
+	re.Len(ops, co.GetOperatorController().AddWaitingOperator(ops...))
+	// Cancel target operator.
+	co.GetOperatorController().RemoveOperator(co.GetOperatorController().GetOperator(target.GetID()))
+	re.Len(co.GetOperatorController().GetOperators(), 0)
+}
+
 func TestReplica(t *testing.T) {
 	re := require.New(t)
 
