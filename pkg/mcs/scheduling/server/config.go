@@ -63,17 +63,10 @@ const (
 	defaultMaxReplicas               = 3
 	defaultMaxSnapshotCount          = 64
 	defaultMaxPendingPeerCount       = 64
-	defaultMaxMergeRegionSize        = 20
-	defaultSplitMergeInterval        = time.Hour
-	defaultSwitchWitnessInterval     = time.Hour
 	defaultEnableDiagnostic          = true
-	defaultPatrolRegionInterval      = 10 * time.Millisecond
 	defaultMaxStoreDownTime          = 30 * time.Minute
 	defaultLeaderScheduleLimit       = 4
 	defaultRegionScheduleLimit       = 2048
-	defaultWitnessScheduleLimit      = 4
-	defaultReplicaScheduleLimit      = 64
-	defaultMergeScheduleLimit        = 8
 	defaultHotRegionScheduleLimit    = 4
 	defaultTolerantSizeRatio         = 0
 	defaultLowSpaceRatio             = 0.8
@@ -84,19 +77,12 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
-	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
-	defaultEnableTiKVSplitRegion       = true
 	defaultEnableCrossTableMerge       = true
-	defaultHotRegionsWriteInterval     = 10 * time.Minute
-	defaultHotRegionsReservedDays      = 7
-	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
-	defaultMaxStorePreparingTime = 48 * time.Hour
 	// When a slow store affected more than 30% of total stores, it will trigger evicting.
 	defaultSlowStoreEvictingAffectedStoreRatioThreshold = 0.3
 
 	defaultStoreLimitVersion = "v1"
-	defaultEnableWitness     = false
 	defaultHaltScheduling    = false
 )
 
@@ -130,40 +116,17 @@ type Config struct {
 	// it will never be used as a source or target store.
 	MaxSnapshotCount    uint64 `toml:"max-snapshot-count" json:"max-snapshot-count"`
 	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count" json:"max-pending-peer-count"`
-	// If both the size of region is smaller than MaxMergeRegionSize
-	// and the number of rows in region is smaller than MaxMergeRegionKeys,
-	// it will try to merge with adjacent regions.
-	MaxMergeRegionSize uint64 `toml:"max-merge-region-size" json:"max-merge-region-size"`
-	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
-	// SplitMergeInterval is the minimum interval time to permit merge after split.
-	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
-	// SwitchWitnessInterval is the minimum interval that allows a peer to become a witness again after it is promoted to non-witness.
-	SwitchWitnessInterval typeutil.Duration `toml:"switch-witness-interval" json:"swtich-witness-interval"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
-	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
-	// This option only works when key type is "table".
-	EnableCrossTableMerge bool `toml:"enable-cross-table-merge" json:"enable-cross-table-merge,string"`
-	// PatrolRegionInterval is the interval for scanning region during patrol.
-	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval" json:"patrol-region-interval"`
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
-	// MaxStorePreparingTime is the max duration after which
-	// a store will be considered to be preparing.
-	MaxStorePreparingTime typeutil.Duration `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
 	// LeaderScheduleLimit is the max coexist leader schedules.
 	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
 	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
 	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
 	// RegionScheduleLimit is the max coexist region schedules.
 	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
-	// WitnessScheduleLimit is the max coexist witness schedules.
-	WitnessScheduleLimit uint64 `toml:"witness-schedule-limit" json:"witness-schedule-limit"`
-	// ReplicaScheduleLimit is the max coexist replica schedules.
-	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
-	// MergeScheduleLimit is the max coexist merge schedules.
-	MergeScheduleLimit uint64 `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
 	// HotRegionScheduleLimit is the max coexist hot region schedules.
 	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
 	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
@@ -192,32 +155,13 @@ type Config struct {
 	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
 	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
 
-	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
-	EnableRemoveDownReplica bool `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
-	// EnableReplaceOfflineReplica is the option to enable replica checker to replace offline replica.
-	EnableReplaceOfflineReplica bool `toml:"enable-replace-offline-replica" json:"enable-replace-offline-replica,string"`
-	// EnableMakeUpReplica is the option to enable replica checker to make up replica.
-	EnableMakeUpReplica bool `toml:"enable-make-up-replica" json:"enable-make-up-replica,string"`
-	// EnableRemoveExtraReplica is the option to enable replica checker to remove extra replica.
-	EnableRemoveExtraReplica bool `toml:"enable-remove-extra-replica" json:"enable-remove-extra-replica,string"`
-	// EnableLocationReplacement is the option to enable replica checker to move replica to a better location.
-	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
 	// EnableDebugMetrics is the option to enable debug metrics.
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
 	// EnableJointConsensus is the option to enable using joint consensus as a operator step.
 	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
-	// EnableTiKVSplitRegion is the option to enable tikv split region.
-	// on ebs-based BR we need to disable it with TTL
-	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
 
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
-
-	// Controls the time interval between write hot regions info into leveldb.
-	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
-
-	// The day of hot regions data to be reserved. 0 means close.
-	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 
 	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
@@ -225,9 +169,6 @@ type Config struct {
 
 	// EnableDiagnostic is the the option to enable using diagnostic
 	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
-
-	// EnableWitness is the option to enable using witness
-	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
 
 	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
 	// A store's slowness must affected more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
@@ -336,29 +277,12 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	if !meta.IsDefined("max-pending-peer-count") {
 		configutil.AdjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	}
-	if !meta.IsDefined("max-merge-region-size") {
-		configutil.AdjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
-	}
-	configutil.AdjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
-	configutil.AdjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
-	configutil.AdjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
-	configutil.AdjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
-	configutil.AdjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
 	if !meta.IsDefined("leader-schedule-limit") {
 		configutil.AdjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	}
 	if !meta.IsDefined("region-schedule-limit") {
 		configutil.AdjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
-	}
-	if !meta.IsDefined("witness-schedule-limit") {
-		configutil.AdjustUint64(&c.WitnessScheduleLimit, defaultWitnessScheduleLimit)
-	}
-	if !meta.IsDefined("replica-schedule-limit") {
-		configutil.AdjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
-	}
-	if !meta.IsDefined("merge-schedule-limit") {
-		configutil.AdjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
 	}
 	if !meta.IsDefined("hot-region-schedule-limit") {
 		configutil.AdjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
@@ -383,20 +307,11 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
 	}
-	if !meta.IsDefined("enable-tikv-split-region") {
-		c.EnableTiKVSplitRegion = defaultEnableTiKVSplitRegion
-	}
-	if !meta.IsDefined("enable-cross-table-merge") {
-		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
-	}
+
 	configutil.AdjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	configutil.AdjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
 	if !meta.IsDefined("enable-diagnostic") {
 		c.EnableDiagnostic = defaultEnableDiagnostic
-	}
-
-	if !meta.IsDefined("enable-witness") {
-		c.EnableWitness = defaultEnableWitness
 	}
 
 	// new cluster:v2, old cluster:v1
@@ -412,10 +327,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	if c.StoreLimit == nil {
 		c.StoreLimit = make(map[uint64]StoreLimitConfig)
-	}
-
-	if !meta.IsDefined("hot-regions-reserved-days") {
-		configutil.AdjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
 	if !meta.IsDefined("slow-store-evicting-affected-store-ratio-threshold") {

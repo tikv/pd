@@ -24,9 +24,22 @@ import (
 func TestAdjust(t *testing.T) {
 	re := require.New(t)
 	cfgData := `
-max-merge-region-size = 0
 enable-one-way-merge = true
 leader-schedule-limit = 0
+max-snapshot-count = 10
+max-pending-peer-count = 128
+leader-schedule-policy = "size"
+region-schedule-limit = 16
+max-movable-hot-peer-size = 100
+halt-scheduling = true
+region-score-formula-version = "v1"
+hot-region-schedule-limit = 10
+hot-region-cache-hits-threshold = 10
+tolerant-size-ratio = 0.1
+scheduler-max-waiting-operator = 100
+slow-store-evicting-affected-store-ratio-threshold = 0.1
+low-space-ratio = 0.99
+high-space-ratio = 0.98
 `
 
 	cfg := NewConfig()
@@ -35,8 +48,20 @@ leader-schedule-limit = 0
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
-	re.Equal(uint64(0), cfg.MaxMergeRegionSize)
 	re.True(cfg.EnableOneWayMerge)
 	re.Equal(uint64(0), cfg.LeaderScheduleLimit)
-	re.Equal(uint64(0), cfg.MaxMergeRegionKeys)
+	re.Equal(uint64(10), cfg.MaxSnapshotCount)
+	re.Equal(uint64(128), cfg.MaxPendingPeerCount)
+	re.Equal("size", cfg.LeaderSchedulePolicy)
+	re.Equal(uint64(16), cfg.RegionScheduleLimit)
+	re.Equal(uint64(100), cfg.MaxMovableHotPeerSize)
+	re.True(cfg.HaltScheduling)
+	re.Equal("v1", cfg.RegionScoreFormulaVersion)
+	re.Equal(uint64(10), cfg.HotRegionScheduleLimit)
+	re.Equal(uint64(10), cfg.HotRegionCacheHitsThreshold)
+	re.Equal(float64(0.1), cfg.TolerantSizeRatio)
+	re.Equal(uint64(100), cfg.SchedulerMaxWaitingOperator)
+	re.Equal(float64(0.1), cfg.SlowStoreEvictingAffectedStoreRatioThreshold)
+	re.Equal(float64(0.99), cfg.LowSpaceRatio)
+	re.Equal(float64(0.98), cfg.HighSpaceRatio)
 }
