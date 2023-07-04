@@ -486,6 +486,7 @@ func SetPriorityForKeyspaceGroup(c *gin.Context) {
 	c.JSON(http.StatusOK, nil)
 }
 
+// GetKeyspaceGroupPrimaryByID gets primary of keyspace group by ID.
 func GetKeyspaceGroupPrimaryByID(c *gin.Context) {
 	id, err := validateKeyspaceGroupID(c)
 	if err != nil {

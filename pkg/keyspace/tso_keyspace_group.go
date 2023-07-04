@@ -1013,6 +1013,7 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 	return nil
 }
 
+// GetKeyspaceGroupPrimaryByID returns the primary node of the keyspace group by ID.
 func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 	// default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
 	// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
