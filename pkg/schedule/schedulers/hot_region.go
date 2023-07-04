@@ -58,11 +58,12 @@ var (
 	hotSchedulerSnapshotSenderLimitCounter  = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
 
 	// counter related with the split region
-	hotSchedulerNotFoundSplitKeysCounter       = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
-	hotSchedulerRegionBucketsNotHotCounter     = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
-	hotSchedulerSplitSuccessCounter            = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
-	hotSchedulerNeedSplitBeforeScheduleCounter = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
-	hotSchedulerRegionIsTooHotCounter          = schedulerCounter.WithLabelValues(HotRegionName, "region_is_too_hot")
+	hotSchedulerNotFoundSplitKeysCounter          = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
+	hotSchedulerRegionBucketsNotHotCounter        = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
+	hotSchedulerRegionBucketsSingleHotSpotCounter = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_single_hot_spot")
+	hotSchedulerSplitSuccessCounter               = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
+	hotSchedulerNeedSplitBeforeScheduleCounter    = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
+	hotSchedulerRegionIsTooHotCounter             = schedulerCounter.WithLabelValues(HotRegionName, "region_is_too_hot")
 
 	hotSchedulerMoveLeaderCounter     = schedulerCounter.WithLabelValues(HotRegionName, moveLeader.String())
 	hotSchedulerMovePeerCounter       = schedulerCounter.WithLabelValues(HotRegionName, movePeer.String())
@@ -670,7 +671,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			bs.cur.mainPeerStat = mainPeerStat
 			if regionTooHot(srcStore, mainPeerStat) {
 				hotSchedulerRegionIsTooHotCounter.Inc()
-				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region})
+				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region}, true)
 				if len(ops) > 0 {
 					bs.ops = ops
 					bs.cur.calcPeersRate(bs.firstPriority, bs.secondPriority)
@@ -1463,7 +1464,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 		}
 	}
 	if len(splitRegions) > 0 {
-		return bs.createSplitOperator(splitRegions)
+		return bs.createSplitOperator(splitRegions, false)
 	}
 
 	srcStoreID := bs.cur.srcStore.GetID()
@@ -1503,7 +1504,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 }
 
 // createSplitOperator creates split operators for the given regions.
-func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*operator.Operator {
+func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHot bool) []*operator.Operator {
 	if len(regions) == 0 {
 		return nil
 	}
@@ -1518,6 +1519,11 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo) []*oper
 		stats, ok := hotBuckets[region.GetID()]
 		if !ok {
 			hotSchedulerRegionBucketsNotHotCounter.Inc()
+			return
+		}
+		// skip if only one hot buckets exists on this region.
+		if len(stats) <= 1 && isTooHot {
+			hotSchedulerRegionBucketsSingleHotSpotCounter.Inc()
 			return
 		}
 		startKey, endKey := region.GetStartKey(), region.GetEndKey()

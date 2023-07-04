@@ -214,15 +214,18 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	b := &metapb.Buckets{
 		RegionId:   1,
 		PeriodInMs: 1000,
-		Keys: [][]byte{[]byte(fmt.Sprintf("%21d", 11)),
-			[]byte(fmt.Sprintf("%21d", 12))},
+		Keys: [][]byte{
+			[]byte(fmt.Sprintf("%21d", 11)),
+			[]byte(fmt.Sprintf("%21d", 12)),
+			[]byte(fmt.Sprintf("%21d", 13)),
+		},
 		Stats: &metapb.BucketStats{
-			ReadBytes:  []uint64{10 * units.KiB},
-			ReadKeys:   []uint64{256},
-			ReadQps:    []uint64{0},
-			WriteBytes: []uint64{0},
-			WriteQps:   []uint64{0},
-			WriteKeys:  []uint64{0},
+			ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB},
+			ReadKeys:   []uint64{256, 256},
+			ReadQps:    []uint64{0, 0},
+			WriteBytes: []uint64{0, 0},
+			WriteQps:   []uint64{0, 0},
+			WriteKeys:  []uint64{0, 0},
 		},
 	}
 
@@ -292,7 +295,7 @@ func TestSplitBuckets(t *testing.T) {
 	task := buckets.NewCheckPeerTask(b)
 	re.True(tc.HotBucketCache.CheckAsync(task))
 	time.Sleep(time.Millisecond * 10)
-	ops := solve.createSplitOperator([]*core.RegionInfo{region})
+	ops := solve.createSplitOperator([]*core.RegionInfo{region}, false)
 	re.Equal(1, len(ops))
 	op := ops[0]
 	re.Equal(splitBucket, op.Desc())
