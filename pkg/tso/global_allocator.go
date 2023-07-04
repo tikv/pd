@@ -96,7 +96,7 @@ func NewGlobalTSOAllocator(
 		member: am.member,
 		timestampOracle: &timestampOracle{
 			client:                 am.member.GetLeadership().GetClient(),
-			tsPath:                 am.getKeyspaceGroupTSPath(am.kgID),
+			tsPath:                 getKeyspaceGroupTSPath(am.kgID),
 			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,

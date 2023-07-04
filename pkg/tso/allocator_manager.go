@@ -1412,10 +1412,9 @@ func (am *AllocatorManager) GetLeaderAddr() string {
 //     "" in /pd/{cluster_id}/timestamp
 //  2. for the non-default keyspace groups:
 //     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
-func (am *AllocatorManager) getKeyspaceGroupTSPath(groupID uint32) string {
-	tsPath := ""
-	if am.kgID != mcsutils.DefaultKeyspaceGroupID {
-		tsPath = path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
+func getKeyspaceGroupTSPath(groupID uint32) string {
+	if groupID == mcsutils.DefaultKeyspaceGroupID {
+		return ""
 	}
-	return tsPath
+	return path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
 }
