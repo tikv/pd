@@ -1431,14 +1431,14 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			// Make sure the allocator and group meta are not in use anymore.
 			am, _ := kgm.getKeyspaceGroupMeta(groupID)
 			if am != nil {
-				log.Info("the keyspace group allocator has not been closed yet",
+				log.Info("the keyspace group tso allocator has not been closed yet",
 					zap.Uint32("keyspace-group-id", groupID))
 				continue
 			}
 			log.Info("delete the keyspace group tso key",
 				zap.Uint32("keyspace-group-id", groupID))
 			// Clean up the remaining TSO keys.
-			// TODO: support the Local TSO Allocator.
+			// TODO: support the Local TSO Allocator clean up.
 			err := kgm.tsoSvcStorage.DeleteTimestamp(
 				endpoint.GetTimestampPath(
 					endpoint.GetKeyspaceGroupTSPath(groupID),
