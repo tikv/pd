@@ -42,6 +42,7 @@ func NewKeyspaceGroupCommand() *cobra.Command {
 	cmd.AddCommand(newFinishMergeKeyspaceGroupCommand())
 	cmd.AddCommand(newSetNodesKeyspaceGroupCommand())
 	cmd.AddCommand(newSetPriorityKeyspaceGroupCommand())
+	cmd.AddCommand(newShowKeyspaceGroupPrimaryCommand())
 	cmd.Flags().String("state", "", "state filter")
 	return cmd
 }
@@ -107,6 +108,15 @@ func newSetPriorityKeyspaceGroupCommand() *cobra.Command {
 		Use:   "set-priority <keyspace_group_id> <tso_node_addr> <priority>",
 		Short: "set the priority of tso nodes for keyspace group with the given ID. If the priority is negative, it need to add a prefix with -- to avoid identified as flag.",
 		Run:   setPriorityKeyspaceGroupCommandFunc,
+	}
+	return r
+}
+
+func newShowKeyspaceGroupPrimaryCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "primary <keyspace_group_id>",
+		Short: "show th primary of tso nodes for keyspace group with the given ID.",
+		Run:   showKeyspaceGroupPrimaryCommandFunc,
 	}
 	return r
 }
@@ -335,6 +345,24 @@ func setPriorityKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	patchJSON(cmd, fmt.Sprintf("%s/%s/%s", keyspaceGroupsPrefix, args[0], node), map[string]interface{}{
 		"Priority": priority,
 	})
+}
+
+func showKeyspaceGroupPrimaryCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 {
+		cmd.Usage()
+		return
+	}
+	_, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		cmd.Printf("Failed to parse the keyspace group ID: %s\n", err)
+		return
+	}
+	r, err := doRequest(cmd, fmt.Sprintf("%s/%s/primary", keyspaceGroupsPrefix, args[0]), http.MethodGet, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to get the keyspace group primary information: %s\n", err)
+		return
+	}
+	cmd.Println(r)
 }
 
 func convertToKeyspaceGroup(content string) string {
