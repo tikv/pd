@@ -126,9 +126,20 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	mgr.RLock()
 	re.Nil(mgr.ams[1])
 	re.Nil(mgr.kgs[1])
-	_, ok := mgr.deletedGroups[1]
-	re.False(ok)
+	re.NotContains(mgr.deletedGroups, 1)
 	mgr.RUnlock()
+	// Try to delete the default keyspace group.
+	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupDeleteEvent(mcsutils.DefaultKeyspaceGroupID)})
+	// Default keyspace group should NOT be deleted.
+	mgr.RLock()
+	re.NotNil(mgr.ams[mcsutils.DefaultKeyspaceGroupID])
+	re.NotNil(mgr.kgs[mcsutils.DefaultKeyspaceGroupID])
+	re.NotContains(mgr.deletedGroups, mcsutils.DefaultKeyspaceGroupID)
+	mgr.RUnlock()
+	// Default keyspace group TSO key should NOT be deleted.
+	ts, err := mgr.legacySvcStorage.LoadTimestamp(endpoint.GetKeyspaceGroupTSPath(mcsutils.DefaultKeyspaceGroupID))
+	re.NoError(err)
+	re.NotEmpty(ts)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastDeletedGroupCleaner"))
 }
