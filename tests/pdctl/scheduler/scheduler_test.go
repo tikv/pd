@@ -340,6 +340,7 @@ func TestScheduler(t *testing.T) {
 		"strict-picking-store":       "true",
 		"enable-for-tiflash":         "true",
 		"rank-formula-version":       "v2",
+		"split-thresholds":           0.5,
 	}
 	var conf map[string]interface{}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
