@@ -110,6 +110,20 @@ func LoadKeyspace(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
+	if _, ok := c.GetQuery("refresh_group_id"); ok {
+		groupManager := svr.GetKeyspaceGroupManager()
+		if groupManager == nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+			return
+		}
+		// keyspace has been checked in LoadKeyspace, so no need to check again.
+		groupID, err := groupManager.GetGroupByKeyspaceID(meta.GetId())
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		meta.Config[keyspace.TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(groupID), 10)
+	}
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
 

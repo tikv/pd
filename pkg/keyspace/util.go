@@ -70,6 +70,8 @@ var (
 	}
 	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
 	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
+	// ErrKeyspaceNotInAnyKeyspaceGroup is used to indicate target keyspace is not in any keyspace group.
+	ErrKeyspaceNotInAnyKeyspaceGroup = errors.New("keyspace is not in any keyspace group")
 	// ErrNodeNotInKeyspaceGroup is used to indicate the tso node is not in this keyspace group.
 	ErrNodeNotInKeyspaceGroup = errors.New("the tso node is not in this keyspace group")
 	// ErrKeyspaceGroupNotEnoughReplicas is used to indicate not enough replicas in the keyspace group.
