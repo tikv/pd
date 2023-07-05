@@ -133,21 +133,21 @@ func TestMergeCheck(t *testing.T) {
 		mergeKeys: 200000,
 		pass:      true,
 	}, {
-		// case 2: the smallest region is 68MiB,it can't be merged again.
+		// case 2: the smallest region is 68MiB, it can't be merged again.
 		size:      144 + 20,
 		mergeSize: 20,
 		keys:      1440000 + 200000,
 		mergeKeys: 200000,
 		pass:      true,
 	}, {
-		// case 3: the smallest region is 50MiB,it can be merged again.
+		// case 3: the smallest region is 50MiB, it can be merged again.
 		size:      144 + 2,
 		mergeSize: 50,
 		keys:      1440000 + 20000,
 		mergeKeys: 500000,
 		pass:      false,
 	}, {
-		// case4: the smallest region is 51MiB,it can't be merged again.
+		// case4: the smallest region is 51MiB, it can't be merged again.
 		size:      144 + 3,
 		mergeSize: 50,
 		keys:      1440000 + 30000,
