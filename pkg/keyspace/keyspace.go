@@ -334,6 +334,8 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 				if region == nil || !bytes.Equal(region.GetStartKey(), txnRightBound) {
 					continue
 				}
+				// Note: we reset the ticker here to support updating configuration dynamically.
+				ticker.Reset(manager.config.GetCheckRegionSplitInterval())
 			case <-timer.C:
 				log.Warn("[keyspace] wait region split timeout",
 					zap.Uint32("keyspace-id", id),

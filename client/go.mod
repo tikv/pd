@@ -3,7 +3,7 @@ module github.com/tikv/pd/client
 go 1.20
 
 require (
-	github.com/elastic/gosigar v0.14.2
+	github.com/cloudfoundry/gosigar v1.3.6
 	github.com/gogo/protobuf v1.3.2
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
