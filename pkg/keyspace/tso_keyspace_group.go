@@ -889,7 +889,7 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	//   - Load and delete the keyspace groups in the merge list.
 	//   - Load and update the target keyspace group.
 	// So we pre-check the number of operations to avoid exceeding the maximum number of etcd transaction.
-	if (mergeListNum+1)*2 > maxEtcdTxnOps {
+	if (mergeListNum+1)*2 > MaxEtcdTxnOps {
 		return ErrExceedMaxEtcdTxnOps
 	}
 	if slice.Contains(mergeList, utils.DefaultKeyspaceGroupID) {
@@ -1010,6 +1010,80 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 	log.Info("finish merge keyspace group",
 		zap.Uint32("merge-target-id", mergeTargetKg.ID),
 		zap.Reflect("merge-list", mergeList))
+	return nil
+}
+
+// MergeAllIntoDefaultKeyspaceGroup merges all other keyspace groups into the default keyspace group.
+func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
+	mergedGroupNum := 0
+	for i := 0; i < int(endpoint.UserKindCount); i++ {
+		userKind := endpoint.UserKind(i)
+		log.Info("start to merge all keyspace groups into the default one",
+			zap.Stringer("user-kind", userKind))
+		groups, ok := m.groups[userKind]
+		if !ok || groups.Len() == 0 {
+			continue
+		}
+		var (
+			maxBatchSize  = MaxEtcdTxnOps/2 - 1
+			groupsToMerge = make([]uint32, 0, maxBatchSize)
+		)
+		for idx, group := range groups.GetAll() {
+			if group.ID == utils.DefaultKeyspaceGroupID {
+				continue
+			}
+			groupsToMerge = append(groupsToMerge, group.ID)
+			if len(groupsToMerge) < maxBatchSize && idx < groups.Len()-1 {
+				continue
+			}
+			log.Info("merge keyspace groups into the default one",
+				zap.Int("index", idx),
+				zap.Int("batch-size", len(groupsToMerge)),
+				zap.Int("merged-group-num", mergedGroupNum))
+			// Reach the batch size, merge them into the default keyspace group.
+			if err := m.MergeKeyspaceGroups(utils.DefaultKeyspaceGroupID, groupsToMerge); err != nil {
+				log.Error("failed to merge all keyspace groups into the default one",
+					zap.Int("index", idx),
+					zap.Int("batch-size", len(groupsToMerge)),
+					zap.Int("merged-group-num", mergedGroupNum),
+					zap.Error(err))
+				return err
+			}
+			// Wait for the merge to finish.
+			ctx, cancel := context.WithTimeout(m.ctx, time.Minute)
+		checkLoop:
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("cancel merging all keyspace groups into the default one",
+						zap.Int("index", idx),
+						zap.Int("batch-size", len(groupsToMerge)),
+						zap.Int("merged-group-num", mergedGroupNum))
+					cancel()
+					return nil
+				case <-time.After(time.Second):
+					kg, err := m.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+					if err != nil {
+						log.Error("failed to check the default keyspace group merge state",
+							zap.Int("index", idx),
+							zap.Int("batch-size", len(groupsToMerge)),
+							zap.Int("merged-group-num", mergedGroupNum),
+							zap.Error(err))
+						cancel()
+						return err
+					}
+					if !kg.IsMergeTarget() {
+						break checkLoop
+					}
+				}
+			}
+			cancel()
+			mergedGroupNum += len(groupsToMerge)
+			groupsToMerge = groupsToMerge[:0]
+		}
+	}
+	log.Info("finish merging all keyspace groups into the default one",
+		zap.Int("merged-group-num", mergedGroupNum))
 	return nil
 }
 
