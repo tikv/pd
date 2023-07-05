@@ -1364,6 +1364,7 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 // groupSplitPatroller is used to patrol the groups that are in the on-going
 // split state and to check if we could speed up the split process.
 func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
+	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 	patrolInterval := groupPatrolInterval
 	failpoint.Inject("fastGroupSplitPatroller", func() {
@@ -1409,6 +1410,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 // deletedGroupCleaner is used to clean the deleted keyspace groups related data.
 // For example, the TSO keys of the merged keyspace groups remain in the storage.
 func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
+	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 	patrolInterval := groupPatrolInterval
 	failpoint.Inject("fastDeletedGroupCleaner", func() {
