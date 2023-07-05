@@ -1015,6 +1015,15 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 
 // GetKeyspaceGroupPrimaryByID returns the primary node of the keyspace group by ID.
 func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
+	// check if the keyspace group exists
+	kg, err := m.GetKeyspaceGroupByID(id)
+	if err != nil {
+		return "", err
+	}
+	if kg == nil {
+		return "", ErrKeyspaceGroupNotExists(id)
+	}
+
 	// default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
 	// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
 	path := fmt.Sprintf("/ms/%d/tso/00000/primary", m.clusterID)

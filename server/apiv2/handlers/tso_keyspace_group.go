@@ -47,7 +47,6 @@ func RegisterTSOKeyspaceGroup(r *gin.RouterGroup) {
 	router.DELETE("/:id/split", FinishSplitKeyspaceByID)
 	router.POST("/:id/merge", MergeKeyspaceGroups)
 	router.DELETE("/:id/merge", FinishMergeKeyspaceByID)
-	router.GET("/:id/primary", GetKeyspaceGroupPrimaryByID)
 }
 
 // CreateKeyspaceGroupParams defines the params for creating keyspace groups.
@@ -150,12 +149,22 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
 		return
 	}
+
+	if c.Query("get_param") == "primary" {
+		primary, err := manager.GetKeyspaceGroupPrimaryByID(id)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, primary)
+		return
+	}
+
 	kg, err := manager.GetKeyspaceGroupByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-
 	c.IndentedJSON(http.StatusOK, kg)
 }
 
@@ -484,34 +493,6 @@ func SetPriorityForKeyspaceGroup(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, nil)
-}
-
-// GetKeyspaceGroupPrimaryByID gets primary of keyspace group by ID.
-func GetKeyspaceGroupPrimaryByID(c *gin.Context) {
-	id, err := validateKeyspaceGroupID(c)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid keyspace group id")
-		return
-	}
-	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	manager := svr.GetKeyspaceGroupManager()
-	if manager == nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
-		return
-	}
-	// check if keyspace group exists
-	kg, err := manager.GetKeyspaceGroupByID(id)
-	if err != nil || kg == nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "keyspace group does not exist")
-		return
-	}
-	// get primary
-	primary, err := manager.GetKeyspaceGroupPrimaryByID(id)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	c.JSON(http.StatusOK, primary)
 }
 
 func validateKeyspaceGroupID(c *gin.Context) (uint32, error) {
