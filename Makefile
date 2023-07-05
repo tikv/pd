@@ -242,7 +242,7 @@ test-tso-consistency: install-tools
 TASK_COUNT=1
 TASK_ID=1
 
-# The command should be used in daily CI，it will split some tasks to run parallel.
+# The command should be used in daily CI,it will split some tasks to run parallel.
 # It should retain report.xml,coverage,coverage.xml and package.list to analyze.
 test-with-cover-parallel: install-tools dashboard-ui split
 	@$(FAILPOINT_ENABLE)
