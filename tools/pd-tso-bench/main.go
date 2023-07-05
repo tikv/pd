@@ -55,13 +55,13 @@ var (
 	caPath                         = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
 	certPath                       = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
 	keyPath                        = flag.String("key", "", "path of file that contains X509 key in PEM format")
-	useTSOServerProxy              = flag.Bool("use-tso-server-proxy", false, "whether send tso requests to tso server proxy instead of tso service directly")
 	maxBatchWaitInterval           = flag.Duration("batch-interval", 0, "the max batch wait interval")
 	enableTSOFollowerProxy         = flag.Bool("enable-tso-follower-proxy", false, "whether enable the TSO Follower Proxy")
 	enableFaultInjection           = flag.Bool("enable-fault-injection", false, "whether enable fault injection")
 	faultInjectionRate             = flag.Float64("fault-injection-rate", 0.01, "the failure rate [0.0001, 1]. 0.01 means 1% failure rate")
 	maxTSOSendIntervalMilliseconds = flag.Int("max-send-interval-ms", 0, "max tso send interval in milliseconds, 60s by default")
-	keyspace                       = flag.Uint("keyspace", 0, "the id of the keyspac to access")
+	keyspaceID                     = flag.Uint("keyspace-id", 0, "the id of the keyspace to access")
+	keyspaceName                   = flag.String("keyspace-name", "", "the name of the keyspace to access")
 	wg                             sync.WaitGroup
 )
 
@@ -356,7 +356,7 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 		err                    error
 		maxRetryTime           int           = 120
 		sleepIntervalOnFailure time.Duration = 1000 * time.Millisecond
-		totalSleepBeforeGetTS  time.Duration = 0
+		totalSleepBeforeGetTS  time.Duration
 	)
 	pdCli := pdClients[clientIdx]
 
@@ -422,10 +422,6 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 	)
 
 	opts := make([]pd.ClientOption, 0)
-	if *useTSOServerProxy {
-		opts = append(opts, pd.WithTSOServerProxyOption(true))
-	}
-
 	opts = append(opts, pd.WithGRPCDialOptions(
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    keepaliveTime,
@@ -433,11 +429,20 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 		}),
 	))
 
-	pdCli, err = pd.NewClientWithKeyspace(ctx, uint32(*keyspace), []string{*pdAddrs}, pd.SecurityOption{
-		CAPath:   *caPath,
-		CertPath: *certPath,
-		KeyPath:  *keyPath,
-	}, opts...)
+	if len(*keyspaceName) > 0 {
+		apiCtx := pd.NewAPIContextV2(*keyspaceName)
+		pdCli, err = pd.NewClientWithAPIContext(ctx, apiCtx, []string{*pdAddrs}, pd.SecurityOption{
+			CAPath:   *caPath,
+			CertPath: *certPath,
+			KeyPath:  *keyPath,
+		}, opts...)
+	} else {
+		pdCli, err = pd.NewClientWithKeyspace(ctx, uint32(*keyspaceID), []string{*pdAddrs}, pd.SecurityOption{
+			CAPath:   *caPath,
+			CertPath: *certPath,
+			KeyPath:  *keyPath,
+		}, opts...)
+	}
 	if err != nil {
 		return nil, err
 	}
