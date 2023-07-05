@@ -724,3 +724,82 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeClient()
 	cancel()
 	wg.Wait()
 }
+
+// See https://github.com/tikv/pd/issues/6748
+func TestGetTSOImmediately(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+
+	// Init api server config but not start.
+	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Keyspace.PreAlloc = []string{
+			"keyspace_a", "keyspace_b",
+		}
+	})
+	re.NoError(err)
+	pdAddr := tc.GetConfig().GetClientURL()
+
+	// Start api server and tso server.
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+
+	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, pdAddr)
+	re.NoError(err)
+	defer tsoCluster.Destroy()
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+
+	// First split keyspace group 0 to 1 with keyspace 2.
+	kgm := leaderServer.GetServer().GetKeyspaceGroupManager()
+	re.NotNil(kgm)
+	testutil.Eventually(re, func() bool {
+		err = kgm.SplitKeyspaceGroupByID(0, 1, []uint32{2})
+		return err == nil
+	})
+
+	// Start pd client for finishing the split.
+
+	apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
+	clientB, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
+	re.NoError(err)
+
+	// Trigger checkTSOSplit to ensure the split is finished.
+	testutil.Eventually(re, func() bool {
+		_, _, err = clientB.GetTS(ctx)
+		return err == nil
+	})
+	waitFinishSplit(re, leaderServer, 0, 1, []uint32{mcsutils.DefaultKeyspaceID, 1}, []uint32{2})
+	clientB.Close()
+
+	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
+	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 1)
+	re.Equal([]uint32{0, 1}, kg0.Keyspaces)
+	re.Equal([]uint32{2}, kg1.Keyspaces)
+	re.False(kg0.IsSplitting())
+	re.False(kg1.IsSplitting())
+
+	// Let group 0 and group 1 have different primary node.
+	kgm.SetPriorityForKeyspaceGroup(0, kg0.Members[0].Address, 100)
+	kgm.SetPriorityForKeyspaceGroup(1, kg1.Members[1].Address, 100)
+	testutil.Eventually(re, func() bool {
+		p0, err := kgm.GetKeyspaceGroupPrimaryByID(0)
+		re.NoError(err)
+		p1, err := kgm.GetKeyspaceGroupPrimaryByID(1)
+		re.NoError(err)
+		return p0 == kg0.Members[0].Address && p1 == kg1.Members[1].Address
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
+	re.NoError(err)
+	_, _, err = cli.GetTS(ctx)
+	re.NoError(err)
+	cli.Close()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+}
