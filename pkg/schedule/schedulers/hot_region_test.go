@@ -2478,6 +2478,14 @@ func TestConfigValidation(t *testing.T) {
 	hc.ForbidRWType = "test"
 	err = hc.valid()
 	re.Error(err)
+
+	hc.SplitThresholds = 0
+	err = hc.valid()
+	re.Error(err)
+
+	hc.SplitThresholds = 1.1
+	err = hc.valid()
+	re.Error(err)
 }
 
 type maxZombieDurTestCase struct {

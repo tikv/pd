@@ -75,6 +75,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		EnableForTiFlash:       true,
 		RankFormulaVersion:     "v2",
 		ForbidRWType:           "none",
+		SplitThresholds:        0.5,
 	}
 	cfg.applyPrioritiesConfig(defaultPrioritiesConfig)
 	return cfg
@@ -102,6 +103,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 		EnableForTiFlash:       conf.EnableForTiFlash,
 		RankFormulaVersion:     conf.getRankFormulaVersionLocked(),
 		ForbidRWType:           conf.getForbidRWTypeLocked(),
+		SplitThresholds:        conf.SplitThresholds,
 	}
 }
 
@@ -143,6 +145,8 @@ type hotRegionSchedulerConfig struct {
 	RankFormulaVersion string `json:"rank-formula-version"`
 	// forbid read or write scheduler, only for test
 	ForbidRWType string `json:"forbid-rw-type,omitempty"`
+	// SplitThresholds is the threshold to split hot region if the flow of on hot region exceeds it.
+	SplitThresholds float64 `json:"split-thresholds"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -316,6 +320,12 @@ func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw statistics.RWType) bool 
 	return rw.String() == conf.ForbidRWType
 }
 
+func (conf *hotRegionSchedulerConfig) getSplitThresholds() float64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.SplitThresholds
+}
+
 func (conf *hotRegionSchedulerConfig) getForbidRWTypeLocked() string {
 	switch conf.ForbidRWType {
 	case statistics.Read.String(), statistics.Write.String():
@@ -376,6 +386,9 @@ func (conf *hotRegionSchedulerConfig) valid() error {
 	if conf.ForbidRWType != statistics.Read.String() && conf.ForbidRWType != statistics.Write.String() &&
 		conf.ForbidRWType != "none" && conf.ForbidRWType != "" {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid forbid-rw-type")
+	}
+	if conf.SplitThresholds < 0.2 || conf.SplitThresholds > 1.0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("invalid split-thresholds, should be in range [0.2, 1.0]")
 	}
 	return nil
 }
