@@ -35,18 +35,24 @@ type hotStatusHandler struct {
 }
 
 type HotBucketItem struct {
-	StartKey  string   `json:"start_key"`
-	EndKey    string   `json:"end_key"`
-	HotDegree int      `json:"hot_degree"`
-	Loads     []uint64 `josn:"loads"`
+	StartKey   string `json:"start_key"`
+	EndKey     string `json:"end_key"`
+	HotDegree  int    `json:"hot_degree"`
+	ReadBytes  uint64 `json:"read_bytes"`
+	ReadKeys   uint64 `json:"read_keys"`
+	WriteBytes uint64 `json:"write_bytes"`
+	WriteKeys  uint64 `json:"write_keys"`
 }
 
 func convert(buckets *buckets.BucketStat) *HotBucketItem {
 	return &HotBucketItem{
-		StartKey:  core.HexRegionKeyStr(buckets.StartKey),
-		EndKey:    core.HexRegionKeyStr(buckets.EndKey),
-		HotDegree: buckets.HotDegree,
-		Loads:     buckets.Loads,
+		StartKey:   core.HexRegionKeyStr(buckets.StartKey),
+		EndKey:     core.HexRegionKeyStr(buckets.EndKey),
+		HotDegree:  buckets.HotDegree,
+		ReadBytes:  buckets.Loads[statistics.RegionReadBytes],
+		ReadKeys:   buckets.Loads[statistics.RegionReadKeys],
+		WriteBytes: buckets.Loads[statistics.RegionWriteBytes],
+		WriteKeys:  buckets.Loads[statistics.RegionWriteKeys],
 	}
 }
 

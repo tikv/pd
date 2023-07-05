@@ -138,12 +138,12 @@ func MustReportBuckets(re *require.Assertions, cluster *tests.TestCluster, regio
 		Version:  1,
 		Keys:     [][]byte{start, end},
 		Stats: &metapb.BucketStats{
-			ReadQps:    loads,
-			ReadBytes:  loads,
-			ReadKeys:   loads,
-			WriteBytes: loads,
-			WriteKeys:  loads,
-			WriteQps:   loads,
+			ReadBytes:  []uint64{loads[0]},
+			ReadKeys:   []uint64{loads[1]},
+			ReadQps:    []uint64{0},
+			WriteBytes: []uint64{loads[2]},
+			WriteKeys:  []uint64{loads[3]},
+			WriteQps:   []uint64{0},
 		},
 		PeriodInMs: 10000,
 	}

@@ -258,7 +258,8 @@ func TestHotWithStoreID(t *testing.T) {
 	re.Equal(float64(200000000), hotRegion.AsLeader[1].TotalBytesRate)
 	re.Equal(float64(100000000), hotRegion.AsLeader[2].TotalBytesRate)
 
-	buckets := pdctl.MustReportBuckets(re, cluster, 1, []byte("a"), []byte("b"), []uint64{10 * units.MiB})
+	buckets := pdctl.MustReportBuckets(re, cluster, 1, []byte("a"), []byte("b"),
+		[]uint64{10 * units.MiB, 11 * units.MiB, 12 * units.MiB, 13 * units.MiB})
 	args = []string{"-u", pdAddr, "hot", "buckets", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
@@ -270,7 +271,11 @@ func TestHotWithStoreID(t *testing.T) {
 	re.Equal(core.HexRegionKeyStr(buckets.GetKeys()[0]), item.StartKey)
 	re.Equal(core.HexRegionKeyStr(buckets.GetKeys()[1]), item.EndKey)
 	re.Equal(1, item.HotDegree)
-	re.Equal(buckets.GetStats().ReadBytes[0], item.Loads[0]*buckets.GetPeriodInMs()/1000)
+	interval := buckets.GetPeriodInMs() / 1000
+	re.Equal(buckets.GetStats().ReadBytes[0]/interval, item.ReadBytes)
+	re.Equal(buckets.GetStats().ReadKeys[0]/interval, item.ReadKeys)
+	re.Equal(buckets.GetStats().WriteBytes[0]/interval, item.WriteBytes)
+	re.Equal(buckets.GetStats().WriteKeys[0]/interval, item.WriteKeys)
 }
 
 func TestHistoryHotRegions(t *testing.T) {
