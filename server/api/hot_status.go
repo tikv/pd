@@ -17,6 +17,8 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/statistics/buckets"
 	"io"
 	"net/http"
 	"strconv"
@@ -30,6 +32,22 @@ import (
 type hotStatusHandler struct {
 	*server.Handler
 	rd *render.Render
+}
+
+type HotBucketItem struct {
+	StartKey  string   `json:"start_key"`
+	EndKey    string   `json:"end_key"`
+	HotDegree int      `json:"hot_degree"`
+	Loads     []uint64 `josn:"loads"`
+}
+
+func convert(buckets *buckets.BucketStat) *HotBucketItem {
+	return &HotBucketItem{
+		StartKey:  core.HexRegionKeyStr(buckets.StartKey),
+		EndKey:    core.HexRegionKeyStr(buckets.EndKey),
+		HotDegree: buckets.HotDegree,
+		Loads:     buckets.Loads,
+	}
 }
 
 // HotStoreStats is used to record the status of hot stores.
@@ -167,6 +185,31 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	h.rd.JSON(w, http.StatusOK, stats)
+}
+
+// @Tags     hotspot
+// @Summary  List the hot buckets.
+// @Produce  json
+// @Success  200  {object}  map[uint64][]*HotBucketItem
+// @Router   /hotspot/buckets [get]
+func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request) {
+	regionIDs := r.URL.Query()["region_id"]
+	ids := make([]uint64, len(regionIDs))
+	for i, regionID := range regionIDs {
+		if id, err := strconv.ParseUint(regionID, 10, 64); err == nil {
+			ids[i] = id
+		}
+	}
+	stats := h.Handler.GetHotBuckets()
+	ret := make(map[uint64][]*HotBucketItem, len(stats))
+	for regionID, stats := range stats {
+		ret[regionID] = make([]*HotBucketItem, len(stats))
+		for i, stat := range stats {
+			ret[regionID][i] = convert(stat)
+		}
+	}
+	h.rd.JSON(w, http.StatusOK, ret)
+	return
 }
 
 // @Tags     hotspot

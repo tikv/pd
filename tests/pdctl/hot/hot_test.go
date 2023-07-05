@@ -257,6 +257,20 @@ func TestHotWithStoreID(t *testing.T) {
 	re.Equal(1, hotRegion.AsLeader[2].Count)
 	re.Equal(float64(200000000), hotRegion.AsLeader[1].TotalBytesRate)
 	re.Equal(float64(100000000), hotRegion.AsLeader[2].TotalBytesRate)
+
+	buckets := pdctl.MustReportBuckets(re, cluster, 1, []byte("a"), []byte("b"), []uint64{10 * units.MiB})
+	args = []string{"-u", pdAddr, "hot", "buckets", "1"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	hotBuckets := make(map[uint64][]*api.HotBucketItem, 1)
+	re.NoError(json.Unmarshal(output, &hotBuckets))
+	re.Len(hotBuckets, 1)
+	re.Len(hotBuckets[1], 1)
+	item := hotBuckets[1][0]
+	re.Equal(core.HexRegionKeyStr(buckets.GetKeys()[0]), item.StartKey)
+	re.Equal(core.HexRegionKeyStr(buckets.GetKeys()[1]), item.EndKey)
+	re.Equal(1, item.HotDegree)
+	re.Equal(buckets.GetStats().ReadBytes[0], item.Loads[0]*buckets.GetPeriodInMs()/1000)
 }
 
 func TestHistoryHotRegions(t *testing.T) {
