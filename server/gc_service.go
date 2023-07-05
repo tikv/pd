@@ -247,14 +247,14 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 
 func (s *GrpcServer) loadRangeFromETCD(startKey, endKey string) ([]string, []string, int64, error) {
 	startKey = strings.Join([]string{s.rootPath, startKey}, "/")
-	var OpOption []clientv3.OpOption
+	var opOption []clientv3.OpOption
 	if endKey == "\x00" {
-		OpOption = append(OpOption, clientv3.WithPrefix())
+		opOption = append(opOption, clientv3.WithPrefix())
 	} else {
 		endKey = strings.Join([]string{s.rootPath, endKey}, "/")
-		OpOption = append(OpOption, clientv3.WithRange(endKey))
+		opOption = append(opOption, clientv3.WithRange(endKey))
 	}
-	resp, err := etcdutil.EtcdKVGet(s.client, startKey)
+	resp, err := etcdutil.EtcdKVGet(s.client, startKey, opOption...)
 	if err != nil {
 		return nil, nil, 0, err
 	}
