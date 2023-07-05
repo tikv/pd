@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/balancer"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -1009,4 +1011,34 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 		zap.Uint32("merge-target-id", mergeTargetKg.ID),
 		zap.Reflect("merge-list", mergeList))
 	return nil
+}
+
+// GetKeyspaceGroupPrimaryByID returns the primary node of the keyspace group by ID.
+func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
+	// check if the keyspace group exists
+	kg, err := m.GetKeyspaceGroupByID(id)
+	if err != nil {
+		return "", err
+	}
+	if kg == nil {
+		return "", ErrKeyspaceGroupNotExists(id)
+	}
+
+	// default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
+	// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
+	path := fmt.Sprintf("/ms/%d/tso/00000/primary", m.clusterID)
+	if id != utils.DefaultKeyspaceGroupID {
+		path = fmt.Sprintf("/ms/%d/tso/keyspace_groups/election/%05d/primary", m.clusterID, id)
+	}
+	leader := &tsopb.Participant{}
+	ok, _, err := etcdutil.GetProtoMsgWithModRev(m.client, path, leader)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", ErrKeyspaceGroupPrimaryNotFound
+	}
+	// The format of leader name is address-groupID.
+	contents := strings.Split(leader.GetName(), "-")
+	return contents[0], err
 }

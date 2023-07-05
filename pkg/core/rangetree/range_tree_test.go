@@ -100,7 +100,7 @@ func TestRingPutItem(t *testing.T) {
 	re.Len(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("010"), []byte("110"))), 2)
 	re.Empty(bucketTree.GetOverlaps(newSimpleBucketItem([]byte("200"), []byte("300"))))
 
-	// test1： insert one key range, the old overlaps will retain like split buckets.
+	// test1: insert one key range, the old overlaps will retain like split buckets.
 	// key range: [002,010],[010,090],[090,100],[100,200]
 	bucketTree.Update(newSimpleBucketItem([]byte("010"), []byte("090")))
 	re.Equal(4, bucketTree.Len())
