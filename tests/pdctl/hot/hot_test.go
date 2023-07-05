@@ -263,7 +263,7 @@ func TestHotWithStoreID(t *testing.T) {
 	args = []string{"-u", pdAddr, "hot", "buckets", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	hotBuckets := make(map[uint64][]*api.HotBucketItem, 1)
+	hotBuckets := api.HotBucketsResponse{}
 	re.NoError(json.Unmarshal(output, &hotBuckets))
 	re.Len(hotBuckets, 1)
 	re.Len(hotBuckets[1], 1)

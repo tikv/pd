@@ -34,7 +34,9 @@ type hotStatusHandler struct {
 	rd *render.Render
 }
 
-type HotBucketItem struct {
+type HotBucketsResponse map[uint64][]*HotBucketsItem
+
+type HotBucketsItem struct {
 	StartKey   string `json:"start_key"`
 	EndKey     string `json:"end_key"`
 	HotDegree  int    `json:"hot_degree"`
@@ -44,8 +46,8 @@ type HotBucketItem struct {
 	WriteKeys  uint64 `json:"write_keys"`
 }
 
-func convert(buckets *buckets.BucketStat) *HotBucketItem {
-	return &HotBucketItem{
+func convert(buckets *buckets.BucketStat) *HotBucketsItem {
+	return &HotBucketsItem{
 		StartKey:   core.HexRegionKeyStr(buckets.StartKey),
 		EndKey:     core.HexRegionKeyStr(buckets.EndKey),
 		HotDegree:  buckets.HotDegree,
@@ -196,7 +198,7 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 // @Tags     hotspot
 // @Summary  List the hot buckets.
 // @Produce  json
-// @Success  200  {object}  map[uint64][]*HotBucketItem
+// @Success  200  {object}  HotBucketsResponse
 // @Router   /hotspot/buckets [get]
 func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request) {
 	regionIDs := r.URL.Query()["region_id"]
@@ -207,9 +209,9 @@ func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	stats := h.Handler.GetHotBuckets()
-	ret := make(map[uint64][]*HotBucketItem, len(stats))
+	ret := HotBucketsResponse{}
 	for regionID, stats := range stats {
-		ret[regionID] = make([]*HotBucketItem, len(stats))
+		ret[regionID] = make([]*HotBucketsItem, len(stats))
 		for i, stat := range stats {
 			ret[regionID][i] = convert(stat)
 		}
@@ -239,7 +241,7 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	results, err := getAllRequestHistroyHotRegion(h.Handler, historyHotRegionsRequest)
+	results, err := getAllRequestHistoryHotRegion(h.Handler, historyHotRegionsRequest)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -247,7 +249,7 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, results)
 }
 
-func getAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*storage.HistoryHotRegions, error) {
+func getAllRequestHistoryHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*storage.HistoryHotRegions, error) {
 	var hotRegionTypes = storage.HotRegionTypes
 	if len(request.HotRegionTypes) != 0 {
 		hotRegionTypes = request.HotRegionTypes
