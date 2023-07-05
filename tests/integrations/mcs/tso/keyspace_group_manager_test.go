@@ -493,6 +493,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
 	// Init api server config but not start.
 	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
@@ -502,21 +503,6 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	})
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
-
-	// Start pd client and wait pd server start.
-	var clients sync.Map
-	go func() {
-		apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
-		cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
-		re.NoError(err)
-		clients.Store("keyspace_b", cli)
-	}()
-	go func() {
-		apiCtx := pd.NewAPIContextV2("keyspace_a") // its keyspace id is 1.
-		cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
-		re.NoError(err)
-		clients.Store("keyspace_a", cli)
-	}()
 
 	// Start api server and tso server.
 	err = tc.RunInitialServers()
@@ -531,20 +517,6 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	defer tsoCluster.Destroy()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 
-	// Wait pd clients are ready.
-	testutil.Eventually(re, func() bool {
-		count := 0
-		clients.Range(func(_, _ interface{}) bool {
-			count++
-			return true
-		})
-		return count == 2
-	})
-	clientA, ok := clients.Load("keyspace_a")
-	re.True(ok)
-	clientB, ok := clients.Load("keyspace_b")
-	re.True(ok)
-
 	// First split keyspace group 0 to 1 with keyspace 2.
 	kgm := leaderServer.GetServer().GetKeyspaceGroupManager()
 	re.NotNil(kgm)
@@ -553,13 +525,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		return err == nil
 	})
 
-	// Trigger checkTSOSplit to ensure the split is finished.
-	testutil.Eventually(re, func() bool {
-		_, _, err = clientB.(pd.Client).GetTS(ctx)
-		return err == nil
-	})
 	waitFinishSplit(re, leaderServer, 0, 1, []uint32{mcsutils.DefaultKeyspaceID, 1}, []uint32{2})
-	clientB.(pd.Client).Close()
 
 	// Then split keyspace group 0 to 2 with keyspace 1.
 	testutil.Eventually(re, func() bool {
@@ -567,13 +533,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		return err == nil
 	})
 
-	// Trigger checkTSOSplit to ensure the split is finished.
-	testutil.Eventually(re, func() bool {
-		_, _, err = clientA.(pd.Client).GetTS(ctx)
-		return err == nil
-	})
 	waitFinishSplit(re, leaderServer, 0, 2, []uint32{mcsutils.DefaultKeyspaceID}, []uint32{1})
-	clientA.(pd.Client).Close()
 
 	// Check the keyspace group 0 is split to 1 and 2.
 	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
@@ -586,6 +546,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re.False(kg1.IsSplitting())
 	re.False(kg2.IsSplitting())
 
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
 
@@ -732,6 +693,7 @@ func TestGetTSOImmediately(t *testing.T) {
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
 	// Init api server config but not start.
 	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
@@ -763,19 +725,7 @@ func TestGetTSOImmediately(t *testing.T) {
 		return err == nil
 	})
 
-	// Start pd client for finishing the split.
-
-	apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
-	clientB, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
-	re.NoError(err)
-
-	// Trigger checkTSOSplit to ensure the split is finished.
-	testutil.Eventually(re, func() bool {
-		_, _, err = clientB.GetTS(ctx)
-		return err == nil
-	})
 	waitFinishSplit(re, leaderServer, 0, 1, []uint32{mcsutils.DefaultKeyspaceID, 1}, []uint32{2})
-	clientB.Close()
 
 	kg0 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 0)
 	kg1 := handlersutil.MustLoadKeyspaceGroupByID(re, leaderServer, 1)
@@ -795,6 +745,7 @@ func TestGetTSOImmediately(t *testing.T) {
 		return p0 == kg0.Members[0].Address && p1 == kg1.Members[1].Address
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
+	apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
 	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
 	re.NoError(err)
 	_, _, err = cli.GetTS(ctx)
@@ -802,4 +753,5 @@ func TestGetTSOImmediately(t *testing.T) {
 	cli.Close()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
 }
