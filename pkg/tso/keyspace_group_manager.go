@@ -61,6 +61,7 @@ const (
 	// of the primaries on this TSO server/pod have changed. A goroutine will periodically check
 	// do this check and re-distribute the primaries if necessary.
 	defaultPrimaryPriorityCheckInterval = 10 * time.Second
+	groupPatrolInterval                 = time.Minute
 )
 
 type state struct {
@@ -74,13 +75,16 @@ type state struct {
 	kgs [mcsutils.MaxKeyspaceGroupCountInUse]*endpoint.KeyspaceGroup
 	// keyspaceLookupTable is a map from keyspace to the keyspace group to which it belongs.
 	keyspaceLookupTable map[uint32]uint32
+	// splittingGroups is the cache of splitting keyspace group related information.
+	splittingGroups map[uint32]struct{}
 }
 
 func (s *state) initialize() {
 	s.keyspaceLookupTable = make(map[uint32]uint32)
+	s.splittingGroups = make(map[uint32]struct{})
 }
 
-func (s *state) deinitialize() {
+func (s *state) deInitialize() {
 	log.Info("closing all keyspace groups")
 
 	s.Lock()
@@ -398,8 +402,9 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		return errs.ErrLoadKeyspaceGroupsTerminated.Wrap(err)
 	}
 
-	kgm.wg.Add(1)
+	kgm.wg.Add(2)
 	go kgm.primaryPriorityCheckLoop()
+	go kgm.groupSplitPatroller()
 
 	return nil
 }
@@ -415,7 +420,7 @@ func (kgm *KeyspaceGroupManager) Close() {
 	// added/initialized after that.
 	kgm.cancel()
 	kgm.wg.Wait()
-	kgm.state.deinitialize()
+	kgm.state.deInitialize()
 
 	log.Info("keyspace group manager closed")
 }
@@ -732,6 +737,10 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	}
 	kgm.kgs[group.ID] = group
 	kgm.ams[group.ID] = am
+	// If the group is the split target, add it to the splitting group map.
+	if group.IsSplitTarget() {
+		kgm.splittingGroups[group.ID] = struct{}{}
+	}
 	kgm.Unlock()
 }
 
@@ -859,6 +868,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	// Check if the split is completed.
 	if oldGroup != nil && oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
 		kgm.ams[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
+		delete(kgm.splittingGroups, groupID)
 	}
 	kgm.kgs[groupID] = newGroup
 }
@@ -1320,5 +1330,60 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 			zap.Any("merge-list", mergeList),
 			zap.Time("merged-ts", mergedTS))
 		return
+	}
+}
+
+// groupSplitPatroller is used to patrol the groups that are in the on-going
+// split state and to check if we could speed up the split process.
+func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
+	defer kgm.wg.Done()
+	patrolInterval := groupPatrolInterval
+	failpoint.Inject("fastGroupSplitPatroller", func() {
+		patrolInterval = 200 * time.Millisecond
+	})
+	ticker := time.NewTicker(patrolInterval)
+	defer ticker.Stop()
+	log.Info("group split patroller is started",
+		zap.Duration("patrol-interval", patrolInterval))
+	for {
+		select {
+		case <-kgm.ctx.Done():
+			log.Info("group split patroller is exiting")
+			return
+		case <-ticker.C:
+		}
+		kgm.RLock()
+		if len(kgm.splittingGroups) == 0 {
+			kgm.RUnlock()
+			continue
+		}
+		var splittingGroups []uint32
+		for id := range kgm.splittingGroups {
+			splittingGroups = append(splittingGroups, id)
+		}
+		kgm.RUnlock()
+		for _, groupID := range splittingGroups {
+			am, group := kgm.getKeyspaceGroupMeta(groupID)
+			if !am.IsLeader() {
+				continue
+			}
+			if len(group.Keyspaces) == 0 {
+				log.Warn("abnormal keyspace group with empty keyspace list",
+					zap.Uint32("keyspace-group-id", groupID))
+				continue
+			}
+			log.Info("request tso for the splitting keyspace group",
+				zap.Uint32("keyspace-group-id", groupID),
+				zap.Uint32("keyspace-id", group.Keyspaces[0]))
+			// Request the TSO manually to speed up the split process.
+			_, _, err := kgm.HandleTSORequest(group.Keyspaces[0], groupID, GlobalDCLocation, 1)
+			if err != nil {
+				log.Warn("failed to request tso for the splitting keyspace group",
+					zap.Uint32("keyspace-group-id", groupID),
+					zap.Uint32("keyspace-id", group.Keyspaces[0]),
+					zap.Error(err))
+				continue
+			}
+		}
 	}
 }

@@ -234,10 +234,10 @@ func getCgroupDetails(mountInfoPath string, cRoot string, controller string) (mo
 			// It is possible that the controller mount and the cgroup path are not the same (both are relative to the NS root).
 			// So start with the mount and construct the relative path of the cgroup.
 			// To test:
-			//  1、start a docker to run unit test or tidb-server
+			//  1. start a docker to run unit test or tidb-server
 			//   > docker run -it --cpus=8 --memory=8g --name test --rm ubuntu:18.04 bash
 			//
-			//  2、change the limit when the container is running
+			//  2. change the limit when the container is running
 			//	docker update --cpus=8 <containers>
 			nsRelativePath := string(fields[3])
 			if !strings.Contains(nsRelativePath, "..") {
