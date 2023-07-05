@@ -1296,12 +1296,17 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 		if len(mergeMap) > 0 {
 			continue
 		}
+		log.Info("all the keyspace group primaries in the merge list are gone, "+
+			"start to calculate the newly merged TSO",
+			zap.String("member", kgm.tsoServiceID.ServiceAddr),
+			zap.Uint32("merge-target-id", mergeTargetID),
+			zap.Any("merge-list", mergeList))
 		// All the keyspace group primaries in the merge list are gone,
-		// update the newly merged TSO to make sure it is greater than the original ones.
+		// calculate the newly merged TSO to make sure it is greater than the original ones.
 		var mergedTS time.Time
 		for _, id := range mergeList {
 			ts, err := kgm.tsoSvcStorage.LoadTimestamp(endpoint.GetKeyspaceGroupTSPath(id))
-			if err != nil || ts == typeutil.ZeroTime {
+			if err != nil {
 				log.Error("failed to load the keyspace group TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
 					zap.Uint32("merge-target-id", mergeTargetID),
@@ -1309,38 +1314,44 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 					zap.Uint32("merge-id", id),
 					zap.Time("ts", ts),
 					zap.Error(err))
-				mergedTS = typeutil.ZeroTime
 				break
 			}
 			if ts.After(mergedTS) {
 				mergedTS = ts
 			}
 		}
-		if mergedTS == typeutil.ZeroTime {
+		if err != nil {
 			continue
 		}
-		// Update the newly merged TSO.
-		// TODO: support the Local TSO Allocator.
-		allocator, err := am.GetAllocator(GlobalDCLocation)
-		if err != nil {
-			log.Error("failed to get the allocator",
+		// Update the newly merged TSO if the merged TSO is not zero.
+		if mergedTS != typeutil.ZeroTime {
+			log.Info("start to set the newly merged TSO",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
 				zap.Any("merge-list", mergeList),
-				zap.Error(err))
-			continue
-		}
-		err = allocator.SetTSO(
-			tsoutil.GenerateTS(tsoutil.GenerateTimestamp(mergedTS, 1)),
-			true, true)
-		if err != nil {
-			log.Error("failed to update the newly merged TSO",
-				zap.String("member", kgm.tsoServiceID.ServiceAddr),
-				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList),
-				zap.Time("merged-ts", mergedTS),
-				zap.Error(err))
-			continue
+				zap.Time("merged-ts", mergedTS))
+			// TODO: support the Local TSO Allocator.
+			allocator, err := am.GetAllocator(GlobalDCLocation)
+			if err != nil {
+				log.Error("failed to get the allocator",
+					zap.String("member", kgm.tsoServiceID.ServiceAddr),
+					zap.Uint32("merge-target-id", mergeTargetID),
+					zap.Any("merge-list", mergeList),
+					zap.Error(err))
+				continue
+			}
+			err = allocator.SetTSO(
+				tsoutil.GenerateTS(tsoutil.GenerateTimestamp(mergedTS, 1)),
+				true, true)
+			if err != nil {
+				log.Error("failed to update the newly merged TSO",
+					zap.String("member", kgm.tsoServiceID.ServiceAddr),
+					zap.Uint32("merge-target-id", mergeTargetID),
+					zap.Any("merge-list", mergeList),
+					zap.Time("merged-ts", mergedTS),
+					zap.Error(err))
+				continue
+			}
 		}
 		// Finish the merge.
 		err = kgm.finishMergeKeyspaceGroup(mergeTargetID)
