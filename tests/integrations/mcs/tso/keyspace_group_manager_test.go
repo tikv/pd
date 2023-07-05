@@ -202,17 +202,15 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						// for primary election.
 						var (
 							timestampPath string
-							primaryPath   string
 						)
 						clusterID := strconv.FormatUint(suite.pdLeaderServer.GetClusterID(), 10)
+						rootPath := endpoint.TSOSvcRootPath(suite.pdLeaderServer.GetClusterID())
+						primaryPath := endpoint.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
 						if param.keyspaceGroupID == mcsutils.DefaultKeyspaceGroupID {
 							timestampPath = fmt.Sprintf("/pd/%s/timestamp", clusterID)
-							primaryPath = fmt.Sprintf("/ms/%s/tso/00000/primary", clusterID)
 						} else {
 							timestampPath = fmt.Sprintf("/ms/%s/tso/%05d/gta/timestamp",
 								clusterID, param.keyspaceGroupID)
-							primaryPath = fmt.Sprintf("/ms/%s/tso/%s/election/%05d/primary",
-								clusterID, mcsutils.KeyspaceGroupsKey, param.keyspaceGroupID)
 						}
 						re.Equal(timestampPath, am.GetTimestampPath(tsopkg.GlobalDCLocation))
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())

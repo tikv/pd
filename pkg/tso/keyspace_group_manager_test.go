@@ -100,7 +100,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	guid := uuid.New().String()
 	tsoServiceKey := discovery.ServicePath(guid, "tso") + "/"
 	legacySvcRootPath := path.Join("/pd", guid)
-	tsoSvcRootPath := path.Join("/ms", guid, "tso")
+	tsoSvcRootPath := path.Join(mcsutils.MicroserviceRootPath, guid, "tso")
 	electionNamePrefix := "tso-server-" + guid
 
 	kgm := NewKeyspaceGroupManager(
@@ -766,7 +766,7 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr()}
 	tsoServiceKey := discovery.ServicePath(uniqueStr, "tso") + "/"
 	legacySvcRootPath := path.Join("/pd", uniqueStr)
-	tsoSvcRootPath := path.Join("/ms", uniqueStr, "tso")
+	tsoSvcRootPath := path.Join(mcsutils.MicroserviceRootPath, uniqueStr, "tso")
 	electionNamePrefix := "kgm-test-" + cfg.GetAdvertiseListenAddr()
 
 	kgm := NewKeyspaceGroupManager(

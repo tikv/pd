@@ -56,8 +56,9 @@ const (
 	tsoServiceKey = utils.TSOServiceName
 	timestampKey  = "timestamp"
 
-	tsoKeyspaceGroupPrefix     = tsoServiceKey + "/" + utils.KeyspaceGroupsKey
-	keyspaceGroupMembershipKey = "membership"
+	tsoKeyspaceGroupPrefix      = tsoServiceKey + "/" + utils.KeyspaceGroupsKey
+	keyspaceGroupsMembershipKey = "membership"
+	keyspaceGroupsElectionKey   = "election"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
@@ -228,18 +229,56 @@ func EncodeKeyspaceID(spaceID uint32) string {
 // KeyspaceGroupIDPrefix returns the prefix of keyspace group id.
 // Path: tso/keyspace_groups/membership
 func KeyspaceGroupIDPrefix() string {
-	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey)
+	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupsMembershipKey)
 }
 
 // KeyspaceGroupIDPath returns the path to keyspace id from the given name.
 // Path: tso/keyspace_groups/membership/{id}
 func KeyspaceGroupIDPath(id uint32) string {
-	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupMembershipKey, encodeKeyspaceGroupID(id))
+	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupsMembershipKey, encodeKeyspaceGroupID(id))
 }
 
 // GetCompiledKeyspaceGroupIDRegexp returns the compiled regular expression for matching keyspace group id.
 func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 	pattern := strings.Join([]string{KeyspaceGroupIDPrefix(), `(\d{5})$`}, "/")
+	return regexp.MustCompile(pattern)
+}
+
+// ResourceManagerSvcRootPath returns the root path of resource manager service.
+func ResourceManagerSvcRootPath(clusterID uint64) string {
+	return svcRootPath(clusterID, utils.ResourceManagerServiceName)
+}
+
+// TSOSvcRootPath returns the root path of tso service.
+func TSOSvcRootPath(clusterID uint64) string {
+	return svcRootPath(clusterID, utils.TSOServiceName)
+}
+
+func svcRootPath(clusterID uint64, svcName string) string {
+	c := strconv.FormatUint(clusterID, 10)
+	return path.Join(utils.MicroserviceRootPath, c, svcName)
+}
+
+// KeyspaceGroupPrimaryPath returns the path of keyspace group primary.
+// default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
+// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
+func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
+	electionPath := KeyspaceGroupsElectionPath(rootPath, keyspaceGroupID)
+	return path.Join(electionPath, utils.KeyspaceGroupsPrimaryKey)
+}
+
+// KeyspaceGroupsElectionPath returns the path of keyspace groups election.
+func KeyspaceGroupsElectionPath(rootPath string, keyspaceGroupID uint32) string {
+	if keyspaceGroupID == utils.DefaultKeyspaceGroupID {
+		return path.Join(rootPath, "00000")
+	}
+	return path.Join(rootPath, utils.KeyspaceGroupsKey, keyspaceGroupsElectionKey, fmt.Sprintf("%05d", keyspaceGroupID))
+}
+
+// GetCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
+func GetCompiledNonDefaultIDRegexp(clusterID uint64) *regexp.Regexp {
+	rootPath := TSOSvcRootPath(clusterID)
+	pattern := strings.Join([]string{rootPath, utils.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, utils.KeyspaceGroupsPrimaryKey + `$`}, "/")
 	return regexp.MustCompile(pattern)
 }
 

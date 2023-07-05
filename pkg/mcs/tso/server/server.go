@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -64,11 +65,7 @@ import (
 
 const (
 	// pdRootPath is the old path for storing the tso related root path.
-	pdRootPath        = "/pd"
-	msServiceRootPath = "/ms"
-	// tsoSvcRootPathFormat defines the root path for all etcd paths used for different purposes.
-	// format: "/ms/{cluster_id}/tso".
-	tsoSvcRootPathFormat = msServiceRootPath + "/%d/" + mcsutils.TSOServiceName
+	pdRootPath = "/pd"
 	// maxRetryTimesWaitAPIService is the max retry times for initializing the cluster ID.
 	maxRetryTimesWaitAPIService = 360
 	// retryIntervalWaitAPIService is the interval to retry.
@@ -536,7 +533,7 @@ func (s *Server) startServer() (err error) {
 	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 	legacySvcRootPath := path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
-	tsoSvcRootPath := fmt.Sprintf(tsoSvcRootPathFormat, s.clusterID)
+	tsoSvcRootPath := endpoint.TSOSvcRootPath(s.clusterID)
 	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.etcdClient, s.httpClient, s.cfg.AdvertiseListenAddr,
