@@ -357,7 +357,7 @@ func showKeyspaceGroupPrimaryCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to parse the keyspace group ID: %s\n", err)
 		return
 	}
-	r, err := doRequest(cmd, fmt.Sprintf("%s/%s?get_param=primary", keyspaceGroupsPrefix, args[0]), http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, fmt.Sprintf("%s/%s?fields=primary", keyspaceGroupsPrefix, args[0]), http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the keyspace group primary information: %s\n", err)
 		return

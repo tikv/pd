@@ -135,6 +135,12 @@ func GetKeyspaceGroups(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, kgs)
 }
 
+// GetKeyspaceGroupPrimaryResponse defines the response for getting primary node of keyspace group.
+type GetKeyspaceGroupPrimaryResponse struct {
+	ID      uint32 `json:"id"`
+	Primary string `json:"primary"`
+}
+
 // GetKeyspaceGroupByID gets keyspace group by ID.
 func GetKeyspaceGroupByID(c *gin.Context) {
 	id, err := validateKeyspaceGroupID(c)
@@ -150,13 +156,17 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 		return
 	}
 
-	if c.Query("get_param") == "primary" {
+	fields := c.Query("fields") // split by comma if need to add more fields
+	if fields == "primary" {
 		primary, err := manager.GetKeyspaceGroupPrimaryByID(id)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
-		c.JSON(http.StatusOK, primary)
+		c.JSON(http.StatusOK, &GetKeyspaceGroupPrimaryResponse{
+			ID:      id,
+			Primary: primary,
+		})
 		return
 	}
 

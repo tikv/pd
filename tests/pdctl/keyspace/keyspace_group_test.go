@@ -504,9 +504,9 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		args := []string{"-u", pdAddr, "keyspace-group", "primary", defaultKeyspaceGroupID}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		addr := strings.ReplaceAll(string(output), "\"", "")
-		addr = strings.ReplaceAll(addr, "\n", "")
-		return s1.GetAddr() == addr || s2.GetAddr() == addr
+		var resp handlers.GetKeyspaceGroupPrimaryResponse
+		json.Unmarshal(output, &resp)
+		return s1.GetAddr() == resp.Primary || s2.GetAddr() == resp.Primary
 	})
 
 	// split keyspace group.
@@ -536,9 +536,9 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		args := []string{"-u", pdAddr, "keyspace-group", "primary", "1"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		addr := strings.ReplaceAll(string(output), "\"", "")
-		addr = strings.ReplaceAll(addr, "\n", "")
-		return s1.GetAddr() == addr || s2.GetAddr() == addr
+		var resp handlers.GetKeyspaceGroupPrimaryResponse
+		json.Unmarshal(output, &resp)
+		return s1.GetAddr() == resp.Primary || s2.GetAddr() == resp.Primary
 	})
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
