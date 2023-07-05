@@ -687,10 +687,14 @@ func (u *unsafeRecoveryController) getFailedPeers(region *metapb.Region) []*meta
 
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
+<<<<<<< HEAD
 		if peer.Role == metapb.PeerRole_Learner || peer.Role == metapb.PeerRole_DemotingVoter {
 			continue
 		}
 		if _, ok := u.failedStores[peer.StoreId]; ok {
+=======
+		if u.isFailed(peer) {
+>>>>>>> 9954576fd (unsafe recovery: Fixing learner store being ignored error in 7.1 (#6744))
 			failedPeers = append(failedPeers, peer)
 		}
 	}
