@@ -1273,7 +1273,7 @@ func (bs *balanceSolver) getMinRate(dim int) float64 {
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
 func (bs *balanceSolver) betterThanV1(old *solution) bool {
-	if old == nil {
+	if old == nil || bs.cur.progressiveRank <= splitProgressiveRank {
 		return true
 	}
 	if bs.cur.progressiveRank != old.progressiveRank {
