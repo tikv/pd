@@ -140,7 +140,7 @@ func (t *timestampOracle) calibrateLogical(rawLogical int64, suffixBits int) int
 
 // GetTimestampPath returns the timestamp path in etcd.
 func (t *timestampOracle) GetTimestampPath() string {
-	return endpoint.GetTimestampPath(t.tsPath)
+	return endpoint.TimestampPath(t.tsPath)
 }
 
 // SyncTimestamp is used to synchronize the timestamp.

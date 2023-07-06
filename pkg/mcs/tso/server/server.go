@@ -23,7 +23,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,8 +63,6 @@ import (
 )
 
 const (
-	// pdRootPath is the old path for storing the tso related root path.
-	pdRootPath = "/pd"
 	// maxRetryTimesWaitAPIService is the max retry times for initializing the cluster ID.
 	maxRetryTimesWaitAPIService = 360
 	// retryIntervalWaitAPIService is the interval to retry.
@@ -532,7 +529,7 @@ func (s *Server) startServer() (err error) {
 
 	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	legacySvcRootPath := path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	legacySvcRootPath := endpoint.LegacyRootPath(s.clusterID)
 	tsoSvcRootPath := endpoint.TSOSvcRootPath(s.clusterID)
 	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(

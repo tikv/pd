@@ -136,7 +136,7 @@ func (s *backupTestSuite) BeforeTest(suiteName, testName string) {
 		rootPath               = path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
 		allocTimestampMaxBytes = typeutil.Uint64ToBytes(allocTimestampMax)
 	)
-	_, err = s.etcdClient.Put(ctx, endpoint.GetTimestampPath(rootPath), string(allocTimestampMaxBytes))
+	_, err = s.etcdClient.Put(ctx, endpoint.TimestampPath(rootPath), string(allocTimestampMaxBytes))
 	s.NoError(err)
 
 	var (

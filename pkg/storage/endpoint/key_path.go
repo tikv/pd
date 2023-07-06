@@ -25,6 +25,7 @@ import (
 )
 
 const (
+	pdRootPath               = "/pd"
 	clusterPath              = "raft"
 	configPath               = "config"
 	serviceMiddlewarePath    = "service_middleware"
@@ -263,6 +264,12 @@ func svcRootPath(clusterID uint64, svcName string) string {
 	return path.Join(utils.MicroserviceRootPath, c, svcName)
 }
 
+// LegacyRootPath returns the root path of legacy pd service.
+// Path: /pd/{cluster_id}
+func LegacyRootPath(clusterID uint64) string {
+	return path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
+}
+
 // KeyspaceGroupPrimaryPath returns the path of keyspace group primary.
 // default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
 // non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
@@ -307,19 +314,33 @@ func buildPath(withSuffix bool, str ...string) string {
 	return sb.String()
 }
 
-// GetKeyspaceGroupTSPath constructs the timestampOracle path prefix, which is:
+// KeyspaceGroupTSPath constructs the timestampOracle path prefix, which is:
 //  1. for the default keyspace group:
 //     "" in /pd/{cluster_id}/timestamp
 //  2. for the non-default keyspace groups:
 //     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
-func GetKeyspaceGroupTSPath(groupID uint32) string {
+func KeyspaceGroupTSPath(groupID uint32) string {
 	if groupID == utils.DefaultKeyspaceGroupID {
 		return ""
 	}
 	return path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
 }
 
-// GetTimestampPath returns the timestamp path for the given timestamp oracle path prefix.
-func GetTimestampPath(tsPath string) string {
+// TimestampPath returns the timestamp path for the given timestamp oracle path prefix.
+func TimestampPath(tsPath string) string {
 	return path.Join(tsPath, TimestampKey)
+}
+
+// FullTimestampPath returns the full timestamp path.
+//  1. for the default keyspace group:
+//     /pd/{cluster_id}/timestamp
+//  2. for the non-default keyspace groups:
+//     /ms/{cluster_id}/tso/{group}/gta/timestamp
+func FullTimestampPath(clusterID uint64, groupID uint32) string {
+	rootPath := TSOSvcRootPath(clusterID)
+	tsPath := TimestampPath(KeyspaceGroupTSPath(groupID))
+	if groupID == utils.DefaultKeyspaceGroupID {
+		rootPath = LegacyRootPath(clusterID)
+	}
+	return path.Join(rootPath, tsPath)
 }
