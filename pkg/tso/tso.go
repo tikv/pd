@@ -16,7 +16,6 @@ package tso
 
 import (
 	"fmt"
-	"path"
 	"sync/atomic"
 	"time"
 
@@ -34,7 +33,6 @@ import (
 )
 
 const (
-	timestampKey = "timestamp"
 	// UpdateTimestampGuard is the min timestamp interval.
 	UpdateTimestampGuard = time.Millisecond
 	// maxLogical is the max upper limit for logical time.
@@ -142,7 +140,7 @@ func (t *timestampOracle) calibrateLogical(rawLogical int64, suffixBits int) int
 
 // GetTimestampPath returns the timestamp path in etcd.
 func (t *timestampOracle) GetTimestampPath() string {
-	return path.Join(t.tsPath, timestampKey)
+	return endpoint.GetTimestampPath(t.tsPath)
 }
 
 // SyncTimestamp is used to synchronize the timestamp.

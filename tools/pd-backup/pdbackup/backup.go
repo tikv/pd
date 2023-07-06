@@ -25,6 +25,7 @@ import (
 	"path"
 	"strconv"
 
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -74,8 +75,7 @@ func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) 
 
 	backInfo.AllocIDMax = allocIDMax
 
-	timestampPath := path.Join(rootPath, "timestamp")
-	resp, err = etcdutil.EtcdKVGet(client, timestampPath)
+	resp, err = etcdutil.EtcdKVGet(client, endpoint.GetTimestampPath(rootPath))
 	if err != nil {
 		return nil, err
 	}
