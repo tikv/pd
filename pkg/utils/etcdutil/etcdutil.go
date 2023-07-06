@@ -269,6 +269,11 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 			select {
 			case <-client.Ctx().Done():
 				log.Info("[etcd client] etcd client is closed, exit health check goroutine")
+				checker.Range(func(key, value interface{}) bool {
+					client := value.(*healthyClient)
+					client.Close()
+					return true
+				})
 				return
 			case <-ticker.C:
 				usedEps := client.Endpoints()
@@ -371,9 +376,9 @@ func (checker *healthyChecker) update(eps []string) {
 				checker.Delete(ep)
 			}
 			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
-				// try to update client to trigger reconnect
-				checker.addClient(ep, lastHealthy)
-				client.(*healthyClient).Close()
+				// try to reset client endpoint to trigger reconnect
+				client.(*healthyClient).Client.SetEndpoints([]string{}...)
+				client.(*healthyClient).Client.SetEndpoints(ep)
 			}
 			continue
 		}
@@ -672,12 +677,20 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
 	watcher := clientv3.NewWatcher(lw.client)
 	defer watcher.Close()
-
+	var watchChanCancel *context.CancelFunc
+	defer func() {
+		if watchChanCancel != nil {
+			(*watchChanCancel)()
+		}
+	}()
 	for {
+		if watchChanCancel != nil {
+			(*watchChanCancel)()
+		}
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
-		watchChanCtx, watchChanCancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
-		defer watchChanCancel()
+		watchChanCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
+		watchChanCancel = &cancel
 		opts := append(lw.opts, clientv3.WithRev(revision))
 		watchChan := watcher.Watch(watchChanCtx, lw.key, opts...)
 	WatchChan:
@@ -690,7 +703,6 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("force load key failed in watch loop", zap.String("name", lw.name),
 					zap.String("key", lw.key), zap.Error(err))
 			}
-			watchChanCancel()
 			continue
 		case wresp := <-watchChan:
 			if wresp.CompactRevision != 0 {
@@ -698,7 +710,6 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("required-revision", revision),
 					zap.Int64("compact-revision", wresp.CompactRevision))
 				revision = wresp.CompactRevision
-				watchChanCancel()
 				continue
 			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
 				log.Error("watcher is canceled in watch loop",

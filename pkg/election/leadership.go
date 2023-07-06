@@ -190,9 +190,9 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	}
 
 	interval := detectHealthyInterval
-	timeout := watchLoopUnhealthyTimeout
+	unhealthyTimeout := watchLoopUnhealthyTimeout
 	failpoint.Inject("fastTick", func() {
-		timeout = 5 * time.Second
+		unhealthyTimeout = 5 * time.Second
 		interval = 1 * time.Second
 	})
 	ticker := time.NewTicker(interval)
@@ -201,17 +201,26 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 	watcher := clientv3.NewWatcher(ls.client)
 	defer watcher.Close()
+	var watchChanCancel *context.CancelFunc
+	defer func() {
+		if watchChanCancel != nil {
+			(*watchChanCancel)()
+		}
+	}()
 	for {
 		failpoint.Inject("delayWatcher", nil)
+		if watchChanCancel != nil {
+			(*watchChanCancel)()
+		}
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
-		watchChanCtx, watchChanCancel := context.WithCancel(clientv3.WithRequireLeader(serverCtx))
-		defer watchChanCancel()
+		watchChanCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(serverCtx))
+		watchChanCancel = &cancel
 
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.
 		if !etcdutil.IsHealthy(serverCtx, ls.client) {
-			if time.Since(lastHealthyTime) > timeout {
+			if time.Since(lastHealthyTime) > unhealthyTimeout {
 				log.Error("the connect of leadership watcher is unhealthy",
 					zap.Int64("revision", revision),
 					zap.String("leader-key", ls.leaderKey),
@@ -223,13 +232,12 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				// server closed, return
 				return
 			case <-ticker.C:
-				watchChanCancel()
+				// continue to check the etcd availability
 				continue
 			}
 		}
 
 		watchChan := watcher.Watch(watchChanCtx, ls.leaderKey, clientv3.WithRev(revision))
-		lastHealthyTime = time.Now()
 	WatchChan:
 		select {
 		case <-serverCtx.Done():
@@ -237,10 +245,15 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			return
 		case <-ticker.C:
 			if !etcdutil.IsHealthy(serverCtx, ls.client) {
-				watchChanCancel()
-				continue
+				if time.Since(lastHealthyTime) > unhealthyTimeout {
+					log.Error("the connect of leadership watcher is unhealthy",
+						zap.Int64("revision", revision),
+						zap.String("leader-key", ls.leaderKey),
+						zap.String("purpose", ls.purpose))
+					return
+				}
+				goto WatchChan
 			}
-			goto WatchChan // use goto to avoid to create a new watchChan
 		case wresp := <-watchChan:
 			// meet compacted error, use the compact revision.
 			if wresp.CompactRevision != 0 {
@@ -248,7 +261,6 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 					zap.Int64("required-revision", revision),
 					zap.Int64("compact-revision", wresp.CompactRevision))
 				revision = wresp.CompactRevision
-				watchChanCancel()
 				continue
 			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
 				log.Error("leadership watcher is canceled with",
@@ -269,8 +281,9 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				}
 			}
 			revision = wresp.Header.Revision + 1
-			goto WatchChan // use goto to avoid to create a new watchChan
 		}
+		lastHealthyTime = time.Now()
+		goto WatchChan // use goto to avoid to create a new watchChan
 	}
 }
 
