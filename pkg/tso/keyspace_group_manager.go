@@ -1377,7 +1377,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 	for {
 		select {
 		case <-kgm.ctx.Done():
-			log.Info("group split patroller is exiting")
+			log.Info("group split patroller exited")
 			return
 		case <-ticker.C:
 		}
@@ -1423,7 +1423,7 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 	for {
 		select {
 		case <-kgm.ctx.Done():
-			log.Info("deleted group cleaner is exiting")
+			log.Info("deleted group cleaner exited")
 			return
 		case <-ticker.C:
 		}
