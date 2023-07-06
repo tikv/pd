@@ -218,7 +218,8 @@ var (
 	// as it implies that this dimension is sufficiently uniform.
 	stddevThreshold = 0.1
 
-	splitBucket = "split-hot-region"
+	splitBucket          = "split-hot-region"
+	splitProgressiveRank = int64(-5)
 )
 
 type hotScheduler struct {
@@ -1566,7 +1567,7 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHo
 	}
 	// the split bucket's priority is highest
 	if len(operators) > 0 {
-		bs.cur.progressiveRank = -5
+		bs.cur.progressiveRank = splitProgressiveRank
 	}
 	return operators
 }
