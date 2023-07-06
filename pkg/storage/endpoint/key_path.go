@@ -245,11 +245,13 @@ func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 }
 
 // ResourceManagerSvcRootPath returns the root path of resource manager service.
+// Path: /ms/{cluster_id}/resource_manager
 func ResourceManagerSvcRootPath(clusterID uint64) string {
 	return svcRootPath(clusterID, utils.ResourceManagerServiceName)
 }
 
 // TSOSvcRootPath returns the root path of tso service.
+// Path: /ms/{cluster_id}/tso
 func TSOSvcRootPath(clusterID uint64) string {
 	return svcRootPath(clusterID, utils.TSOServiceName)
 }
@@ -268,6 +270,8 @@ func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
 }
 
 // KeyspaceGroupsElectionPath returns the path of keyspace groups election.
+// default keyspace group: "/ms/{cluster_id}/tso/00000".
+// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}".
 func KeyspaceGroupsElectionPath(rootPath string, keyspaceGroupID uint32) string {
 	if keyspaceGroupID == utils.DefaultKeyspaceGroupID {
 		return path.Join(rootPath, "00000")
