@@ -226,7 +226,7 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 			KeyspaceId:  jsonGcSafePoint.KeyspaceID,
 			GcSafePoint: jsonGcSafePoint.SafePoint,
 		}
-		log.Info("GetAllGCSafePointV2",
+		log.Debug("get all gc safe point v2",
 			zap.Uint32("keyspace-id", jsonGcSafePoint.KeyspaceID),
 			zap.Uint64("gc-safe-point", jsonGcSafePoint.SafePoint))
 		gcSafePoints = append(gcSafePoints, gcSafePoint)
