@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -96,7 +97,7 @@ func NewGlobalTSOAllocator(
 		member: am.member,
 		timestampOracle: &timestampOracle{
 			client:                 am.member.GetLeadership().GetClient(),
-			tsPath:                 am.getKeyspaceGroupTSPath(am.kgID),
+			tsPath:                 endpoint.GetKeyspaceGroupTSPath(am.kgID),
 			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,

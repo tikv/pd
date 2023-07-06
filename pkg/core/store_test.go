@@ -174,7 +174,7 @@ func TestLowSpaceScoreV2(t *testing.T) {
 		bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.5),
 		small:  newStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
 	}, {
-		// store1 and store2 has same capacity and regionSize（40g)
+		// store1 and store2 has same capacity and regionSize (40g)
 		// but store1 has less available space size
 		bigger: newStoreInfoWithAvailable(1, 60*units.GiB, 100*units.GiB, 1),
 		small:  newStoreInfoWithAvailable(2, 80*units.GiB, 100*units.GiB, 2),

@@ -94,6 +94,9 @@ var (
 	}
 	// Only keyspaces in the state specified by allowChangeConfig are allowed to change their config.
 	allowChangeConfig = []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED}
+
+	// ErrKeyspaceGroupPrimaryNotFound is used to indicate primary of target keyspace group does not exist.
+	ErrKeyspaceGroupPrimaryNotFound = errors.New("primary of keyspace group does not exist")
 )
 
 // validateID check if keyspace falls within the acceptable range.

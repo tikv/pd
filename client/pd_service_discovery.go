@@ -59,8 +59,6 @@ type ServiceDiscovery interface {
 	GetClusterID() uint64
 	// GetKeyspaceID returns the ID of the keyspace
 	GetKeyspaceID() uint32
-	// SetKeyspaceID sets the ID of the keyspace
-	SetKeyspaceID(keyspaceID uint32)
 	// GetKeyspaceGroupID returns the ID of the keyspace group
 	GetKeyspaceGroupID() uint32
 	// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
@@ -99,6 +97,7 @@ type ServiceDiscovery interface {
 	AddServiceAddrsSwitchedCallback(callbacks ...func())
 }
 
+type updateKeyspaceIDFunc func() error
 type tsoLocalServAddrsUpdatedFunc func(map[string]string) error
 type tsoGlobalServAddrUpdatedFunc func(string) error
 
@@ -149,8 +148,9 @@ type pdServiceDiscovery struct {
 	cancel    context.CancelFunc
 	closeOnce sync.Once
 
-	keyspaceID uint32
-	tlsCfg     *tlsutil.TLSConfig
+	updateKeyspaceIDCb updateKeyspaceIDFunc
+	keyspaceID         uint32
+	tlsCfg             *tlsutil.TLSConfig
 	// Client option.
 	option *option
 }
@@ -160,6 +160,7 @@ func newPDServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup,
 	serviceModeUpdateCb func(pdpb.ServiceMode),
+	updateKeyspaceIDCb updateKeyspaceIDFunc,
 	keyspaceID uint32,
 	urls []string, tlsCfg *tlsutil.TLSConfig, option *option,
 ) *pdServiceDiscovery {
@@ -169,6 +170,7 @@ func newPDServiceDiscovery(
 		cancel:              cancel,
 		wg:                  wg,
 		serviceModeUpdateCb: serviceModeUpdateCb,
+		updateKeyspaceIDCb:  updateKeyspaceIDCb,
 		keyspaceID:          keyspaceID,
 		tlsCfg:              tlsCfg,
 		option:              option,
@@ -191,6 +193,14 @@ func (c *pdServiceDiscovery) Init() error {
 		return err
 	}
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
+
+	// We need to update the keyspace ID before we discover and update the service mode
+	// so that TSO in API mode can be initialized with the correct keyspace ID.
+	if c.updateKeyspaceIDCb != nil {
+		if err := c.updateKeyspaceIDCb(); err != nil {
+			return err
+		}
+	}
 
 	if err := c.checkServiceModeChanged(); err != nil {
 		log.Warn("[pd] failed to check service mode and will check later", zap.Error(err))
