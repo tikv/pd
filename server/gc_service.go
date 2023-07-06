@@ -213,7 +213,7 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 	}
 
 	startkey := endpoint.GCSafePointV2Prefix()
-	endkey := clientv3.GetPrefixRangeEnd(endpoint.GCSafePointV2Prefix())
+	endkey := clientv3.GetPrefixRangeEnd(startkey)
 	_, values, revision, err := s.loadRangeFromETCD(startkey, endkey)
 
 	gcSafePoints := make([]*pdpb.GCSafePointV2, 0, len(values))
