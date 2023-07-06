@@ -738,13 +738,6 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			return splitSourceAM.GetMember().IsLeader()
 		})
 	}
-
-	failpoint.Inject("electionCampaignFailed", func() {
-		participant.SetCampaignChecker(func(leadership *election.Leadership) bool {
-			return false
-		})
-	})
-
 	// Only the default keyspace group uses the legacy service root path for LoadTimestamp/SyncTimestamp.
 	var (
 		tsRootPath string

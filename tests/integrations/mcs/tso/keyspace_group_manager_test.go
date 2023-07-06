@@ -663,8 +663,8 @@ func waitFinishMerge(
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeBeforeInitTSO() {
 	re := suite.Require()
-	// Make sure the TSO of keyspace group 1 won't be initialized.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/electionCampaignFailed", `return(true)`))
+	// Make sure the TSO of keyspace group 1 won't be initialized before it's merged.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/failedToSaveTimestamp", `return(true)`))
 	// Request the TSO for the default keyspace concurrently via client.
 	wg, cancel := suite.dispatchClient(re, mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
@@ -687,7 +687,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeBeforeIn
 	// Stop the client.
 	cancel()
 	wg.Wait()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/electionCampaignFailed"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToSaveTimestamp"))
 }
 
 // See https://github.com/tikv/pd/issues/6748

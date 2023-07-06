@@ -170,7 +170,9 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 			zap.Time("last", last), zap.Time("next", next), errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(UpdateTimestampGuard)
 	}
-
+	failpoint.Inject("failedToSaveTimestamp", func() {
+		failpoint.Return(errs.ErrEtcdTxnInternal)
+	})
 	save := next.Add(t.saveInterval)
 	if err = t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 		tsoCounter.WithLabelValues("err_save_sync_ts", t.dcLocation).Inc()
