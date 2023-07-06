@@ -400,7 +400,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 	re.Equal([]uint32{444, 555, 666}, kg1.Keyspaces)
 	re.False(kg1.IsSplitting())
 	// Request the TSO for keyspace 555 concurrently via client.
-	wg, cancel := suite.dispatchClient(re, 555, 1)
+	cancel := suite.dispatchClient(re, 555, 1)
 	// Split the keyspace group 1 to 2.
 	handlersutil.MustSplitKeyspaceGroup(re, suite.pdLeaderServer, 1, &handlers.SplitKeyspaceGroupByIDParams{
 		NewID:     2,
@@ -410,13 +410,12 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplitClient()
 	waitFinishSplit(re, suite.pdLeaderServer, 1, 2, []uint32{444}, []uint32{555, 666})
 	// Stop the client.
 	cancel()
-	wg.Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/systemTimeSlow"))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 	re *require.Assertions, keyspaceID, keyspaceGroupID uint32,
-) (*sync.WaitGroup, context.CancelFunc) {
+) context.CancelFunc {
 	// Make sure the leader of the keyspace group is elected.
 	member, err := suite.tsoCluster.
 		WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID).
@@ -464,7 +463,14 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 			lastPhysical, lastLogical = physical, logical
 		}
 	}()
-	return &wg, cancel
+	return func() {
+		// Wait for a while to make sure the client has sent more TSO requests.
+		time.Sleep(time.Second)
+		// Cancel the context to stop the client.
+		cancel()
+		// Wait for the client to stop.
+		wg.Wait()
+	}
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
@@ -633,7 +639,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeClient()
 	re.Equal([]uint32{111, 222, 333}, kg1.Keyspaces)
 	re.False(kg1.IsMerging())
 	// Request the TSO for keyspace 222 concurrently via client.
-	wg, cancel := suite.dispatchClient(re, 222, 1)
+	cancel := suite.dispatchClient(re, 222, 1)
 	// Merge the keyspace group 1 to the default keyspace group.
 	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
 		MergeList: []uint32{1},
@@ -642,7 +648,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeClient()
 	waitFinishMerge(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, []uint32{111, 222, 333})
 	// Stop the client.
 	cancel()
-	wg.Wait()
 }
 
 func waitFinishMerge(
@@ -666,7 +671,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeBeforeIn
 	// Make sure the TSO of keyspace group 1 won't be initialized before it's merged.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/failedToSaveTimestamp", `return(true)`))
 	// Request the TSO for the default keyspace concurrently via client.
-	wg, cancel := suite.dispatchClient(re, mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+	cancel := suite.dispatchClient(re, mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
 	// Create the keyspace group 1 with keyspaces [111, 222, 333].
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -686,7 +691,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeBeforeIn
 	waitFinishMerge(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, []uint32{111, 222, 333})
 	// Stop the client.
 	cancel()
-	wg.Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/failedToSaveTimestamp"))
 }
 
