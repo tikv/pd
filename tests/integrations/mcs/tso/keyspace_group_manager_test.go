@@ -738,10 +738,8 @@ func TestGetTSOImmediately(t *testing.T) {
 	kgm.SetPriorityForKeyspaceGroup(0, kg0.Members[0].Address, 100)
 	kgm.SetPriorityForKeyspaceGroup(1, kg1.Members[1].Address, 100)
 	testutil.Eventually(re, func() bool {
-		p0, err := kgm.GetKeyspaceGroupPrimaryByID(0)
-		re.NoError(err)
-		p1, err := kgm.GetKeyspaceGroupPrimaryByID(1)
-		re.NoError(err)
+		p0, _ := kgm.GetKeyspaceGroupPrimaryByID(0)
+		p1, _ := kgm.GetKeyspaceGroupPrimaryByID(1)
 		return p0 == kg0.Members[0].Address && p1 == kg1.Members[1].Address
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
