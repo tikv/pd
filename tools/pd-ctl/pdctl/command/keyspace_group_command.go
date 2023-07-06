@@ -288,17 +288,17 @@ func setNodesKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to parse the keyspace group ID: %s\n", err)
 		return
 	}
-	addresses := make([]string, 0, len(args)-1)
+	nodes := make([]string, 0, len(args)-1)
 	for _, arg := range args[1:] {
 		u, err := url.ParseRequestURI(arg)
 		if u == nil || err != nil {
 			cmd.Printf("Failed to parse the tso node address: %s\n", err)
 			return
 		}
-		addresses = append(addresses, arg)
+		nodes = append(nodes, arg)
 	}
-	postJSON(cmd, fmt.Sprintf("%s/%s/nodes", keyspaceGroupsPrefix, args[0]), map[string]interface{}{
-		"Nodes": addresses,
+	patchJSON(cmd, fmt.Sprintf("%s/%s", keyspaceGroupsPrefix, args[0]), map[string]interface{}{
+		"Nodes": nodes,
 	})
 }
 
@@ -313,12 +313,18 @@ func setPriorityKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	address := args[1]
-	u, err := url.ParseRequestURI(address)
+	node := args[1]
+	u, err := url.ParseRequestURI(node)
 	if u == nil || err != nil {
 		cmd.Printf("Failed to parse the tso node address: %s\n", err)
 		return
 	}
+
+	// Escape the node address to avoid the error of parsing the url
+	// But the url.PathEscape will escape the '/' to '%2F', which % will cause the error of parsing the url
+	// So we need to replace the % to \%
+	node = url.PathEscape(node)
+	node = strings.ReplaceAll(node, "%", "\\%")
 
 	priority, err := strconv.ParseInt(args[2], 10, 32)
 	if err != nil {
@@ -326,8 +332,7 @@ func setPriorityKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	postJSON(cmd, fmt.Sprintf("%s/%s/priority", keyspaceGroupsPrefix, args[0]), map[string]interface{}{
-		"Node":     address,
+	patchJSON(cmd, fmt.Sprintf("%s/%s/%s", keyspaceGroupsPrefix, args[0], node), map[string]interface{}{
 		"Priority": priority,
 	})
 }

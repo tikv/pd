@@ -61,6 +61,7 @@ const (
 	// of the primaries on this TSO server/pod have changed. A goroutine will periodically check
 	// do this check and re-distribute the primaries if necessary.
 	defaultPrimaryPriorityCheckInterval = 10 * time.Second
+	groupPatrolInterval                 = time.Minute
 )
 
 type state struct {
@@ -74,13 +75,19 @@ type state struct {
 	kgs [mcsutils.MaxKeyspaceGroupCountInUse]*endpoint.KeyspaceGroup
 	// keyspaceLookupTable is a map from keyspace to the keyspace group to which it belongs.
 	keyspaceLookupTable map[uint32]uint32
+	// splittingGroups is the cache of splitting keyspace group related information.
+	splittingGroups map[uint32]struct{}
+	// deletedGroups is the cache of deleted keyspace group related information.
+	deletedGroups map[uint32]struct{}
 }
 
 func (s *state) initialize() {
 	s.keyspaceLookupTable = make(map[uint32]uint32)
+	s.splittingGroups = make(map[uint32]struct{})
+	s.deletedGroups = make(map[uint32]struct{})
 }
 
-func (s *state) deinitialize() {
+func (s *state) deInitialize() {
 	log.Info("closing all keyspace groups")
 
 	s.Lock()
@@ -110,6 +117,28 @@ func (s *state) getKeyspaceGroupMeta(
 	s.RLock()
 	defer s.RUnlock()
 	return s.ams[groupID], s.kgs[groupID]
+}
+
+// getSplittingGroups returns the IDs of the splitting keyspace groups.
+func (s *state) getSplittingGroups() []uint32 {
+	s.RLock()
+	defer s.RUnlock()
+	groups := make([]uint32, 0, len(s.splittingGroups))
+	for groupID := range s.splittingGroups {
+		groups = append(groups, groupID)
+	}
+	return groups
+}
+
+// getDeletedGroups returns the IDs of the deleted keyspace groups.
+func (s *state) getDeletedGroups() []uint32 {
+	s.RLock()
+	defer s.RUnlock()
+	groups := make([]uint32, 0, len(s.deletedGroups))
+	for groupID := range s.deletedGroups {
+		groups = append(groups, groupID)
+	}
+	return groups
 }
 
 func (s *state) checkTSOSplit(
@@ -398,8 +427,10 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		return errs.ErrLoadKeyspaceGroupsTerminated.Wrap(err)
 	}
 
-	kgm.wg.Add(1)
+	kgm.wg.Add(3)
 	go kgm.primaryPriorityCheckLoop()
+	go kgm.groupSplitPatroller()
+	go kgm.deletedGroupCleaner()
 
 	return nil
 }
@@ -415,7 +446,7 @@ func (kgm *KeyspaceGroupManager) Close() {
 	// added/initialized after that.
 	kgm.cancel()
 	kgm.wg.Wait()
-	kgm.state.deinitialize()
+	kgm.state.deInitialize()
 
 	log.Info("keyspace group manager closed")
 }
@@ -568,6 +599,8 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 		kgm.primaryPriorityCheckInterval = 200 * time.Millisecond
 	})
 
+	ticker := time.NewTicker(kgm.primaryPriorityCheckInterval)
+	defer ticker.Stop()
 	ctx, cancel := context.WithCancel(kgm.ctx)
 	defer cancel()
 	groupID := 0
@@ -576,7 +609,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 		case <-ctx.Done():
 			log.Info("exit primary priority check loop")
 			return
-		case <-time.After(kgm.primaryPriorityCheckInterval):
+		case <-ticker.C:
 			// Every primaryPriorityCheckInterval, we only reset the primary of one keyspace group
 			member, kg, localPriority, nextGroupID := kgm.getNextPrimaryToReset(groupID, kgm.tsoServiceID.ServiceAddr)
 			if member != nil {
@@ -730,6 +763,10 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	}
 	kgm.kgs[group.ID] = group
 	kgm.ams[group.ID] = am
+	// If the group is the split target, add it to the splitting group map.
+	if group.IsSplitTarget() {
+		kgm.splittingGroups[group.ID] = struct{}{}
+	}
 	kgm.Unlock()
 }
 
@@ -857,6 +894,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	// Check if the split is completed.
 	if oldGroup != nil && oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
 		kgm.ams[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
+		delete(kgm.splittingGroups, groupID)
 	}
 	kgm.kgs[groupID] = newGroup
 }
@@ -903,10 +941,12 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 		am.close()
 		kgm.ams[groupID] = nil
 	}
+
+	kgm.deletedGroups[groupID] = struct{}{}
 }
 
 // exitElectionMembership exits the election membership of the given keyspace group by
-// deinitializing the allocator manager, but still keeps the keyspace group info.
+// de-initializing the allocator manager, but still keeps the keyspace group info.
 func (kgm *KeyspaceGroupManager) exitElectionMembership(group *endpoint.KeyspaceGroup) {
 	log.Info("resign election membership", zap.Uint32("keyspace-group-id", group.ID))
 
@@ -1260,7 +1300,7 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 		// update the newly merged TSO to make sure it is greater than the original ones.
 		var mergedTS time.Time
 		for _, id := range mergeList {
-			ts, err := kgm.tsoSvcStorage.LoadTimestamp(am.getKeyspaceGroupTSPath(id))
+			ts, err := kgm.tsoSvcStorage.LoadTimestamp(endpoint.GetKeyspaceGroupTSPath(id))
 			if err != nil || ts == typeutil.ZeroTime {
 				log.Error("failed to load the keyspace group TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
@@ -1318,5 +1358,105 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 			zap.Any("merge-list", mergeList),
 			zap.Time("merged-ts", mergedTS))
 		return
+	}
+}
+
+// groupSplitPatroller is used to patrol the groups that are in the on-going
+// split state and to check if we could speed up the split process.
+func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
+	defer logutil.LogPanic()
+	defer kgm.wg.Done()
+	patrolInterval := groupPatrolInterval
+	failpoint.Inject("fastGroupSplitPatroller", func() {
+		patrolInterval = 200 * time.Millisecond
+	})
+	ticker := time.NewTicker(patrolInterval)
+	defer ticker.Stop()
+	log.Info("group split patroller is started",
+		zap.Duration("patrol-interval", patrolInterval))
+	for {
+		select {
+		case <-kgm.ctx.Done():
+			log.Info("group split patroller exited")
+			return
+		case <-ticker.C:
+		}
+		for _, groupID := range kgm.getSplittingGroups() {
+			am, group := kgm.getKeyspaceGroupMeta(groupID)
+			if !am.IsLeader() {
+				continue
+			}
+			if len(group.Keyspaces) == 0 {
+				log.Warn("abnormal keyspace group with empty keyspace list",
+					zap.Uint32("keyspace-group-id", groupID))
+				continue
+			}
+			log.Info("request tso for the splitting keyspace group",
+				zap.Uint32("keyspace-group-id", groupID),
+				zap.Uint32("keyspace-id", group.Keyspaces[0]))
+			// Request the TSO manually to speed up the split process.
+			_, _, err := kgm.HandleTSORequest(group.Keyspaces[0], groupID, GlobalDCLocation, 1)
+			if err != nil {
+				log.Warn("failed to request tso for the splitting keyspace group",
+					zap.Uint32("keyspace-group-id", groupID),
+					zap.Uint32("keyspace-id", group.Keyspaces[0]),
+					zap.Error(err))
+				continue
+			}
+		}
+	}
+}
+
+// deletedGroupCleaner is used to clean the deleted keyspace groups related data.
+// For example, the TSO keys of the merged keyspace groups remain in the storage.
+func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
+	defer logutil.LogPanic()
+	defer kgm.wg.Done()
+	patrolInterval := groupPatrolInterval
+	failpoint.Inject("fastDeletedGroupCleaner", func() {
+		patrolInterval = 200 * time.Millisecond
+	})
+	ticker := time.NewTicker(patrolInterval)
+	defer ticker.Stop()
+	log.Info("deleted group cleaner is started",
+		zap.Duration("patrol-interval", patrolInterval))
+	for {
+		select {
+		case <-kgm.ctx.Done():
+			log.Info("deleted group cleaner exited")
+			return
+		case <-ticker.C:
+		}
+		for _, groupID := range kgm.getDeletedGroups() {
+			// Do not clean the default keyspace group data.
+			if groupID == mcsutils.DefaultKeyspaceGroupID {
+				continue
+			}
+			// Make sure the allocator and group meta are not in use anymore.
+			am, _ := kgm.getKeyspaceGroupMeta(groupID)
+			if am != nil {
+				log.Info("the keyspace group tso allocator has not been closed yet",
+					zap.Uint32("keyspace-group-id", groupID))
+				continue
+			}
+			log.Info("delete the keyspace group tso key",
+				zap.Uint32("keyspace-group-id", groupID))
+			// Clean up the remaining TSO keys.
+			// TODO: support the Local TSO Allocator clean up.
+			err := kgm.tsoSvcStorage.DeleteTimestamp(
+				endpoint.GetTimestampPath(
+					endpoint.GetKeyspaceGroupTSPath(groupID),
+				),
+			)
+			if err != nil {
+				log.Warn("failed to delete the keyspace group tso key",
+					zap.Uint32("keyspace-group-id", groupID),
+					zap.Error(err))
+				continue
+			}
+			kgm.Lock()
+			delete(kgm.deletedGroups, groupID)
+			kgm.Unlock()
+		}
 	}
 }

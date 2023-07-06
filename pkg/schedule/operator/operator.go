@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -63,6 +64,8 @@ var (
 	ExceedStoreLimit CancelReasonType = "exceed store limit"
 	// ExceedWaitLimit is the cancel reason when the operator exceeds the waiting queue limit.
 	ExceedWaitLimit CancelReasonType = "exceed wait limit"
+	// RelatedMergeRegion is the cancel reason when the operator is cancelled by related merge region.
+	RelatedMergeRegion CancelReasonType = "related merge region"
 	// Unknown is the cancel reason when the operator is cancelled by an unknown reason.
 	Unknown CancelReasonType = "unknown"
 )
@@ -117,6 +120,8 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 // Sync some attribute with the given timeout.
 func (o *Operator) Sync(other *Operator) {
 	o.timeout = other.timeout
+	o.AdditionalInfos[string(RelatedMergeRegion)] = strconv.FormatUint(other.RegionID(), 10)
+	other.AdditionalInfos[string(RelatedMergeRegion)] = strconv.FormatUint(o.RegionID(), 10)
 }
 
 func (o *Operator) String() string {
@@ -124,7 +129,7 @@ func (o *Operator) String() string {
 	for i := range o.steps {
 		stepStrs[i] = o.steps[i].String()
 	}
-	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v, %v), createAt:%s, startAt:%s, currentStep:%v, size:%d, steps:[%s]，timeout:[%s])",
+	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v, %v), createAt:%s, startAt:%s, currentStep:%v, size:%d, steps:[%s], timeout:[%s])",
 		o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(),
 		o.GetStartTime(), atomic.LoadInt32(&o.currentStep), o.ApproximateSize, strings.Join(stepStrs, ", "), o.timeout.String())
 	if o.CheckSuccess() {

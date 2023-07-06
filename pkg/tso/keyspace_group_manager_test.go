@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/goleak"
@@ -89,6 +90,58 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 		MaxResetTSGap:             time.Hour * 24,
 		TLSConfig:                 nil,
 	}
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastDeletedGroupCleaner", "return(true)"))
+
+	// Start with the empty keyspace group assignment.
+	mgr := suite.newUniqueKeyspaceGroupManager(0)
+	re.NotNil(mgr)
+	defer mgr.Close()
+	err := mgr.Initialize()
+	re.NoError(err)
+
+	rootPath := mgr.legacySvcRootPath
+	svcAddr := mgr.tsoServiceID.ServiceAddr
+
+	// Add keyspace group 1.
+	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupPutEvent(1, []uint32{1}, []string{svcAddr})})
+	// Check if the TSO key is created.
+	testutil.Eventually(re, func() bool {
+		ts, err := mgr.tsoSvcStorage.LoadTimestamp(endpoint.GetKeyspaceGroupTSPath(1))
+		re.NoError(err)
+		return ts != typeutil.ZeroTime
+	})
+	// Delete keyspace group 1.
+	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupDeleteEvent(1)})
+	// Check if the TSO key is deleted.
+	testutil.Eventually(re, func() bool {
+		ts, err := mgr.tsoSvcStorage.LoadTimestamp(endpoint.GetKeyspaceGroupTSPath(1))
+		re.NoError(err)
+		return ts == typeutil.ZeroTime
+	})
+	// Check if the keyspace group is deleted completely.
+	mgr.RLock()
+	re.Nil(mgr.ams[1])
+	re.Nil(mgr.kgs[1])
+	re.NotContains(mgr.deletedGroups, 1)
+	mgr.RUnlock()
+	// Try to delete the default keyspace group.
+	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupDeleteEvent(mcsutils.DefaultKeyspaceGroupID)})
+	// Default keyspace group should NOT be deleted.
+	mgr.RLock()
+	re.NotNil(mgr.ams[mcsutils.DefaultKeyspaceGroupID])
+	re.NotNil(mgr.kgs[mcsutils.DefaultKeyspaceGroupID])
+	re.NotContains(mgr.deletedGroups, mcsutils.DefaultKeyspaceGroupID)
+	mgr.RUnlock()
+	// Default keyspace group TSO key should NOT be deleted.
+	ts, err := mgr.legacySvcStorage.LoadTimestamp(endpoint.GetKeyspaceGroupTSPath(mcsutils.DefaultKeyspaceGroupID))
+	re.NoError(err)
+	re.NotEmpty(ts)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastDeletedGroupCleaner"))
 }
 
 // TestNewKeyspaceGroupManager tests the initialization of KeyspaceGroupManager.

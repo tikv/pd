@@ -711,7 +711,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	testCasesSet1 := []struct {
 		name           string
 		mode           rmpb.GroupMode
-		addSuccess     bool
+		isNewGroup     bool
 		modifySuccess  bool
 		expectMarshal  string
 		modifySettings func(*rmpb.ResourceGroup)
@@ -730,7 +730,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		},
 
 		{"test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":20000},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":10000},"action":1}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":20000},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":10000},"action":1},"background_settings":{"job_types":["test"]}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -745,10 +745,13 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 					},
 					Action: rmpb.RunawayAction_CoolDown,
 				}
+				gs.BackgroundSettings = &rmpb.BackgroundSettings{
+					JobTypes: []string{"test"},
+				}
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":1000},"action":2,"watch":{"lasting_duration_ms":100000,"type":1}}}`,
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":1000},"action":2,"watch":{"lasting_duration_ms":100000,"type":1}},"background_settings":{"job_types":["br","lightning"]}}`,
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -767,6 +770,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 						Type:              rmpb.RunawayWatchType_Similar,
 						LastingDurationMs: 100000,
 					},
+				}
+				gs.BackgroundSettings = &rmpb.BackgroundSettings{
+					JobTypes: []string{"br", "lightning"},
 				}
 			},
 		},
@@ -789,8 +795,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 		// Create Resource Group
 		resp, err := cli.AddResourceGroup(suite.ctx, group)
-		checkErr(err, tcase.addSuccess)
-		if tcase.addSuccess {
+		checkErr(err, true)
+		if tcase.isNewGroup {
 			finalNum++
 			re.Contains(resp, "Success!")
 		}
@@ -860,11 +866,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		resp, err := http.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
 		defer resp.Body.Close()
-		if tcase.addSuccess {
-			re.Equal(http.StatusOK, resp.StatusCode)
+		re.Equal(http.StatusOK, resp.StatusCode)
+		if tcase.isNewGroup {
 			finalNum++
-		} else {
-			re.Equal(http.StatusInternalServerError, resp.StatusCode)
 		}
 
 		// Modify Resource Group

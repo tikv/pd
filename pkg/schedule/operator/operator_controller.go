@@ -48,7 +48,7 @@ var (
 	fastNotifyInterval = 2 * time.Second
 	// StoreBalanceBaseTime represents the base time of balance rate.
 	StoreBalanceBaseTime float64 = 60
-	// FastOperatorFinishTime min finish time, if finish duration less than it,op will be pushed to fast operator queue
+	// FastOperatorFinishTime min finish time, if finish duration less than it, op will be pushed to fast operator queue
 	FastOperatorFinishTime = 10 * time.Second
 )
 
@@ -575,9 +575,25 @@ func (oc *Controller) removeOperatorLocked(op *Operator) bool {
 		oc.updateCounts(oc.operators)
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
+		if op.Kind()&OpMerge != 0 {
+			oc.removeRelatedMergeOperator(op)
+		}
 		return true
 	}
 	return false
+}
+
+func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
+	relatedID, _ := strconv.ParseUint(op.AdditionalInfos[string(RelatedMergeRegion)], 10, 64)
+	if relatedOp := oc.operators[relatedID]; relatedOp != nil && relatedOp.Status() != CANCELED {
+		log.Info("operator canceled related merge region",
+			zap.Uint64("region-id", relatedOp.RegionID()),
+			zap.String("additional-info", relatedOp.GetAdditionalInfo()),
+			zap.Duration("takes", relatedOp.RunningTime()))
+		oc.removeOperatorLocked(relatedOp)
+		relatedOp.Cancel(RelatedMergeRegion)
+		oc.buryOperator(relatedOp)
+	}
 }
 
 func (oc *Controller) buryOperator(op *Operator) {
