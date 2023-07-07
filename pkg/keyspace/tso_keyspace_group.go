@@ -17,7 +17,6 @@ package keyspace
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -1024,14 +1023,10 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", ErrKeyspaceGroupNotExists(id)
 	}
 
-	// default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
-	// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
-	path := fmt.Sprintf("/ms/%d/tso/00000/primary", m.clusterID)
-	if id != utils.DefaultKeyspaceGroupID {
-		path = fmt.Sprintf("/ms/%d/tso/keyspace_groups/election/%05d/primary", m.clusterID, id)
-	}
+	rootPath := endpoint.TSOSvcRootPath(m.clusterID)
+	primaryPath := endpoint.KeyspaceGroupPrimaryPath(rootPath, id)
 	leader := &tsopb.Participant{}
-	ok, _, err := etcdutil.GetProtoMsgWithModRev(m.client, path, leader)
+	ok, _, err := etcdutil.GetProtoMsgWithModRev(m.client, primaryPath, leader)
 	if err != nil {
 		return "", err
 	}
