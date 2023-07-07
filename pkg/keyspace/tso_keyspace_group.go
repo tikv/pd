@@ -1051,6 +1051,7 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 			}
 			// Wait for the merge to finish.
 			ctx, cancel := context.WithTimeout(m.ctx, time.Minute)
+			ticker := time.NewTicker(time.Second)
 		checkLoop:
 			for {
 				select {
@@ -1060,8 +1061,9 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 						zap.Int("batch-size", len(groupsToMerge)),
 						zap.Int("merged-group-num", mergedGroupNum))
 					cancel()
+					ticker.Stop()
 					return nil
-				case <-time.After(time.Second):
+				case <-ticker.C:
 					kg, err := m.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 					if err != nil {
 						log.Error("failed to check the default keyspace group merge state",
@@ -1070,6 +1072,7 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 							zap.Int("merged-group-num", mergedGroupNum),
 							zap.Error(err))
 						cancel()
+						ticker.Stop()
 						return err
 					}
 					if !kg.IsMergeTarget() {
@@ -1078,6 +1081,7 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 				}
 			}
 			cancel()
+			ticker.Stop()
 			mergedGroupNum += len(groupsToMerge)
 			groupsToMerge = groupsToMerge[:0]
 		}
