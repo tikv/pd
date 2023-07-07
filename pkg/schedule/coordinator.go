@@ -944,6 +944,8 @@ func (c *Coordinator) GetCluster() sche.ClusterInformer {
 
 // GetDiagnosticResult returns the diagnostic result.
 func (c *Coordinator) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult, error) {
+	c.RLock()
+	defer c.RUnlock()
 	return c.diagnosticManager.GetDiagnosticResult(name)
 }
 
