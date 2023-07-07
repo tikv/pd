@@ -15,7 +15,6 @@
 package tso
 
 import (
-	"path"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -75,13 +74,7 @@ func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
 func TestExtractKeyspaceGroupIDFromKeyspaceGroupPrimaryPath(t *testing.T) {
 	re := require.New(t)
 
-	tsoSvcRootPath := "/ms/111/tso"
-	primaryPathBuilder := &kgPrimaryPathBuilder{
-		rootPath:                   tsoSvcRootPath,
-		defaultKeyspaceGroupIDPath: path.Join(tsoSvcRootPath, "00000"),
-	}
-
-	compiledRegexp := primaryPathBuilder.getCompiledNonDefaultIDRegexp()
+	compiledRegexp := endpoint.GetCompiledNonDefaultIDRegexp(uint64(111))
 
 	rightCases := []struct {
 		path string

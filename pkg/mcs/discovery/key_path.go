@@ -17,21 +17,22 @@ package discovery
 import (
 	"strconv"
 	"strings"
+
+	"github.com/tikv/pd/pkg/mcs/utils"
 )
 
 const (
-	registryPrefix = "/ms"
-	registryKey    = "registry"
+	registryKey = "registry"
 )
 
 // RegistryPath returns the full path to store microservice addresses.
 func RegistryPath(clusterID, serviceName, serviceAddr string) string {
-	return strings.Join([]string{registryPrefix, clusterID, serviceName, registryKey, serviceAddr}, "/")
+	return strings.Join([]string{utils.MicroserviceRootPath, clusterID, serviceName, registryKey, serviceAddr}, "/")
 }
 
 // ServicePath returns the path to store microservice addresses.
 func ServicePath(clusterID, serviceName string) string {
-	return strings.Join([]string{registryPrefix, clusterID, serviceName, registryKey}, "/")
+	return strings.Join([]string{utils.MicroserviceRootPath, clusterID, serviceName, registryKey}, "/")
 }
 
 // TSOPath returns the path to store TSO addresses.

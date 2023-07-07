@@ -277,11 +277,6 @@ func (c *tsoServiceDiscovery) GetKeyspaceID() uint32 {
 	return c.keyspaceID.Load()
 }
 
-// SetKeyspaceID sets the ID of the keyspace
-func (c *tsoServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
-	c.keyspaceID.Store(keyspaceID)
-}
-
 // GetKeyspaceGroupID returns the ID of the keyspace group. If the keyspace group is unknown,
 // it returns the default keyspace group ID.
 func (c *tsoServiceDiscovery) GetKeyspaceGroupID() uint32 {
@@ -429,12 +424,16 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		return err
 	}
 
+	keyspaceID := c.GetKeyspaceID()
 	var keyspaceGroup *tsopb.KeyspaceGroup
 	if len(tsoServerAddr) > 0 {
-		keyspaceGroup, err = c.findGroupByKeyspaceID(c.GetKeyspaceID(), tsoServerAddr, updateMemberTimeout)
+		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerAddr, updateMemberTimeout)
 		if err != nil {
 			if c.tsoServerDiscovery.countFailure() {
-				log.Error("[tso] failed to find the keyspace group", errs.ZapError(err))
+				log.Error("[tso] failed to find the keyspace group",
+					zap.Uint32("keyspace-id-in-request", keyspaceID),
+					zap.String("tso-server-addr", tsoServerAddr),
+					errs.ZapError(err))
 			}
 			return err
 		}
@@ -448,6 +447,8 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		c.printFallbackLogOnce.Do(func() {
 			log.Warn("[tso] no tso server address found,"+
 				" fallback to the legacy path to discover from etcd directly",
+				zap.Uint32("keyspace-id-in-request", keyspaceID),
+				zap.String("tso-server-addr", tsoServerAddr),
 				zap.String("discovery-key", c.defaultDiscoveryKey))
 		})
 		addrs, err := c.discoverWithLegacyPath()
@@ -466,6 +467,14 @@ func (c *tsoServiceDiscovery) updateMember() error {
 			Id:      defaultKeySpaceGroupID,
 			Members: members,
 		}
+	}
+
+	oldGroupID := c.GetKeyspaceGroupID()
+	if oldGroupID != keyspaceGroup.Id {
+		log.Info("[tso] the keyspace group changed",
+			zap.Uint32("keyspace-id", keyspaceGroup.Id),
+			zap.Uint32("new-keyspace-group-id", keyspaceGroup.Id),
+			zap.Uint32("old-keyspace-group-id", oldGroupID))
 	}
 
 	// Initialize the serving addresses from the returned keyspace group info.
@@ -487,6 +496,8 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		if primarySwitched := !strings.EqualFold(primaryAddr, c.getPrimaryAddr()); primarySwitched {
 			if _, err := c.GetOrCreateGRPCConn(primaryAddr); err != nil {
 				log.Warn("[tso] failed to connect the next primary",
+					zap.Uint32("keyspace-id-in-request", keyspaceID),
+					zap.String("tso-server-addr", tsoServerAddr),
 					zap.String("next-primary", primaryAddr), errs.ZapError(err))
 				return err
 			}
@@ -497,6 +508,8 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		c.keyspaceGroupSD.update(keyspaceGroup, primaryAddr, secondaryAddrs, addrs)
 	if primarySwitched {
 		log.Info("[tso] updated keyspace group service discovery info",
+			zap.Uint32("keyspace-id-in-request", keyspaceID),
+			zap.String("tso-server-addr", tsoServerAddr),
 			zap.String("keyspace-group-service", keyspaceGroup.String()))
 		if err := c.afterPrimarySwitched(oldPrimary, primaryAddr); err != nil {
 			return err

@@ -192,7 +192,7 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	re.NoError(err)
 	re.Nil(next)
 	schedule := leaderServer.GetConfig().Schedule
-	// set reserved day to zero,close hot region storage
+	// set reserved day to zero, close hot region storage
 	schedule.HotRegionsReservedDays = 0
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
@@ -210,7 +210,7 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	next, err = iter.Next()
 	re.NoError(err)
 	re.Nil(next)
-	// set reserved day to one,open hot region storage
+	// set reserved day to one, open hot region storage
 	schedule.HotRegionsReservedDays = 1
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	time.Sleep(3 * interval)
