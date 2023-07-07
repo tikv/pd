@@ -17,13 +17,13 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/statistics/buckets"
 	"io"
 	"net/http"
 	"strconv"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -37,6 +37,7 @@ type hotStatusHandler struct {
 // HotBucketsResponse is the response for hot buckets.
 type HotBucketsResponse map[uint64][]*HotBucketsItem
 
+// HotBucketsItem is the item of hot buckets.
 type HotBucketsItem struct {
 	StartKey   string `json:"start_key"`
 	EndKey     string `json:"end_key"`
