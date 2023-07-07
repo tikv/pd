@@ -258,8 +258,15 @@ func TestHotWithStoreID(t *testing.T) {
 	re.Equal(float64(200000000), hotRegion.AsLeader[1].TotalBytesRate)
 	re.Equal(float64(100000000), hotRegion.AsLeader[2].TotalBytesRate)
 
-	buckets := pdctl.MustReportBuckets(re, cluster, 1, []byte("a"), []byte("b"),
-		[]uint64{10 * units.MiB, 11 * units.MiB, 12 * units.MiB, 13 * units.MiB})
+	stats := &metapb.BucketStats{
+		ReadBytes:  []uint64{10 * units.MiB},
+		ReadKeys:   []uint64{11 * units.MiB},
+		ReadQps:    []uint64{0},
+		WriteKeys:  []uint64{12 * units.MiB},
+		WriteBytes: []uint64{13 * units.MiB},
+		WriteQps:   []uint64{0},
+	}
+	buckets := pdctl.MustReportBuckets(re, cluster, 1, []byte("a"), []byte("b"), stats)
 	args = []string{"-u", pdAddr, "hot", "buckets", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
