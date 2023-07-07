@@ -8,6 +8,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 // RejectLeader is the label property type that suggests a store should not
@@ -30,6 +31,10 @@ func IsSchedulerRegistered(name string) bool {
 // Config is the interface that wraps the Config related methods.
 type Config interface {
 	IsSchedulingHalted() bool
+	IsSchedulerDisabled(string) bool
+	AddSchedulerCfg(string, []string)
+	RemoveSchedulerCfg(string)
+	Persist(endpoint.ConfigStorage) error
 
 	GetReplicaScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
