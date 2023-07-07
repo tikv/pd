@@ -128,6 +128,7 @@ func NewHotRegionsHistoryCommand() *cobra.Command {
 	return cmd
 }
 
+// NewHotBucketsCommand return a hot buckets subcommand of hotSpotCmd
 func NewHotBucketsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "buckets [region_id]",
@@ -150,7 +151,6 @@ func showHotBucketsCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	cmd.Println(r)
-
 }
 
 func showHotRegionsHistoryCommandFunc(cmd *cobra.Command, args []string) {

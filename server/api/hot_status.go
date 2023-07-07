@@ -34,6 +34,7 @@ type hotStatusHandler struct {
 	rd *render.Render
 }
 
+// HotBucketsResponse is the response for hot buckets.
 type HotBucketsResponse map[uint64][]*HotBucketsItem
 
 type HotBucketsItem struct {
@@ -217,7 +218,6 @@ func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	h.rd.JSON(w, http.StatusOK, ret)
-	return
 }
 
 // @Tags     hotspot
