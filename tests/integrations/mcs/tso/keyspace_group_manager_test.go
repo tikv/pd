@@ -759,6 +759,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 	var (
 		keyspaceGroupNum = keyspace.MaxEtcdTxnOps
 		keyspaceGroups   = make([]*endpoint.KeyspaceGroup, 0, keyspaceGroupNum)
+		keyspaces        = make([]uint32, 0, keyspaceGroupNum)
 	)
 	for i := 1; i <= keyspaceGroupNum; i++ {
 		keyspaceGroups = append(keyspaceGroups, &endpoint.KeyspaceGroup{
@@ -766,6 +767,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 			UserKind:  endpoint.UserKind(rand.Intn(int(endpoint.UserKindCount))).String(),
 			Keyspaces: []uint32{uint32(i)},
 		})
+		keyspaces = append(keyspaces, uint32(i))
 		if len(keyspaceGroups) < keyspace.MaxEtcdTxnOps/2 && i != keyspaceGroupNum {
 			continue
 		}
@@ -786,6 +788,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
 		MergeAllIntoDefault: true,
 	})
+	// Wait for all the keyspace groups to be merged.
+	waitFinishMerge(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, keyspaces)
+	// Check if all the keyspace groups are merged.
+	groups = handlersutil.MustLoadKeyspaceGroups(re, suite.pdLeaderServer, "0", "0")
+	re.Len(groups, 1)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
