@@ -110,7 +110,7 @@ func LoadKeyspace(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if _, ok := c.GetQuery("refresh_group_id"); ok {
+	if value, ok := c.GetQuery("force_refresh_group_id"); ok && value == "true" {
 		groupManager := svr.GetKeyspaceGroupManager()
 		if groupManager == nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
