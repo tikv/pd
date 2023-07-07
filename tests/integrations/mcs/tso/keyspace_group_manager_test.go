@@ -467,15 +467,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
-	kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
-	re.Equal(uint32(0), kg.ID)
-	re.Equal([]uint32{0}, kg.Keyspaces)
-	re.False(kg.IsSplitting())
 	// wait for finishing alloc nodes
-	testutil.Eventually(re, func() bool {
-		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
-		return len(kg.Members) == 2
-	})
+	waitFinishAllocNodes(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID)
 	testConfig := map[string]string{
 		"config":                "1",
 		"tso_keyspace_group_id": "0",
@@ -485,13 +478,17 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
 		Name:   "test_keyspace",
 		Config: testConfig,
 	})
-	kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
-	testutil.Eventually(re, func() bool {
-		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
-		return len(kg.Members) == 2
-	})
+	waitFinishAllocNodes(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+}
+
+func waitFinishAllocNodes(re *require.Assertions, server *tests.TestServer, groupID uint32) {
+	testutil.Eventually(re, func() bool {
+		kg := handlersutil.MustLoadKeyspaceGroupByID(re, server, groupID)
+		re.Equal(groupID, kg.ID)
+		return len(kg.Members) == mcsutils.DefaultKeyspaceGroupReplicaCount
+	})
 }
 
 func TestTwiceSplitKeyspaceGroup(t *testing.T) {
