@@ -138,7 +138,7 @@ func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]
 type RegionScatterer struct {
 	ctx            context.Context
 	name           string
-	cluster        sche.ClusterInformer
+	cluster        sche.ScatterCluster
 	ordinaryEngine engineContext
 	specialEngines sync.Map
 	opController   *operator.Controller
@@ -146,7 +146,7 @@ type RegionScatterer struct {
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(ctx context.Context, cluster sche.ClusterInformer, opController *operator.Controller) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster sche.ScatterCluster, opController *operator.Controller) *RegionScatterer {
 	return &RegionScatterer{
 		ctx:          ctx,
 		name:         regionScatterName,
@@ -315,7 +315,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		if store == nil {
 			return nil
 		}
-		if engineFilter.Target(r.cluster.GetOpts(), store).IsOK() {
+		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			ordinaryPeers[peer.GetStoreId()] = peer
 		} else {
 			engine := store.GetLabelValue(core.EngineKey)
@@ -439,7 +439,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, oldFit *plac
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(r.name, nil, selectedStores),
 	}
-	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
+	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
 	for _, filterFunc := range context.filterFuncs {
 		filters = append(filters, filterFunc())
 	}
@@ -463,7 +463,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, oldFit *plac
 		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
 		// could be selected as candidate.
 		if storeCount < maxStoreTotalCount || maxStoreTotalCount == minStoreTotalCount {
-			if filter.Target(r.cluster.GetOpts(), store, filters) {
+			if filter.Target(r.cluster.GetSharedConfig(), store, filters) {
 				candidates = append(candidates, store.GetID())
 			}
 		}
@@ -533,7 +533,7 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 		if store == nil {
 			continue
 		}
-		if engineFilter.Target(r.cluster.GetOpts(), store).IsOK() {
+		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
 				fmt.Sprintf("%v", storeID),

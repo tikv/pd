@@ -40,7 +40,7 @@ import (
 // according to various constraints.
 type Builder struct {
 	// basic info
-	sche.ScheduleCluster
+	sche.SharedCluster
 	desc            string
 	regionID        uint64
 	regionEpoch     *metapb.RegionEpoch
@@ -92,10 +92,10 @@ func SkipPlacementRulesCheck(b *Builder) {
 }
 
 // NewBuilder creates a Builder.
-func NewBuilder(desc string, ci sche.ScheduleCluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
+func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opts ...BuilderOption) *Builder {
 	b := &Builder{
 		desc:            desc,
-		ScheduleCluster: ci,
+		SharedCluster:   ci,
 		regionID:        region.GetID(),
 		regionEpoch:     region.GetRegionEpoch(),
 		approximateSize: region.GetApproximateSize(),
@@ -135,7 +135,7 @@ func NewBuilder(desc string, ci sche.ScheduleCluster, region *core.RegionInfo, o
 
 	// placement rules
 	var rules []*placement.Rule
-	if err == nil && !b.skipPlacementRulesCheck && b.GetOpts().IsPlacementRulesEnabled() {
+	if err == nil && !b.skipPlacementRulesCheck && b.GetSharedConfig().IsPlacementRulesEnabled() {
 		fit := b.GetRuleManager().FitRegion(b.GetBasicCluster(), region)
 		for _, rf := range fit.RuleFits {
 			rules = append(rules, rf.Rule)
@@ -151,14 +151,14 @@ func NewBuilder(desc string, ci sche.ScheduleCluster, region *core.RegionInfo, o
 	}
 
 	// build flags
-	supportConfChangeV2 := versioninfo.IsFeatureSupported(b.GetOpts().GetClusterVersion(), versioninfo.ConfChangeV2)
+	supportConfChangeV2 := versioninfo.IsFeatureSupported(b.GetSharedConfig().GetClusterVersion(), versioninfo.ConfChangeV2)
 
 	b.rules = rules
 	b.originPeers = originPeers
 	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
 	b.targetPeers = originPeers.Copy()
-	b.useJointConsensus = supportConfChangeV2 && b.GetOpts().IsUseJointConsensus()
+	b.useJointConsensus = supportConfChangeV2 && b.GetSharedConfig().IsUseJointConsensus()
 	b.err = err
 	return b
 }
@@ -790,7 +790,7 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	var isDownStore bool
 	store := b.GetBasicCluster().GetStore(removeStoreID)
 	if store != nil {
-		isDownStore = store.DownTime() > b.GetOpts().GetMaxStoreDownTime()
+		isDownStore = store.DownTime() > b.GetSharedConfig().GetMaxStoreDownTime()
 	}
 	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore})
 	delete(b.currentPeers, removeStoreID)
@@ -906,7 +906,7 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 
 	stateFilter := &filter.StoreStateFilter{ActionScope: "operator-builder", TransferLeader: true}
 	// store state filter
-	if !stateFilter.Target(b.GetOpts(), store).IsOK() {
+	if !stateFilter.Target(b.GetSharedConfig(), store).IsOK() {
 		return false
 	}
 
@@ -1177,7 +1177,7 @@ func (b *Builder) labelMatch(x, y uint64) int {
 	if sx == nil || sy == nil {
 		return 0
 	}
-	labels := b.GetOpts().GetLocationLabels()
+	labels := b.GetSharedConfig().GetLocationLabels()
 	for i, l := range labels {
 		if sx.GetLabelValue(l) != sy.GetLabelValue(l) {
 			return i

@@ -26,7 +26,7 @@ import (
 // JointStateChecker ensures region is in joint state will leave.
 type JointStateChecker struct {
 	PauseController
-	cluster sche.ClusterInformer
+	cluster sche.CheckerCluster
 }
 
 const jointStateCheckerName = "joint_state_checker"
@@ -41,7 +41,7 @@ var (
 )
 
 // NewJointStateChecker creates a joint state checker.
-func NewJointStateChecker(cluster sche.ClusterInformer) *JointStateChecker {
+func NewJointStateChecker(cluster sche.CheckerCluster) *JointStateChecker {
 	return &JointStateChecker{
 		cluster: cluster,
 	}
