@@ -20,11 +20,14 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"strings"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -196,4 +199,70 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 			}
 		}
 	}
+}
+
+// GetAllGCSafePointV2 return all gc safe point v2.
+func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetAllGCSafePointV2Request) (*pdpb.GetAllGCSafePointV2Response, error) {
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
+		return pdpb.NewPDClient(client).GetAllGCSafePointV2(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.GetAllGCSafePointV2Response), err
+	}
+
+	startkey := endpoint.GCSafePointV2Prefix()
+	endkey := clientv3.GetPrefixRangeEnd(startkey)
+	_, values, revision, err := s.loadRangeFromETCD(startkey, endkey)
+
+	gcSafePoints := make([]*pdpb.GCSafePointV2, 0, len(values))
+	for _, value := range values {
+		jsonGcSafePoint := &endpoint.GCSafePointV2{}
+		if err = json.Unmarshal([]byte(value), jsonGcSafePoint); err != nil {
+			return nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+		}
+		gcSafePoint := &pdpb.GCSafePointV2{
+			KeyspaceId:  jsonGcSafePoint.KeyspaceID,
+			GcSafePoint: jsonGcSafePoint.SafePoint,
+		}
+		log.Debug("get all gc safe point v2",
+			zap.Uint32("keyspace-id", jsonGcSafePoint.KeyspaceID),
+			zap.Uint64("gc-safe-point", jsonGcSafePoint.SafePoint))
+		gcSafePoints = append(gcSafePoints, gcSafePoint)
+	}
+
+	if err != nil {
+		return &pdpb.GetAllGCSafePointV2Response{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, err
+	}
+
+	return &pdpb.GetAllGCSafePointV2Response{
+		Header:       s.header(),
+		GcSafePoints: gcSafePoints,
+		Revision:     revision,
+	}, nil
+}
+
+func (s *GrpcServer) loadRangeFromETCD(startKey, endKey string) ([]string, []string, int64, error) {
+	startKey = strings.Join([]string{s.rootPath, startKey}, "/")
+	var opOption []clientv3.OpOption
+	if endKey == "\x00" {
+		opOption = append(opOption, clientv3.WithPrefix())
+	} else {
+		endKey = strings.Join([]string{s.rootPath, endKey}, "/")
+		opOption = append(opOption, clientv3.WithRange(endKey))
+	}
+	resp, err := etcdutil.EtcdKVGet(s.client, startKey, opOption...)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	keys := make([]string, 0, len(resp.Kvs))
+	values := make([]string, 0, len(resp.Kvs))
+	for _, item := range resp.Kvs {
+		keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(string(item.Key), s.rootPath), "/"))
+		values = append(values, string(item.Value))
+	}
+	return keys, values, resp.Header.Revision, nil
 }
