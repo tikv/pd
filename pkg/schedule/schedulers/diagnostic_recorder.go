@@ -18,13 +18,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/movingaverage"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"go.uber.org/zap"
 )
 
 const (
@@ -65,7 +63,6 @@ type DiagnosticRecorder struct {
 func NewDiagnosticRecorder(name string, config sc.Config) *DiagnosticRecorder {
 	summaryFunc, ok := DiagnosableSummaryFunc[name]
 	if !ok {
-		log.Error("can't find summary function", zap.String("scheduler-name", name))
 		return nil
 	}
 	return &DiagnosticRecorder{

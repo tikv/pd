@@ -26,21 +26,13 @@ import (
 type Manager struct {
 	config              *config.PersistOptions
 	schedulerController map[string]*schedulers.ScheduleController
-	schedulerRecorders  map[string]*schedulers.DiagnosticRecorder
 }
 
 // NewManager creates a new Manager.
 func NewManager(schedulerController map[string]*schedulers.ScheduleController, config *config.PersistOptions) *Manager {
-	schedulerRecorders := make(map[string]*schedulers.DiagnosticRecorder)
-	for name := range schedulers.DiagnosableSummaryFunc {
-		if _, ok := schedulerController[name]; ok {
-			schedulerRecorders[name] = schedulerController[name].GetDiagnosticRecorder()
-		}
-	}
 	return &Manager{
 		config:              config,
 		schedulerController: schedulerController,
-		schedulerRecorders:  schedulerRecorders,
 	}
 }
 
@@ -51,6 +43,11 @@ func (d *Manager) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 	}
 
 	scheduler, isSchedulerExisted := d.schedulerController[name]
+	if !isSchedulerExisted {
+		ts := uint64(time.Now().Unix())
+		res := &schedulers.DiagnosticResult{Name: name, Timestamp: ts, Status: schedulers.Disabled}
+		return res, nil
+	}
 	var isDisabled bool
 	t := scheduler.Scheduler.GetType()
 	scheduleConfig := d.config.GetScheduleConfig()
@@ -60,7 +57,7 @@ func (d *Manager) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 			break
 		}
 	}
-	if !isSchedulerExisted || isDisabled {
+	if isDisabled {
 		ts := uint64(time.Now().Unix())
 		res := &schedulers.DiagnosticResult{Name: name, Timestamp: ts, Status: schedulers.Disabled}
 		return res, nil
@@ -78,5 +75,5 @@ func (d *Manager) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 }
 
 func (d *Manager) getSchedulerRecorder(name string) *schedulers.DiagnosticRecorder {
-	return d.schedulerRecorders[name]
+	return d.schedulerController[name].GetDiagnosticRecorder()
 }
