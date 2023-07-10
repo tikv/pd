@@ -1015,6 +1015,7 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 
 // MergeAllIntoDefaultKeyspaceGroup merges all other keyspace groups into the default keyspace group.
 func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
+	defer logutil.LogPanic()
 	mergedGroupNum := 0
 	for i := 0; i < int(endpoint.UserKindCount); i++ {
 		userKind := endpoint.UserKind(i)
