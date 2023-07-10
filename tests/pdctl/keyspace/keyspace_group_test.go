@@ -366,7 +366,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 
 	// merge keyspace group with `all` flag.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "merge", "--all"}
+		args := []string{"-u", pdAddr, "keyspace-group", "merge", "0", "--all"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
@@ -393,6 +393,14 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	strings.Contains(string(output), "Must specify the source keyspace group ID(s) or the merge all flag")
+	args = []string{"-u", pdAddr, "keyspace-group", "merge", "0", "1", "--all"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	strings.Contains(string(output), "Must specify the source keyspace group ID(s) or the merge all flag")
+	args = []string{"-u", pdAddr, "keyspace-group", "merge", "1", "--all"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	strings.Contains(string(output), "Unable to merge all keyspace groups into a non-default keyspace group")
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))

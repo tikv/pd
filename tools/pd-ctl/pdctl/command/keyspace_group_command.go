@@ -250,23 +250,28 @@ func finishSplitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 
 func mergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	var (
-		targetGroupID = mcsutils.DefaultKeyspaceGroupID
+		targetGroupID uint32
 		params        = map[string]interface{}{}
 		argNum        = len(args)
 	)
-	if argNum == 0 {
-		mergeAll, err := cmd.Flags().GetBool("all")
+	mergeAll, err := cmd.Flags().GetBool("all")
+	if err != nil {
+		cmd.Printf("Failed to get the merge all flag: %s\n", err)
+		return
+	}
+	if argNum == 1 && mergeAll {
+		target, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {
-			cmd.Printf("Failed to get the merge all flag: %s\n", err)
+			cmd.Printf("Failed to parse the target keyspace group ID: %s\n", err)
 			return
 		}
-		if !mergeAll {
-			cmd.Println("Must specify the source keyspace group ID(s) or the merge all flag")
-			cmd.Usage()
+		targetGroupID = uint32(target)
+		if targetGroupID != mcsutils.DefaultKeyspaceGroupID {
+			cmd.Println("Unable to merge all keyspace groups into a non-default keyspace group")
 			return
 		}
 		params["merge-all-into-default"] = true
-	} else if argNum >= 2 {
+	} else if argNum >= 2 && !mergeAll {
 		target, err := strconv.ParseUint(args[0], 10, 32)
 		if err != nil {
 			cmd.Printf("Failed to parse the target keyspace group ID: %s\n", err)
