@@ -436,7 +436,7 @@ func TestMixedTSODeployment(t *testing.T) {
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	checkTSO(ctx1, re, &wg, backendEndpoints)
+	checkTSO(ctx1, re, &wg, backendEndpoints, pd.WithAllowTSOFallback() /* It's expected that the timestamp fallback happens here */)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -497,12 +497,15 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
 }
 
-func checkTSO(ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, backendEndpoints string) {
+func checkTSO(
+	ctx context.Context, re *require.Assertions, wg *sync.WaitGroup,
+	backendEndpoints string, opts ...pd.ClientOption,
+) {
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
-			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","))
+			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","), opts...)
 			defer cli.Close()
 			var ts, lastTS uint64
 			for {
