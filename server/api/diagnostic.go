@@ -19,7 +19,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -38,7 +38,7 @@ func newDiagnosticHandler(svr *server.Server, rd *render.Render) *diagnosticHand
 
 func (h *diagnosticHandler) GetDiagnosticResult(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
-	if _, ok := schedule.DiagnosableSummaryFunc[name]; !ok {
+	if _, ok := schedulers.DiagnosableSummaryFunc[name]; !ok {
 		h.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerUndiagnosable.FastGenByArgs(name).Error())
 		return
 	}
