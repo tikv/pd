@@ -257,7 +257,7 @@ func mergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	if argNum == 0 {
 		mergeAll, err := cmd.Flags().GetBool("all")
 		if err != nil {
-			cmd.Printf("Failed to get the merge all flag: %s\n", err.Error())
+			cmd.Printf("Failed to get the merge all flag: %s\n", err)
 			return
 		}
 		if !mergeAll {
