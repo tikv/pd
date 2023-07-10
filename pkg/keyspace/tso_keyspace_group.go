@@ -1016,13 +1016,23 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 // MergeAllIntoDefaultKeyspaceGroup merges all other keyspace groups into the default keyspace group.
 func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 	defer logutil.LogPanic()
+	// Since we don't take the default keyspace group into account,
+	// the number of unmerged keyspace groups is -1.
+	unmergedGroupNum := -1
+	// Calculate the total number of keyspace groups to merge.
+	for _, groups := range m.groups {
+		unmergedGroupNum += groups.Len()
+	}
 	mergedGroupNum := 0
-	for i := 0; i < int(endpoint.UserKindCount); i++ {
-		userKind := endpoint.UserKind(i)
+	// Start to merge all keyspace groups into the default one.
+	for userKind, groups := range m.groups {
+		mergeNum := groups.Len()
 		log.Info("start to merge all keyspace groups into the default one",
-			zap.Stringer("user-kind", userKind))
-		groups, ok := m.groups[userKind]
-		if !ok || groups.Len() == 0 {
+			zap.Stringer("user-kind", userKind),
+			zap.Int("merge-num", mergeNum),
+			zap.Int("merged-group-num", mergedGroupNum),
+			zap.Int("unmerged-group-num", unmergedGroupNum))
+		if mergeNum == 0 {
 			continue
 		}
 		var (
@@ -1034,19 +1044,23 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 				continue
 			}
 			groupsToMerge = append(groupsToMerge, group.ID)
-			if len(groupsToMerge) < maxBatchSize && idx < groups.Len()-1 {
+			if len(groupsToMerge) < maxBatchSize && idx < mergeNum-1 {
 				continue
 			}
 			log.Info("merge keyspace groups into the default one",
 				zap.Int("index", idx),
 				zap.Int("batch-size", len(groupsToMerge)),
-				zap.Int("merged-group-num", mergedGroupNum))
+				zap.Int("merge-num", mergeNum),
+				zap.Int("merged-group-num", mergedGroupNum),
+				zap.Int("unmerged-group-num", unmergedGroupNum))
 			// Reach the batch size, merge them into the default keyspace group.
 			if err := m.MergeKeyspaceGroups(utils.DefaultKeyspaceGroupID, groupsToMerge); err != nil {
 				log.Error("failed to merge all keyspace groups into the default one",
 					zap.Int("index", idx),
 					zap.Int("batch-size", len(groupsToMerge)),
+					zap.Int("merge-num", mergeNum),
 					zap.Int("merged-group-num", mergedGroupNum),
+					zap.Int("unmerged-group-num", unmergedGroupNum),
 					zap.Error(err))
 				return err
 			}
@@ -1060,7 +1074,9 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 					log.Info("cancel merging all keyspace groups into the default one",
 						zap.Int("index", idx),
 						zap.Int("batch-size", len(groupsToMerge)),
-						zap.Int("merged-group-num", mergedGroupNum))
+						zap.Int("merge-num", mergeNum),
+						zap.Int("merged-group-num", mergedGroupNum),
+						zap.Int("unmerged-group-num", unmergedGroupNum))
 					cancel()
 					ticker.Stop()
 					return nil
@@ -1070,7 +1086,9 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 						log.Error("failed to check the default keyspace group merge state",
 							zap.Int("index", idx),
 							zap.Int("batch-size", len(groupsToMerge)),
+							zap.Int("merge-num", mergeNum),
 							zap.Int("merged-group-num", mergedGroupNum),
+							zap.Int("unmerged-group-num", unmergedGroupNum),
 							zap.Error(err))
 						cancel()
 						ticker.Stop()
@@ -1084,11 +1102,13 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 			cancel()
 			ticker.Stop()
 			mergedGroupNum += len(groupsToMerge)
+			unmergedGroupNum -= len(groupsToMerge)
 			groupsToMerge = groupsToMerge[:0]
 		}
 	}
 	log.Info("finish merging all keyspace groups into the default one",
-		zap.Int("merged-group-num", mergedGroupNum))
+		zap.Int("merged-group-num", mergedGroupNum),
+		zap.Int("unmerged-group-num", unmergedGroupNum))
 	return nil
 }
 
