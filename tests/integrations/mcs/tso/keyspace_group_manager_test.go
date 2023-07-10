@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/integrations/mcs"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
 
@@ -143,10 +144,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	// Create a client for each keyspace and make sure they can successfully discover the service
 	// provided by the default keyspace group.
 	keyspaceIDs := []uint32{0, 1, 2, 3, 1000}
-	clients := tests.WaitForMultiKeyspacesTSOAvailable(
+	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Equal(len(keyspaceIDs), len(clients))
-	tests.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
 }
@@ -224,10 +225,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 		keyspaceIDs = append(keyspaceIDs, param.keyspaceIDs...)
 	}
 
-	clients := tests.WaitForMultiKeyspacesTSOAvailable(
+	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Equal(len(keyspaceIDs), len(clients))
-	tests.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
 }

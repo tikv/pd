@@ -41,6 +41,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/integrations/mcs"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
@@ -188,7 +189,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	cli := tests.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
+	cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
 	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
 	ts := tsoutil.ComposeTS(physical, logical)
@@ -495,7 +496,7 @@ func (suite *APIServerForwardTestSuite) checkUnavailableTSO() {
 
 func (suite *APIServerForwardTestSuite) checkAvailableTSO() {
 	re := suite.Require()
-	tests.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
+	mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
 	// try to get ts
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.NoError(err)
