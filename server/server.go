@@ -1844,13 +1844,10 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 	s.servicePrimaryMap.Store(serviceName, addr)
 }
 
-func (s *Server) servicePrimaryKey(serviceName string) string {
-	return fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
-}
-
 func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := mcs.TSOServiceName
-	tsoServicePrimaryKey := s.servicePrimaryKey(serviceName)
+	tsoRootPath := endpoint.TSOSvcRootPath(s.clusterID)
+	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, mcs.DefaultKeyspaceGroupID)
 	putFn := func(kv *mvccpb.KeyValue) error {
 		primary := &tsopb.Participant{} // TODO: use Generics
 		if err := proto.Unmarshal(kv.Value, primary); err != nil {
