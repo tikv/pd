@@ -244,6 +244,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	addRegionInfo(tc, statistics.Read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
 	})
+	tc.GetStoreConfig().SetRegionBucketEnabled(true)
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	re.Equal(operator.OpSplit, ops[0].Kind())
