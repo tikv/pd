@@ -188,13 +188,13 @@ func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
 }
 
 // GetHotBuckets returns all hot buckets stats.
-func (h *Handler) GetHotBuckets(regionIds ...uint64) map[uint64][]*buckets.BucketStat {
+func (h *Handler) GetHotBuckets(regionIDs ...uint64) map[uint64][]*buckets.BucketStat {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil
 	}
 	degree := c.GetOpts().GetHotRegionCacheHitsThreshold()
-	return c.BucketsStats(degree, regionIds...)
+	return c.BucketsStats(degree, regionIDs...)
 }
 
 // GetHotReadRegions gets all hot read regions stats.
