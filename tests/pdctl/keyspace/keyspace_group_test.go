@@ -203,10 +203,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	ttc, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
 	re.NoError(err)
 	defer ttc.Destroy()
-	tsoAddrs := make([]string, 0, 2)
-	for _, server := range ttc.GetServers() {
-		tsoAddrs = append(tsoAddrs, server.GetAddr())
-	}
+	tsoAddrs := ttc.GetAddrs()
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
@@ -514,12 +511,10 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	s1, tsoServerCleanup1, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
-	defer tsoServerCleanup1()
+	ttc, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
 	re.NoError(err)
-	s2, tsoServerCleanup2, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
-	defer tsoServerCleanup2()
-	re.NoError(err)
+	defer ttc.Destroy()
+	tsoAddrs := ttc.GetAddrs()
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
@@ -540,7 +535,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		return len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {
-		re.Contains([]string{s1.GetAddr(), s2.GetAddr()}, member.Address)
+		re.Contains(tsoAddrs, member.Address)
 	}
 
 	// get primary for keyspace group 0.
@@ -550,7 +545,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		re.NoError(err)
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
 		json.Unmarshal(output, &resp)
-		return s1.GetAddr() == resp.Primary || s2.GetAddr() == resp.Primary
+		return tsoAddrs[0] == resp.Primary || tsoAddrs[1] == resp.Primary
 	})
 
 	// split keyspace group.
@@ -572,7 +567,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		return len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {
-		re.Contains([]string{s1.GetAddr(), s2.GetAddr()}, member.Address)
+		re.Contains(tsoAddrs, member.Address)
 	}
 
 	// get primary for keyspace group 1.
@@ -582,7 +577,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		re.NoError(err)
 		var resp handlers.GetKeyspaceGroupPrimaryResponse
 		json.Unmarshal(output, &resp)
-		return s1.GetAddr() == resp.Primary || s2.GetAddr() == resp.Primary
+		return tsoAddrs[0] == resp.Primary || tsoAddrs[1] == resp.Primary
 	})
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
