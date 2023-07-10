@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,112 +12,60 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package schedulers
 
 import (
 	"fmt"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/movingaverage"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"go.uber.org/zap"
-)
-
-const (
-	// disabled means the current scheduler is unavailable or removed
-	disabled = "disabled"
-	// paused means the current scheduler is paused
-	paused = "paused"
-	// halted means the current scheduler is halted
-	halted = "halted"
-	// scheduling means the current scheduler is generating.
-	scheduling = "scheduling"
-	// pending means the current scheduler cannot generate scheduling operator
-	pending = "pending"
-	// normal means that there is no need to create operators since everything is fine.
-	normal = "normal"
 )
 
 const (
 	maxDiagnosticResultNum = 10
 )
 
+const (
+	// Disabled means the current scheduler is unavailable or removed
+	Disabled = "disabled"
+	// Paused means the current scheduler is paused
+	Paused = "paused"
+	// Halted means the current scheduler is halted
+	Halted = "halted"
+	// Scheduling means the current scheduler is generating.
+	Scheduling = "scheduling"
+	// Pending means the current scheduler cannot generate scheduling operator
+	Pending = "pending"
+	// Normal means that there is no need to create operators since everything is fine.
+	Normal = "normal"
+)
+
 // DiagnosableSummaryFunc includes all implementations of plan.Summary.
 // And it also includes all schedulers which pd support to diagnose.
 var DiagnosableSummaryFunc = map[string]plan.Summary{
-	schedulers.BalanceRegionName: plan.BalancePlanSummary,
-	schedulers.BalanceLeaderName: plan.BalancePlanSummary,
+	BalanceRegionName: plan.BalancePlanSummary,
+	BalanceLeaderName: plan.BalancePlanSummary,
 }
 
-type diagnosticManager struct {
-	coordinator *Coordinator
-	config      sc.Config
-	recorders   map[string]*diagnosticRecorder
-}
-
-func newDiagnosticManager(coordinator *Coordinator, config sc.Config) *diagnosticManager {
-	recorders := make(map[string]*diagnosticRecorder)
-	for name := range DiagnosableSummaryFunc {
-		recorders[name] = newDiagnosticRecorder(name, coordinator, config)
-	}
-	return &diagnosticManager{
-		coordinator: coordinator,
-		config:      config,
-		recorders:   recorders,
-	}
-}
-
-func (d *diagnosticManager) getDiagnosticResult(name string) (*DiagnosticResult, error) {
-	if !d.config.IsDiagnosticAllowed() {
-		return nil, errs.ErrDiagnosticDisabled
-	}
-
-	isSchedulerExisted, _ := d.coordinator.IsSchedulerExisted(name)
-	isDisabled, _ := d.coordinator.IsSchedulerDisabled(name)
-	if !isSchedulerExisted || isDisabled {
-		ts := uint64(time.Now().Unix())
-		res := &DiagnosticResult{Name: name, Timestamp: ts, Status: disabled}
-		return res, nil
-	}
-
-	recorder := d.getRecorder(name)
-	if recorder == nil {
-		return nil, errs.ErrSchedulerUndiagnosable.FastGenByArgs(name)
-	}
-	result := recorder.getLastResult()
-	if result == nil {
-		return nil, errs.ErrNoDiagnosticResult.FastGenByArgs(name)
-	}
-	return result, nil
-}
-
-func (d *diagnosticManager) getRecorder(name string) *diagnosticRecorder {
-	return d.recorders[name]
-}
-
-// diagnosticRecorder is used to manage diagnostic for one scheduler.
-type diagnosticRecorder struct {
+// DiagnosticRecorder is used to manage diagnostic for one scheduler.
+type DiagnosticRecorder struct {
 	schedulerName string
-	coordinator   *Coordinator
 	config        sc.Config
 	summaryFunc   plan.Summary
 	results       *cache.FIFO
 }
 
-func newDiagnosticRecorder(name string, coordinator *Coordinator, config sc.Config) *diagnosticRecorder {
+// NewDiagnosticRecorder creates a new DiagnosticRecorder.
+func NewDiagnosticRecorder(name string, config sc.Config) *DiagnosticRecorder {
 	summaryFunc, ok := DiagnosableSummaryFunc[name]
 	if !ok {
-		log.Error("can't find summary function", zap.String("scheduler-name", name))
 		return nil
 	}
-	return &diagnosticRecorder{
-		coordinator:   coordinator,
+	return &DiagnosticRecorder{
 		schedulerName: name,
 		config:        config,
 		summaryFunc:   summaryFunc,
@@ -125,14 +73,16 @@ func newDiagnosticRecorder(name string, coordinator *Coordinator, config sc.Conf
 	}
 }
 
-func (d *diagnosticRecorder) isAllowed() bool {
+// IsAllowed is used to check whether the diagnostic is allowed.
+func (d *DiagnosticRecorder) IsAllowed() bool {
 	if d == nil {
 		return false
 	}
 	return d.config.IsDiagnosticAllowed()
 }
 
-func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
+// GetLastResult is used to get the last diagnostic result.
+func (d *DiagnosticRecorder) GetLastResult() *DiagnosticResult {
 	if d.results.Len() == 0 {
 		return nil
 	}
@@ -150,7 +100,7 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 
 	var resStr string
 	firstStatus := items[0].Value.(*DiagnosticResult).Status
-	if firstStatus == pending || firstStatus == normal {
+	if firstStatus == Pending || firstStatus == Normal {
 		wa := movingaverage.NewWeightAllocator(length, 3)
 		counter := make(map[uint64]map[plan.Status]float64)
 		for i := 0; i < length; i++ {
@@ -179,7 +129,7 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 			for k, v := range statusCounter {
 				resStr += fmt.Sprintf("%d store(s) %s; ", v, k.String())
 			}
-		} else if firstStatus == pending {
+		} else if firstStatus == Pending {
 			// This is used to handle pending status because of reach limit in `IsScheduleAllowed`
 			resStr = fmt.Sprintf("%s reach limit", d.schedulerName)
 		}
@@ -192,7 +142,8 @@ func (d *diagnosticRecorder) getLastResult() *DiagnosticResult {
 	}
 }
 
-func (d *diagnosticRecorder) setResultFromStatus(status string) {
+// SetResultFromStatus is used to set result from status.
+func (d *DiagnosticRecorder) SetResultFromStatus(status string) {
 	if d == nil {
 		return
 	}
@@ -200,7 +151,8 @@ func (d *diagnosticRecorder) setResultFromStatus(status string) {
 	d.results.Put(result.Timestamp, result)
 }
 
-func (d *diagnosticRecorder) setResultFromPlans(ops []*operator.Operator, plans []plan.Plan) {
+// SetResultFromPlans is used to set result from plans.
+func (d *DiagnosticRecorder) SetResultFromPlans(ops []*operator.Operator, plans []plan.Plan) {
 	if d == nil {
 		return
 	}
@@ -208,22 +160,22 @@ func (d *diagnosticRecorder) setResultFromPlans(ops []*operator.Operator, plans 
 	d.results.Put(result.Timestamp, result)
 }
 
-func (d *diagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
-	res := &DiagnosticResult{Name: d.schedulerName, Timestamp: ts, Status: normal}
+func (d *DiagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
+	res := &DiagnosticResult{Name: d.schedulerName, Timestamp: ts, Status: Normal}
 	name := d.schedulerName
 	// TODO: support more schedulers and checkers
 	switch name {
-	case schedulers.BalanceRegionName, schedulers.BalanceLeaderName:
+	case BalanceRegionName, BalanceLeaderName:
 		if len(ops) != 0 {
-			res.Status = scheduling
+			res.Status = Scheduling
 			return res
 		}
-		res.Status = pending
+		res.Status = Pending
 		if d.summaryFunc != nil {
 			isAllNormal := false
 			res.StoreStatus, isAllNormal, _ = d.summaryFunc(plans)
 			if isAllNormal {
-				res.Status = normal
+				res.Status = Normal
 			}
 		}
 		return res
