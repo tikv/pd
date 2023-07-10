@@ -77,6 +77,9 @@ type Config struct {
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
+	// WarningMsgs contains all warnings during parsing.
+	WarningMsgs []string
+
 	// LeaderLease defines the time within which a Resource Manager primary/leader must
 	// update its TTL in etcd, otherwise etcd will expire the leader key and other servers
 	// can campaign the primary/leader again. Etcd only supports seconds TTL, so here is
@@ -196,11 +199,9 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 // Adjust is used to adjust the resource manager configurations.
 func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configMetaData := configutil.NewConfigMetadata(meta)
-	warningMsgs := make([]string, 0)
 	if err := configMetaData.CheckUndecoded(); err != nil {
-		warningMsgs = append(warningMsgs, err.Error())
+		c.WarningMsgs = append(c.WarningMsgs, err.Error())
 	}
-	configutil.PrintConfigCheckMsg(os.Stdout, warningMsgs)
 
 	if c.Name == "" {
 		hostname, err := os.Hostname()
