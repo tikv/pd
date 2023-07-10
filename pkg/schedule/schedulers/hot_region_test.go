@@ -302,7 +302,15 @@ func TestSplitBuckets(t *testing.T) {
 	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
 	expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
 	re.NoError(err)
-	expectOp.GetCreateTime()
+	re.Equal(expectOp.Brief(), op.Brief())
+	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
+
+	ops = solve.createSplitOperator([]*core.RegionInfo{region}, true)
+	re.Equal(1, len(ops))
+	op = ops[0]
+	re.Equal(splitBucket, op.Desc())
+	expectKeys = [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")}
+	expectOp, err = operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
 	re.Equal(expectOp.Brief(), op.Brief())
 	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
 }

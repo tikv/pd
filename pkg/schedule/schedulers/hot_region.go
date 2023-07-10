@@ -670,7 +670,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				}
 			}
 			bs.cur.mainPeerStat = mainPeerStat
-			if tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) {
+			if tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) && bs.GetStoreConfig().IsEnableRegionBucket() {
 				hotSchedulerRegionTooHotNeedSplitCounter.Inc()
 				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region}, true /*too hot need to split*/)
 				if len(ops) > 0 {
@@ -1541,7 +1541,13 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHo
 				// Otherwise, we should append the current start key and end key.
 				// E.g. [a, b), [c, d) -> [a, b), [c, d) split keys is [a,b,c,d]
 				if bytes.Equal(stat.StartKey, splitKey[len(splitKey)-1]) {
-					splitKey[len(splitKey)-1] = stat.EndKey
+					// If the region is too hot, we should split all the buckets to balance the load.
+					// otherwise, we should split the buckets that are too hot.
+					if isTooHot {
+						splitKey = append(splitKey, stat.EndKey)
+					} else {
+						splitKey[len(splitKey)-1] = stat.EndKey
+					}
 				} else {
 					splitKey = append(splitKey, stat.StartKey, stat.EndKey)
 				}

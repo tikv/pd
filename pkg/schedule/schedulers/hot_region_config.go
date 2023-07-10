@@ -75,7 +75,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		EnableForTiFlash:       true,
 		RankFormulaVersion:     "v2",
 		ForbidRWType:           "none",
-		SplitThresholds:        0.5,
+		SplitThresholds:        0.2,
 	}
 	cfg.applyPrioritiesConfig(defaultPrioritiesConfig)
 	return cfg
@@ -387,8 +387,8 @@ func (conf *hotRegionSchedulerConfig) valid() error {
 		conf.ForbidRWType != "none" && conf.ForbidRWType != "" {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid forbid-rw-type")
 	}
-	if conf.SplitThresholds < 0.2 || conf.SplitThresholds > 1.0 {
-		return errs.ErrSchedulerConfig.FastGenByArgs("invalid split-thresholds, should be in range [0.2, 1.0]")
+	if conf.SplitThresholds < 0.01 || conf.SplitThresholds > 1.0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("invalid split-thresholds, should be in range [0.01, 1.0]")
 	}
 	return nil
 }
