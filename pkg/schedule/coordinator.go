@@ -316,7 +316,7 @@ func (c *Coordinator) RunUntilStop() {
 	c.Run()
 	<-c.ctx.Done()
 	log.Info("Coordinator is stopping")
-	c.GetSchedulersController().GetWaitGroup().Wait()
+	c.GetSchedulersController().Wait()
 	c.wg.Wait()
 	log.Info("Coordinator has been stopped")
 }

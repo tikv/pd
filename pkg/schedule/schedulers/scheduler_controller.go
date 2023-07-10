@@ -59,9 +59,9 @@ func NewController(ctx context.Context, cluster sche.ScheduleCluster, storage en
 	}
 }
 
-// GetWaitGroup returns the waitGroup of the controller.
-func (c *Controller) GetWaitGroup() *sync.WaitGroup {
-	return &c.wg
+// Wait waits on all schedulers to exit.
+func (c *Controller) Wait() {
+	c.wg.Wait()
 }
 
 // GetScheduler returns a schedule controller by name.
