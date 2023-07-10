@@ -16,6 +16,7 @@ package tso
 
 import (
 	"context"
+	"math/rand"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -465,15 +467,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
-	kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
-	re.Equal(uint32(0), kg.ID)
-	re.Equal([]uint32{0}, kg.Keyspaces)
-	re.False(kg.IsSplitting())
 	// wait for finishing alloc nodes
-	testutil.Eventually(re, func() bool {
-		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
-		return len(kg.Members) == 2
-	})
+	waitFinishAllocNodes(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID)
 	testConfig := map[string]string{
 		"config":                "1",
 		"tso_keyspace_group_id": "0",
@@ -483,13 +478,17 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMembers() {
 		Name:   "test_keyspace",
 		Config: testConfig,
 	})
-	kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
-	testutil.Eventually(re, func() bool {
-		kg = handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 0)
-		return len(kg.Members) == 2
-	})
+	waitFinishAllocNodes(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
+}
+
+func waitFinishAllocNodes(re *require.Assertions, server *tests.TestServer, groupID uint32) {
+	testutil.Eventually(re, func() bool {
+		kg := handlersutil.MustLoadKeyspaceGroupByID(re, server, groupID)
+		re.Equal(groupID, kg.ID)
+		return len(kg.Members) == mcsutils.DefaultKeyspaceGroupReplicaCount
+	})
 }
 
 func TestTwiceSplitKeyspaceGroup(t *testing.T) {
@@ -748,4 +747,49 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
+}
+
+func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
+
+	var (
+		keyspaceGroupNum = keyspace.MaxEtcdTxnOps
+		keyspaceGroups   = make([]*endpoint.KeyspaceGroup, 0, keyspaceGroupNum)
+		keyspaces        = make([]uint32, 0, keyspaceGroupNum)
+	)
+	for i := 1; i <= keyspaceGroupNum; i++ {
+		keyspaceGroups = append(keyspaceGroups, &endpoint.KeyspaceGroup{
+			ID:        uint32(i),
+			UserKind:  endpoint.UserKind(rand.Intn(int(endpoint.UserKindCount))).String(),
+			Keyspaces: []uint32{uint32(i)},
+		})
+		keyspaces = append(keyspaces, uint32(i))
+		if len(keyspaceGroups) < keyspace.MaxEtcdTxnOps/2 && i != keyspaceGroupNum {
+			continue
+		}
+		handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
+			KeyspaceGroups: keyspaceGroups,
+		})
+		keyspaceGroups = keyspaceGroups[:0]
+	}
+	// Check if all the keyspace groups are created.
+	groups := handlersutil.MustLoadKeyspaceGroups(re, suite.pdLeaderServer, "0", "0")
+	re.Len(groups, keyspaceGroupNum+1)
+	// Wait for all the keyspace groups to be served.
+	svr := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	re.NotNil(svr)
+	svr = suite.tsoCluster.WaitForPrimaryServing(re, uint32(keyspaceGroupNum), uint32(keyspaceGroupNum))
+	re.NotNil(svr)
+	// Merge all the keyspace groups into the default keyspace group.
+	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
+		MergeAllIntoDefault: true,
+	})
+	// Wait for all the keyspace groups to be merged.
+	waitFinishMerge(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, keyspaces)
+	// Check if all the keyspace groups are merged.
+	groups = handlersutil.MustLoadKeyspaceGroups(re, suite.pdLeaderServer, "0", "0")
+	re.Len(groups, 1)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
