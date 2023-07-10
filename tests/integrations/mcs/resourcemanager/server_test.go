@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
 )
 
 func TestResourceManagerServer(t *testing.T) {
@@ -45,7 +44,7 @@ func TestResourceManagerServer(t *testing.T) {
 	leaderName := cluster.WaitLeader()
 	leader := cluster.GetServer(leaderName)
 
-	s, cleanup := mcs.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
+	s, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
 	addr := s.GetAddr()
 	defer cleanup()
 

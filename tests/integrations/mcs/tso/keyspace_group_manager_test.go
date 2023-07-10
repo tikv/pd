@@ -39,7 +39,6 @@ import (
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
 
@@ -54,7 +53,7 @@ type tsoKeyspaceGroupManagerTestSuite struct {
 	// pdLeaderServer is the leader server of the PD cluster.
 	pdLeaderServer *tests.TestServer
 	// tsoCluster is the TSO service cluster.
-	tsoCluster *mcs.TestTSOCluster
+	tsoCluster *tests.TestTSOCluster
 }
 
 func TestTSOKeyspaceGroupManager(t *testing.T) {
@@ -74,7 +73,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())
-	suite.tsoCluster, err = mcs.NewTestTSOCluster(suite.ctx, 2, suite.pdLeaderServer.GetAddr())
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 2, suite.pdLeaderServer.GetAddr())
 	re.NoError(err)
 }
 
@@ -144,10 +143,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	// Create a client for each keyspace and make sure they can successfully discover the service
 	// provided by the default keyspace group.
 	keyspaceIDs := []uint32{0, 1, 2, 3, 1000}
-	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
+	clients := tests.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Equal(len(keyspaceIDs), len(clients))
-	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+	tests.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
 }
@@ -225,10 +224,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 		keyspaceIDs = append(keyspaceIDs, param.keyspaceIDs...)
 	}
 
-	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
+	clients := tests.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
 	re.Equal(len(keyspaceIDs), len(clients))
-	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
+	tests.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
 }
@@ -515,7 +514,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
 
-	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, pdAddr)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
 	re.NoError(err)
 	defer tsoCluster.Destroy()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
@@ -707,7 +706,7 @@ func TestGetTSOImmediately(t *testing.T) {
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
 
-	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, pdAddr)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
 	re.NoError(err)
 	defer tsoCluster.Destroy()
 	tsoCluster.WaitForDefaultPrimaryServing(re)

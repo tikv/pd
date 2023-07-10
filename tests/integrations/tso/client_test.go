@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
 
@@ -54,7 +53,7 @@ type tsoClientTestSuite struct {
 	// pdLeaderServer is the leader server of the PD cluster.
 	pdLeaderServer *tests.TestServer
 	// The TSO service in microservice mode.
-	tsoCluster *mcs.TestTSOCluster
+	tsoCluster *tests.TestTSOCluster
 
 	keyspaceGroups []struct {
 		keyspaceGroupID uint32
@@ -104,11 +103,11 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 		re.True(ok)
 		re.Equal(mcsutils.NullKeyspaceID, innerClient.GetServiceDiscovery().GetKeyspaceID())
 		re.Equal(mcsutils.DefaultKeyspaceGroupID, innerClient.GetServiceDiscovery().GetKeyspaceGroupID())
-		mcs.WaitForTSOServiceAvailable(suite.ctx, re, client)
+		tests.WaitForTSOServiceAvailable(suite.ctx, re, client)
 		suite.clients = make([]pd.Client, 0)
 		suite.clients = append(suite.clients, client)
 	} else {
-		suite.tsoCluster, err = mcs.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
+		suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
 		re.NoError(err)
 
 		suite.keyspaceGroups = []struct {
@@ -172,7 +171,7 @@ func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.A
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Create clients and make sure they all have discovered the tso service.
-	suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
+	suite.clients = tests.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, suite.keyspaceIDs, strings.Split(suite.backendEndpoints, ","))
 	re.Equal(len(suite.keyspaceIDs), len(suite.clients))
 }
@@ -248,7 +247,7 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	client := mcs.SetupClientWithKeyspaceID(
+	client := tests.SetupClientWithKeyspaceID(
 		ctx, re, keyspaceID, strings.Split(suite.backendEndpoints, ","))
 	var lastTS uint64
 	for j := 0; j < tsoRequestRound; j++ {
@@ -372,7 +371,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 		time.Sleep(time.Duration(n) * time.Second)
 	}
 
-	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
+	tests.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 }
 
@@ -394,7 +393,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 		time.Sleep(time.Duration(n) * time.Second)
 	}
 
-	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
+	tests.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
 	suite.TearDownSuite()
 	suite.SetupSuite()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
@@ -430,9 +429,9 @@ func TestMixedTSODeployment(t *testing.T) {
 	err = apiSvr.Run()
 	re.NoError(err)
 
-	s, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+	s, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
-	mcs.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s})
+	tests.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s})
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -473,23 +472,23 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	re.NoError(err)
 
 	// Create a TSO cluster which has 2 servers
-	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, backendEndpoints)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
 	re.NoError(err)
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 	// The TSO service should be eventually healthy
-	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
+	tests.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Restart the API cluster
 	apiCluster, err = tests.RestartTestAPICluster(ctx, apiCluster)
 	re.NoError(err)
 	// The TSO service should be eventually healthy
-	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
+	tests.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Restart the TSO cluster
-	tsoCluster, err = mcs.RestartTestTSOCluster(ctx, tsoCluster)
+	tsoCluster, err = tests.RestartTestTSOCluster(ctx, tsoCluster)
 	re.NoError(err)
 	// The TSO service should be eventually healthy
-	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
+	tests.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	tsoCluster.Destroy()
 	apiCluster.Destroy()
@@ -505,7 +504,7 @@ func checkTSO(
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
-			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","), opts...)
+			cli := tests.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","), opts...)
 			defer cli.Close()
 			var ts, lastTS uint64
 			for {

@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
@@ -81,6 +82,7 @@ func newMergeKeyspaceGroupCommand() *cobra.Command {
 		Short: "merge the keyspace group with the given IDs into the target one",
 		Run:   mergeKeyspaceGroupCommandFunc,
 	}
+	r.Flags().Bool("all", false, "merge all keyspace groups into the default one")
 	return r
 }
 
@@ -247,27 +249,47 @@ func finishSplitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func mergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) < 2 {
+	var (
+		targetGroupID = mcsutils.DefaultKeyspaceGroupID
+		params        = map[string]interface{}{}
+		argNum        = len(args)
+	)
+	if argNum == 0 {
+		mergeAll, err := cmd.Flags().GetBool("all")
+		if err != nil {
+			cmd.Printf("Failed to get the merge all flag: %s\n", err.Error())
+			return
+		}
+		if !mergeAll {
+			cmd.Println("Must specify the source keyspace group ID(s) or the merge all flag")
+			cmd.Usage()
+			return
+		}
+		params["merge-all-into-default"] = true
+	} else if argNum >= 2 {
+		target, err := strconv.ParseUint(args[0], 10, 32)
+		if err != nil {
+			cmd.Printf("Failed to parse the target keyspace group ID: %s\n", err)
+			return
+		}
+		targetGroupID = uint32(target)
+		groups := make([]uint32, 0, len(args)-1)
+		for _, arg := range args[1:] {
+			id, err := strconv.ParseUint(arg, 10, 32)
+			if err != nil {
+				cmd.Printf("Failed to parse the keyspace ID: %s\n", err)
+				return
+			}
+			groups = append(groups, uint32(id))
+		}
+		params["merge-list"] = groups
+	} else {
+		cmd.Println("Must specify the source keyspace group ID(s) or the merge all flag")
 		cmd.Usage()
 		return
 	}
-	_, err := strconv.ParseUint(args[0], 10, 32)
-	if err != nil {
-		cmd.Printf("Failed to parse the target keyspace group ID: %s\n", err)
-		return
-	}
-	groups := make([]uint32, 0, len(args)-1)
-	for _, arg := range args[1:] {
-		id, err := strconv.ParseUint(arg, 10, 32)
-		if err != nil {
-			cmd.Printf("Failed to parse the keyspace ID: %s\n", err)
-			return
-		}
-		groups = append(groups, uint32(id))
-	}
-	postJSON(cmd, fmt.Sprintf("%s/%s/merge", keyspaceGroupsPrefix, args[0]), map[string]interface{}{
-		"merge-list": groups,
-	})
+	// TODO: implement the retry mechanism under merge all flag.
+	postJSON(cmd, fmt.Sprintf("%s/%d/merge", keyspaceGroupsPrefix, targetGroupID), params)
 }
 
 func finishMergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
