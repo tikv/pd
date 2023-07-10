@@ -43,6 +43,7 @@ func TestGetRUValueFromConsumption(t *testing.T) {
 	typ = rmpb.RequestUnitType_RU
 	expected = float64(0)
 
+	re.True(false)
 	result = getRUValueFromConsumption(custom, typ)
 	re.Equal(expected, result)
 }
