@@ -117,7 +117,6 @@ func TestScheduler(t *testing.T) {
 			mightExec([]string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
 			return len(result) != 0
 		}, testutil.WithTickInterval(50*time.Millisecond))
-
 		re.Equal(expectedStatus, result["status"])
 		re.Equal(expectedSummary, result["summary"])
 	}

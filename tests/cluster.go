@@ -800,6 +800,13 @@ func (c *TestCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	return cluster.HandleRegionHeartbeat(region)
 }
 
+// HandleReportBuckets processes BucketInfo reports from the client.
+func (c *TestCluster) HandleReportBuckets(b *metapb.Buckets) error {
+	leader := c.GetLeader()
+	cluster := c.servers[leader].GetRaftCluster()
+	return cluster.HandleReportBuckets(b)
+}
+
 // Join is used to add a new TestServer into the cluster.
 func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
 	conf, err := c.config.Join().Generate(opts...)

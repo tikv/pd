@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -51,9 +50,6 @@ import (
 )
 
 const (
-	keyspaceGroupsElectionPath = mcsutils.KeyspaceGroupsKey + "/election"
-	// primaryKey is the key for keyspace group primary election.
-	primaryKey = "primary"
 	// mergingCheckInterval is the interval for merging check to see if the keyspace groups
 	// merging process could be moved forward.
 	mergingCheckInterval = 5 * time.Second
@@ -77,11 +73,14 @@ type state struct {
 	keyspaceLookupTable map[uint32]uint32
 	// splittingGroups is the cache of splitting keyspace group related information.
 	splittingGroups map[uint32]struct{}
+	// deletedGroups is the cache of deleted keyspace group related information.
+	deletedGroups map[uint32]struct{}
 }
 
 func (s *state) initialize() {
 	s.keyspaceLookupTable = make(map[uint32]uint32)
 	s.splittingGroups = make(map[uint32]struct{})
+	s.deletedGroups = make(map[uint32]struct{})
 }
 
 func (s *state) deInitialize() {
@@ -114,6 +113,28 @@ func (s *state) getKeyspaceGroupMeta(
 	s.RLock()
 	defer s.RUnlock()
 	return s.ams[groupID], s.kgs[groupID]
+}
+
+// getSplittingGroups returns the IDs of the splitting keyspace groups.
+func (s *state) getSplittingGroups() []uint32 {
+	s.RLock()
+	defer s.RUnlock()
+	groups := make([]uint32, 0, len(s.splittingGroups))
+	for groupID := range s.splittingGroups {
+		groups = append(groups, groupID)
+	}
+	return groups
+}
+
+// getDeletedGroups returns the IDs of the deleted keyspace groups.
+func (s *state) getDeletedGroups() []uint32 {
+	s.RLock()
+	defer s.RUnlock()
+	groups := make([]uint32, 0, len(s.deletedGroups))
+	for groupID := range s.deletedGroups {
+		groups = append(groups, groupID)
+	}
+	return groups
 }
 
 func (s *state) checkTSOSplit(
@@ -231,32 +252,6 @@ func (s *state) getNextPrimaryToReset(
 	return nil, nil, 0, groupID
 }
 
-// kgPrimaryPathBuilder builds the path for keyspace group primary election.
-// default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
-// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
-type kgPrimaryPathBuilder struct {
-	// rootPath is "/ms/{cluster_id}/tso".
-	rootPath string
-	// defaultKeyspaceGroupIDPath is "/ms/{cluster_id}/tso/00000".
-	defaultKeyspaceGroupIDPath string
-}
-
-// getKeyspaceGroupIDPath returns the keyspace group primary ID path.
-// default keyspace group: "/ms/{cluster_id}/tso/00000".
-// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}".
-func (p *kgPrimaryPathBuilder) getKeyspaceGroupIDPath(keyspaceGroupID uint32) string {
-	if keyspaceGroupID == mcsutils.DefaultKeyspaceGroupID {
-		return p.defaultKeyspaceGroupIDPath
-	}
-	return path.Join(p.rootPath, keyspaceGroupsElectionPath, fmt.Sprintf("%05d", keyspaceGroupID))
-}
-
-// getCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
-func (p *kgPrimaryPathBuilder) getCompiledNonDefaultIDRegexp() *regexp.Regexp {
-	pattern := strings.Join([]string{p.rootPath, keyspaceGroupsElectionPath, `(\d{5})`, primaryKey + `$`}, "/")
-	return regexp.MustCompile(pattern)
-}
-
 // KeyspaceGroupManager manages the members of the keyspace groups assigned to this host.
 // The replicas campaign for the leaders which provide the tso service for the corresponding
 // keyspace groups.
@@ -330,7 +325,6 @@ type KeyspaceGroupManager struct {
 	// mergeCheckerCancelMap is the cancel function map for the merge checker of each keyspace group.
 	mergeCheckerCancelMap sync.Map // GroupID -> context.CancelFunc
 
-	primaryPathBuilder           *kgPrimaryPathBuilder
 	primaryPriorityCheckInterval time.Duration
 
 	// tsoNodes is the registered tso servers.
@@ -381,10 +375,6 @@ func NewKeyspaceGroupManager(
 	kgm.tsoSvcStorage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient, kgm.tsoSvcRootPath), nil)
 	kgm.compiledKGMembershipIDRegexp = endpoint.GetCompiledKeyspaceGroupIDRegexp()
-	kgm.primaryPathBuilder = &kgPrimaryPathBuilder{
-		rootPath:                   kgm.tsoSvcRootPath,
-		defaultKeyspaceGroupIDPath: path.Join(kgm.tsoSvcRootPath, "00000"),
-	}
 	kgm.state.initialize()
 	return kgm
 }
@@ -402,9 +392,10 @@ func (kgm *KeyspaceGroupManager) Initialize() error {
 		return errs.ErrLoadKeyspaceGroupsTerminated.Wrap(err)
 	}
 
-	kgm.wg.Add(2)
+	kgm.wg.Add(3)
 	go kgm.primaryPriorityCheckLoop()
 	go kgm.groupSplitPatroller()
+	go kgm.deletedGroupCleaner()
 
 	return nil
 }
@@ -692,8 +683,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	// Initialize the participant info to join the primary election.
 	participant := member.NewParticipant(kgm.etcdClient)
 	participant.InitInfo(
-		uniqueName, uniqueID, kgm.primaryPathBuilder.getKeyspaceGroupIDPath(group.ID),
-		primaryKey, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
+		uniqueName, uniqueID, endpoint.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID),
+		mcsutils.KeyspaceGroupsPrimaryKey, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
@@ -915,10 +906,12 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 		am.close()
 		kgm.ams[groupID] = nil
 	}
+
+	kgm.deletedGroups[groupID] = struct{}{}
 }
 
 // exitElectionMembership exits the election membership of the given keyspace group by
-// deinitializing the allocator manager, but still keeps the keyspace group info.
+// de-initializing the allocator manager, but still keeps the keyspace group info.
 func (kgm *KeyspaceGroupManager) exitElectionMembership(group *endpoint.KeyspaceGroup) {
 	log.Info("resign election membership", zap.Uint32("keyspace-group-id", group.ID))
 
@@ -1248,7 +1241,7 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 		// Check if the keyspace group primaries in the merge map are all gone.
 		if len(mergeMap) != 0 {
 			for id := range mergeMap {
-				leaderPath := path.Join(kgm.primaryPathBuilder.getKeyspaceGroupIDPath(id), primaryKey)
+				leaderPath := endpoint.KeyspaceGroupPrimaryPath(kgm.tsoSvcRootPath, id)
 				val, err := kgm.tsoSvcStorage.Load(leaderPath)
 				if err != nil {
 					log.Error("failed to check if the keyspace group primary in the merge list has gone",
@@ -1268,12 +1261,17 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 		if len(mergeMap) > 0 {
 			continue
 		}
+		log.Info("all the keyspace group primaries in the merge list are gone, "+
+			"start to calculate the newly merged TSO",
+			zap.String("member", kgm.tsoServiceID.ServiceAddr),
+			zap.Uint32("merge-target-id", mergeTargetID),
+			zap.Any("merge-list", mergeList))
 		// All the keyspace group primaries in the merge list are gone,
-		// update the newly merged TSO to make sure it is greater than the original ones.
+		// calculate the newly merged TSO to make sure it is greater than the original ones.
 		var mergedTS time.Time
 		for _, id := range mergeList {
-			ts, err := kgm.tsoSvcStorage.LoadTimestamp(am.getKeyspaceGroupTSPath(id))
-			if err != nil || ts == typeutil.ZeroTime {
+			ts, err := kgm.tsoSvcStorage.LoadTimestamp(endpoint.KeyspaceGroupTSPath(id))
+			if err != nil {
 				log.Error("failed to load the keyspace group TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
 					zap.Uint32("merge-target-id", mergeTargetID),
@@ -1281,38 +1279,44 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 					zap.Uint32("merge-id", id),
 					zap.Time("ts", ts),
 					zap.Error(err))
-				mergedTS = typeutil.ZeroTime
 				break
 			}
 			if ts.After(mergedTS) {
 				mergedTS = ts
 			}
 		}
-		if mergedTS == typeutil.ZeroTime {
+		if err != nil {
 			continue
 		}
-		// Update the newly merged TSO.
-		// TODO: support the Local TSO Allocator.
-		allocator, err := am.GetAllocator(GlobalDCLocation)
-		if err != nil {
-			log.Error("failed to get the allocator",
+		// Update the newly merged TSO if the merged TSO is not zero.
+		if mergedTS != typeutil.ZeroTime {
+			log.Info("start to set the newly merged TSO",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
 				zap.Any("merge-list", mergeList),
-				zap.Error(err))
-			continue
-		}
-		err = allocator.SetTSO(
-			tsoutil.GenerateTS(tsoutil.GenerateTimestamp(mergedTS, 1)),
-			true, true)
-		if err != nil {
-			log.Error("failed to update the newly merged TSO",
-				zap.String("member", kgm.tsoServiceID.ServiceAddr),
-				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList),
-				zap.Time("merged-ts", mergedTS),
-				zap.Error(err))
-			continue
+				zap.Time("merged-ts", mergedTS))
+			// TODO: support the Local TSO Allocator.
+			allocator, err := am.GetAllocator(GlobalDCLocation)
+			if err != nil {
+				log.Error("failed to get the allocator",
+					zap.String("member", kgm.tsoServiceID.ServiceAddr),
+					zap.Uint32("merge-target-id", mergeTargetID),
+					zap.Any("merge-list", mergeList),
+					zap.Error(err))
+				continue
+			}
+			err = allocator.SetTSO(
+				tsoutil.GenerateTS(tsoutil.GenerateTimestamp(mergedTS, 1)),
+				true, true)
+			if err != nil {
+				log.Error("failed to update the newly merged TSO",
+					zap.String("member", kgm.tsoServiceID.ServiceAddr),
+					zap.Uint32("merge-target-id", mergeTargetID),
+					zap.Any("merge-list", mergeList),
+					zap.Time("merged-ts", mergedTS),
+					zap.Error(err))
+				continue
+			}
 		}
 		// Finish the merge.
 		err = kgm.finishMergeKeyspaceGroup(mergeTargetID)
@@ -1336,6 +1340,7 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 // groupSplitPatroller is used to patrol the groups that are in the on-going
 // split state and to check if we could speed up the split process.
 func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
+	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 	patrolInterval := groupPatrolInterval
 	failpoint.Inject("fastGroupSplitPatroller", func() {
@@ -1348,21 +1353,11 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 	for {
 		select {
 		case <-kgm.ctx.Done():
-			log.Info("group split patroller is exiting")
+			log.Info("group split patroller exited")
 			return
 		case <-ticker.C:
 		}
-		kgm.RLock()
-		if len(kgm.splittingGroups) == 0 {
-			kgm.RUnlock()
-			continue
-		}
-		var splittingGroups []uint32
-		for id := range kgm.splittingGroups {
-			splittingGroups = append(splittingGroups, id)
-		}
-		kgm.RUnlock()
-		for _, groupID := range splittingGroups {
+		for _, groupID := range kgm.getSplittingGroups() {
 			am, group := kgm.getKeyspaceGroupMeta(groupID)
 			if !am.IsLeader() {
 				continue
@@ -1384,6 +1379,60 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 					zap.Error(err))
 				continue
 			}
+		}
+	}
+}
+
+// deletedGroupCleaner is used to clean the deleted keyspace groups related data.
+// For example, the TSO keys of the merged keyspace groups remain in the storage.
+func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
+	defer logutil.LogPanic()
+	defer kgm.wg.Done()
+	patrolInterval := groupPatrolInterval
+	failpoint.Inject("fastDeletedGroupCleaner", func() {
+		patrolInterval = 200 * time.Millisecond
+	})
+	ticker := time.NewTicker(patrolInterval)
+	defer ticker.Stop()
+	log.Info("deleted group cleaner is started",
+		zap.Duration("patrol-interval", patrolInterval))
+	for {
+		select {
+		case <-kgm.ctx.Done():
+			log.Info("deleted group cleaner exited")
+			return
+		case <-ticker.C:
+		}
+		for _, groupID := range kgm.getDeletedGroups() {
+			// Do not clean the default keyspace group data.
+			if groupID == mcsutils.DefaultKeyspaceGroupID {
+				continue
+			}
+			// Make sure the allocator and group meta are not in use anymore.
+			am, _ := kgm.getKeyspaceGroupMeta(groupID)
+			if am != nil {
+				log.Info("the keyspace group tso allocator has not been closed yet",
+					zap.Uint32("keyspace-group-id", groupID))
+				continue
+			}
+			log.Info("delete the keyspace group tso key",
+				zap.Uint32("keyspace-group-id", groupID))
+			// Clean up the remaining TSO keys.
+			// TODO: support the Local TSO Allocator clean up.
+			err := kgm.tsoSvcStorage.DeleteTimestamp(
+				endpoint.TimestampPath(
+					endpoint.KeyspaceGroupTSPath(groupID),
+				),
+			)
+			if err != nil {
+				log.Warn("failed to delete the keyspace group tso key",
+					zap.Uint32("keyspace-group-id", groupID),
+					zap.Error(err))
+				continue
+			}
+			kgm.Lock()
+			delete(kgm.deletedGroups, groupID)
+			kgm.Unlock()
 		}
 	}
 }

@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -31,10 +30,9 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/diagnostic"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
-	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
@@ -51,7 +49,6 @@ const (
 	checkSuspectRangesInterval = 100 * time.Millisecond
 	collectFactor              = 0.9
 	collectTimeout             = 5 * time.Minute
-	maxScheduleRetries         = 10
 	maxLoadConfigRetries       = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
@@ -65,9 +62,8 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	waitingListGauge               = regionListGauge.WithLabelValues("waiting_list")
-	priorityListGauge              = regionListGauge.WithLabelValues("priority_list")
-	denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
+	waitingListGauge  = regionListGauge.WithLabelValues("waiting_list")
+	priorityListGauge = regionListGauge.WithLabelValues("priority_list")
 )
 
 // Coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -82,18 +78,18 @@ type Coordinator struct {
 	checkers          *checker.Controller
 	regionScatterer   *scatter.RegionScatterer
 	regionSplitter    *splitter.RegionSplitter
-	schedulers        map[string]*scheduleController
+	schedulers        map[string]*schedulers.ScheduleController
 	opController      *operator.Controller
 	hbStreams         *hbstream.HeartbeatStreams
 	pluginInterface   *PluginInterface
-	diagnosticManager *diagnosticManager
+	diagnosticManager *diagnostic.Manager
 }
 
 // NewCoordinator creates a new Coordinator.
 func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
 	ctx, cancel := context.WithCancel(ctx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetPersistOptions(), hbStreams)
-	schedulers := make(map[string]*scheduleController)
+	schedulers := make(map[string]*schedulers.ScheduleController)
 	c := &Coordinator{
 		ctx:             ctx,
 		cancel:          cancel,
@@ -107,7 +103,7 @@ func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams
 		hbStreams:       hbStreams,
 		pluginInterface: NewPluginInterface(),
 	}
-	c.diagnosticManager = newDiagnosticManager(c, cluster.GetPersistOptions())
+	c.diagnosticManager = diagnostic.NewManager(schedulers, cluster.GetPersistOptions())
 	return c
 }
 
@@ -679,7 +675,7 @@ func (c *Coordinator) AddScheduler(scheduler schedulers.Scheduler, args ...strin
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
-	s := NewScheduleController(c, scheduler)
+	s := schedulers.NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
 	if err := s.Scheduler.Prepare(c.cluster); err != nil {
 		return err
 	}
@@ -756,7 +752,7 @@ func (c *Coordinator) PauseOrResumeScheduler(name string, t int64) error {
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	var s []*scheduleController
+	var s []*schedulers.ScheduleController
 	if name != "all" {
 		sc, ok := c.schedulers[name]
 		if !ok {
@@ -775,8 +771,7 @@ func (c *Coordinator) PauseOrResumeScheduler(name string, t int64) error {
 			delayAt = time.Now().Unix()
 			delayUntil = delayAt + t
 		}
-		atomic.StoreInt64(&sc.delayAt, delayAt)
-		atomic.StoreInt64(&sc.delayUntil, delayUntil)
+		sc.SetDelay(delayAt, delayUntil)
 	}
 	return err
 }
@@ -844,7 +839,7 @@ func (c *Coordinator) IsSchedulerExisted(name string) (bool, error) {
 	return true, nil
 }
 
-func (c *Coordinator) runScheduler(s *scheduleController) {
+func (c *Coordinator) runScheduler(s *schedulers.ScheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	defer s.Scheduler.Cleanup(c.cluster)
@@ -854,7 +849,7 @@ func (c *Coordinator) runScheduler(s *scheduleController) {
 	for {
 		select {
 		case <-ticker.C:
-			diagnosable := s.diagnosticRecorder.isAllowed()
+			diagnosable := s.IsDiagnosticAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue
 			}
@@ -948,155 +943,15 @@ func (c *Coordinator) GetCluster() sche.ClusterInformer {
 }
 
 // GetDiagnosticResult returns the diagnostic result.
-func (c *Coordinator) GetDiagnosticResult(name string) (*DiagnosticResult, error) {
-	return c.diagnosticManager.getDiagnosticResult(name)
+func (c *Coordinator) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult, error) {
+	c.RLock()
+	defer c.RUnlock()
+	return c.diagnosticManager.GetDiagnosticResult(name)
 }
 
 // RecordOpStepWithTTL records OpStep with TTL
 func (c *Coordinator) RecordOpStepWithTTL(regionID uint64) {
 	c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
-}
-
-// scheduleController is used to manage a scheduler to schedulers.
-type scheduleController struct {
-	schedulers.Scheduler
-	cluster            sche.ScheduleCluster
-	opController       *operator.Controller
-	nextInterval       time.Duration
-	ctx                context.Context
-	cancel             context.CancelFunc
-	delayAt            int64
-	delayUntil         int64
-	diagnosticRecorder *diagnosticRecorder
-}
-
-// NewScheduleController creates a new scheduleController.
-func NewScheduleController(c *Coordinator, s schedulers.Scheduler) *scheduleController {
-	ctx, cancel := context.WithCancel(c.ctx)
-	return &scheduleController{
-		Scheduler:          s,
-		cluster:            c.cluster,
-		opController:       c.opController,
-		nextInterval:       s.GetMinInterval(),
-		ctx:                ctx,
-		cancel:             cancel,
-		diagnosticRecorder: c.diagnosticManager.getRecorder(s.GetName()),
-	}
-}
-
-func (s *scheduleController) Ctx() context.Context {
-	return s.ctx
-}
-
-func (s *scheduleController) Stop() {
-	s.cancel()
-}
-
-func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
-	for i := 0; i < maxScheduleRetries; i++ {
-		// no need to retry if schedule should stop to speed exit
-		select {
-		case <-s.ctx.Done():
-			return nil
-		default:
-		}
-		cacheCluster := newCacheCluster(s.cluster)
-		// we need only process diagnostic once in the retry loop
-		diagnosable = diagnosable && i == 0
-		ops, plans := s.Scheduler.Schedule(cacheCluster, diagnosable)
-		if diagnosable {
-			s.diagnosticRecorder.setResultFromPlans(ops, plans)
-		}
-		foundDisabled := false
-		for _, op := range ops {
-			if labelMgr := s.cluster.GetRegionLabeler(); labelMgr != nil {
-				region := s.cluster.GetRegion(op.RegionID())
-				if region == nil {
-					continue
-				}
-				if labelMgr.ScheduleDisabled(region) {
-					denySchedulersByLabelerCounter.Inc()
-					foundDisabled = true
-					break
-				}
-			}
-		}
-		if len(ops) > 0 {
-			// If we have schedule, reset interval to the minimal interval.
-			s.nextInterval = s.Scheduler.GetMinInterval()
-			// try regenerating operators
-			if foundDisabled {
-				continue
-			}
-			return ops
-		}
-	}
-	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
-	return nil
-}
-
-func (s *scheduleController) DiagnoseDryRun() ([]*operator.Operator, []plan.Plan) {
-	cacheCluster := newCacheCluster(s.cluster)
-	return s.Scheduler.Schedule(cacheCluster, true)
-}
-
-// GetInterval returns the interval of scheduling for a scheduler.
-func (s *scheduleController) GetInterval() time.Duration {
-	return s.nextInterval
-}
-
-// SetInterval sets the interval of scheduling for a scheduler. for test purpose.
-func (s *scheduleController) SetInterval(interval time.Duration) {
-	s.nextInterval = interval
-}
-
-// AllowSchedule returns if a scheduler is allowed to schedulers.
-func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
-	if !s.Scheduler.IsScheduleAllowed(s.cluster) {
-		if diagnosable {
-			s.diagnosticRecorder.setResultFromStatus(pending)
-		}
-		return false
-	}
-	if s.isSchedulingHalted() {
-		if diagnosable {
-			s.diagnosticRecorder.setResultFromStatus(halted)
-		}
-		return false
-	}
-	if s.IsPaused() {
-		if diagnosable {
-			s.diagnosticRecorder.setResultFromStatus(paused)
-		}
-		return false
-	}
-	return true
-}
-
-func (s *scheduleController) isSchedulingHalted() bool {
-	return s.cluster.GetOpts().IsSchedulingHalted()
-}
-
-// isPaused returns if a scheduler is paused.
-func (s *scheduleController) IsPaused() bool {
-	delayUntil := atomic.LoadInt64(&s.delayUntil)
-	return time.Now().Unix() < delayUntil
-}
-
-// getDelayAt returns paused timestamp of a paused scheduler
-func (s *scheduleController) getDelayAt() int64 {
-	if s.IsPaused() {
-		return atomic.LoadInt64(&s.delayAt)
-	}
-	return 0
-}
-
-// getDelayUntil returns resume timestamp of a paused scheduler
-func (s *scheduleController) getDelayUntil() int64 {
-	if s.IsPaused() {
-		return atomic.LoadInt64(&s.delayUntil)
-	}
-	return 0
 }
 
 // GetPausedSchedulerDelayAt returns paused timestamp of a paused scheduler
@@ -1110,7 +965,7 @@ func (c *Coordinator) GetPausedSchedulerDelayAt(name string) (int64, error) {
 	if !ok {
 		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	return s.getDelayAt(), nil
+	return s.GetDelayAt(), nil
 }
 
 // GetPausedSchedulerDelayUntil returns the delay time until the scheduler is paused.
@@ -1124,7 +979,7 @@ func (c *Coordinator) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 	if !ok {
 		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	return s.getDelayUntil(), nil
+	return s.GetDelayUntil(), nil
 }
 
 // CheckTransferWitnessLeader determines if transfer leader is required, then sends to the scheduler if needed
@@ -1140,24 +995,5 @@ func (c *Coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
 				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
 			}
 		}
-	}
-}
-
-// cacheCluster include cache info to improve the performance.
-type cacheCluster struct {
-	sche.ScheduleCluster
-	stores []*core.StoreInfo
-}
-
-// GetStores returns store infos from cache
-func (c *cacheCluster) GetStores() []*core.StoreInfo {
-	return c.stores
-}
-
-// newCacheCluster constructor for cache
-func newCacheCluster(c sche.ScheduleCluster) *cacheCluster {
-	return &cacheCluster{
-		ScheduleCluster: c,
-		stores:          c.GetStores(),
 	}
 }

@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -184,6 +185,16 @@ func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
 		return nil
 	}
 	return c.GetHotWriteRegions()
+}
+
+// GetHotBuckets returns all hot buckets stats.
+func (h *Handler) GetHotBuckets(regionIDs ...uint64) map[uint64][]*buckets.BucketStat {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil
+	}
+	degree := c.GetOpts().GetHotRegionCacheHitsThreshold()
+	return c.BucketsStats(degree, regionIDs...)
 }
 
 // GetHotReadRegions gets all hot read regions stats.

@@ -130,3 +130,18 @@ func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID,
 	re.NoError(err)
 	return r
 }
+
+// MustReportBuckets is used for test purpose.
+func MustReportBuckets(re *require.Assertions, cluster *tests.TestCluster, regionID uint64, start, end []byte, stats *metapb.BucketStats) *metapb.Buckets {
+	buckets := &metapb.Buckets{
+		RegionId: regionID,
+		Version:  1,
+		Keys:     [][]byte{start, end},
+		Stats:    stats,
+		// report buckets interval is 10s
+		PeriodInMs: 10000,
+	}
+	err := cluster.HandleReportBuckets(buckets)
+	re.NoError(err)
+	return buckets
+}
