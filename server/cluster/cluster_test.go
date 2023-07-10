@@ -3396,7 +3396,7 @@ func TestController(t *testing.T) {
 		kind:      operator.OpLeader,
 	}
 
-	sc := schedule.NewScheduleController(co, lb)
+	sc := schedulers.NewScheduleController(tc.ctx, co.GetCluster(), co.GetOperatorController(), lb)
 
 	for i := schedulers.MinScheduleInterval; sc.GetInterval() != schedulers.MaxScheduleInterval; i = sc.GetNextInterval(i) {
 		re.Equal(i, sc.GetInterval())
@@ -3471,12 +3471,12 @@ func TestController(t *testing.T) {
 func TestInterval(t *testing.T) {
 	re := require.New(t)
 
-	_, co, cleanup := prepare(nil, nil, nil, re)
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 
 	lb, err := schedulers.CreateScheduler(schedulers.BalanceLeaderType, co.GetOperatorController(), storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
-	sc := schedule.NewScheduleController(co, lb)
+	sc := schedulers.NewScheduleController(tc.ctx, co.GetCluster(), co.GetOperatorController(), lb)
 
 	// If no operator for x seconds, the next check should be in x/2 seconds.
 	idleSeconds := []int{5, 10, 20, 30, 60}
