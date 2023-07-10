@@ -15,11 +15,14 @@ RUN cd / && \
     chmod +x jq
 
 RUN mkdir -p /go/src/github.com/tikv/pd
+RUN mkdir -p /go/src/github.com/tikv/pd/client
 WORKDIR /go/src/github.com/tikv/pd
 
 # Cache dependencies
 COPY go.mod .
 COPY go.sum .
+COPY client/go.mod ./client
+COPY client/go.sum ./client
 
 RUN GO111MODULE=on go mod download
 
