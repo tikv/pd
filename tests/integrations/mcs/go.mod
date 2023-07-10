@@ -16,7 +16,7 @@ require (
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/stretchr/testify v1.8.2
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
-	github.com/tikv/pd/client v0.0.0-20230710071111-47d408b547b9
+	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.24.0
