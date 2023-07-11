@@ -724,6 +724,7 @@ func (o *PersistOptions) RemoveSchedulerCfg(tp string) {
 				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
 			}
 			o.SetScheduleConfig(v)
+			return
 		}
 	}
 }
