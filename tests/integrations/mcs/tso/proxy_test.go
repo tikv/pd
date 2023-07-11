@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/client/tsoutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -44,7 +43,7 @@ type tsoProxyTestSuite struct {
 	apiCluster       *tests.TestCluster
 	apiLeader        *tests.TestServer
 	backendEndpoints string
-	tsoCluster       *mcs.TestTSOCluster
+	tsoCluster       *tests.TestTSOCluster
 	defaultReq       *pdpb.TsoRequest
 	streams          []pdpb.PD_TsoClient
 	cleanupFuncs     []testutil.CleanupFunc
@@ -70,7 +69,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	s.NoError(s.apiLeader.BootstrapCluster())
 
 	// Create a TSO cluster with 2 servers
-	s.tsoCluster, err = mcs.NewTestTSOCluster(s.ctx, 2, s.backendEndpoints)
+	s.tsoCluster, err = tests.NewTestTSOCluster(s.ctx, 2, s.backendEndpoints)
 	re.NoError(err)
 	s.tsoCluster.WaitForDefaultPrimaryServing(re)
 

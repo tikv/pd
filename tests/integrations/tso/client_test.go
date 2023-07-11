@@ -54,7 +54,7 @@ type tsoClientTestSuite struct {
 	// pdLeaderServer is the leader server of the PD cluster.
 	pdLeaderServer *tests.TestServer
 	// The TSO service in microservice mode.
-	tsoCluster *mcs.TestTSOCluster
+	tsoCluster *tests.TestTSOCluster
 
 	keyspaceGroups []struct {
 		keyspaceGroupID uint32
@@ -108,7 +108,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 		suite.clients = make([]pd.Client, 0)
 		suite.clients = append(suite.clients, client)
 	} else {
-		suite.tsoCluster, err = mcs.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
+		suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
 		re.NoError(err)
 
 		suite.keyspaceGroups = []struct {
@@ -430,9 +430,9 @@ func TestMixedTSODeployment(t *testing.T) {
 	err = apiSvr.Run()
 	re.NoError(err)
 
-	s, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+	s, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
-	mcs.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s})
+	tests.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s})
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -473,7 +473,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	re.NoError(err)
 
 	// Create a TSO cluster which has 2 servers
-	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, backendEndpoints)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
 	re.NoError(err)
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 	// The TSO service should be eventually healthy
@@ -486,7 +486,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Restart the TSO cluster
-	tsoCluster, err = mcs.RestartTestTSOCluster(ctx, tsoCluster)
+	tsoCluster, err = tests.RestartTestTSOCluster(ctx, tsoCluster)
 	re.NoError(err)
 	// The TSO service should be eventually healthy
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
