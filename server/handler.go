@@ -115,7 +115,7 @@ func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.GetCoordinator().IsSchedulerPaused(name)
+	return rc.GetCoordinator().GetSchedulersController().IsSchedulerPaused(name)
 }
 
 // IsSchedulerDisabled returns whether scheduler is disabled.
@@ -124,7 +124,7 @@ func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.GetCoordinator().IsSchedulerDisabled(name)
+	return rc.GetCoordinator().GetSchedulersController().IsSchedulerDisabled(name)
 }
 
 // IsSchedulerExisted returns whether scheduler is existed.
@@ -133,7 +133,7 @@ func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.GetCoordinator().IsSchedulerExisted(name)
+	return rc.GetCoordinator().GetSchedulersController().IsSchedulerExisted(name)
 }
 
 // GetScheduleConfig returns ScheduleConfig.
@@ -232,7 +232,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		return err
 	}
 
-	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().RemoveScheduler)
+	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().GetSchedulersController().RemoveScheduler)
 	if err != nil {
 		return err
 	}

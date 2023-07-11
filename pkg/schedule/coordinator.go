@@ -17,7 +17,6 @@ package schedule
 import (
 	"bytes"
 	"context"
-	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -37,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
 	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/config"
@@ -78,7 +76,7 @@ type Coordinator struct {
 	checkers          *checker.Controller
 	regionScatterer   *scatter.RegionScatterer
 	regionSplitter    *splitter.RegionSplitter
-	schedulers        map[string]*schedulers.ScheduleController
+	schedulers        *schedulers.Controller
 	opController      *operator.Controller
 	hbStreams         *hbstream.HeartbeatStreams
 	pluginInterface   *PluginInterface
@@ -89,7 +87,7 @@ type Coordinator struct {
 func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
 	ctx, cancel := context.WithCancel(ctx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetPersistOptions(), hbStreams)
-	schedulers := make(map[string]*schedulers.ScheduleController)
+	schedulers := schedulers.NewController(ctx, cluster, opController)
 	c := &Coordinator{
 		ctx:             ctx,
 		cancel:          cancel,
@@ -318,6 +316,7 @@ func (c *Coordinator) RunUntilStop() {
 	c.Run()
 	<-c.ctx.Done()
 	log.Info("Coordinator is stopping")
+	c.GetSchedulersController().GetWaitGroup().Wait()
 	c.wg.Wait()
 	log.Info("Coordinator has been stopped")
 }
@@ -343,6 +342,17 @@ func (c *Coordinator) Run() {
 		}
 	}
 	log.Info("Coordinator starts to run schedulers")
+	c.initSchedulers()
+
+	c.wg.Add(3)
+	// Starts to patrol regions.
+	go c.PatrolRegions()
+	// Checks suspect key ranges
+	go c.checkSuspectRanges()
+	go c.drivePushOperator()
+}
+
+func (c *Coordinator) initSchedulers() {
 	var (
 		scheduleNames []string
 		configs       []string
@@ -385,13 +395,13 @@ func (c *Coordinator) Run() {
 			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
 			continue
 		}
-		s, err := schedulers.CreateScheduler(cfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.RemoveScheduler)
+		s, err := schedulers.CreateScheduler(cfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
 		}
 		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
-		if err = c.AddScheduler(s); err != nil {
+		if err = c.schedulers.AddScheduler(s); err != nil {
 			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 		}
 	}
@@ -406,14 +416,14 @@ func (c *Coordinator) Run() {
 			continue
 		}
 
-		s, err := schedulers.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args), c.RemoveScheduler)
+		s, err := schedulers.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args), c.schedulers.RemoveScheduler)
 		if err != nil {
 			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
 		}
 
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
-		if err = c.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+		if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 		} else {
 			// Only records the valid scheduler config.
@@ -428,13 +438,6 @@ func (c *Coordinator) Run() {
 	if err := c.cluster.GetPersistOptions().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
-
-	c.wg.Add(3)
-	// Starts to patrol regions.
-	go c.PatrolRegions()
-	// Checks suspect key ranges
-	go c.checkSuspectRanges()
-	go c.drivePushOperator()
 }
 
 // LoadPlugin load user plugin
@@ -455,13 +458,13 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	}
 	schedulerArgs := SchedulerArgs.(func() []string)
 	// create and add user scheduler
-	s, err := schedulers.CreateScheduler(schedulerType(), c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerType(), schedulerArgs()), c.RemoveScheduler)
+	s, err := schedulers.CreateScheduler(schedulerType(), c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerType(), schedulerArgs()), c.schedulers.RemoveScheduler)
 	if err != nil {
 		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), errs.ZapError(err))
 		return
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
-	if err = c.AddScheduler(s); err != nil {
+	if err = c.schedulers.AddScheduler(s); err != nil {
 		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
 		return
 	}
@@ -478,7 +481,7 @@ func (c *Coordinator) waitPluginUnload(pluginPath, schedulerName string, ch chan
 		select {
 		case action := <-ch:
 			if action == PluginUnload {
-				err := c.RemoveScheduler(schedulerName)
+				err := c.schedulers.RemoveScheduler(schedulerName)
 				if err != nil {
 					log.Error("can not remove scheduler", zap.String("scheduler-name", schedulerName), errs.ZapError(err))
 				} else {
@@ -547,48 +550,6 @@ func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.Sto
 // GetWaitGroup returns the wait group. Only for test purpose.
 func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 	return &c.wg
-}
-
-// GetSchedulers returns all names of schedulers.
-func (c *Coordinator) GetSchedulers() []string {
-	c.RLock()
-	defer c.RUnlock()
-	names := make([]string, 0, len(c.schedulers))
-	for name := range c.schedulers {
-		names = append(names, name)
-	}
-	return names
-}
-
-// GetSchedulerHandlers returns all handlers of schedulers.
-func (c *Coordinator) GetSchedulerHandlers() map[string]http.Handler {
-	c.RLock()
-	defer c.RUnlock()
-	handlers := make(map[string]http.Handler, len(c.schedulers))
-	for name, scheduler := range c.schedulers {
-		handlers[name] = scheduler.Scheduler
-	}
-	return handlers
-}
-
-// CollectSchedulerMetrics collects metrics of all schedulers.
-func (c *Coordinator) CollectSchedulerMetrics() {
-	c.RLock()
-	defer c.RUnlock()
-	for _, s := range c.schedulers {
-		var allowScheduler float64
-		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
-		// See issue #1341.
-		if !s.IsPaused() && !c.isSchedulingHalted() {
-			allowScheduler = 1
-		}
-		schedulerStatusGauge.WithLabelValues(s.Scheduler.GetName(), "allow").Set(allowScheduler)
-	}
-}
-
-// ResetSchedulerMetrics resets metrics of all schedulers.
-func (c *Coordinator) ResetSchedulerMetrics() {
-	schedulerStatusGauge.Reset()
 }
 
 // CollectHotSpotMetrics collects hot spot metrics.
@@ -666,206 +627,9 @@ func (c *Coordinator) ShouldRun() bool {
 	return c.prepareChecker.check(c.cluster.GetBasicCluster())
 }
 
-// AddScheduler adds a scheduler.
-func (c *Coordinator) AddScheduler(scheduler schedulers.Scheduler, args ...string) error {
-	c.Lock()
-	defer c.Unlock()
-
-	if _, ok := c.schedulers[scheduler.GetName()]; ok {
-		return errs.ErrSchedulerExisted.FastGenByArgs()
-	}
-
-	s := schedulers.NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
-	if err := s.Scheduler.Prepare(c.cluster); err != nil {
-		return err
-	}
-
-	c.wg.Add(1)
-	go c.runScheduler(s)
-	c.schedulers[s.Scheduler.GetName()] = s
-	c.cluster.GetPersistOptions().AddSchedulerCfg(s.Scheduler.GetType(), args)
-	return nil
-}
-
-// RemoveScheduler removes a scheduler by name.
-func (c *Coordinator) RemoveScheduler(name string) error {
-	c.Lock()
-	defer c.Unlock()
-	if c.cluster == nil {
-		return errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	s, ok := c.schedulers[name]
-	if !ok {
-		return errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-
-	opt := c.cluster.GetPersistOptions()
-	if err := c.removeOptScheduler(opt, name); err != nil {
-		log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
-		return err
-	}
-
-	if err := opt.Persist(c.cluster.GetStorage()); err != nil {
-		log.Error("the option can not persist scheduler config", errs.ZapError(err))
-		return err
-	}
-
-	if err := c.cluster.GetStorage().RemoveScheduleConfig(name); err != nil {
-		log.Error("can not remove the scheduler config", errs.ZapError(err))
-		return err
-	}
-
-	s.Stop()
-	schedulerStatusGauge.DeleteLabelValues(name, "allow")
-	delete(c.schedulers, name)
-
-	return nil
-}
-
-func (c *Coordinator) removeOptScheduler(o *config.PersistOptions, name string) error {
-	v := o.GetScheduleConfig().Clone()
-	for i, schedulerCfg := range v.Schedulers {
-		// To create a temporary scheduler is just used to get scheduler's name
-		decoder := schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
-		tmp, err := schedulers.CreateScheduler(schedulerCfg.Type, c.opController, storage.NewStorageWithMemoryBackend(), decoder, c.RemoveScheduler)
-		if err != nil {
-			return err
-		}
-		if tmp.GetName() == name {
-			if config.IsDefaultScheduler(tmp.GetType()) {
-				schedulerCfg.Disable = true
-				v.Schedulers[i] = schedulerCfg
-			} else {
-				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
-			}
-			o.SetScheduleConfig(v)
-			return nil
-		}
-	}
-	return nil
-}
-
-// PauseOrResumeScheduler pauses or resumes a scheduler by name.
-func (c *Coordinator) PauseOrResumeScheduler(name string, t int64) error {
-	c.Lock()
-	defer c.Unlock()
-	if c.cluster == nil {
-		return errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	var s []*schedulers.ScheduleController
-	if name != "all" {
-		sc, ok := c.schedulers[name]
-		if !ok {
-			return errs.ErrSchedulerNotFound.FastGenByArgs()
-		}
-		s = append(s, sc)
-	} else {
-		for _, sc := range c.schedulers {
-			s = append(s, sc)
-		}
-	}
-	var err error
-	for _, sc := range s {
-		var delayAt, delayUntil int64
-		if t > 0 {
-			delayAt = time.Now().Unix()
-			delayUntil = delayAt + t
-		}
-		sc.SetDelay(delayAt, delayUntil)
-	}
-	return err
-}
-
-// IsSchedulerAllowed returns whether a scheduler is allowed to schedule, a scheduler is not allowed to schedule if it is paused or blocked by unsafe recovery.
-func (c *Coordinator) IsSchedulerAllowed(name string) (bool, error) {
-	c.RLock()
-	defer c.RUnlock()
-	if c.cluster == nil {
-		return false, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	s, ok := c.schedulers[name]
-	if !ok {
-		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	return s.AllowSchedule(false), nil
-}
-
-// IsSchedulerPaused returns whether a scheduler is paused.
-func (c *Coordinator) IsSchedulerPaused(name string) (bool, error) {
-	c.RLock()
-	defer c.RUnlock()
-	if c.cluster == nil {
-		return false, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	s, ok := c.schedulers[name]
-	if !ok {
-		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	return s.IsPaused(), nil
-}
-
-// IsSchedulerDisabled returns whether a scheduler is disabled.
-func (c *Coordinator) IsSchedulerDisabled(name string) (bool, error) {
-	c.RLock()
-	defer c.RUnlock()
-	if c.cluster == nil {
-		return false, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	s, ok := c.schedulers[name]
-	if !ok {
-		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	t := s.Scheduler.GetType()
-	scheduleConfig := c.cluster.GetPersistOptions().GetScheduleConfig()
-	for _, s := range scheduleConfig.Schedulers {
-		if t == s.Type {
-			return s.Disable, nil
-		}
-	}
-	return false, nil
-}
-
-// IsSchedulerExisted returns whether a scheduler is existed.
-func (c *Coordinator) IsSchedulerExisted(name string) (bool, error) {
-	c.RLock()
-	defer c.RUnlock()
-	if c.cluster == nil {
-		return false, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	_, ok := c.schedulers[name]
-	if !ok {
-		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	return true, nil
-}
-
-func (c *Coordinator) runScheduler(s *schedulers.ScheduleController) {
-	defer logutil.LogPanic()
-	defer c.wg.Done()
-	defer s.Scheduler.Cleanup(c.cluster)
-
-	ticker := time.NewTicker(s.GetInterval())
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			diagnosable := s.IsDiagnosticAllowed()
-			if !s.AllowSchedule(diagnosable) {
-				continue
-			}
-			if op := s.Schedule(diagnosable); len(op) > 0 {
-				added := c.opController.AddWaitingOperator(op...)
-				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.Scheduler.GetName()))
-			}
-			// Note: we reset the ticker here to support updating configuration dynamically.
-			ticker.Reset(s.GetInterval())
-		case <-s.Ctx().Done():
-			log.Info("scheduler has been stopped",
-				zap.String("scheduler-name", s.Scheduler.GetName()),
-				errs.ZapError(s.Ctx().Err()))
-			return
-		}
-	}
+// GetSchedulersController returns the schedulers controller.
+func (c *Coordinator) GetSchedulersController() *schedulers.Controller {
+	return c.schedulers
 }
 
 // PauseOrResumeChecker pauses or resumes a checker by name.
@@ -944,56 +708,10 @@ func (c *Coordinator) GetCluster() sche.ClusterInformer {
 
 // GetDiagnosticResult returns the diagnostic result.
 func (c *Coordinator) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult, error) {
-	c.RLock()
-	defer c.RUnlock()
 	return c.diagnosticManager.GetDiagnosticResult(name)
 }
 
 // RecordOpStepWithTTL records OpStep with TTL
 func (c *Coordinator) RecordOpStepWithTTL(regionID uint64) {
 	c.GetRuleChecker().RecordRegionPromoteToNonWitness(regionID)
-}
-
-// GetPausedSchedulerDelayAt returns paused timestamp of a paused scheduler
-func (c *Coordinator) GetPausedSchedulerDelayAt(name string) (int64, error) {
-	c.RLock()
-	defer c.RUnlock()
-	if c.cluster == nil {
-		return -1, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	s, ok := c.schedulers[name]
-	if !ok {
-		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	return s.GetDelayAt(), nil
-}
-
-// GetPausedSchedulerDelayUntil returns the delay time until the scheduler is paused.
-func (c *Coordinator) GetPausedSchedulerDelayUntil(name string) (int64, error) {
-	c.RLock()
-	defer c.RUnlock()
-	if c.cluster == nil {
-		return -1, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	s, ok := c.schedulers[name]
-	if !ok {
-		return -1, errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-	return s.GetDelayUntil(), nil
-}
-
-// CheckTransferWitnessLeader determines if transfer leader is required, then sends to the scheduler if needed
-func (c *Coordinator) CheckTransferWitnessLeader(region *core.RegionInfo) {
-	if core.NeedTransferWitnessLeader(region) {
-		c.RLock()
-		s, ok := c.schedulers[schedulers.TransferWitnessLeaderName]
-		c.RUnlock()
-		if ok {
-			select {
-			case schedulers.RecvRegionInfo(s.Scheduler) <- region:
-			default:
-				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
-			}
-		}
-	}
 }
