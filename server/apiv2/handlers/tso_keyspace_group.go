@@ -135,6 +135,12 @@ func GetKeyspaceGroups(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, kgs)
 }
 
+// GetKeyspaceGroupPrimaryResponse defines the response for getting primary node of keyspace group.
+type GetKeyspaceGroupPrimaryResponse struct {
+	ID      uint32 `json:"id"`
+	Primary string `json:"primary"`
+}
+
 // GetKeyspaceGroupByID gets keyspace group by ID.
 func GetKeyspaceGroupByID(c *gin.Context) {
 	id, err := validateKeyspaceGroupID(c)
@@ -149,12 +155,26 @@ func GetKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
 		return
 	}
+
+	fields := c.Query("fields") // split by comma if need to add more fields
+	if fields == "primary" {
+		primary, err := manager.GetKeyspaceGroupPrimaryByID(id)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, &GetKeyspaceGroupPrimaryResponse{
+			ID:      id,
+			Primary: primary,
+		})
+		return
+	}
+
 	kg, err := manager.GetKeyspaceGroupByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-
 	c.IndentedJSON(http.StatusOK, kg)
 }
 
@@ -276,7 +296,8 @@ func FinishSplitKeyspaceByID(c *gin.Context) {
 
 // MergeKeyspaceGroupsParams defines the params for merging the keyspace groups.
 type MergeKeyspaceGroupsParams struct {
-	MergeList []uint32 `json:"merge-list"`
+	MergeList           []uint32 `json:"merge-list"`
+	MergeAllIntoDefault bool     `json:"merge-all-into-default"`
 }
 
 // MergeKeyspaceGroups merges the keyspace groups in the merge list into the target keyspace group.
@@ -292,8 +313,12 @@ func MergeKeyspaceGroups(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	if len(mergeParams.MergeList) == 0 {
+	if len(mergeParams.MergeList) == 0 && !mergeParams.MergeAllIntoDefault {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid empty merge list")
+		return
+	}
+	if len(mergeParams.MergeList) > 0 && mergeParams.MergeAllIntoDefault {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "non-empty merge list when merge all into default")
 		return
 	}
 	for _, mergeID := range mergeParams.MergeList {
@@ -310,7 +335,11 @@ func MergeKeyspaceGroups(c *gin.Context) {
 		return
 	}
 	// Merge keyspace group.
-	err = groupManager.MergeKeyspaceGroups(id, mergeParams.MergeList)
+	if mergeParams.MergeAllIntoDefault {
+		err = groupManager.MergeAllIntoDefaultKeyspaceGroup()
+	} else {
+		err = groupManager.MergeKeyspaceGroups(id, mergeParams.MergeList)
+	}
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return

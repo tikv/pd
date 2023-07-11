@@ -399,14 +399,14 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
-// @Tags	region
-// @Summary List regions belongs to the given keyspace ID.
-// @Param   keyspace_id  query  string  true  "Keyspace ID"
-// @Param   limit        query  integer false "Limit count"  default(16)
-// @Produce json
-// @Success 200 {object} RegionsInfo
-// @Failure 400 {string} string "The input is invalid."
-// @Router  /regions/keyspace/id/{id} [get]
+// @Tags     region
+// @Summary  List regions belongs to the given keyspace ID.
+// @Param    keyspace_id  query  string   true   "Keyspace ID"
+// @Param    limit        query  integer  false  "Limit count"  default(16)
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/keyspace/id/{id} [get]
 func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)

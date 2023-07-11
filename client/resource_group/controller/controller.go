@@ -60,7 +60,7 @@ type ResourceGroupKVInterceptor interface {
 	OnResponse(resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, error)
 }
 
-// ResourceGroupProvider provides some api to interact with resource manager server。
+// ResourceGroupProvider provides some api to interact with resource manager server.
 type ResourceGroupProvider interface {
 	GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)

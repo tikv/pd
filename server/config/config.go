@@ -865,6 +865,10 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 		configutil.AdjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
+	if !meta.IsDefined("max-movable-hot-peer-size") {
+		configutil.AdjustInt64(&c.MaxMovableHotPeerSize, defaultMaxMovableHotPeerSize)
+	}
+
 	if !meta.IsDefined("slow-store-evicting-affected-store-ratio-threshold") {
 		configutil.AdjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
 	}

@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
 )
 
 const (
@@ -86,11 +85,11 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 	// add three nodes.
 	nodes := make(map[string]bs.Server)
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount+1; i++ {
-		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 		defer cleanup()
 		nodes[s.GetAddr()] = s
 	}
-	mcs.WaitForPrimaryServing(suite.Require(), nodes)
+	tests.WaitForPrimaryServing(suite.Require(), nodes)
 
 	// create a keyspace group.
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -135,11 +134,11 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	nodes := make(map[string]bs.Server)
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
-		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 		defer cleanup()
 		nodes[s.GetAddr()] = s
 	}
-	mcs.WaitForPrimaryServing(suite.Require(), nodes)
+	tests.WaitForPrimaryServing(suite.Require(), nodes)
 
 	// miss replica.
 	id := 1
@@ -188,10 +187,10 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	suite.Equal(http.StatusBadRequest, code)
 
 	// the keyspace group is exist, the new replica is more than the old replica.
-	s2, cleanup2 := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+	s2, cleanup2 := tests.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 	defer cleanup2()
 	nodes[s2.GetAddr()] = s2
-	mcs.WaitForPrimaryServing(suite.Require(), nodes)
+	tests.WaitForPrimaryServing(suite.Require(), nodes)
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
 		Replica: utils.DefaultKeyspaceGroupReplicaCount + 1,
 	}
@@ -228,12 +227,12 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 	nodes := make(map[string]bs.Server)
 	nodesList := []string{}
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
-		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 		defer cleanup()
 		nodes[s.GetAddr()] = s
 		nodesList = append(nodesList, s.GetAddr())
 	}
-	mcs.WaitForPrimaryServing(suite.Require(), nodes)
+	tests.WaitForPrimaryServing(suite.Require(), nodes)
 
 	// the keyspace group is not exist.
 	id := 1
@@ -288,11 +287,11 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	nodes := make(map[string]bs.Server)
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
-		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
 		defer cleanup()
 		nodes[s.GetAddr()] = s
 	}
-	mcs.WaitForPrimaryServing(suite.Require(), nodes)
+	tests.WaitForPrimaryServing(suite.Require(), nodes)
 
 	// the default keyspace group is exist.
 	var kg *endpoint.KeyspaceGroup

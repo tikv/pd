@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	pd "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
 	"google.golang.org/grpc"
 )
 
@@ -83,7 +82,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.pdClient = pd.MustNewGrpcClient(re, backendEndpoints)
 	} else {
-		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
+		suite.tsoServer, suite.tsoServerCleanup = tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
 		suite.tsoClientConn, suite.tsoClient = tso.MustNewGrpcClient(re, suite.tsoServer.GetAddr())
 	}
 }

@@ -1717,8 +1717,9 @@ func TestRemoveFailedStores(t *testing.T) {
 		1: {},
 	}, 60, false))
 	re.True(cluster.GetStore(uint64(1)).IsRemoved())
-	for _, s := range coordinator.GetSchedulers() {
-		paused, err := coordinator.IsSchedulerAllowed(s)
+	schedulers := coordinator.GetSchedulersController()
+	for _, s := range schedulers.GetSchedulerNames() {
+		paused, err := schedulers.IsSchedulerAllowed(s)
 		if s != "split-bucket-scheduler" {
 			re.NoError(err)
 			re.True(paused)
