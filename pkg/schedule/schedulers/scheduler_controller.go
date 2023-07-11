@@ -28,9 +28,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -43,24 +42,26 @@ type Controller struct {
 	sync.RWMutex
 	wg           sync.WaitGroup
 	ctx          context.Context
-	cluster      sche.ClusterInformer
+	cluster      sche.ScheduleCluster
+	storage      endpoint.ConfigStorage
 	schedulers   map[string]*ScheduleController
 	opController *operator.Controller
 }
 
 // NewController creates a scheduler controller.
-func NewController(ctx context.Context, cluster sche.ClusterInformer, opController *operator.Controller) *Controller {
+func NewController(ctx context.Context, cluster sche.ScheduleCluster, storage endpoint.ConfigStorage, opController *operator.Controller) *Controller {
 	return &Controller{
 		ctx:          ctx,
 		cluster:      cluster,
+		storage:      storage,
 		schedulers:   make(map[string]*ScheduleController),
 		opController: opController,
 	}
 }
 
-// GetWaitGroup returns the waitGroup of the controller.
-func (c *Controller) GetWaitGroup() *sync.WaitGroup {
-	return &c.wg
+// Wait waits on all schedulers to exit.
+func (c *Controller) Wait() {
+	c.wg.Wait()
 }
 
 // GetScheduler returns a schedule controller by name.
@@ -108,7 +109,7 @@ func (c *Controller) CollectSchedulerMetrics() {
 }
 
 func (c *Controller) isSchedulingHalted() bool {
-	return c.cluster.GetPersistOptions().IsSchedulingHalted()
+	return c.cluster.GetOpts().IsSchedulingHalted()
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
@@ -133,7 +134,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.Scheduler.GetName()] = s
-	c.cluster.GetPersistOptions().AddSchedulerCfg(s.Scheduler.GetType(), args)
+	c.cluster.GetOpts().AddSchedulerCfg(s.Scheduler.GetType(), args)
 	return nil
 }
 
@@ -149,18 +150,14 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 
-	opt := c.cluster.GetPersistOptions()
-	if err := c.removeOptScheduler(opt, name); err != nil {
-		log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
-		return err
-	}
-
-	if err := opt.Persist(c.cluster.GetStorage()); err != nil {
+	opt := c.cluster.GetOpts()
+	opt.RemoveSchedulerCfg(s.Scheduler.GetType())
+	if err := opt.Persist(c.storage); err != nil {
 		log.Error("the option can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
 
-	if err := c.cluster.GetStorage().RemoveScheduleConfig(name); err != nil {
+	if err := c.storage.RemoveScheduleConfig(name); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
 	}
@@ -169,29 +166,6 @@ func (c *Controller) RemoveScheduler(name string) error {
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
 
-	return nil
-}
-
-func (c *Controller) removeOptScheduler(o *config.PersistOptions, name string) error {
-	v := o.GetScheduleConfig().Clone()
-	for i, schedulerCfg := range v.Schedulers {
-		// To create a temporary scheduler is just used to get scheduler's name
-		decoder := ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args)
-		tmp, err := CreateScheduler(schedulerCfg.Type, c.opController, storage.NewStorageWithMemoryBackend(), decoder, c.RemoveScheduler)
-		if err != nil {
-			return err
-		}
-		if tmp.GetName() == name {
-			if config.IsDefaultScheduler(tmp.GetType()) {
-				schedulerCfg.Disable = true
-				v.Schedulers[i] = schedulerCfg
-			} else {
-				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
-			}
-			o.SetScheduleConfig(v)
-			return nil
-		}
-	}
 	return nil
 }
 
@@ -265,14 +239,7 @@ func (c *Controller) IsSchedulerDisabled(name string) (bool, error) {
 	if !ok {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	t := s.Scheduler.GetType()
-	scheduleConfig := c.cluster.GetPersistOptions().GetScheduleConfig()
-	for _, s := range scheduleConfig.Schedulers {
-		if t == s.Type {
-			return s.Disable, nil
-		}
-	}
-	return false, nil
+	return c.cluster.GetOpts().IsSchedulerDisabled(s.Scheduler.GetType()), nil
 }
 
 // IsSchedulerExisted returns whether a scheduler is existed.

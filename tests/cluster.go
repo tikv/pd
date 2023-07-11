@@ -628,9 +628,11 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
+			s.RLock()
 			if s.state == Running {
 				running++
 			}
+			s.RUnlock()
 			n := s.GetLeader().GetName()
 			if n != "" {
 				counter[n]++

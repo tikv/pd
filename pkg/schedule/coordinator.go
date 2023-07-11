@@ -86,8 +86,8 @@ type Coordinator struct {
 // NewCoordinator creates a new Coordinator.
 func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
 	ctx, cancel := context.WithCancel(ctx)
-	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetPersistOptions(), hbStreams)
-	schedulers := schedulers.NewController(ctx, cluster, opController)
+	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetOpts(), hbStreams)
+	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
 	c := &Coordinator{
 		ctx:             ctx,
 		cancel:          cancel,
@@ -101,7 +101,7 @@ func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams
 		hbStreams:       hbStreams,
 		pluginInterface: NewPluginInterface(),
 	}
-	c.diagnosticManager = diagnostic.NewManager(schedulers, cluster.GetPersistOptions())
+	c.diagnosticManager = diagnostic.NewManager(schedulers, cluster.GetOpts())
 	return c
 }
 
@@ -316,7 +316,7 @@ func (c *Coordinator) RunUntilStop() {
 	c.Run()
 	<-c.ctx.Done()
 	log.Info("Coordinator is stopping")
-	c.GetSchedulersController().GetWaitGroup().Wait()
+	c.GetSchedulersController().Wait()
 	c.wg.Wait()
 	log.Info("Coordinator has been stopped")
 }
