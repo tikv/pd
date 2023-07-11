@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -114,7 +115,7 @@ func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.GetCoordinator().IsSchedulerPaused(name)
+	return rc.GetCoordinator().GetSchedulersController().IsSchedulerPaused(name)
 }
 
 // IsSchedulerDisabled returns whether scheduler is disabled.
@@ -123,7 +124,7 @@ func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.GetCoordinator().IsSchedulerDisabled(name)
+	return rc.GetCoordinator().GetSchedulersController().IsSchedulerDisabled(name)
 }
 
 // IsSchedulerExisted returns whether scheduler is existed.
@@ -132,7 +133,7 @@ func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.GetCoordinator().IsSchedulerExisted(name)
+	return rc.GetCoordinator().GetSchedulersController().IsSchedulerExisted(name)
 }
 
 // GetScheduleConfig returns ScheduleConfig.
@@ -186,6 +187,16 @@ func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
 	return c.GetHotWriteRegions()
 }
 
+// GetHotBuckets returns all hot buckets stats.
+func (h *Handler) GetHotBuckets(regionIDs ...uint64) map[uint64][]*buckets.BucketStat {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil
+	}
+	degree := c.GetOpts().GetHotRegionCacheHitsThreshold()
+	return c.BucketsStats(degree, regionIDs...)
+}
+
 // GetHotReadRegions gets all hot read regions stats.
 func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 	c, err := h.GetRaftCluster()
@@ -221,7 +232,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		return err
 	}
 
-	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().RemoveScheduler)
+	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().GetSchedulersController().RemoveScheduler)
 	if err != nil {
 		return err
 	}

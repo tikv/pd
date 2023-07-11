@@ -54,7 +54,7 @@ type tsoKeyspaceGroupManagerTestSuite struct {
 	// pdLeaderServer is the leader server of the PD cluster.
 	pdLeaderServer *tests.TestServer
 	// tsoCluster is the TSO service cluster.
-	tsoCluster *mcs.TestTSOCluster
+	tsoCluster *tests.TestTSOCluster
 }
 
 func TestTSOKeyspaceGroupManager(t *testing.T) {
@@ -74,7 +74,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())
-	suite.tsoCluster, err = mcs.NewTestTSOCluster(suite.ctx, 2, suite.pdLeaderServer.GetAddr())
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 2, suite.pdLeaderServer.GetAddr())
 	re.NoError(err)
 }
 
@@ -515,7 +515,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
 
-	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, pdAddr)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
 	re.NoError(err)
 	defer tsoCluster.Destroy()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
@@ -707,7 +707,7 @@ func TestGetTSOImmediately(t *testing.T) {
 	leaderServer := tc.GetServer(tc.GetLeader())
 	re.NoError(leaderServer.BootstrapCluster())
 
-	tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, pdAddr)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
 	re.NoError(err)
 	defer tsoCluster.Destroy()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
