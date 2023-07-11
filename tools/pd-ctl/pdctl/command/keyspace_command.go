@@ -23,7 +23,7 @@ import (
 
 const keyspacePrefix = "pd/api/v2/keyspaces"
 
-// NewKeyspaceCommand return a keyspace subcommand of rootCmd
+// NewKeyspaceCommand returns a keyspace subcommand of rootCmd.
 func NewKeyspaceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "keyspace [command] [flags]",

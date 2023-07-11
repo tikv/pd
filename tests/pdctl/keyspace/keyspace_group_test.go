@@ -561,8 +561,10 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		args := []string{"-u", pdAddr, "keyspace-group"}
 		output, err := pdctl.ExecuteCommand(cmd, append(args, "1")...)
 		re.NoError(err)
-
 		err = json.Unmarshal(output, &keyspaceGroup)
+		if err != nil {
+			fmt.Println(string(output))
+		}
 		re.NoError(err)
 		return len(keyspaceGroup.Members) == 2
 	})
