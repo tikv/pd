@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	api "github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
@@ -53,12 +52,9 @@ func TestKeyspace(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	_, tsoServerCleanup1, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
-	defer tsoServerCleanup1()
+	ttc, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
 	re.NoError(err)
-	_, tsoServerCleanup2, err := tests.StartSingleTSOTestServer(ctx, re, pdAddr, tempurl.Alloc())
-	defer tsoServerCleanup2()
-	re.NoError(err)
+	defer ttc.Destroy()
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
