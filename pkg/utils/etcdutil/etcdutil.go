@@ -233,6 +233,9 @@ func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, er
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
 func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client, error) {
+	if len(acURLs) == 0 {
+		return nil, errs.ErrNewEtcdClient.FastGenByArgs("empty etcd endpoints")
+	}
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
@@ -247,11 +250,8 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		tickerInterval = 100 * time.Millisecond
 	})
 	failpoint.Inject("closeTick", func() {
-		tickerInterval = 0
+		failpoint.Return(client, err)
 	})
-	if tickerInterval == 0 {
-		return client, err
-	}
 
 	checker := &healthyChecker{
 		tlsConfig: tlsConfig,
@@ -281,6 +281,9 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 				if len(healthyEps) == 0 {
 					// when all endpoints are unhealthy, try to reset endpoints to update connect
 					// rather than delete them to avoid there is no any endpoint in client.
+					// Note: reset endpoints will trigger subconn closed, and then trigger reconnect.
+					// otherwise, the subconn will be retrying in grpc layer and use exponential backoff,
+					// and it cannot recover as soon as possible.
 					if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
 						log.Info("[etcd client] no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
 						client.SetEndpoints([]string{}...)
