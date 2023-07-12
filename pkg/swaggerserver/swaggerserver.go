@@ -21,12 +21,8 @@ import (
 	"context"
 	"net/http"
 
-<<<<<<< HEAD
-=======
 	httpSwagger "github.com/swaggo/http-swagger"
 	_ "github.com/tikv/pd/docs/swagger"
-	"github.com/tikv/pd/pkg/utils/apiutil"
->>>>>>> c07c333b3 (swagger: block swagger url if disbale swagger server  (#6785))
 	"github.com/tikv/pd/server"
 )
 
