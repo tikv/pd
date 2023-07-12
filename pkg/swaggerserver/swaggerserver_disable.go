@@ -24,6 +24,11 @@ import (
 	"github.com/tikv/pd/server"
 )
 
+// Enabled return false if swagger server is disabled.
+func Enabled() bool {
+	return false
+}
+
 // NewHandler creates a HTTP handler for Swagger.
 func NewHandler(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
 	return nil, server.ServiceGroup{}, nil
