@@ -218,6 +218,9 @@ const (
 )
 
 func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, error) {
+	if len(endpoints) == 0 {
+		return nil, errs.ErrNewEtcdClient.FastGenByArgs("empty etcd endpoints")
+	}
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
@@ -233,9 +236,6 @@ func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, er
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
 func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client, error) {
-	if len(acURLs) == 0 {
-		return nil, errs.ErrNewEtcdClient.FastGenByArgs("empty etcd endpoints")
-	}
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
