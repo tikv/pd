@@ -946,10 +946,11 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re.NoError(err)
 	servers := suite.cluster.GetServers()
 	re.NoError(suite.cluster.StopAll())
+	serverList := make([]*tests.TestServer, 0, len(servers))
 	for _, s := range servers {
-		err := <-suite.cluster.RunServer(s)
-		re.NoError(err)
+		serverList = append(serverList, s)
 	}
+	re.NoError(suite.cluster.RunServers(serverList))
 	suite.cluster.WaitLeader()
 	newGroups, err := cli.ListResourceGroups(suite.ctx)
 	re.NoError(err)
