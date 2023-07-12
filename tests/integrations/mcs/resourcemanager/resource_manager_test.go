@@ -940,6 +940,20 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			re.Equal(1, len(groups1))
 		}
 	}
+
+	// test restart cluster
+	groups, err := cli.ListResourceGroups(suite.ctx)
+	re.NoError(err)
+	servers := suite.cluster.GetServers()
+	re.NoError(suite.cluster.StopAll())
+	for _, s := range servers {
+		err := <-suite.cluster.RunServer(s)
+		re.NoError(err)
+	}
+	suite.cluster.WaitLeader()
+	newGroups, err := cli.ListResourceGroups(suite.ctx)
+	re.NoError(err)
+	re.Equal(groups, newGroups)
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover() {
