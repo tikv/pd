@@ -38,6 +38,11 @@ var (
 	}
 )
 
+// Enabled return true if swagger server is disabled.
+func Enabled() bool {
+	return true
+}
+
 // NewHandler creates a HTTP handler for Swagger.
 func NewHandler(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 	swaggerHandler := http.NewServeMux()
