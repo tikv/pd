@@ -562,10 +562,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		output, err := pdctl.ExecuteCommand(cmd, append(args, "1")...)
 		re.NoError(err)
 		err = json.Unmarshal(output, &keyspaceGroup)
-		if err != nil {
-			fmt.Println(string(output))
-		}
-		re.NoError(err)
+		re.NoErrorf(err, "output: %s", string(output))
 		return len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {
