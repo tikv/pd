@@ -1,4 +1,4 @@
-// Copyright 2020 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build swagger_server
-// +build swagger_server
+package server
 
-package swaggerserver
+import "github.com/prometheus/client_golang/prometheus"
 
-import (
-	"net/http"
-
-	httpSwagger "github.com/swaggo/http-swagger"
-	_ "github.com/tikv/pd/docs/swagger"
+const (
+	namespace       = "scheduling"
+	serverSubsystem = "server"
 )
 
-func handler() http.Handler {
-	return httpSwagger.Handler()
+var (
+	// Meta & Server info.
+	serverInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "info",
+			Help:      "Indicate the scheduling server info, and the value is the start timestamp (s).",
+		}, []string{"version", "hash"})
+)
+
+func init() {
+	prometheus.MustRegister(serverInfo)
 }

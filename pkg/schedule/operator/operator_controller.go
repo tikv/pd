@@ -48,7 +48,7 @@ var (
 	fastNotifyInterval = 2 * time.Second
 	// StoreBalanceBaseTime represents the base time of balance rate.
 	StoreBalanceBaseTime float64 = 60
-	// FastOperatorFinishTime min finish time, if finish duration less than it,op will be pushed to fast operator queue
+	// FastOperatorFinishTime min finish time, if finish duration less than it, op will be pushed to fast operator queue
 	FastOperatorFinishTime = 10 * time.Second
 )
 
@@ -125,7 +125,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
 			}
-			if oc.RemoveOperator(op) {
+			if oc.RemoveOperator(op, Succeed) {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
 			}
@@ -134,7 +134,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 				oc.pushFastOperator(op)
 			}
 		case TIMEOUT:
-			if oc.RemoveOperator(op) {
+			if oc.RemoveOperator(op, Timeout) {
 				operatorCounter.WithLabelValues(op.Desc(), "promote-timeout").Inc()
 				oc.PromoteWaitingOperator()
 			}
@@ -150,7 +150,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 				failpoint.Inject("unexpectedOperator", func() {
 					panic(op)
 				})
-				_ = op.Cancel()
+				_ = op.Cancel(NotInRunningState)
 				oc.buryOperator(op)
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-unexpected").Inc()
 				oc.PromoteWaitingOperator()
@@ -162,7 +162,8 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core.RegionInfo) bool {
 	err := step.CheckInProgress(oc.cluster, oc.config, region)
 	if err != nil {
-		if oc.RemoveOperator(op, zap.String("reason", err.Error())) {
+		log.Info("operator is stale", zap.Uint64("region-id", op.RegionID()), errs.ZapError(err))
+		if oc.RemoveOperator(op, StaleStatus) {
 			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
 			operatorWaitCounter.WithLabelValues(op.Desc(), "promote-stale").Inc()
 			oc.PromoteWaitingOperator()
@@ -177,11 +178,13 @@ func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core
 	latest := region.GetRegionEpoch()
 	changes := latest.GetConfVer() - origin.GetConfVer()
 	if changes > op.ConfVerChanged(region) {
+		log.Info("operator is stale",
+			zap.Uint64("region-id", op.RegionID()),
+			zap.Uint64("diff", changes),
+			zap.Reflect("latest-epoch", region.GetRegionEpoch()))
 		if oc.RemoveOperator(
 			op,
-			zap.String("reason", "stale operator, confver does not meet expectations"),
-			zap.Reflect("latest-epoch", region.GetRegionEpoch()),
-			zap.Uint64("diff", changes),
+			EpochNotMatch,
 		) {
 			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
 			operatorWaitCounter.WithLabelValues(op.Desc(), "promote-stale").Inc()
@@ -220,7 +223,7 @@ func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 	r = oc.cluster.GetRegion(regionID)
 	if r == nil {
 		_ = oc.removeOperatorLocked(op)
-		if op.Cancel() {
+		if op.Cancel(RegionNotFound) {
 			log.Warn("remove operator because region disappeared",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Stringer("operator", op))
@@ -285,14 +288,14 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 			}
 			isMerge = true
 		}
-		if !oc.checkAddOperator(false, op) {
-			_ = op.Cancel()
+		if pass, reason := oc.checkAddOperator(false, op); !pass {
+			_ = op.Cancel(reason)
 			oc.buryOperator(op)
 			if isMerge {
 				// Merge operation have two operators, cancel them all
 				i++
 				next := ops[i]
-				_ = next.Cancel()
+				_ = next.Cancel(reason)
 				oc.buryOperator(next)
 			}
 			continue
@@ -327,9 +330,16 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 	// note: checkAddOperator uses false param for `isPromoting`.
 	// This is used to keep check logic before fixing issue #4946,
 	// but maybe user want to add operator when waiting queue is busy
-	if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(false, ops...) {
+	if oc.exceedStoreLimitLocked(ops...) {
 		for _, op := range ops {
-			_ = op.Cancel()
+			_ = op.Cancel(ExceedStoreLimit)
+			oc.buryOperator(op)
+		}
+		return false
+	}
+	if pass, reason := oc.checkAddOperator(false, ops...); !pass {
+		for _, op := range ops {
+			_ = op.Cancel(reason)
 			oc.buryOperator(op)
 		}
 		return false
@@ -354,11 +364,20 @@ func (oc *Controller) PromoteWaitingOperator() {
 			return
 		}
 		operatorWaitCounter.WithLabelValues(ops[0].Desc(), "get").Inc()
-
-		if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(true, ops...) {
+		if oc.exceedStoreLimitLocked(ops...) {
 			for _, op := range ops {
 				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-canceled").Inc()
-				_ = op.Cancel()
+				_ = op.Cancel(ExceedStoreLimit)
+				oc.buryOperator(op)
+			}
+			oc.wopStatus.ops[ops[0].Desc()]--
+			continue
+		}
+
+		if pass, reason := oc.checkAddOperator(true, ops...); !pass {
+			for _, op := range ops {
+				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-canceled").Inc()
+				_ = op.Cancel(reason)
 				oc.buryOperator(op)
 			}
 			oc.wopStatus.ops[ops[0].Desc()]--
@@ -382,14 +401,14 @@ func (oc *Controller) PromoteWaitingOperator() {
 // - The region already has a higher priority or same priority
 // - Exceed the max number of waiting operators
 // - At least one operator is expired.
-func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) bool {
+func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool, CancelReasonType) {
 	for _, op := range ops {
 		region := oc.cluster.GetRegion(op.RegionID())
 		if region == nil {
 			log.Debug("region not found, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "not-found").Inc()
-			return false
+			return false, RegionNotFound
 		}
 		if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() ||
 			region.GetRegionEpoch().GetConfVer() != op.RegionEpoch().GetConfVer() {
@@ -398,14 +417,14 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) bool 
 				zap.Reflect("old", region.GetRegionEpoch()),
 				zap.Reflect("new", op.RegionEpoch()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
-			return false
+			return false, EpochNotMatch
 		}
 		if old := oc.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
 			log.Debug("already have operator, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Reflect("old", old))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "already-have").Inc()
-			return false
+			return false, AlreadyExist
 		}
 		if op.Status() != CREATED {
 			log.Error("trying to add operator with unexpected status",
@@ -416,26 +435,26 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) bool 
 				panic(op)
 			})
 			operatorWaitCounter.WithLabelValues(op.Desc(), "unexpected-status").Inc()
-			return false
+			return false, NotInCreateStatus
 		}
 		if !isPromoting && oc.wopStatus.ops[op.Desc()] >= oc.config.GetSchedulerMaxWaitingOperator() {
 			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.config.GetSchedulerMaxWaitingOperator()))
 			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
-			return false
+			return false, ExceedWaitLimit
 		}
 
 		if op.SchedulerKind() == OpAdmin || op.IsLeaveJointStateOperator() {
 			continue
 		}
 	}
-	expired := false
+	var reason CancelReasonType
 	for _, op := range ops {
 		if op.CheckExpired() {
-			expired = true
+			reason = Expired
 			operatorWaitCounter.WithLabelValues(op.Desc(), "expired").Inc()
 		}
 	}
-	return !expired
+	return reason != Expired, reason
 }
 
 func isHigherPriorityOperator(new, old *Operator) bool {
@@ -521,18 +540,24 @@ func (oc *Controller) ack(op *Operator) {
 }
 
 // RemoveOperator removes an operator from the running operators.
-func (oc *Controller) RemoveOperator(op *Operator, extraFields ...zap.Field) bool {
+func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) bool {
 	oc.Lock()
 	removed := oc.removeOperatorLocked(op)
 	oc.Unlock()
+	var cancelReason CancelReasonType
+	if len(reasons) > 0 {
+		cancelReason = reasons[0]
+	} else {
+		cancelReason = Unknown
+	}
 	if removed {
-		if op.Cancel() {
+		if op.Cancel(cancelReason) {
 			log.Info("operator removed",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Duration("takes", op.RunningTime()),
 				zap.Reflect("operator", op))
 		}
-		oc.buryOperator(op, extraFields...)
+		oc.buryOperator(op)
 	}
 	return removed
 }
@@ -550,12 +575,28 @@ func (oc *Controller) removeOperatorLocked(op *Operator) bool {
 		oc.updateCounts(oc.operators)
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
+		if op.Kind()&OpMerge != 0 {
+			oc.removeRelatedMergeOperator(op)
+		}
 		return true
 	}
 	return false
 }
 
-func (oc *Controller) buryOperator(op *Operator, extraFields ...zap.Field) {
+func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
+	relatedID, _ := strconv.ParseUint(op.AdditionalInfos[string(RelatedMergeRegion)], 10, 64)
+	if relatedOp := oc.operators[relatedID]; relatedOp != nil && relatedOp.Status() != CANCELED {
+		log.Info("operator canceled related merge region",
+			zap.Uint64("region-id", relatedOp.RegionID()),
+			zap.String("additional-info", relatedOp.GetAdditionalInfo()),
+			zap.Duration("takes", relatedOp.RunningTime()))
+		oc.removeOperatorLocked(relatedOp)
+		relatedOp.Cancel(RelatedMergeRegion)
+		oc.buryOperator(relatedOp)
+	}
+}
+
+func (oc *Controller) buryOperator(op *Operator) {
 	st := op.Status()
 
 	if !IsEndStatus(st) {
@@ -567,7 +608,7 @@ func (oc *Controller) buryOperator(op *Operator, extraFields ...zap.Field) {
 			panic(op)
 		})
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
-		_ = op.Cancel()
+		_ = op.Cancel(Unknown)
 	}
 
 	switch st {
@@ -603,15 +644,11 @@ func (oc *Controller) buryOperator(op *Operator, extraFields ...zap.Field) {
 			zap.String("additional-info", op.GetAdditionalInfo()))
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	case CANCELED:
-		fields := []zap.Field{
+		log.Info("operator canceled",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
 			zap.String("additional-info", op.GetAdditionalInfo()),
-		}
-		fields = append(fields, extraFields...)
-		log.Info("operator canceled",
-			fields...,
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}

@@ -72,7 +72,6 @@ func NewLocalTSOAllocator(
 		leadership:       leadership,
 		timestampOracle: &timestampOracle{
 			client:                 leadership.GetClient(),
-			rootPath:               am.rootPath,
 			tsPath:                 tsPath,
 			storage:                am.storage,
 			saveInterval:           am.saveInterval,

@@ -33,9 +33,10 @@ type ResourceGroup struct {
 	Name string         `json:"name"`
 	Mode rmpb.GroupMode `json:"mode"`
 	// RU settings
-	RUSettings *RequestUnitSettings  `json:"r_u_settings,omitempty"`
-	Priority   uint32                `json:"priority"`
-	Runaway    *rmpb.RunawaySettings `json:"runaway_settings,omitempty"`
+	RUSettings *RequestUnitSettings     `json:"r_u_settings,omitempty"`
+	Priority   uint32                   `json:"priority"`
+	Runaway    *rmpb.RunawaySettings    `json:"runaway_settings,omitempty"`
+	Background *rmpb.BackgroundSettings `json:"background_settings,omitempty"`
 }
 
 // RequestUnitSettings is the definition of the RU settings.
@@ -97,6 +98,7 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 	}
 	rg.Priority = metaGroup.Priority
 	rg.Runaway = metaGroup.RunawaySettings
+	rg.Background = metaGroup.BackgroundSettings
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
 		settings := metaGroup.GetRUSettings()
@@ -115,10 +117,11 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 // FromProtoResourceGroup converts a rmpb.ResourceGroup to a ResourceGroup.
 func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	rg := &ResourceGroup{
-		Name:     group.Name,
-		Mode:     group.Mode,
-		Priority: group.Priority,
-		Runaway:  group.RunawaySettings,
+		Name:       group.Name,
+		Mode:       group.Mode,
+		Priority:   group.Priority,
+		Runaway:    group.RunawaySettings,
+		Background: group.BackgroundSettings,
 	}
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
@@ -163,7 +166,8 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			RUSettings: &rmpb.GroupRequestUnitSettings{
 				RU: rg.RUSettings.RU.GetTokenBucket(),
 			},
-			RunawaySettings: rg.Runaway,
+			RunawaySettings:    rg.Runaway,
+			BackgroundSettings: rg.Background,
 		}
 		return group
 	case rmpb.GroupMode_RawMode: // Raw mode

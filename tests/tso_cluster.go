@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mcs
+package tests
 
 import (
 	"context"
@@ -202,8 +202,18 @@ func (tc *TestTSOCluster) GetServers() map[string]*tso.Server {
 func (tc *TestTSOCluster) GetKeyspaceGroupMember() (members []endpoint.KeyspaceGroupMember) {
 	for _, server := range tc.servers {
 		members = append(members, endpoint.KeyspaceGroupMember{
-			Address: server.GetAddr(),
+			Address:  server.GetAddr(),
+			Priority: mcsutils.DefaultKeyspaceGroupReplicaPriority,
 		})
 	}
 	return
+}
+
+// GetAddrs returns all TSO server addresses.
+func (tc *TestTSOCluster) GetAddrs() []string {
+	addrs := make([]string, 0, len(tc.servers))
+	for _, server := range tc.servers {
+		addrs = append(addrs, server.GetAddr())
+	}
+	return addrs
 }

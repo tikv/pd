@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -89,16 +89,6 @@ func NewGlobalTSOAllocator(
 	am *AllocatorManager,
 	startGlobalLeaderLoop bool,
 ) Allocator {
-	// Construct the timestampOracle path prefix, which is:
-	// 1. for the default keyspace group:
-	//     "" in /pd/{cluster_id}/timestamp
-	// 2. for the non-default keyspace groups:
-	//     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
-	tsPath := ""
-	if am.kgID != mcsutils.DefaultKeyspaceGroupID {
-		tsPath = path.Join(fmt.Sprintf("%05d", am.kgID), globalTSOAllocatorEtcdPrefix)
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	gta := &GlobalTSOAllocator{
 		ctx:    ctx,
@@ -107,8 +97,7 @@ func NewGlobalTSOAllocator(
 		member: am.member,
 		timestampOracle: &timestampOracle{
 			client:                 am.member.GetLeadership().GetClient(),
-			rootPath:               am.rootPath,
-			tsPath:                 tsPath,
+			tsPath:                 endpoint.KeyspaceGroupTSPath(am.kgID),
 			storage:                am.storage,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,

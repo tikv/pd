@@ -609,6 +609,48 @@ func TestAutoDetectMode(t *testing.T) {
 	}
 }
 
+// Failed learner replica store should be considered by auto-detect mode.
+func TestAutoDetectWithOneLearner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+
+	storeReport := pdpb.StoreReport{
+		PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2}, {Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner}}}}},
+		},
+	}
+	req := newStoreHeartbeat(1, &storeReport)
+	req.StoreReport.Step = 1
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.HandleStoreHeartbeat(req, resp)
+	hasStore3AsFailedStore := false
+	for _, failedStore := range resp.RecoveryPlan.ForceLeader.FailedStores {
+		if failedStore == 3 {
+			hasStore3AsFailedStore = true
+			break
+		}
+	}
+	re.True(hasStore3AsFailedStore)
+}
+
 func TestOneLearner(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1675,8 +1717,9 @@ func TestRemoveFailedStores(t *testing.T) {
 		1: {},
 	}, 60, false))
 	re.True(cluster.GetStore(uint64(1)).IsRemoved())
-	for _, s := range coordinator.GetSchedulers() {
-		paused, err := coordinator.IsSchedulerAllowed(s)
+	schedulers := coordinator.GetSchedulersController()
+	for _, s := range schedulers.GetSchedulerNames() {
+		paused, err := schedulers.IsSchedulerAllowed(s)
 		if s != "split-bucket-scheduler" {
 			re.NoError(err)
 			re.True(paused)

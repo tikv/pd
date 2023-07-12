@@ -23,7 +23,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/core"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -251,8 +250,6 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 			return nil
 		}
 		splitBucketNewOperatorCounter.Inc()
-		op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
-		op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
 		op.AdditionalInfos["hot-degree"] = strconv.FormatInt(int64(splitBucket.HotDegree), 10)
 		return []*operator.Operator{op}
 	}

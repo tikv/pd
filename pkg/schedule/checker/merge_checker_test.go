@@ -484,7 +484,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 		suite.NotNil(ops)
 		suite.True(oc.AddOperator(ops...))
 		for _, op := range ops {
-			oc.RemoveOperator(op)
+			oc.RemoveOperator(op, operator.ExceedStoreLimit)
 		}
 	}
 	regions[2] = regions[2].Clone(
@@ -498,7 +498,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 		suite.NotNil(ops)
 		suite.True(oc.AddOperator(ops...))
 		for _, op := range ops {
-			oc.RemoveOperator(op)
+			oc.RemoveOperator(op, operator.ExceedStoreLimit)
 		}
 	}
 	{

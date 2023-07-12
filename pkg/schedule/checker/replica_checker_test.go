@@ -162,7 +162,7 @@ func (suite *replicaCheckerTestSuite) TestDownPeer() {
 	suite.NotNil(op)
 	suite.Equal("remove-extra-down-replica", op.Desc())
 
-	// down a peer,the number of peers(except learner) is not enough.
+	// down a peer, the number of peers(except learner) is not enough.
 	op = suite.downPeerAndCheck(metapb.PeerRole_Learner)
 	suite.NotNil(op)
 	suite.Equal("replace-down-replica", op.Desc())

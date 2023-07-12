@@ -55,6 +55,7 @@ var (
 	ErrKeyspaceGroupNotInitialized      = errors.Normalize("the keyspace group %d isn't initialized", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupNotInitialized"))
 	ErrKeyspaceNotAssigned              = errors.Normalize("the keyspace %d isn't assigned to any keyspace group", errors.RFCCodeText("PD:tso:ErrKeyspaceNotAssigned"))
 	ErrGetMinTS                         = errors.Normalize("get min ts failed, %s", errors.RFCCodeText("PD:tso:ErrGetMinTS"))
+	ErrKeyspaceGroupIsMerging           = errors.Normalize("the keyspace group %d is merging", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupIsMerging"))
 )
 
 // member errors
@@ -371,8 +372,7 @@ var (
 
 // Resource Manager errors
 var (
-	ErrResourceGroupAlreadyExists = errors.Normalize("the %s resource group already exists", errors.RFCCodeText("PD:resourcemanager:ErrResourceGroupAlreadyExists"))
-	ErrResourceGroupNotExists     = errors.Normalize("the %s resource group does not exist", errors.RFCCodeText("PD:resourcemanager:ErrGroupNotExists"))
-	ErrDeleteReservedGroup        = errors.Normalize("cannot delete reserved group", errors.RFCCodeText("PD:resourcemanager:ErrDeleteReservedGroup"))
-	ErrInvalidGroup               = errors.Normalize("invalid group settings, please check the group name, priority and the number of resources", errors.RFCCodeText("PD:resourcemanager:ErrInvalidGroup"))
+	ErrResourceGroupNotExists = errors.Normalize("the %s resource group does not exist", errors.RFCCodeText("PD:resourcemanager:ErrGroupNotExists"))
+	ErrDeleteReservedGroup    = errors.Normalize("cannot delete reserved group", errors.RFCCodeText("PD:resourcemanager:ErrDeleteReservedGroup"))
+	ErrInvalidGroup           = errors.Normalize("invalid group settings, please check the group name, priority and the number of resources", errors.RFCCodeText("PD:resourcemanager:ErrInvalidGroup"))
 )

@@ -606,11 +606,6 @@ error = '''
 invalid group settings, please check the group name, priority and the number of resources
 '''
 
-["PD:resourcemanager:ErrResourceGroupAlreadyExists"]
-error = '''
-the %s resource group already exists
-'''
-
 ["PD:schedule:ErrCreateOperator"]
 error = '''
 unable to create operator, %s
@@ -764,6 +759,11 @@ get min ts failed, %s
 ["PD:tso:ErrKeyspaceGroupIDInvalid"]
 error = '''
 the keyspace group id is invalid, %s
+'''
+
+["PD:tso:ErrKeyspaceGroupIsMerging"]
+error = '''
+the keyspace group %d is merging
 '''
 
 ["PD:tso:ErrKeyspaceGroupNotInitialized"]

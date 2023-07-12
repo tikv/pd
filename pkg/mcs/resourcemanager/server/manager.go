@@ -127,23 +127,26 @@ func (m *Manager) Init(ctx context.Context) {
 	}
 	m.storage.LoadResourceGroupStates(tokenHandler)
 
-	// Add default group
-	defaultGroup := &ResourceGroup{
-		Name: reservedDefaultGroupName,
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &RequestUnitSettings{
-			RU: &GroupTokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   math.MaxInt32,
-					BurstLimit: -1,
+	// Add default group if it's not inited.
+	if _, ok := m.groups[reservedDefaultGroupName]; !ok {
+		defaultGroup := &ResourceGroup{
+			Name: reservedDefaultGroupName,
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &RequestUnitSettings{
+				RU: &GroupTokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   math.MaxInt32,
+						BurstLimit: -1,
+					},
 				},
 			},
-		},
-		Priority: middlePriority,
+			Priority: middlePriority,
+		}
+		if err := m.AddResourceGroup(defaultGroup.IntoProtoResourceGroup()); err != nil {
+			log.Warn("init default group failed", zap.Error(err))
+		}
 	}
-	if err := m.AddResourceGroup(defaultGroup.IntoProtoResourceGroup()); err != nil {
-		log.Warn("init default group failed", zap.Error(err))
-	}
+
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
 	go func() {
@@ -154,6 +157,8 @@ func (m *Manager) Init(ctx context.Context) {
 }
 
 // AddResourceGroup puts a resource group.
+// NOTE: AddResourceGroup should also be idempotent because tidb depends
+// on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	// Check the name.
 	if len(grouppb.Name) == 0 || len(grouppb.Name) > 32 {
@@ -162,12 +167,6 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	// Check the Priority.
 	if grouppb.GetPriority() > 16 {
 		return errs.ErrInvalidGroup
-	}
-	m.RLock()
-	_, ok := m.groups[grouppb.Name]
-	m.RUnlock()
-	if ok {
-		return errs.ErrResourceGroupAlreadyExists.FastGenByArgs(grouppb.Name)
 	}
 	group := FromProtoResourceGroup(grouppb)
 	m.Lock()
