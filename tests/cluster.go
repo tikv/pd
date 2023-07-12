@@ -96,6 +96,9 @@ func createTestServer(ctx context.Context, cfg *config.Config, services []string
 		return nil, err
 	}
 	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
+	if swaggerserver.Enabled() {
+		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
+	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {

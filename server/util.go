@@ -97,9 +97,6 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 		if err != nil {
 			return nil, err
 		}
-		if handler == nil {
-			continue
-		}
 		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
 			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
 		}
