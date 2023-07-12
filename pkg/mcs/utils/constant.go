@@ -49,8 +49,8 @@ const (
 	// We also reserved 0 for the keyspace group for the same purpose.
 	DefaultKeyspaceGroupID = uint32(0)
 
-	// MicroserviceKey is the key of microservice.
-	MicroserviceKey = "ms"
+	// MicroserviceRootPath is the root path of microservice in etcd.
+	MicroserviceRootPath = "/ms"
 	// APIServiceName is the name of api server.
 	APIServiceName = "api"
 	// TSOServiceName is the name of tso server.
@@ -59,6 +59,8 @@ const (
 	ResourceManagerServiceName = "resource_manager"
 	// KeyspaceGroupsKey is the path component of keyspace groups.
 	KeyspaceGroupsKey = "keyspace_groups"
+	// KeyspaceGroupsPrimaryKey is the path component of primary for keyspace groups.
+	KeyspaceGroupsPrimaryKey = "primary"
 
 	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
 	// is the sharding unit, i.e., by the definition here, the max count of the shards
@@ -72,6 +74,12 @@ const (
 	// foreseen future, and the former is just for extensibility in theory.
 	MaxKeyspaceGroupCountInUse = uint32(4096)
 
-	// KeyspaceGroupDefaultReplicaCount is the default replica count of keyspace group.
-	KeyspaceGroupDefaultReplicaCount = 2
+	// DefaultKeyspaceGroupReplicaCount is the default replica count of keyspace group.
+	DefaultKeyspaceGroupReplicaCount = 2
+
+	// DefaultKeyspaceGroupReplicaPriority is the default priority of a keyspace group replica.
+	// It's used in keyspace group primary weighted-election to balance primaries' distribution.
+	// Among multiple replicas of a keyspace group, the higher the priority, the more likely
+	// the replica is to be elected as primary.
+	DefaultKeyspaceGroupReplicaPriority = 0
 )

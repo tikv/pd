@@ -62,7 +62,7 @@ type FileReplicater interface {
 }
 
 const drStatusFile = "DR_STATE"
-const persistFileTimeout = time.Second * 10
+const persistFileTimeout = time.Second * 3
 
 // ModeManager is used to control how raft logs are synchronized between
 // different tikv nodes.
@@ -234,7 +234,7 @@ func (m *ModeManager) drSwitchToAsyncWait(availableStores []uint64) error {
 	m.Lock()
 	defer m.Unlock()
 
-	id, err := m.cluster.GetAllocator().Alloc()
+	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to async wait state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -257,7 +257,7 @@ func (m *ModeManager) drSwitchToAsync(availableStores []uint64) error {
 }
 
 func (m *ModeManager) drSwitchToAsyncWithLock(availableStores []uint64) error {
-	id, err := m.cluster.GetAllocator().Alloc()
+	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -280,7 +280,7 @@ func (m *ModeManager) drSwitchToSyncRecover() error {
 }
 
 func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
-	id, err := m.cluster.GetAllocator().Alloc()
+	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -301,7 +301,7 @@ func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 func (m *ModeManager) drSwitchToSync() error {
 	m.Lock()
 	defer m.Unlock()
-	id, err := m.cluster.GetAllocator().Alloc()
+	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -375,14 +375,18 @@ const (
 // Run starts the background job.
 func (m *ModeManager) Run(ctx context.Context) {
 	// Wait for a while when just start, in case tikv do not connect in time.
+	timer := time.NewTimer(idleTimeout)
+	defer timer.Stop()
 	select {
-	case <-time.After(idleTimeout):
+	case <-timer.C:
 	case <-ctx.Done():
 		return
 	}
+	ticker := time.NewTicker(tickInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-time.After(tickInterval):
+		case <-ticker.C:
 		case <-ctx.Done():
 			return
 		}

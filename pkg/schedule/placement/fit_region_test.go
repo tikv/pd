@@ -326,7 +326,7 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 	label := &metapb.StoreLabel{Key: "exclusive", Value: "exclusive"}
 	labels = append(labels, label)
 	// 5 peers in 5 different stores,
-	// split the stores(peers) to three zones,make the number of peers in each zone: 2:2:1
+	// split the stores(peers) to three zones, make the number of peers in each zone: 2:2:1
 	for _, peer := range region.GetPeers() {
 		storeID := peer.StoreId
 		store := core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now()), core.SetStoreLabels(labels))
@@ -380,7 +380,7 @@ func BenchmarkFitRegionWithLocationLabels(b *testing.B) {
 	// create stores
 	lists := make([]*core.StoreInfo, 0)
 	// 10 peers in 10 different stores,
-	// split the stores(peers) to three zones,make the number of peers in each zone: 4:3:3
+	// split the stores(peers) to three zones, make the number of peers in each zone: 4:3:3
 	for idx, peer := range region.GetPeers() {
 		storeID := peer.StoreId
 		zoneInfo := &metapb.StoreLabel{Key: "zone", Value: fmt.Sprintf("z_%02d", idx%3)}

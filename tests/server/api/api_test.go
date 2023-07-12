@@ -377,6 +377,15 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	}
 }
 
+func (suite *middlewareTestSuite) TestSwaggerUrl() {
+	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", nil)
+	resp, err := dialClient.Do(req)
+	suite.NoError(err)
+	suite.True(resp.StatusCode == http.StatusNotFound)
+	resp.Body.Close()
+}
+
 func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	input := map[string]interface{}{
@@ -445,6 +454,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 
 func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+	defer os.Remove(tempStdoutFile.Name())
 	cfg := &log.Config{}
 	cfg.File.Filename = tempStdoutFile.Name()
 	cfg.Level = "info"
@@ -471,8 +481,6 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	suite.Contains(string(b), "audit log")
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
-
-	os.Remove(tempStdoutFile.Name())
 }
 
 func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
@@ -654,6 +662,32 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 	suite.NotEqual(http.StatusOK, resp1.StatusCode)
 	_, err = io.ReadAll(resp1.Body)
 	suite.NoError(err)
+}
+
+func (suite *redirectorTestSuite) TestXForwardedFor() {
+	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NoError(leader.BootstrapCluster())
+	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+	defer os.Remove(tempStdoutFile.Name())
+	cfg := &log.Config{}
+	cfg.File.Filename = tempStdoutFile.Name()
+	cfg.Level = "info"
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
+
+	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
+	addr := follower.GetAddr() + "/pd/api/v1/regions"
+	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	suite.NoError(err)
+	resp, err := dialClient.Do(request)
+	suite.NoError(err)
+	defer resp.Body.Close()
+	suite.Equal(http.StatusOK, resp.StatusCode)
+	time.Sleep(1 * time.Second)
+	b, _ := os.ReadFile(tempStdoutFile.Name())
+	l := string(b)
+	suite.Contains(l, "/pd/api/v1/regions")
+	suite.NotContains(l, suite.cluster.GetConfig().GetClientURLs())
 }
 
 func mustRequestSuccess(re *require.Assertions, s *server.Server) http.Header {

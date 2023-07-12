@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -99,9 +98,9 @@ func (mc *Cluster) GetStorage() storage.Storage {
 	return mc.Storage
 }
 
-// GetAllocator returns the ID allocator.
-func (mc *Cluster) GetAllocator() id.Allocator {
-	return mc.IDAllocator
+// AllocID returns a new unique ID.
+func (mc *Cluster) AllocID() (uint64, error) {
+	return mc.IDAllocator.Alloc()
 }
 
 // GetPersistOptions returns the persist options.
@@ -111,9 +110,6 @@ func (mc *Cluster) GetPersistOptions() *config.PersistOptions {
 
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
 func (mc *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {}
-
-// CheckSchedulingAllowance checks if the cluster allows scheduling currently.
-func (mc *Cluster) CheckSchedulingAllowance() (bool, error) { return true, nil }
 
 // LoadRegion puts region info without leader
 func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
@@ -188,7 +184,7 @@ func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind statistics
 
 // AllocPeer allocs a new peer on a store.
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := mc.GetAllocator().Alloc()
+	peerID, err := mc.AllocID()
 	if err != nil {
 		log.Error("failed to alloc peer", errs.ZapError(err))
 		return nil, err
@@ -361,7 +357,7 @@ func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, lea
 	}
 	mc.AddRegionStore(storeID, regionCount)
 	for i := 0; i < leaderCount; i++ {
-		id, _ := mc.GetAllocator().Alloc()
+		id, _ := mc.AllocID()
 		mc.AddLeaderRegion(id, storeID)
 	}
 }
@@ -812,8 +808,8 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 	region := &metapb.Region{
 		Id:          regionID,
-		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
+		StartKey:    []byte(fmt.Sprintf("%20d0", regionID)),
+		EndKey:      []byte(fmt.Sprintf("%20d0", regionID+1)),
 		RegionEpoch: epoch,
 	}
 	var leader *metapb.Peer

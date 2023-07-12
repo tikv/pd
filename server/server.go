@@ -617,9 +617,11 @@ func (s *Server) serverMetricsLoop() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
+	ticker := time.NewTicker(serverMetricsInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-time.After(serverMetricsInterval):
+		case <-ticker.C:
 			s.collectEtcdStateMetrics()
 		case <-ctx.Done():
 			log.Info("server is closed, exit metrics loop")
@@ -1672,10 +1674,14 @@ func (s *Server) etcdLeaderLoop() {
 
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
+	ticker := time.NewTicker(s.cfg.LeaderPriorityCheckInterval.Duration)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-time.After(s.cfg.LeaderPriorityCheckInterval.Duration):
+		case <-ticker.C:
 			s.member.CheckPriority(ctx)
+			// Note: we reset the ticker here to support updating configuration dynamically.
+			ticker.Reset(s.cfg.LeaderPriorityCheckInterval.Duration)
 		case <-ctx.Done():
 			log.Info("server is closed, exit etcd leader loop")
 			return
@@ -1815,6 +1821,8 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 // GetServicePrimaryAddr returns the primary address for a given service.
 // Note: This function will only return primary address without judging if it's alive.
 func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
+	ticker := time.NewTicker(retryIntervalGetServicePrimary)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
 		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
 			return v.(string), true
@@ -1824,7 +1832,7 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 			return "", false
 		case <-ctx.Done():
 			return "", false
-		case <-time.After(retryIntervalGetServicePrimary):
+		case <-ticker.C:
 		}
 	}
 	return "", false
@@ -1836,13 +1844,10 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 	s.servicePrimaryMap.Store(serviceName, addr)
 }
 
-func (s *Server) servicePrimaryKey(serviceName string) string {
-	return fmt.Sprintf("/ms/%d/%s/%s/%s", s.clusterID, serviceName, fmt.Sprintf("%05d", 0), "primary")
-}
-
 func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := mcs.TSOServiceName
-	tsoServicePrimaryKey := s.servicePrimaryKey(serviceName)
+	tsoRootPath := endpoint.TSOSvcRootPath(s.clusterID)
+	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, mcs.DefaultKeyspaceGroupID)
 	putFn := func(kv *mvccpb.KeyValue) error {
 		primary := &tsopb.Participant{} // TODO: use Generics
 		if err := proto.Unmarshal(kv.Value, primary); err != nil {
@@ -1852,6 +1857,7 @@ func (s *Server) initTSOPrimaryWatcher() {
 		if len(listenUrls) > 0 {
 			// listenUrls[0] is the primary service endpoint of the keyspace group
 			s.servicePrimaryMap.Store(serviceName, listenUrls[0])
+			log.Info("update tso primary", zap.String("primary", listenUrls[0]))
 		}
 		return nil
 	}
@@ -1901,6 +1907,17 @@ func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (s *Server) IsLocalTSOEnabled() bool {
 	return s.cfg.IsLocalTSOEnabled()
+}
+
+// GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
+// If the value is negative, there is no limit.
+func (s *Server) GetMaxConcurrentTSOProxyStreamings() int {
+	return s.cfg.GetMaxConcurrentTSOProxyStreamings()
+}
+
+// GetTSOProxyRecvFromClientTimeout returns timeout value for TSO proxy receiving from the client.
+func (s *Server) GetTSOProxyRecvFromClientTimeout() time.Duration {
+	return s.cfg.GetTSOProxyRecvFromClientTimeout()
 }
 
 // GetLeaderLease returns the leader lease.

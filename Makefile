@@ -215,8 +215,11 @@ basic-test: install-tools
 
 ci-test-job: install-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -timeout=15m -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX))
-	@ for mod in $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX) 1); do cd $$mod && $(MAKE) ci-test-job && cd $(ROOT_PATH) > /dev/null && cat $$mod/covprofile >> covprofile; done	
+	if [[ $(JOB_INDEX) -le 10 ]]; then \
+	CGO_ENABLED=1 go test -timeout=15m -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)); \
+	else \
+	for mod in $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)); do cd $$mod && $(MAKE) ci-test-job && cd $(ROOT_PATH) > /dev/null && cat $$mod/covprofile >> covprofile; done; \
+	fi
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 
@@ -239,7 +242,7 @@ test-tso-consistency: install-tools
 TASK_COUNT=1
 TASK_ID=1
 
-# The command should be used in daily CI，it will split some tasks to run parallel.
+# The command should be used in daily CI, it will split some tasks to run parallel.
 # It should retain report.xml,coverage,coverage.xml and package.list to analyze.
 test-with-cover-parallel: install-tools dashboard-ui split
 	@$(FAILPOINT_ENABLE)

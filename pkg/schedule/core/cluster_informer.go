@@ -16,7 +16,6 @@ package core
 
 import (
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/id"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -28,28 +27,28 @@ import (
 
 // ClusterInformer provides the necessary information of a cluster.
 type ClusterInformer interface {
-	RegionHealthCluster
-	statistics.RegionStatInformer
-	statistics.StoreStatInformer
-	buckets.BucketStatInformer
+	ScheduleCluster
 
-	GetBasicCluster() *core.BasicCluster
-	GetStoreConfig() sc.StoreConfig
-	GetAllocator() id.Allocator
-	GetRegionLabeler() *labeler.RegionLabeler
 	GetStorage() storage.Storage
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
-	CheckSchedulingAllowance() (bool, error)
 	AddSuspectRegions(ids ...uint64)
 	GetPersistOptions() *config.PersistOptions
 }
 
-// RegionHealthCluster is an aggregate interface that wraps multiple interfaces
-type RegionHealthCluster interface {
+// ScheduleCluster is an aggregate interface that wraps multiple interfaces for schedulers use
+type ScheduleCluster interface {
 	BasicCluster
+
+	statistics.StoreStatInformer
+	statistics.RegionStatInformer
+	buckets.BucketStatInformer
 
 	GetOpts() sc.Config
 	GetRuleManager() *placement.RuleManager
+	GetRegionLabeler() *labeler.RegionLabeler
+	GetBasicCluster() *core.BasicCluster
+	GetStoreConfig() sc.StoreConfig
+	AllocID() (uint64, error)
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces

@@ -23,7 +23,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/core"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -166,7 +165,7 @@ func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 // IsScheduleAllowed return true if the sum of executing opSplit operator is less  .
-func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) bool {
+func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
 	if !cluster.GetStoreConfig().IsEnableRegionBucket() {
 		splitBucketDisableCounter.Inc()
 		return false
@@ -181,13 +180,13 @@ func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.ClusterInformer) b
 
 type splitBucketPlan struct {
 	hotBuckets         map[uint64][]*buckets.BucketStat
-	cluster            sche.ClusterInformer
+	cluster            sche.ScheduleCluster
 	conf               *splitBucketSchedulerConfig
 	hotRegionSplitSize int64
 }
 
 // Schedule return operators if some bucket is too hot.
-func (s *splitBucketScheduler) Schedule(cluster sche.ClusterInformer, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *splitBucketScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	splitBucketScheduleCounter.Inc()
 	conf := s.conf.Clone()
 	plan := &splitBucketPlan{
@@ -251,8 +250,6 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 			return nil
 		}
 		splitBucketNewOperatorCounter.Inc()
-		op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
-		op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
 		op.AdditionalInfos["hot-degree"] = strconv.FormatInt(int64(splitBucket.HotDegree), 10)
 		return []*operator.Operator{op}
 	}

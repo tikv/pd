@@ -34,7 +34,7 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*S
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	s := NewServer(ctx, cfg)
+	s := CreateServer(ctx, cfg)
 	if err = s.Run(); err != nil {
 		return nil, nil, err
 	}

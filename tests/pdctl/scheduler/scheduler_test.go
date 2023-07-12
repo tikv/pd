@@ -117,7 +117,6 @@ func TestScheduler(t *testing.T) {
 			mightExec([]string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
 			return len(result) != 0
 		}, testutil.WithTickInterval(50*time.Millisecond))
-
 		re.Equal(expectedStatus, result["status"])
 		re.Equal(expectedSummary, result["summary"])
 	}
@@ -340,6 +339,7 @@ func TestScheduler(t *testing.T) {
 		"strict-picking-store":       "true",
 		"enable-for-tiflash":         "true",
 		"rank-formula-version":       "v2",
+		"split-thresholds":           0.2,
 	}
 	var conf map[string]interface{}
 	mustExec([]string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
@@ -463,12 +463,8 @@ func TestScheduler(t *testing.T) {
 	result := make(map[string]interface{})
 	testutil.Eventually(re, func() bool {
 		mightExec([]string{"-u", pdAddr, "scheduler", "describe", "balance-leader-scheduler"}, &result)
-		return len(result) != 0
-	}, testutil.WithTickInterval(50*time.Millisecond))
-
-	testutil.Eventually(re, func() bool {
-		return result["status"] == "paused" && result["summary"] == ""
-	}, testutil.WithTickInterval(50*time.Millisecond))
+		return len(result) != 0 && result["status"] == "paused" && result["summary"] == ""
+	}, testutil.WithWaitFor(30*time.Second))
 
 	mustUsage([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler", "60"})
 	mustExec([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)

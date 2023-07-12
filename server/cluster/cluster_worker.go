@@ -43,8 +43,8 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
-	if allowed, err := c.CheckSchedulingAllowance(); !allowed {
-		return nil, err
+	if c.isSchedulingHalted() {
+		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
@@ -86,6 +86,10 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	return split, nil
 }
 
+func (c *RaftCluster) isSchedulingHalted() bool {
+	return c.opt.IsSchedulingHalted()
+}
+
 // ValidRequestRegion is used to decide if the region is valid.
 func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
@@ -105,8 +109,8 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 
 // HandleAskBatchSplit handles the batch split request.
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
-	if allowed, err := c.CheckSchedulingAllowance(); !allowed {
-		return nil, err
+	if c.isSchedulingHalted() {
+		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()

@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedulers
+package plan
 
 import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule/plan"
 )
 
 const (
@@ -29,82 +28,90 @@ const (
 	// createOperator
 )
 
-type balanceSchedulerPlan struct {
-	source *core.StoreInfo
-	target *core.StoreInfo
-	region *core.RegionInfo
-	status *plan.Status
-	step   int
+// BalanceSchedulerPlan is a plan for balance scheduler
+type BalanceSchedulerPlan struct {
+	Source *core.StoreInfo
+	Target *core.StoreInfo
+	Region *core.RegionInfo
+	Status *Status
+	Step   int
 }
 
 // NewBalanceSchedulerPlan returns a new balanceSchedulerBasePlan
-func NewBalanceSchedulerPlan() *balanceSchedulerPlan {
-	basePlan := &balanceSchedulerPlan{
-		status: plan.NewStatus(plan.StatusOK),
+func NewBalanceSchedulerPlan() *BalanceSchedulerPlan {
+	basePlan := &BalanceSchedulerPlan{
+		Status: NewStatus(StatusOK),
 	}
 	return basePlan
 }
 
-func (p *balanceSchedulerPlan) GetStep() int {
-	return p.step
+// GetStep is used to get current step of plan.
+func (p *BalanceSchedulerPlan) GetStep() int {
+	return p.Step
 }
 
-func (p *balanceSchedulerPlan) SetResource(resource interface{}) {
-	switch p.step {
+// SetResource is used to set resource for current step.
+func (p *BalanceSchedulerPlan) SetResource(resource interface{}) {
+	switch p.Step {
 	// for balance-region/leader scheduler, the first step is selecting stores as source candidates.
 	case pickSource:
-		p.source = resource.(*core.StoreInfo)
+		p.Source = resource.(*core.StoreInfo)
 	// the second step is selecting region from source store.
 	case pickRegion:
-		p.region = resource.(*core.RegionInfo)
+		p.Region = resource.(*core.RegionInfo)
 	// the third step is selecting stores as target candidates.
 	case pickTarget:
-		p.target = resource.(*core.StoreInfo)
+		p.Target = resource.(*core.StoreInfo)
 	}
 }
 
-func (p *balanceSchedulerPlan) SetResourceWithStep(resource interface{}, step int) {
-	p.step = step
+// SetResourceWithStep is used to set resource for specific step.
+func (p *BalanceSchedulerPlan) SetResourceWithStep(resource interface{}, step int) {
+	p.Step = step
 	p.SetResource(resource)
 }
 
-func (p *balanceSchedulerPlan) GetResource(step int) uint64 {
-	if p.step < step {
+// GetResource is used to get resource for specific step.
+func (p *BalanceSchedulerPlan) GetResource(step int) uint64 {
+	if p.Step < step {
 		return 0
 	}
 	// Please use with care. Add a nil check if need in the future
 	switch step {
 	case pickSource:
-		return p.source.GetID()
+		return p.Source.GetID()
 	case pickRegion:
-		return p.region.GetID()
+		return p.Region.GetID()
 	case pickTarget:
-		return p.target.GetID()
+		return p.Target.GetID()
 	}
 	return 0
 }
 
-func (p *balanceSchedulerPlan) GetStatus() *plan.Status {
-	return p.status
+// GetStatus is used to get status of plan.
+func (p *BalanceSchedulerPlan) GetStatus() *Status {
+	return p.Status
 }
 
-func (p *balanceSchedulerPlan) SetStatus(status *plan.Status) {
-	p.status = status
+// SetStatus is used to set status of plan.
+func (p *BalanceSchedulerPlan) SetStatus(status *Status) {
+	p.Status = status
 }
 
-func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
-	plan := &balanceSchedulerPlan{
-		status: p.status,
+// Clone is used to clone a new plan.
+func (p *BalanceSchedulerPlan) Clone(opts ...Option) Plan {
+	plan := &BalanceSchedulerPlan{
+		Status: p.Status,
 	}
-	plan.step = p.step
-	if p.step > pickSource {
-		plan.source = p.source
+	plan.Step = p.Step
+	if p.Step > pickSource {
+		plan.Source = p.Source
 	}
-	if p.step > pickRegion {
-		plan.region = p.region
+	if p.Step > pickRegion {
+		plan.Region = p.Region
 	}
-	if p.step > pickTarget {
-		plan.target = p.target
+	if p.Step > pickTarget {
+		plan.Target = p.Target
 	}
 	for _, opt := range opts {
 		opt(plan)
@@ -113,15 +120,15 @@ func (p *balanceSchedulerPlan) Clone(opts ...plan.Option) plan.Plan {
 }
 
 // BalancePlanSummary is used to summarize for BalancePlan
-func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error) {
+func BalancePlanSummary(plans []Plan) (map[uint64]Status, bool, error) {
 	// storeStatusCounter is used to count the number of various statuses of each store
-	storeStatusCounter := make(map[uint64]map[plan.Status]int)
+	storeStatusCounter := make(map[uint64]map[Status]int)
 	// statusCounter is used to count the number of status which is regarded as best status of each store
-	statusCounter := make(map[uint64]plan.Status)
+	statusCounter := make(map[uint64]Status)
 	storeMaxStep := make(map[uint64]int)
 	normal := true
 	for _, pi := range plans {
-		p, ok := pi.(*balanceSchedulerPlan)
+		p, ok := pi.(*BalanceSchedulerPlan)
 		if !ok {
 			return nil, false, errs.ErrDiagnosticLoadPlan
 		}
@@ -134,7 +141,7 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 		// `step == pickRegion` is a special processing in summary, because we want to exclude the factor of region
 		// and consider the failure as the status of source store.
 		if step == pickRegion {
-			store = p.source.GetID()
+			store = p.Source.GetID()
 		} else {
 			store = p.GetResource(step)
 		}
@@ -143,20 +150,20 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 			maxStep = -1
 		}
 		if step > maxStep {
-			storeStatusCounter[store] = make(map[plan.Status]int)
+			storeStatusCounter[store] = make(map[Status]int)
 			storeMaxStep[store] = step
 		} else if step < maxStep {
 			continue
 		}
-		if !p.status.IsNormal() {
+		if !p.Status.IsNormal() {
 			normal = false
 		}
-		storeStatusCounter[store][*p.status]++
+		storeStatusCounter[store][*p.Status]++
 	}
 
 	for id, store := range storeStatusCounter {
 		max := 0
-		curStat := *plan.NewStatus(plan.StatusOK)
+		curStat := *NewStatus(StatusOK)
 		for stat, c := range store {
 			if balancePlanStatusComparer(max, curStat, c, stat) {
 				max = c
@@ -169,7 +176,7 @@ func BalancePlanSummary(plans []plan.Plan) (map[uint64]plan.Status, bool, error)
 }
 
 // balancePlanStatusComparer returns true if new status is better than old one.
-func balancePlanStatusComparer(oldStatusCount int, oldStatus plan.Status, newStatusCount int, newStatus plan.Status) bool {
+func balancePlanStatusComparer(oldStatusCount int, oldStatus Status, newStatusCount int, newStatus Status) bool {
 	if newStatus.Priority() != oldStatus.Priority() {
 		return newStatus.Priority() > oldStatus.Priority()
 	}

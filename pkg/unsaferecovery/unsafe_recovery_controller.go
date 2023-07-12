@@ -31,9 +31,9 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -107,8 +107,9 @@ type cluster interface {
 	core.StoreSetInformer
 
 	DropCacheAllRegion()
-	GetAllocator() id.Allocator
+	AllocID() (uint64, error)
 	BuryStore(storeID uint64, forceBury bool) error
+	GetPersistOptions() *config.PersistOptions
 }
 
 // Controller is used to control the unsafe recovery process.
@@ -174,11 +175,11 @@ func (u *Controller) reset() {
 func (u *Controller) IsRunning() bool {
 	u.RLock()
 	defer u.RUnlock()
-	return u.isRunningLocked()
+	return isRunning(u.stage)
 }
 
-func (u *Controller) isRunningLocked() bool {
-	return u.stage != Idle && u.stage != Finished && u.stage != Failed
+func isRunning(s stage) bool {
+	return s != Idle && s != Finished && s != Failed
 }
 
 // RemoveFailedStores removes Failed stores from the cluster.
@@ -186,7 +187,7 @@ func (u *Controller) RemoveFailedStores(failedStores map[uint64]struct{}, timeou
 	u.Lock()
 	defer u.Unlock()
 
-	if u.isRunningLocked() {
+	if isRunning(u.stage) {
 		return errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
 	}
 
@@ -316,7 +317,7 @@ func (u *Controller) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest,
 	u.Lock()
 	defer u.Unlock()
 
-	if !u.isRunningLocked() {
+	if !isRunning(u.stage) {
 		// no recovery in progress, do nothing
 		return
 	}
@@ -490,6 +491,11 @@ func (u *Controller) GetStage() stage {
 
 func (u *Controller) changeStage(stage stage) {
 	u.stage = stage
+	// Halt and resume the scheduling once the running state changed.
+	running := isRunning(stage)
+	if opt := u.cluster.GetPersistOptions(); opt.IsSchedulingHalted() != running {
+		opt.SetHaltScheduling(running, "online-unsafe-recovery")
+	}
 
 	var output StageOutput
 	output.Time = time.Now().Format("2006-01-02 15:04:05.000")
@@ -720,9 +726,6 @@ func (u *Controller) getFailedPeers(region *metapb.Region) []*metapb.Peer {
 
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
-		if peer.Role == metapb.PeerRole_Learner || peer.Role == metapb.PeerRole_DemotingVoter {
-			continue
-		}
 		if u.isFailed(peer) {
 			failedPeers = append(failedPeers, peer)
 		}
@@ -1128,11 +1131,11 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 	hasPlan := false
 
 	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
-		regionID, err := u.cluster.GetAllocator().Alloc()
+		regionID, err := u.cluster.AllocID()
 		if err != nil {
 			return nil, err
 		}
-		peerID, err := u.cluster.GetAllocator().Alloc()
+		peerID, err := u.cluster.AllocID()
 		if err != nil {
 			return nil, err
 		}

@@ -1,4 +1,4 @@
-// Copyright 2020 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build swagger_server
-// +build swagger_server
+package config
 
-package swaggerserver
+import "github.com/prometheus/client_golang/prometheus"
 
-import (
-	"net/http"
+var schedulingAllowanceStatusGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "scheduling",
+		Name:      "allowance_status",
+		Help:      "Status of the scheduling allowance.",
+	}, []string{"kind"})
 
-	httpSwagger "github.com/swaggo/http-swagger"
-	_ "github.com/tikv/pd/docs/swagger"
-)
-
-func handler() http.Handler {
-	return httpSwagger.Handler()
+func init() {
+	prometheus.MustRegister(schedulingAllowanceStatusGauge)
 }

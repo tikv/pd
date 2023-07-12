@@ -56,9 +56,9 @@ func (suite *evictSlowStoreTestSuite) SetupTest() {
 
 	storage := storage.NewStorageWithMemoryBackend()
 	var err error
-	suite.es, err = CreateScheduler(EvictSlowStoreType, suite.oc, storage, ConfigSliceDecoder(EvictSlowStoreType, []string{}))
+	suite.es, err = CreateScheduler(EvictSlowStoreType, suite.oc, storage, ConfigSliceDecoder(EvictSlowStoreType, []string{}), nil)
 	suite.NoError(err)
-	suite.bs, err = CreateScheduler(BalanceLeaderType, suite.oc, storage, ConfigSliceDecoder(BalanceLeaderType, []string{}))
+	suite.bs, err = CreateScheduler(BalanceLeaderType, suite.oc, storage, ConfigSliceDecoder(BalanceLeaderType, []string{}), nil)
 	suite.NoError(err)
 }
 

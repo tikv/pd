@@ -350,6 +350,7 @@ const (
 	defaultLoadFromEtcdRetryTimes    = int(defaultLoadDataFromEtcdTimeout / defaultLoadFromEtcdRetryInterval)
 	defaultLoadBatchSize             = 400
 	defaultWatchChangeRetryInterval  = 1 * time.Second
+	defaultForceLoadMinimalInterval  = 200 * time.Millisecond
 )
 
 // LoopWatcher loads data from etcd and sets a watcher for it.
@@ -375,6 +376,11 @@ type LoopWatcher struct {
 	deleteFn func(*mvccpb.KeyValue) error
 	// postEventFn is used to call after handling all events.
 	postEventFn func() error
+
+	// forceLoadMu is used to ensure two force loads have minimal interval.
+	forceLoadMu sync.RWMutex
+	// lastTimeForceLoad is used to record the last time force loading data from etcd.
+	lastTimeForceLoad time.Time
 
 	// loadTimeout is used to set the timeout for loading data from etcd.
 	loadTimeout time.Duration
@@ -405,6 +411,7 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 		deleteFn:                 deleteFn,
 		postEventFn:              postEventFn,
 		opts:                     opts,
+		lastTimeForceLoad:        time.Now(),
 		loadTimeout:              defaultLoadDataFromEtcdTimeout,
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
 		loadBatchSize:            defaultLoadBatchSize,
@@ -601,6 +608,25 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 
 // ForceLoad forces to load the key.
 func (lw *LoopWatcher) ForceLoad() {
+	// When NotLeader error happens, a large volume of force load requests will be received here,
+	// so the minimal interval between two force loads (from etcd) is used to avoid the congestion.
+	// Two-phase locking is also used to let most of the requests return directly without acquiring
+	// the write lock and causing the system to choke.
+	lw.forceLoadMu.RLock()
+	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
+		lw.forceLoadMu.RUnlock()
+		return
+	}
+	lw.forceLoadMu.RUnlock()
+
+	lw.forceLoadMu.Lock()
+	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
+		lw.forceLoadMu.Unlock()
+		return
+	}
+	lw.lastTimeForceLoad = time.Now()
+	lw.forceLoadMu.Unlock()
+
 	select {
 	case lw.forceLoadCh <- struct{}{}:
 	default:
