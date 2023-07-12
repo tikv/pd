@@ -18,7 +18,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
@@ -34,6 +33,8 @@ type KeyspaceClient interface {
 	WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.KeyspaceMeta, error)
 	// UpdateKeyspaceState updates target keyspace's state.
 	UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error)
+	// GetAllKeyspaces get all keyspace's metadata.
+	GetAllKeyspaces(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) ([]*keyspacepb.KeyspaceMeta, error)
 }
 
 // keyspaceClient returns the KeyspaceClient from current PD leader.
@@ -152,4 +153,34 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 	}
 
 	return resp.Keyspace, nil
+}
+
+// GetAllKeyspaces get all keyspaces metadata.
+func (c *client) GetAllKeyspaces(ctx context.Context) ([]*keyspacepb.KeyspaceMeta, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("keyspaceClient.UpdateKeyspaceState", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &keyspacepb.GetAllKeyspacesRequest{
+		Header: c.requestHeader(),
+	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	resp, err := c.keyspaceClient().GetAllKeyspaces(ctx, req)
+	cancel()
+
+	if err != nil {
+		cmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		return nil, err
+	}
+
+	if resp.Header.GetError() != nil {
+		cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+		return nil, errors.Errorf("Get all keyspaces metadata failed", resp.Header.GetError().String())
+	}
+
+	return nil, nil
 }

@@ -139,6 +139,7 @@ var (
 	cmdDurationSplitAndScatterRegions   prometheus.Observer
 	cmdDurationLoadKeyspace             prometheus.Observer
 	cmdDurationUpdateKeyspaceState      prometheus.Observer
+	cmdDurationGetAllKeyspaces          prometheus.Observer
 	cmdDurationGet                      prometheus.Observer
 	cmdDurationPut                      prometheus.Observer
 	cmdDurationUpdateGCSafePointV2      prometheus.Observer
