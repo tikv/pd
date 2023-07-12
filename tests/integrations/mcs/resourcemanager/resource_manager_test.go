@@ -776,6 +776,22 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				}
 			},
 		},
+		{"default", rmpb.GroupMode_RUMode, false, true,
+			`{"name":"default","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":10000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"background_settings":{"job_types":["br"]}}`,
+			func(gs *rmpb.ResourceGroup) {
+				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
+					RU: &rmpb.TokenBucket{
+						Settings: &rmpb.TokenLimitSettings{
+							FillRate:   10000,
+							BurstLimit: -1,
+						},
+					},
+				}
+				gs.BackgroundSettings = &rmpb.BackgroundSettings{
+					JobTypes: []string{"br"},
+				}
+			},
+		},
 	}
 
 	checkErr := func(err error, success bool) {
