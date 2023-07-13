@@ -928,12 +928,12 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 }
 
 // GetOfflinePeer gets the region with offline peer.
-func (h *Handler) GetOfflinePeer(typ statistics.RegionStatisticType) ([]*core.RegionInfo, error) {
+func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
 		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	return c.GetOfflineRegionStatsByType(typ), nil
+	return c.GetOfflineRegionStats(), nil
 }
 
 // ResetTS resets the ts with specified tso.

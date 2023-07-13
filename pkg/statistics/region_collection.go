@@ -42,27 +42,17 @@ const (
 	WitnessLeader
 )
 
-var (
-	regionStatisticTypes = []RegionStatisticType{
-		MissPeer,
-		ExtraPeer,
-		DownPeer,
-		PendingPeer,
-		LearnerPeer,
-		EmptyRegion,
-		OversizedRegion,
-		UndersizedRegion,
-		WitnessLeader,
-	}
-	offlineRegionStatisticTypes = []RegionStatisticType{
-		MissPeer,
-		ExtraPeer,
-		DownPeer,
-		PendingPeer,
-		OfflinePeer,
-		LearnerPeer,
-	}
-)
+var regionStatisticTypes = []RegionStatisticType{
+	MissPeer,
+	ExtraPeer,
+	DownPeer,
+	PendingPeer,
+	LearnerPeer,
+	EmptyRegion,
+	OversizedRegion,
+	UndersizedRegion,
+	WitnessLeader,
+}
 
 const nonIsolation = "none"
 
@@ -77,13 +67,7 @@ var (
 	regionOversizedRegionCounter     = regionStatusGauge.WithLabelValues("oversized-region-count")
 	regionUndersizedRegionCounter    = regionStatusGauge.WithLabelValues("undersized-region-count")
 	regionWitnessLeaderRegionCounter = regionStatusGauge.WithLabelValues("witness-leader-region-count")
-
-	offlineMissPeerRegionCounter    = offlineRegionStatusGauge.WithLabelValues("miss-peer-region-count")
-	offlineExtraPeerRegionCounter   = offlineRegionStatusGauge.WithLabelValues("extra-peer-region-count")
-	offlineDownPeerRegionCounter    = offlineRegionStatusGauge.WithLabelValues("down-peer-region-count")
-	offlinePendingPeerRegionCounter = offlineRegionStatusGauge.WithLabelValues("pending-peer-region-count")
-	offlineLearnerPeerRegionCounter = offlineRegionStatusGauge.WithLabelValues("learner-peer-region-count")
-	offlineOfflinePeerRegionCounter = offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count")
+	offlineOfflinePeerRegionCounter  = offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count")
 )
 
 // RegionInfoWithTS is used to record the extra timestamp status of a region.
@@ -96,50 +80,49 @@ type RegionInfoWithTS struct {
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
 	sync.RWMutex
-	// core is used to get the region information.
-	core               *core.BasicCluster
-	conf               sc.CheckerConfig
-	stats              map[RegionStatisticType]map[uint64]*RegionInfoWithTS
-	offlineStats       map[RegionStatisticType]map[uint64]struct{}
+	// bc is used to get the region information.
+	bc    *core.BasicCluster
+	conf  sc.CheckerConfig
+	stats map[RegionStatisticType]map[uint64]*RegionInfoWithTS
+	// Since we may easily have a large number of offline regions in the scale-in scenario,
+	// to prevent the lock contention with the heartbeat processing, we use a separate map
+	// to record the full offline region information here.
+	offlineStats       map[uint64]*core.RegionInfo
 	index              map[uint64]RegionStatisticType
-	offlineIndex       map[uint64]RegionStatisticType
 	ruleManager        *placement.RuleManager
 	storeConfigManager *config.StoreConfigManager
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
 func NewRegionStatistics(
-	core *core.BasicCluster,
+	bc *core.BasicCluster,
 	conf sc.CheckerConfig,
 	ruleManager *placement.RuleManager,
 	storeConfigManager *config.StoreConfigManager,
 ) *RegionStatistics {
 	r := &RegionStatistics{
-		core:               core,
+		bc:                 bc,
 		conf:               conf,
 		ruleManager:        ruleManager,
 		storeConfigManager: storeConfigManager,
 		stats:              make(map[RegionStatisticType]map[uint64]*RegionInfoWithTS),
-		offlineStats:       make(map[RegionStatisticType]map[uint64]struct{}),
+		offlineStats:       make(map[uint64]*core.RegionInfo),
 		index:              make(map[uint64]RegionStatisticType),
-		offlineIndex:       make(map[uint64]RegionStatisticType),
 	}
 	for _, typ := range regionStatisticTypes {
 		r.stats[typ] = make(map[uint64]*RegionInfoWithTS)
 	}
-	for _, typ := range offlineRegionStatisticTypes {
-		r.offlineStats[typ] = make(map[uint64]struct{})
-	}
 	return r
 }
 
-// GetRegionStatsByType gets the status of the region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
+// GetRegionStatsByType gets the status of the region by types.
+// The regions here need to be cloned, otherwise, it may cause data race problems.
 func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
 	for regionID := range r.stats[typ] {
-		res = append(res, r.core.GetRegion(regionID).Clone())
+		res = append(res, r.bc.GetRegion(regionID).Clone())
 	}
 	return res
 }
@@ -152,13 +135,14 @@ func (r *RegionStatistics) IsRegionStatsType(regionID uint64, typ RegionStatisti
 	return exist
 }
 
-// GetOfflineRegionStatsByType gets the status of the offline region by types. The regions here need to be cloned, otherwise, it may cause data race problems.
-func (r *RegionStatistics) GetOfflineRegionStatsByType(typ RegionStatisticType) []*core.RegionInfo {
+// GetOfflineRegionStats gets the status of the offline region.
+// The regions here need to be cloned, otherwise, it may cause data race problems.
+func (r *RegionStatistics) GetOfflineRegionStats() []*core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
-	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
-	for regionID := range r.offlineStats[typ] {
-		res = append(res, r.core.GetRegion(regionID).Clone())
+	res := make([]*core.RegionInfo, 0, len(r.offlineStats))
+	for _, r := range r.offlineStats {
+		res = append(res, r.Clone())
 	}
 	return res
 }
@@ -167,14 +151,6 @@ func (r *RegionStatistics) deleteEntry(deleteIndex RegionStatisticType, regionID
 	for typ := RegionStatisticType(1); typ <= deleteIndex; typ <<= 1 {
 		if deleteIndex&typ != 0 {
 			delete(r.stats[typ], regionID)
-		}
-	}
-}
-
-func (r *RegionStatistics) deleteOfflineEntry(deleteIndex RegionStatisticType, regionID uint64) {
-	for typ := RegionStatisticType(1); typ <= deleteIndex; typ <<= 1 {
-		if deleteIndex&typ != 0 {
-			delete(r.offlineStats[typ], regionID)
 		}
 	}
 }
@@ -195,15 +171,13 @@ func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo) {
 	r.Lock()
 	defer r.Unlock()
-	// Region state.
-	regionID := region.GetID()
 	var (
-		peerTypeIndex        RegionStatisticType
-		offlinePeerTypeIndex RegionStatisticType
-		deleteIndex          RegionStatisticType
+		desiredReplicas = r.conf.GetMaxReplicas()
+		desiredVoters   = desiredReplicas
+		peerTypeIndex   RegionStatisticType
+		deleteIndex     RegionStatisticType
 	)
-	desiredReplicas := r.conf.GetMaxReplicas()
-	desiredVoters := desiredReplicas
+	// Check if the region meets count requirements of its rules.
 	if r.conf.IsPlacementRulesEnabled() {
 		if !r.ruleManager.IsInitialized() {
 			log.Warn("ruleManager haven't been initialized")
@@ -219,9 +193,8 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			}
 		}
 	}
-
+	// Check if the region is in a removing state.
 	var isRemoving bool
-
 	for _, store := range stores {
 		if store.IsRemoving() {
 			peer := region.GetStorePeer(store.GetID())
@@ -231,7 +204,6 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			}
 		}
 	}
-
 	// Better to make sure once any of these conditions changes, it will trigger the heartbeat `save_cache`.
 	// Otherwise, the state may be out-of-date for a long time, which needs another way to apply the change ASAP.
 	// For example, see `RegionStatsNeedUpdate` above to know how `OversizedRegion` and `UndersizedRegion` are updated.
@@ -252,13 +224,10 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		),
 		WitnessLeader: region.GetLeader().GetIsWitness(),
 	}
-
+	// Check if the region meets any of the conditions and update the corresponding info.
+	regionID := region.GetID()
 	for typ, c := range conditions {
 		if c {
-			if isRemoving && typ < EmptyRegion {
-				r.offlineStats[typ][regionID] = struct{}{}
-				offlinePeerTypeIndex |= typ
-			}
 			info := r.stats[typ][regionID]
 			if info == nil {
 				info = &RegionInfoWithTS{id: regionID}
@@ -281,18 +250,13 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			peerTypeIndex |= typ
 		}
 	}
-
+	// Update the offline region info.
 	if isRemoving {
-		r.offlineStats[OfflinePeer][regionID] = struct{}{}
-		offlinePeerTypeIndex |= OfflinePeer
+		r.offlineStats[regionID] = region
+	} else {
+		delete(r.offlineStats, regionID)
 	}
-
-	if oldIndex, ok := r.offlineIndex[regionID]; ok {
-		deleteIndex = oldIndex &^ offlinePeerTypeIndex
-	}
-	r.deleteOfflineEntry(deleteIndex, regionID)
-	r.offlineIndex[regionID] = offlinePeerTypeIndex
-
+	// Remove the info if any of the conditions doesn't meet any more.
 	if oldIndex, ok := r.index[regionID]; ok {
 		deleteIndex = oldIndex &^ peerTypeIndex
 	}
@@ -307,9 +271,7 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 	if oldIndex, ok := r.index[regionID]; ok {
 		r.deleteEntry(oldIndex, regionID)
 	}
-	if oldIndex, ok := r.offlineIndex[regionID]; ok {
-		r.deleteOfflineEntry(oldIndex, regionID)
-	}
+	delete(r.offlineStats, regionID)
 }
 
 // Collect collects the metrics of the regions' status.
@@ -325,13 +287,7 @@ func (r *RegionStatistics) Collect() {
 	regionOversizedRegionCounter.Set(float64(len(r.stats[OversizedRegion])))
 	regionUndersizedRegionCounter.Set(float64(len(r.stats[UndersizedRegion])))
 	regionWitnessLeaderRegionCounter.Set(float64(len(r.stats[WitnessLeader])))
-
-	offlineMissPeerRegionCounter.Set(float64(len(r.offlineStats[MissPeer])))
-	offlineExtraPeerRegionCounter.Set(float64(len(r.offlineStats[ExtraPeer])))
-	offlineDownPeerRegionCounter.Set(float64(len(r.offlineStats[DownPeer])))
-	offlinePendingPeerRegionCounter.Set(float64(len(r.offlineStats[PendingPeer])))
-	offlineLearnerPeerRegionCounter.Set(float64(len(r.offlineStats[LearnerPeer])))
-	offlineOfflinePeerRegionCounter.Set(float64(len(r.offlineStats[OfflinePeer])))
+	offlineOfflinePeerRegionCounter.Set(float64(len(r.offlineStats)))
 }
 
 // Reset resets the metrics of the regions' status.
@@ -345,12 +301,6 @@ func (r *RegionStatistics) Reset() {
 	regionOversizedRegionCounter.Set(0)
 	regionUndersizedRegionCounter.Set(0)
 	regionWitnessLeaderRegionCounter.Set(0)
-
-	offlineMissPeerRegionCounter.Set(0)
-	offlineExtraPeerRegionCounter.Set(0)
-	offlineDownPeerRegionCounter.Set(0)
-	offlinePendingPeerRegionCounter.Set(0)
-	offlineLearnerPeerRegionCounter.Set(0)
 	offlineOfflinePeerRegionCounter.Set(0)
 }
 
