@@ -159,7 +159,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 // GetAllKeyspaces get all keyspaces metadata.
 func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint32) ([]*keyspacepb.KeyspaceMeta, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("keyspaceClient.UpdateKeyspaceState", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("keyspaceClient.GetAllKeyspaces", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -175,7 +175,7 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	cancel()
 
 	if err != nil {
-		cmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
+		cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
 		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
