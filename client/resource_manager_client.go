@@ -34,6 +34,8 @@ const (
 	add                     actionType = 0
 	modify                  actionType = 1
 	groupSettingsPathPrefix            = "resource_group/settings"
+	// errNotPrimary is returned when the requested server is not primary.
+	errNotPrimary = "not primary"
 	// errNotPrimary is returned when the requested server is not pd leader.
 	errNotLeader = "not leader"
 )
@@ -65,7 +67,7 @@ func (c *client) resourceManagerClient() (rmpb.ResourceManagerClient, error) {
 
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *client) gRPCErrorHandler(err error) {
-	if strings.Contains(err.Error(), errNotLeader) {
+	if strings.Contains(err.Error(), errNotPrimary) || strings.Contains(err.Error(), errNotLeader) {
 		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
 	}
 }
