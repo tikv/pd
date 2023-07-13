@@ -210,7 +210,7 @@ func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request)
 			ids[i] = id
 		}
 	}
-	stats := h.Handler.GetHotBuckets()
+	stats := h.Handler.GetHotBuckets(ids...)
 	ret := HotBucketsResponse{}
 	for regionID, stats := range stats {
 		ret[regionID] = make([]*HotBucketsItem, len(stats))
