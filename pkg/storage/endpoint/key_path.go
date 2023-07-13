@@ -253,6 +253,12 @@ func ResourceManagerSvcRootPath(clusterID uint64) string {
 	return svcRootPath(clusterID, utils.ResourceManagerServiceName)
 }
 
+// SchedulingSvcRootPath returns the root path of scheduling service.
+// Path: /ms/{cluster_id}/scheduling
+func SchedulingSvcRootPath(clusterID uint64) string {
+	return svcRootPath(clusterID, utils.SchedulingServiceName)
+}
+
 // TSOSvcRootPath returns the root path of tso service.
 // Path: /ms/{cluster_id}/tso
 func TSOSvcRootPath(clusterID uint64) string {

@@ -18,18 +18,18 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"github.com/tikv/pd/server/config"
 )
 
 // Manager is used to manage the diagnostic result of schedulers for now.
 type Manager struct {
-	config              *config.PersistOptions
-	schedulerController map[string]*schedulers.ScheduleController
+	config              config.Config
+	schedulerController *schedulers.Controller
 }
 
 // NewManager creates a new Manager.
-func NewManager(schedulerController map[string]*schedulers.ScheduleController, config *config.PersistOptions) *Manager {
+func NewManager(schedulerController *schedulers.Controller, config config.Config) *Manager {
 	return &Manager{
 		config:              config,
 		schedulerController: schedulerController,
@@ -42,21 +42,13 @@ func (d *Manager) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 		return nil, errs.ErrDiagnosticDisabled
 	}
 
-	scheduler, isSchedulerExisted := d.schedulerController[name]
-	if !isSchedulerExisted {
+	scheduler := d.schedulerController.GetScheduler(name)
+	if scheduler == nil {
 		ts := uint64(time.Now().Unix())
 		res := &schedulers.DiagnosticResult{Name: name, Timestamp: ts, Status: schedulers.Disabled}
 		return res, nil
 	}
-	var isDisabled bool
-	t := scheduler.Scheduler.GetType()
-	scheduleConfig := d.config.GetScheduleConfig()
-	for _, s := range scheduleConfig.Schedulers {
-		if t == s.Type {
-			isDisabled = s.Disable
-			break
-		}
-	}
+	isDisabled := d.config.IsSchedulerDisabled(scheduler.Scheduler.GetType())
 	if isDisabled {
 		ts := uint64(time.Now().Unix())
 		res := &schedulers.DiagnosticResult{Name: name, Timestamp: ts, Status: schedulers.Disabled}
@@ -75,5 +67,5 @@ func (d *Manager) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 }
 
 func (d *Manager) getSchedulerRecorder(name string) *schedulers.DiagnosticRecorder {
-	return d.schedulerController[name].GetDiagnosticRecorder()
+	return d.schedulerController.GetScheduler(name).GetDiagnosticRecorder()
 }

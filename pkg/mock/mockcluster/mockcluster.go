@@ -808,8 +808,8 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	followerStoreIDs, learnerStoreIDs []uint64, epoch *metapb.RegionEpoch) *core.RegionInfo {
 	region := &metapb.Region{
 		Id:          regionID,
-		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
+		StartKey:    []byte(fmt.Sprintf("%20d0", regionID)),
+		EndKey:      []byte(fmt.Sprintf("%20d0", regionID+1)),
 		RegionEpoch: epoch,
 	}
 	var leader *metapb.Peer

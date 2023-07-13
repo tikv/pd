@@ -591,6 +591,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 	}
 }
 
+// runCoordinator runs the main scheduling loop.
 func (c *RaftCluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
@@ -679,27 +680,27 @@ func (c *RaftCluster) GetRuleChecker() *checker.RuleChecker {
 
 // GetSchedulers gets all schedulers.
 func (c *RaftCluster) GetSchedulers() []string {
-	return c.coordinator.GetSchedulers()
+	return c.coordinator.GetSchedulersController().GetSchedulerNames()
 }
 
 // GetSchedulerHandlers gets all scheduler handlers.
 func (c *RaftCluster) GetSchedulerHandlers() map[string]http.Handler {
-	return c.coordinator.GetSchedulerHandlers()
+	return c.coordinator.GetSchedulersController().GetSchedulerHandlers()
 }
 
 // AddScheduler adds a scheduler.
 func (c *RaftCluster) AddScheduler(scheduler schedulers.Scheduler, args ...string) error {
-	return c.coordinator.AddScheduler(scheduler, args...)
+	return c.coordinator.GetSchedulersController().AddScheduler(scheduler, args...)
 }
 
 // RemoveScheduler removes a scheduler.
 func (c *RaftCluster) RemoveScheduler(name string) error {
-	return c.coordinator.RemoveScheduler(name)
+	return c.coordinator.GetSchedulersController().RemoveScheduler(name)
 }
 
 // PauseOrResumeScheduler pauses or resumes a scheduler.
 func (c *RaftCluster) PauseOrResumeScheduler(name string, t int64) error {
-	return c.coordinator.PauseOrResumeScheduler(name, t)
+	return c.coordinator.GetSchedulersController().PauseOrResumeScheduler(name, t)
 }
 
 // PauseOrResumeChecker pauses or resumes checker.
@@ -986,7 +987,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
 		c.hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
 	}
-	c.coordinator.CheckTransferWitnessLeader(region)
+	c.coordinator.GetSchedulersController().CheckTransferWitnessLeader(region)
 
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated.
@@ -1451,7 +1452,7 @@ func (c *RaftCluster) getEvictLeaderStores() (evictStores []uint64) {
 	if c.coordinator == nil {
 		return nil
 	}
-	handler, ok := c.coordinator.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	handler, ok := c.coordinator.GetSchedulersController().GetSchedulerHandlers()[schedulers.EvictLeaderName]
 	if !ok {
 		return
 	}
@@ -2042,7 +2043,7 @@ func (c *RaftCluster) collectMetrics() {
 	}
 	statsMap.Collect()
 
-	c.coordinator.CollectSchedulerMetrics()
+	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	c.coordinator.CollectHotSpotMetrics()
 	c.collectClusterMetrics()
 	c.collectHealthStatus()
@@ -2052,7 +2053,7 @@ func (c *RaftCluster) resetMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
 	statsMap.Reset()
 
-	c.coordinator.ResetSchedulerMetrics()
+	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
 	c.coordinator.ResetHotSpotMetrics()
 	c.resetClusterMetrics()
 	c.resetHealthStatus()
@@ -2671,10 +2672,10 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 
 // GetPausedSchedulerDelayAt returns DelayAt of a paused scheduler
 func (c *RaftCluster) GetPausedSchedulerDelayAt(name string) (int64, error) {
-	return c.coordinator.GetPausedSchedulerDelayAt(name)
+	return c.coordinator.GetSchedulersController().GetPausedSchedulerDelayAt(name)
 }
 
 // GetPausedSchedulerDelayUntil returns DelayUntil of a paused scheduler
 func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
-	return c.coordinator.GetPausedSchedulerDelayUntil(name)
+	return c.coordinator.GetSchedulersController().GetPausedSchedulerDelayUntil(name)
 }

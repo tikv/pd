@@ -674,6 +674,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	}
 
 	// If the keyspace group is not initialized, initialize it.
+	// The format of leader name is address-groupID.
 	uniqueName := fmt.Sprintf("%s-%05d", kgm.electionNamePrefix, group.ID)
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election",

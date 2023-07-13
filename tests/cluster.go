@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
-	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
@@ -86,38 +85,6 @@ func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, err
 	return createTestServer(ctx, cfg, []string{utils.APIServiceName})
 }
 
-// StartSingleTSOTestServer creates and starts a tso server with default config for testing.
-func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*tsoserver.Server, func(), error) {
-	cfg := tsoserver.NewConfig()
-	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = listenAddrs
-	cfg, err := tsoserver.GenerateConfig(cfg)
-	re.NoError(err)
-	// Setup the logger.
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-	if err != nil {
-		return nil, nil, err
-	}
-	zapLogOnce.Do(func() {
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-	})
-	re.NoError(err)
-	return NewTSOTestServer(ctx, cfg)
-}
-
-// NewTSOTestServer creates a tso server with given config for testing.
-func NewTSOTestServer(ctx context.Context, cfg *tsoserver.Config) (*tsoserver.Server, testutil.CleanupFunc, error) {
-	s := tsoserver.CreateServer(ctx, cfg)
-	if err := s.Run(); err != nil {
-		return nil, nil, err
-	}
-	cleanup := func() {
-		s.Close()
-		os.RemoveAll(cfg.DataDir)
-	}
-	return s, cleanup, nil
-}
-
 func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
@@ -130,7 +97,10 @@ func createTestServer(ctx context.Context, cfg *config.Config, services []string
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	if swaggerserver.Enabled() {
+		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
+	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
@@ -661,9 +631,11 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
+			s.RLock()
 			if s.state == Running {
 				running++
 			}
+			s.RUnlock()
 			n := s.GetLeader().GetName()
 			if n != "" {
 				counter[n]++

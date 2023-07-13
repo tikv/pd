@@ -109,11 +109,19 @@ func TestReconfig(t *testing.T) {
 	args := tokenBucketReconfigureArgs{
 		NewTokens: 6.,
 		NewRate:   2,
-		NewBurst:  -1,
 	}
 	lim.Reconfigure(t1, args)
 	checkTokens(re, lim, t1, 5)
 	checkTokens(re, lim, t2, 7)
+
+	args = tokenBucketReconfigureArgs{
+		NewTokens: 6.,
+		NewRate:   2,
+		NewBurst:  -1,
+	}
+	lim.Reconfigure(t1, args)
+	checkTokens(re, lim, t1, 6)
+	checkTokens(re, lim, t2, 6)
 	re.Equal(int64(-1), lim.GetBurst())
 }
 

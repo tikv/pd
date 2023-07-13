@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
 )
 
 const (
@@ -51,7 +50,7 @@ type tsoAPITestSuite struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	pdCluster  *tests.TestCluster
-	tsoCluster *mcs.TestTSOCluster
+	tsoCluster *tests.TestTSOCluster
 }
 
 func TestTSOAPI(t *testing.T) {
@@ -70,7 +69,7 @@ func (suite *tsoAPITestSuite) SetupTest() {
 	leaderName := suite.pdCluster.WaitLeader()
 	pdLeaderServer := suite.pdCluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
-	suite.tsoCluster, err = mcs.NewTestTSOCluster(suite.ctx, 1, pdLeaderServer.GetAddr())
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, pdLeaderServer.GetAddr())
 	re.NoError(err)
 }
 
@@ -124,10 +123,10 @@ func TestTSOServerStartFirst(t *testing.T) {
 	addr := apiCluster.GetConfig().GetClientURL()
 	ch := make(chan struct{})
 	defer close(ch)
-	clusterCh := make(chan *mcs.TestTSOCluster)
+	clusterCh := make(chan *tests.TestTSOCluster)
 	defer close(clusterCh)
 	go func() {
-		tsoCluster, err := mcs.NewTestTSOCluster(ctx, 2, addr)
+		tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, addr)
 		re.NoError(err)
 		primary := tsoCluster.WaitForDefaultPrimaryServing(re)
 		re.NotNil(primary)

@@ -57,6 +57,8 @@ const (
 	TSOServiceName = "tso"
 	// ResourceManagerServiceName is the name of resource manager server.
 	ResourceManagerServiceName = "resource_manager"
+	// SchedulingServiceName is the name of scheduling server.
+	SchedulingServiceName = "scheduling"
 	// KeyspaceGroupsKey is the path component of keyspace groups.
 	KeyspaceGroupsKey = "keyspace_groups"
 	// KeyspaceGroupsPrimaryKey is the path component of primary for keyspace groups.
