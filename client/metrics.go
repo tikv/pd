@@ -139,6 +139,7 @@ var (
 	cmdDurationSplitAndScatterRegions   prometheus.Observer
 	cmdDurationLoadKeyspace             prometheus.Observer
 	cmdDurationUpdateKeyspaceState      prometheus.Observer
+	cmdDurationGetAllKeyspaces          prometheus.Observer
 	cmdDurationGet                      prometheus.Observer
 	cmdDurationPut                      prometheus.Observer
 	cmdDurationUpdateGCSafePointV2      prometheus.Observer
@@ -184,6 +185,7 @@ func initCmdDurations() {
 	cmdDurationSplitAndScatterRegions = cmdDuration.WithLabelValues("split_and_scatter_regions")
 	cmdDurationLoadKeyspace = cmdDuration.WithLabelValues("load_keyspace")
 	cmdDurationUpdateKeyspaceState = cmdDuration.WithLabelValues("update_keyspace_state")
+	cmdDurationGetAllKeyspaces = cmdDuration.WithLabelValues("get_all_keyspaces")
 	cmdDurationGet = cmdDuration.WithLabelValues("get")
 	cmdDurationPut = cmdDuration.WithLabelValues("put")
 	cmdDurationUpdateGCSafePointV2 = cmdDuration.WithLabelValues("update_gc_safe_point_v2")
