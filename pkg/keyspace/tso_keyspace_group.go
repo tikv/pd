@@ -388,6 +388,20 @@ func (m *GroupManager) getKeyspaceConfigByKindLocked(userKind endpoint.UserKind)
 	return config, nil
 }
 
+// GetGroupByKeyspaceID returns the keyspace group ID for the given keyspace ID.
+func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
+	m.RLock()
+	defer m.RUnlock()
+	for _, groups := range m.groups {
+		for _, group := range groups.GetAll() {
+			if slice.Contains(group.Keyspaces, id) {
+				return group.ID, nil
+			}
+		}
+	}
+	return 0, ErrKeyspaceNotInAnyKeyspaceGroup
+}
+
 var failpointOnce sync.Once
 
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
