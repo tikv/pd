@@ -699,6 +699,19 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				}
 			},
 		},
+		{"default", rmpb.GroupMode_RUMode, false, true,
+			`{"name":"default","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":10000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0}`,
+			func(gs *rmpb.ResourceGroup) {
+				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
+					RU: &rmpb.TokenBucket{
+						Settings: &rmpb.TokenLimitSettings{
+							FillRate:   10000,
+							BurstLimit: -1,
+						},
+					},
+				}
+			},
+		},
 	}
 
 	checkErr := func(err error, success bool) {
@@ -865,6 +878,25 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			re.Equal(1, len(groups1))
 		}
 	}
+
+	// test restart cluster
+	groups, err := cli.ListResourceGroups(suite.ctx)
+	re.NoError(err)
+	servers := suite.cluster.GetServers()
+	re.NoError(suite.cluster.StopAll())
+	serverList := make([]*tests.TestServer, 0, len(servers))
+	for _, s := range servers {
+		serverList = append(serverList, s)
+	}
+	re.NoError(suite.cluster.RunServers(serverList))
+	suite.cluster.WaitLeader()
+	var newGroups []*rmpb.ResourceGroup
+	testutil.Eventually(suite.Require(), func() bool {
+		var err error
+		newGroups, err = cli.ListResourceGroups(suite.ctx)
+		return err == nil
+	}, testutil.WithWaitFor(time.Second))
+	re.Equal(groups, newGroups)
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover() {
