@@ -5559,6 +5559,7 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 0,
+          "description": "The select events of hot read scheduler",
           "fill": 0,
           "gridPos": {
             "h": 7,
@@ -6850,6 +6851,7 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 0,
+          "description": "The select events of hot read scheduler",
           "fill": 0,
           "gridPos": {
             "h": 7,
