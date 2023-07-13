@@ -67,7 +67,7 @@ var (
 	regionOversizedRegionCounter     = regionStatusGauge.WithLabelValues("oversized-region-count")
 	regionUndersizedRegionCounter    = regionStatusGauge.WithLabelValues("undersized-region-count")
 	regionWitnessLeaderRegionCounter = regionStatusGauge.WithLabelValues("witness-leader-region-count")
-	offlineOfflinePeerRegionCounter  = offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count")
+	regionOfflinePeerRegionCounter   = offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count")
 )
 
 // RegionInfoWithTS is used to record the extra timestamp status of a region.
@@ -287,7 +287,7 @@ func (r *RegionStatistics) Collect() {
 	regionOversizedRegionCounter.Set(float64(len(r.stats[OversizedRegion])))
 	regionUndersizedRegionCounter.Set(float64(len(r.stats[UndersizedRegion])))
 	regionWitnessLeaderRegionCounter.Set(float64(len(r.stats[WitnessLeader])))
-	offlineOfflinePeerRegionCounter.Set(float64(len(r.offlineStats)))
+	regionOfflinePeerRegionCounter.Set(float64(len(r.offlineStats)))
 }
 
 // Reset resets the metrics of the regions' status.
@@ -301,7 +301,7 @@ func (r *RegionStatistics) Reset() {
 	regionOversizedRegionCounter.Set(0)
 	regionUndersizedRegionCounter.Set(0)
 	regionWitnessLeaderRegionCounter.Set(0)
-	offlineOfflinePeerRegionCounter.Set(0)
+	regionOfflinePeerRegionCounter.Set(0)
 }
 
 // LabelStatistics is the statistics of the level of labels.
