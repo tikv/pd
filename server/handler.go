@@ -927,8 +927,8 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	return mux, nil
 }
 
-// GetOfflinePeer gets the region with offline peer.
-func (h *Handler) GetOfflinePeer() ([]*core.RegionInfo, error) {
+// GetOfflinePeerRegions gets the regions with offline peers.
+func (h *Handler) GetOfflinePeerRegions() ([]*core.RegionInfo, error) {
 	c := h.s.GetRaftCluster()
 	if c == nil {
 		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
