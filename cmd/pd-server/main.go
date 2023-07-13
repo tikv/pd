@@ -86,6 +86,8 @@ func NewTSOServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	cmd.Flags().StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-file", "", "", "log file path")
 	return cmd
 }
 
@@ -104,6 +106,8 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	cmd.Flags().StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-file", "", "", "log file path")
 	return cmd
 }
 
@@ -208,7 +212,10 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	if swaggerserver.Enabled() {
+		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
+	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {

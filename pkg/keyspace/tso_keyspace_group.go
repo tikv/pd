@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/balancer"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -622,7 +623,17 @@ func buildSplitKeyspaces(
 				oldSplit = append(oldSplit, keyspace)
 			}
 		}
-		return oldSplit, new, nil
+		// If newNum != len(newKeyspaceMap), it means the provided new keyspace list contains
+		// duplicate keyspaces, and we need to dedup them (https://github.com/tikv/pd/issues/6687);
+		// otherwise, we can just return the old split and new keyspace list.
+		if newNum == len(newKeyspaceMap) {
+			return oldSplit, new, nil
+		}
+		newSplit := make([]uint32, 0, len(newKeyspaceMap))
+		for keyspace := range newKeyspaceMap {
+			newSplit = append(newSplit, keyspace)
+		}
+		return oldSplit, newSplit, nil
 	}
 	// Split according to the start and end keyspace ID.
 	if startKeyspaceID == 0 && endKeyspaceID == 0 {
@@ -634,7 +645,9 @@ func buildSplitKeyspaces(
 	)
 	for _, keyspace := range old {
 		if keyspace == utils.DefaultKeyspaceID {
-			return nil, nil, ErrModifyDefaultKeyspace
+			// The source keyspace group must be the default keyspace group and we always keep the default
+			// keyspace in the default keyspace group.
+			continue
 		}
 		if startKeyspaceID <= keyspace && keyspace <= endKeyspaceID {
 			newSplit = append(newSplit, keyspace)
@@ -875,7 +888,7 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	//   - Load and delete the keyspace groups in the merge list.
 	//   - Load and update the target keyspace group.
 	// So we pre-check the number of operations to avoid exceeding the maximum number of etcd transaction.
-	if (mergeListNum+1)*2 > maxEtcdTxnOps {
+	if (mergeListNum+1)*2 > MaxEtcdTxnOps {
 		return ErrExceedMaxEtcdTxnOps
 	}
 	if slice.Contains(mergeList, utils.DefaultKeyspaceGroupID) {
@@ -997,4 +1010,129 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 		zap.Uint32("merge-target-id", mergeTargetKg.ID),
 		zap.Reflect("merge-list", mergeList))
 	return nil
+}
+
+// MergeAllIntoDefaultKeyspaceGroup merges all other keyspace groups into the default keyspace group.
+func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
+	defer logutil.LogPanic()
+	// Since we don't take the default keyspace group into account,
+	// the number of unmerged keyspace groups is -1.
+	unmergedGroupNum := -1
+	// Calculate the total number of keyspace groups to merge.
+	for _, groups := range m.groups {
+		unmergedGroupNum += groups.Len()
+	}
+	mergedGroupNum := 0
+	// Start to merge all keyspace groups into the default one.
+	for userKind, groups := range m.groups {
+		mergeNum := groups.Len()
+		log.Info("start to merge all keyspace groups into the default one",
+			zap.Stringer("user-kind", userKind),
+			zap.Int("merge-num", mergeNum),
+			zap.Int("merged-group-num", mergedGroupNum),
+			zap.Int("unmerged-group-num", unmergedGroupNum))
+		if mergeNum == 0 {
+			continue
+		}
+		var (
+			maxBatchSize  = MaxEtcdTxnOps/2 - 1
+			groupsToMerge = make([]uint32, 0, maxBatchSize)
+		)
+		for idx, group := range groups.GetAll() {
+			if group.ID == utils.DefaultKeyspaceGroupID {
+				continue
+			}
+			groupsToMerge = append(groupsToMerge, group.ID)
+			if len(groupsToMerge) < maxBatchSize && idx < mergeNum-1 {
+				continue
+			}
+			log.Info("merge keyspace groups into the default one",
+				zap.Int("index", idx),
+				zap.Int("batch-size", len(groupsToMerge)),
+				zap.Int("merge-num", mergeNum),
+				zap.Int("merged-group-num", mergedGroupNum),
+				zap.Int("unmerged-group-num", unmergedGroupNum))
+			// Reach the batch size, merge them into the default keyspace group.
+			if err := m.MergeKeyspaceGroups(utils.DefaultKeyspaceGroupID, groupsToMerge); err != nil {
+				log.Error("failed to merge all keyspace groups into the default one",
+					zap.Int("index", idx),
+					zap.Int("batch-size", len(groupsToMerge)),
+					zap.Int("merge-num", mergeNum),
+					zap.Int("merged-group-num", mergedGroupNum),
+					zap.Int("unmerged-group-num", unmergedGroupNum),
+					zap.Error(err))
+				return err
+			}
+			// Wait for the merge to finish.
+			ctx, cancel := context.WithTimeout(m.ctx, time.Minute)
+			ticker := time.NewTicker(time.Second)
+		checkLoop:
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("cancel merging all keyspace groups into the default one",
+						zap.Int("index", idx),
+						zap.Int("batch-size", len(groupsToMerge)),
+						zap.Int("merge-num", mergeNum),
+						zap.Int("merged-group-num", mergedGroupNum),
+						zap.Int("unmerged-group-num", unmergedGroupNum))
+					cancel()
+					ticker.Stop()
+					return nil
+				case <-ticker.C:
+					kg, err := m.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+					if err != nil {
+						log.Error("failed to check the default keyspace group merge state",
+							zap.Int("index", idx),
+							zap.Int("batch-size", len(groupsToMerge)),
+							zap.Int("merge-num", mergeNum),
+							zap.Int("merged-group-num", mergedGroupNum),
+							zap.Int("unmerged-group-num", unmergedGroupNum),
+							zap.Error(err))
+						cancel()
+						ticker.Stop()
+						return err
+					}
+					if !kg.IsMergeTarget() {
+						break checkLoop
+					}
+				}
+			}
+			cancel()
+			ticker.Stop()
+			mergedGroupNum += len(groupsToMerge)
+			unmergedGroupNum -= len(groupsToMerge)
+			groupsToMerge = groupsToMerge[:0]
+		}
+	}
+	log.Info("finish merging all keyspace groups into the default one",
+		zap.Int("merged-group-num", mergedGroupNum),
+		zap.Int("unmerged-group-num", unmergedGroupNum))
+	return nil
+}
+
+// GetKeyspaceGroupPrimaryByID returns the primary node of the keyspace group by ID.
+func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
+	// check if the keyspace group exists
+	kg, err := m.GetKeyspaceGroupByID(id)
+	if err != nil {
+		return "", err
+	}
+	if kg == nil {
+		return "", ErrKeyspaceGroupNotExists(id)
+	}
+
+	rootPath := endpoint.TSOSvcRootPath(m.clusterID)
+	primaryPath := endpoint.KeyspaceGroupPrimaryPath(rootPath, id)
+	leader := &tsopb.Participant{}
+	ok, _, err := etcdutil.GetProtoMsgWithModRev(m.client, primaryPath, leader)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", ErrKeyspaceGroupPrimaryNotFound
+	}
+	// The format of leader name is address-groupID.
+	contents := strings.Split(leader.GetName(), "-")
+	return contents[0], err
 }

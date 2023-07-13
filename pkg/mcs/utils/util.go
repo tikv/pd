@@ -37,6 +37,8 @@ const (
 
 // InitClusterID initializes the cluster ID.
 func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err error) {
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
 		if clusterID, err := etcdutil.GetClusterID(client, clusterIDPath); err == nil && clusterID != 0 {
 			return clusterID, nil
@@ -44,7 +46,7 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 		select {
 		case <-ctx.Done():
 			return 0, err
-		case <-time.After(retryInterval):
+		case <-ticker.C:
 		}
 	}
 	return 0, errors.Errorf("failed to init cluster ID after retrying %d times", maxRetryTimes)

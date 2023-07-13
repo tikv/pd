@@ -265,6 +265,14 @@ func WithInitMetricsOption(initMetrics bool) ClientOption {
 	}
 }
 
+// WithAllowTSOFallback configures the client with `allowTSOFallback` option.
+// NOTICE: This should only be used for testing.
+func WithAllowTSOFallback() ClientOption {
+	return func(c *client) {
+		c.option.allowTSOFallback = true
+	}
+}
+
 var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
@@ -275,14 +283,6 @@ type serviceModeKeeper struct {
 	serviceMode     pdpb.ServiceMode
 	tsoClient       *tsoClient
 	tsoSvcDiscovery ServiceDiscovery
-}
-
-func (k *serviceModeKeeper) SetKeyspaceID(keyspaceID uint32) {
-	k.Lock()
-	defer k.Unlock()
-	if k.serviceMode == pdpb.ServiceMode_API_SVC_MODE {
-		k.tsoSvcDiscovery.SetKeyspaceID(keyspaceID)
-	}
 }
 
 func (k *serviceModeKeeper) close() {
@@ -392,7 +392,7 @@ func createClientWithKeyspace(
 
 	c.pdSvcDiscovery = newPDServiceDiscovery(
 		clientCtx, clientCancel, &c.wg, c.setServiceMode,
-		keyspaceID, c.svrUrls, c.tlsCfg, c.option)
+		nil, keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		return nil, err
@@ -504,28 +504,34 @@ func newClientWithKeyspaceName(
 		opt(c)
 	}
 
+	updateKeyspaceIDCb := func() error {
+		if err := c.initRetry(c.loadKeyspaceMeta, keyspaceName); err != nil {
+			return err
+		}
+		// c.keyspaceID is the source of truth for keyspace id.
+		c.pdSvcDiscovery.(*pdServiceDiscovery).SetKeyspaceID(c.keyspaceID)
+		return nil
+	}
+
 	// Create a PD service discovery with null keyspace id, then query the real id wth the keyspace name,
 	// finally update the keyspace id to the PD service discovery for the following interactions.
 	c.pdSvcDiscovery = newPDServiceDiscovery(
-		clientCtx, clientCancel, &c.wg, c.setServiceMode, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
+		clientCtx, clientCancel, &c.wg, c.setServiceMode, updateKeyspaceIDCb, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		return nil, err
 	}
-	if err := c.initRetry(c.loadKeyspaceMeta, keyspaceName); err != nil {
-		return nil, err
-	}
-	// We call "c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)" after service mode already switching to API mode
-	// and tso service discovery already initialized, so here we need to set the tso_service_discovery's keyspace id too.
-	c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
-	c.serviceModeKeeper.SetKeyspaceID(c.keyspaceID)
 	log.Info("[pd] create pd client with endpoints and keyspace",
-		zap.Strings("pd-address", svrAddrs), zap.String("keyspace-name", keyspaceName), zap.Uint32("keyspace-id", c.keyspaceID))
+		zap.Strings("pd-address", svrAddrs),
+		zap.String("keyspace-name", keyspaceName),
+		zap.Uint32("keyspace-id", c.keyspaceID))
 	return c, nil
 }
 
 func (c *client) initRetry(f func(s string) error, str string) error {
 	var err error
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for i := 0; i < c.option.maxRetryTimes; i++ {
 		if err = f(str); err == nil {
 			return nil
@@ -533,7 +539,7 @@ func (c *client) initRetry(f func(s string) error, str string) error {
 		select {
 		case <-c.ctx.Done():
 			return err
-		case <-time.After(time.Second):
+		case <-ticker.C:
 		}
 	}
 	return errors.WithStack(err)

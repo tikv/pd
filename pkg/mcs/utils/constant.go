@@ -49,16 +49,20 @@ const (
 	// We also reserved 0 for the keyspace group for the same purpose.
 	DefaultKeyspaceGroupID = uint32(0)
 
-	// MicroserviceKey is the key of microservice.
-	MicroserviceKey = "ms"
+	// MicroserviceRootPath is the root path of microservice in etcd.
+	MicroserviceRootPath = "/ms"
 	// APIServiceName is the name of api server.
 	APIServiceName = "api"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
 	// ResourceManagerServiceName is the name of resource manager server.
 	ResourceManagerServiceName = "resource_manager"
+	// SchedulingServiceName is the name of scheduling server.
+	SchedulingServiceName = "scheduling"
 	// KeyspaceGroupsKey is the path component of keyspace groups.
 	KeyspaceGroupsKey = "keyspace_groups"
+	// KeyspaceGroupsPrimaryKey is the path component of primary for keyspace groups.
+	KeyspaceGroupsPrimaryKey = "primary"
 
 	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
 	// is the sharding unit, i.e., by the definition here, the max count of the shards

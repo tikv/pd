@@ -16,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -133,10 +134,9 @@ func (s *backupTestSuite) BeforeTest(suiteName, testName string) {
 
 	var (
 		rootPath               = path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
-		timestampPath          = path.Join(rootPath, "timestamp")
 		allocTimestampMaxBytes = typeutil.Uint64ToBytes(allocTimestampMax)
 	)
-	_, err = s.etcdClient.Put(ctx, timestampPath, string(allocTimestampMaxBytes))
+	_, err = s.etcdClient.Put(ctx, endpoint.TimestampPath(rootPath), string(allocTimestampMaxBytes))
 	s.NoError(err)
 
 	var (

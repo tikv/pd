@@ -375,14 +375,18 @@ const (
 // Run starts the background job.
 func (m *ModeManager) Run(ctx context.Context) {
 	// Wait for a while when just start, in case tikv do not connect in time.
+	timer := time.NewTimer(idleTimeout)
+	defer timer.Stop()
 	select {
-	case <-time.After(idleTimeout):
+	case <-timer.C:
 	case <-ctx.Done():
 		return
 	}
+	ticker := time.NewTicker(tickInterval)
+	defer ticker.Stop()
 	for {
 		select {
-		case <-time.After(tickInterval):
+		case <-ticker.C:
 		case <-ctx.Done():
 			return
 		}

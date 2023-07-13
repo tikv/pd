@@ -448,7 +448,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	err = suite.kgm.MergeKeyspaceGroups(4, []uint32{5})
 	re.ErrorContains(err, ErrKeyspaceGroupNotExists(5).Error())
 	// merge with the number of keyspace groups exceeds the limit
-	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, maxEtcdTxnOps/2))
+	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, MaxEtcdTxnOps/2))
 	re.ErrorIs(err, ErrExceedMaxEtcdTxnOps)
 	// merge the default keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{utils.DefaultKeyspaceGroupID})
@@ -484,11 +484,38 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 			err: ErrKeyspaceNotInKeyspaceGroup,
 		},
 		{
+			old:         []uint32{1, 2},
+			new:         []uint32{2, 2},
+			expectedOld: []uint32{1},
+			expectedNew: []uint32{2},
+		},
+		{
+			old:             []uint32{0, 1, 2, 3, 4, 5},
+			startKeyspaceID: 2,
+			endKeyspaceID:   4,
+			expectedOld:     []uint32{0, 1, 5},
+			expectedNew:     []uint32{2, 3, 4},
+		},
+		{
+			old:             []uint32{0, 1, 2, 3, 4, 5},
+			startKeyspaceID: 0,
+			endKeyspaceID:   4,
+			expectedOld:     []uint32{0, 5},
+			expectedNew:     []uint32{1, 2, 3, 4},
+		},
+		{
 			old:             []uint32{1, 2, 3, 4, 5},
 			startKeyspaceID: 2,
 			endKeyspaceID:   4,
 			expectedOld:     []uint32{1, 5},
 			expectedNew:     []uint32{2, 3, 4},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 5,
+			endKeyspaceID:   6,
+			expectedOld:     []uint32{1, 2, 3, 4},
+			expectedNew:     []uint32{5},
 		},
 		{
 			old:             []uint32{1, 2, 3, 4, 5},
@@ -499,10 +526,24 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 		},
 		{
 			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 1,
+			endKeyspaceID:   1,
+			expectedOld:     []uint32{2, 3, 4, 5},
+			expectedNew:     []uint32{1},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
 			startKeyspaceID: 0,
 			endKeyspaceID:   6,
 			expectedOld:     []uint32{},
 			expectedNew:     []uint32{1, 2, 3, 4, 5},
+		},
+		{
+			old:             []uint32{1, 2, 3, 4, 5},
+			startKeyspaceID: 7,
+			endKeyspaceID:   10,
+			expectedOld:     []uint32{1, 2, 3, 4, 5},
+			expectedNew:     []uint32{},
 		},
 		{
 			old: []uint32{1, 2, 3, 4, 5},
