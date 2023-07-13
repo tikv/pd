@@ -36,7 +36,7 @@ const (
 	groupSettingsPathPrefix            = "resource_group/settings"
 	// errNotPrimary is returned when the requested server is not primary.
 	errNotPrimary = "not primary"
-	// errNotPrimary is returned when the requested server is not pd leader.
+	// errNotLeader is returned when the requested server is not pd leader.
 	errNotLeader = "not leader"
 )
 
