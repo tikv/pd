@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"encoding/hex"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -141,7 +142,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		op.Start()
 		op.SetStatusReachTime(operator.CREATED, time.Now().Add(-5*statistics.StoreHeartBeatReportInterval*time.Second))
 		op.SetStatusReachTime(operator.STARTED, time.Now().Add((-5*statistics.StoreHeartBeatReportInterval+1)*time.Second))
-		return newPendingInfluence(op, 2, 4, statistics.Influence{}, hb.conf.GetStoreStatZombieDuration())
+		return newPendingInfluence(op, []uint64{2}, 4, statistics.Influence{}, hb.conf.GetStoreStatZombieDuration())
 	}
 	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		infl := notDoneOpInfluence(region, ty)
@@ -202,6 +203,69 @@ func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
 }
 
+func TestSplitIfRegionTooHot(t *testing.T) {
+	re := require.New(t)
+	statistics.Denoising = false
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetHotRegionCacheHitsThreshold(1)
+	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	b := &metapb.Buckets{
+		RegionId:   1,
+		PeriodInMs: 1000,
+		Keys: [][]byte{
+			[]byte(fmt.Sprintf("%21d", 11)),
+			[]byte(fmt.Sprintf("%21d", 12)),
+			[]byte(fmt.Sprintf("%21d", 13)),
+		},
+		Stats: &metapb.BucketStats{
+			ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB},
+			ReadKeys:   []uint64{256, 256},
+			ReadQps:    []uint64{0, 0},
+			WriteBytes: []uint64{0, 0},
+			WriteQps:   []uint64{0, 0},
+			WriteKeys:  []uint64{0, 0},
+		},
+	}
+
+	task := buckets.NewCheckPeerTask(b)
+	re.True(tc.HotBucketCache.CheckAsync(task))
+	time.Sleep(time.Millisecond * 10)
+
+	tc.AddRegionStore(1, 3)
+	tc.AddRegionStore(2, 2)
+	tc.AddRegionStore(3, 2)
+
+	tc.UpdateStorageReadBytes(1, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 1*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 1*units.MiB*statistics.StoreHeartBeatReportInterval)
+	// Region 1, 2 and 3 are hot regions.
+	addRegionInfo(tc, statistics.Read, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
+	})
+	tc.GetStoreConfig().SetRegionBucketEnabled(true)
+	ops, _ := hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(operator.OpSplit, ops[0].Kind())
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 0)
+
+	tc.UpdateStorageWrittenBytes(1, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 1*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 1*units.MiB*statistics.StoreHeartBeatReportInterval)
+	// Region 1, 2 and 3 are hot regions.
+	addRegionInfo(tc, statistics.Write, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
+	})
+	hb, _ = CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(operator.OpSplit, ops[0].Kind())
+	ops, _ = hb.Schedule(tc, false)
+	re.Len(ops, 0)
+}
+
 func TestSplitBuckets(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
@@ -211,6 +275,7 @@ func TestSplitBuckets(t *testing.T) {
 	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, statistics.Read, transferLeader)
+	solve.cur = &solution{}
 	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
 
 	// the hot range is [a,c],[e,f]
@@ -231,14 +296,23 @@ func TestSplitBuckets(t *testing.T) {
 	task := buckets.NewCheckPeerTask(b)
 	re.True(tc.HotBucketCache.CheckAsync(task))
 	time.Sleep(time.Millisecond * 10)
-	ops := solve.createSplitOperator([]*core.RegionInfo{region})
+	ops := solve.createSplitOperator([]*core.RegionInfo{region}, false)
 	re.Equal(1, len(ops))
 	op := ops[0]
 	re.Equal(splitBucket, op.Desc())
 	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
 	expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
 	re.NoError(err)
-	expectOp.GetCreateTime()
+	re.Equal(expectOp.Brief(), op.Brief())
+	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
+
+	ops = solve.createSplitOperator([]*core.RegionInfo{region}, true)
+	re.Equal(1, len(ops))
+	op = ops[0]
+	re.Equal(splitBucket, op.Desc())
+	expectKeys = [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")}
+	expectOp, err = operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
+	re.NoError(err)
 	re.Equal(expectOp.Brief(), op.Brief())
 	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
 }
@@ -2412,6 +2486,14 @@ func TestConfigValidation(t *testing.T) {
 	re.True(hc.IsForbidRWType(statistics.Write))
 	// illegal
 	hc.ForbidRWType = "test"
+	err = hc.valid()
+	re.Error(err)
+
+	hc.SplitThresholds = 0
+	err = hc.valid()
+	re.Error(err)
+
+	hc.SplitThresholds = 1.1
 	err = hc.valid()
 	re.Error(err)
 }

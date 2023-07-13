@@ -25,14 +25,6 @@ var (
 			Help:      "Status of the hotspot.",
 		}, []string{"address", "store", "type"})
 
-	schedulerStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "status",
-			Help:      "Status of the scheduler.",
-		}, []string{"kind", "type"})
-
 	regionListGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -51,7 +43,6 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(regionListGauge)
 	prometheus.MustRegister(patrolCheckRegionsGauge)

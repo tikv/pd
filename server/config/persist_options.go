@@ -618,11 +618,7 @@ func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
 func (o *PersistOptions) GetMaxMovableHotPeerSize() int64 {
-	size := o.GetScheduleConfig().MaxMovableHotPeerSize
-	if size <= 0 {
-		size = defaultMaxMovableHotPeerSize
-	}
-	return size
+	return o.GetScheduleConfig().MaxMovableHotPeerSize
 }
 
 // IsDebugMetricsEnabled returns if debug metrics is enabled.
@@ -663,6 +659,17 @@ func (o *PersistOptions) GetSchedulers() SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers
 }
 
+// IsSchedulerDisabled returns if the scheduler is disabled.
+func (o *PersistOptions) IsSchedulerDisabled(t string) bool {
+	schedulers := o.GetScheduleConfig().Schedulers
+	for _, s := range schedulers {
+		if t == s.Type {
+			return s.Disable
+		}
+	}
+	return false
+}
+
 // GetHotRegionsWriteInterval gets interval for PD to store Hot Region information.
 func (o *PersistOptions) GetHotRegionsWriteInterval() time.Duration {
 	return o.GetScheduleConfig().HotRegionsWriteInterval.Duration
@@ -693,6 +700,23 @@ func (o *PersistOptions) AddSchedulerCfg(tp string, args []string) {
 	}
 	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args, Disable: false})
 	o.SetScheduleConfig(v)
+}
+
+// RemoveSchedulerCfg removes the scheduler configurations.
+func (o *PersistOptions) RemoveSchedulerCfg(tp string) {
+	v := o.GetScheduleConfig().Clone()
+	for i, schedulerCfg := range v.Schedulers {
+		if tp == schedulerCfg.Type {
+			if IsDefaultScheduler(tp) {
+				schedulerCfg.Disable = true
+				v.Schedulers[i] = schedulerCfg
+			} else {
+				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+			}
+			o.SetScheduleConfig(v)
+			return
+		}
+	}
 }
 
 // SetLabelProperty sets the label property.

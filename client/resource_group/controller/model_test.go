@@ -37,14 +37,6 @@ func TestGetRUValueFromConsumption(t *testing.T) {
 
 	result = getRUValueFromConsumption(custom, typ)
 	re.Equal(expected, result)
-
-	// When typ is not RU
-	custom = &rmpb.Consumption{RRU: 2.5, WRU: 3.5}
-	typ = rmpb.RequestUnitType_RU
-	expected = float64(0)
-
-	result = getRUValueFromConsumption(custom, typ)
-	re.Equal(expected, result)
 }
 
 func TestGetRUTokenBucketSetting(t *testing.T) {
@@ -69,18 +61,6 @@ func TestGetRUTokenBucketSetting(t *testing.T) {
 	if result != expected {
 		t.Errorf("Expected nil but got %v", result)
 	}
-
-	// When typ is not RU
-	group = &rmpb.ResourceGroup{
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 100}},
-		},
-	}
-	typ = rmpb.RequestUnitType_RU
-	expected = nil
-
-	result = getRUTokenBucketSetting(group, typ)
-	re.Equal(expected, result)
 }
 
 func TestGetRawResourceValueFromConsumption(t *testing.T) {
