@@ -69,6 +69,34 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	re.Equal(utils.DefaultKeyspaceName, keyspaceDefault.GetName())
 }
 
+func (suite *clientTestSuite) TestGetAllKeyspaces() {
+	re := suite.Require()
+	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
+	for _, expected := range metas {
+		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
+		re.NoError(err)
+		re.Equal(expected, loaded)
+	}
+	// Get all keyspaces.
+	resKeyspaces, err := suite.client.GetAllKeyspaces(suite.ctx)
+	re.Error(err)
+	re.Equal(len(metas), len(resKeyspaces))
+	// Check expected keyspaces all in resKeyspaces.
+	for _, expected := range metas {
+		var isExists bool
+		for _, resKeyspace := range resKeyspaces {
+			if expected == resKeyspace {
+				isExists = true
+				continue
+			}
+		}
+		if !isExists {
+			re.Fail("not exists keyspace")
+		}
+	}
+
+}
+
 func (suite *clientTestSuite) TestWatchKeyspaces() {
 	re := suite.Require()
 	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 10, 10)

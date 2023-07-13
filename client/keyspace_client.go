@@ -18,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
@@ -34,7 +35,7 @@ type KeyspaceClient interface {
 	// UpdateKeyspaceState updates target keyspace's state.
 	UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error)
 	// GetAllKeyspaces get all keyspace's metadata.
-	GetAllKeyspaces(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) ([]*keyspacepb.KeyspaceMeta, error)
+	GetAllKeyspaces(ctx context.Context) ([]*keyspacepb.KeyspaceMeta, error)
 }
 
 // keyspaceClient returns the KeyspaceClient from current PD leader.
@@ -179,7 +180,7 @@ func (c *client) GetAllKeyspaces(ctx context.Context) ([]*keyspacepb.KeyspaceMet
 
 	if resp.Header.GetError() != nil {
 		cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
-		return nil, errors.Errorf("Get all keyspaces metadata failed", resp.Header.GetError().String())
+		return nil, errors.Errorf("Get all keyspaces metadata failed: %s", resp.Header.GetError().String())
 	}
 
 	return nil, nil
