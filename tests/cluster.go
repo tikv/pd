@@ -97,7 +97,10 @@ func createTestServer(ctx context.Context, cfg *config.Config, services []string
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	if swaggerserver.Enabled() {
+		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
+	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
@@ -628,9 +631,11 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
+			s.RLock()
 			if s.state == Running {
 				running++
 			}
+			s.RUnlock()
 			n := s.GetLeader().GetName()
 			if n != "" {
 				counter[n]++
