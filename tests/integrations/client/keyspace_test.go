@@ -73,7 +73,7 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 
 func (suite *clientTestSuite) TestGetAllKeyspaces() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 0)
+	metas := mustMakeTestKeyspaces(re, suite.srv, 20)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
 		re.NoError(err)
