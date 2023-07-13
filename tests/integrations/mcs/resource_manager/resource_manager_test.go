@@ -890,8 +890,12 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	}
 	re.NoError(suite.cluster.RunServers(serverList))
 	suite.cluster.WaitLeader()
-	newGroups, err := cli.ListResourceGroups(suite.ctx)
-	re.NoError(err)
+	var newGroups []*rmpb.ResourceGroup
+	testutil.Eventually(suite.Require(), func() bool {
+		var err error
+		newGroups, err = cli.ListResourceGroups(suite.ctx)
+		return err == nil
+	}, testutil.WithWaitFor(time.Second))
 	re.Equal(groups, newGroups)
 }
 
