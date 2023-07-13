@@ -35,7 +35,7 @@ type KeyspaceClient interface {
 	// UpdateKeyspaceState updates target keyspace's state.
 	UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error)
 	// GetAllKeyspaces get all keyspace's metadata.
-	GetAllKeyspaces(ctx context.Context) ([]*keyspacepb.KeyspaceMeta, error)
+	GetAllKeyspaces(ctx context.Context, startID uint32, limit uint32) ([]*keyspacepb.KeyspaceMeta, error)
 }
 
 // keyspaceClient returns the KeyspaceClient from current PD leader.
@@ -157,7 +157,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 }
 
 // GetAllKeyspaces get all keyspaces metadata.
-func (c *client) GetAllKeyspaces(ctx context.Context) ([]*keyspacepb.KeyspaceMeta, error) {
+func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint32) ([]*keyspacepb.KeyspaceMeta, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("keyspaceClient.UpdateKeyspaceState", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -166,7 +166,9 @@ func (c *client) GetAllKeyspaces(ctx context.Context) ([]*keyspacepb.KeyspaceMet
 	defer func() { cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &keyspacepb.GetAllKeyspacesRequest{
-		Header: c.requestHeader(),
+		Header:  c.requestHeader(),
+		StartId: startID,
+		Limit:   limit,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.keyspaceClient().GetAllKeyspaces(ctx, req)
@@ -183,5 +185,5 @@ func (c *client) GetAllKeyspaces(ctx context.Context) ([]*keyspacepb.KeyspaceMet
 		return nil, errors.Errorf("Get all keyspaces metadata failed: %s", resp.Header.GetError().String())
 	}
 
-	return nil, nil
+	return resp.Keyspaces, nil
 }

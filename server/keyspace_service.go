@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	"math"
 	"path"
 	"time"
 
@@ -150,7 +149,7 @@ func (s *KeyspaceServer) GetAllKeyspaces(_ context.Context, request *keyspacepb.
 	}
 
 	manager := s.GetKeyspaceManager()
-	keyspaces, err := manager.LoadRangeKeyspace(0, math.MaxUint32)
+	keyspaces, err := manager.LoadRangeKeyspace(request.StartId, int(request.Limit))
 	if err != nil {
 		return &keyspacepb.GetAllKeyspacesResponse{Header: s.getErrorHeader(err)}, nil
 	}

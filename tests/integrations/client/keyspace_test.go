@@ -16,14 +16,17 @@ package client_test
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/server"
+	"go.uber.org/zap"
 )
 
 const (
@@ -78,14 +81,15 @@ func (suite *clientTestSuite) TestGetAllKeyspaces() {
 		re.Equal(expected, loaded)
 	}
 	// Get all keyspaces.
-	resKeyspaces, err := suite.client.GetAllKeyspaces(suite.ctx)
+	resKeyspaces, err := suite.client.GetAllKeyspaces(suite.ctx, 1, math.MaxUint32)
 	re.NoError(err)
 	re.Equal(len(metas), len(resKeyspaces))
+	log.Info("max int", zap.Int("max", math.MaxInt))
 	// Check expected keyspaces all in resKeyspaces.
 	for _, expected := range metas {
 		var isExists bool
 		for _, resKeyspace := range resKeyspaces {
-			if expected == resKeyspace {
+			if expected.GetName() == resKeyspace.GetName() {
 				isExists = true
 				continue
 			}
