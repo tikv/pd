@@ -21,17 +21,13 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/grpcutil"
-	"go.uber.org/zap"
 )
 
 // KeyspaceClient manages keyspace metadata.
 type KeyspaceClient interface {
 	// LoadKeyspace load and return target keyspace's metadata.
 	LoadKeyspace(ctx context.Context, name string) (*keyspacepb.KeyspaceMeta, error)
-	// WatchKeyspaces watches keyspace meta changes.
-	WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.KeyspaceMeta, error)
 	// UpdateKeyspaceState updates target keyspace's state.
 	UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error)
 	// GetAllKeyspaces get all keyspace's metadata.
@@ -75,44 +71,6 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 	}
 
 	return resp.Keyspace, nil
-}
-
-// WatchKeyspaces watches keyspace meta changes.
-// It returns a stream of slices of keyspace metadata.
-// The first message in stream contains all current keyspaceMeta,
-// all subsequent messages contains new put events for all keyspaces.
-func (c *client) WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.KeyspaceMeta, error) {
-	keyspaceWatcherChan := make(chan []*keyspacepb.KeyspaceMeta)
-	req := &keyspacepb.WatchKeyspacesRequest{
-		Header: c.requestHeader(),
-	}
-	stream, err := c.keyspaceClient().WatchKeyspaces(ctx, req)
-	if err != nil {
-		close(keyspaceWatcherChan)
-		return nil, err
-	}
-	go func() {
-		defer func() {
-			close(keyspaceWatcherChan)
-			if r := recover(); r != nil {
-				log.Error("[pd] panic in keyspace client `WatchKeyspaces`", zap.Any("error", r))
-				return
-			}
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				resp, err := stream.Recv()
-				if err != nil {
-					return
-				}
-				keyspaceWatcherChan <- resp.Keyspaces
-			}
-		}
-	}()
-	return keyspaceWatcherChan, err
 }
 
 // UpdateKeyspaceState attempts to update the keyspace specified by ID to the target state,

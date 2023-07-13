@@ -98,56 +98,6 @@ func (suite *clientTestSuite) TestGetAllKeyspaces() {
 	}
 }
 
-func (suite *clientTestSuite) TestWatchKeyspaces() {
-	re := suite.Require()
-	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 10)
-	watchChan, err := suite.client.WatchKeyspaces(suite.ctx)
-	re.NoError(err)
-	// First batch of watchChan message should contain all existing keyspaces.
-	initialLoaded := <-watchChan
-	for i := range initialKeyspaces {
-		re.Contains(initialLoaded, initialKeyspaces[i])
-	}
-	// Each additional message contains extra put events.
-	additionalKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 30)
-	re.NoError(err)
-	// Checks that all additional keyspaces are captured by watch channel.
-	for i := 0; i < 10; {
-		loadedKeyspaces := <-watchChan
-		re.NotEmpty(loadedKeyspaces)
-		for j := range loadedKeyspaces {
-			re.Equal(additionalKeyspaces[i+j], loadedKeyspaces[j])
-		}
-		i += len(loadedKeyspaces)
-	}
-	// Updates to state should also be captured.
-	expected, err := suite.srv.GetKeyspaceManager().UpdateKeyspaceState(initialKeyspaces[0].Name, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
-	re.NoError(err)
-	loaded := <-watchChan
-	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
-	// Updates to config should also be captured.
-	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(initialKeyspaces[0].Name, []*keyspace.Mutation{
-		{
-			Op:  keyspace.OpDel,
-			Key: testConfig1,
-		},
-	})
-	re.NoError(err)
-	loaded = <-watchChan
-	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
-	// Updates to default keyspace's config should also be captured.
-	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(utils.DefaultKeyspaceName, []*keyspace.Mutation{
-		{
-			Op:    keyspace.OpPut,
-			Key:   "config",
-			Value: "value",
-		},
-	})
-	re.NoError(err)
-	loaded = <-watchChan
-	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
-}
-
 func mustCreateKeyspaceAtState(re *require.Assertions, server *server.Server, index int, state keyspacepb.KeyspaceState) *keyspacepb.KeyspaceMeta {
 	manager := server.GetKeyspaceManager()
 	meta, err := manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
