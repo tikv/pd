@@ -28,16 +28,17 @@ import (
 )
 
 const (
-	testConfig1 = "config_entry_1"
-	testConfig2 = "config_entry_2"
+	testConfig1       = "config_entry_1"
+	testConfig2       = "config_entry_2"
+	testKeyspaceCount = 10
 )
 
-func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start, count int) []*keyspacepb.KeyspaceMeta {
+func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start int) []*keyspacepb.KeyspaceMeta {
 	now := time.Now().Unix()
 	var err error
-	keyspaces := make([]*keyspacepb.KeyspaceMeta, count)
+	keyspaces := make([]*keyspacepb.KeyspaceMeta, testKeyspaceCount)
 	manager := server.GetKeyspaceManager()
-	for i := 0; i < count; i++ {
+	for i := 0; i < testKeyspaceCount; i++ {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test_keyspace_%d", start+i),
 			Config: map[string]string{
@@ -54,7 +55,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start,
 
 func (suite *clientTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
+	metas := mustMakeTestKeyspaces(re, suite.srv, 0)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
 		re.NoError(err)
@@ -72,7 +73,7 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 
 func (suite *clientTestSuite) TestGetAllKeyspaces() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
+	metas := mustMakeTestKeyspaces(re, suite.srv, 0)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
 		re.NoError(err)
@@ -95,12 +96,11 @@ func (suite *clientTestSuite) TestGetAllKeyspaces() {
 			re.Fail("not exists keyspace")
 		}
 	}
-
 }
 
 func (suite *clientTestSuite) TestWatchKeyspaces() {
 	re := suite.Require()
-	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 10, 10)
+	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 10)
 	watchChan, err := suite.client.WatchKeyspaces(suite.ctx)
 	re.NoError(err)
 	// First batch of watchChan message should contain all existing keyspaces.
@@ -109,7 +109,7 @@ func (suite *clientTestSuite) TestWatchKeyspaces() {
 		re.Contains(initialLoaded, initialKeyspaces[i])
 	}
 	// Each additional message contains extra put events.
-	additionalKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 30, 10)
+	additionalKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 30)
 	re.NoError(err)
 	// Checks that all additional keyspaces are captured by watch channel.
 	for i := 0; i < 10; {
