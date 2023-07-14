@@ -283,6 +283,13 @@ func TestHotWithStoreID(t *testing.T) {
 	re.Equal(buckets.GetStats().ReadKeys[0]/interval, item.ReadKeys)
 	re.Equal(buckets.GetStats().WriteBytes[0]/interval, item.WriteBytes)
 	re.Equal(buckets.GetStats().WriteKeys[0]/interval, item.WriteKeys)
+
+	args = []string{"-u", pdAddr, "hot", "buckets", "2"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	hotBuckets = api.HotBucketsResponse{}
+	re.NoError(json.Unmarshal(output, &hotBuckets))
+	re.Nil(hotBuckets[2])
 }
 
 func TestHistoryHotRegions(t *testing.T) {
