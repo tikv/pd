@@ -29,7 +29,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
-	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -79,6 +79,15 @@ type Config struct {
 	// Backward compatibility.
 	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
 	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
+
+	// MaxConcurrentTSOProxyStreamings is the maximum number of concurrent TSO proxy streaming process routines allowed.
+	// Exceeding this limit will result in an error being returned to the client when a new client starts a TSO streaming.
+	// Set this to 0 will disable TSO Proxy.
+	// Set this to the negative value to disable the limit.
+	MaxConcurrentTSOProxyStreamings int `toml:"max-concurrent-tso-proxy-streamings" json:"max-concurrent-tso-proxy-streamings"`
+	// TSOProxyRecvFromClientTimeout is the timeout for the TSO proxy to receive a tso request from a client via grpc TSO stream.
+	// After the timeout, the TSO proxy will close the grpc TSO stream.
+	TSOProxyRecvFromClientTimeout typeutil.Duration `toml:"tso-proxy-recv-from-client-timeout" json:"tso-proxy-recv-from-client-timeout"`
 
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
@@ -213,10 +222,14 @@ const (
 	defaultEnableGRPCGateway    = true
 	defaultDisableErrorVerbose  = true
 	defaultEnableWitness        = false
+	defaultHaltScheduling       = false
 
 	defaultDashboardAddress = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
+
+	defaultMaxConcurrentTSOProxyStreamings = 5000
+	defaultTSOProxyRecvFromClientTimeout   = 1 * time.Hour
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
@@ -238,6 +251,11 @@ const (
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
+
+	defaultWaitRegionSplitTimeout   = 30 * time.Second
+	defaultCheckRegionSplitInterval = 50 * time.Millisecond
+	minCheckRegionSplitInterval     = 1 * time.Millisecond
+	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 )
 
 // Special keys for Labels
@@ -436,10 +454,11 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		}
 	}
 
+	configutil.AdjustInt(&c.MaxConcurrentTSOProxyStreamings, defaultMaxConcurrentTSOProxyStreamings)
+	configutil.AdjustDuration(&c.TSOProxyRecvFromClientTimeout, defaultTSOProxyRecvFromClientTimeout)
+
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
-
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
-
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
@@ -496,6 +515,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
+	c.Keyspace.adjust(configMetaData.Child("keyspace"))
+
 	c.Security.Encryption.Adjust()
 
 	if len(c.Log.Format) == 0 {
@@ -542,7 +563,7 @@ type ScheduleConfig struct {
 	// SplitMergeInterval is the minimum interval time to permit merge after split.
 	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
 	// SwitchWitnessInterval is the minimum interval that allows a peer to become a witness again after it is promoted to non-witness.
-	SwitchWitnessInterval typeutil.Duration `toml:"switch-witness-interval" json:"swtich-witness-interval"`
+	SwitchWitnessInterval typeutil.Duration `toml:"switch-witness-interval" json:"switch-witness-interval"`
 	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
 	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
 	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
@@ -633,7 +654,7 @@ type ScheduleConfig struct {
 	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
 	// EnableDebugMetrics is the option to enable debug metrics.
 	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
-	// EnableJointConsensus is the option to enable using joint consensus as a operator step.
+	// EnableJointConsensus is the option to enable using joint consensus as an operator step.
 	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
 	// EnableTiKVSplitRegion is the option to enable tikv split region.
 	// on ebs-based BR we need to disable it with TTL
@@ -645,14 +666,6 @@ type ScheduleConfig struct {
 	// Only used to display
 	SchedulersPayload map[string]interface{} `toml:"schedulers-payload" json:"schedulers-payload"`
 
-	// StoreLimitMode can be auto or manual, when set to auto,
-	// PD tries to change the store limit values according to
-	// the load state of the cluster dynamically. User can
-	// overwrite the auto-tuned value by pd-ctl, when the value
-	// is overwritten, the value is fixed until it is deleted.
-	// Default: manual
-	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
-
 	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
 
@@ -663,15 +676,24 @@ type ScheduleConfig struct {
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
 
-	// EnableDiagnostic is the the option to enable using diagnostic
+	// EnableDiagnostic is the option to enable using diagnostic
 	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
 
 	// EnableWitness is the option to enable using witness
 	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
 
 	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
-	// A store's slowness must affected more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
+	// A store's slowness must affect more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
 	SlowStoreEvictingAffectedStoreRatioThreshold float64 `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
+
+	// StoreLimitVersion is the version of store limit.
+	// v1: which is based on the region count by rate limit.
+	// v2: which is based on region size by window size.
+	StoreLimitVersion string `toml:"store-limit-version" json:"store-limit-version,omitempty"`
+
+	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
+	// and any other scheduling configs will be ignored.
+	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -716,7 +738,6 @@ const (
 	defaultHotRegionCacheHitsThreshold = 3
 	defaultSchedulerMaxWaitingOperator = 5
 	defaultLeaderSchedulePolicy        = "count"
-	defaultStoreLimitMode              = "manual"
 	defaultEnableJointConsensus        = true
 	defaultEnableTiKVSplitRegion       = true
 	defaultEnableCrossTableMerge       = true
@@ -726,6 +747,8 @@ const (
 	defaultMaxStorePreparingTime = 48 * time.Hour
 	// When a slow store affected more than 30% of total stores, it will trigger evicting.
 	defaultSlowStoreEvictingAffectedStoreRatioThreshold = 0.3
+
+	defaultStoreLimitVersion = "v1"
 )
 
 func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool) error {
@@ -774,9 +797,10 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("leader-schedule-policy") {
 		configutil.AdjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
 	}
-	if !meta.IsDefined("store-limit-mode") {
-		configutil.AdjustString(&c.StoreLimitMode, defaultStoreLimitMode)
+	if !meta.IsDefined("store-limit-version") {
+		configutil.AdjustString(&c.StoreLimitVersion, defaultStoreLimitVersion)
 	}
+
 	if !meta.IsDefined("enable-joint-consensus") {
 		c.EnableJointConsensus = defaultEnableJointConsensus
 	}
@@ -799,6 +823,10 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 	// new cluster:v2, old cluster:v1
 	if !meta.IsDefined("region-score-formula-version") && !reloading {
 		configutil.AdjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
+	}
+
+	if !meta.IsDefined("halt-scheduling") {
+		c.HaltScheduling = defaultHaltScheduling
 	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
@@ -824,7 +852,11 @@ func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool)
 		configutil.AdjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
 	}
 
-	if !meta.IsDefined("SlowStoreEvictingAffectedStoreRatioThreshold") {
+	if !meta.IsDefined("max-movable-hot-peer-size") {
+		configutil.AdjustInt64(&c.MaxMovableHotPeerSize, defaultMaxMovableHotPeerSize)
+	}
+
+	if !meta.IsDefined("slow-store-evicting-affected-store-ratio-threshold") {
 		configutil.AdjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
 	}
 	return c.Validate()
@@ -957,7 +989,6 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-leader"},
 	{Type: "balance-witness"},
 	{Type: "hot-region"},
-	{Type: "split-bucket"},
 	{Type: "transfer-witness-leader"},
 }
 
@@ -1053,7 +1084,7 @@ type PDServerConfig struct {
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
-	// RuntimeServices is the running the running extension services.
+	// RuntimeServices is the running extension services.
 	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
 	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
@@ -1071,7 +1102,7 @@ type PDServerConfig struct {
 	ServerMemoryLimit float64 `toml:"server-memory-limit" json:"server-memory-limit"`
 	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
 	ServerMemoryLimitGCTrigger float64 `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
-	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC
+	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC.
 	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
 	// GCTunerThreshold is the threshold of GC tuner.
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
@@ -1223,6 +1254,17 @@ func (c *Config) GetLeaderLease() int64 {
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO
+}
+
+// GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
+// If the value is negative, there is no limit.
+func (c *Config) GetMaxConcurrentTSOProxyStreamings() int {
+	return c.MaxConcurrentTSOProxyStreamings
+}
+
+// GetTSOProxyRecvFromClientTimeout returns timeout value for TSO proxy receiving from the client.
+func (c *Config) GetTSOProxyRecvFromClientTimeout() time.Duration {
+	return c.TSOProxyRecvFromClientTimeout.Duration
 }
 
 // GetTSOUpdatePhysicalInterval returns TSO update physical interval.
@@ -1389,9 +1431,62 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
+	// WaitRegionSplit indicates whether to wait for the region split to complete
+	WaitRegionSplit bool `toml:"wait-region-split" json:"wait-region-split"`
+	// WaitRegionSplitTimeout indicates the max duration to wait region split.
+	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
+	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
+	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
+}
+
+// Validate checks if keyspace config falls within acceptable range.
+func (c *KeyspaceConfig) Validate() error {
+	if c.CheckRegionSplitInterval.Duration > maxCheckRegionSplitInterval || c.CheckRegionSplitInterval.Duration < minCheckRegionSplitInterval {
+		return errors.New(fmt.Sprintf("[keyspace] check-region-split-interval should between %v and %v",
+			minCheckRegionSplitInterval, maxCheckRegionSplitInterval))
+	}
+	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
+		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
+	}
+	return nil
+}
+
+func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
+	if !meta.IsDefined("wait-region-split") {
+		c.WaitRegionSplit = true
+	}
+	if !meta.IsDefined("wait-region-split-timeout") {
+		c.WaitRegionSplitTimeout = typeutil.NewDuration(defaultWaitRegionSplitTimeout)
+	}
+	if !meta.IsDefined("check-region-split-interval") {
+		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
+	}
+}
+
+// Clone makes a deep copy of the keyspace config.
+func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
+	preAlloc := append(c.PreAlloc[:0:0], c.PreAlloc...)
+	cfg := *c
+	cfg.PreAlloc = preAlloc
+	return &cfg
 }
 
 // GetPreAlloc returns the keyspace to be allocated during keyspace manager initialization.
 func (c *KeyspaceConfig) GetPreAlloc() []string {
 	return c.PreAlloc
+}
+
+// ToWaitRegionSplit returns whether to wait for the region split to complete.
+func (c *KeyspaceConfig) ToWaitRegionSplit() bool {
+	return c.WaitRegionSplit
+}
+
+// GetWaitRegionSplitTimeout returns the max duration to wait region split.
+func (c *KeyspaceConfig) GetWaitRegionSplitTimeout() time.Duration {
+	return c.WaitRegionSplitTimeout.Duration
+}
+
+// GetCheckRegionSplitInterval returns the interval to check whether the region split is complete.
+func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
+	return c.CheckRegionSplitInterval.Duration
 }

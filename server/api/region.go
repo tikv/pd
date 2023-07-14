@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/failpoint"
@@ -30,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -372,7 +374,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 // @Router   /regions/count [get]
 func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
-	count := rc.GetRegionCount()
+	count := rc.GetTotalRegionCount()
 	h.rd.JSON(w, http.StatusOK, &RegionsInfo{Count: count})
 }
 
@@ -393,6 +395,56 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	regions := rc.GetStoreRegions(uint64(id))
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+// @Tags     region
+// @Summary  List regions belongs to the given keyspace ID.
+// @Param    keyspace_id  query  string   true   "Keyspace ID"
+// @Param    limit        query  integer  false  "Limit count"  default(16)
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/keyspace/id/{id} [get]
+func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	vars := mux.Vars(r)
+	keyspaceIDStr := vars["id"]
+	if keyspaceIDStr == "" {
+		h.rd.JSON(w, http.StatusBadRequest, "keyspace id is empty")
+		return
+	}
+
+	keyspaceID64, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	keyspaceID := uint32(keyspaceID64)
+	keyspaceManager := h.svr.GetKeyspaceManager()
+	if _, err := keyspaceManager.LoadKeyspaceByID(keyspaceID); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	limit := defaultRegionLimit
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+	regionBound := keyspace.MakeRegionBound(keyspaceID)
+	regions := rc.ScanRegions(regionBound.RawLeftBound, regionBound.RawRightBound, limit)
+	if limit <= 0 || limit > len(regions) {
+		txnRegion := rc.ScanRegions(regionBound.TxnLeftBound, regionBound.TxnRightBound, limit-len(regions))
+		regions = append(regions, txnRegion...)
+	}
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
@@ -834,6 +886,61 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 		rc.AddSuspectRegions(regionsIDList...)
 	}
 	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
+}
+
+// @Tags     region
+// @Summary  Accelerate regions scheduling in given ranges, only receive hex format for keys
+// @Accept   json
+// @Param    body   body   object   true   "json params"
+// @Param    limit  query  integer  false  "Limit count"  default(256)
+// @Produce  json
+// @Success  200  {string}  string  "Accelerate regions scheduling in given ranges [startKey1, endKey1), [startKey2, endKey2), ..."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/accelerate-schedule/batch [post]
+func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	var input []map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	limit := 256
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+	var msgBuilder strings.Builder
+	msgBuilder.Grow(128)
+	msgBuilder.WriteString("Accelerate regions scheduling in given ranges: ")
+	var regions []*core.RegionInfo
+	for _, rg := range input {
+		startKey, rawStartKey, err := apiutil.ParseKey("start_key", rg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		endKey, rawEndKey, err := apiutil.ParseKey("end_key", rg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		regions = append(regions, rc.ScanRegions(startKey, endKey, limit)...)
+		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
+	}
+	if len(regions) > 0 {
+		regionsIDList := make([]uint64, 0, len(regions))
+		for _, region := range regions {
+			regionsIDList = append(regionsIDList, region.GetID())
+		}
+		rc.AddSuspectRegions(regionsIDList...)
+	}
+	h.rd.Text(w, http.StatusOK, msgBuilder.String())
 }
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {

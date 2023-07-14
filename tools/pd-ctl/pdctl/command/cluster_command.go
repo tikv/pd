@@ -20,8 +20,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const clusterPrefix = "pd/api/v1/cluster"
-const clusterStatusPrefix = "pd/api/v1/cluster/status"
+const (
+	clusterPrefix       = "pd/api/v1/cluster"
+	clusterStatusPrefix = "pd/api/v1/cluster/status"
+)
 
 // NewClusterCommand return a cluster subcommand of rootCmd
 func NewClusterCommand() *cobra.Command {

@@ -8,6 +8,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 // RejectLeader is the label property type that suggests a store should not
@@ -29,6 +30,12 @@ func IsSchedulerRegistered(name string) bool {
 
 // Config is the interface that wraps the Config related methods.
 type Config interface {
+	IsSchedulingHalted() bool
+	IsSchedulerDisabled(string) bool
+	AddSchedulerCfg(string, []string)
+	RemoveSchedulerCfg(string)
+	Persist(endpoint.ConfigStorage) error
+
 	GetReplicaScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
 	GetMergeScheduleLimit() uint64
@@ -80,12 +87,14 @@ type Config interface {
 	CheckLabelProperty(string, []*metapb.StoreLabel) bool
 	IsDebugMetricsEnabled() bool
 	GetClusterVersion() *semver.Version
+	GetStoreLimitVersion() string
+	IsDiagnosticAllowed() bool
 	// for test purpose
 	SetPlacementRuleEnabled(bool)
 	SetSplitMergeInterval(time.Duration)
 	SetMaxReplicas(int)
 	SetPlacementRulesCacheEnabled(bool)
-	SetWitnessEnabled(bool)
+	SetEnableWitness(bool)
 	// only for store configuration
 	UseRaftV2()
 }
@@ -96,6 +105,7 @@ type StoreConfig interface {
 	CheckRegionSize(uint64, uint64) error
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool
+	IsRaftKV2() bool
 	// for test purpose
 	SetRegionBucketEnabled(bool)
 }

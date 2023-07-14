@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -60,19 +61,93 @@ func (k UserKind) String() string {
 	return "unknown UserKind"
 }
 
+// IsUserKindValid checks if the user kind is valid.
+func IsUserKindValid(kind string) bool {
+	switch kind {
+	case Basic.String(), Standard.String(), Enterprise.String():
+		return true
+	default:
+		return false
+	}
+}
+
 // KeyspaceGroupMember defines an election member which campaigns for the primary of the keyspace group.
+// Its `Priority` is used in keyspace group primary weighted-election to balance primaries' distribution.
+// Among multiple replicas of a keyspace group, the higher the priority, the more likely
+// the replica is to be elected as primary.
 type KeyspaceGroupMember struct {
-	Address string `json:"address"`
+	Address  string `json:"address"`
+	Priority int    `json:"priority"`
+}
+
+// SplitState defines the split state of a keyspace group.
+type SplitState struct {
+	// SplitSource is the current keyspace group ID from which the keyspace group is split.
+	// When the keyspace group is being split to another keyspace group, the split-source will
+	// be set to its own ID.
+	SplitSource uint32 `json:"split-source"`
+}
+
+// MergeState defines the merging state of a keyspace group.
+type MergeState struct {
+	// MergeList is the list of keyspace group IDs which are merging to this target keyspace group.
+	MergeList []uint32 `json:"merge-list"`
 }
 
 // KeyspaceGroup is the keyspace group.
 type KeyspaceGroup struct {
 	ID       uint32 `json:"id"`
 	UserKind string `json:"user-kind"`
+	// SplitState is the current split state of the keyspace group.
+	SplitState *SplitState `json:"split-state,omitempty"`
+	// MergeState is the current merging state of the keyspace group.
+	MergeState *MergeState `json:"merge-state,omitempty"`
 	// Members are the election members which campaign for the primary of the keyspace group.
 	Members []KeyspaceGroupMember `json:"members"`
 	// Keyspaces are the keyspace IDs which belong to the keyspace group.
 	Keyspaces []uint32 `json:"keyspaces"`
+	// KeyspaceLookupTable is for fast lookup if a given keyspace belongs to this keyspace group.
+	// It's not persisted and will be built when loading from storage.
+	KeyspaceLookupTable map[uint32]struct{} `json:"-"`
+}
+
+// IsSplitting checks if the keyspace group is in split state.
+func (kg *KeyspaceGroup) IsSplitting() bool {
+	return kg != nil && kg.SplitState != nil
+}
+
+// IsSplitTarget checks if the keyspace group is in split state and is the split target.
+func (kg *KeyspaceGroup) IsSplitTarget() bool {
+	return kg.IsSplitting() && kg.SplitState.SplitSource != kg.ID
+}
+
+// IsSplitSource checks if the keyspace group is in split state and is the split source.
+func (kg *KeyspaceGroup) IsSplitSource() bool {
+	return kg.IsSplitting() && kg.SplitState.SplitSource == kg.ID
+}
+
+// SplitSource returns the keyspace group split source ID. When the keyspace group is the split source
+// itself, it will return its own ID.
+func (kg *KeyspaceGroup) SplitSource() uint32 {
+	if kg.IsSplitting() {
+		return kg.SplitState.SplitSource
+	}
+	return 0
+}
+
+// IsMerging checks if the keyspace group is in merging state.
+func (kg *KeyspaceGroup) IsMerging() bool {
+	return kg != nil && kg.MergeState != nil
+}
+
+// IsMergeTarget checks if the keyspace group is in merging state and is the merge target.
+func (kg *KeyspaceGroup) IsMergeTarget() bool {
+	return kg.IsMerging() && !slice.Contains(kg.MergeState.MergeList, kg.ID)
+}
+
+// IsMergeSource checks if the keyspace group is in merging state and is the merge source.
+func (kg *KeyspaceGroup) IsMergeSource() bool {
+	return kg.IsMerging() && slice.Contains(kg.MergeState.MergeList, kg.ID)
 }
 
 // KeyspaceGroupStorage is the interface for keyspace group storage.
@@ -87,7 +162,7 @@ type KeyspaceGroupStorage interface {
 
 var _ KeyspaceGroupStorage = (*StorageEndpoint)(nil)
 
-// LoadKeyspaceGroup loads the keyspace group by id.
+// LoadKeyspaceGroup loads the keyspace group by ID.
 func (se *StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
 	value, err := txn.Load(KeyspaceGroupIDPath(id))
 	if err != nil || value == "" {

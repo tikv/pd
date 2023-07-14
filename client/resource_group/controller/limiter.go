@@ -79,6 +79,8 @@ type Limiter struct {
 	// So the notifyThreshold cannot show whether the limiter is in the low token state,
 	// isLowProcess is used to check it.
 	isLowProcess bool
+	// remainingNotifyTimes is used to limit notify when the speed limit is already set.
+	remainingNotifyTimes int
 }
 
 // Limit returns the maximum overall event rate.
@@ -183,7 +185,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 
 // Reserve returns a Reservation that indicates how long the caller must wait before n events happen.
 // The Limiter takes this Reservation into account when allowing future events.
-// The returned Reservation’s OK() method returns false if wait duration exceeds deadline.
+// The returned Reservation's OK() method returns false if wait duration exceeds deadline.
 // Usage example:
 //
 //	r := lim.Reserve(time.Now(), 1)
@@ -298,7 +300,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 ) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	log.Debug("[resource group controller] before reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
+	log.Debug("[resource group controller] before reconfigure", zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.limit)), zap.Float64("old-notify-threshold", args.NotifyThreshold), zap.Int64("old-burst", lim.burst))
 	if args.NewBurst < 0 {
 		lim.last = now
 		lim.tokens = args.NewTokens
@@ -314,7 +316,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		opt(lim)
 	}
 	lim.maybeNotify()
-	log.Debug("[resource group controller] after reconfigure", zap.Float64("NewTokens", lim.tokens), zap.Float64("NewRate", float64(lim.limit)), zap.Float64("NotifyThreshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
+	log.Debug("[resource group controller] after reconfigure", zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.limit)), zap.Float64("notify-threshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -369,9 +371,25 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.tokens = tokens
 		lim.maybeNotify()
 	} else {
+		log.Debug("[resource group controller]", zap.Float64("current-tokens", lim.tokens), zap.Float64("current-rate", float64(lim.limit)), zap.Float64("request-tokens", n), zap.Int64("burst", lim.burst), zap.Int("remaining-notify-times", lim.remainingNotifyTimes))
 		lim.last = last
+		if lim.limit == 0 {
+			lim.notify()
+		} else if lim.remainingNotifyTimes > 0 {
+			// When fillrate is greater than 0, the speed limit is already set.
+			// If limiter are in limit state, the server has allocated tokens as much as possible. Don't need to request tokens.
+			// But there is a special case, see issue https://github.com/tikv/pd/issues/6300.
+			lim.remainingNotifyTimes--
+			lim.notify()
+		}
 	}
 	return r
+}
+
+func (lim *Limiter) ResetRemainingNotifyTimes() {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	lim.remainingNotifyTimes = 3
 }
 
 // advance calculates and returns an updated state for lim resulting from the passage of time.

@@ -42,7 +42,7 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 	}
 	ch1 := make(chan struct{})
 	ch2 := make(chan *groupCostController)
-	gc, err := newGroupCostController(group, DefaultConfig(), ch1, ch2, successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name), resourceGroupTokenRequestCounter.WithLabelValues(group.Name))
+	gc, err := newGroupCostController(group, DefaultConfig(), ch1, ch2)
 	re.NoError(err)
 	return gc
 }
@@ -97,7 +97,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 	kvCalculator := gc.getKVCalculator()
 	for idx, testCase := range testCases {
 		caseNum := fmt.Sprintf("case %d", idx)
-		consumption, err := gc.onRequestWait(context.TODO(), testCase.req)
+		consumption, _, err := gc.onRequestWait(context.TODO(), testCase.req)
 		re.NoError(err, caseNum)
 		expectedConsumption := &rmpb.Consumption{}
 		if testCase.req.IsWrite() {

@@ -33,7 +33,7 @@ func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *Ru
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
 	manager := NewRuleManager(store, nil, mockconfig.NewTestOptions())
-	manager.conf.SetWitnessEnabled(enableWitness)
+	manager.conf.SetEnableWitness(enableWitness)
 	err = manager.Initialize(3, []string{"zone", "rack", "host"})
 	re.NoError(err)
 	return store, manager

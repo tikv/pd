@@ -20,6 +20,8 @@ import (
 	"io"
 	"path"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -48,22 +50,30 @@ import (
 )
 
 const (
-	heartbeatSendTimeout = 5 * time.Second
+	heartbeatSendTimeout          = 5 * time.Second
+	maxRetryTimesRequestTSOServer = 3
+	retryIntervalRequestTSOServer = 500 * time.Millisecond
+	getMinTSFromTSOServerTimeout  = 1 * time.Second
+	defaultGRPCDialTimeout        = 3 * time.Second
 )
 
 // gRPC errors
 var (
 	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
 	// TODO: work as proxy.
-	ErrNotLeader            = status.Errorf(codes.Unavailable, "not leader")
-	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
-	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
-	ErrNotFoundTSOAddr      = status.Errorf(codes.NotFound, "not found tso address")
+	ErrNotLeader                        = status.Errorf(codes.Unavailable, "not leader")
+	ErrNotStarted                       = status.Errorf(codes.Unavailable, "server not started")
+	ErrSendHeartbeatTimeout             = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
+	ErrNotFoundTSOAddr                  = status.Errorf(codes.NotFound, "not found tso address")
+	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
+	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
+	ErrTSOProxyRecvFromClientTimeout    = status.Errorf(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server")
 )
 
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
 	*Server
+	concurrentTSOProxyStreamings atomic.Int32
 }
 
 type request interface {
@@ -97,18 +107,15 @@ func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoR
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
 		return &pdpb.GetClusterInfoResponse{
-			Header: &pdpb.ResponseHeader{
-				Error: &pdpb.Error{
-					Type:    pdpb.ErrorType_UNKNOWN,
-					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
-				},
-			},
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
 
+	var tsoServiceAddrs []string
 	svcModes := make([]pdpb.ServiceMode, 0)
 	if s.IsAPIServiceMode() {
 		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
+		tsoServiceAddrs = s.keyspaceGroupManager.GetTSOServiceAddrs()
 	} else {
 		svcModes = append(svcModes, pdpb.ServiceMode_PD_SVC_MODE)
 	}
@@ -116,7 +123,155 @@ func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoR
 	return &pdpb.GetClusterInfoResponse{
 		Header:       s.header(),
 		ServiceModes: svcModes,
+		TsoUrls:      tsoServiceAddrs,
 	}, nil
+}
+
+// GetMinTS implements gRPC PDServer. In PD service mode, it simply returns a timestamp.
+// In API service mode, it queries all tso servers and gets the minimum timestamp across
+// all keyspace groups.
+func (s *GrpcServer) GetMinTS(
+	ctx context.Context, request *pdpb.GetMinTSRequest,
+) (*pdpb.GetMinTSResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return &pdpb.GetMinTSResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+
+	var (
+		minTS *pdpb.Timestamp
+		err   error
+	)
+	if s.IsAPIServiceMode() {
+		minTS, err = s.GetMinTSFromTSOService(tso.GlobalDCLocation)
+	} else {
+		start := time.Now()
+		ts, internalErr := s.tsoAllocatorManager.HandleRequest(tso.GlobalDCLocation, 1)
+		if internalErr == nil {
+			tsoHandleDuration.Observe(time.Since(start).Seconds())
+		}
+		minTS = &ts
+	}
+	if err != nil {
+		return &pdpb.GetMinTSResponse{
+			Header:    s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Timestamp: minTS,
+		}, nil
+	}
+
+	return &pdpb.GetMinTSResponse{
+		Header:    s.header(),
+		Timestamp: minTS,
+	}, nil
+}
+
+// GetMinTSFromTSOService queries all tso servers and gets the minimum timestamp across
+// all keyspace groups.
+func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp, error) {
+	addrs := s.keyspaceGroupManager.GetTSOServiceAddrs()
+	if len(addrs) == 0 {
+		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("no tso servers/pods discovered")
+	}
+
+	// Get the minimal timestamp from the TSO servers/pods
+	var mutex sync.Mutex
+	resps := make([]*tsopb.GetMinTSResponse, 0)
+	wg := sync.WaitGroup{}
+	wg.Add(len(addrs))
+	for _, addr := range addrs {
+		go func(addr string) {
+			defer wg.Done()
+			resp, err := s.getMinTSFromSingleServer(s.ctx, dcLocation, addr)
+			if err != nil || resp == nil {
+				log.Warn("failed to get min ts from tso server",
+					zap.String("address", addr), zap.Error(err))
+				return
+			}
+			mutex.Lock()
+			defer mutex.Unlock()
+			resps = append(resps, resp)
+		}(addr)
+	}
+	wg.Wait()
+
+	// Check the results. The returned minimal timestamp is valid if all the conditions are met:
+	// 1. The number of responses is equal to the number of TSO servers/pods.
+	// 2. The number of keyspace groups asked is equal to the number of TSO servers/pods.
+	// 3. The minimal timestamp is not zero.
+	var (
+		minTS               *pdpb.Timestamp
+		keyspaceGroupsAsked uint32
+	)
+	if len(resps) == 0 {
+		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("none of tso server/pod responded")
+	}
+	emptyTS := &pdpb.Timestamp{}
+	keyspaceGroupsTotal := resps[0].KeyspaceGroupsTotal
+	for _, resp := range resps {
+		if resp.KeyspaceGroupsTotal == 0 {
+			return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("the tso service has no keyspace group")
+		}
+		if resp.KeyspaceGroupsTotal != keyspaceGroupsTotal {
+			return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs(
+				"the tso service has inconsistent keyspace group total count")
+		}
+		keyspaceGroupsAsked += resp.KeyspaceGroupsServing
+		if tsoutil.CompareTimestamp(resp.Timestamp, emptyTS) > 0 &&
+			(minTS == nil || tsoutil.CompareTimestamp(resp.Timestamp, minTS) < 0) {
+			minTS = resp.Timestamp
+		}
+	}
+
+	if keyspaceGroupsAsked != keyspaceGroupsTotal {
+		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs(
+			fmt.Sprintf("can't query all the tso keyspace groups. Asked %d, expected %d",
+				keyspaceGroupsAsked, keyspaceGroupsTotal))
+	}
+
+	if minTS == nil {
+		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("the tso service is not ready")
+	}
+
+	return minTS, nil
+}
+
+func (s *GrpcServer) getMinTSFromSingleServer(
+	ctx context.Context, dcLocation, tsoSrvAddr string,
+) (*tsopb.GetMinTSResponse, error) {
+	cc, err := s.getDelegateClient(s.ctx, tsoSrvAddr)
+	if err != nil {
+		return nil, errs.ErrClientGetMinTSO.FastGenByArgs(
+			fmt.Sprintf("can't connect to tso server %s", tsoSrvAddr))
+	}
+
+	cctx, cancel := context.WithTimeout(ctx, getMinTSFromTSOServerTimeout)
+	defer cancel()
+
+	resp, err := tsopb.NewTSOClient(cc).GetMinTS(
+		cctx, &tsopb.GetMinTSRequest{
+			Header: &tsopb.RequestHeader{
+				ClusterId: s.ClusterID(),
+			},
+			DcLocation: dcLocation,
+		})
+	if err != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			err, cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp == nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			"no min ts info collected", cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.GetHeader().GetError() != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+
+	return resp, nil
 }
 
 // GetMembers implements gRPC PDServer.
@@ -125,12 +280,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
 		return &pdpb.GetMembersResponse{
-			Header: &pdpb.ResponseHeader{
-				Error: &pdpb.Error{
-					Type:    pdpb.ErrorType_UNKNOWN,
-					Message: errs.ErrServerNotStarted.FastGenByArgs().Error(),
-				},
-			},
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
 	members, err := cluster.GetMembers(s.GetClient())
@@ -179,6 +329,10 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
+	if s.IsAPIServiceMode() {
+		return s.forwardTSO(stream)
+	}
+
 	var (
 		doneCh chan struct{}
 		errCh  chan error
@@ -216,15 +370,8 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				errCh = make(chan error)
 			}
 
-			var tsoProtoFactory tsoutil.ProtoFactory
-			if s.IsAPIServiceMode() {
-				tsoProtoFactory = s.tsoProtoFactory
-			} else {
-				tsoProtoFactory = s.pdProtoFactory
-			}
-
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
-			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory, doneCh, errCh)
+			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, s.pdProtoFactory, doneCh, errCh, s.tsoPrimaryWatcher)
 			continue
 		}
 
@@ -234,7 +381,8 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.Unknown, "server not started")
 		}
 		if request.GetHeader().GetClusterId() != s.clusterID {
-			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
+			return status.Errorf(codes.FailedPrecondition,
+				"mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
 		ts, err := s.tsoAllocatorManager.HandleRequest(request.GetDcLocation(), count)
@@ -250,6 +398,255 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}
+	}
+}
+
+// forwardTSO forward the TSO requests to the TSO service.
+func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
+	var (
+		server            = &tsoServer{stream: stream}
+		forwardStream     tsopb.TSO_TsoClient
+		forwardCtx        context.Context
+		cancelForward     context.CancelFunc
+		lastForwardedHost string
+	)
+	defer func() {
+		s.concurrentTSOProxyStreamings.Add(-1)
+		if cancelForward != nil {
+			cancelForward()
+		}
+	}()
+
+	maxConcurrentTSOProxyStreamings := int32(s.GetMaxConcurrentTSOProxyStreamings())
+	if maxConcurrentTSOProxyStreamings >= 0 {
+		if newCount := s.concurrentTSOProxyStreamings.Add(1); newCount > maxConcurrentTSOProxyStreamings {
+			return errors.WithStack(ErrMaxCountTSOProxyRoutinesExceeded)
+		}
+	}
+
+	tsDeadlineCh := make(chan *tsoutil.TSDeadline, 1)
+	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return errors.WithStack(s.ctx.Err())
+		case <-stream.Context().Done():
+			return stream.Context().Err()
+		default:
+		}
+
+		request, err := server.Recv(s.GetTSOProxyRecvFromClientTimeout())
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		if request.GetCount() == 0 {
+			err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
+			return status.Errorf(codes.Unknown, err.Error())
+		}
+
+		forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), utils.TSOServiceName)
+		if !ok || len(forwardedHost) == 0 {
+			return errors.WithStack(ErrNotFoundTSOAddr)
+		}
+		if forwardStream == nil || lastForwardedHost != forwardedHost {
+			if cancelForward != nil {
+				cancelForward()
+			}
+
+			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			forwardStream, forwardCtx, cancelForward, err =
+				s.createTSOForwardStream(stream.Context(), clientConn)
+			if err != nil {
+				return errors.WithStack(err)
+			}
+			lastForwardedHost = forwardedHost
+		}
+
+		tsopbResp, err := s.forwardTSORequestWithDeadLine(
+			forwardCtx, cancelForward, forwardStream, request, tsDeadlineCh)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		// The error types defined for tsopb and pdpb are different, so we need to convert them.
+		var pdpbErr *pdpb.Error
+		tsopbErr := tsopbResp.GetHeader().GetError()
+		if tsopbErr != nil {
+			if tsopbErr.Type == tsopb.ErrorType_OK {
+				pdpbErr = &pdpb.Error{
+					Type:    pdpb.ErrorType_OK,
+					Message: tsopbErr.GetMessage(),
+				}
+			} else {
+				// TODO: specify FORWARD FAILURE error type instead of UNKNOWN.
+				pdpbErr = &pdpb.Error{
+					Type:    pdpb.ErrorType_UNKNOWN,
+					Message: tsopbErr.GetMessage(),
+				}
+			}
+		}
+
+		response := &pdpb.TsoResponse{
+			Header: &pdpb.ResponseHeader{
+				ClusterId: tsopbResp.GetHeader().GetClusterId(),
+				Error:     pdpbErr,
+			},
+			Count:     tsopbResp.GetCount(),
+			Timestamp: tsopbResp.GetTimestamp(),
+		}
+		if err := server.Send(response); err != nil {
+			return errors.WithStack(err)
+		}
+	}
+}
+
+func (s *GrpcServer) forwardTSORequestWithDeadLine(
+	forwardCtx context.Context,
+	cancelForward context.CancelFunc,
+	forwardStream tsopb.TSO_TsoClient,
+	request *pdpb.TsoRequest,
+	tsDeadlineCh chan<- *tsoutil.TSDeadline,
+) (*tsopb.TsoResponse, error) {
+	done := make(chan struct{})
+	dl := tsoutil.NewTSDeadline(tsoutil.DefaultTSOProxyTimeout, done, cancelForward)
+	select {
+	case tsDeadlineCh <- dl:
+	case <-forwardCtx.Done():
+		return nil, forwardCtx.Err()
+	}
+
+	start := time.Now()
+	resp, err := s.forwardTSORequest(forwardCtx, request, forwardStream)
+	close(done)
+	if err != nil {
+		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+			s.tsoPrimaryWatcher.ForceLoad()
+		}
+		return nil, err
+	}
+	tsoProxyBatchSize.Observe(float64(request.GetCount()))
+	tsoProxyHandleDuration.Observe(time.Since(start).Seconds())
+	return resp, nil
+}
+
+func (s *GrpcServer) forwardTSORequest(
+	ctx context.Context,
+	request *pdpb.TsoRequest,
+	forwardStream tsopb.TSO_TsoClient,
+) (*tsopb.TsoResponse, error) {
+	tsopbReq := &tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId:       request.GetHeader().GetClusterId(),
+			SenderId:        request.GetHeader().GetSenderId(),
+			KeyspaceId:      utils.DefaultKeyspaceID,
+			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
+		},
+		Count:      request.GetCount(),
+		DcLocation: request.GetDcLocation(),
+	}
+
+	failpoint.Inject("tsoProxySendToTSOTimeout", func() {
+		// block until watchDeadline routine cancels the context.
+		<-ctx.Done()
+	})
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	if err := forwardStream.Send(tsopbReq); err != nil {
+		return nil, err
+	}
+
+	failpoint.Inject("tsoProxyRecvFromTSOTimeout", func() {
+		// block until watchDeadline routine cancels the context.
+		<-ctx.Done()
+	})
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	return forwardStream.Recv()
+}
+
+// tsoServer wraps PD_TsoServer to ensure when any error
+// occurs on Send() or Recv(), both endpoints will be closed.
+type tsoServer struct {
+	stream pdpb.PD_TsoServer
+	closed int32
+}
+
+type pdpbTSORequest struct {
+	request *pdpb.TsoRequest
+	err     error
+}
+
+func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
+	if atomic.LoadInt32(&s.closed) == 1 {
+		return io.EOF
+	}
+	done := make(chan error, 1)
+	go func() {
+		defer logutil.LogPanic()
+		failpoint.Inject("tsoProxyFailToSendToClient", func() {
+			done <- errors.New("injected error")
+			failpoint.Return()
+		})
+		done <- s.stream.Send(m)
+	}()
+	timer := time.NewTimer(tsoutil.DefaultTSOProxyTimeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			atomic.StoreInt32(&s.closed, 1)
+		}
+		return errors.WithStack(err)
+	case <-timer.C:
+		atomic.StoreInt32(&s.closed, 1)
+		return ErrForwardTSOTimeout
+	}
+}
+
+func (s *tsoServer) Recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
+	if atomic.LoadInt32(&s.closed) == 1 {
+		return nil, io.EOF
+	}
+	failpoint.Inject("tsoProxyRecvFromClientTimeout", func(val failpoint.Value) {
+		if customTimeoutInSeconds, ok := val.(int); ok {
+			timeout = time.Duration(customTimeoutInSeconds) * time.Second
+		}
+	})
+	requestCh := make(chan *pdpbTSORequest, 1)
+	go func() {
+		defer logutil.LogPanic()
+		request, err := s.stream.Recv()
+		requestCh <- &pdpbTSORequest{request: request, err: err}
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case req := <-requestCh:
+		if req.err != nil {
+			atomic.StoreInt32(&s.closed, 1)
+			return nil, errors.WithStack(req.err)
+		}
+		return req.request, nil
+	case <-timer.C:
+		atomic.StoreInt32(&s.closed, 1)
+		return nil, ErrTSOProxyRecvFromClientTimeout
 	}
 }
 
@@ -560,15 +957,18 @@ func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 	}
 	done := make(chan error, 1)
 	go func() {
+		defer logutil.LogPanic()
 		done <- b.stream.SendAndClose(bucket)
 	}()
+	timer := time.NewTimer(heartbeatSendTimeout)
+	defer timer.Stop()
 	select {
 	case err := <-done:
 		if err != nil {
 			atomic.StoreInt32(&b.closed, 1)
 		}
 		return err
-	case <-time.After(heartbeatSendTimeout):
+	case <-timer.C:
 		atomic.StoreInt32(&b.closed, 1)
 		return ErrSendHeartbeatTimeout
 	}
@@ -598,14 +998,19 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 		return io.EOF
 	}
 	done := make(chan error, 1)
-	go func() { done <- s.stream.Send(m) }()
+	go func() {
+		defer logutil.LogPanic()
+		done <- s.stream.Send(m)
+	}()
+	timer := time.NewTimer(heartbeatSendTimeout)
+	defer timer.Stop()
 	select {
 	case err := <-done:
 		if err != nil {
 			atomic.StoreInt32(&s.closed, 1)
 		}
 		return errors.WithStack(err)
-	case <-time.After(heartbeatSendTimeout):
+	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
 		return ErrSendHeartbeatTimeout
 	}
@@ -1670,19 +2075,30 @@ func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAll
 
 func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
 	client, ok := s.clientConns.Load(forwardedHost)
-	if !ok {
-		tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
-		if err != nil {
-			return nil, err
-		}
-		cc, err := grpcutil.GetClientConn(ctx, forwardedHost, tlsConfig)
-		if err != nil {
-			return nil, err
-		}
-		client = cc
-		s.clientConns.Store(forwardedHost, cc)
+	if ok {
+		// Mostly, the connection is already established, and return it directly.
+		return client.(*grpc.ClientConn), nil
 	}
-	return client.(*grpc.ClientConn), nil
+
+	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	ctxTimeout, cancel := context.WithTimeout(ctx, defaultGRPCDialTimeout)
+	defer cancel()
+	newConn, err := grpcutil.GetClientConn(ctxTimeout, forwardedHost, tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	conn, loaded := s.clientConns.LoadOrStore(forwardedHost, newConn)
+	if !loaded {
+		// Successfully stored the connection we created.
+		return newConn, nil
+	}
+	// Loaded a connection created/stored by another goroutine, so close the one we created
+	// and return the one we loaded.
+	newConn.Close()
+	return conn.(*grpc.ClientConn), nil
 }
 
 func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
@@ -1711,6 +2127,7 @@ func (s *GrpcServer) createHeartbeatForwardStream(client *grpc.ClientConn) (pdpb
 }
 
 func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
 	defer close(errCh)
 	for {
 		resp, err := forwardStream.Recv()
@@ -1725,6 +2142,17 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 	}
 }
 
+func (s *GrpcServer) createTSOForwardStream(
+	ctx context.Context, client *grpc.ClientConn,
+) (tsopb.TSO_TsoClient, context.Context, context.CancelFunc, error) {
+	done := make(chan struct{})
+	forwardCtx, cancelForward := context.WithCancel(ctx)
+	go checkStream(forwardCtx, cancelForward, done)
+	forwardStream, err := tsopb.NewTSOClient(client).Tso(forwardCtx)
+	done <- struct{}{}
+	return forwardStream, forwardCtx, cancelForward, err
+}
+
 func (s *GrpcServer) createReportBucketsForwardStream(client *grpc.ClientConn) (pdpb.PD_ReportBucketsClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
@@ -1735,6 +2163,7 @@ func (s *GrpcServer) createReportBucketsForwardStream(client *grpc.ClientConn) (
 }
 
 func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
 	defer close(errCh)
 	for {
 		resp, err := forwardStream.CloseAndRecv()
@@ -1751,10 +2180,13 @@ func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient
 
 // TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
 func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	defer logutil.LogPanic()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-done:
 		return
-	case <-time.After(3 * time.Second):
+	case <-timer.C:
 		cancel()
 	case <-streamCtx.Done():
 	}
@@ -1762,28 +2194,50 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 }
 
 func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
-	forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
-	if !ok || forwardedHost == "" {
-		return pdpb.Timestamp{}, ErrNotFoundTSOAddr
-	}
-	forwardStream, err := s.getTSOForwardStream(forwardedHost)
-	if err != nil {
-		return pdpb.Timestamp{}, err
-	}
-	forwardStream.Send(&tsopb.TsoRequest{
+	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
 			KeyspaceId:      utils.DefaultKeyspaceID,
-			KeyspaceGroupId: utils.DefaultKeySpaceGroupID,
+			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
 		},
 		Count: 1,
-	})
-	ts, err := forwardStream.Recv()
-	if err != nil {
-		log.Error("get global tso from tso server failed", zap.Error(err))
-		return pdpb.Timestamp{}, err
 	}
-	return *ts.GetTimestamp(), nil
+	var (
+		forwardedHost string
+		forwardStream tsopb.TSO_TsoClient
+		ts            *tsopb.TsoResponse
+		err           error
+	)
+	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
+		forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
+		if !ok || forwardedHost == "" {
+			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
+		}
+		forwardStream, err = s.getTSOForwardStream(forwardedHost)
+		if err != nil {
+			return pdpb.Timestamp{}, err
+		}
+		forwardStream.Send(request)
+		ts, err = forwardStream.Recv()
+		if err != nil {
+			if strings.Contains(err.Error(), errs.NotLeaderErr) {
+				s.tsoPrimaryWatcher.ForceLoad()
+				time.Sleep(retryIntervalRequestTSOServer)
+				continue
+			}
+			if strings.Contains(err.Error(), codes.Unavailable.String()) {
+				s.tsoClientPool.Lock()
+				delete(s.tsoClientPool.clients, forwardedHost)
+				s.tsoClientPool.Unlock()
+				continue
+			}
+			log.Error("get global tso from tso service primary addr failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return pdpb.Timestamp{}, err
+		}
+		return *ts.GetTimestamp(), nil
+	}
+	log.Error("get global tso from tso service primary addr failed after retry", zap.Error(err), zap.String("tso-addr", forwardedHost))
+	return pdpb.Timestamp{}, err
 }
 
 func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoClient, error) {
@@ -1949,6 +2403,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 					}
 				}
 			}
+
 			if len(cfgs) > 0 {
 				if err := server.Send(&pdpb.WatchGlobalConfigResponse{Changes: cfgs, Revision: res.Header.GetRevision()}); err != nil {
 					return err

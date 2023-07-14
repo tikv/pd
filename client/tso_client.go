@@ -31,14 +31,17 @@ import (
 
 // TSOClient is the client used to get timestamps.
 type TSOClient interface {
-	// GetTS gets a timestamp from PD.
+	// GetTS gets a timestamp from PD or TSO microservice.
 	GetTS(ctx context.Context) (int64, int64, error)
-	// GetTSAsync gets a timestamp from PD, without block the caller.
+	// GetTSAsync gets a timestamp from PD or TSO microservice, without block the caller.
 	GetTSAsync(ctx context.Context) TSFuture
-	// GetLocalTS gets a local timestamp from PD.
+	// GetLocalTS gets a local timestamp from PD or TSO microservice.
 	GetLocalTS(ctx context.Context, dcLocation string) (int64, int64, error)
-	// GetLocalTSAsync gets a local timestamp from PD, without block the caller.
+	// GetLocalTSAsync gets a local timestamp from PD or TSO microservice, without block the caller.
 	GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture
+	// GetMinTS gets a timestamp from PD or the minimal timestamp across all keyspace groups from
+	// the TSO microservice.
+	GetMinTS(ctx context.Context) (int64, int64, error)
 }
 
 type tsoRequest struct {
@@ -48,7 +51,6 @@ type tsoRequest struct {
 	done       chan error
 	physical   int64
 	logical    int64
-	keyspaceID uint32
 	dcLocation string
 }
 
@@ -68,7 +70,6 @@ type tsoClient struct {
 	wg     sync.WaitGroup
 	option *option
 
-	keyspaceID   uint32
 	svcDiscovery ServiceDiscovery
 	tsoStreamBuilderFactory
 	// tsoAllocators defines the mapping {dc-location -> TSO allocator leader URL}
@@ -82,8 +83,8 @@ type tsoClient struct {
 	tsoDispatcher sync.Map // Same as map[string]chan *tsoRequest
 	// dc-location -> deadline
 	tsDeadline sync.Map // Same as map[string]chan deadline
-	// dc-location -> *lastTSO
-	lastTSMap sync.Map // Same as map[string]*lastTSO
+	// dc-location -> *tsoInfo while the tsoInfo is the last TSO info
+	lastTSOInfoMap sync.Map // Same as map[string]*tsoInfo
 
 	checkTSDeadlineCh         chan struct{}
 	checkTSODispatcherCh      chan struct{}
@@ -92,7 +93,7 @@ type tsoClient struct {
 
 // newTSOClient returns a new TSO client.
 func newTSOClient(
-	ctx context.Context, option *option, keyspaceID uint32,
+	ctx context.Context, option *option,
 	svcDiscovery ServiceDiscovery, factory tsoStreamBuilderFactory,
 ) *tsoClient {
 	ctx, cancel := context.WithCancel(ctx)
@@ -100,7 +101,6 @@ func newTSOClient(
 		ctx:                       ctx,
 		cancel:                    cancel,
 		option:                    option,
-		keyspaceID:                keyspaceID,
 		svcDiscovery:              svcDiscovery,
 		tsoStreamBuilderFactory:   factory,
 		checkTSDeadlineCh:         make(chan struct{}),
@@ -209,7 +209,7 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 			return err
 		}
 		c.tsoAllocators.Store(dcLocation, addr)
-		log.Info("[tso] switch dc tso allocator serving address",
+		log.Info("[tso] switch dc tso local allocator serving address",
 			zap.String("dc-location", dcLocation),
 			zap.String("new-address", addr),
 			zap.String("old-address", oldAddr))
@@ -227,7 +227,7 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 
 func (c *tsoClient) updateTSOGlobalServAddr(addr string) error {
 	c.tsoAllocators.Store(globalDCLocation, addr)
-	log.Info("[tso] switch dc tso allocator serving address",
+	log.Info("[tso] switch dc tso global allocator serving address",
 		zap.String("dc-location", globalDCLocation),
 		zap.String("new-address", addr))
 	c.scheduleCheckTSODispatcher()

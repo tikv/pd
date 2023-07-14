@@ -32,11 +32,11 @@ import (
 type MetaStorage interface {
 	LoadMeta(meta *metapb.Cluster) (bool, error)
 	SaveMeta(meta *metapb.Cluster) error
-	LoadStore(storeID uint64, store *metapb.Store) (bool, error)
-	SaveStore(store *metapb.Store) error
+	LoadStoreMeta(storeID uint64, store *metapb.Store) (bool, error)
+	SaveStoreMeta(store *metapb.Store) error
 	SaveStoreWeight(storeID uint64, leader, region float64) error
 	LoadStores(f func(store *core.StoreInfo)) error
-	DeleteStore(store *metapb.Store) error
+	DeleteStoreMeta(store *metapb.Store) error
 	RegionStorage
 }
 
@@ -71,13 +71,13 @@ func (se *StorageEndpoint) SaveMeta(meta *metapb.Cluster) error {
 	return se.saveProto(clusterPath, meta)
 }
 
-// LoadStore loads one store from storage.
-func (se *StorageEndpoint) LoadStore(storeID uint64, store *metapb.Store) (bool, error) {
+// LoadStoreMeta loads one store from storage.
+func (se *StorageEndpoint) LoadStoreMeta(storeID uint64, store *metapb.Store) (bool, error) {
 	return se.loadProto(StorePath(storeID), store)
 }
 
-// SaveStore saves one store to storage.
-func (se *StorageEndpoint) SaveStore(store *metapb.Store) error {
+// SaveStoreMeta saves one store to storage.
+func (se *StorageEndpoint) SaveStoreMeta(store *metapb.Store) error {
 	return se.saveProto(StorePath(store.GetId()), store)
 }
 
@@ -146,8 +146,8 @@ func (se *StorageEndpoint) loadFloatWithDefaultValue(path string, def float64) (
 	return val, nil
 }
 
-// DeleteStore deletes one store from storage.
-func (se *StorageEndpoint) DeleteStore(store *metapb.Store) error {
+// DeleteStoreMeta deletes one store from storage.
+func (se *StorageEndpoint) DeleteStoreMeta(store *metapb.Store) error {
 	return se.Remove(StorePath(store.GetId()))
 }
 

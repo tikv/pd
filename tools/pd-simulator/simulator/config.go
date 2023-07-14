@@ -40,6 +40,8 @@ const (
 	defaultRegionSplitSize    = 96 * units.MiB
 	defaultCapacity           = 1 * units.TiB
 	defaultExtraUsedSpace     = 0
+	// TSO Proxy related
+	defaultMaxConcurrentTSOProxyStreamings = 5000
 	// server
 	defaultLeaderLease                 = 3
 	defaultTSOSaveInterval             = 200 * time.Millisecond
@@ -105,6 +107,8 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustUint64(&sc.Coprocessor.RegionSplitKey, defaultRegionSplitKeys)
 	configutil.AdjustByteSize(&sc.Coprocessor.RegionSplitSize, defaultRegionSplitSize)
 
+	configutil.AdjustInt(&sc.ServerConfig.MaxConcurrentTSOProxyStreamings, defaultMaxConcurrentTSOProxyStreamings)
+
 	configutil.AdjustInt64(&sc.ServerConfig.LeaderLease, defaultLeaderLease)
 	configutil.AdjustDuration(&sc.ServerConfig.TSOSaveInterval, defaultTSOSaveInterval)
 	configutil.AdjustDuration(&sc.ServerConfig.TickInterval, defaultTickInterval)
@@ -112,6 +116,9 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
 	return sc.ServerConfig.Adjust(meta, false)
+}
+func (sc *SimConfig) speed() uint64 {
+	return uint64(time.Second / sc.SimTickInterval.Duration)
 }
 
 // PDConfig saves some config which may be changed in PD.

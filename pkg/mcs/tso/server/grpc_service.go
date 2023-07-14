@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -25,7 +26,6 @@ import (
 	"github.com/pkg/errors"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -36,7 +36,8 @@ import (
 
 // gRPC errors
 var (
-	ErrNotStarted = status.Errorf(codes.Unavailable, "server not started")
+	ErrNotStarted        = status.Errorf(codes.Unavailable, "server not started")
+	ErrClusterMismatched = status.Errorf(codes.Unavailable, "cluster mismatched")
 )
 
 var _ tsopb.TSOServer = (*Service)(nil)
@@ -131,16 +132,19 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 			return status.Errorf(codes.Unknown, "server not started")
 		}
 		if request.GetHeader().GetClusterId() != s.clusterID {
-			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
+			return status.Errorf(
+				codes.FailedPrecondition, "mismatch cluster id, need %d but got %d",
+				s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.keyspaceGroupManager.HandleTSORequest(utils.DefaultKeySpaceGroupID, request.GetDcLocation(), count)
+		ts, keyspaceGroupBelongTo, err := s.keyspaceGroupManager.HandleTSORequest(
+			request.Header.KeyspaceId, request.Header.KeyspaceGroupId, request.GetDcLocation(), count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		response := &tsopb.TsoResponse{
-			Header:    s.header(),
+			Header:    s.header(keyspaceGroupBelongTo),
 			Timestamp: &ts,
 			Count:     count,
 		}
@@ -150,23 +154,118 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 	}
 }
 
-func (s *Service) header() *tsopb.ResponseHeader {
-	if s.clusterID == 0 {
-		return s.wrapErrorToHeader(tsopb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+// FindGroupByKeyspaceID returns the keyspace group that the keyspace belongs to.
+func (s *Service) FindGroupByKeyspaceID(
+	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
+) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
+	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
+	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(errorType, err.Error(), respKeyspaceGroup),
+		}, nil
 	}
-	return &tsopb.ResponseHeader{ClusterId: s.clusterID}
+
+	keyspaceID := request.GetKeyspaceId()
+	am, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	if err != nil {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
+		}, nil
+	}
+	if keyspaceGroup == nil {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: s.wrapErrorToHeader(
+				tsopb.ErrorType_UNKNOWN, "keyspace group not found", keyspaceGroupID),
+		}, nil
+	}
+
+	members := make([]*tsopb.KeyspaceGroupMember, 0, len(keyspaceGroup.Members))
+	for _, member := range keyspaceGroup.Members {
+		members = append(members, &tsopb.KeyspaceGroupMember{
+			Address: member.Address,
+			// TODO: watch the keyspace groups' primary serving address changes
+			// to get the latest primary serving addresses of all keyspace groups.
+			IsPrimary: strings.EqualFold(member.Address, am.GetLeaderAddr()),
+		})
+	}
+
+	var splitState *tsopb.SplitState
+	if keyspaceGroup.SplitState != nil {
+		splitState = &tsopb.SplitState{
+			SplitSource: keyspaceGroup.SplitState.SplitSource,
+		}
+	}
+
+	return &tsopb.FindGroupByKeyspaceIDResponse{
+		Header: s.header(keyspaceGroupID),
+		KeyspaceGroup: &tsopb.KeyspaceGroup{
+			Id:         keyspaceGroupID,
+			UserKind:   keyspaceGroup.UserKind,
+			SplitState: splitState,
+			Members:    members,
+		},
+	}, nil
 }
 
-func (s *Service) wrapErrorToHeader(errorType tsopb.ErrorType, message string) *tsopb.ResponseHeader {
-	return s.errorHeader(&tsopb.Error{
-		Type:    errorType,
-		Message: message,
-	})
+// GetMinTS gets the minimum timestamp across all keyspace groups served by the TSO server
+// who receives and handles the request.
+func (s *Service) GetMinTS(
+	ctx context.Context, request *tsopb.GetMinTSRequest,
+) (*tsopb.GetMinTSResponse, error) {
+	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
+	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
+		return &tsopb.GetMinTSResponse{
+			Header: s.wrapErrorToHeader(errorType, err.Error(), respKeyspaceGroup),
+		}, nil
+	}
+
+	minTS, kgAskedCount, kgTotalCount, err := s.keyspaceGroupManager.GetMinTS(request.GetDcLocation())
+	if err != nil {
+		return &tsopb.GetMinTSResponse{
+			Header: s.wrapErrorToHeader(
+				tsopb.ErrorType_UNKNOWN, err.Error(), respKeyspaceGroup),
+			Timestamp:             &minTS,
+			KeyspaceGroupsServing: kgAskedCount,
+			KeyspaceGroupsTotal:   kgTotalCount,
+		}, nil
+	}
+
+	return &tsopb.GetMinTSResponse{
+		Header:                s.header(respKeyspaceGroup),
+		Timestamp:             &minTS,
+		KeyspaceGroupsServing: kgAskedCount,
+		KeyspaceGroupsTotal:   kgTotalCount,
+	}, nil
 }
 
-func (s *Service) errorHeader(err *tsopb.Error) *tsopb.ResponseHeader {
+func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, error) {
+	if s.IsClosed() || s.keyspaceGroupManager == nil {
+		return tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted
+	}
+	if header == nil || header.GetClusterId() != s.clusterID {
+		return tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched
+	}
+	return tsopb.ErrorType_OK, nil
+}
+
+func (s *Service) header(keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
+	if s.clusterID == 0 {
+		return s.wrapErrorToHeader(
+			tsopb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready", keyspaceGroupBelongTo)
+	}
+	return &tsopb.ResponseHeader{ClusterId: s.clusterID, KeyspaceGroupId: keyspaceGroupBelongTo}
+}
+
+func (s *Service) wrapErrorToHeader(
+	errorType tsopb.ErrorType, message string, keyspaceGroupBelongTo uint32,
+) *tsopb.ResponseHeader {
+	return s.errorHeader(&tsopb.Error{Type: errorType, Message: message}, keyspaceGroupBelongTo)
+}
+
+func (s *Service) errorHeader(err *tsopb.Error, keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
 	return &tsopb.ResponseHeader{
-		ClusterId: s.clusterID,
-		Error:     err,
+		ClusterId:       s.clusterID,
+		Error:           err,
+		KeyspaceGroupId: keyspaceGroupBelongTo,
 	}
 }

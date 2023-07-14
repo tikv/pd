@@ -58,6 +58,8 @@ type EmbeddedEtcdMember struct {
 	// etcd leader key when the PD node is successfully elected as the PD leader
 	// of the cluster. Every write will use it to check PD leadership.
 	memberValue string
+	// lastLeaderUpdatedTime is the last time when the leader is updated.
+	lastLeaderUpdatedTime atomic.Value
 }
 
 // NewMember create a new Member.
@@ -140,11 +142,13 @@ func (m *EmbeddedEtcdMember) GetLeader() *pdpb.Member {
 // setLeader sets the member's PD leader.
 func (m *EmbeddedEtcdMember) setLeader(member *pdpb.Member) {
 	m.leader.Store(member)
+	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
 // unsetLeader unsets the member's PD leader.
 func (m *EmbeddedEtcdMember) unsetLeader() {
 	m.leader.Store(&pdpb.Member{})
+	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
 // EnableLeader sets the member itself to a PD leader.
@@ -162,6 +166,15 @@ func (m *EmbeddedEtcdMember) GetLeadership() *election.Leadership {
 	return m.leadership
 }
 
+// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
+func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
+	lastLeaderUpdatedTime := m.lastLeaderUpdatedTime.Load()
+	if lastLeaderUpdatedTime == nil {
+		return time.Time{}
+	}
+	return lastLeaderUpdatedTime.(time.Time)
+}
+
 // CampaignLeader is used to campaign a PD member's leadership
 // and make it become a PD leader.
 func (m *EmbeddedEtcdMember) CampaignLeader(leaseTimeout int64) error {
@@ -173,8 +186,8 @@ func (m *EmbeddedEtcdMember) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// PrecheckLeader does some pre-check before checking whether or not it's the leader.
-func (m *EmbeddedEtcdMember) PrecheckLeader() error {
+// PreCheckLeader does some pre-check before checking whether or not it's the leader.
+func (m *EmbeddedEtcdMember) PreCheckLeader() error {
 	if m.GetEtcdLeader() == 0 {
 		return errs.ErrEtcdLeaderNotFound
 	}
@@ -198,7 +211,7 @@ func (m *EmbeddedEtcdMember) getPersistentLeader() (*pdpb.Member, int64, error) 
 // CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
 // otherwise returns a bool which indicates if it is needed to check later.
 func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
-	if err := m.PrecheckLeader(); err != nil {
+	if err := m.PreCheckLeader(); err != nil {
 		log.Error("failed to pass pre-check, check pd leader later", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, true

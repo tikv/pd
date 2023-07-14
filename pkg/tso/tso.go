@@ -16,7 +16,6 @@ package tso
 
 import (
 	"fmt"
-	"path"
 	"sync/atomic"
 	"time"
 
@@ -34,7 +33,6 @@ import (
 )
 
 const (
-	timestampKey = "timestamp"
 	// UpdateTimestampGuard is the min timestamp interval.
 	UpdateTimestampGuard = time.Millisecond
 	// maxLogical is the max upper limit for logical time.
@@ -60,10 +58,9 @@ type tsoObject struct {
 
 // timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
-	client   *clientv3.Client
-	rootPath string
-	// When ltsPath is empty, it means that it is a global timestampOracle.
-	ltsPath string
+	client *clientv3.Client
+	// When tsPath is empty, it means that it is a global timestampOracle.
+	tsPath  string
 	storage endpoint.TSOStorage
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
@@ -141,8 +138,9 @@ func (t *timestampOracle) calibrateLogical(rawLogical int64, suffixBits int) int
 	return rawLogical<<suffixBits + int64(t.suffix)
 }
 
-func (t *timestampOracle) getTimestampPath() string {
-	return path.Join(t.ltsPath, timestampKey)
+// GetTimestampPath returns the timestamp path in etcd.
+func (t *timestampOracle) GetTimestampPath() string {
+	return endpoint.TimestampPath(t.tsPath)
 }
 
 // SyncTimestamp is used to synchronize the timestamp.
@@ -153,7 +151,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 		time.Sleep(time.Second)
 	})
 
-	last, err := t.storage.LoadTimestamp(t.ltsPath)
+	last, err := t.storage.LoadTimestamp(t.tsPath)
 	if err != nil {
 		return err
 	}
@@ -168,13 +166,15 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubRealTimeByWallClock(next, last) < UpdateTimestampGuard {
-		log.Error("system time may be incorrect",
+		log.Warn("system time may be incorrect",
 			zap.Time("last", last), zap.Time("next", next), errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(UpdateTimestampGuard)
 	}
-
+	failpoint.Inject("failedToSaveTimestamp", func() {
+		failpoint.Return(errs.ErrEtcdTxnInternal)
+	})
 	save := next.Add(t.saveInterval)
-	if err = t.storage.SaveTimestamp(t.getTimestampPath(), save); err != nil {
+	if err = t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 		tsoCounter.WithLabelValues("err_save_sync_ts", t.dcLocation).Inc()
 		return err
 	}
@@ -241,7 +241,7 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 	// save into etcd only if nextPhysical is close to lastSavedTime
 	if typeutil.SubRealTimeByWallClock(t.lastSavedTime.Load().(time.Time), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
-		if err := t.storage.SaveTimestamp(t.getTimestampPath(), save); err != nil {
+		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 			tsoCounter.WithLabelValues("err_save_reset_ts", t.dcLocation).Inc()
 			return err
 		}
@@ -286,7 +286,11 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 
 	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
 	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
-		log.Warn("clock offset", zap.Duration("jet-lag", jetLag), zap.Time("prev-physical", prevPhysical), zap.Time("now", now), zap.Duration("update-physical-interval", t.updatePhysicalInterval))
+		log.Warn("clock offset",
+			zap.Duration("jet-lag", jetLag),
+			zap.Time("prev-physical", prevPhysical),
+			zap.Time("now", now),
+			zap.Duration("update-physical-interval", t.updatePhysicalInterval))
 		tsoCounter.WithLabelValues("slow_save", t.dcLocation).Inc()
 	}
 
@@ -313,7 +317,11 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	// The time window needs to be updated and saved to etcd.
 	if typeutil.SubRealTimeByWallClock(t.lastSavedTime.Load().(time.Time), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
-		if err := t.storage.SaveTimestamp(t.getTimestampPath(), save); err != nil {
+		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
+			log.Warn("save timestamp failed",
+				zap.String("dc-location", t.dcLocation),
+				zap.String("timestamp-path", t.GetTimestampPath()),
+				zap.Error(err))
 			tsoCounter.WithLabelValues("err_save_update_ts", t.dcLocation).Inc()
 			return err
 		}
@@ -359,7 +367,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 		}
 		// In case lease expired after the first check.
 		if !leadership.Check() {
-			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd or local tso allocator leader anymore")
+			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
 		resp.SuffixBits = uint32(suffixBits)
 		return resp, nil

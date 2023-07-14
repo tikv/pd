@@ -27,7 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -81,7 +81,7 @@ var (
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
-	cluster            schedule.Cluster
+	cluster            sche.ClusterInformer
 	ruleManager        *placement.RuleManager
 	name               string
 	regionWaitingList  cache.Cache
@@ -91,7 +91,7 @@ type RuleChecker struct {
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
+func NewRuleChecker(ctx context.Context, cluster sche.ClusterInformer, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
 	return &RuleChecker{
 		cluster:            cluster,
 		ruleManager:        ruleManager,
@@ -391,7 +391,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 }
 
 func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
-	if len(rf.Rule.LocationLabels) == 0 || rf.Rule.Count <= 1 {
+	if len(rf.Rule.LocationLabels) == 0 {
 		return nil, nil
 	}
 
@@ -403,7 +403,15 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	if oldStore == 0 {
 		return nil, nil
 	}
-	newStore, filterByTempState := strategy.SelectStoreToImprove(ruleStores, oldStore)
+	var coLocationStores []*core.StoreInfo
+	regionStores := c.cluster.GetRegionStores(region)
+	for _, s := range regionStores {
+		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
+			coLocationStores = append(coLocationStores, s)
+		}
+	}
+
+	newStore, filterByTempState := strategy.SelectStoreToImprove(coLocationStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		c.handleFilterState(region, filterByTempState)
@@ -455,11 +463,18 @@ loopFits:
 	// If hasUnhealthyFit is true, try to remove unhealthy orphan peers only if number of OrphanPeers is >= 2.
 	// Ref https://github.com/tikv/pd/issues/4045
 	if len(fit.OrphanPeers) >= 2 {
+		hasHealthPeer := false
 		for _, orphanPeer := range fit.OrphanPeers {
 			if isUnhealthyPeer(orphanPeer.GetId()) {
 				ruleCheckerRemoveOrphanPeerCounter.Inc()
 				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
+			if hasHealthPeer {
+				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
+				ruleCheckerRemoveOrphanPeerCounter.Inc()
+				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
+			}
+			hasHealthPeer = true
 		}
 	}
 	ruleCheckerSkipRemoveOrphanPeerCounter.Inc()
@@ -572,7 +587,7 @@ func (o *recorder) incOfflineLeaderCount(storeID uint64) {
 // Offline is triggered manually and only appears when the node makes some adjustments. here is an operator timeout / 2.
 var offlineCounterTTL = 5 * time.Minute
 
-func (o *recorder) refresh(cluster schedule.Cluster) {
+func (o *recorder) refresh(cluster sche.ClusterInformer) {
 	// re-count the offlineLeaderCounter if the store is already tombstone or store is gone.
 	if len(o.offlineLeaderCounter) > 0 && time.Since(o.lastUpdateTime) > offlineCounterTTL {
 		needClean := false

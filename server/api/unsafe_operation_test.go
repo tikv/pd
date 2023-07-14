@@ -21,9 +21,9 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/unsaferecovery"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/cluster"
 )
 
 type unsafeOperationTestSuite struct {
@@ -80,7 +80,7 @@ func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
 	suite.NoError(err)
 
 	// Test show
-	var output []cluster.StageOutput
+	var output []unsaferecovery.StageOutput
 	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/remove-failed-stores/show", &output)
 	suite.NoError(err)
 }

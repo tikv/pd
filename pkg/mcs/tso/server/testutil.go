@@ -15,39 +15,13 @@
 package server
 
 import (
-	"context"
-	"os"
 	"strings"
 
 	"github.com/pingcap/kvproto/pkg/tsopb"
-	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"google.golang.org/grpc"
 )
-
-// NewTSOTestServer creates a tso server for testing.
-func NewTSOTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, testutil.CleanupFunc, error) {
-	// New zap logger
-	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-	re.NoError(err)
-	log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-	// Flushing any buffered log entries
-	defer log.Sync()
-
-	s := CreateServer(ctx, cfg)
-	if err = s.Run(); err != nil {
-		return nil, nil, err
-	}
-
-	cleanup := func() {
-		s.Close()
-		os.RemoveAll(cfg.DataDir)
-	}
-	return s, cleanup, nil
-}
 
 // MustNewGrpcClient must create a new TSO grpc client.
 func MustNewGrpcClient(re *require.Assertions, addr string) (*grpc.ClientConn, tsopb.TSOClient) {

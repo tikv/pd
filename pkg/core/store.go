@@ -55,6 +55,7 @@ type StoreInfo struct {
 	slowTrendEvicted    bool // this store has been evicted as a slow store by trend, should not transfer leader to it
 	leaderCount         int
 	regionCount         int
+	learnerCount        int
 	witnessCount        int
 	leaderSize          int64
 	regionSize          int64
@@ -106,9 +107,25 @@ func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store := *s
 	store.meta = typeutil.DeepClone(s.meta, StoreFactory)
 	for _, opt := range opts {
-		opt(&store)
+		if opt != nil {
+			opt(&store)
+		}
 	}
 	return &store
+}
+
+// LimitVersion returns the limit version of the store.
+func (s *StoreInfo) LimitVersion() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.limiter.Version()
+}
+
+// Feedback is used to update the store's limit.
+func (s *StoreInfo) Feedback(e float64) {
+	if limit := s.limiter; limit != nil {
+		limit.Feedback(e)
+	}
 }
 
 // ShallowClone creates a copy of current StoreInfo, but not clone 'meta'.
@@ -257,6 +274,11 @@ func (s *StoreInfo) GetLeaderCount() int {
 // GetRegionCount returns the Region count of the store.
 func (s *StoreInfo) GetRegionCount() int {
 	return s.regionCount
+}
+
+// GetLearnerCount returns the learner count of the store.
+func (s *StoreInfo) GetLearnerCount() int {
+	return s.learnerCount
 }
 
 // GetWitnessCount returns the witness count of the store.
@@ -773,11 +795,12 @@ func (s *StoresInfo) SetRegionSize(storeID uint64, regionSize int64) {
 }
 
 // UpdateStoreStatus updates the information of the store.
-func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount int, regionCount int, pendingPeerCount int, leaderSize int64, regionSize int64, witnessCount int) {
+func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount int, leaderSize int64, regionSize int64) {
 	if store, ok := s.stores[storeID]; ok {
 		newStore := store.ShallowClone(SetLeaderCount(leaderCount),
 			SetRegionCount(regionCount),
 			SetWitnessCount(witnessCount),
+			SetLearnerCount(learnerCount),
 			SetPendingPeerCount(pendingPeerCount),
 			SetLeaderSize(leaderSize),
 			SetRegionSize(regionSize))

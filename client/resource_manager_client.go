@@ -21,7 +21,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
@@ -36,7 +36,12 @@ const (
 	groupSettingsPathPrefix            = "resource_group/settings"
 	// errNotPrimary is returned when the requested server is not primary.
 	errNotPrimary = "not primary"
+	// errNotLeader is returned when the requested server is not pd leader.
+	errNotLeader = "not leader"
 )
+
+// GroupSettingsPathPrefixBytes is used to watch or get resource groups.
+var GroupSettingsPathPrefixBytes = []byte(groupSettingsPathPrefix)
 
 // ResourceManagerClient manages resource group info and token request.
 type ResourceManagerClient interface {
@@ -45,8 +50,10 @@ type ResourceManagerClient interface {
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
+	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	WatchResourceGroup(ctx context.Context, revision int64) (chan []*rmpb.ResourceGroup, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
+	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error)
 }
 
 // resourceManagerClient gets the ResourceManager client of current PD leader.
@@ -60,7 +67,7 @@ func (c *client) resourceManagerClient() (rmpb.ResourceManagerClient, error) {
 
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *client) gRPCErrorHandler(err error) {
-	if strings.Contains(err.Error(), errNotPrimary) {
+	if strings.Contains(err.Error(), errNotPrimary) || strings.Contains(err.Error(), errNotLeader) {
 		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
 	}
 }
@@ -158,12 +165,31 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	return resp.GetBody(), nil
 }
 
+func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
+	resp, err := c.Get(ctx, GroupSettingsPathPrefixBytes, WithPrefix())
+	if err != nil {
+		return nil, 0, err
+	}
+	if resp.Header.Error != nil {
+		return nil, resp.Header.Revision, errors.Errorf(resp.Header.Error.Message)
+	}
+	groups := make([]*rmpb.ResourceGroup, 0, len(resp.Kvs))
+	for _, item := range resp.Kvs {
+		group := &rmpb.ResourceGroup{}
+		if err := proto.Unmarshal(item.Value, group); err != nil {
+			continue
+		}
+		groups = append(groups, group)
+	}
+	return groups, resp.Header.Revision, nil
+}
+
 // WatchResourceGroup [just for TEST] watches resource groups changes.
 // It returns a stream of slices of resource groups.
 // The first message in stream contains all current resource groups,
 // all subsequent messages contains new events[PUT/DELETE] for all resource groups.
 func (c *client) WatchResourceGroup(ctx context.Context, revision int64) (chan []*rmpb.ResourceGroup, error) {
-	configChan, err := c.WatchGlobalConfig(ctx, groupSettingsPathPrefix, revision)
+	configChan, err := c.Watch(ctx, GroupSettingsPathPrefixBytes, WithRev(revision), WithPrefix())
 	if err != nil {
 		return nil, err
 	}
@@ -186,14 +212,14 @@ func (c *client) WatchResourceGroup(ctx context.Context, revision int64) (chan [
 				}
 				groups := make([]*rmpb.ResourceGroup, 0, len(res))
 				for _, item := range res {
-					switch item.EventType {
-					case pdpb.EventType_PUT:
+					switch item.Type {
+					case meta_storagepb.Event_PUT:
 						group := &rmpb.ResourceGroup{}
-						if err := proto.Unmarshal([]byte(item.Value), group); err != nil {
+						if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
 							return
 						}
 						groups = append(groups, group)
-					case pdpb.EventType_DELETE:
+					case meta_storagepb.Event_DELETE:
 						continue
 					}
 				}
@@ -365,6 +391,8 @@ func (c *client) tryResourceManagerConnect(ctx context.Context, connection *reso
 		err    error
 		stream rmpb.ResourceManager_AcquireTokenBucketsClient
 	)
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
 		cc, err := c.resourceManagerClient()
 		if err != nil {
@@ -382,7 +410,7 @@ func (c *client) tryResourceManagerConnect(ctx context.Context, connection *reso
 		select {
 		case <-ctx.Done():
 			return err
-		case <-time.After(retryInterval):
+		case <-ticker.C:
 		}
 	}
 	return err

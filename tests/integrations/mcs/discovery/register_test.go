@@ -18,6 +18,7 @@ import (
 	"context"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -26,7 +27,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
 	"go.uber.org/goleak"
 )
 
@@ -96,15 +96,19 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	re.Equal(addr, returnedEntry.ServiceAddr)
 
 	// test primary when only one server
+	expectedPrimary := tests.WaitForPrimaryServing(suite.Require(), map[string]bs.Server{addr: s})
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
-	re.Equal(primary, addr)
+	re.Equal(primary, expectedPrimary)
 
 	// test API server discovery after unregister
 	cleanup()
 	endpoints, err = discovery.Discover(client, suite.clusterID, serviceName)
 	re.NoError(err)
 	re.Empty(endpoints)
+	testutil.Eventually(re, func() bool {
+		return !s.IsServing()
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 }
 
 func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
@@ -126,7 +130,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 		serverMap[s.GetAddr()] = s
 	}
 
-	expectedPrimary := mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	expectedPrimary := tests.WaitForPrimaryServing(suite.Require(), serverMap)
 	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
 	re.Equal(expectedPrimary, primary)
@@ -134,7 +138,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	serverMap[primary].Close()
 	delete(serverMap, primary)
 
-	expectedPrimary = mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	expectedPrimary = tests.WaitForPrimaryServing(suite.Require(), serverMap)
 	// test API server discovery
 	client := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(client, suite.clusterID, serviceName)
@@ -151,9 +155,9 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	re := suite.Require()
 	switch serviceName {
 	case utils.TSOServiceName:
-		return mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	case utils.ResourceManagerServiceName:
-		return mcs.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	default:
 		return nil, nil
 	}

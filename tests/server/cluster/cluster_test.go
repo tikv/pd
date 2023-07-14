@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -44,7 +45,6 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/tests"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -294,15 +294,15 @@ func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftClus
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 
-	rc.GetAllocator().Alloc()
-	id, err := rc.GetAllocator().Alloc()
+	rc.AllocID()
+	id, err := rc.AllocID()
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is up will fail.
 	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
 
-	id, err = rc.GetAllocator().Alloc()
+	id, err = rc.AllocID()
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is offline will fail.
 	resetStoreState(re, rc, store.GetId(), metapb.StoreState_Offline)
@@ -310,7 +310,7 @@ func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftClus
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
 
-	id, err = rc.GetAllocator().Alloc()
+	id, err = rc.AllocID()
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	resetStoreState(re, rc, store.GetId(), metapb.StoreState_Tombstone)
@@ -319,7 +319,7 @@ func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftClus
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 
-	id, err = rc.GetAllocator().Alloc()
+	id, err = rc.AllocID()
 	re.NoError(err)
 	deployPath := getTestDeployPath(id)
 	// Put a new store.
@@ -626,7 +626,6 @@ func TestConcurrentHandleRegion(t *testing.T) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	stores := make([]*metapb.Store, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -813,7 +812,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), svr.GetKeyspaceGroupManager())
 	raftCluster, err := rc.LoadClusterInfo()
 	re.NoError(err)
 	re.Nil(raftCluster)
@@ -831,7 +830,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(testStorage.SaveStore(store))
+		re.NoError(testStorage.SaveStoreMeta(store))
 	}
 
 	regions := make([]*metapb.Region, 0, n)
@@ -851,7 +850,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	re.NoError(testStorage.Flush())
 
 	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), testStorage, basicCluster)
+	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), testStorage, basicCluster, svr.GetKeyspaceGroupManager())
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
 	re.NotNil(raftCluster)
@@ -862,7 +861,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	for _, store := range raftCluster.GetMetaStores() {
 		re.Equal(stores[store.GetId()], store)
 	}
-	re.Equal(n, raftCluster.GetRegionCount())
+	re.Equal(n, raftCluster.GetTotalRegionCount())
 	for _, region := range raftCluster.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
 	}
@@ -883,7 +882,7 @@ func TestLoadClusterInfo(t *testing.T) {
 		re.NoError(testStorage.SaveRegion(region))
 	}
 	re.NoError(storage.TryLoadRegionsOnce(ctx, testStorage, raftCluster.GetBasicCluster().PutRegion))
-	re.Equal(n, raftCluster.GetRegionCount())
+	re.Equal(n, raftCluster.GetTotalRegionCount())
 }
 
 func TestTiFlashWithPlacementRules(t *testing.T) {
@@ -1056,7 +1055,6 @@ func TestOfflineStoreLimit(t *testing.T) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
 		storeID, err := id.Alloc()
@@ -1148,7 +1146,6 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	store := newMetaStore(1, "127.0.1.1:0", "4.0.0", metapb.StoreState_Up, "test/store1")
 	resp, err := putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)
@@ -1208,7 +1205,6 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	rc.SetStorage(storage.NewStorageWithMemoryBackend())
 	peers := make([]*metapb.Peer, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
@@ -1438,7 +1434,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	leaderServer := tc.GetServer(tc.GetLeader())
 	svr := leaderServer.GetServer()
 	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), svr.GetKeyspaceGroupManager())
 	storage := rc.GetStorage()
 	meta := &metapb.Cluster{Id: 123}
 	re.NoError(storage.SaveMeta(meta))
@@ -1450,7 +1446,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		re.NoError(storage.SaveStore(store))
+		re.NoError(storage.SaveStoreMeta(store))
 	}
 	rc, err = rc.LoadClusterInfo()
 	re.NoError(err)

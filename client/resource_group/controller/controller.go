@@ -22,8 +22,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,9 +36,13 @@ import (
 
 const (
 	controllerConfigPath    = "resource_group/controller"
-	maxRetry                = 3
+	maxRetry                = 10
+	retryInterval           = 50 * time.Millisecond
 	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
+	trickleReserveDuration  = 1250 * time.Millisecond
+
+	watchRetryInterval = 30 * time.Second
 )
 
 type selectType int
@@ -49,20 +55,21 @@ const (
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
-	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, error)
+	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, *rmpb.Consumption, error)
 	// OnResponse is used to consume tokens after receiving response
 	OnResponse(resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, error)
 }
 
-// ResourceGroupProvider provides some api to interact with resource manager server。
+// ResourceGroupProvider provides some api to interact with resource manager server.
 type ResourceGroupProvider interface {
-	ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error)
 	GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]pd.GlobalConfigItem, int64, error)
+	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
+	Watch(ctx context.Context, key []byte, opts ...pd.OpOption) (chan []*meta_storagepb.Event, error)
 }
 
 // ResourceControlCreateOption create a ResourceGroupsController with the optional settings.
@@ -128,6 +135,7 @@ func NewResourceGroupController(
 	if requestUnitConfig != nil {
 		controllerConfig.RequestUnit = *requestUnitConfig
 	}
+	log.Info("load resource controller config", zap.Reflect("config", controllerConfig))
 	config := GenerateConfig(controllerConfig)
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
@@ -185,6 +193,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		defer cleanupTicker.Stop()
 		stateUpdateTicker := time.NewTicker(defaultGroupStateUpdateInterval)
 		defer stateUpdateTicker.Stop()
+		emergencyTokenAcquisitionTicker := time.NewTicker(defaultTargetPeriod)
+		defer emergencyTokenAcquisitionTicker.Stop()
 
 		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Stop()
@@ -199,6 +209,20 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker = time.NewTicker(time.Millisecond * 100)
 		})
 
+		_, revision, err := c.provider.LoadResourceGroups(ctx)
+		if err != nil {
+			log.Warn("load resource group revision failed", zap.Error(err))
+		}
+		var watchChannel chan []*meta_storagepb.Event
+		if !c.config.isSingleGroupByKeyspace {
+			watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix())
+		}
+		watchRetryTimer := time.NewTimer(watchRetryInterval)
+		if err == nil || c.config.isSingleGroupByKeyspace {
+			watchRetryTimer.Stop()
+		}
+		defer watchRetryTimer.Stop()
+
 		for {
 			select {
 			case <-c.loopCtx.Done():
@@ -206,32 +230,72 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode = true
-				c.applyDegradedMode()
+				c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				log.Warn("[resource group controller] enter degraded mode")
 			case resp := <-c.tokenResponseChan:
 				if resp != nil {
-					c.updateRunState()
+					c.executeOnAllGroups((*groupCostController).updateRunState)
 					c.handleTokenBucketResponse(resp)
 				}
 				c.run.currentRequests = nil
 			case <-cleanupTicker.C:
-				if err := c.cleanUpResourceGroup(c.loopCtx); err != nil {
-					log.Error("[resource group controller] clean up resource groups failed", zap.Error(err))
-				}
+				c.cleanUpResourceGroup()
 			case <-stateUpdateTicker.C:
-				c.updateRunState()
-				c.updateAvgRequestResourcePerSec()
+				c.executeOnAllGroups((*groupCostController).updateRunState)
+				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
 				if len(c.run.currentRequests) == 0 {
 					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, periodicReport /* select resource groups which should be reported periodically */)
 				}
 			case <-c.lowTokenNotifyChan:
-				c.updateRunState()
-				c.updateAvgRequestResourcePerSec()
+				c.executeOnAllGroups((*groupCostController).updateRunState)
+				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
 				if len(c.run.currentRequests) == 0 {
 					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */)
 				}
 				if c.run.inDegradedMode {
-					c.applyDegradedMode()
+					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
+				}
+			case <-emergencyTokenAcquisitionTicker.C:
+				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
+			case resp, ok := <-watchChannel:
+				failpoint.Inject("disableWatch", func() {
+					if c.config.isSingleGroupByKeyspace {
+						panic("disableWatch")
+					}
+				})
+				if !ok {
+					watchChannel = nil
+					watchRetryTimer.Reset(watchRetryInterval)
+					failpoint.Inject("watchStreamError", func() {
+						watchRetryTimer.Reset(20 * time.Millisecond)
+					})
+					continue
+				}
+				for _, item := range resp {
+					revision = item.Kv.ModRevision
+					group := &rmpb.ResourceGroup{}
+					if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
+						continue
+					}
+					switch item.Type {
+					case meta_storagepb.Event_PUT:
+						if item, ok := c.groupsController.Load(group.Name); ok {
+							gc := item.(*groupCostController)
+							gc.modifyMeta(group)
+						}
+					case meta_storagepb.Event_DELETE:
+						if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {
+							resourceGroupStatusGauge.DeleteLabelValues(group.Name)
+						}
+					}
+				}
+			case <-watchRetryTimer.C:
+				watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix())
+				if err != nil {
+					watchRetryTimer.Reset(watchRetryInterval)
+					failpoint.Inject("watchStreamError", func() {
+						watchRetryTimer.Reset(20 * time.Millisecond)
+					})
 				}
 			case gc := <-c.tokenBucketUpdateChan:
 				now := gc.run.now
@@ -262,14 +326,16 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	if err != nil {
 		return nil, err
 	}
+	if group == nil {
+		return nil, errors.Errorf("%s does not exists", name)
+	}
 	// Check again to prevent initializing the same resource group concurrently.
 	if tmp, ok := c.groupsController.Load(name); ok {
 		gc := tmp.(*groupCostController)
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan,
-		successfulRequestDuration.WithLabelValues(group.Name), failedRequestCounter.WithLabelValues(group.Name), resourceGroupTokenRequestCounter.WithLabelValues(group.Name))
+	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 	if err != nil {
 		return nil, err
 	}
@@ -284,23 +350,9 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	return tmp.(*groupCostController), nil
 }
 
-func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) error {
-	groups, err := c.provider.ListResourceGroups(ctx)
-	if err != nil {
-		return errs.ErrClientListResourceGroup.FastGenByArgs(err.Error())
-	}
-	latestGroups := make(map[string]struct{})
-	for _, group := range groups {
-		latestGroups[group.GetName()] = struct{}{}
-	}
+func (c *ResourceGroupsController) cleanUpResourceGroup() {
 	c.groupsController.Range(func(key, value any) bool {
 		resourceGroupName := key.(string)
-		if _, ok := latestGroups[resourceGroupName]; !ok {
-			c.groupsController.Delete(key)
-			resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName)
-			return true
-		}
-
 		gc := value.(*groupCostController)
 		// Check for stale resource groups, which will be deleted when consumption is continuously unchanged.
 		gc.mu.Lock()
@@ -318,29 +370,11 @@ func (c *ResourceGroupsController) cleanUpResourceGroup(ctx context.Context) err
 		}
 		return true
 	})
-	return nil
 }
 
-func (c *ResourceGroupsController) updateRunState() {
+func (c *ResourceGroupsController) executeOnAllGroups(f func(controller *groupCostController)) {
 	c.groupsController.Range(func(name, value any) bool {
-		gc := value.(*groupCostController)
-		gc.updateRunState()
-		return true
-	})
-}
-
-func (c *ResourceGroupsController) applyDegradedMode() {
-	c.groupsController.Range(func(name, value any) bool {
-		gc := value.(*groupCostController)
-		gc.applyDegradedMode()
-		return true
-	})
-}
-
-func (c *ResourceGroupsController) updateAvgRequestResourcePerSec() {
-	c.groupsController.Range(func(name, value any) bool {
-		gc := value.(*groupCostController)
-		gc.updateAvgRequestResourcePerSec()
+		f(value.(*groupCostController))
 		return true
 	})
 }
@@ -417,11 +451,11 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 // OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
-) (*rmpb.Consumption, error) {
+) (*rmpb.Consumption, *rmpb.Consumption, error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
 		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
-		return nil, err
+		return nil, nil, err
 	}
 	return gc.onRequestWait(ctx, info)
 }
@@ -432,27 +466,44 @@ func (c *ResourceGroupsController) OnResponse(
 ) (*rmpb.Consumption, error) {
 	tmp, ok := c.groupsController.Load(resourceGroupName)
 	if !ok {
-		log.Warn("[resource group controller] resource group name does not exist", zap.String("resourceGroupName", resourceGroupName))
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
 		return &rmpb.Consumption{}, nil
 	}
 	return tmp.(*groupCostController).onResponse(req, resp)
 }
 
-type groupCostController struct {
-	*rmpb.ResourceGroup
-	mainCfg     *Config
-	calculators []ResourceCalculator
-	mode        rmpb.GroupMode
+// GetResourceGroup returns the meta setting of the given resource group name.
+func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*rmpb.ResourceGroup, error) {
+	gc, err := c.tryGetResourceGroup(c.loopCtx, resourceGroupName)
+	if err != nil {
+		return nil, err
+	}
+	return gc.getMeta(), nil
+}
 
+type groupCostController struct {
+	// invariant attributes
+	name    string
+	mode    rmpb.GroupMode
+	mainCfg *Config
+	// meta info
+	meta     *rmpb.ResourceGroup
+	metaLock sync.RWMutex
+
+	// following fields are used for token limiter.
+	calculators    []ResourceCalculator
 	handleRespFunc func(*rmpb.TokenBucketResponse)
 
 	successfulRequestDuration prometheus.Observer
+	requestRetryCounter       prometheus.Counter
 	failedRequestCounter      prometheus.Counter
 	tokenRequestCounter       prometheus.Counter
 
 	mu struct {
 		sync.Mutex
-		consumption *rmpb.Consumption
+		consumption   *rmpb.Consumption
+		storeCounter  map[uint64]*rmpb.Consumption
+		globalCounter *rmpb.Consumption
 	}
 
 	// fast path to make once token limit with un-limit burst.
@@ -526,8 +577,6 @@ func newGroupCostController(
 	mainCfg *Config,
 	lowRUNotifyChan chan struct{},
 	tokenBucketUpdateChan chan *groupCostController,
-	successfulRequestDuration prometheus.Observer,
-	failedRequestCounter, tokenRequestCounter prometheus.Counter,
 ) (*groupCostController, error) {
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -537,18 +586,19 @@ func newGroupCostController(
 	default:
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
-
 	gc := &groupCostController{
-		ResourceGroup:             group,
+		meta:                      group,
+		name:                      group.Name,
 		mainCfg:                   mainCfg,
-		successfulRequestDuration: successfulRequestDuration,
-		failedRequestCounter:      failedRequestCounter,
-		tokenRequestCounter:       tokenRequestCounter,
+		mode:                      group.GetMode(),
+		successfulRequestDuration: successfulRequestDuration.WithLabelValues(group.Name),
+		failedRequestCounter:      failedRequestCounter.WithLabelValues(group.Name),
+		requestRetryCounter:       requestRetryCounter.WithLabelValues(group.Name),
+		tokenRequestCounter:       resourceGroupTokenRequestCounter.WithLabelValues(group.Name),
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
 		},
-		mode:                  group.GetMode(),
 		tokenBucketUpdateChan: tokenBucketUpdateChan,
 		lowRUNotifyChan:       lowRUNotifyChan,
 		burstable:             &atomic.Bool{},
@@ -562,6 +612,8 @@ func newGroupCostController(
 	}
 
 	gc.mu.consumption = &rmpb.Consumption{}
+	gc.mu.storeCounter = make(map[uint64]*rmpb.Consumption)
+	gc.mu.globalCounter = &rmpb.Consumption{}
 	return gc, nil
 }
 
@@ -591,19 +643,19 @@ func (gc *groupCostController) initRunState() {
 		return cfg
 	}
 
+	gc.metaLock.RLock()
+	defer gc.metaLock.RUnlock()
 	switch gc.mode {
 	case rmpb.GroupMode_RUMode:
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitLimitTypeList {
-			tb := getRUTokenBucketSetting(gc.ResourceGroup, typ)
-			cfg := cfgFunc(tb)
-			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
+			limiter := NewLimiterWithCfg(now, cfgFunc(getRUTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
 			counter := &tokenCounter{
 				limiter:     limiter,
 				avgRUPerSec: 0,
 				avgLastTime: now,
 				getTokenBucketFunc: func() *rmpb.TokenBucket {
-					return getRUTokenBucketSetting(gc.ResourceGroup, typ)
+					return getRUTokenBucketSetting(gc.meta, typ)
 				},
 			}
 			gc.run.requestUnitTokens[typ] = counter
@@ -611,15 +663,13 @@ func (gc *groupCostController) initRunState() {
 	case rmpb.GroupMode_RawMode:
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceLimitTypeList {
-			tb := getRawResourceTokenBucketSetting(gc.ResourceGroup, typ)
-			cfg := cfgFunc(tb)
-			limiter := NewLimiterWithCfg(now, cfg, gc.lowRUNotifyChan)
+			limiter := NewLimiterWithCfg(now, cfgFunc(getRawResourceTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
 			counter := &tokenCounter{
 				limiter:     limiter,
 				avgRUPerSec: 0,
 				avgLastTime: now,
 				getTokenBucketFunc: func() *rmpb.TokenBucket {
-					return getRawResourceTokenBucketSetting(gc.ResourceGroup, typ)
+					return getRawResourceTokenBucketSetting(gc.meta, typ)
 				},
 			}
 			gc.run.resourceTokens[typ] = counter
@@ -646,7 +696,7 @@ func (gc *groupCostController) updateRunState() {
 	}
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
-	log.Debug("[resource group controller] update run state", zap.Any("request unit consumption", gc.run.consumption))
+	log.Debug("[resource group controller] update run state", zap.Any("request-unit-consumption", gc.run.consumption))
 	gc.run.now = newTime
 }
 
@@ -656,6 +706,19 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 		gc.updateAvgRaWResourcePerSec()
 	case rmpb.GroupMode_RUMode:
 		gc.updateAvgRUPerSec()
+	}
+}
+
+func (gc *groupCostController) resetEmergencyTokenAcquisition() {
+	switch gc.mode {
+	case rmpb.GroupMode_RawMode:
+		for _, counter := range gc.run.resourceTokens {
+			counter.limiter.ResetRemainingNotifyTimes()
+		}
+	case rmpb.GroupMode_RUMode:
+		for _, counter := range gc.run.requestUnitTokens {
+			counter.limiter.ResetRemainingNotifyTimes()
+		}
 	}
 }
 
@@ -714,7 +777,7 @@ func (gc *groupCostController) updateAvgRaWResourcePerSec() {
 		if !gc.calcAvg(counter, getRawResourceValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
-		log.Debug("[resource group controller] update avg raw resource per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
+		log.Debug("[resource group controller] update avg raw resource per sec", zap.String("name", gc.name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec))
 	}
 	gc.burstable.Store(isBurstable)
 }
@@ -728,7 +791,7 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 		if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
-		log.Debug("[resource group controller] update avg ru per sec", zap.String("name", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]), zap.Float64("avgRUPerSec", counter.avgRUPerSec))
+		log.Debug("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec))
 	}
 	gc.burstable.Store(isBurstable)
 }
@@ -740,6 +803,13 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 	})
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
+	failpoint.Inject("acceleratedSpeedTrend", func() {
+		if delta > 0 {
+			counter.avgRUPerSec = 1000
+		} else {
+			counter.avgRUPerSec = 0
+		}
+	})
 	counter.avgLastTime = gc.run.now
 	counter.avgRUPerSecLastRU = new
 	return true
@@ -753,11 +823,14 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 	failpoint.Inject("acceleratedReportingPeriod", func() {
 		timeSinceLastRequest = extendedReportingPeriodFactor * defaultTargetPeriod
 	})
-	if timeSinceLastRequest >= defaultTargetPeriod {
+	// Due to `gc.run.lastRequestTime` update operations late in this logic,
+	// so `timeSinceLastRequest` is less than defaultGroupStateUpdateInterval a little bit, lead to actual report period is greater than defaultTargetPeriod.
+	// Add defaultGroupStateUpdateInterval/2 as duration buffer to avoid it.
+	if timeSinceLastRequest+defaultGroupStateUpdateInterval/2 >= defaultTargetPeriod {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
 		}
-		switch gc.Mode {
+		switch gc.mode {
 		case rmpb.GroupMode_RUMode:
 			for typ := range requestUnitLimitTypeList {
 				if getRUValueFromConsumption(gc.run.consumption, typ)-getRUValueFromConsumption(gc.run.lastRequestConsumption, typ) >= consumptionsReportingThreshold {
@@ -823,7 +896,7 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 			cfg.NewRate = 99999999
 		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
-		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("resource group", gc.Name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
+		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("resource-group", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
 	}
 }
 
@@ -872,9 +945,9 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		deadline := gc.run.now.Add(trickleDuration)
 		cfg.NewRate = float64(bucket.GetSettings().FillRate) + granted/trickleDuration.Seconds()
 
-		timerDuration := trickleDuration - time.Second
+		timerDuration := trickleDuration - trickleReserveDuration
 		if timerDuration <= 0 {
-			timerDuration = (trickleDuration + time.Second) / 2
+			timerDuration = (trickleDuration + trickleReserveDuration) / 2
 		}
 		counter.notify.mu.Lock()
 		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
@@ -904,7 +977,7 @@ func initCounterNotify(counter *tokenCounter) {
 
 func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType) *rmpb.TokenBucketRequest {
 	req := &rmpb.TokenBucketRequest{
-		ResourceGroupName: gc.ResourceGroup.GetName(),
+		ResourceGroupName: gc.name,
 	}
 	// collect request resource
 	selected := gc.run.requestInProgress
@@ -971,6 +1044,18 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	return req
 }
 
+func (gc *groupCostController) getMeta() *rmpb.ResourceGroup {
+	gc.metaLock.Lock()
+	defer gc.metaLock.Unlock()
+	return gc.meta
+}
+
+func (gc *groupCostController) modifyMeta(newMeta *rmpb.ResourceGroup) {
+	gc.metaLock.Lock()
+	defer gc.metaLock.Unlock()
+	gc.meta = newMeta
+}
+
 func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 	// `needTokensAmplification` is used to properly amplify a need. The reason is that in the current implementation,
 	// the token returned from the server determines the average consumption speed.
@@ -985,11 +1070,16 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 
 func (gc *groupCostController) onRequestWait(
 	ctx context.Context, info RequestInfo,
-) (*rmpb.Consumption, error) {
+) (*rmpb.Consumption, *rmpb.Consumption, error) {
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
+
+	gc.mu.Lock()
+	add(gc.mu.consumption, delta)
+	gc.mu.Unlock()
+
 	if !gc.burstable.Load() {
 		var err error
 		now := time.Now()
@@ -1019,19 +1109,35 @@ func (gc *groupCostController) onRequestWait(
 					break retryLoop
 				}
 			}
-			time.Sleep(100 * time.Millisecond)
+			gc.requestRetryCounter.Inc()
+			time.Sleep(retryInterval)
 		}
 		if err != nil {
 			gc.failedRequestCounter.Inc()
-			return nil, err
+			gc.mu.Lock()
+			sub(gc.mu.consumption, delta)
+			gc.mu.Unlock()
+			return nil, nil, err
 		} else {
 			gc.successfulRequestDuration.Observe(d.Seconds())
 		}
 	}
+
 	gc.mu.Lock()
-	add(gc.mu.consumption, delta)
+	// Calculate the penalty of the store
+	penalty := &rmpb.Consumption{}
+	if storeCounter, exist := gc.mu.storeCounter[info.StoreID()]; exist {
+		*penalty = *gc.mu.globalCounter
+		sub(penalty, storeCounter)
+	} else {
+		gc.mu.storeCounter[info.StoreID()] = &rmpb.Consumption{}
+	}
+	// More accurately, it should be reset when the request succeed. But it would cause all concurrent requests piggyback large delta which inflates penalty.
+	// So here resets it directly as failure is rare.
+	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 	gc.mu.Unlock()
-	return delta, nil
+
+	return delta, penalty, nil
 }
 
 func (gc *groupCostController) onResponse(
@@ -1057,17 +1163,32 @@ func (gc *groupCostController) onResponse(
 			}
 		}
 	}
+
 	gc.mu.Lock()
+	// Record the consumption of the request
 	add(gc.mu.consumption, delta)
+	// Record the consumption of the request by store
+	count := &rmpb.Consumption{}
+	*count = *delta
+	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
+	for _, calc := range gc.calculators {
+		calc.BeforeKVRequest(count, req)
+	}
+	add(gc.mu.storeCounter[req.StoreID()], count)
+	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
+
 	return delta, nil
 }
 
-// CheckResourceGroupExist checks if groupsController map {rg.name -> resource group controller}
-// contains name. Used for test only.
-func (c *ResourceGroupsController) CheckResourceGroupExist(name string) bool {
-	_, ok := c.groupsController.Load(name)
-	return ok
+// GetActiveResourceGroup is used to get action resource group.
+// This is used for test only.
+func (c *ResourceGroupsController) GetActiveResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
+	tmp, ok := c.groupsController.Load(resourceGroupName)
+	if !ok {
+		return nil
+	}
+	return tmp.(*groupCostController).getMeta()
 }
 
 // This is used for test only.

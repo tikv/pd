@@ -18,7 +18,10 @@ import (
 	"context"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -34,6 +37,8 @@ const (
 
 // InitClusterID initializes the cluster ID.
 func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err error) {
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
 		if clusterID, err := etcdutil.GetClusterID(client, clusterIDPath); err == nil && clusterID != 0 {
 			return clusterID, nil
@@ -41,8 +46,18 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 		select {
 		case <-ctx.Done():
 			return 0, err
-		case <-time.After(retryInterval):
+		case <-ticker.C:
 		}
 	}
 	return 0, errors.Errorf("failed to init cluster ID after retrying %d times", maxRetryTimes)
+}
+
+// PromHandler is a handler to get prometheus metrics.
+func PromHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// register promhttp.HandlerOpts DisableCompression
+		promhttp.InstrumentMetricHandler(prometheus.DefaultRegisterer, promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
+			DisableCompression: true,
+		})).ServeHTTP(c.Writer, c.Request)
+	}
 }

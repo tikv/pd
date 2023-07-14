@@ -1,21 +1,21 @@
 #!/bin/bash
 
-# ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX> <INTEGRATION_TEST_ONLY>
+# ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX>
 
-if [[ $3 ]]; then
+if [[ $2 -gt 10 ]]; then
     # Get integration test list.
     makefile_dirs=($(find . -iname "Makefile" -exec dirname {} \; | sort -u))
     submod_dirs=($(find . -iname "go.mod" -exec dirname {} \; | sort -u))
     integration_tasks=$(comm -12 <(printf "%s\n" "${makefile_dirs[@]}") <(printf "%s\n" "${submod_dirs[@]}") | grep "./tests/integrations/*")
     # Currently, we only have 3 integration tests, so we can hardcode the task index.
     for t in ${integration_tasks[@]}; do
-        if [[ "$t" = "./tests/integrations/client" && "$2" = 9 ]]; then
+        if [[ "$t" = "./tests/integrations/client" && "$2" = 11 ]]; then
             printf "%s " "$t"
             break
-        elif [[ "$t" = "./tests/integrations/tso" && "$2" = 7 ]]; then
+        elif [[ "$t" = "./tests/integrations/tso" && "$2" = 12 ]]; then
             printf "%s " "$t"
             break
-        elif [[ "$t" = "./tests/integrations/mcs" && "$2" = 2 ]]; then
+        elif [[ "$t" = "./tests/integrations/mcs" && "$2" = 13 ]]; then
             printf "%s " "$t"
             break
         fi
@@ -45,6 +45,5 @@ else
         scores[$min_i]=$((${scores[$min_i]} + $?))
         [[ $(($min_i + 1)) -eq $2 ]] && res+=($t)
     done
-
     printf "%s " "${res[@]}"
 fi

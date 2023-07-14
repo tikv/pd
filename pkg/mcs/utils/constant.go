@@ -35,21 +35,34 @@ const (
 	// LeaderTickInterval is the interval to check leader
 	LeaderTickInterval = 50 * time.Millisecond
 
+	// DefaultKeyspaceName is the name reserved for default keyspace.
+	DefaultKeyspaceName = "DEFAULT"
+
 	// DefaultKeyspaceID is the default key space id.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap and reserved for users who haven't been assigned keyspace.
+	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap
+	// and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
-
-	// DefaultKeySpaceGroupID is the default key space group id.
+	// NullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic.
+	NullKeyspaceID = uint32(0xFFFFFFFF)
+	// DefaultKeyspaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
-	DefaultKeySpaceGroupID = uint32(0)
+	DefaultKeyspaceGroupID = uint32(0)
 
+	// MicroserviceRootPath is the root path of microservice in etcd.
+	MicroserviceRootPath = "/ms"
 	// APIServiceName is the name of api server.
 	APIServiceName = "api"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
 	// ResourceManagerServiceName is the name of resource manager server.
 	ResourceManagerServiceName = "resource_manager"
+	// SchedulingServiceName is the name of scheduling server.
+	SchedulingServiceName = "scheduling"
+	// KeyspaceGroupsKey is the path component of keyspace groups.
+	KeyspaceGroupsKey = "keyspace_groups"
+	// KeyspaceGroupsPrimaryKey is the path component of primary for keyspace groups.
+	KeyspaceGroupsPrimaryKey = "primary"
 
 	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
 	// is the sharding unit, i.e., by the definition here, the max count of the shards
@@ -62,4 +75,13 @@ const (
 	// MaxKeyspaceGroupCountInUse is a much more reasonable value of the max count in the
 	// foreseen future, and the former is just for extensibility in theory.
 	MaxKeyspaceGroupCountInUse = uint32(4096)
+
+	// DefaultKeyspaceGroupReplicaCount is the default replica count of keyspace group.
+	DefaultKeyspaceGroupReplicaCount = 2
+
+	// DefaultKeyspaceGroupReplicaPriority is the default priority of a keyspace group replica.
+	// It's used in keyspace group primary weighted-election to balance primaries' distribution.
+	// Among multiple replicas of a keyspace group, the higher the priority, the more likely
+	// the replica is to be elected as primary.
+	DefaultKeyspaceGroupReplicaPriority = 0
 )

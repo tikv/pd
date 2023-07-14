@@ -38,7 +38,7 @@ var (
 			Namespace: namespace,
 			Subsystem: requestSubsystem,
 			Name:      "success",
-			Buckets:   prometheus.ExponentialBuckets(0.001, 4, 8), // 0.001 ~ 40.96
+			Buckets:   []float64{.005, .01, .05, .1, .5, 1, 5, 10, 20, 25, 30}, // 0.005 ~ 30
 			Help:      "Bucketed histogram of wait duration of successful request.",
 		}, []string{resourceGroupNameLabel})
 
@@ -48,6 +48,14 @@ var (
 			Subsystem: requestSubsystem,
 			Name:      "fail",
 			Help:      "Counter of failed request.",
+		}, []string{resourceGroupNameLabel})
+
+	requestRetryCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: requestSubsystem,
+			Name:      "retry",
+			Help:      "Counter of retry time for request.",
 		}, []string{resourceGroupNameLabel})
 
 	tokenRequestDuration = prometheus.NewHistogramVec(
@@ -77,6 +85,7 @@ func init() {
 	prometheus.MustRegister(resourceGroupStatusGauge)
 	prometheus.MustRegister(successfulRequestDuration)
 	prometheus.MustRegister(failedRequestCounter)
+	prometheus.MustRegister(requestRetryCounter)
 	prometheus.MustRegister(tokenRequestDuration)
 	prometheus.MustRegister(resourceGroupTokenRequestCounter)
 }

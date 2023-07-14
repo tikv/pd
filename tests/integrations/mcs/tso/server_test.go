@@ -16,22 +16,26 @@ package tso
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -74,6 +78,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	suite.NoError(suite.pdLeader.BootstrapCluster())
 }
 
 func (suite *tsoServerTestSuite) TearDownSuite() {
@@ -90,7 +95,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}()
 
 	re := suite.Require()
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 
 	defer cleanup()
 	testutil.Eventually(re, func() bool {
@@ -120,10 +125,38 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}
 }
 
+func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
+	re := suite.Require()
+
+	cfg := tso.NewConfig()
+	cfg.BackendEndpoints = suite.backendEndpoints
+	cfg.ListenAddr = tempurl.Alloc()
+	cfg.AdvertiseListenAddr = tempurl.Alloc()
+	cfg, err := tso.GenerateConfig(cfg)
+	re.NoError(err)
+
+	// Setup the logger.
+	err = tests.InitLogger(cfg)
+	re.NoError(err)
+
+	s, cleanup, err := tests.NewTSOTestServer(suite.ctx, cfg)
+	re.NoError(err)
+	defer cleanup()
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	member, err := s.GetMember(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.Equal(fmt.Sprintf("%s-%05d", cfg.AdvertiseListenAddr, utils.DefaultKeyspaceGroupID), member.Name())
+}
+
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
 	checkTSOPath(re, true /*isAPIServiceMode*/)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady", "return(true)"))
 	checkTSOPath(re, false /*isAPIServiceMode*/)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady"))
 }
 
 func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
@@ -144,6 +177,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	re.NoError(err)
 	leaderName := cluster.WaitLeader()
 	pdLeader := cluster.GetServer(leaderName)
+	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
 	if isAPIServiceMode {
@@ -152,10 +186,10 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
 	}
 
-	_, cleanup := mcs.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	cli := mcs.SetupClientWithKeyspace(ctx, re, []string{backendEndpoints})
+	cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
 	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
 	ts := tsoutil.ComposeTS(physical, logical)
@@ -170,12 +204,62 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 	var count int
 	for _, kv := range resp.Kvs {
 		key := strings.TrimSpace(string(kv.Key))
-		if !strings.HasSuffix(key, "timestamp") {
+		if !strings.HasSuffix(key, endpoint.TimestampKey) {
 			continue
 		}
 		count++
 	}
 	return count
+}
+
+func TestWaitAPIServiceReady(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startCluster := func(isAPIServiceMode bool) (cluster *tests.TestCluster, backendEndpoints string) {
+		var err error
+		if isAPIServiceMode {
+			cluster, err = tests.NewTestAPICluster(ctx, 1)
+		} else {
+			cluster, err = tests.NewTestCluster(ctx, 1)
+		}
+		re.NoError(err)
+		err = cluster.RunInitialServers()
+		re.NoError(err)
+		leaderName := cluster.WaitLeader()
+		pdLeader := cluster.GetServer(leaderName)
+		return cluster, pdLeader.GetAddr()
+	}
+
+	// tso server cannot be started because the pd server is not ready as api service.
+	cluster, backendEndpoints := startCluster(false /*isAPIServiceMode*/)
+	sctx, scancel := context.WithTimeout(ctx, time.Second*10)
+	defer scancel()
+	s, _, err := tests.StartSingleTSOTestServerWithoutCheck(sctx, re, backendEndpoints, tempurl.Alloc())
+	re.Error(err)
+	re.Nil(s)
+	cluster.Destroy()
+
+	// tso server can be started because the pd server is ready as api service.
+	cluster, backendEndpoints = startCluster(true /*isAPIServiceMode*/)
+	sctx, scancel = context.WithTimeout(ctx, time.Second*10)
+	defer scancel()
+	s, cleanup, err := tests.StartSingleTSOTestServerWithoutCheck(sctx, re, backendEndpoints, tempurl.Alloc())
+	re.NoError(err)
+	defer cluster.Destroy()
+	defer cleanup()
+
+	for i := 0; i < 12; i++ {
+		select {
+		case <-time.After(time.Second):
+		case <-sctx.Done():
+			return
+		}
+		if s != nil && s.IsServing() {
+			break
+		}
+	}
 }
 
 type APIServerForwardTestSuite struct {
@@ -192,11 +276,11 @@ func TestAPIServerForwardTestSuite(t *testing.T) {
 	suite.Run(t, new(APIServerForwardTestSuite))
 }
 
-func (suite *APIServerForwardTestSuite) SetupSuite() {
+func (suite *APIServerForwardTestSuite) SetupTest() {
 	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 3)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -208,12 +292,13 @@ func (suite *APIServerForwardTestSuite) SetupSuite() {
 	suite.NoError(suite.pdLeader.BootstrapCluster())
 	suite.addRegions()
 
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
 	suite.pdClient, err = pd.NewClientWithContext(context.Background(),
 		[]string{suite.backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 	suite.NoError(err)
 }
 
-func (suite *APIServerForwardTestSuite) TearDownSuite() {
+func (suite *APIServerForwardTestSuite) TearDownTest() {
 	suite.pdClient.Close()
 
 	etcdClient := suite.pdLeader.GetEtcdClient()
@@ -227,58 +312,161 @@ func (suite *APIServerForwardTestSuite) TearDownSuite() {
 	}
 	suite.cluster.Destroy()
 	suite.cancel()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
 }
 
 func (suite *APIServerForwardTestSuite) TestForwardTSORelated() {
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO()
-	// can use the tso-related interface with tso server
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
-	serverMap := make(map[string]bs.Server)
-	serverMap[s.GetAddr()] = s
-	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	suite.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(suite.Require())
 	suite.checkAvailableTSO()
-	cleanup()
 }
 
 func (suite *APIServerForwardTestSuite) TestForwardTSOWhenPrimaryChanged() {
-	serverMap := make(map[string]bs.Server)
-	for i := 0; i < 3; i++ {
-		s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup()
-		serverMap[s.GetAddr()] = s
-	}
-	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	re := suite.Require()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	// can use the tso-related interface with old primary
+	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	re.True(exist)
+	suite.checkAvailableTSO()
 
 	// can use the tso-related interface with new primary
-	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
-	suite.True(exist)
-	serverMap[oldPrimary].Close()
-	delete(serverMap, oldPrimary)
+	tc.DestroyServer(oldPrimary)
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
-	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	tc.WaitForDefaultPrimaryServing(re)
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
-	suite.True(exist)
-	suite.NotEqual(oldPrimary, primary)
+	re.True(exist)
+	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO()
 
 	// can use the tso-related interface with old primary again
-	s, cleanup := mcs.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, oldPrimary)
-	defer cleanup()
-	serverMap[oldPrimary] = s
+	tc.AddServer(oldPrimary)
 	suite.checkAvailableTSO()
-	for addr, s := range serverMap {
+	for addr := range tc.GetServers() {
 		if addr != oldPrimary {
-			s.Close()
-			delete(serverMap, addr)
+			tc.DestroyServer(addr)
 		}
 	}
-	mcs.WaitForPrimaryServing(suite.Require(), serverMap)
+	tc.WaitForDefaultPrimaryServing(re)
 	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
 	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
-	suite.True(exist)
-	suite.Equal(oldPrimary, primary)
+	re.True(exist)
+	re.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO()
+}
+
+func (suite *APIServerForwardTestSuite) TestResignTSOPrimaryForward() {
+	// TODO: test random kill primary with 3 nodes
+	re := suite.Require()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	for j := 0; j < 10; j++ {
+		tc.ResignPrimary(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+		tc.WaitForDefaultPrimaryServing(re)
+		var err error
+		for i := 0; i < 3; i++ { // try 3 times
+			_, _, err = suite.pdClient.GetTS(suite.ctx)
+			if err == nil {
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		suite.NoError(err)
+		suite.checkAvailableTSO()
+	}
+}
+
+func (suite *APIServerForwardTestSuite) TestResignAPIPrimaryForward() {
+	re := suite.Require()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	for j := 0; j < 10; j++ {
+		suite.pdLeader.ResignLeader()
+		suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+		suite.backendEndpoints = suite.pdLeader.GetAddr()
+		_, _, err = suite.pdClient.GetTS(suite.ctx)
+		suite.NoError(err)
+	}
+}
+
+func (suite *APIServerForwardTestSuite) TestForwardTSOUnexpectedToFollower1() {
+	suite.checkForwardTSOUnexpectedToFollower(func() {
+		// unary call will retry internally
+		// try to update gc safe point
+		min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1)
+		suite.NoError(err)
+		suite.Equal(uint64(0), min)
+	})
+}
+
+func (suite *APIServerForwardTestSuite) TestForwardTSOUnexpectedToFollower2() {
+	suite.checkForwardTSOUnexpectedToFollower(func() {
+		// unary call will retry internally
+		// try to set external ts
+		ts, err := suite.pdClient.GetExternalTimestamp(suite.ctx)
+		suite.NoError(err)
+		err = suite.pdClient.SetExternalTimestamp(suite.ctx, ts+1)
+		suite.NoError(err)
+	})
+}
+
+func (suite *APIServerForwardTestSuite) TestForwardTSOUnexpectedToFollower3() {
+	suite.checkForwardTSOUnexpectedToFollower(func() {
+		_, _, err := suite.pdClient.GetTS(suite.ctx)
+		suite.Error(err)
+	})
+}
+
+func (suite *APIServerForwardTestSuite) checkForwardTSOUnexpectedToFollower(checkTSO func()) {
+	re := suite.Require()
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+	tc.WaitForDefaultPrimaryServing(re)
+
+	// get follower's address
+	servers := tc.GetServers()
+	oldPrimary := tc.GetPrimaryServer(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID).GetAddr()
+	var follower string
+	for addr := range servers {
+		if addr != oldPrimary {
+			follower = addr
+			break
+		}
+	}
+	re.NotEmpty(follower)
+
+	// write follower's address to cache to simulate cache is not updated.
+	suite.pdLeader.GetServer().SetServicePrimaryAddr(utils.TSOServiceName, follower)
+	errorAddr, ok := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	suite.True(ok)
+	suite.Equal(follower, errorAddr)
+
+	// test tso request
+	checkTSO()
+
+	// test tso request will success after cache is updated
+	suite.checkAvailableTSO()
+	newPrimary, exist2 := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	suite.True(exist2)
+	suite.NotEqual(errorAddr, newPrimary)
+	suite.Equal(oldPrimary, newPrimary)
+	tc.Destroy()
 }
 
 func (suite *APIServerForwardTestSuite) addRegions() {
@@ -307,41 +495,123 @@ func (suite *APIServerForwardTestSuite) checkUnavailableTSO() {
 }
 
 func (suite *APIServerForwardTestSuite) checkAvailableTSO() {
-	err := mcs.WaitForTSOServiceAvailable(suite.ctx, suite.pdClient)
-	suite.NoError(err)
+	re := suite.Require()
+	mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
 	// try to get ts
-	_, _, err = suite.pdClient.GetTS(suite.ctx)
-	suite.NoError(err)
+	_, _, err := suite.pdClient.GetTS(suite.ctx)
+	re.NoError(err)
 	// try to update gc safe point
 	min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1)
-	suite.NoError(err)
-	suite.Equal(uint64(0), min)
+	re.NoError(err)
+	re.Equal(uint64(0), min)
 	// try to set external ts
 	ts, err := suite.pdClient.GetExternalTimestamp(suite.ctx)
-	suite.NoError(err)
+	re.NoError(err)
 	err = suite.pdClient.SetExternalTimestamp(suite.ctx, ts+1)
-	suite.NoError(err)
+	re.NoError(err)
 }
 
-func TestAdvertiseAddr(t *testing.T) {
-	re := require.New(t)
+type CommonTestSuite struct {
+	suite.Suite
+	ctx        context.Context
+	cancel     context.CancelFunc
+	cluster    *tests.TestCluster
+	tsoCluster *tests.TestTSOCluster
+	pdLeader   *tests.TestServer
+	// tsoDefaultPrimaryServer is the primary server of the default keyspace group
+	tsoDefaultPrimaryServer *tso.Server
+	backendEndpoints        string
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestAPICluster(ctx, 1)
-	defer cluster.Destroy()
+func TestCommonTestSuite(t *testing.T) {
+	suite.Run(t, new(CommonTestSuite))
+}
+
+func (suite *CommonTestSuite) SetupSuite() {
+	var err error
+	re := suite.Require()
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
 	re.NoError(err)
 
-	err = cluster.RunInitialServers()
+	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 
-	leaderName := cluster.WaitLeader()
-	leader := cluster.GetServer(leaderName)
+	leaderName := suite.cluster.WaitLeader()
+	suite.pdLeader = suite.cluster.GetServer(leaderName)
+	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	suite.NoError(suite.pdLeader.BootstrapCluster())
 
-	u := tempurl.Alloc()
-	s, cleanup := mcs.StartSingleTSOTestServer(ctx, re, leader.GetAddr(), u)
-	defer cleanup()
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	suite.NoError(err)
+	suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+}
 
-	tsoServerConf := s.GetConfig()
-	re.Equal(u, tsoServerConf.AdvertiseListenAddr)
+func (suite *CommonTestSuite) TearDownSuite() {
+	suite.tsoCluster.Destroy()
+	etcdClient := suite.pdLeader.GetEtcdClient()
+	clusterID := strconv.FormatUint(suite.pdLeader.GetClusterID(), 10)
+	endpoints, err := discovery.Discover(etcdClient, clusterID, utils.TSOServiceName)
+	suite.NoError(err)
+	if len(endpoints) != 0 {
+		endpoints, err = discovery.Discover(etcdClient, clusterID, utils.TSOServiceName)
+		suite.NoError(err)
+		suite.Empty(endpoints)
+	}
+	suite.cluster.Destroy()
+	suite.cancel()
+}
+
+func (suite *CommonTestSuite) TestAdvertiseAddr() {
+	re := suite.Require()
+
+	conf := suite.tsoDefaultPrimaryServer.GetConfig()
+	re.Equal(conf.GetListenAddr(), conf.GetAdvertiseListenAddr())
+}
+
+func (suite *CommonTestSuite) TestMetrics() {
+	re := suite.Require()
+
+	resp, err := http.Get(suite.tsoDefaultPrimaryServer.GetConfig().GetAdvertiseListenAddr() + "/metrics")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	respBytes, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Contains(string(respBytes), "tso_server_info")
+}
+
+func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
+	re := suite.Require()
+
+	// check the default keyspace group
+	check := func() {
+		resp, err := http.Get(suite.pdLeader.GetServer().GetConfig().AdvertiseClientUrls + "/pd/api/v2/tso/keyspace-groups")
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
+		respString, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		var kgs []*endpoint.KeyspaceGroup
+		re.NoError(json.Unmarshal(respString, &kgs))
+		re.Len(kgs, 1)
+		re.Equal(utils.DefaultKeyspaceGroupID, kgs[0].ID)
+		re.Equal(endpoint.Basic.String(), kgs[0].UserKind)
+		re.Empty(kgs[0].SplitState)
+		re.Empty(kgs[0].Members)
+		re.Empty(kgs[0].KeyspaceLookupTable)
+	}
+	check()
+
+	s, err := suite.cluster.JoinAPIServer(suite.ctx)
+	re.NoError(err)
+	re.NoError(s.Run())
+
+	// transfer leader to the new server
+	suite.pdLeader.ResignLeader()
+	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+	check()
+	suite.pdLeader.ResignLeader()
+	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 }

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -30,6 +31,7 @@ import (
 type TSOStorage interface {
 	LoadTimestamp(prefix string) (time.Time, error)
 	SaveTimestamp(key string, ts time.Time) error
+	DeleteTimestamp(key string) error
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
@@ -50,7 +52,7 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 	maxTSWindow := typeutil.ZeroTime
 	for i, key := range keys {
 		key := strings.TrimSpace(key)
-		if !strings.HasSuffix(key, timestampKey) {
+		if !strings.HasSuffix(key, TimestampKey) {
 			continue
 		}
 		tsWindow, err := typeutil.ParseTimestamp([]byte(values[i]))
@@ -82,9 +84,16 @@ func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 			}
 		}
 		if previousTS != typeutil.ZeroTime && typeutil.SubRealTimeByWallClock(ts, previousTS) <= 0 {
-			return nil
+			return errors.Errorf("saving timestamp %d is less than or equal to the previous one %d", ts.UnixNano(), previousTS.UnixNano())
 		}
 		data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
 		return txn.Save(key, string(data))
+	})
+}
+
+// DeleteTimestamp deletes the timestamp from the storage.
+func (se *StorageEndpoint) DeleteTimestamp(key string) error {
+	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		return txn.Remove(key)
 	})
 }
