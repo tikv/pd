@@ -606,6 +606,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 	}
 }
 
+// runCoordinator runs the main scheduling loop.
 func (c *RaftCluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
@@ -892,7 +893,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
 	// c.limiter is nil before "start" is called
-	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
+	if c.limiter != nil {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
