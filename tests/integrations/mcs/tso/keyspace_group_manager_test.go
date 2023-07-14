@@ -358,7 +358,7 @@ func waitFinishSplit(
 	splitSourceID, splitTargetID uint32,
 	splitSourceKeyspaces, splitTargetKeyspaces []uint32,
 ) {
-	var kg *endpoint.KeyspaceGroup
+	var kg endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
 		code, data := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitTargetID)
 		if code != http.StatusOK {
