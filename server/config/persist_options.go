@@ -501,11 +501,6 @@ func (o *PersistOptions) GetAllStoresLimit() map[uint64]StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLimit
 }
 
-// GetStoreLimitMode returns the limit mode of store.
-func (o *PersistOptions) GetStoreLimitMode() string {
-	return o.GetScheduleConfig().StoreLimitMode
-}
-
 // GetStoreLimitVersion returns the limit version of store.
 func (o *PersistOptions) GetStoreLimitVersion() string {
 	return o.GetScheduleConfig().StoreLimitVersion
