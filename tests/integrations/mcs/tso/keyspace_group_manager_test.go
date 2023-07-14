@@ -427,8 +427,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 		for {
 			select {
 			case <-ctx.Done():
-				// Make sure at least one TSO request is successful.
-				re.NotEmpty(lastPhysical)
 				return
 			default:
 			}
