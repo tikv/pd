@@ -181,6 +181,18 @@ func MustLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer,
 	return &kg
 }
 
+// TryLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
+func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) (int, []byte) {
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), nil)
+	re.NoError(err)
+	resp, err := dialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	return resp.StatusCode, data
+}
+
 // MustCreateKeyspaceGroup creates a keyspace group with HTTP API.
 func MustCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceGroupParams) {
 	code, data := tryCreateKeyspaceGroup(re, server, request)

@@ -16,7 +16,9 @@ package tso
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -356,14 +358,23 @@ func waitFinishSplit(
 	splitSourceID, splitTargetID uint32,
 	splitSourceKeyspaces, splitTargetKeyspaces []uint32,
 ) {
+	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
-		kg := handlersutil.MustLoadKeyspaceGroupByID(re, server, splitTargetID)
+		code, data := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitTargetID)
+		if code != http.StatusOK {
+			return false
+		}
+		re.NoError(json.Unmarshal(data, &kg))
 		re.Equal(splitTargetID, kg.ID)
 		re.Equal(splitTargetKeyspaces, kg.Keyspaces)
 		return !kg.IsSplitTarget()
 	})
 	testutil.Eventually(re, func() bool {
-		kg := handlersutil.MustLoadKeyspaceGroupByID(re, server, splitSourceID)
+		code, data := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitSourceID)
+		if code != http.StatusOK {
+			return false
+		}
+		re.NoError(json.Unmarshal(data, &kg))
 		re.Equal(splitSourceID, kg.ID)
 		re.Equal(splitSourceKeyspaces, kg.Keyspaces)
 		return !kg.IsSplitSource()
