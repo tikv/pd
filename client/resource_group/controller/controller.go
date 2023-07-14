@@ -78,25 +78,25 @@ type ResourceControlCreateOption func(controller *ResourceGroupsController)
 // EnableSingleGroupByKeyspace is the option to enable single group by keyspace feature.
 func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
-		controller.config.isSingleGroupByKeyspace = true
+		controller.ruConfig.isSingleGroupByKeyspace = true
 	}
 }
 
 // WithMaxWaitDuration is the option to set the max wait duration for acquiring token buckets.
 func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
-		controller.config.maxWaitDuration = d
+		controller.ruConfig.maxWaitDuration = d
 	}
 }
 
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
-// ResourceGroupsController impls ResourceGroupKVInterceptor.
+// ResourceGroupsController implements ResourceGroupKVInterceptor.
 type ResourceGroupsController struct {
 	clientUniqueID   uint64
 	provider         ResourceGroupProvider
 	groupsController sync.Map
-	config           *Config
+	ruConfig         *RUConfig
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -128,18 +128,19 @@ func NewResourceGroupController(
 	requestUnitConfig *RequestUnitConfig,
 	opts ...ResourceControlCreateOption,
 ) (*ResourceGroupsController, error) {
-	controllerConfig, err := loadServerConfig(ctx, provider)
+	config, err := loadServerConfig(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
 	if requestUnitConfig != nil {
-		controllerConfig.RequestUnit = *requestUnitConfig
+		config.RequestUnit = *requestUnitConfig
 	}
-	config := GenerateConfig(controllerConfig)
+	log.Info("load resource controller config", zap.Reflect("config", config))
+	ruConfig := GenerateRUConfig(config)
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
-		config:                config,
+		ruConfig:              ruConfig,
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
@@ -147,30 +148,30 @@ func NewResourceGroupController(
 	for _, opt := range opts {
 		opt(controller)
 	}
-	controller.calculators = []ResourceCalculator{newKVCalculator(controller.config), newSQLCalculator(controller.config)}
+	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
 	return controller, nil
 }
 
-func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*ControllerConfig, error) {
+func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Config, error) {
 	items, _, err := provider.LoadGlobalConfig(ctx, nil, controllerConfigPath)
 	if err != nil {
 		return nil, err
 	}
 	if len(items) == 0 {
 		log.Warn("[resource group controller] server does not save config, load config failed")
-		return DefaultControllerConfig(), nil
+		return DefaultConfig(), nil
 	}
-	controllerConfig := &ControllerConfig{}
-	err = json.Unmarshal(items[0].PayLoad, controllerConfig)
+	config := &Config{}
+	err = json.Unmarshal(items[0].PayLoad, config)
 	if err != nil {
 		return nil, err
 	}
-	return controllerConfig, nil
+	return config, nil
 }
 
 // GetConfig returns the config of controller. It's only used for test.
-func (c *ResourceGroupsController) GetConfig() *Config {
-	return c.config
+func (c *ResourceGroupsController) GetConfig() *RUConfig {
+	return c.ruConfig
 }
 
 // Source List
@@ -183,8 +184,8 @@ const (
 func (c *ResourceGroupsController) Start(ctx context.Context) {
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	go func() {
-		if c.config.DegradedModeWaitDuration > 0 {
-			c.run.responseDeadline = time.NewTimer(c.config.DegradedModeWaitDuration)
+		if c.ruConfig.DegradedModeWaitDuration > 0 {
+			c.run.responseDeadline = time.NewTimer(c.ruConfig.DegradedModeWaitDuration)
 			c.run.responseDeadline.Stop()
 			defer c.run.responseDeadline.Stop()
 		}
@@ -213,11 +214,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
 		var watchChannel chan []*meta_storagepb.Event
-		if !c.config.isSingleGroupByKeyspace {
+		if !c.ruConfig.isSingleGroupByKeyspace {
 			watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix())
 		}
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
-		if err == nil || c.config.isSingleGroupByKeyspace {
+		if err == nil || c.ruConfig.isSingleGroupByKeyspace {
 			watchRetryTimer.Stop()
 		}
 		defer watchRetryTimer.Stop()
@@ -258,7 +259,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			case resp, ok := <-watchChannel:
 				failpoint.Inject("disableWatch", func() {
-					if c.config.isSingleGroupByKeyspace {
+					if c.ruConfig.isSingleGroupByKeyspace {
 						panic("disableWatch")
 					}
 				})
@@ -334,7 +335,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err := newGroupCostController(group, c.config, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 	if err != nil {
 		return nil, err
 	}
@@ -424,8 +425,8 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		TargetRequestPeriodMs: uint64(defaultTargetPeriod / time.Millisecond),
 		ClientUniqueId:        c.clientUniqueID,
 	}
-	if c.config.DegradedModeWaitDuration > 0 && c.responseDeadlineCh == nil {
-		c.run.responseDeadline.Reset(c.config.DegradedModeWaitDuration)
+	if c.ruConfig.DegradedModeWaitDuration > 0 && c.responseDeadlineCh == nil {
+		c.run.responseDeadline.Reset(c.ruConfig.DegradedModeWaitDuration)
 		c.responseDeadlineCh = c.run.responseDeadline.C
 	}
 	go func() {
@@ -484,7 +485,7 @@ type groupCostController struct {
 	// invariant attributes
 	name    string
 	mode    rmpb.GroupMode
-	mainCfg *Config
+	mainCfg *RUConfig
 	// meta info
 	meta     *rmpb.ResourceGroup
 	metaLock sync.RWMutex
@@ -573,7 +574,7 @@ type tokenCounter struct {
 
 func newGroupCostController(
 	group *rmpb.ResourceGroup,
-	mainCfg *Config,
+	mainCfg *RUConfig,
 	lowRUNotifyChan chan struct{},
 	tokenBucketUpdateChan chan *groupCostController,
 ) (*groupCostController, error) {

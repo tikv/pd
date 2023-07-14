@@ -70,8 +70,8 @@ const (
 	defaultDegradedModeWaitDuration = "0s"
 )
 
-// ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
-type ControllerConfig struct {
+// Config is the configuration of the resource manager controller which includes some option for client needed.
+type Config struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
 	DegradedModeWaitDuration string `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
 
@@ -80,9 +80,9 @@ type ControllerConfig struct {
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
 }
 
-// DefaultControllerConfig returns the default resource manager controller configuration.
-func DefaultControllerConfig() *ControllerConfig {
-	return &ControllerConfig{
+// DefaultConfig returns the default resource manager controller configuration.
+func DefaultConfig() *Config {
+	return &Config{
 		DegradedModeWaitDuration: defaultDegradedModeWaitDuration,
 		RequestUnit:              DefaultRequestUnitConfig(),
 	}
@@ -117,10 +117,10 @@ func DefaultRequestUnitConfig() RequestUnitConfig {
 	}
 }
 
-// Config is the configuration of the resource units, which gives the read/write request
+// RUConfig is the configuration of the resource units, which gives the read/write request
 // units or request resource cost standards. It should be calculated by a given `RequestUnitConfig`
 // or `RequestResourceConfig`.
-type Config struct {
+type RUConfig struct {
 	// RU model config
 	ReadBaseCost   RequestUnit
 	ReadBytesCost  RequestUnit
@@ -133,16 +133,16 @@ type Config struct {
 	DegradedModeWaitDuration time.Duration
 }
 
-// DefaultConfig returns the default configuration.
-func DefaultConfig() *Config {
-	return GenerateConfig(
-		DefaultControllerConfig(),
+// DefaultRUConfig returns the default configuration.
+func DefaultRUConfig() *RUConfig {
+	return GenerateRUConfig(
+		DefaultConfig(),
 	)
 }
 
-// GenerateConfig generates the configuration by the given request unit configuration.
-func GenerateConfig(config *ControllerConfig) *Config {
-	cfg := &Config{
+// GenerateRUConfig generates the configuration by the given request unit configuration.
+func GenerateRUConfig(config *Config) *RUConfig {
+	cfg := &RUConfig{
 		ReadBaseCost:    RequestUnit(config.RequestUnit.ReadBaseCost),
 		ReadBytesCost:   RequestUnit(config.RequestUnit.ReadCostPerByte),
 		WriteBaseCost:   RequestUnit(config.RequestUnit.WriteBaseCost),
