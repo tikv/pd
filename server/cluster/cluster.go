@@ -254,6 +254,7 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, s.GetStorage(), cluster, s)
 	if err != nil {
@@ -262,6 +263,11 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.coordinator = newCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager)
+=======
+	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient)
+	c.coordinator = schedule.NewCoordinator(c.ctx, cluster, s.GetHBStreams())
+	c.regionStats = statistics.NewRegionStatistics(c.core, c.opt, c.ruleManager, c.storeConfigManager)
+>>>>>>> 40eaa35f2 (statistics: get region info via core cluster inside RegionStatistics (#6804))
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.unsafeRecoveryController = newUnsafeRecoveryController(cluster)
 
@@ -1347,6 +1353,7 @@ func (c *RaftCluster) GetRegionStatsByType(typ statistics.RegionStatisticType) [
 	return c.regionStats.GetRegionStatsByType(typ)
 }
 
+<<<<<<< HEAD
 // GetOfflineRegionStatsByType gets the status of the offline region by types.
 func (c *RaftCluster) GetOfflineRegionStatsByType(typ statistics.RegionStatisticType) []*core.RegionInfo {
 	c.RLock()
@@ -1360,6 +1367,10 @@ func (c *RaftCluster) GetOfflineRegionStatsByType(typ statistics.RegionStatistic
 func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	c.Lock()
 	defer c.Unlock()
+=======
+// UpdateRegionsLabelLevelStats updates the status of the region label level by types.
+func (c *RaftCluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
+>>>>>>> 40eaa35f2 (statistics: get region info via core cluster inside RegionStatistics (#6804))
 	for _, region := range regions {
 		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.opt.GetLocationLabels())
 	}

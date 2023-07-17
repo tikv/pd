@@ -374,6 +374,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
+<<<<<<< HEAD
 // @Tags region
 // @Summary List all regions that miss peer.
 // @Produce json
@@ -381,8 +382,74 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 // @Failure 500 {string} string "PD server failed to proceed the request."
 // @Router /regions/check/miss-peer [get]
 func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Request) {
+=======
+// @Tags     region
+// @Summary  List regions belongs to the given keyspace ID.
+// @Param    keyspace_id  query  string   true   "Keyspace ID"
+// @Param    limit        query  integer  false  "Limit count"  default(16)
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/keyspace/id/{id} [get]
+func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	vars := mux.Vars(r)
+	keyspaceIDStr := vars["id"]
+	if keyspaceIDStr == "" {
+		h.rd.JSON(w, http.StatusBadRequest, "keyspace id is empty")
+		return
+	}
+
+	keyspaceID64, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	keyspaceID := uint32(keyspaceID64)
+	keyspaceManager := h.svr.GetKeyspaceManager()
+	if _, err := keyspaceManager.LoadKeyspaceByID(keyspaceID); err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	limit := defaultRegionLimit
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+	regionBound := keyspace.MakeRegionBound(keyspaceID)
+	regions := rc.ScanRegions(regionBound.RawLeftBound, regionBound.RawRightBound, limit)
+	if limit <= 0 || limit > len(regions) {
+		txnRegion := rc.ScanRegions(regionBound.TxnLeftBound, regionBound.TxnRightBound, limit-len(regions))
+		regions = append(regions, txnRegion...)
+	}
+	regionsInfo := convertToAPIRegions(regions)
+	h.rd.JSON(w, http.StatusOK, regionsInfo)
+}
+
+// @Tags     region
+// @Summary  List all regions that miss peer.
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/check/miss-peer [get]
+func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.MissPeer)
+}
+
+func (h *regionsHandler) getRegionsByType(
+	w http.ResponseWriter,
+	typ statistics.RegionStatisticType,
+) {
+>>>>>>> 40eaa35f2 (statistics: get region info via core cluster inside RegionStatistics (#6804))
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.MissPeer)
+	regions, err := handler.GetRegionsByType(typ)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -391,6 +458,7 @@ func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Reque
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
 }
 
+<<<<<<< HEAD
 // @Tags region
 // @Summary List all regions that has extra peer.
 // @Produce json
@@ -491,6 +559,86 @@ func (h *regionsHandler) GetEmptyRegion(w http.ResponseWriter, r *http.Request) 
 	}
 	regionsInfo := convertToAPIRegions(regions)
 	h.rd.JSON(w, http.StatusOK, regionsInfo)
+=======
+// @Tags     region
+// @Summary  List all regions that has extra peer.
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/check/extra-peer [get]
+func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.ExtraPeer)
+}
+
+// @Tags     region
+// @Summary  List all regions that has pending peer.
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/check/pending-peer [get]
+func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.PendingPeer)
+}
+
+// @Tags     region
+// @Summary  List all regions that has down peer.
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/check/down-peer [get]
+func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.DownPeer)
+}
+
+// @Tags     region
+// @Summary  List all regions that has learner peer.
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/check/learner-peer [get]
+func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.LearnerPeer)
+}
+
+// @Tags     region
+// @Summary  List all regions that has offline peer.
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/check/offline-peer [get]
+func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.OfflinePeer)
+}
+
+// @Tags     region
+// @Summary  List all regions that are oversized.
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/check/oversized-region [get]
+func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.OversizedRegion)
+}
+
+// @Tags     region
+// @Summary  List all regions that are undersized.
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/check/undersized-region [get]
+func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.UndersizedRegion)
+}
+
+// @Tags     region
+// @Summary  List all empty regions.
+// @Produce  json
+// @Success  200  {object}  RegionsInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/check/empty-region [get]
+func (h *regionsHandler) GetEmptyRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.EmptyRegion)
+>>>>>>> 40eaa35f2 (statistics: get region info via core cluster inside RegionStatistics (#6804))
 }
 
 type histItem struct {

@@ -792,6 +792,7 @@
           "intervalFactor": 2,
           "legendFormat": "{{type}}",
           "refId": "B"
+<<<<<<< HEAD
         },
         {
           "expr": "pd_regions_offline_status{tidb_cluster=\"$tidb_cluster\", type=\"offline-peer-region-count\", instance=\"$instance\"}",
@@ -799,6 +800,8 @@
           "intervalFactor": 1,
           "legendFormat": "{{type}}",
           "refId": "C"
+=======
+>>>>>>> 40eaa35f2 (statistics: get region info via core cluster inside RegionStatistics (#6804))
         }
       ],
       "thresholds": [
