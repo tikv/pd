@@ -2129,14 +2129,6 @@ func (c *RaftCluster) GetRegionStatsByType(typ statistics.RegionStatisticType) [
 	return c.regionStats.GetRegionStatsByType(typ)
 }
 
-// GetOfflineRegionStats gets the status of the offline region.
-func (c *RaftCluster) GetOfflineRegionStats() []*core.RegionInfo {
-	if c.regionStats == nil {
-		return nil
-	}
-	return c.regionStats.GetOfflineRegionStats()
-}
-
 // UpdateRegionsLabelLevelStats updates the status of the region label level by types.
 func (c *RaftCluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {

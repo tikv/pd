@@ -53,6 +53,7 @@ var regionStatisticTypes = []RegionStatisticType{
 	ExtraPeer,
 	DownPeer,
 	PendingPeer,
+	OfflinePeer,
 	LearnerPeer,
 	EmptyRegion,
 	OversizedRegion,
@@ -73,7 +74,9 @@ var (
 	regionOversizedRegionCounter     = regionStatusGauge.WithLabelValues("oversized-region-count")
 	regionUndersizedRegionCounter    = regionStatusGauge.WithLabelValues("undersized-region-count")
 	regionWitnessLeaderRegionCounter = regionStatusGauge.WithLabelValues("witness-leader-region-count")
-	regionOfflinePeerRegionCounter   = offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count")
+	// In order to maintain historical compatibility, we did not replace it with a unified `regionStatusGauge` metrics,
+	// but kept it so that we don't have to modify the Prometheus query on the Grafana dashboard.
+	regionOfflinePeerRegionCounter = offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count")
 )
 
 // RegionInfoWithTS is used to record the extra timestamp status of a region.
@@ -86,13 +89,9 @@ type RegionInfoWithTS struct {
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
 	sync.RWMutex
-	rip   RegionInfoProvider
-	conf  sc.CheckerConfig
-	stats map[RegionStatisticType]map[uint64]*RegionInfoWithTS
-	// Since we may easily have a large number of offline regions in the scale-in scenario,
-	// to prevent the lock contention with the heartbeat processing, we use a separate map
-	// to record the full offline region information here.
-	offlineStats       map[uint64]*core.RegionInfo
+	rip                RegionInfoProvider
+	conf               sc.CheckerConfig
+	stats              map[RegionStatisticType]map[uint64]*RegionInfoWithTS
 	index              map[uint64]RegionStatisticType
 	ruleManager        *placement.RuleManager
 	storeConfigManager *config.StoreConfigManager
@@ -111,7 +110,6 @@ func NewRegionStatistics(
 		ruleManager:        ruleManager,
 		storeConfigManager: storeConfigManager,
 		stats:              make(map[RegionStatisticType]map[uint64]*RegionInfoWithTS),
-		offlineStats:       make(map[uint64]*core.RegionInfo),
 		index:              make(map[uint64]RegionStatisticType),
 	}
 	for _, typ := range regionStatisticTypes {
@@ -138,18 +136,6 @@ func (r *RegionStatistics) IsRegionStatsType(regionID uint64, typ RegionStatisti
 	defer r.RUnlock()
 	_, exist := r.stats[typ][regionID]
 	return exist
-}
-
-// GetOfflineRegionStats gets the status of the offline region.
-// The regions here need to be cloned, otherwise, it may cause data race problems.
-func (r *RegionStatistics) GetOfflineRegionStats() []*core.RegionInfo {
-	r.RLock()
-	defer r.RUnlock()
-	res := make([]*core.RegionInfo, 0, len(r.offlineStats))
-	for _, r := range r.offlineStats {
-		res = append(res, r.Clone())
-	}
-	return res
 }
 
 func (r *RegionStatistics) deleteEntry(deleteIndex RegionStatisticType, regionID uint64) {
@@ -198,17 +184,6 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			}
 		}
 	}
-	// Check if the region is in a removing state.
-	var isRemoving bool
-	for _, store := range stores {
-		if store.IsRemoving() {
-			peer := region.GetStorePeer(store.GetID())
-			if peer != nil {
-				isRemoving = true
-				break
-			}
-		}
-	}
 	// Better to make sure once any of these conditions changes, it will trigger the heartbeat `save_cache`.
 	// Otherwise, the state may be out-of-date for a long time, which needs another way to apply the change ASAP.
 	// For example, see `RegionStatsNeedUpdate` above to know how `OversizedRegion` and `UndersizedRegion` are updated.
@@ -217,6 +192,17 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		ExtraPeer:   len(region.GetPeers()) > desiredReplicas,
 		DownPeer:    len(region.GetDownPeers()) > 0,
 		PendingPeer: len(region.GetPendingPeers()) > 0,
+		OfflinePeer: func() bool {
+			for _, store := range stores {
+				if store.IsRemoving() {
+					peer := region.GetStorePeer(store.GetID())
+					if peer != nil {
+						return true
+					}
+				}
+			}
+			return false
+		}(),
 		LearnerPeer: len(region.GetLearners()) > 0,
 		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
 		OversizedRegion: region.IsOversized(
@@ -255,13 +241,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			peerTypeIndex |= typ
 		}
 	}
-	// Update the offline region info.
-	if isRemoving {
-		r.offlineStats[regionID] = region
-	} else {
-		delete(r.offlineStats, regionID)
-	}
-	// Remove the info if any of the conditions doesn't meet any more.
+	// Remove the info if any of the conditions are not met any more.
 	if oldIndex, ok := r.index[regionID]; ok {
 		deleteIndex = oldIndex &^ peerTypeIndex
 	}
@@ -276,7 +256,6 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 	if oldIndex, ok := r.index[regionID]; ok {
 		r.deleteEntry(oldIndex, regionID)
 	}
-	delete(r.offlineStats, regionID)
 }
 
 // Collect collects the metrics of the regions' status.
@@ -292,7 +271,7 @@ func (r *RegionStatistics) Collect() {
 	regionOversizedRegionCounter.Set(float64(len(r.stats[OversizedRegion])))
 	regionUndersizedRegionCounter.Set(float64(len(r.stats[UndersizedRegion])))
 	regionWitnessLeaderRegionCounter.Set(float64(len(r.stats[WitnessLeader])))
-	regionOfflinePeerRegionCounter.Set(float64(len(r.offlineStats)))
+	regionOfflinePeerRegionCounter.Set(float64(len(r.stats[OfflinePeer])))
 }
 
 // Reset resets the metrics of the regions' status.

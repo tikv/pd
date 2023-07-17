@@ -1308,13 +1308,13 @@ func TestOfflineAndMerge(t *testing.T) {
 		regions = core.SplitRegions(regions)
 	}
 	heartbeatRegions(re, cluster, regions)
-	re.Len(cluster.GetOfflineRegionStats(), len(regions))
+	re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
 
 	// Merge.
 	for i := 0; i < n; i++ {
 		regions = core.MergeRegions(regions)
 		heartbeatRegions(re, cluster, regions)
-		re.Len(cluster.GetOfflineRegionStats(), len(regions))
+		re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
 	}
 }
 

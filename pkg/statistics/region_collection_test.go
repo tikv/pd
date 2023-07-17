@@ -71,7 +71,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[LearnerPeer], 1)
 	re.Len(regionStats.stats[EmptyRegion], 1)
 	re.Len(regionStats.stats[UndersizedRegion], 1)
-	re.Len(regionStats.offlineStats, 1)
+	re.Len(regionStats.stats[OfflinePeer], 1)
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
@@ -87,7 +87,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Empty(regionStats.stats[EmptyRegion])
 	re.Len(regionStats.stats[OversizedRegion], 1)
 	re.Empty(regionStats.stats[UndersizedRegion])
-	re.Len(regionStats.offlineStats, 1)
+	re.Len(regionStats.stats[OfflinePeer], 1)
 
 	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
 	regionStats.Observe(region2, stores[0:2])
@@ -98,7 +98,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[LearnerPeer], 1)
 	re.Len(regionStats.stats[OversizedRegion], 1)
 	re.Len(regionStats.stats[UndersizedRegion], 1)
-	re.Len(regionStats.offlineStats, 1)
+	re.Len(regionStats.stats[OfflinePeer], 1)
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
 	regionStats.Observe(region1, stores[0:3])
@@ -107,7 +107,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[DownPeer], 2)
 	re.Len(regionStats.stats[PendingPeer], 1)
 	re.Empty(regionStats.stats[LearnerPeer])
-	re.Empty(regionStats.offlineStats)
+	re.Empty(regionStats.stats[OfflinePeer])
 
 	store3 = stores[3].Clone(core.UpStore())
 	stores[3] = store3
