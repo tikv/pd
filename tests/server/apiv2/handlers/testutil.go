@@ -168,15 +168,13 @@ func tryCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, re
 
 // MustLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
 func MustLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) *endpoint.KeyspaceGroup {
-	code, data := TryLoadKeyspaceGroupByID(re, server, id)
-	re.Equal(http.StatusOK, code, string(data))
-	var kg endpoint.KeyspaceGroup
-	re.NoError(json.Unmarshal(data, &kg))
-	return &kg
+	kg, code := TryLoadKeyspaceGroupByID(re, server, id)
+	re.Equal(http.StatusOK, code)
+	return kg
 }
 
 // TryLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
-func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) (int, []byte) {
+func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, int) {
 	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), nil)
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
@@ -184,7 +182,13 @@ func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, 
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	re.NoError(err)
-	return resp.StatusCode, data
+	if resp.StatusCode != http.StatusOK {
+		return nil, resp.StatusCode
+	}
+
+	var kg endpoint.KeyspaceGroup
+	re.NoError(json.Unmarshal(data, &kg))
+	return &kg, resp.StatusCode
 }
 
 // MustCreateKeyspaceGroup creates a keyspace group with HTTP API.
