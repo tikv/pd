@@ -77,10 +77,11 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
+func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit
-	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
-	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	conf := cluster.GetSchedulerConfig()
+	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
+	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
 	if !hotRegionAllowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpHotRegion.String()).Inc()
 	}
@@ -93,7 +94,7 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.ScheduleClust
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
 
-func (s *shuffleHotRegionScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *shuffleHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
@@ -101,7 +102,7 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster sche.ScheduleCluster, dryRu
 	return operators, nil
 }
 
-func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.ScheduleCluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
+func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
 	for _, detail := range loadDetail {
 		if len(detail.HotPeers) < 1 {
 			continue
@@ -122,12 +123,12 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.ScheduleCluster,
 		filters := []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.Low},
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()),
-			filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
+			filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
 		}
 		stores := cluster.GetStores()
 		destStoreIDs := make([]uint64, 0, len(stores))
 		for _, store := range stores {
-			if !filter.Target(cluster.GetOpts(), store, filters) {
+			if !filter.Target(cluster.GetSchedulerConfig(), store, filters) {
 				continue
 			}
 			destStoreIDs = append(destStoreIDs, store.GetID())

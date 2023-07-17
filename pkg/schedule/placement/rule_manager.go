@@ -50,11 +50,11 @@ type RuleManager struct {
 	keyType          string
 	storeSetInformer core.StoreSetInformer
 	cache            *RegionRuleFitCacheManager
-	conf             config.Config
+	conf             config.SharedConfig
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.Config) *RuleManager {
+func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfig) *RuleManager {
 	return &RuleManager{
 		storage:          storage,
 		storeSetInformer: storeSetInformer,

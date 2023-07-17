@@ -446,14 +446,15 @@ func (conf *hotRegionSchedulerConfig) persistLocked() error {
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }
 
-func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.ScheduleCluster) bool {
-	querySupport := versioninfo.IsFeatureSupported(cluster.GetOpts().GetClusterVersion(), versioninfo.HotScheduleWithQuery)
+func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.SchedulerCluster) bool {
+	version := cluster.GetSchedulerConfig().GetClusterVersion()
+	querySupport := versioninfo.IsFeatureSupported(version, versioninfo.HotScheduleWithQuery)
 	conf.Lock()
 	defer conf.Unlock()
 	if querySupport != conf.lastQuerySupported {
 		log.Info("query supported changed",
 			zap.Bool("last-query-support", conf.lastQuerySupported),
-			zap.String("cluster-version", cluster.GetOpts().GetClusterVersion().String()),
+			zap.String("cluster-version", version.String()),
 			zap.Reflect("config", conf),
 			zap.Reflect("valid-config", conf.getValidConf()))
 		conf.lastQuerySupported = querySupport

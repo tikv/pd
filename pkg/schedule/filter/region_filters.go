@@ -100,12 +100,12 @@ func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 
 // RegionReplicatedFilter filters all unreplicated regions.
 type RegionReplicatedFilter struct {
-	cluster sche.ScheduleCluster
+	cluster sche.SharedCluster
 	fit     *placement.RegionFit
 }
 
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
-func NewRegionReplicatedFilter(cluster sche.ScheduleCluster) RegionFilter {
+func NewRegionReplicatedFilter(cluster sche.SharedCluster) RegionFilter {
 	return &RegionReplicatedFilter{cluster: cluster}
 }
 
@@ -117,7 +117,7 @@ func (f *RegionReplicatedFilter) GetFit() *placement.RegionFit {
 // Select returns Ok if the given region satisfy the replication.
 // it will cache the lasted region fit if the region satisfy the replication.
 func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
-	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
+	if f.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
 		fit := f.cluster.GetRuleManager().FitRegion(f.cluster, region)
 		if !fit.IsSatisfied() {
 			return statusRegionNotMatchRule
@@ -132,11 +132,11 @@ func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 type regionEmptyFilter struct {
-	cluster sche.ScheduleCluster
+	cluster sche.SharedCluster
 }
 
 // NewRegionEmptyFilter returns creates a RegionFilter that filters all empty regions.
-func NewRegionEmptyFilter(cluster sche.ScheduleCluster) RegionFilter {
+func NewRegionEmptyFilter(cluster sche.SharedCluster) RegionFilter {
 	return &regionEmptyFilter{cluster: cluster}
 }
 
@@ -148,7 +148,7 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
-func isEmptyRegionAllowBalance(cluster sche.ScheduleCluster, region *core.RegionInfo) bool {
+func isEmptyRegionAllowBalance(cluster sche.SharedCluster, region *core.RegionInfo) bool {
 	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetTotalRegionCount() < core.InitClusterRegionThreshold
 }
 

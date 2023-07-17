@@ -46,7 +46,7 @@ func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (contex
 	ctx, cancel := context.WithCancel(context.Background())
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), nil)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), nil)
 	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(ruleEnable)
 
@@ -95,7 +95,7 @@ func newBenchBigCluster(storeNumInOneRack, regionNum int) (context.CancelFunc, *
 	ctx, cancel := context.WithCancel(context.Background())
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), nil)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), nil)
 	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(true)
 

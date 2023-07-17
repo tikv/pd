@@ -44,7 +44,7 @@ const (
 
 type solver struct {
 	*plan.BalanceSchedulerPlan
-	sche.ScheduleCluster
+	sche.SchedulerCluster
 	kind              constant.ScheduleKind
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
@@ -55,10 +55,10 @@ type solver struct {
 	targetScore float64
 }
 
-func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.ScheduleCluster, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence operator.OpInfluence) *solver {
 	return &solver{
 		BalanceSchedulerPlan: basePlan,
-		ScheduleCluster:      cluster,
+		SchedulerCluster:     cluster,
 		kind:                 kind,
 		opInfluence:          opInfluence,
 		tolerantSizeRatio:    adjustTolerantRatio(cluster, kind),
@@ -95,8 +95,7 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 		influence = -influence
 	}
 
-	opts := p.GetOpts()
-	if opts.IsDebugMetricsEnabled() {
+	if p.GetSchedulerConfig().IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(influence))
 		tolerantResourceStatus.WithLabelValues(scheduleName).Set(float64(tolerantResource))
 	}
@@ -107,7 +106,7 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 		score = p.Source.LeaderScore(p.kind.Policy, sourceDelta)
 	case constant.RegionKind:
 		sourceDelta := influence*influenceAmp - tolerantResource
-		score = p.Source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
+		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
 	case constant.WitnessKind:
 		sourceDelta := influence - tolerantResource
 		score = p.Source.WitnessScore(sourceDelta)
@@ -127,8 +126,7 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 		influence = -influence
 	}
 
-	opts := p.GetOpts()
-	if opts.IsDebugMetricsEnabled() {
+	if p.GetSchedulerConfig().IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(influence))
 	}
 	var score float64
@@ -138,7 +136,7 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
 	case constant.RegionKind:
 		targetDelta := influence*influenceAmp + tolerantResource
-		score = p.Target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
+		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
 	case constant.WitnessKind:
 		targetDelta := influence + tolerantResource
 		score = p.Target.WitnessScore(targetDelta)
@@ -182,14 +180,14 @@ func (p *solver) getTolerantResource() int64 {
 	return p.tolerantSource
 }
 
-func adjustTolerantRatio(cluster sche.ScheduleCluster, kind constant.ScheduleKind) float64 {
+func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKind) float64 {
 	var tolerantSizeRatio float64
 	switch c := cluster.(type) {
 	case *rangeCluster:
 		// range cluster use a separate configuration
 		tolerantSizeRatio = c.GetTolerantSizeRatio()
 	default:
-		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
+		tolerantSizeRatio = cluster.GetSchedulerConfig().GetTolerantSizeRatio()
 	}
 	if kind.Resource == constant.LeaderKind && kind.Policy == constant.ByCount {
 		if tolerantSizeRatio == 0 {

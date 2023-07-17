@@ -24,12 +24,12 @@ import (
 
 // Manager is used to manage the diagnostic result of schedulers for now.
 type Manager struct {
-	config              config.Config
+	config              config.SchedulerConfig
 	schedulerController *schedulers.Controller
 }
 
 // NewManager creates a new Manager.
-func NewManager(schedulerController *schedulers.Controller, config config.Config) *Manager {
+func NewManager(schedulerController *schedulers.Controller, config config.SchedulerConfig) *Manager {
 	return &Manager{
 		config:              config,
 		schedulerController: schedulerController,

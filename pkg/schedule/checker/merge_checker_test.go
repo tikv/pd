@@ -80,7 +80,7 @@ func (suite *mergeCheckerTestSuite) SetupTest() {
 	for _, region := range suite.regions {
 		suite.cluster.PutRegion(region)
 	}
-	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetOpts())
+	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetCheckerConfig())
 }
 
 func (suite *mergeCheckerTestSuite) TearDownTest() {
@@ -461,9 +461,9 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 		tc.PutRegion(region)
 	}
 
-	mc := NewMergeChecker(suite.ctx, tc, tc.GetOpts())
+	mc := NewMergeChecker(suite.ctx, tc, tc.GetCheckerConfig())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := operator.NewController(suite.ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
+	oc := operator.NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	regions[2] = regions[2].Clone(
 		core.SetPeers([]*metapb.Peer{
@@ -530,7 +530,7 @@ func (suite *mergeCheckerTestSuite) TestCache() {
 		suite.cluster.PutRegion(region)
 	}
 
-	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetOpts())
+	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetCheckerConfig())
 
 	ops := suite.mc.Check(suite.regions[1])
 	suite.Nil(ops)

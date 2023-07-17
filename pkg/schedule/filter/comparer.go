@@ -25,7 +25,7 @@ type StoreComparer func(a, b *core.StoreInfo) int
 
 // RegionScoreComparer creates a StoreComparer to sort store by region
 // score.
-func RegionScoreComparer(conf config.Config) StoreComparer {
+func RegionScoreComparer(conf config.SharedConfig) StoreComparer {
 	return func(a, b *core.StoreInfo) int {
 		sa := a.RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), 0)
 		sb := b.RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), 0)

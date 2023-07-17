@@ -77,19 +77,19 @@ func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetOpts().GetMergeScheduleLimit()
+func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetSchedulerConfig().GetMergeScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpMerge.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *randomMergeScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	randomMergeCounter.Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
-		FilterSource(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true, OperatorLevel: constant.Low}).
+		FilterSource(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true, OperatorLevel: constant.Low}).
 		RandomPick()
 	if store == nil {
 		randomMergeNoSourceStoreCounter.Inc()
@@ -104,7 +104,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.ScheduleCluster, dryRun boo
 	}
 
 	other, target := cluster.GetAdjacentRegions(region)
-	if !cluster.GetOpts().IsOneWayMergeEnabled() && ((rand.Int()%2 == 0 && other != nil) || target == nil) {
+	if !cluster.GetSchedulerConfig().IsOneWayMergeEnabled() && ((rand.Int()%2 == 0 && other != nil) || target == nil) {
 		target = other
 	}
 	if target == nil {
@@ -128,7 +128,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.ScheduleCluster, dryRun boo
 	return ops, nil
 }
 
-func (s *randomMergeScheduler) allowMerge(cluster sche.ScheduleCluster, region, target *core.RegionInfo) bool {
+func (s *randomMergeScheduler) allowMerge(cluster sche.SchedulerCluster, region, target *core.RegionInfo) bool {
 	if !filter.IsRegionHealthy(region) || !filter.IsRegionHealthy(target) {
 		return false
 	}
