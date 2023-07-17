@@ -261,6 +261,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 					zap.Int64("required-revision", revision),
 					zap.Int64("compact-revision", wresp.CompactRevision))
 				revision = wresp.CompactRevision
+				lastHealthyTime = time.Now()
 				continue
 			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
 				log.Error("leadership watcher is canceled with",
