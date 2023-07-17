@@ -69,14 +69,12 @@ var (
 	regionExtraPeerRegionCounter     = regionStatusGauge.WithLabelValues("extra-peer-region-count")
 	regionDownPeerRegionCounter      = regionStatusGauge.WithLabelValues("down-peer-region-count")
 	regionPendingPeerRegionCounter   = regionStatusGauge.WithLabelValues("pending-peer-region-count")
+	regionOfflinePeerRegionCounter   = regionStatusGauge.WithLabelValues("offline-peer-region-count")
 	regionLearnerPeerRegionCounter   = regionStatusGauge.WithLabelValues("learner-peer-region-count")
 	regionEmptyRegionCounter         = regionStatusGauge.WithLabelValues("empty-region-count")
 	regionOversizedRegionCounter     = regionStatusGauge.WithLabelValues("oversized-region-count")
 	regionUndersizedRegionCounter    = regionStatusGauge.WithLabelValues("undersized-region-count")
 	regionWitnessLeaderRegionCounter = regionStatusGauge.WithLabelValues("witness-leader-region-count")
-	// In order to maintain historical compatibility, we did not replace it with a unified `regionStatusGauge` metrics,
-	// but kept it so that we don't have to modify the Prometheus query on the Grafana dashboard.
-	regionOfflinePeerRegionCounter = offlineRegionStatusGauge.WithLabelValues("offline-peer-region-count")
 )
 
 // RegionInfoWithTS is used to record the extra timestamp status of a region.
@@ -266,12 +264,12 @@ func (r *RegionStatistics) Collect() {
 	regionExtraPeerRegionCounter.Set(float64(len(r.stats[ExtraPeer])))
 	regionDownPeerRegionCounter.Set(float64(len(r.stats[DownPeer])))
 	regionPendingPeerRegionCounter.Set(float64(len(r.stats[PendingPeer])))
+	regionOfflinePeerRegionCounter.Set(float64(len(r.stats[OfflinePeer])))
 	regionLearnerPeerRegionCounter.Set(float64(len(r.stats[LearnerPeer])))
 	regionEmptyRegionCounter.Set(float64(len(r.stats[EmptyRegion])))
 	regionOversizedRegionCounter.Set(float64(len(r.stats[OversizedRegion])))
 	regionUndersizedRegionCounter.Set(float64(len(r.stats[UndersizedRegion])))
 	regionWitnessLeaderRegionCounter.Set(float64(len(r.stats[WitnessLeader])))
-	regionOfflinePeerRegionCounter.Set(float64(len(r.stats[OfflinePeer])))
 }
 
 // Reset resets the metrics of the regions' status.
@@ -280,12 +278,12 @@ func (r *RegionStatistics) Reset() {
 	regionExtraPeerRegionCounter.Set(0)
 	regionDownPeerRegionCounter.Set(0)
 	regionPendingPeerRegionCounter.Set(0)
+	regionOfflinePeerRegionCounter.Set(0)
 	regionLearnerPeerRegionCounter.Set(0)
 	regionEmptyRegionCounter.Set(0)
 	regionOversizedRegionCounter.Set(0)
 	regionUndersizedRegionCounter.Set(0)
 	regionWitnessLeaderRegionCounter.Set(0)
-	regionOfflinePeerRegionCounter.Set(0)
 }
 
 // LabelStatistics is the statistics of the level of labels.
