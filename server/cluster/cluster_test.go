@@ -1348,7 +1348,6 @@ func TestSyncConfig(t *testing.T) {
 		if v.updated {
 			re.True(switchRaftV2)
 			tc.opt.UseRaftV2()
-			re.EqualValues(0, tc.opt.GetMaxMergeRegionSize())
 			re.EqualValues(512, tc.opt.GetMaxMovableHotPeerSize())
 			success, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
 			re.True(success)
@@ -2409,7 +2408,7 @@ func TestCollectMetrics(t *testing.T) {
 	stores := co.GetCluster().GetStores()
 	regionStats := co.GetCluster().RegionWriteStats()
 	status1 := statistics.CollectHotPeerInfos(stores, regionStats)
-	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, statistics.Write, co.GetCluster().GetOpts().IsTraceRegionFlow())
+	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, statistics.Write, co.GetCluster().GetSchedulerConfig().IsTraceRegionFlow())
 	for _, s := range status2.AsLeader {
 		s.Stats = nil
 	}
@@ -3391,7 +3390,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 

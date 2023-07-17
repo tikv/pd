@@ -22,22 +22,22 @@ import (
 
 // rangeCluster isolates the cluster by range.
 type rangeCluster struct {
-	sche.ScheduleCluster
+	sche.SchedulerCluster
 	subCluster        *core.BasicCluster // Collect all regions belong to the range.
 	tolerantSizeRatio float64
 }
 
 // genRangeCluster gets a range cluster by specifying start key and end key.
 // The cluster can only know the regions within [startKey, endKey).
-func genRangeCluster(cluster sche.ScheduleCluster, startKey, endKey []byte) *rangeCluster {
+func genRangeCluster(cluster sche.SchedulerCluster, startKey, endKey []byte) *rangeCluster {
 	subCluster := core.NewBasicCluster()
 	for _, r := range cluster.ScanRegions(startKey, endKey, -1) {
 		origin, overlaps, rangeChanged := subCluster.SetRegion(r)
 		subCluster.UpdateSubTree(r, origin, overlaps, rangeChanged)
 	}
 	return &rangeCluster{
-		ScheduleCluster: cluster,
-		subCluster:      subCluster,
+		SchedulerCluster: cluster,
+		subCluster:       subCluster,
 	}
 }
 
@@ -70,7 +70,7 @@ func (r *rangeCluster) updateStoreInfo(s *core.StoreInfo) *core.StoreInfo {
 
 // GetStore searches for a store by ID.
 func (r *rangeCluster) GetStore(id uint64) *core.StoreInfo {
-	s := r.ScheduleCluster.GetStore(id)
+	s := r.SchedulerCluster.GetStore(id)
 	if s == nil {
 		return nil
 	}
@@ -79,7 +79,7 @@ func (r *rangeCluster) GetStore(id uint64) *core.StoreInfo {
 
 // GetStores returns all Stores in the cluster.
 func (r *rangeCluster) GetStores() []*core.StoreInfo {
-	stores := r.ScheduleCluster.GetStores()
+	stores := r.SchedulerCluster.GetStores()
 	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
@@ -97,7 +97,7 @@ func (r *rangeCluster) GetTolerantSizeRatio() float64 {
 	if r.tolerantSizeRatio != 0 {
 		return r.tolerantSizeRatio
 	}
-	return r.ScheduleCluster.GetOpts().GetTolerantSizeRatio()
+	return r.SchedulerCluster.GetSchedulerConfig().GetTolerantSizeRatio()
 }
 
 // RandFollowerRegions returns a random region that has a follower on the store.
@@ -117,7 +117,7 @@ func (r *rangeCluster) GetAverageRegionSize() int64 {
 
 // GetRegionStores returns all stores that contains the region's peer.
 func (r *rangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
-	stores := r.ScheduleCluster.GetRegionStores(region)
+	stores := r.SchedulerCluster.GetRegionStores(region)
 	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
@@ -127,7 +127,7 @@ func (r *rangeCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInf
 
 // GetFollowerStores returns all stores that contains the region's follower peer.
 func (r *rangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
-	stores := r.ScheduleCluster.GetFollowerStores(region)
+	stores := r.SchedulerCluster.GetFollowerStores(region)
 	newStores := make([]*core.StoreInfo, 0, len(stores))
 	for _, s := range stores {
 		newStores = append(newStores, r.updateStoreInfo(s))
@@ -137,7 +137,7 @@ func (r *rangeCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreI
 
 // GetLeaderStore returns all stores that contains the region's leader peer.
 func (r *rangeCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
-	s := r.ScheduleCluster.GetLeaderStore(region)
+	s := r.SchedulerCluster.GetLeaderStore(region)
 	if s != nil {
 		return r.updateStoreInfo(s)
 	}

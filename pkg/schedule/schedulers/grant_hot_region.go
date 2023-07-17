@@ -152,9 +152,10 @@ func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 
 // IsScheduleAllowed returns whether the scheduler is allowed to schedule.
 // TODO it should check if there is any scheduler such as evict or hot region scheduler
-func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
-	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	conf := cluster.GetSchedulerConfig()
+	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
+	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
 	if !regionAllowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
 	}
@@ -226,14 +227,14 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 	return router
 }
 
-func (s *grantHotRegionScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *grantHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	grantHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
 	return s.dispatch(rw, cluster), nil
 }
 
-func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster sche.ScheduleCluster) []*operator.Operator {
+func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster sche.SchedulerCluster) []*operator.Operator {
 	stLoadInfos := s.stLoadInfos[buildResourceType(typ, constant.RegionKind)]
 	infos := make([]*statistics.StoreLoadDetail, len(stLoadInfos))
 	index := 0
@@ -247,7 +248,7 @@ func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster sche.S
 	return s.randomSchedule(cluster, infos)
 }
 
-func (s *grantHotRegionScheduler) randomSchedule(cluster sche.ScheduleCluster, srcStores []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
+func (s *grantHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, srcStores []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
 	isLeader := s.r.Int()%2 == 1
 	for _, srcStore := range srcStores {
 		srcStoreID := srcStore.GetID()
@@ -278,7 +279,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster sche.ScheduleCluster, s
 	return nil
 }
 
-func (s *grantHotRegionScheduler) transfer(cluster sche.ScheduleCluster, regionID uint64, srcStoreID uint64, isLeader bool) (op *operator.Operator, err error) {
+func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, regionID uint64, srcStoreID uint64, isLeader bool) (op *operator.Operator, err error) {
 	srcRegion := cluster.GetRegion(regionID)
 	if srcRegion == nil || len(srcRegion.GetDownPeers()) != 0 || len(srcRegion.GetPendingPeers()) != 0 {
 		return nil, errs.ErrRegionRuleNotFound
@@ -289,7 +290,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.ScheduleCluster, regionI
 		return nil, errs.ErrStoreNotFound
 	}
 	filters := []filter.Filter{
-		filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
+		filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
 	}
 
 	destStoreIDs := make([]uint64, 0, len(s.conf.StoreIDs))
@@ -304,7 +305,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.ScheduleCluster, regionI
 	}
 	for _, storeID := range candidate {
 		store := cluster.GetStore(storeID)
-		if !filter.Target(cluster.GetOpts(), store, filters) {
+		if !filter.Target(cluster.GetSchedulerConfig(), store, filters) {
 			continue
 		}
 		destStoreIDs = append(destStoreIDs, storeID)

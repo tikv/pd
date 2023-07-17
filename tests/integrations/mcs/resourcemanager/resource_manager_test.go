@@ -968,8 +968,12 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	}
 	re.NoError(suite.cluster.RunServers(serverList))
 	suite.cluster.WaitLeader()
-	newGroups, err := cli.ListResourceGroups(suite.ctx)
-	re.NoError(err)
+	var newGroups []*rmpb.ResourceGroup
+	testutil.Eventually(suite.Require(), func() bool {
+		var err error
+		newGroups, err = cli.ListResourceGroups(suite.ctx)
+		return err == nil
+	}, testutil.WithWaitFor(time.Second))
 	re.Equal(groups, newGroups)
 }
 
@@ -1077,7 +1081,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.NoError(err)
 	config := ctr.GetConfig()
 	re.NotNil(config)
-	expectedConfig := controller.DefaultConfig()
+	expectedConfig := controller.DefaultRUConfig()
 	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
 	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
 	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)
@@ -1095,9 +1099,9 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.NoError(err)
 	config = ctr.GetConfig()
 	re.NotNil(config)
-	controllerConfig := controller.DefaultControllerConfig()
+	controllerConfig := controller.DefaultConfig()
 	controllerConfig.RequestUnit = *ruConfig
-	expectedConfig = controller.GenerateConfig(controllerConfig)
+	expectedConfig = controller.GenerateRUConfig(controllerConfig)
 	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
 	re.Equal(expectedConfig.ReadBytesCost, config.ReadBytesCost)
 	re.Equal(expectedConfig.WriteBaseCost, config.WriteBaseCost)

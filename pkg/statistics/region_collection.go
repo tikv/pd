@@ -74,7 +74,7 @@ type RegionInfo struct {
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
 	sync.RWMutex
-	conf               sc.Config
+	conf               sc.CheckerConfig
 	stats              map[RegionStatisticType]map[uint64]*RegionInfo
 	offlineStats       map[RegionStatisticType]map[uint64]*core.RegionInfo
 	index              map[uint64]RegionStatisticType
@@ -84,7 +84,7 @@ type RegionStatistics struct {
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
-func NewRegionStatistics(conf sc.Config, ruleManager *placement.RuleManager, storeConfigManager *config.StoreConfigManager) *RegionStatistics {
+func NewRegionStatistics(conf sc.CheckerConfig, ruleManager *placement.RuleManager, storeConfigManager *config.StoreConfigManager) *RegionStatistics {
 	r := &RegionStatistics{
 		conf:               conf,
 		ruleManager:        ruleManager,

@@ -196,6 +196,21 @@ func (c *RaftCluster) GetStoreConfig() sc.StoreConfig {
 	return c.storeConfigManager.GetStoreConfig()
 }
 
+// GetCheckerConfig returns the checker config.
+func (c *RaftCluster) GetCheckerConfig() sc.CheckerConfig {
+	return c.GetOpts()
+}
+
+// GetSchedulerConfig returns the scheduler config.
+func (c *RaftCluster) GetSchedulerConfig() sc.SchedulerConfig {
+	return c.GetOpts()
+}
+
+// GetSharedConfig returns the shared config.
+func (c *RaftCluster) GetSharedConfig() sc.SharedConfig {
+	return c.GetOpts()
+}
+
 // LoadClusterStatus loads the cluster status.
 func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 	bootstrapTime, err := c.loadBootstrapTime()
@@ -878,7 +893,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
 	// c.limiter is nil before "start" is called
-	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
+	if c.limiter != nil {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 

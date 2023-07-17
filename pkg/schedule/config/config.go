@@ -28,17 +28,18 @@ func IsSchedulerRegistered(name string) bool {
 	return ok
 }
 
-// Config is the interface that wraps the Config related methods.
-type Config interface {
+// SchedulerConfig is the interface for scheduler configurations.
+type SchedulerConfig interface {
+	SharedConfig
+
 	IsSchedulingHalted() bool
+
 	IsSchedulerDisabled(string) bool
 	AddSchedulerCfg(string, []string)
 	RemoveSchedulerCfg(string)
 	Persist(endpoint.ConfigStorage) error
 
-	GetReplicaScheduleLimit() uint64
 	GetRegionScheduleLimit() uint64
-	GetMergeScheduleLimit() uint64
 	GetLeaderScheduleLimit() uint64
 	GetHotRegionScheduleLimit() uint64
 	GetWitnessScheduleLimit() uint64
@@ -47,54 +48,69 @@ type Config interface {
 	GetMaxMovableHotPeerSize() int64
 	IsTraceRegionFlow() bool
 
-	GetSplitMergeInterval() time.Duration
-	GetMaxMergeRegionSize() uint64
-	GetMaxMergeRegionKeys() uint64
-	GetKeyType() constant.KeyType
-	IsOneWayMergeEnabled() bool
-	IsCrossTableMergeEnabled() bool
-
-	IsPlacementRulesEnabled() bool
-	IsPlacementRulesCacheEnabled() bool
-
-	GetMaxReplicas() int
-	GetPatrolRegionInterval() time.Duration
-	GetMaxStoreDownTime() time.Duration
-	GetLocationLabels() []string
-	GetIsolationLevel() string
-	IsReplaceOfflineReplicaEnabled() bool
-	IsMakeUpReplicaEnabled() bool
-	IsRemoveExtraReplicaEnabled() bool
-	IsLocationReplacementEnabled() bool
-	IsRemoveDownReplicaEnabled() bool
-
-	GetSwitchWitnessInterval() time.Duration
-	IsWitnessAllowed() bool
-
-	GetLowSpaceRatio() float64
-	GetHighSpaceRatio() float64
 	GetTolerantSizeRatio() float64
 	GetLeaderSchedulePolicy() constant.SchedulePolicy
-	GetRegionScoreFormulaVersion() string
 
+	IsDebugMetricsEnabled() bool
+	IsDiagnosticAllowed() bool
+	GetSlowStoreEvictingAffectedStoreRatioThreshold() float64
+}
+
+// CheckerConfig is the interface for checker configurations.
+type CheckerConfig interface {
+	SharedConfig
+
+	GetSwitchWitnessInterval() time.Duration
+	IsRemoveExtraReplicaEnabled() bool
+	IsRemoveDownReplicaEnabled() bool
+	IsReplaceOfflineReplicaEnabled() bool
+	IsMakeUpReplicaEnabled() bool
+	IsLocationReplacementEnabled() bool
+	GetIsolationLevel() string
+	GetSplitMergeInterval() time.Duration
+	GetPatrolRegionInterval() time.Duration
+	GetMaxMergeRegionSize() uint64
+	GetMaxMergeRegionKeys() uint64
+	GetReplicaScheduleLimit() uint64
+}
+
+// SharedConfig is the interface for shared configurations.
+type SharedConfig interface {
+	GetMaxReplicas() int
+	IsPlacementRulesEnabled() bool
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
+	GetLowSpaceRatio() float64
+	GetHighSpaceRatio() float64
+	GetMaxStoreDownTime() time.Duration
+	GetLocationLabels() []string
+	CheckLabelProperty(string, []*metapb.StoreLabel) bool
+	GetClusterVersion() *semver.Version
+	IsUseJointConsensus() bool
+	GetKeyType() constant.KeyType
+	IsCrossTableMergeEnabled() bool
+	IsOneWayMergeEnabled() bool
+	GetMergeScheduleLimit() uint64
+	GetRegionScoreFormulaVersion() string
 	GetSchedulerMaxWaitingOperator() uint64
 	GetStoreLimitByType(uint64, storelimit.Type) float64
-	SetAllStoresLimit(storelimit.Type, float64)
-	GetSlowStoreEvictingAffectedStoreRatioThreshold() float64
-	IsUseJointConsensus() bool
-	CheckLabelProperty(string, []*metapb.StoreLabel) bool
-	IsDebugMetricsEnabled() bool
-	GetClusterVersion() *semver.Version
-	GetStoreLimitVersion() string
-	IsDiagnosticAllowed() bool
+	IsWitnessAllowed() bool
+	IsPlacementRulesCacheEnabled() bool
+
+	// for test purpose
+	SetPlacementRulesCacheEnabled(bool)
+	SetEnableWitness(bool)
+}
+
+// Config is the interface that wraps the Config related methods.
+type Config interface {
+	SchedulerConfig
+	CheckerConfig
 	// for test purpose
 	SetPlacementRuleEnabled(bool)
 	SetSplitMergeInterval(time.Duration)
 	SetMaxReplicas(int)
-	SetPlacementRulesCacheEnabled(bool)
-	SetEnableWitness(bool)
+	SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 	// only for store configuration
 	UseRaftV2()
 }

@@ -204,7 +204,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
+func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -216,7 +216,7 @@ func (s *evictLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
 	return res
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
+func (s *evictLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
@@ -224,15 +224,15 @@ func (s *evictLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
 	}
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize), nil
 }
@@ -257,7 +257,7 @@ type evictLeaderStoresConf interface {
 	getKeyRangesByID(id uint64) []core.KeyRange
 }
 
-func scheduleEvictLeaderBatch(name, typ string, cluster sche.ScheduleCluster, conf evictLeaderStoresConf, batchSize int) []*operator.Operator {
+func scheduleEvictLeaderBatch(name, typ string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
 	for i := 0; i < batchSize; i++ {
 		once := scheduleEvictLeaderOnce(name, typ, cluster, conf)
@@ -274,7 +274,7 @@ func scheduleEvictLeaderBatch(name, typ string, cluster sche.ScheduleCluster, co
 	return ops
 }
 
-func scheduleEvictLeaderOnce(name, typ string, cluster sche.ScheduleCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(name, typ string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -306,7 +306,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster sche.ScheduleCluster, con
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
 		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), nil, nil, filters...)
+			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
 		// Compatible with old TiKV transfer leader logic.
 		target := candidates.RandomPick()
 		targets := candidates.PickAll()

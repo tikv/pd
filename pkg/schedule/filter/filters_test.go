@@ -93,7 +93,7 @@ func TestLabelConstraintsFilter(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		filter := NewLabelConstraintFilter("", []placement.LabelConstraint{{Key: testCase.key, Op: placement.LabelConstraintOp(testCase.op), Values: testCase.values}})
-		re.Equal(testCase.res, filter.Source(testCluster.GetOpts(), store).StatusCode)
+		re.Equal(testCase.res, filter.Source(testCluster.GetSharedConfig(), store).StatusCode)
 	}
 }
 
@@ -139,15 +139,15 @@ func TestRuleFitFilter(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		filter := newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1)
-		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
-		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
+		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
+		re.Equal(testCase.targetRes, filter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
 		leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
-		re.Equal(testCase.targetRes, leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
+		re.Equal(testCase.targetRes, leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
 	}
 
 	// store-6 is not exist in the peers, so it will not allow transferring leader to store 6.
 	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, false)
-	re.False(leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(6)).IsOK())
+	re.False(leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).IsOK())
 }
 
 func TestSendStateFilter(t *testing.T) {
@@ -334,8 +334,8 @@ func TestIsolationFilter(t *testing.T) {
 	for _, testCase := range testCases {
 		filter := NewIsolationFilter("", testCase.isolationLevel, testCluster.GetLocationLabels(), testCluster.GetRegionStores(testCase.region))
 		for idx, store := range allStores {
-			re.Equal(testCase.sourceRes[idx], filter.Source(testCluster.GetOpts(), testCluster.GetStore(store.storeID)).StatusCode)
-			re.Equal(testCase.targetRes[idx], filter.Target(testCluster.GetOpts(), testCluster.GetStore(store.storeID)).StatusCode)
+			re.Equal(testCase.sourceRes[idx], filter.Source(testCluster.GetSharedConfig(), testCluster.GetStore(store.storeID)).StatusCode)
+			re.Equal(testCase.targetRes[idx], filter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(store.storeID)).StatusCode)
 		}
 	}
 }
@@ -362,10 +362,10 @@ func TestPlacementGuard(t *testing.T) {
 	store := testCluster.GetStore(1)
 
 	re.IsType(NewLocationSafeguard("", []string{"zone"}, testCluster.GetRegionStores(region), store),
-		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
+		NewPlacementSafeguard("", testCluster.GetSharedConfig(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
 	testCluster.SetEnablePlacementRules(true)
 	re.IsType(newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1),
-		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
+		NewPlacementSafeguard("", testCluster.GetSharedConfig(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
 }
 
 func TestSpecialUseFilter(t *testing.T) {
@@ -393,8 +393,8 @@ func TestSpecialUseFilter(t *testing.T) {
 		store := core.NewStoreInfoWithLabel(1, testCase.label)
 		store = store.Clone(core.SetStoreStats(&pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB}))
 		filter := NewSpecialUseFilter("", testCase.allowUse...)
-		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), store).StatusCode)
-		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), store).StatusCode)
+		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetSharedConfig(), store).StatusCode)
+		re.Equal(testCase.targetRes, filter.Target(testCluster.GetSharedConfig(), store).StatusCode)
 	}
 }
 

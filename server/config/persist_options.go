@@ -202,13 +202,7 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 }
 
 // UseRaftV2 set some config for raft store v2 by default temporary.
-// todo: remove this after raft store support this.
-// disable merge check
-func (o *PersistOptions) UseRaftV2() {
-	v := o.GetScheduleConfig().Clone()
-	v.MaxMergeRegionSize = 0
-	o.SetScheduleConfig(v)
-}
+func (o *PersistOptions) UseRaftV2() {}
 
 const (
 	maxSnapshotCountKey            = "schedule.max-snapshot-count"
@@ -505,11 +499,6 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 // GetAllStoresLimit returns the limit of all stores.
 func (o *PersistOptions) GetAllStoresLimit() map[uint64]StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLimit
-}
-
-// GetStoreLimitMode returns the limit mode of store.
-func (o *PersistOptions) GetStoreLimitMode() string {
-	return o.GetScheduleConfig().StoreLimitMode
 }
 
 // GetStoreLimitVersion returns the limit version of store.

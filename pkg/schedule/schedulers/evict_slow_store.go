@@ -109,7 +109,7 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *evictSlowStoreScheduler) Prepare(cluster sche.ScheduleCluster) error {
+func (s *evictSlowStoreScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
 		return cluster.SlowStoreEvicted(evictStore)
@@ -117,11 +117,11 @@ func (s *evictSlowStoreScheduler) Prepare(cluster sche.ScheduleCluster) error {
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) Cleanup(cluster sche.ScheduleCluster) {
+func (s *evictSlowStoreScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
 
-func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.ScheduleCluster, storeID uint64) error {
+func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
 	err := s.conf.setStoreAndPersist(storeID)
 	if err != nil {
 		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", storeID))
@@ -131,7 +131,7 @@ func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.ScheduleCluste
 	return cluster.SlowStoreEvicted(storeID)
 }
 
-func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.ScheduleCluster) {
+func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster) {
 	evictSlowStore, err := s.conf.clearAndPersist()
 	if err != nil {
 		log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", evictSlowStore))
@@ -142,13 +142,13 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.ScheduleCluste
 	cluster.SlowStoreRecovered(evictSlowStore)
 }
 
-func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.ScheduleCluster) []*operator.Operator {
+func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
 }
 
-func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
+func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	if s.conf.evictStore() != 0 {
-		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 		if !allowed {
 			operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
 		}
@@ -157,7 +157,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster
 	return true
 }
 
-func (s *evictSlowStoreScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
 	var ops []*operator.Operator
 

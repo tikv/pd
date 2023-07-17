@@ -78,21 +78,21 @@ func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *shuffleLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *shuffleLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	// We shuffle leaders between stores by:
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.
 	shuffleLeaderCounter.Inc()
 	targetStore := filter.NewCandidates(cluster.GetStores()).
-		FilterTarget(cluster.GetOpts(), nil, nil, s.filters...).
+		FilterTarget(cluster.GetSchedulerConfig(), nil, nil, s.filters...).
 		RandomPick()
 	if targetStore == nil {
 		shuffleLeaderNoTargetStoreCounter.Inc()
