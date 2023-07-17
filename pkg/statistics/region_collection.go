@@ -25,6 +25,12 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
+// RegionInfoProvider is an interface to provide the region information.
+type RegionInfoProvider interface {
+	// GetRegion returns the region information according to the given region ID.
+	GetRegion(regionID uint64) *core.RegionInfo
+}
+
 // RegionStatisticType represents the type of the region's status.
 type RegionStatisticType uint32
 
@@ -80,8 +86,7 @@ type RegionInfoWithTS struct {
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
 	sync.RWMutex
-	// bc is used to get the region information.
-	bc    *core.BasicCluster
+	rip   RegionInfoProvider
 	conf  sc.CheckerConfig
 	stats map[RegionStatisticType]map[uint64]*RegionInfoWithTS
 	// Since we may easily have a large number of offline regions in the scale-in scenario,
@@ -95,13 +100,13 @@ type RegionStatistics struct {
 
 // NewRegionStatistics creates a new RegionStatistics.
 func NewRegionStatistics(
-	bc *core.BasicCluster,
+	rip RegionInfoProvider,
 	conf sc.CheckerConfig,
 	ruleManager *placement.RuleManager,
 	storeConfigManager *config.StoreConfigManager,
 ) *RegionStatistics {
 	r := &RegionStatistics{
-		bc:                 bc,
+		rip:                rip,
 		conf:               conf,
 		ruleManager:        ruleManager,
 		storeConfigManager: storeConfigManager,
@@ -122,7 +127,7 @@ func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core
 	defer r.RUnlock()
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
 	for regionID := range r.stats[typ] {
-		res = append(res, r.bc.GetRegion(regionID).Clone())
+		res = append(res, r.rip.GetRegion(regionID).Clone())
 	}
 	return res
 }
