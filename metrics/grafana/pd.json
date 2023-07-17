@@ -796,13 +796,6 @@
           "intervalFactor": 2,
           "legendFormat": "{{type}}",
           "refId": "B"
-        },
-        {
-          "expr": "pd_regions_offline_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"offline-peer-region-count\", instance=\"$instance\"}",
-          "format": "time_series",
-          "intervalFactor": 1,
-          "legendFormat": "{{type}}",
-          "refId": "C"
         }
       ],
       "thresholds": [
