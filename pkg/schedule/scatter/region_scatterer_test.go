@@ -790,7 +790,7 @@ func TestRemoveStoreLimit(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetOpts(), stream)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	// Add stores 1~6.
 	for i := uint64(1); i <= 5; i++ {

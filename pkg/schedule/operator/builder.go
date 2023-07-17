@@ -775,11 +775,7 @@ func (b *Builder) execPromoteNonWitness(peer *metapb.Peer) {
 }
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
-	if b.lightWeight {
-		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightWeight, IsWitness: peer.GetIsWitness(), SendStore: b.originLeaderStoreID})
-	} else {
-		b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness(), SendStore: b.originLeaderStoreID})
-	}
+	b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightWeight, IsWitness: peer.GetIsWitness(), SendStore: b.originLeaderStoreID})
 	if !core.IsLearner(peer) {
 		b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness()})
 	}
@@ -795,11 +791,7 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	if store != nil {
 		isDownStore = store.DownTime() > b.GetSharedConfig().GetMaxStoreDownTime()
 	}
-	if b.lightWeight {
-		b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore, IsLightWeight: b.lightWeight})
-	} else {
-		b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore})
-	}
+	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore, IsLightWeight: b.lightWeight})
 	delete(b.currentPeers, removeStoreID)
 	delete(b.toRemove, removeStoreID)
 }
