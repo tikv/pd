@@ -201,21 +201,21 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 	watcher := clientv3.NewWatcher(ls.client)
 	defer watcher.Close()
-	var watchChanCancel *context.CancelFunc
+	var watchChanCancel context.CancelFunc // nolint https://github.com/golang/go/issues/25720
 	defer func() {
 		if watchChanCancel != nil {
-			(*watchChanCancel)()
+			watchChanCancel()
 		}
 	}()
 	for {
 		failpoint.Inject("delayWatcher", nil)
 		if watchChanCancel != nil {
-			(*watchChanCancel)()
+			watchChanCancel()
 		}
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
 		watchChanCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(serverCtx))
-		watchChanCancel = &cancel
+		watchChanCancel = cancel
 
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.

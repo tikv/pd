@@ -680,20 +680,20 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
 	watcher := clientv3.NewWatcher(lw.client)
 	defer watcher.Close()
-	var watchChanCancel *context.CancelFunc
+	var watchChanCancel context.CancelFunc // nolint https://github.com/golang/go/issues/25720
 	defer func() {
 		if watchChanCancel != nil {
-			(*watchChanCancel)()
+			watchChanCancel()
 		}
 	}()
 	for {
 		if watchChanCancel != nil {
-			(*watchChanCancel)()
+			watchChanCancel()
 		}
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
 		watchChanCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
-		watchChanCancel = &cancel
+		watchChanCancel = cancel
 		opts := append(lw.opts, clientv3.WithRev(revision))
 		watchChan := watcher.Watch(watchChanCtx, lw.key, opts...)
 	WatchChan:
