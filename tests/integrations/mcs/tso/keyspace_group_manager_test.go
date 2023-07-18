@@ -17,6 +17,7 @@ package tso
 import (
 	"context"
 	"math/rand"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -357,13 +358,19 @@ func waitFinishSplit(
 	splitSourceKeyspaces, splitTargetKeyspaces []uint32,
 ) {
 	testutil.Eventually(re, func() bool {
-		kg := handlersutil.MustLoadKeyspaceGroupByID(re, server, splitTargetID)
+		kg, code := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitTargetID)
+		if code != http.StatusOK {
+			return false
+		}
 		re.Equal(splitTargetID, kg.ID)
 		re.Equal(splitTargetKeyspaces, kg.Keyspaces)
 		return !kg.IsSplitTarget()
 	})
 	testutil.Eventually(re, func() bool {
-		kg := handlersutil.MustLoadKeyspaceGroupByID(re, server, splitSourceID)
+		kg, code := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitSourceID)
+		if code != http.StatusOK {
+			return false
+		}
 		re.Equal(splitSourceID, kg.ID)
 		re.Equal(splitSourceKeyspaces, kg.Keyspaces)
 		return !kg.IsSplitSource()
