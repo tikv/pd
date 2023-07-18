@@ -294,6 +294,16 @@ func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
+// PeerDownTooLong returns if a peer is down for too long.
+func (r *RegionInfo) PeerDownTooLong(peerID uint64) bool {
+	for _, down := range r.downPeers {
+		if down.GetPeer().GetId() == peerID {
+			return down.GetDownSeconds() > uint64(storeUnhealthyDuration.Seconds())
+		}
+	}
+	return false
+}
+
 // GetDownVoter returns the down voter with specified peer id.
 func (r *RegionInfo) GetDownVoter(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {

@@ -1220,28 +1220,28 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeers() {
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
-	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+	suite.cluster.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{4})
 	r1 := suite.cluster.GetRegion(1)
 
-	// set peer3 to pending
+	// set peer3 to pending and down
 	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetPeer(3)}))
-	suite.cluster.PutRegion(r1)
-
-	var remove operator.RemovePeer
-	op := suite.rc.Check(suite.cluster.GetRegion(1))
-	suite.IsType(remove, op.Step(0))
-	suite.Equal("remove-orphan-peer", op.Desc())
-
-	// set peer3 to down
 	r1 = r1.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{
 			Peer:        r1.GetStorePeer(3),
-			DownSeconds: 42,
+			DownSeconds: 30000,
 		},
 	}))
-	r1 = r1.Clone(core.WithPendingPeers(nil))
 	suite.cluster.PutRegion(r1)
-
+	var promote operator.PromoteLearner
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.IsType(promote, op.Step(0))
+	suite.Equal("fix-peer-role", op.Desc())
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
+	r1 = suite.cluster.GetRegion(1)
+	// set peer3 to pending
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetPeer(3)}))
+	suite.cluster.PutRegion(r1)
+	var remove operator.RemovePeer
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.IsType(remove, op.Step(0))
 	suite.Equal("remove-orphan-peer", op.Desc())

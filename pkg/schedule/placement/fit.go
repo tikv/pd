@@ -116,6 +116,7 @@ type RuleFit struct {
 	// different Role from configuration (the Role can be migrated to target role
 	// by scheduling).
 	PeersWithDifferentRole []*metapb.Peer `json:"peers-different-role"`
+	PeerWithUnhealthy      []*metapb.Peer `json:"peers-unhealthy"`
 	// IsolationScore indicates at which level of labeling these Peers are
 	// isolated. A larger value is better.
 	IsolationScore float64 `json:"isolation-score"`
@@ -143,6 +144,10 @@ func compareRuleFit(a, b *RuleFit) int {
 	case len(a.Peers) < len(b.Peers):
 		return -1
 	case len(a.Peers) > len(b.Peers):
+		return 1
+	case len(a.PeerWithUnhealthy) > len(b.PeerWithUnhealthy):
+		return -1
+	case len(a.PeerWithUnhealthy) < len(b.PeerWithUnhealthy):
 		return 1
 	case len(a.PeersWithDifferentRole) > len(b.PeersWithDifferentRole):
 		return -1
@@ -189,6 +194,7 @@ func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*m
 	for i, p := range fitPeers {
 		peer := &fitPeer{
 			Peer:     p,
+			region:   region,
 			store:    getStoreByID(stores, p.GetStoreId()),
 			isLeader: region.GetLeader().GetId() == p.GetId(),
 		}
@@ -359,6 +365,9 @@ func newRuleFit(rule *Rule, peers []*fitPeer, supportWitness bool) *RuleFit {
 			(!supportWitness && p.IsWitness) {
 			rf.PeersWithDifferentRole = append(rf.PeersWithDifferentRole, p.Peer)
 		}
+		if p.isUnhealthy() {
+			rf.PeerWithUnhealthy = append(rf.PeerWithUnhealthy, p.Peer)
+		}
 	}
 	return rf
 }
@@ -366,6 +375,7 @@ func newRuleFit(rule *Rule, peers []*fitPeer, supportWitness bool) *RuleFit {
 type fitPeer struct {
 	*metapb.Peer
 	store    *core.StoreInfo
+	region   *core.RegionInfo
 	isLeader bool
 	selected bool
 }
@@ -382,6 +392,10 @@ func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 		return core.IsLearner(p.Peer)
 	}
 	return false
+}
+
+func (p *fitPeer) isUnhealthy() bool {
+	return p.store.IsUnhealthy() || p.region.PeerDownTooLong(p.GetId())
 }
 
 func isolationStoreScore(srcStoreID uint64, dstStore *core.StoreInfo, stores []*core.StoreInfo, labels []string) float64 {
