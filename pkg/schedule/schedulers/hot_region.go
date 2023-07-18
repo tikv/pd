@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -32,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/movingaverage"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -43,8 +45,30 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// HotRegionName is balance hot region scheduler name.
+	HotRegionName = "balance-hot-region-scheduler"
+	// HotRegionType is balance hot region scheduler type.
+	HotRegionType = "hot-region"
+
+	minHotScheduleInterval = time.Second
+	maxHotScheduleInterval = 20 * time.Second
+
+	splitBucket          = "split-hot-region"
+	splitProgressiveRank = int64(-5)
+)
+
 var (
+	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
+	pendingAmpFactor = 2.0
+	// If the distribution of a dimension is below the corresponding stddev threshold, then scheduling will no longer be based on this dimension,
+	// as it implies that this dimension is sufficiently uniform.
+	stddevThreshold = 0.1
+	// statisticsInterval is the time interval for statistics update.
 	statisticsInterval = time.Second
+)
+
+var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	hotSchedulerCounter                     = schedulerCounter.WithLabelValues(HotRegionName, "schedule")
 	hotSchedulerSkipCounter                 = schedulerCounter.WithLabelValues(HotRegionName, "skip")
@@ -199,29 +223,6 @@ func (h *baseHotScheduler) randomRWType() statistics.RWType {
 	return h.types[h.r.Int()%len(h.types)]
 }
 
-const (
-	// HotRegionName is balance hot region scheduler name.
-	HotRegionName = "balance-hot-region-scheduler"
-	// HotRegionType is balance hot region scheduler type.
-	HotRegionType = "hot-region"
-
-	minHotScheduleInterval = time.Second
-	maxHotScheduleInterval = 20 * time.Second
-)
-
-var (
-	// schedulePeerPr the probability of schedule the hot peer.
-	schedulePeerPr = 0.66
-	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
-	pendingAmpFactor = 2.0
-	// If the distribution of a dimension is below the corresponding stddev threshold, then scheduling will no longer be based on this dimension,
-	// as it implies that this dimension is sufficiently uniform.
-	stddevThreshold = 0.1
-
-	splitBucket          = "split-hot-region"
-	splitProgressiveRank = int64(-5)
-)
-
 type hotScheduler struct {
 	name string
 	*baseHotScheduler
@@ -229,6 +230,7 @@ type hotScheduler struct {
 	// config of hot scheduler
 	conf                *hotRegionSchedulerConfig
 	searchRevertRegions [resourceTypeLen]bool // Whether to search revert regions.
+	replicas            *movingaverage.MedianFilter
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
@@ -237,6 +239,7 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 		name:             HotRegionName,
 		baseHotScheduler: base,
 		conf:             conf,
+		replicas:         movingaverage.NewMedianFilter(conf.GetMaxPeerNumber()),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.searchRevertRegions[ty] = false
@@ -360,18 +363,35 @@ func (h *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*o
 }
 
 func (h *hotScheduler) balanceHotWriteRegions(cluster sche.SchedulerCluster) []*operator.Operator {
+	// calculate the probability to move peer or transfer leader
+	if time.Since(h.updateWriteTime) >= statisticsInterval {
+		h.replicas.Reset()
+		for _, store := range h.stLoadInfos[writePeer] {
+			for _, peer := range store.HotPeers {
+				h.replicas.Add(float64(len(peer.GetStores())))
+			}
+		}
+	}
+	replica := h.replicas.Get()
+	if replica <= 1 {
+		replica = float64(cluster.GetSchedulerConfig().GetMaxReplicas())
+	}
+	probabilityToMovePeer := (replica - 1) / replica
+	failpoint.Inject("setProbabilityToMovePeer", func(val failpoint.Value) {
+		probabilityToMovePeer = float64(val.(int))
+	})
+
 	// prefer to balance by peer
-	s := h.r.Intn(100)
-	switch {
-	case s < int(schedulePeerPr*100):
+	// try to move peer
+	if h.r.Float64() < probabilityToMovePeer {
 		peerSolver := newBalanceSolver(h, cluster, statistics.Write, movePeer)
 		ops := peerSolver.solve()
 		if len(ops) > 0 && peerSolver.tryAddPendingInfluence() {
 			return ops
 		}
-	default:
 	}
 
+	// then try to transfer leader
 	leaderSolver := newBalanceSolver(h, cluster, statistics.Write, transferLeader)
 	ops := leaderSolver.solve()
 	if len(ops) > 0 && leaderSolver.tryAddPendingInfluence() {

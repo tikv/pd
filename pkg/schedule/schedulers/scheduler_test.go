@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/docker/go-units"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
@@ -310,7 +311,7 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/setProbabilityToMovePeer", `return(1)`))
 	storage := storage.NewStorageWithMemoryBackend()
 	cd := ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
 	bs, err := CreateScheduler(BalanceRegionType, oc, storage, cd)
@@ -356,6 +357,7 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	ops, _ = hs.Schedule(tc, false)
 	re.Len(ops, 1)
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 4)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/setProbabilityToMovePeer"))
 }
 
 func TestSpecialUseReserved(t *testing.T) {

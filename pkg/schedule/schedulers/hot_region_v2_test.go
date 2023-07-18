@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/docker/go-units"
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics"
@@ -32,7 +33,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	statistics.Denoising = false
-
+	statisticsInterval = 0
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/setProbabilityToMovePeer", `return(1)`))
 	sche, err := CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
@@ -47,7 +49,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
 	hb.conf.WritePeerPriorities = []string{statistics.BytePriority, statistics.KeyPriority}
-
+	stddevThreshold = -1.0
+	pendingAmpFactor = 0.0
 	tc.UpdateStorageWrittenStats(1, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(2, 16*units.MiB*statistics.StoreHeartBeatReportInterval, 20*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(3, 15*units.MiB*statistics.StoreHeartBeatReportInterval, 15*units.MiB*statistics.StoreHeartBeatReportInterval)
@@ -86,6 +89,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	re.False(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/setProbabilityToMovePeer"))
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
@@ -94,7 +98,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	statistics.Denoising = false
-
+	statisticsInterval = 0
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/setProbabilityToMovePeer", `return(1)`))
 	sche, err := CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
@@ -139,13 +144,15 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 	re.True(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/setProbabilityToMovePeer"))
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -2.
 	re := require.New(t)
 	statistics.Denoising = false
-
+	statisticsInterval = 0
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/setProbabilityToMovePeer", `return(1)`))
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
@@ -201,13 +208,14 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 	re.True(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/setProbabilityToMovePeer"))
 }
 
 func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -1.
 	re := require.New(t)
 	statistics.Denoising = false
-
+	statisticsInterval = 0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
@@ -268,7 +276,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 func TestSkipUniformStore(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
-
+	statisticsInterval = 0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
