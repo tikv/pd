@@ -484,9 +484,7 @@ func (c *ResourceGroupsController) IsBackgroundRequest(ctx context.Context,
 		return false
 	}
 
-	gc.metaLock.RLock()
-	defer gc.metaLock.RUnlock()
-	return c.checkBackgroundSettings(ctx, gc.meta.BackgroundSettings, requestResource)
+	return c.checkBackgroundSettings(ctx, gc.getBackgroundSettings(), requestResource)
 }
 
 func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, bg *rmpb.BackgroundSettings, requestResource string) bool {
@@ -498,7 +496,7 @@ func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, 
 			failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
 			return false
 		}
-		bg = gc.meta.BackgroundSettings
+		bg = gc.getBackgroundSettings()
 	}
 
 	if bg == nil || len(requestResource) == 0 || len(bg.JobTypes) == 0 {
@@ -1082,6 +1080,12 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	gc.run.lastRequestTime = time.Now()
 	gc.run.requestInProgress = true
 	return req
+}
+
+func (gc *groupCostController) getBackgroundSettings() *rmpb.BackgroundSettings {
+	gc.metaLock.RLock()
+	defer gc.metaLock.RUnlock()
+	return gc.meta.BackgroundSettings
 }
 
 func (gc *groupCostController) getMeta() *rmpb.ResourceGroup {

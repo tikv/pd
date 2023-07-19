@@ -1189,6 +1189,30 @@ func (suite *resourceManagerClientTestSuite) TestSkipConsumptionForBackgroundJob
 		re.Contains(resp, "Success!")
 	}
 
+	cfg := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+		CPUMsCost:        1,
+	}
+	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
+	c.Start(suite.ctx)
+
+	resourceGroupName := suite.initGroups[1].Name
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_default"))
+	// test fallback for nil.
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, ""))
+
+	resourceGroupName = "background_job"
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_br"))
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
+	// test fallback for nil.
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
+
+	// modify `Default` to check fallback.
 	resp, err := cli.ModifyResourceGroup(suite.ctx, &rmpb.ResourceGroup{
 		Name: "default",
 		Mode: rmpb.GroupMode_RUMode,
@@ -1205,27 +1229,20 @@ func (suite *resourceManagerClientTestSuite) TestSkipConsumptionForBackgroundJob
 	})
 	re.NoError(err)
 	re.Contains(resp, "Success!")
+	// wait for watch event modify.
+	time.Sleep(time.Millisecond * 100)
 
-	cfg := &controller.RequestUnitConfig{
-		ReadBaseCost:     1,
-		ReadCostPerByte:  1,
-		WriteBaseCost:    1,
-		WriteCostPerByte: 1,
-		CPUMsCost:        1,
-	}
-	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
-	c.Start(suite.ctx)
-
-	resourceGroupName := suite.initGroups[1].Name
+	resourceGroupName = suite.initGroups[1].Name
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_default"))
-	// test fallback.
+	// test fallback for `"lightning", "ddl"`.
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, ""))
 
 	resourceGroupName = "background_job"
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_br"))
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
-	// test fallback.
+	// test fallback for `"lightning", "ddl"`.
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
 
 	c.Stop()
