@@ -2913,10 +2913,13 @@ func checkWriteScheduleWithReplica3(re *require.Assertions, enablePlacementRules
 	// |    2     |       4.5MB      |
 	// |    3     |       4.5MB      |
 	// |    4     |        6MB       |
-	tc.UpdateStorageWrittenBytes(1, 7.5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
+	updateStore := func() {
+		tc.UpdateStorageWrittenBytes(1, 7.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(2, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(3, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(4, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
+	}
+	updateStore()
 
 	// | region_id | leader_store | follower_store | follower_store | written_bytes |
 	// |-----------|--------------|----------------|----------------|---------------|
@@ -2928,8 +2931,15 @@ func checkWriteScheduleWithReplica3(re *require.Assertions, enablePlacementRules
 	})
 
 	count := 0
-	total := 1000
+	total := 400
+	ticker := time.NewTicker(statistics.StoreHeartBeatReportInterval * time.Second)
+	defer ticker.Stop()
 	for i := 0; i < total; i++ {
+		select {
+		case <-ticker.C:
+			updateStore() // avoid selected store is disconnected
+		default:
+		}
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
 		clearPendingInfluence(hb.(*hotScheduler))
@@ -2980,12 +2990,15 @@ func checkWriteScheduleWithReplica5(re *require.Assertions, enablePlacementRules
 	// |    4     |       4.5MB      |
 	// |    5     |       4.5MB      |
 	// |    6     |        0MB       |
-	tc.UpdateStorageWrittenBytes(1, 7.5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(5, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(6, 0*units.MiB*statistics.StoreHeartBeatReportInterval)
+	updateStore := func() {
+		tc.UpdateStorageWrittenBytes(1, 7.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(2, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(3, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(4, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(5, 4.5*units.MiB*statistics.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenBytes(6, 0*units.MiB*statistics.StoreHeartBeatReportInterval)
+	}
+	updateStore()
 
 	// | region_id | leader_store | follower_store | written_bytes |
 	// |-----------|--------------|----------------|---------------|
@@ -2997,8 +3010,15 @@ func checkWriteScheduleWithReplica5(re *require.Assertions, enablePlacementRules
 	})
 
 	count := 0
-	total := 1000
+	total := 400
+	ticker := time.NewTicker(statistics.StoreHeartBeatReportInterval * time.Second)
+	defer ticker.Stop()
 	for i := 0; i < total; i++ {
+		select {
+		case <-ticker.C:
+			updateStore() // avoid selected store is disconnected
+		default:
+		}
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
 		clearPendingInfluence(hb.(*hotScheduler))

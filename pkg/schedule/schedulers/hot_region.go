@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/movingaverage"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -120,11 +119,12 @@ type baseHotScheduler struct {
 	// regionPendings stores regionID -> pendingInfluence
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
-	regionPendings  map[uint64]*pendingInfluence
-	types           []statistics.RWType
-	r               *rand.Rand
-	updateReadTime  time.Time
-	updateWriteTime time.Time
+	regionPendings        map[uint64]*pendingInfluence
+	types                 []statistics.RWType
+	r                     *rand.Rand
+	updateReadTime        time.Time
+	updateWriteTime       time.Time
+	probabilityToMovePeer float64
 }
 
 func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
@@ -176,6 +176,22 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.
 			prepare(regionWrite, constant.LeaderKind)
 			prepare(regionWrite, constant.RegionKind)
 			h.updateWriteTime = time.Now()
+			// calculate the probability to move peer or transfer leader
+			total, count := 0.0, 0.0
+			for _, store := range h.stLoadInfos[writePeer] {
+				for _, peer := range store.HotPeers {
+					total += float64(len(peer.GetStores()))
+					count++
+				}
+			}
+			replica := total / count
+			if replica <= 1 {
+				replica = float64(cluster.GetSchedulerConfig().GetMaxReplicas())
+			}
+			h.probabilityToMovePeer = (replica - 1) / replica
+			failpoint.Inject("setProbabilityToMovePeer", func(val failpoint.Value) {
+				h.probabilityToMovePeer = float64(val.(int))
+			})
 		}
 	}
 }
@@ -230,7 +246,6 @@ type hotScheduler struct {
 	// config of hot scheduler
 	conf                *hotRegionSchedulerConfig
 	searchRevertRegions [resourceTypeLen]bool // Whether to search revert regions.
-	replicas            *movingaverage.MedianFilter
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
@@ -239,7 +254,6 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 		name:             HotRegionName,
 		baseHotScheduler: base,
 		conf:             conf,
-		replicas:         movingaverage.NewMedianFilter(conf.GetMaxPeerNumber()),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.searchRevertRegions[ty] = false
@@ -363,27 +377,9 @@ func (h *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*o
 }
 
 func (h *hotScheduler) balanceHotWriteRegions(cluster sche.SchedulerCluster) []*operator.Operator {
-	// calculate the probability to move peer or transfer leader
-	if time.Since(h.updateWriteTime) >= statisticsInterval {
-		h.replicas.Reset()
-		for _, store := range h.stLoadInfos[writePeer] {
-			for _, peer := range store.HotPeers {
-				h.replicas.Add(float64(len(peer.GetStores())))
-			}
-		}
-	}
-	replica := h.replicas.Get()
-	if replica <= 1 {
-		replica = float64(cluster.GetSchedulerConfig().GetMaxReplicas())
-	}
-	probabilityToMovePeer := (replica - 1) / replica
-	failpoint.Inject("setProbabilityToMovePeer", func(val failpoint.Value) {
-		probabilityToMovePeer = float64(val.(int))
-	})
-
 	// prefer to balance by peer
 	// try to move peer
-	if h.r.Float64() < probabilityToMovePeer {
+	if h.r.Float64() < h.probabilityToMovePeer {
 		peerSolver := newBalanceSolver(h, cluster, statistics.Write, movePeer)
 		ops := peerSolver.solve()
 		if len(ops) > 0 && peerSolver.tryAddPendingInfluence() {
