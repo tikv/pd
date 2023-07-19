@@ -17,6 +17,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/docker/go-units"
 	"io"
 	"net/http"
 	"reflect"
@@ -36,7 +37,7 @@ var (
 	// default region split size is 96MB
 	defaultRegionSplitSize = uint64(96)
 	// default bucket size is 96MB
-	defaultBucketSize = uint64(96)
+	defaultBucketSize = uint64(96 * units.MB)
 	// default region max key is 144000
 	defaultRegionMaxKey = uint64(1440000)
 	// default region split key is 960000

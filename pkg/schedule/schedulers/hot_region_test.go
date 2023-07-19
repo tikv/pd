@@ -218,14 +218,16 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 			[]byte(fmt.Sprintf("%21d", 11)),
 			[]byte(fmt.Sprintf("%21d", 12)),
 			[]byte(fmt.Sprintf("%21d", 13)),
+			[]byte(fmt.Sprintf("%21d", 14)),
+			[]byte(fmt.Sprintf("%21d", 15)),
 		},
 		Stats: &metapb.BucketStats{
-			ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB},
-			ReadKeys:   []uint64{256, 256},
-			ReadQps:    []uint64{0, 0},
-			WriteBytes: []uint64{0, 0},
-			WriteQps:   []uint64{0, 0},
-			WriteKeys:  []uint64{0, 0},
+			ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB, 11 * units.KiB, 10 * units.KiB},
+			ReadKeys:   []uint64{256, 256, 156, 256},
+			ReadQps:    []uint64{0, 0, 0, 0},
+			WriteBytes: []uint64{100 * units.KiB, 10 * units.KiB, 10 * units.KiB, 10 * units.KiB},
+			WriteQps:   []uint64{256, 256, 156, 256},
+			WriteKeys:  []uint64{0, 0, 0, 0},
 		},
 	}
 
@@ -247,7 +249,11 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	tc.GetStoreConfig().SetRegionBucketEnabled(true)
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	re.Equal(operator.OpSplit, ops[0].Kind())
+	expectOp, _ := operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
+		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 13))})
+	re.Equal(expectOp.Brief(), ops[0].Brief())
+	re.Equal(expectOp.Kind(), ops[0].Kind())
+
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 0)
 
@@ -261,7 +267,12 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	hb, _ = CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
+	expectOp, _ = operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
+		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 12))})
+	re.Equal(expectOp.Brief(), ops[0].Brief())
+	re.Equal(expectOp.Kind(), ops[0].Kind())
 	re.Equal(operator.OpSplit, ops[0].Kind())
+
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 0)
 }
@@ -271,6 +282,7 @@ func TestSplitBuckets(t *testing.T) {
 	statistics.Denoising = false
 	cancel, _, tc, oc := prepareSchedulersTest()
 	tc.SetHotRegionCacheHitsThreshold(1)
+	tc.GetStoreConfig().SetRegionBucketEnabled(true)
 	defer cancel()
 	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -299,9 +311,9 @@ func TestSplitBuckets(t *testing.T) {
 	ops := solve.createSplitOperator([]*core.RegionInfo{region}, false)
 	re.Equal(1, len(ops))
 	op := ops[0]
-	re.Equal(splitBucket, op.Desc())
+	re.Equal(splitHotReadBuckets, op.Desc())
 	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
-	expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
+	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
 	re.NoError(err)
 	re.Equal(expectOp.Brief(), op.Brief())
 	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
@@ -309,12 +321,11 @@ func TestSplitBuckets(t *testing.T) {
 	ops = solve.createSplitOperator([]*core.RegionInfo{region}, true)
 	re.Equal(1, len(ops))
 	op = ops[0]
-	re.Equal(splitBucket, op.Desc())
-	expectKeys = [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")}
+	re.Equal(splitHotReadBuckets, op.Desc())
+	expectKeys = [][]byte{[]byte("d")}
 	expectOp, err = operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
 	re.NoError(err)
 	re.Equal(expectOp.Brief(), op.Brief())
-	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
 }
 
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
