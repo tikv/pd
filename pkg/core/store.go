@@ -544,7 +544,9 @@ var (
 	// be marked as disconnected state. The value should be greater than tikv's
 	// store heartbeat interval (default 10s).
 	storeDisconnectDuration = 20 * time.Second
-	storeUnhealthyDuration  = 10 * time.Minute
+	// If a store is disconnected for StoreUnhealthyDuration, the store will be
+	// seen as unhealthy.
+	StoreUnhealthyDuration = 10 * time.Minute
 )
 
 // IsDisconnected checks if a store is disconnected, which means PD misses
@@ -556,7 +558,7 @@ func (s *StoreInfo) IsDisconnected() bool {
 
 // IsUnhealthy checks if a store is unhealthy.
 func (s *StoreInfo) IsUnhealthy() bool {
-	return s.DownTime() > storeUnhealthyDuration
+	return s.DownTime() > StoreUnhealthyDuration
 }
 
 // GetLabelValue returns a label's value (if exists).

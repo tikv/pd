@@ -18,6 +18,7 @@ import (
 	"math"
 	"math/bits"
 	"sort"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
@@ -173,20 +174,21 @@ type StoreSet interface {
 }
 
 // fitRegion tries to fit peers of a region to the rules.
-func fitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule, supportWitness bool) *RegionFit {
-	w := newFitWorker(stores, region, rules, supportWitness)
+func fitRegion(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule, supportWitness bool, maxStoreDownTime time.Duration) *RegionFit {
+	w := newFitWorker(stores, region, rules, supportWitness, maxStoreDownTime)
 	w.run()
 	return &w.bestFit
 }
 
 type fitWorker struct {
-	stores         []*core.StoreInfo
-	bestFit        RegionFit  // update during execution
-	peers          []*fitPeer // p.selected is updated during execution.
-	rules          []*Rule
-	supportWitness bool
-	needIsolation  bool
-	exit           bool
+	stores           []*core.StoreInfo
+	bestFit          RegionFit  // update during execution
+	peers            []*fitPeer // p.selected is updated during execution.
+	rules            []*Rule
+	supportWitness   bool
+	needIsolation    bool
+	exit             bool
+	maxStoreDownTime time.Duration
 }
 
 func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*metapb.Peer) []*fitPeer {
@@ -203,7 +205,7 @@ func newFitPeer(stores []*core.StoreInfo, region *core.RegionInfo, fitPeers []*m
 	return peers
 }
 
-func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule, supportWitness bool) *fitWorker {
+func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Rule, supportWitness bool, maxStoreDownTime time.Duration) *fitWorker {
 	peers := newFitPeer(stores, region, region.GetPeers())
 	// Sort peers to keep the match result deterministic.
 	sort.Slice(peers, func(i, j int) bool {
@@ -212,12 +214,13 @@ func newFitWorker(stores []*core.StoreInfo, region *core.RegionInfo, rules []*Ru
 		return si > sj || (si == sj && peers[i].GetId() < peers[j].GetId())
 	})
 	return &fitWorker{
-		stores:         stores,
-		bestFit:        RegionFit{RuleFits: make([]*RuleFit, len(rules))},
-		peers:          peers,
-		needIsolation:  needIsolation(rules),
-		rules:          rules,
-		supportWitness: supportWitness,
+		stores:           stores,
+		bestFit:          RegionFit{RuleFits: make([]*RuleFit, len(rules))},
+		peers:            peers,
+		needIsolation:    needIsolation(rules),
+		rules:            rules,
+		supportWitness:   supportWitness,
+		maxStoreDownTime: maxStoreDownTime,
 	}
 }
 
@@ -317,7 +320,7 @@ func unSelectPeers(seleted []*fitPeer) {
 // compareBest checks if the selected peers is better then previous best.
 // Returns true if it replaces `bestFit` with a better alternative.
 func (w *fitWorker) compareBest(selected []*fitPeer, index int) bool {
-	rf := newRuleFit(w.rules[index], selected, w.supportWitness)
+	rf := newRuleFit(w.rules[index], selected, w.supportWitness, w.maxStoreDownTime)
 	cmp := 1
 	if best := w.bestFit.RuleFits[index]; best != nil {
 		cmp = compareRuleFit(rf, best)
@@ -355,7 +358,7 @@ func (w *fitWorker) updateOrphanPeers(index int) {
 	}
 }
 
-func newRuleFit(rule *Rule, peers []*fitPeer, supportWitness bool) *RuleFit {
+func newRuleFit(rule *Rule, peers []*fitPeer, supportWitness bool, maxStoreDownTime time.Duration) *RuleFit {
 	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels), WitnessScore: witnessScore(peers, supportWitness && rule.IsWitness)}
 	for _, p := range peers {
 		rf.Peers = append(rf.Peers, p.Peer)
@@ -365,7 +368,8 @@ func newRuleFit(rule *Rule, peers []*fitPeer, supportWitness bool) *RuleFit {
 			(!supportWitness && p.IsWitness) {
 			rf.PeersWithDifferentRole = append(rf.PeersWithDifferentRole, p.Peer)
 		}
-		if p.isUnhealthy() {
+		// Only consider in the witness disable scenario first, because witness is not used yet and would complicate this
+		if p.isUnhealthy(maxStoreDownTime) && !supportWitness {
 			rf.PeerWithUnhealthy = append(rf.PeerWithUnhealthy, p.Peer)
 		}
 	}
@@ -394,8 +398,8 @@ func (p *fitPeer) matchRoleStrict(role PeerRoleType) bool {
 	return false
 }
 
-func (p *fitPeer) isUnhealthy() bool {
-	return p.store.IsUnhealthy() || p.region.PeerDownTooLong(p.GetId())
+func (p *fitPeer) isUnhealthy(maxStoreDownTime time.Duration) bool {
+	return p.store != nil && (p.store.DownTime() > maxStoreDownTime || p.region.IsPeerDownTooLong(p.GetId(), maxStoreDownTime))
 }
 
 func isolationStoreScore(srcStoreID uint64, dstStore *core.StoreInfo, stores []*core.StoreInfo, labels []string) float64 {

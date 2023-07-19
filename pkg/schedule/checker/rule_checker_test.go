@@ -1215,7 +1215,9 @@ func (suite *ruleCheckerTestSuite) TestSkipFixOrphanPeerIfSelectedPeerisPendingO
 	suite.Equal("remove-orphan-peer", op.Desc())
 }
 
-func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeers() {
+func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeersWithoutWitness() {
+	suite.cluster.SetEnableWitness(false)
+	defer suite.cluster.SetEnableWitness(true)
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
@@ -1236,6 +1238,7 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeers() {
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.IsType(promote, op.Step(0))
 	suite.Equal("fix-peer-role", op.Desc())
+
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2, 3, 4)
 	r1 = suite.cluster.GetRegion(1)
 	// set peer3 to pending
@@ -1245,6 +1248,60 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeers() {
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.IsType(remove, op.Step(0))
 	suite.Equal("remove-orphan-peer", op.Desc())
+}
+
+func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeersAndTiFlashWithoutWitness() {
+	suite.cluster.SetEnableWitness(false)
+	defer suite.cluster.SetEnableWitness(true)
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", "engine": "tiflash"})
+	suite.cluster.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{4})
+	rule := &placement.Rule{
+		GroupID: "pd",
+		ID:      "test",
+		Role:    placement.Voter,
+		Count:   3,
+	}
+	rule2 := &placement.Rule{
+		GroupID: "pd",
+		ID:      "test2",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "engine",
+				Op:     placement.In,
+				Values: []string{"tiflash"},
+			},
+		},
+	}
+	suite.ruleManager.SetRule(rule)
+	suite.ruleManager.SetRule(rule2)
+	suite.ruleManager.DeleteRule("pd", "default")
+
+	r1 := suite.cluster.GetRegion(1)
+	// set peer3 to pending and down
+	r1 = r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetPeer(3)}))
+	r1 = r1.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{
+			Peer:        r1.GetStorePeer(3),
+			DownSeconds: 30000,
+		},
+	}))
+	suite.cluster.PutRegion(r1)
+	suite.cluster.GetStore(3).GetMeta().LastHeartbeat = time.Now().Add(-31 * time.Minute).UnixNano()
+
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	// should not promote tiflash peer
+	suite.Nil(op)
+
+	// scale a node, can replace the down peer
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("replace-rule-down-peer", op.Desc())
 }
 
 // Ref https://github.com/tikv/pd/issues/4140

@@ -152,7 +152,7 @@ func TestReplace(t *testing.T) {
 		for _, r := range tc.rules {
 			rules = append(rules, makeRule(r))
 		}
-		rf := fitRegion(stores.GetStores(), region, rules, false)
+		rf := fitRegion(stores.GetStores(), region, rules, false, core.StoreUnhealthyDuration)
 		re.True(rf.IsSatisfied())
 		rf.regionStores = stores.GetStores()
 		re.Equal(rf.Replace(tc.srcStoreID, stores.GetStore(tc.dstStoreID)), tc.ok)
@@ -194,7 +194,7 @@ func TestFitRegion(t *testing.T) {
 		for _, r := range testCase.rules {
 			rules = append(rules, makeRule(r))
 		}
-		rf := fitRegion(stores.GetStores(), region, rules, false)
+		rf := fitRegion(stores.GetStores(), region, rules, false, core.StoreUnhealthyDuration)
 		expects := strings.Split(testCase.fitPeers, "/")
 		for i, f := range rf.RuleFits {
 			re.True(checkPeerMatch(f.Peers, expects[i]))

@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/docker/go-units"
@@ -294,11 +295,11 @@ func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// PeerDownTooLong returns if a peer is down for too long.
-func (r *RegionInfo) PeerDownTooLong(peerID uint64) bool {
+// IsPeerDownTooLong returns if a peer is down for too long.
+func (r *RegionInfo) IsPeerDownTooLong(peerID uint64, duration time.Duration) bool {
 	for _, down := range r.downPeers {
 		if down.GetPeer().GetId() == peerID {
-			return down.GetDownSeconds() > uint64(storeUnhealthyDuration.Seconds())
+			return down.GetDownSeconds() > uint64(duration.Seconds())
 		}
 	}
 	return false

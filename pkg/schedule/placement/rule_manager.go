@@ -372,7 +372,7 @@ func (m *RuleManager) FitRegion(storeSet StoreSet, region *core.RegionInfo) (fit
 			return fit
 		}
 	}
-	fit = fitRegion(regionStores, region, rules, m.conf.IsWitnessAllowed())
+	fit = fitRegion(regionStores, region, rules, m.conf.IsWitnessAllowed(), m.conf.GetMaxStoreDownTime())
 	fit.regionStores = regionStores
 	fit.rules = rules
 	if isCached {
