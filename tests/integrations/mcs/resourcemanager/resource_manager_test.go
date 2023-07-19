@@ -1189,6 +1189,23 @@ func (suite *resourceManagerClientTestSuite) TestSkipConsumptionForBackgroundJob
 		re.Contains(resp, "Success!")
 	}
 
+	resp, err := cli.ModifyResourceGroup(suite.ctx, &rmpb.ResourceGroup{
+		Name: "default",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   1,
+					BurstLimit: -1,
+				},
+				Tokens: 1,
+			},
+		},
+		BackgroundSettings: &rmpb.BackgroundSettings{JobTypes: []string{"lightning", "ddl"}},
+	})
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+
 	cfg := &controller.RequestUnitConfig{
 		ReadBaseCost:     1,
 		ReadCostPerByte:  1,
@@ -1201,10 +1218,15 @@ func (suite *resourceManagerClientTestSuite) TestSkipConsumptionForBackgroundJob
 
 	resourceGroupName := suite.initGroups[1].Name
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_default"))
+	// test fallback.
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
 
 	resourceGroupName = "background_job"
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_br"))
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
+	// test fallback.
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
 
 	c.Stop()
 }

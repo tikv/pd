@@ -486,14 +486,29 @@ func (c *ResourceGroupsController) IsBackgroundRequest(ctx context.Context,
 
 	gc.metaLock.RLock()
 	defer gc.metaLock.RUnlock()
-	if bg := gc.meta.BackgroundSettings; bg != nil {
-		if len(requestResource) == 0 || len(bg.JobTypes) == 0 {
+	return c.checkBackgroundSettings(ctx, gc.meta.BackgroundSettings, requestResource)
+}
+
+func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, bg *rmpb.BackgroundSettings, requestResource string) bool {
+	// fallback to default resource group.
+	if bg == nil {
+		resourceGroupName := "default"
+		gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
+		if err != nil {
+			failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
 			return false
 		}
-		if idx := strings.LastIndex(requestResource, "_"); idx != -1 {
-			return slices.Contains(bg.JobTypes, requestResource[idx+1:])
-		}
+		bg = gc.meta.BackgroundSettings
 	}
+
+	if bg == nil || len(requestResource) == 0 || len(bg.JobTypes) == 0 {
+		return false
+	}
+
+	if idx := strings.LastIndex(requestResource, "_"); idx != -1 {
+		return slices.Contains(bg.JobTypes, requestResource[idx+1:])
+	}
+
 	return false
 }
 
