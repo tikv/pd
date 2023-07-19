@@ -544,8 +544,8 @@ var (
 	// be marked as disconnected state. The value should be greater than tikv's
 	// store heartbeat interval (default 10s).
 	storeDisconnectDuration = 20 * time.Second
-	// If a store is disconnected for StoreUnhealthyDuration, the store will be
-	// seen as unhealthy.
+	// StoreUnhealthyDuration is the duration that the store will be marked as
+	// unhealthy if the store is disconnected.
 	StoreUnhealthyDuration = 10 * time.Minute
 )
 
