@@ -40,10 +40,10 @@ type Scheduler interface {
 	EncodeConfig() ([]byte, error)
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster sche.ScheduleCluster) error
-	Cleanup(cluster sche.ScheduleCluster)
-	Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
-	IsScheduleAllowed(cluster sche.ScheduleCluster) bool
+	Prepare(cluster sche.SchedulerCluster) error
+	Cleanup(cluster sche.SchedulerCluster)
+	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
+	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.

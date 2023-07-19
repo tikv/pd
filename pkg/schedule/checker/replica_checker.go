@@ -61,13 +61,13 @@ var (
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
 	PauseController
-	cluster           sche.ClusterInformer
-	conf              config.Config
+	cluster           sche.CheckerCluster
+	conf              config.CheckerConfig
 	regionWaitingList cache.Cache
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster sche.ClusterInformer, conf config.Config, regionWaitingList cache.Cache) *ReplicaChecker {
+func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfig, regionWaitingList cache.Cache) *ReplicaChecker {
 	return &ReplicaChecker{
 		cluster:           cluster,
 		conf:              conf,

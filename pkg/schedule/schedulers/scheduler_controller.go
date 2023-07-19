@@ -42,14 +42,14 @@ type Controller struct {
 	sync.RWMutex
 	wg           sync.WaitGroup
 	ctx          context.Context
-	cluster      sche.ScheduleCluster
+	cluster      sche.SchedulerCluster
 	storage      endpoint.ConfigStorage
 	schedulers   map[string]*ScheduleController
 	opController *operator.Controller
 }
 
 // NewController creates a scheduler controller.
-func NewController(ctx context.Context, cluster sche.ScheduleCluster, storage endpoint.ConfigStorage, opController *operator.Controller) *Controller {
+func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller) *Controller {
 	return &Controller{
 		ctx:          ctx,
 		cluster:      cluster,
@@ -109,7 +109,7 @@ func (c *Controller) CollectSchedulerMetrics() {
 }
 
 func (c *Controller) isSchedulingHalted() bool {
-	return c.cluster.GetOpts().IsSchedulingHalted()
+	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
@@ -134,7 +134,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.Scheduler.GetName()] = s
-	c.cluster.GetOpts().AddSchedulerCfg(s.Scheduler.GetType(), args)
+	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.Scheduler.GetType(), args)
 	return nil
 }
 
@@ -150,9 +150,9 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 
-	opt := c.cluster.GetOpts()
-	opt.RemoveSchedulerCfg(s.Scheduler.GetType())
-	if err := opt.Persist(c.storage); err != nil {
+	conf := c.cluster.GetSchedulerConfig()
+	conf.RemoveSchedulerCfg(s.Scheduler.GetType())
+	if err := conf.Persist(c.storage); err != nil {
 		log.Error("the option can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
@@ -239,7 +239,7 @@ func (c *Controller) IsSchedulerDisabled(name string) (bool, error) {
 	if !ok {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	return c.cluster.GetOpts().IsSchedulerDisabled(s.Scheduler.GetType()), nil
+	return c.cluster.GetSchedulerConfig().IsSchedulerDisabled(s.Scheduler.GetType()), nil
 }
 
 // IsSchedulerExisted returns whether a scheduler is existed.
@@ -332,7 +332,7 @@ func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 // ScheduleController is used to manage a scheduler.
 type ScheduleController struct {
 	Scheduler
-	cluster            sche.ScheduleCluster
+	cluster            sche.SchedulerCluster
 	opController       *operator.Controller
 	nextInterval       time.Duration
 	ctx                context.Context
@@ -343,7 +343,7 @@ type ScheduleController struct {
 }
 
 // NewScheduleController creates a new ScheduleController.
-func NewScheduleController(ctx context.Context, cluster sche.ScheduleCluster, opController *operator.Controller, s Scheduler) *ScheduleController {
+func NewScheduleController(ctx context.Context, cluster sche.SchedulerCluster, opController *operator.Controller, s Scheduler) *ScheduleController {
 	ctx, cancel := context.WithCancel(ctx)
 	return &ScheduleController{
 		Scheduler:          s,
@@ -352,7 +352,7 @@ func NewScheduleController(ctx context.Context, cluster sche.ScheduleCluster, op
 		nextInterval:       s.GetMinInterval(),
 		ctx:                ctx,
 		cancel:             cancel,
-		diagnosticRecorder: NewDiagnosticRecorder(s.GetName(), cluster.GetOpts()),
+		diagnosticRecorder: NewDiagnosticRecorder(s.GetName(), cluster.GetSchedulerConfig()),
 	}
 }
 
@@ -450,7 +450,7 @@ func (s *ScheduleController) AllowSchedule(diagnosable bool) bool {
 }
 
 func (s *ScheduleController) isSchedulingHalted() bool {
-	return s.cluster.GetOpts().IsSchedulingHalted()
+	return s.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 // IsPaused returns if a scheduler is paused.
@@ -493,7 +493,7 @@ func (s *ScheduleController) IsDiagnosticAllowed() bool {
 
 // cacheCluster include cache info to improve the performance.
 type cacheCluster struct {
-	sche.ScheduleCluster
+	sche.SchedulerCluster
 	stores []*core.StoreInfo
 }
 
@@ -503,9 +503,9 @@ func (c *cacheCluster) GetStores() []*core.StoreInfo {
 }
 
 // newCacheCluster constructor for cache
-func newCacheCluster(c sche.ScheduleCluster) *cacheCluster {
+func newCacheCluster(c sche.SchedulerCluster) *cacheCluster {
 	return &cacheCluster{
-		ScheduleCluster: c,
-		stores:          c.GetStores(),
+		SchedulerCluster: c,
+		stores:           c.GetStores(),
 	}
 }

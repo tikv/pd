@@ -141,3 +141,21 @@ func (s *KeyspaceServer) UpdateKeyspaceState(_ context.Context, request *keyspac
 		Keyspace: meta,
 	}, nil
 }
+
+// GetAllKeyspaces get all keyspace's metadata.
+func (s *KeyspaceServer) GetAllKeyspaces(_ context.Context, request *keyspacepb.GetAllKeyspacesRequest) (*keyspacepb.GetAllKeyspacesResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	manager := s.GetKeyspaceManager()
+	keyspaces, err := manager.LoadRangeKeyspace(request.StartId, int(request.Limit))
+	if err != nil {
+		return &keyspacepb.GetAllKeyspacesResponse{Header: s.getErrorHeader(err)}, nil
+	}
+
+	return &keyspacepb.GetAllKeyspacesResponse{
+		Header:    s.header(),
+		Keyspaces: keyspaces,
+	}, nil
+}

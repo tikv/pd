@@ -978,7 +978,11 @@ func TestRegionSizeChanged(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.regionStats = statistics.NewRegionStatistics(
+		cluster.GetBasicCluster(),
+		cluster.GetOpts(),
+		cluster.ruleManager,
+		cluster.storeConfigManager)
 	region := newTestRegions(1, 3, 3)[0]
 	cluster.opt.GetMaxMergeRegionKeys()
 	curMaxMergeSize := int64(cluster.opt.GetMaxMergeRegionSize())
@@ -1260,7 +1264,11 @@ func TestOfflineAndMerge(t *testing.T) {
 			panic(err)
 		}
 	}
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.regionStats = statistics.NewRegionStatistics(
+		cluster.GetBasicCluster(),
+		cluster.GetOpts(),
+		cluster.ruleManager,
+		cluster.storeConfigManager)
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	// Put 4 stores.
@@ -1300,13 +1308,13 @@ func TestOfflineAndMerge(t *testing.T) {
 		regions = core.SplitRegions(regions)
 	}
 	heartbeatRegions(re, cluster, regions)
-	re.Len(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), len(regions))
+	re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
 
 	// Merge.
 	for i := 0; i < n; i++ {
 		regions = core.MergeRegions(regions)
 		heartbeatRegions(re, cluster, regions)
-		re.Len(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), len(regions))
+		re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
 	}
 }
 
@@ -1348,7 +1356,6 @@ func TestSyncConfig(t *testing.T) {
 		if v.updated {
 			re.True(switchRaftV2)
 			tc.opt.UseRaftV2()
-			re.EqualValues(0, tc.opt.GetMaxMergeRegionSize())
 			re.EqualValues(512, tc.opt.GetMaxMovableHotPeerSize())
 			success, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
 			re.True(success)
@@ -1515,7 +1522,11 @@ func TestCalculateStoreSize1(t *testing.T) {
 	opt.SetReplicationConfig(cfg)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.regionStats = statistics.NewRegionStatistics(
+		cluster.GetBasicCluster(),
+		cluster.GetOpts(),
+		cluster.ruleManager,
+		cluster.storeConfigManager)
 
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
@@ -1598,7 +1609,11 @@ func TestCalculateStoreSize2(t *testing.T) {
 	opt.SetMaxReplicas(3)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.regionStats = statistics.NewRegionStatistics(
+		cluster.GetBasicCluster(),
+		cluster.GetOpts(),
+		cluster.ruleManager,
+		cluster.storeConfigManager)
 
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
@@ -2352,7 +2367,11 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
+		tc.regionStats = statistics.NewRegionStatistics(
+			tc.GetBasicCluster(),
+			tc.GetOpts(),
+			nil,
+			tc.storeConfigManager)
 	}, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
 
@@ -2384,7 +2403,11 @@ func TestCollectMetrics(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
+		tc.regionStats = statistics.NewRegionStatistics(
+			tc.GetBasicCluster(),
+			tc.GetOpts(),
+			nil,
+			tc.storeConfigManager)
 	}, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
 	count := 10
@@ -2409,7 +2432,7 @@ func TestCollectMetrics(t *testing.T) {
 	stores := co.GetCluster().GetStores()
 	regionStats := co.GetCluster().RegionWriteStats()
 	status1 := statistics.CollectHotPeerInfos(stores, regionStats)
-	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, statistics.Write, co.GetCluster().GetOpts().IsTraceRegionFlow())
+	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, statistics.Write, co.GetCluster().GetSchedulerConfig().IsTraceRegionFlow())
 	for _, s := range status2.AsLeader {
 		s.Stats = nil
 	}
@@ -3391,7 +3414,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 

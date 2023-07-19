@@ -42,7 +42,7 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 	}
 	ch1 := make(chan struct{})
 	ch2 := make(chan *groupCostController)
-	gc, err := newGroupCostController(group, DefaultConfig(), ch1, ch2)
+	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2)
 	re.NoError(err)
 	return gc
 }

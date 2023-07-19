@@ -196,6 +196,21 @@ func (c *RaftCluster) GetStoreConfig() sc.StoreConfig {
 	return c.storeConfigManager.GetStoreConfig()
 }
 
+// GetCheckerConfig returns the checker config.
+func (c *RaftCluster) GetCheckerConfig() sc.CheckerConfig {
+	return c.GetOpts()
+}
+
+// GetSchedulerConfig returns the scheduler config.
+func (c *RaftCluster) GetSchedulerConfig() sc.SchedulerConfig {
+	return c.GetOpts()
+}
+
+// GetSharedConfig returns the shared config.
+func (c *RaftCluster) GetSharedConfig() sc.SharedConfig {
+	return c.GetOpts()
+}
+
 // LoadClusterStatus loads the cluster status.
 func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 	bootstrapTime, err := c.loadBootstrapTime()
@@ -305,7 +320,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient)
 	c.coordinator = schedule.NewCoordinator(c.ctx, cluster, s.GetHBStreams())
-	c.regionStats = statistics.NewRegionStatistics(c.opt, c.ruleManager, c.storeConfigManager)
+	c.regionStats = statistics.NewRegionStatistics(c.core, c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.externalTS, err = c.storage.LoadExternalTS()
 	if err != nil {
@@ -878,7 +893,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 
 	// c.limiter is nil before "start" is called
-	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
+	if c.limiter != nil {
 		c.limiter.Collect(newStore.GetStoreStats())
 	}
 
@@ -2112,14 +2127,6 @@ func (c *RaftCluster) GetRegionStatsByType(typ statistics.RegionStatisticType) [
 		return nil
 	}
 	return c.regionStats.GetRegionStatsByType(typ)
-}
-
-// GetOfflineRegionStatsByType gets the status of the offline region by types.
-func (c *RaftCluster) GetOfflineRegionStatsByType(typ statistics.RegionStatisticType) []*core.RegionInfo {
-	if c.regionStats == nil {
-		return nil
-	}
-	return c.regionStats.GetOfflineRegionStatsByType(typ)
 }
 
 // UpdateRegionsLabelLevelStats updates the status of the region label level by types.

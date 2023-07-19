@@ -186,7 +186,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedulers.EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
+func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -198,7 +198,7 @@ func (s *evictLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
 	return res
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
+func (s *evictLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
@@ -206,15 +206,15 @@ func (s *evictLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
 	}
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWitRanges))
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -226,7 +226,7 @@ func (s *evictLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun boo
 			continue
 		}
 		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true, OperatorLevel: constant.Urgent}).
+			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true, OperatorLevel: constant.Urgent}).
 			RandomPick()
 		if target == nil {
 			continue

@@ -27,7 +27,7 @@ import (
 // exists to allow replica_checker and rule_checker to reuse common logics.
 type ReplicaStrategy struct {
 	checkerName    string // replica-checker / rule-checker
-	cluster        sche.ClusterInformer
+	cluster        sche.CheckerCluster
 	locationLabels []string
 	isolationLevel string
 	region         *core.RegionInfo
@@ -77,13 +77,13 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowFastFailover: s.fastFailover, OperatorLevel: level}
 	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
-		FilterTarget(s.cluster.GetOpts(), nil, nil, filters...).
+		FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, filters...).
 		KeepTheTopStores(isolationComparer, false) // greater isolation score is better
 	if targetCandidate.Len() == 0 {
 		return 0, false
 	}
-	target := targetCandidate.FilterTarget(s.cluster.GetOpts(), nil, nil, strictStateFilter).
-		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), true) // less region score is better
+	target := targetCandidate.FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, strictStateFilter).
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetCheckerConfig()), true) // less region score is better
 	if target == nil {
 		return 0, true // filter by temporary states
 	}
@@ -139,9 +139,9 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 		level = constant.Urgent
 	}
 	source := filter.NewCandidates(coLocationStores).
-		FilterSource(s.cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
+		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
 		KeepTheTopStores(isolationComparer, true).
-		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), false)
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetCheckerConfig()), false)
 	if source == nil {
 		log.Debug("no removable store", zap.Uint64("region-id", s.region.GetID()))
 		return 0

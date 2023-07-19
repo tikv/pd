@@ -32,10 +32,10 @@ func RegistryPath(clusterID, serviceName, serviceAddr string) string {
 
 // ServicePath returns the path to store microservice addresses.
 func ServicePath(clusterID, serviceName string) string {
-	return strings.Join([]string{utils.MicroserviceRootPath, clusterID, serviceName, registryKey}, "/")
+	return strings.Join([]string{utils.MicroserviceRootPath, clusterID, serviceName, registryKey, ""}, "/")
 }
 
 // TSOPath returns the path to store TSO addresses.
 func TSOPath(clusterID uint64) string {
-	return ServicePath(strconv.FormatUint(clusterID, 10), "tso") + "/"
+	return ServicePath(strconv.FormatUint(clusterID, 10), "tso")
 }

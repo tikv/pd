@@ -37,8 +37,8 @@ var denyCheckersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("
 
 // Controller is used to manage all checkers.
 type Controller struct {
-	cluster           sche.ClusterInformer
-	conf              config.Config
+	cluster           sche.CheckerCluster
+	conf              config.CheckerConfig
 	opController      *operator.Controller
 	learnerChecker    *LearnerChecker
 	replicaChecker    *ReplicaChecker
@@ -53,7 +53,7 @@ type Controller struct {
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster sche.ClusterInformer, conf config.Config, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
+func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfig, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
 	regionWaitingList := cache.NewDefaultCache(DefaultCacheSize)
 	return &Controller{
 		cluster:           cluster,
@@ -87,7 +87,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	if c.conf.IsPlacementRulesEnabled() {
-		skipRuleCheck := c.cluster.GetOpts().IsPlacementRulesCacheEnabled() &&
+		skipRuleCheck := c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() &&
 			c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
 		if skipRuleCheck {
 			// If the fit is fetched from cache, it seems that the region doesn't need check

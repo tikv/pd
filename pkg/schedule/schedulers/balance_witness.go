@@ -209,15 +209,15 @@ func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(b.conf)
 }
 
-func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := b.OpController.OperatorCount(operator.OpWitness) < cluster.GetOpts().GetWitnessScheduleLimit()
+func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := b.OpController.OperatorCount(operator.OpWitness) < cluster.GetSchedulerConfig().GetWitnessScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(b.GetType(), operator.OpWitness.String()).Inc()
 	}
 	return allowed
 }
 
-func (b *balanceWitnessScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (b *balanceWitnessScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	b.conf.mu.RLock()
 	defer b.conf.mu.RUnlock()
 	basePlan := plan.NewBalanceSchedulerPlan()
@@ -236,7 +236,7 @@ func (b *balanceWitnessScheduler) Schedule(cluster sche.ScheduleCluster, dryRun 
 	scoreFunc := func(store *core.StoreInfo) float64 {
 		return store.WitnessScore(solver.GetOpInfluence(store.GetID()))
 	}
-	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, b.filters, cluster.GetOpts(), collector, b.filterCounter), false, scoreFunc)
+	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, b.filters, cluster.GetSchedulerConfig(), collector, b.filterCounter), false, scoreFunc)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
@@ -296,11 +296,11 @@ func (b *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 	defer func() { solver.Step-- }()
 	targets := solver.GetNonWitnessVoterStores(solver.Region)
 	finalFilters := b.filters
-	opts := solver.GetOpts()
-	if witnessFilter := filter.NewPlacementWitnessSafeguard(b.GetName(), opts, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
+	conf := solver.GetSchedulerConfig()
+	if witnessFilter := filter.NewPlacementWitnessSafeguard(b.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
 		finalFilters = append(b.filters, witnessFilter)
 	}
-	targets = filter.SelectTargetStores(targets, finalFilters, opts, collector, b.filterCounter)
+	targets = filter.SelectTargetStores(targets, finalFilters, conf, collector, b.filterCounter)
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := solver.GetOpInfluence(targets[i].GetID())
 		jOp := solver.GetOpInfluence(targets[j].GetID())

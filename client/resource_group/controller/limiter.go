@@ -285,6 +285,7 @@ type tokenBucketReconfigureArgs struct {
 	NotifyThreshold float64
 }
 
+// LimiterOption configures Limiter.
 type LimiterOption func(*Limiter)
 
 func resetLowProcess() func(*Limiter) {
@@ -386,6 +387,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	return r
 }
 
+// ResetRemainingNotifyTimes resets the remaining notify times to 3.
 func (lim *Limiter) ResetRemainingNotifyTimes() {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()

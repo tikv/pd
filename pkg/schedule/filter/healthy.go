@@ -42,17 +42,17 @@ func hasDownPeers(region *core.RegionInfo) bool {
 // IsRegionReplicated checks if a region is fully replicated. When placement
 // rules is enabled, its peers should fit corresponding rules. When placement
 // rules is disabled, it should have enough replicas and no any learner peer.
-func IsRegionReplicated(cluster sche.ScheduleCluster, region *core.RegionInfo) bool {
-	if cluster.GetOpts().IsPlacementRulesEnabled() {
+func IsRegionReplicated(cluster sche.SharedCluster, region *core.RegionInfo) bool {
+	if cluster.GetSharedConfig().IsPlacementRulesEnabled() {
 		return isRegionPlacementRuleSatisfied(cluster, region)
 	}
 	return isRegionReplicasSatisfied(cluster, region)
 }
 
-func isRegionPlacementRuleSatisfied(cluster sche.ScheduleCluster, region *core.RegionInfo) bool {
+func isRegionPlacementRuleSatisfied(cluster sche.SharedCluster, region *core.RegionInfo) bool {
 	return cluster.GetRuleManager().FitRegion(cluster, region).IsSatisfied()
 }
 
-func isRegionReplicasSatisfied(cluster sche.ScheduleCluster, region *core.RegionInfo) bool {
-	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetOpts().GetMaxReplicas()
+func isRegionReplicasSatisfied(cluster sche.SharedCluster, region *core.RegionInfo) bool {
+	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetSharedConfig().GetMaxReplicas()
 }
