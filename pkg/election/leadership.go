@@ -201,7 +201,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 	watcher := clientv3.NewWatcher(ls.client)
 	defer watcher.Close()
-	var watchChanCancel context.CancelFunc // nolint https://github.com/golang/go/issues/25720
+	var watchChanCancel context.CancelFunc
 	defer func() {
 		if watchChanCancel != nil {
 			watchChanCancel()
@@ -229,7 +229,9 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			}
 			select {
 			case <-serverCtx.Done():
-				// server closed, return
+				log.Info("server is closed, exit leader watch loop",
+					zap.String("leader-key", ls.leaderKey),
+					zap.String("purpose", ls.purpose))
 				return
 			case <-ticker.C:
 				// continue to check the etcd availability
@@ -238,10 +240,12 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		}
 
 		watchChan := watcher.Watch(watchChanCtx, ls.leaderKey, clientv3.WithRev(revision))
-	WatchChan:
+	WatchChanLoop:
 		select {
 		case <-serverCtx.Done():
-			// server closed, return
+			log.Info("server is closed, exit leader watch loop",
+				zap.String("leader-key", ls.leaderKey),
+				zap.String("purpose", ls.purpose))
 			return
 		case <-ticker.C:
 			if !etcdutil.IsHealthy(serverCtx, ls.client) {
@@ -252,7 +256,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 						zap.String("purpose", ls.purpose))
 					return
 				}
-				goto WatchChan
+				goto WatchChanLoop
 			}
 		case wresp := <-watchChan:
 			// meet compacted error, use the compact revision.
@@ -284,7 +288,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			revision = wresp.Header.Revision + 1
 		}
 		lastHealthyTime = time.Now()
-		goto WatchChan // use goto to avoid to create a new watchChan
+		goto WatchChanLoop // use goto to avoid to create a new watchChan
 	}
 }
 

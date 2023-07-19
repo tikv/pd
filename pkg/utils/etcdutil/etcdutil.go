@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
-	"sort"
 	"sync"
 	"time"
 
@@ -61,6 +60,8 @@ const (
 	// DefaultSlowRequestTime 1s for the threshold for normal request, for those
 	// longer then 1s, they are considered as slow requests.
 	DefaultSlowRequestTime = time.Second
+
+	healthyPath = "health"
 )
 
 // CheckClusterID checks etcd cluster ID, returns an error if mismatch.
@@ -152,7 +153,7 @@ func IsHealthy(ctx context.Context, client *clientv3.Client) bool {
 	})
 	ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(ctx), timeout)
 	defer cancel()
-	_, err := client.Get(ctx, "health")
+	_, err := client.Get(ctx, healthyPath)
 	// permission denied is OK since proposal goes through consensus to get it
 	// See: https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L124
 	return err == nil || err == rpctypes.ErrPermissionDenied
@@ -290,7 +291,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 						client.SetEndpoints(usedEps...)
 					}
 				} else {
-					if !isEqual(healthyEps, usedEps) {
+					if !typeutil.AreStringSlicesEquivalent(healthyEps, usedEps) {
 						client.SetEndpoints(healthyEps...)
 						change := fmt.Sprintf("%d->%d", len(usedEps), len(healthyEps))
 						etcdStateGauge.WithLabelValues("endpoints").Set(float64(len(healthyEps)))
@@ -417,20 +418,6 @@ func syncUrls(client *clientv3.Client) []string {
 		}
 	}
 	return eps
-}
-
-func isEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	sort.Strings(a)
-	sort.Strings(b)
-	for i, v := range a {
-		if v != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // CreateClients creates etcd v3 client and http client.
@@ -680,7 +667,7 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
 	watcher := clientv3.NewWatcher(lw.client)
 	defer watcher.Close()
-	var watchChanCancel context.CancelFunc // nolint https://github.com/golang/go/issues/25720
+	var watchChanCancel context.CancelFunc
 	defer func() {
 		if watchChanCancel != nil {
 			watchChanCancel()
@@ -696,7 +683,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		watchChanCancel = cancel
 		opts := append(lw.opts, clientv3.WithRev(revision))
 		watchChan := watcher.Watch(watchChanCtx, lw.key, opts...)
-	WatchChan:
+	WatchChanLoop:
 		select {
 		case <-ctx.Done():
 			return revision, nil
@@ -746,7 +733,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.String("key", lw.key), zap.Error(err))
 			}
 			revision = wresp.Header.Revision + 1
-			goto WatchChan // use goto to avoid to create a new watchChan
+			goto WatchChanLoop // use goto to avoid to create a new watchChan
 		}
 	}
 }

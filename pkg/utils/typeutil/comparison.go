@@ -16,6 +16,7 @@ package typeutil
 
 import (
 	"math"
+	"sort"
 	"time"
 )
 
@@ -43,13 +44,30 @@ func MinDuration(a, b time.Duration) time.Duration {
 	return b
 }
 
-// StringsEqual checks if two string slices are equal. Empyt slice and nil are considered equal.
-func StringsEqual(a, b []string) bool {
+// AreStringSlicesEqual checks if two string slices are equal. Empyt slice and nil are considered equal.
+// It returns true if the slices are of the same length and all elements are identical in both slices, otherwise, it returns false.
+func AreStringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
 		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// AreStringSlicesEquivalent checks if two string slices are equivalent.
+// If the slices are of the same length and contain the same elements (but possibly in different order), the function returns true.
+func AreStringSlicesEquivalent(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	sort.Strings(a)
+	sort.Strings(b)
+	for i, v := range a {
+		if v != b[i] {
 			return false
 		}
 	}
