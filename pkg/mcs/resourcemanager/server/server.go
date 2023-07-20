@@ -375,7 +375,7 @@ func (s *Server) startServer() (err error) {
 	resourceManagerPrimaryPrefix := endpoint.ResourceManagerSvcRootPath(s.clusterID)
 	s.participant = member.NewParticipant(s.etcdClient)
 	s.participant.InitInfo(uniqueName, uniqueID, path.Join(resourceManagerPrimaryPrefix, fmt.Sprintf("%05d", 0)),
-		utils.KeyspaceGroupsPrimaryKey, "keyspace group primary election", s.cfg.AdvertiseListenAddr)
+		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
 
 	s.service = &Service{
 		ctx:     s.ctx,

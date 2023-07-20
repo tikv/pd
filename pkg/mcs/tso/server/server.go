@@ -43,7 +43,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/systimemon"
@@ -60,14 +60,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-)
-
-const (
-	// maxRetryTimesWaitAPIService is the max retry times for initializing the cluster ID.
-	maxRetryTimesWaitAPIService = 360
-	// retryIntervalWaitAPIService is the interval to retry.
-	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
-	retryIntervalWaitAPIService = 500 * time.Millisecond
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -220,7 +212,7 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 // IsServing implements basicserver. It returns whether the server is the leader
 // if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return s.IsKeyspaceServing(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+	return s.IsKeyspaceServing(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
 }
 
 // IsKeyspaceServing returns whether the server is the primary of the given keyspace.
@@ -243,7 +235,7 @@ func (s *Server) IsKeyspaceServing(keyspaceID, keyspaceGroupID uint32) bool {
 // The entry at the index 0 is the primary's service endpoint.
 func (s *Server) GetLeaderListenUrls() []string {
 	member, err := s.keyspaceGroupManager.GetElectionMember(
-		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+		utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
 	if err != nil {
 		log.Error("failed to get election member", errs.ZapError(err))
 		return nil
@@ -452,7 +444,7 @@ func (s *Server) stopHTTPServer() {
 	log.Info("stopping http server")
 	defer log.Info("http server stopped")
 
-	ctx, cancel := context.WithTimeout(context.Background(), mcsutils.DefaultHTTPGracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
 	defer cancel()
 
 	// First, try to gracefully shutdown the http server
@@ -485,7 +477,7 @@ func (s *Server) stopGRPCServer() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), mcsutils.DefaultGRPCGracefulStopTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultGRPCGracefulStopTimeout)
 	defer cancel()
 
 	// First, try to gracefully shutdown the grpc server
@@ -511,7 +503,7 @@ func (s *Server) stopGRPCServer() {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = mcsutils.InitClusterID(s.ctx, s.etcdClient); err != nil {
+	if s.clusterID, err = utils.InitClusterID(s.ctx, s.etcdClient); err != nil {
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
@@ -548,9 +540,9 @@ func (s *Server) startServer() (err error) {
 	}
 	if tlsConfig != nil {
 		s.secure = true
-		s.muxListener, err = tls.Listen(mcsutils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
+		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
 	} else {
-		s.muxListener, err = net.Listen(mcsutils.TCPNetworkStr, s.listenURL.Host)
+		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
 	}
 	if err != nil {
 		return err
@@ -574,9 +566,9 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, strconv.FormatUint(s.clusterID, 10),
-		mcsutils.TSOServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+		utils.TSOServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
-		log.Error("failed to register the service", zap.String("service-name", mcsutils.TSOServiceName), errs.ZapError(err))
+		log.Error("failed to register the service", zap.String("service-name", utils.TSOServiceName), errs.ZapError(err))
 		return err
 	}
 
@@ -589,9 +581,9 @@ func (s *Server) waitAPIServiceReady() error {
 		ready bool
 		err   error
 	)
-	ticker := time.NewTicker(retryIntervalWaitAPIService)
+	ticker := time.NewTicker(utils.RetryIntervalWaitAPIService)
 	defer ticker.Stop()
-	for i := 0; i < maxRetryTimesWaitAPIService; i++ {
+	for i := 0; i < utils.MaxRetryTimesWaitAPIService; i++ {
 		ready, err = s.isAPIServiceReady()
 		if err == nil && ready {
 			return nil
@@ -606,7 +598,7 @@ func (s *Server) waitAPIServiceReady() error {
 	if err != nil {
 		log.Warn("failed to check api server ready", errs.ZapError(err))
 	}
-	return errors.Errorf("failed to wait api server ready after retrying %d times", maxRetryTimesWaitAPIService)
+	return errors.Errorf("failed to wait api server ready after retrying %d times", utils.MaxRetryTimesWaitAPIService)
 }
 
 func (s *Server) isAPIServiceReady() (bool, error) {
