@@ -1554,7 +1554,9 @@ func (bs *balanceSolver) splitHotKeys(region *core.RegionInfo, stats []*buckets.
 	for ; acc < totalLoads/2 && splitIdx < len(stats); splitIdx++ {
 		acc += stats[splitIdx].Loads[dim]
 	}
-
+	if splitIdx <= 0 {
+		return nil
+	}
 	splitKey := stats[splitIdx-1].EndKey
 	op := bs.splitBucketsOperator(region, [][]byte{splitKey})
 	if op != nil {
