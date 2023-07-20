@@ -32,6 +32,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 
 	sche, err := CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
@@ -145,6 +146,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -2.
 	re := require.New(t)
 	statistics.Denoising = false
+	statisticsInterval = 0
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -207,6 +209,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -1.
 	re := require.New(t)
 	statistics.Denoising = false
+	statisticsInterval = 0
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -268,6 +271,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 func TestSkipUniformStore(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
+	statisticsInterval = 0
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -344,4 +348,55 @@ func TestSkipUniformStore(t *testing.T) {
 	re.Len(ops, 1)
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
+}
+
+func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
+	re := require.New(t)
+	// Case1: the hot region is smaller than the minHotRatio
+	// And we use top10 as the threshold of minHotPeer.
+	ops := checkHotReadRegionScheduleWithSmallHotRegion(re)
+	re.Len(ops, 1)
+	// Case2: the hot region is smaller than the minHotRatio
+	// And we only use minHotRatio, because 10000 is larger than the length of hotRegions, so `filterHotPeers` will skip the topn calculation.
+	origin := topnPosition
+	topnPosition = 10000
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re)
+	re.Len(ops, 0)
+	topnPosition = origin
+}
+
+func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions) []*operator.Operator {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	statistics.Denoising = false
+	sche, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.AddRegionStore(1, 40)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+
+	highLoad, lowLoad := uint64(2000), uint64(200)
+	tc.UpdateStorageReadQuery(1, highLoad*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadQuery(2, lowLoad*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadQuery(3, (highLoad+lowLoad)/2*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(1, highLoad*units.MiB*statistics.StoreHeartBeatReportInterval, 0)
+	tc.UpdateStorageReadStats(2, lowLoad*units.MiB*statistics.StoreHeartBeatReportInterval, 0)
+	tc.UpdateStorageReadStats(3, (highLoad+lowLoad)/2*units.MiB*statistics.StoreHeartBeatReportInterval, 0)
+
+	regions := make([]testRegionInfo, 0)
+	smallHotPeerQuery := float64(lowLoad) * firstPriorityMinHotRatio * 0.9             // it's a small hot region than the firstPriorityMinHotRatio
+	smallHotPeerByte := float64(lowLoad) * secondPriorityMinHotRatio * 0.9 * units.MiB // it's a small hot region than the secondPriorityMinHotRatio
+	for i := 0; i < 40; i++ {
+		regions = append(regions, testRegionInfo{uint64(i), []uint64{1, 2, 3}, smallHotPeerByte, 0, smallHotPeerQuery})
+		if i < 10 {
+			regions = append(regions, testRegionInfo{uint64(i), []uint64{2, 1, 3}, smallHotPeerByte, 0, smallHotPeerQuery})
+			regions = append(regions, testRegionInfo{uint64(i), []uint64{3, 1, 2}, smallHotPeerByte, 0, smallHotPeerQuery})
+		}
+	}
+	addRegionInfo(tc, statistics.Read, regions)
+
+	ops, _ := hb.Schedule(tc, false)
+	return ops
 }
