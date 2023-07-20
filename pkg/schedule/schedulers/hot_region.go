@@ -1507,19 +1507,19 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	return
 }
 
-// todo: remove it if bucket's qps has report
-// only use the first priority to split hot buckets.
-// such like: [10,11,12,9] , the split keys is 11, to make the buckets more balance.
-func (bs *balanceSolver) getSplitDim() int {
-	dim := int(statistics.RegionReadBytes)
+// bucketFirstStat returns the first priority statistics of the bucket.
+// if the first priority is query rate, it will return the second priority .
+func (bs *balanceSolver) bucketFirstStat() statistics.RegionStatKind {
+	dim := statistics.RegionReadBytes
 	diff := bs.firstPriority
+	// todo: remove it if bucket's qps has been supported.
 	if bs.firstPriority == statistics.QueryDim {
 		diff = bs.secondPriority
 	}
 	if bs.rwTy == statistics.Write {
-		dim = int(statistics.RegionWriteBytes)
+		dim = statistics.RegionWriteBytes
 	}
-	dim += diff
+	dim += statistics.RegionStatKind(diff)
 	return dim
 }
 
@@ -1545,7 +1545,7 @@ func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]
 
 func (bs *balanceSolver) splitHotKeys(region *core.RegionInfo, stats []*buckets.BucketStat) *operator.Operator {
 	totalLoads := uint64(0)
-	dim := bs.getSplitDim()
+	dim := bs.bucketFirstStat()
 	for _, stat := range stats {
 		totalLoads += stat.Loads[dim]
 	}

@@ -2882,3 +2882,46 @@ func TestEncodeConfig(t *testing.T) {
 	re.NoError(err)
 	re.NotEqual("null", string(data))
 }
+
+func TestBucketFirstStat(t *testing.T) {
+	re := require.New(t)
+	testdata := []struct {
+		firstPriority  int
+		secondPriority int
+		rwTy           statistics.RWType
+		expect         statistics.RegionStatKind
+	}{
+		{
+			firstPriority:  statistics.KeyDim,
+			secondPriority: statistics.ByteDim,
+			rwTy:           statistics.Write,
+			expect:         statistics.RegionWriteKeys,
+		},
+		{
+			firstPriority:  statistics.QueryDim,
+			secondPriority: statistics.ByteDim,
+			rwTy:           statistics.Write,
+			expect:         statistics.RegionWriteBytes,
+		},
+		{
+			firstPriority:  statistics.KeyDim,
+			secondPriority: statistics.ByteDim,
+			rwTy:           statistics.Read,
+			expect:         statistics.RegionReadKeys,
+		},
+		{
+			firstPriority:  statistics.QueryDim,
+			secondPriority: statistics.ByteDim,
+			rwTy:           statistics.Read,
+			expect:         statistics.RegionReadBytes,
+		},
+	}
+	for _, data := range testdata {
+		bs := &balanceSolver{
+			firstPriority:  data.firstPriority,
+			secondPriority: data.secondPriority,
+			rwTy:           data.rwTy,
+		}
+		re.Equal(data.expect, bs.bucketFirstStat())
+	}
+}
