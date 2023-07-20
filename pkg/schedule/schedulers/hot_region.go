@@ -180,6 +180,10 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.
 			total, count := 0.0, 0.0
 			for _, store := range h.stLoadInfos[writePeer] {
 				for _, peer := range store.HotPeers {
+					region := cluster.GetRegion(peer.RegionID)
+					if region == nil || !filter.IsRegionHealthy(region) || !filter.IsRegionReplicated(cluster, region) {
+						continue
+					}
 					total += float64(len(peer.GetStores()))
 					count++
 				}
