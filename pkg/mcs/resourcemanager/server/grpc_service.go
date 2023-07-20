@@ -180,7 +180,6 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		}
 		targetPeriodMs := request.GetTargetRequestPeriodMs()
 		clientUniqueID := request.GetClientUniqueId()
-		isBackground := request.GetIsBackground()
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
@@ -191,6 +190,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				continue
 			}
 			// Send the consumption to update the metrics.
+			isBackground := req.GetIsBackground()
 			s.manager.consumptionDispatcher <- struct {
 				resourceGroupName string
 				*rmpb.Consumption

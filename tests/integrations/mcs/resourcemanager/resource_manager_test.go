@@ -719,7 +719,12 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		checkFunc(gresp, groups[0])
 	}
 
-	reqs.IsBackground = true
+	// Test for background request upload.
+	reqs.Requests = nil
+	reqs.Requests = append(reqs.Requests, &rmpb.TokenBucketRequest{
+		ResourceGroupName: "background_job",
+		IsBackground:      true,
+	})
 	aresp, err := cli.AcquireTokenBuckets(suite.ctx, reqs)
 	re.NoError(err)
 	for _, resp := range aresp {
