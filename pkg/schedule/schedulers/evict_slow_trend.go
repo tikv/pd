@@ -36,9 +36,21 @@ const (
 	EvictSlowTrendType = "evict-slow-trend"
 )
 
+type StrategyOption int8
+
+const (
+	EvictLeader StrategyOption = 0
+	PauseGrpc   StrategyOption = 1
+)
+
+type EvictStoreCandidate struct {
+	storeID  uint64
+	strategy StrategyOption
+}
+
 type evictSlowTrendSchedulerConfig struct {
 	storage              endpoint.ConfigStorage
-	evictCandidate       uint64
+	evictCandidate       EvictStoreCandidate // org: uint64
 	candidateCaptureTime time.Time
 
 	// Only evict one store for now
@@ -79,7 +91,7 @@ func (conf *evictSlowTrendSchedulerConfig) evictedStore() uint64 {
 	return conf.EvictedStores[0]
 }
 
-func (conf *evictSlowTrendSchedulerConfig) candidate() uint64 {
+func (conf *evictSlowTrendSchedulerConfig) candidate() EvictStoreCandidate {
 	return conf.evictCandidate
 }
 
@@ -91,15 +103,18 @@ func (conf *evictSlowTrendSchedulerConfig) candidateCapturedSecs() uint64 {
 	return uint64(time.Since(conf.candidateCaptureTime).Seconds())
 }
 
-func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
-	conf.evictCandidate = id
+func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64, opt StrategyOption) {
+	conf.evictCandidate = EvictStoreCandidate{
+		storeID:  id,
+		strategy: opt,
+	}
 	conf.candidateCaptureTime = time.Now()
 }
 
-func (conf *evictSlowTrendSchedulerConfig) popCandidate() uint64 {
-	id := conf.evictCandidate
-	conf.evictCandidate = 0
-	return id
+func (conf *evictSlowTrendSchedulerConfig) popCandidate() EvictStoreCandidate {
+	candidate := conf.evictCandidate
+	conf.evictCandidate = EvictStoreCandidate{}
+	return candidate
 }
 
 func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
@@ -151,13 +166,22 @@ func (s *evictSlowTrendScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
 
-func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
+func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, store EvictStoreCandidate) error {
+	storeID := store.storeID
+	strategy := store.strategy
 	err := s.conf.setStoreAndPersist(storeID)
 	if err != nil {
 		log.Info("evict-slow-trend-scheduler persist config failed", zap.Uint64("store-id", storeID))
 		return err
 	}
-	return cluster.SlowTrendEvicted(storeID)
+	switch strategy {
+	case EvictLeader:
+		return cluster.SlowTrendEvicted(storeID)
+	case PauseGrpc:
+		cluster.SlowTrendEvicted(storeID)
+		return cluster.PauseGrpcServer(storeID)
+	}
+	return nil
 }
 
 func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster) {
@@ -167,6 +191,7 @@ func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 	}
 	if evictedStoreID != 0 {
 		cluster.SlowTrendRecovered(evictedStoreID)
+		cluster.ResumeGrpcServer(evictedStoreID)
 	}
 }
 
@@ -216,22 +241,27 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 	}
 
 	candFreshCaptured := false
-	if s.conf.candidate() == 0 {
-		candidate := chooseEvictCandidate(cluster)
+	if s.conf.candidate() == (EvictStoreCandidate{}) {
+		var (
+			candidate *core.StoreInfo
+			strategy  StrategyOption
+		)
+		candidate, strategy = chooseEvictCandidate(cluster)
 		if candidate != nil {
 			storeSlowTrendActionStatusGauge.WithLabelValues("cand.captured").Inc()
-			s.conf.captureCandidate(candidate.GetID())
+			s.conf.captureCandidate(candidate.GetID(), strategy)
 			candFreshCaptured = true
 		}
 	} else {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.continue").Inc()
 	}
-	slowStoreID := s.conf.candidate()
-	if slowStoreID == 0 {
+	slowCandidate := s.conf.candidate()
+	if slowCandidate == (EvictStoreCandidate{}) {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none").Inc()
 		return ops, nil
 	}
 
+	slowStoreID := slowCandidate.storeID
 	slowStore := cluster.GetStore(slowStoreID)
 	if !candFreshCaptured && checkStoreFasterThanOthers(cluster, slowStore) {
 		s.conf.popCandidate()
@@ -270,13 +300,14 @@ func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSl
 	}
 }
 
-func chooseEvictCandidate(cluster sche.SchedulerCluster) (slowStore *core.StoreInfo) {
+func chooseEvictCandidate(cluster sche.SchedulerCluster) (slowStore *core.StoreInfo, strategy StrategyOption) {
 	stores := cluster.GetStores()
 	if len(stores) < 3 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-few").Inc()
 		return
 	}
 	var candidates []*core.StoreInfo
+	var strategyOpt StrategyOption
 	var affectedStoreCount int
 	for _, store := range stores {
 		if store.IsRemoved() {
@@ -286,18 +317,33 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster) (slowStore *core.StoreI
 			continue
 		}
 		slowTrend := store.GetSlowTrend()
-		if slowTrend != nil && slowTrend.CauseRate > alterEpsilon && slowTrend.ResultRate < -alterEpsilon {
-			candidates = append(candidates, store)
-			storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
-			log.Info("evict-slow-trend-scheduler pre-canptured candidate",
-				zap.Uint64("store-id", store.GetID()),
-				zap.Float64("cause-rate", slowTrend.CauseRate),
-				zap.Float64("result-rate", slowTrend.ResultRate),
-				zap.Float64("cause-value", slowTrend.CauseValue),
-				zap.Float64("result-value", slowTrend.ResultValue))
-		}
-		if slowTrend != nil && slowTrend.ResultRate < -alterEpsilon {
-			affectedStoreCount += 1
+		if slowTrend != nil {
+			if slowTrend.ResultRate < -alterEpsilon {
+				affectedStoreCount += 1
+			}
+			// Normal strategy for evicting leaders.
+			if slowTrend.CauseRate > alterEpsilon && slowTrend.ResultRate < -alterEpsilon {
+				candidates = append(candidates, store)
+				strategyOpt = EvictLeader
+				storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
+				log.Info("evict-slow-trend-scheduler pre-canptured candidate",
+					zap.Uint64("store-id", store.GetID()),
+					zap.Float64("cause-rate", slowTrend.CauseRate),
+					zap.Float64("result-rate", slowTrend.ResultRate),
+					zap.Float64("cause-value", slowTrend.CauseValue),
+					zap.Float64("result-value", slowTrend.ResultValue))
+			} else if slowTrend.CauseRate > alterEpsilon {
+				// TODO: move to restart-slow-store-scheduler.
+				candidates = append(candidates, store)
+				strategyOpt = PauseGrpc
+				storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
+				log.Info("evict-slow-trend-scheduler pre-canptured candidate for pause grpc server",
+					zap.Uint64("store-id", store.GetID()),
+					zap.Float64("cause-rate", slowTrend.CauseRate),
+					zap.Float64("result-rate", slowTrend.ResultRate),
+					zap.Float64("cause-value", slowTrend.CauseValue),
+					zap.Float64("result-value", slowTrend.ResultValue))
+			}
 		}
 	}
 	if len(candidates) == 0 {
@@ -327,7 +373,7 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster) (slowStore *core.StoreI
 
 	storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
 	log.Info("evict-slow-trend-scheduler captured candidate", zap.Uint64("store-id", store.GetID()))
-	return store
+	return store, strategyOpt
 }
 
 func checkStoresAreUpdated(cluster sche.SchedulerCluster, slowStoreID uint64, slowStoreRecordTS time.Time) bool {

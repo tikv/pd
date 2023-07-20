@@ -32,11 +32,10 @@ import (
 
 const (
 	// Interval to save store meta (including heartbeat ts) to etcd.
-	storePersistInterval    = 5 * time.Minute
-	initialMinSpace         = 8 * units.GiB // 2^33=8GB
-	slowStorePauseThreshold = 20
-	slowStoreThreshold      = 80
-	awakenStoreInterval     = 10 * time.Minute // 2 * slowScoreRecoveryTime
+	storePersistInterval = 5 * time.Minute
+	initialMinSpace      = 8 * units.GiB // 2^33=8GB
+	slowStoreThreshold   = 80
+	awakenStoreInterval  = 10 * time.Minute // 2 * slowScoreRecoveryTime
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
@@ -54,6 +53,7 @@ type StoreInfo struct {
 	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
 	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
 	slowTrendEvicted    bool // this store has been evicted as a slow store by trend, should not transfer leader to it
+	slowTrendGrpcPaused bool // this store has been marked slow and can be chosen to pause Grpc.
 	leaderCount         int
 	regionCount         int
 	learnerCount        int
@@ -152,6 +152,11 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 // IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
 func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
 	return s.slowTrendEvicted
+}
+
+// IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
+func (s *StoreInfo) IsPausedAsSlowTrend() bool {
+	return s.slowTrendGrpcPaused
 }
 
 // IsAvailable returns if the store bucket of limitation is available
@@ -543,13 +548,13 @@ func (s *StoreInfo) NeedAwakenStore() bool {
 func (s *StoreInfo) NeedPauseGrpc() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return !s.rawStats.IsGrpcPaused && (s.slowTrendEvicted || s.rawStats.GetSlowScore() >= slowStorePauseThreshold)
+	return !s.rawStats.IsGrpcPaused && s.slowTrendEvicted && s.slowTrendGrpcPaused
 }
 
 func (s *StoreInfo) NeedResumeGrpc() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.rawStats.IsGrpcPaused && !s.slowTrendEvicted && s.rawStats.GetSlowScore() < slowStorePauseThreshold
+	return s.rawStats.IsGrpcPaused && s.slowTrendEvicted && !s.slowTrendGrpcPaused
 }
 
 var (
@@ -735,6 +740,28 @@ func (s *StoresInfo) SlowTrendRecovered(storeID uint64) {
 		return
 	}
 	s.stores[storeID] = store.Clone(SlowTrendRecovered())
+}
+
+func (s *StoresInfo) PauseGrpcServer(storeID uint64) error {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if store.IsPausedAsSlowTrend() {
+		return errs.ErrSlowTrendEvicted.FastGenByArgs(storeID)
+	}
+	s.stores[storeID] = store.Clone(PauseGrpcServer())
+	return nil
+}
+
+func (s *StoresInfo) ResumeGrpcServer(storeID uint64) {
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Warn("try to clean a store's evicted by trend as a slow store state, but it is not found. It may be cleanup",
+			zap.Uint64("store-id", storeID))
+		return
+	}
+	s.stores[storeID] = store.Clone(ResumeGrpcServer())
 }
 
 // ResetStoreLimit resets the limit for a specific store.

@@ -1566,6 +1566,11 @@ func (c *RaftCluster) SlowStoreEvicted(storeID uint64) error {
 	return c.core.SlowStoreEvicted(storeID)
 }
 
+// SlowStoreRecovered cleans the evicted state of a store.
+func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
+	c.core.SlowStoreRecovered(storeID)
+}
+
 // SlowTrendEvicted marks a store as a slow store by trend and prevents transferring
 // leader to the store
 func (c *RaftCluster) SlowTrendEvicted(storeID uint64) error {
@@ -1577,9 +1582,15 @@ func (c *RaftCluster) SlowTrendRecovered(storeID uint64) {
 	c.core.SlowTrendRecovered(storeID)
 }
 
-// SlowStoreRecovered cleans the evicted state of a store.
-func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
-	c.core.SlowStoreRecovered(storeID)
+// PauseGrpcServer marks a store as a slow store by trend and prevents transferring
+// leader to the store
+func (c *RaftCluster) PauseGrpcServer(storeID uint64) error {
+	return c.core.PauseGrpcServer(storeID)
+}
+
+// ResumeGrpcServer cleans the evicted by slow trend state of a store.
+func (c *RaftCluster) ResumeGrpcServer(storeID uint64) {
+	c.core.ResumeGrpcServer(storeID)
 }
 
 // NeedAwakenAllRegionsInStore checks whether we should do AwakenRegions operation.
