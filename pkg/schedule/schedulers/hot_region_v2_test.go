@@ -351,21 +351,37 @@ func TestSkipUniformStore(t *testing.T) {
 }
 
 func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
+	// This is a test that we can schedule small hot region,
+	// which is smaller than 20% of diff or 2% of low node. (#6645)
+	// 20% is from `firstPriorityPerceivedRatio`, 2% is from `firstPriorityMinHotRatio`.
+	// The byte of high node is 2000MB/s, the low node is 200MB/s.
+	// The query of high node is 2000qps, the low node is 200qps.
+	// There are all small hot regions in the cluster, which are smaller than 20% of diff or 2% of low node.
 	re := require.New(t)
-	// Case1: the hot region is smaller than the minHotRatio
-	// And we use top10 as the threshold of minHotPeer.
-	ops := checkHotReadRegionScheduleWithSmallHotRegion(re)
-	re.Len(ops, 1)
-	// Case2: the hot region is smaller than the minHotRatio
-	// And we only use minHotRatio, because 10000 is larger than the length of hotRegions, so `filterHotPeers` will skip the topn calculation.
+	highLoad, lowLoad := uint64(2000), uint64(200)
+
+	// Case1: Before #6827, we only use minHotRatio, so cannot schedule small hot region in this case.
+	// Because 10000 is larger than the length of hotRegions, so `filterHotPeers` will skip the topn calculation.
+	regions := make([]testRegionInfo, 0)
 	origin := topnPosition
 	topnPosition = 10000
-	ops = checkHotReadRegionScheduleWithSmallHotRegion(re)
-	re.Len(ops, 0)
+	ops := checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, regions)
+	re.Empty(ops)
 	topnPosition = origin
+
+	// Case2: After #6827, we use top10 as the threshold of minHotPeer.
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, regions)
+	re.Len(ops, 1)
+
+	// Case3: If there is larger hot region, we will schedule it.
+	hotRegionID := uint64(100)
+	regions = append(regions, testRegionInfo{hotRegionID, []uint64{1, 2, 3}, float64(lowLoad*units.MiB) * 0.1, 0, float64(lowLoad) * 0.1})
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, regions)
+	re.Len(ops, 1)
+	re.Equal(hotRegionID, ops[0].RegionID())
 }
 
-func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions) []*operator.Operator {
+func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLoad, lowLoad uint64, regions []testRegionInfo) []*operator.Operator {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	statistics.Denoising = false
@@ -377,7 +393,6 @@ func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions) []*ope
 	tc.AddRegionStore(2, 10)
 	tc.AddRegionStore(3, 10)
 
-	highLoad, lowLoad := uint64(2000), uint64(200)
 	tc.UpdateStorageReadQuery(1, highLoad*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadQuery(2, lowLoad*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadQuery(3, (highLoad+lowLoad)/2*statistics.StoreHeartBeatReportInterval)
@@ -385,12 +400,11 @@ func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions) []*ope
 	tc.UpdateStorageReadStats(2, lowLoad*units.MiB*statistics.StoreHeartBeatReportInterval, 0)
 	tc.UpdateStorageReadStats(3, (highLoad+lowLoad)/2*units.MiB*statistics.StoreHeartBeatReportInterval, 0)
 
-	regions := make([]testRegionInfo, 0)
 	smallHotPeerQuery := float64(lowLoad) * firstPriorityMinHotRatio * 0.9             // it's a small hot region than the firstPriorityMinHotRatio
 	smallHotPeerByte := float64(lowLoad) * secondPriorityMinHotRatio * 0.9 * units.MiB // it's a small hot region than the secondPriorityMinHotRatio
-	for i := 0; i < 40; i++ {
+	for i := 10; i < 50; i++ {
 		regions = append(regions, testRegionInfo{uint64(i), []uint64{1, 2, 3}, smallHotPeerByte, 0, smallHotPeerQuery})
-		if i < 10 {
+		if i < 20 {
 			regions = append(regions, testRegionInfo{uint64(i), []uint64{2, 1, 3}, smallHotPeerByte, 0, smallHotPeerQuery})
 			regions = append(regions, testRegionInfo{uint64(i), []uint64{3, 1, 2}, smallHotPeerByte, 0, smallHotPeerQuery})
 		}
