@@ -338,12 +338,12 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	// start client
-	s.client, s.httpClient, err = startClient(s.cfg)
+	s.client, s.httpClient, err = s.startClient()
 	if err != nil {
 		return err
 	}
 
-	s.electionClient, err = startElectionClient(s.cfg)
+	s.electionClient, err = s.startElectionClient()
 	if err != nil {
 		return err
 	}
@@ -370,29 +370,29 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	return nil
 }
 
-func startClient(cfg *config.Config) (*clientv3.Client, *http.Client, error) {
-	tlsConfig, err := cfg.Security.ToTLSConfig()
+func (s *Server) startClient() (*clientv3.Client, *http.Client, error) {
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return nil, nil, err
 	}
-	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
 	if err != nil {
 		return nil, nil, err
 	}
-	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls[0])
+	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls)
 }
 
-func startElectionClient(cfg *config.Config) (*clientv3.Client, error) {
-	tlsConfig, err := cfg.Security.ToTLSConfig()
+func (s *Server) startElectionClient() (*clientv3.Client, error) {
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return nil, err
 	}
-	etcdCfg, err := cfg.GenEmbedEtcdConfig()
+	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
 	if err != nil {
 		return nil, err
 	}
 
-	return etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls[0])
+	return etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
 }
 
 // AddStartCallback adds a callback in the startServer phase.
@@ -1031,14 +1031,14 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
 				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
+			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.StringsEqual(cfg.LocationLabels, old.LocationLabels)) {
+		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels)) {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
