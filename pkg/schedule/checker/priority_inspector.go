@@ -104,9 +104,11 @@ func (p *PriorityInspector) addOrRemoveRegion(priority int, regionID uint64) {
 			e := entry.Value.(*RegionPriorityEntry)
 			e.Attempt++
 			e.Last = time.Now()
+			p.queue.Put(priority, e)
+		} else {
+			entry := NewRegionEntry(regionID)
+			p.queue.Put(priority, entry)
 		}
-		entry := NewRegionEntry(regionID)
-		p.queue.Put(priority, entry)
 	} else {
 		p.queue.Remove(regionID)
 	}
