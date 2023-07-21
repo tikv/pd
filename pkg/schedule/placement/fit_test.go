@@ -44,7 +44,7 @@ func makeStores() StoreSet {
 					if x == 5 {
 						labels["engine"] = "tiflash"
 					}
-					stores.SetStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now)))
+					stores.PutStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now)))
 				}
 			}
 		}

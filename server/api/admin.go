@@ -55,7 +55,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rc.DropCacheRegion(regionID)
+	rc.RemoveRegionIfExist(regionID)
 	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache.")
 }
 
@@ -66,7 +66,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 // @Router   /admin/cache/regions [delete]
 func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
-	rc.DropCacheAllRegion()
+	rc.ResetRegionCache()
 	h.rd.JSON(w, http.StatusOK, "All regions are removed from server cache.")
 }
 

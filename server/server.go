@@ -1384,8 +1384,6 @@ func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit
 
 // GetClusterStatus gets cluster status.
 func (s *Server) GetClusterStatus() (*cluster.Status, error) {
-	s.cluster.Lock()
-	defer s.cluster.Unlock()
 	return s.cluster.LoadClusterStatus()
 }
 
