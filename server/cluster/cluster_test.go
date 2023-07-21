@@ -92,7 +92,7 @@ func TestStoreHeartbeat(t *testing.T) {
 		}
 		re.Error(cluster.HandleStoreHeartbeat(req, resp))
 
-		re.NoError(cluster.putStoreLocked(store))
+		re.NoError(cluster.setStore(store))
 		re.Equal(i+1, cluster.GetStoreCount())
 
 		re.Equal(int64(0), store.GetLastHeartbeatTS().UnixNano())
@@ -214,7 +214,7 @@ func TestFilterUnhealthyStore(t *testing.T) {
 			Available:   50,
 			RegionCount: 1,
 		}
-		re.NoError(cluster.putStoreLocked(store))
+		re.NoError(cluster.setStore(store))
 		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 		re.NotNil(cluster.hotStat.GetRollingStoreStats(store.GetID()))
 	}
@@ -252,7 +252,7 @@ func TestSetOfflineStore(t *testing.T) {
 
 	// Put 6 stores.
 	for _, store := range newTestStores(6, "2.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 
 	// store 1: up -> offline
@@ -294,7 +294,7 @@ func TestSetOfflineStore(t *testing.T) {
 	// test clean up tombstone store
 	toCleanStore := cluster.GetStore(1).Clone().GetMeta()
 	toCleanStore.LastHeartbeat = time.Now().Add(-40 * 24 * time.Hour).UnixNano()
-	cluster.PutStore(toCleanStore)
+	cluster.PutMetaStore(toCleanStore)
 	cluster.checkStores()
 	re.Nil(cluster.GetStore(1))
 }
@@ -311,7 +311,7 @@ func TestSetOfflineWithReplica(t *testing.T) {
 
 	// Put 4 stores.
 	for _, store := range newTestStores(4, "2.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 
 	re.NoError(cluster.RemoveStore(2, false))
@@ -350,7 +350,7 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 
 	// Put 3 stores.
 	for _, store := range newTestStores(3, "2.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 	_, err = addEvictLeaderScheduler(cluster, 1)
 
@@ -377,7 +377,7 @@ func TestForceBuryStore(t *testing.T) {
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
 	for _, store := range stores {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 	re.NoError(cluster.BuryStore(uint64(1), true))
 	re.Error(cluster.BuryStore(uint64(2), true))
@@ -395,7 +395,7 @@ func TestReuseAddress(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	// Put 4 stores.
 	for _, store := range newTestStores(4, "2.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 	// store 1: up
 	// store 2: offline
@@ -419,9 +419,9 @@ func TestReuseAddress(t *testing.T) {
 
 		if storeInfo.IsPhysicallyDestroyed() || storeInfo.IsRemoved() {
 			// try to start a new store with the same address with store which is physically destroyed or tombstone should be success
-			re.NoError(cluster.PutStore(newStore))
+			re.NoError(cluster.PutMetaStore(newStore))
 		} else {
-			re.Error(cluster.PutStore(newStore))
+			re.Error(cluster.PutMetaStore(newStore))
 		}
 	}
 }
@@ -449,7 +449,7 @@ func TestUpStore(t *testing.T) {
 
 	// Put 5 stores.
 	for _, store := range newTestStores(5, "5.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 
 	// set store 1 offline
@@ -489,7 +489,7 @@ func TestRemovingProcess(t *testing.T) {
 	// Put 5 stores.
 	stores := newTestStores(5, "5.0.0")
 	for _, store := range stores {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 	regions := newTestRegions(100, 5, 1)
 	var regionInStore1 []*core.RegionInfo
@@ -517,7 +517,7 @@ func TestRemovingProcess(t *testing.T) {
 		if i >= 5 {
 			break
 		}
-		cluster.DropCacheRegion(region.GetID())
+		cluster.RemoveRegionIfExist(region.GetID())
 		i++
 	}
 	cluster.checkStores()
@@ -552,13 +552,13 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 
 	// Put 3 new 4.0.9 stores.
 	for _, store := range newTestStores(3, "4.0.9") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 	re.Equal("4.0.9", cluster.GetClusterVersion())
 
 	// Upgrade 2 stores to 5.0.0.
 	for _, store := range newTestStores(2, "5.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 	re.Equal("4.0.9", cluster.GetClusterVersion())
 
@@ -581,14 +581,14 @@ func TestStoreClusterVersion(t *testing.T) {
 	s1.Version = "5.0.1"
 	s2.Version = "5.0.3"
 	s3.Version = "5.0.5"
-	re.NoError(cluster.PutStore(s2))
+	re.NoError(cluster.PutMetaStore(s2))
 	re.Equal(s2.Version, cluster.GetClusterVersion())
 
-	re.NoError(cluster.PutStore(s1))
+	re.NoError(cluster.PutMetaStore(s1))
 	// the cluster version should be 5.0.1(the min one)
 	re.Equal(s1.Version, cluster.GetClusterVersion())
 
-	re.NoError(cluster.PutStore(s3))
+	re.NoError(cluster.PutMetaStore(s3))
 	// the cluster version should be 5.0.1(the min one)
 	re.Equal(s1.Version, cluster.GetClusterVersion())
 }
@@ -678,7 +678,7 @@ func TestBucketHeartbeat(t *testing.T) {
 	n, np := uint64(2), uint64(2)
 	regions := newTestRegions(n, n, np)
 	for _, store := range stores {
-		re.NoError(cluster.putStoreLocked(store))
+		re.NoError(cluster.setStore(store))
 	}
 
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0]))
@@ -728,7 +728,7 @@ func TestRegionHeartbeat(t *testing.T) {
 	regions := newTestRegions(n, n, np)
 
 	for _, store := range stores {
-		re.NoError(cluster.putStoreLocked(store))
+		re.NoError(cluster.setStore(store))
 	}
 
 	for i, region := range regions {
@@ -893,10 +893,10 @@ func TestRegionHeartbeat(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	for _, store := range cluster.GetStores() {
-		re.Equal(cluster.core.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
-		re.Equal(cluster.core.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
-		re.Equal(cluster.core.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
-		re.Equal(cluster.core.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
+		re.Equal(cluster.BasicCluster.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
+		re.Equal(cluster.BasicCluster.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
+		re.Equal(cluster.BasicCluster.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
+		re.Equal(cluster.BasicCluster.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
 	}
 
 	// Test with storage.
@@ -1132,7 +1132,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 			State:   metapb.StoreState_Up,
 			Labels:  labels,
 		}
-		re.NoError(cluster.putStoreLocked(core.NewStoreInfo(store)))
+		re.NoError(cluster.setStore(core.NewStoreInfo(store)))
 	}
 
 	peers := make([]*metapb.Peer, 0, 4)
@@ -1295,7 +1295,7 @@ func TestOfflineAndMerge(t *testing.T) {
 
 	// Put 4 stores.
 	for _, store := range newTestStores(4, "5.0.0") {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 
 	peers := []*metapb.Peer{
@@ -1350,7 +1350,7 @@ func TestStoreConfigUpdate(t *testing.T) {
 	tc := newTestCluster(ctx, opt)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
-		re.NoError(tc.putStoreLocked(s))
+		re.NoError(tc.setStore(s))
 	}
 	re.Len(tc.getUpStores(), 5)
 	// Case1: big region.
@@ -1502,7 +1502,7 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	tc.RaftCluster.coordinator = schedule.NewCoordinator(ctx, tc.RaftCluster, nil)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
-		re.NoError(tc.putStoreLocked(s))
+		re.NoError(tc.setStore(s))
 	}
 	tc.RaftCluster.wg.Add(1)
 	go tc.RaftCluster.runUpdateStoreStats()
@@ -1677,7 +1677,7 @@ func TestCalculateStoreSize1(t *testing.T) {
 			},
 		}...)
 		s := store.Clone(core.SetStoreLabels(labels))
-		re.NoError(cluster.PutStore(s.GetMeta()))
+		re.NoError(cluster.PutMetaStore(s.GetMeta()))
 	}
 
 	cluster.ruleManager.SetRule(
@@ -1761,7 +1761,7 @@ func TestCalculateStoreSize2(t *testing.T) {
 		}
 		labels = append(labels, []*metapb.StoreLabel{{Key: "rack", Value: "r1"}, {Key: "host", Value: "h1"}}...)
 		s := store.Clone(core.SetStoreLabels(labels))
-		re.NoError(cluster.PutStore(s.GetMeta()))
+		re.NoError(cluster.PutMetaStore(s.GetMeta()))
 	}
 
 	cluster.ruleManager.SetRule(
@@ -1811,7 +1811,7 @@ func TestStores(t *testing.T) {
 		id := store.GetID()
 		re.Nil(cache.GetStore(id))
 		re.Error(cache.PauseLeaderTransfer(id))
-		cache.SetStore(store)
+		cache.PutStore(store)
 		re.Equal(store, cache.GetStore(id))
 		re.Equal(i+1, cache.GetStoreCount())
 		re.NoError(cache.PauseLeaderTransfer(id))
@@ -1960,7 +1960,7 @@ func TestAwakenStore(t *testing.T) {
 	stores := newTestStores(n, "6.5.0")
 	re.True(stores[0].NeedAwakenStore())
 	for _, store := range stores {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 	for i := uint64(1); i <= n; i++ {
 		re.False(cluster.slowStat.ExistsSlowStores())
@@ -1970,7 +1970,7 @@ func TestAwakenStore(t *testing.T) {
 
 	now := time.Now()
 	store4 := stores[0].Clone(core.SetLastHeartbeatTS(now), core.SetLastAwakenTime(now.Add(-11*time.Minute)))
-	re.NoError(cluster.putStoreLocked(store4))
+	re.NoError(cluster.setStore(store4))
 	store1 := cluster.GetStore(1)
 	re.True(store1.NeedAwakenStore())
 
@@ -2012,7 +2012,7 @@ func TestUpdateAndDeleteLabel(t *testing.T) {
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	stores := newTestStores(1, "6.5.1")
 	for _, store := range stores {
-		re.NoError(cluster.PutStore(store.GetMeta()))
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
 	}
 	re.Empty(cluster.GetStore(1).GetLabels())
 	// Update label.
@@ -2104,7 +2104,7 @@ func TestUpdateAndDeleteLabel(t *testing.T) {
 	newStore := typeutil.DeepClone(cluster.GetStore(1).GetMeta(), core.StoreFactory)
 	newStore.Labels = nil
 	// Store rebooting will call PutStore.
-	err = cluster.PutStore(newStore)
+	err = cluster.PutMetaStore(newStore)
 	re.NoError(err)
 	// Check the label after rebooting.
 	re.Equal([]*metapb.StoreLabel{{Key: "mode", Value: "readonly"}}, cluster.GetStore(1).GetLabels())
@@ -2323,7 +2323,7 @@ func (c *testCluster) addRegionStore(storeID uint64, regionCount int, regionSize
 	c.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	c.Lock()
 	defer c.Unlock()
-	return c.putStoreLocked(newStore)
+	return c.setStore(newStore)
 }
 
 func (c *testCluster) addLeaderRegion(regionID uint64, leaderStoreID uint64, followerStoreIDs ...uint64) error {
@@ -2346,7 +2346,7 @@ func (c *testCluster) updateLeaderCount(storeID uint64, leaderCount int) error {
 	)
 	c.Lock()
 	defer c.Unlock()
-	return c.putStoreLocked(newStore)
+	return c.setStore(newStore)
 }
 
 func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
@@ -2362,7 +2362,7 @@ func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 	c.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
 	c.Lock()
 	defer c.Unlock()
-	return c.putStoreLocked(newStore)
+	return c.setStore(newStore)
 }
 
 func (c *testCluster) setStoreDown(storeID uint64) error {
@@ -2373,7 +2373,7 @@ func (c *testCluster) setStoreDown(storeID uint64) error {
 	)
 	c.Lock()
 	defer c.Unlock()
-	return c.putStoreLocked(newStore)
+	return c.setStore(newStore)
 }
 
 func (c *testCluster) setStoreOffline(storeID uint64) error {
@@ -2381,7 +2381,7 @@ func (c *testCluster) setStoreOffline(storeID uint64) error {
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	c.Lock()
 	defer c.Unlock()
-	return c.putStoreLocked(newStore)
+	return c.setStore(newStore)
 }
 
 func (c *testCluster) LoadRegion(regionID uint64, followerStoreIDs ...uint64) error {

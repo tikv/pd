@@ -138,11 +138,6 @@ func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
 	return mc.HotStat.GetStoresLoads()
 }
 
-// GetStore gets a store with a given store ID.
-func (mc *Cluster) GetStore(storeID uint64) *core.StoreInfo {
-	return mc.Stores.GetStore(storeID)
-}
-
 // IsRegionHot checks if the region is hot.
 func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
@@ -561,11 +556,6 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	return items
 }
 
-// DropCacheAllRegion removes all regions from the cache.
-func (mc *Cluster) DropCacheAllRegion() {
-	mc.ResetRegionCache()
-}
-
 // UpdateStoreLeaderWeight updates store leader weight.
 func (mc *Cluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 	store := mc.GetStore(storeID)
@@ -752,7 +742,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	pendingPeerCount := mc.GetStorePendingPeerCount(id)
 	leaderSize := mc.GetStoreLeaderRegionSize(id)
 	regionSize := mc.GetStoreRegionSize(id)
-	store := mc.Stores.GetStore(id)
+	store := mc.GetStore(id)
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = defaultStoreCapacity
 	stats.Available = stats.Capacity - uint64(store.GetRegionSize()*units.MiB)
