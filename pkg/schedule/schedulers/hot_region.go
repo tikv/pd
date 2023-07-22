@@ -495,8 +495,21 @@ type balanceSolver struct {
 }
 
 func (bs *balanceSolver) init() {
-	// Init store load detail according to the type.
+	// Load the configuration items of the scheduler.
 	bs.resourceTy = toResourceType(bs.rwTy, bs.opTy)
+	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
+	bs.minHotDegree = bs.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()
+	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
+	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
+	bs.isRaftKV2 = bs.GetStoreConfig().IsRaftKV2()
+	switch bs.sche.conf.GetRankFormulaVersion() {
+	case "v1":
+		bs.initRankV1()
+	default:
+		bs.initRankV2()
+	}
+
+	// Init store load detail according to the type.
 	bs.stLoadDetail = bs.sche.stLoadInfos[bs.resourceTy]
 
 	bs.maxSrc = &statistics.StoreLoad{Loads: make([]float64, statistics.DimLen)}
@@ -509,7 +522,6 @@ func (bs *balanceSolver) init() {
 	}
 	maxCur := &statistics.StoreLoad{Loads: make([]float64, statistics.DimLen)}
 
-	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
 	bs.filteredHotPeers = make(map[uint64][]*statistics.HotPeerStat)
 	bs.nthHotPeer = make(map[uint64][]*statistics.HotPeerStat)
 	for _, detail := range bs.stLoadDetail {
@@ -531,18 +543,6 @@ func (bs *balanceSolver) init() {
 	bs.rankStep = &statistics.StoreLoad{
 		Loads: stepLoads,
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
-	}
-
-	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
-	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
-	bs.minHotDegree = bs.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()
-	bs.isRaftKV2 = bs.GetStoreConfig().IsRaftKV2()
-
-	switch bs.sche.conf.GetRankFormulaVersion() {
-	case "v1":
-		bs.initRankV1()
-	default:
-		bs.initRankV2()
 	}
 }
 
@@ -881,15 +881,13 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 	ret := make([]*statistics.HotPeerStat, 0, len(hotPeers))
 	appendItem := func(item *statistics.HotPeerStat) {
 		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree, bs.rwTy) {
-			// todo: add test for regionPendings
-			// todo: add test for CoolDownTransferLeader
 			// no in pending operator and no need cool down after transfer leader
 			ret = append(ret, item)
 		}
 	}
 
 	var firstSort, secondSort []*statistics.HotPeerStat
-	if len(hotPeers) > topnPosition || len(hotPeers) > bs.maxPeerNum {
+	if len(hotPeers) >= topnPosition || len(hotPeers) > bs.maxPeerNum {
 		firstSort = make([]*statistics.HotPeerStat, len(hotPeers))
 		copy(firstSort, hotPeers)
 		sort.Slice(firstSort, func(i, j int) bool {
@@ -901,10 +899,10 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 			return secondSort[i].GetLoad(bs.secondPriority) > secondSort[j].GetLoad(bs.secondPriority)
 		})
 	}
-	if len(hotPeers) > topnPosition {
+	if len(hotPeers) >= topnPosition {
 		storeID := storeLoad.GetID()
-		bs.nthHotPeer[storeID][bs.firstPriority] = firstSort[topnPosition]
-		bs.nthHotPeer[storeID][bs.secondPriority] = secondSort[topnPosition]
+		bs.nthHotPeer[storeID][bs.firstPriority] = firstSort[topnPosition-1]
+		bs.nthHotPeer[storeID][bs.secondPriority] = secondSort[topnPosition-1]
 	}
 	if len(hotPeers) > bs.maxPeerNum {
 		union := bs.sortHotPeers(firstSort, secondSort)
@@ -923,9 +921,6 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 
 func (bs *balanceSolver) sortHotPeers(firstSort, secondSort []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
 	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
-	if len(firstSort) == 0 || len(secondSort) == 0 {
-		return union
-	}
 	// At most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
 	for len(union) < bs.maxPeerNum {
 		for len(firstSort) > 0 {
