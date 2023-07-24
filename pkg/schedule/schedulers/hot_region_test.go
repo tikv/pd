@@ -322,7 +322,7 @@ func TestSplitBuckets(t *testing.T) {
 	re.Equal(1, len(ops))
 	op = ops[0]
 	re.Equal(splitHotReadBuckets, op.Desc())
-	expectKeys = [][]byte{[]byte("d")}
+	expectKeys = [][]byte{[]byte("c")}
 	expectOp, err = operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
 	re.NoError(err)
 	re.Equal(expectOp.Brief(), op.Brief())
