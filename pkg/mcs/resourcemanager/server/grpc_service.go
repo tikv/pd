@@ -190,10 +190,15 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				continue
 			}
 			// Send the consumption to update the metrics.
+			isBackground := req.GetIsBackground()
 			s.manager.consumptionDispatcher <- struct {
 				resourceGroupName string
 				*rmpb.Consumption
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest()}
+				isBackground bool
+			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground}
+			if isBackground {
+				continue
+			}
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,

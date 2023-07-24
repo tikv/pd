@@ -39,6 +39,9 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 				},
 			},
 		},
+		BackgroundSettings: &rmpb.BackgroundSettings{
+			JobTypes: []string{"lightning", "br"},
+		},
 	}
 	ch1 := make(chan struct{})
 	ch2 := make(chan *groupCostController)
