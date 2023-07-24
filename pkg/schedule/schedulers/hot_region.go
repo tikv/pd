@@ -1555,6 +1555,7 @@ func (bs *balanceSolver) splitHotKeys(region *core.RegionInfo, stats []*buckets.
 		acc += stats[splitIdx].Loads[dim]
 	}
 	if splitIdx <= 0 {
+		hotSchedulerRegionBucketsSingleHotSpotCounter.Inc()
 		return nil
 	}
 	splitKey := stats[splitIdx-1].EndKey
