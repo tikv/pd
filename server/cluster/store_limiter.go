@@ -44,21 +44,6 @@ func NewStoreLimiter(opt *config.PersistOptions) *StoreLimiter {
 	}
 }
 
-func (s *StoreLimiter) calculateRate(limitType storelimit.Type, state LoadState) float64 {
-	rate := float64(0)
-	switch state {
-	case LoadStateIdle:
-		rate = float64(s.scene[limitType].Idle)
-	case LoadStateLow:
-		rate = float64(s.scene[limitType].Low)
-	case LoadStateNormal:
-		rate = float64(s.scene[limitType].Normal)
-	case LoadStateHigh:
-		rate = float64(s.scene[limitType].High)
-	}
-	return rate
-}
-
 // ReplaceStoreLimitScene replaces the store limit values for different scenes
 func (s *StoreLimiter) ReplaceStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
 	s.m.Lock()
