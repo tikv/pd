@@ -44,16 +44,6 @@ func NewStoreLimiter(opt *config.PersistOptions) *StoreLimiter {
 	}
 }
 
-func collectClusterStateCurrent(state LoadState) {
-	for i := LoadStateNone; i <= LoadStateHigh; i++ {
-		if i == state {
-			clusterStateCurrent.WithLabelValues(state.String()).Set(1)
-			continue
-		}
-		clusterStateCurrent.WithLabelValues(i.String()).Set(0)
-	}
-}
-
 func (s *StoreLimiter) calculateRate(limitType storelimit.Type, state LoadState) float64 {
 	rate := float64(0)
 	switch state {
