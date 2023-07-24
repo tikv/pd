@@ -25,6 +25,7 @@ const (
 	typeLabel              = "type"
 	readTypeLabel          = "read"
 	writeTypeLabel         = "write"
+	backgroundTypeLabel    = "background"
 )
 
 var (
@@ -44,14 +45,14 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "read_request_unit_sum",
 			Help:      "Counter of the read request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, typeLabel})
 	writeRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
 			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, typeLabel})
 	sqlLayerRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -67,28 +68,28 @@ var (
 			Subsystem: resourceSubsystem,
 			Name:      "read_byte_sum",
 			Help:      "Counter of the read byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, typeLabel})
 	writeByteCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "write_byte_sum",
 			Help:      "Counter of the write byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, typeLabel})
 	kvCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "kv_cpu_time_ms_sum",
 			Help:      "Counter of the KV CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, typeLabel})
 	sqlCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "sql_cpu_time_ms_sum",
 			Help:      "Counter of the SQL CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, typeLabel})
 	requestCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
