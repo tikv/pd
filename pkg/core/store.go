@@ -560,7 +560,7 @@ func (s *StoreInfo) NeedPauseGrpc() bool {
 func (s *StoreInfo) NeedResumeGrpc() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.rawStats.IsGrpcPaused && s.slowTrendEvicted && !s.slowTrendGrpcPaused
+	return s.rawStats.IsGrpcPaused && !s.slowTrendEvicted && !s.slowTrendGrpcPaused
 }
 
 var (
