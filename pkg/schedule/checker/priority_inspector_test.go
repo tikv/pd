@@ -75,6 +75,13 @@ func checkPriorityRegionTest(re *require.Assertions, pc *PriorityInspector, tc *
 	pc.Inspect(region)
 	re.Equal(1, pc.queue.Len())
 
+	// case5: inspect region 3 again
+	region = tc.GetRegion(3)
+	pc.Inspect(region)
+	time.Sleep(opt.GetPatrolRegionInterval() * 10)
+	ids = pc.GetPriorityRegions()
+	re.Empty(ids)
+
 	// recover
 	tc.AddLeaderRegion(2, 2, 3)
 	pc.RemovePriorityRegion(uint64(3))
