@@ -78,23 +78,6 @@ var (
 			Help:      "Bucketed histogram of the operator region size.",
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 20), // 1MB~1TB
 		}, []string{"type"})
-
-	operatorWaitCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "operators_waiting_count",
-			Help:      "Counter of schedule waiting operators.",
-		}, []string{"type", "event"})
-
-	operatorWaitDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "waiting_operators_duration_seconds",
-			Help:      "Bucketed histogram of waiting time (s) of operator for being promoted.",
-			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 16),
-		}, []string{"type"})
 )
 
 func init() {
@@ -103,8 +86,6 @@ func init() {
 	prometheus.MustRegister(OperatorExceededStoreLimitCounter)
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(operatorDuration)
-	prometheus.MustRegister(operatorWaitDuration)
-	prometheus.MustRegister(operatorWaitCounter)
 	prometheus.MustRegister(operatorSizeHist)
 	prometheus.MustRegister(storeLimitCostCounter)
 }
