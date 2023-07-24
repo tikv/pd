@@ -480,11 +480,12 @@ loopFits:
 				continue
 			}
 			// check if down peer can replace with orphan peer.
-			ruleCheckerReplaceOrphanPeerCounter.Inc()
+
 			dstStore := c.cluster.GetStore(orphanPeer.GetStoreId())
 			if fit.Replace(pinDownPeer.GetPeer().GetStoreId(), dstStore) {
 				destRole := pinDownPeer.GetPeer().Role
 				orphanPeerRole := orphanPeer.GetRole()
+				ruleCheckerReplaceOrphanPeerCounter.Inc()
 				switch {
 				case orphanPeerRole == metapb.PeerRole_Learner && destRole == metapb.PeerRole_Voter:
 					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer.GetPeer())
