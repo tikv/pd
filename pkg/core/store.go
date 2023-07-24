@@ -545,6 +545,12 @@ func (s *StoreInfo) NeedAwakenStore() bool {
 	return s.GetLastHeartbeatTS().Sub(s.lastAwakenTime) > awakenStoreInterval
 }
 
+func (s *StoreInfo) IsGrpcPaused() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.slowTrendEvicted && s.slowTrendGrpcPaused
+}
+
 func (s *StoreInfo) NeedPauseGrpc() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -200,6 +200,10 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 	if store == nil {
 		return nil
 	}
+	if store.IsGrpcPaused() {
+		log.Info("evict-slow-trend-scheduler already paused grpc server, no need to evict leaders", zap.Uint64("store-id", store.GetStoreStats().StoreId))
+		return nil
+	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
 }
