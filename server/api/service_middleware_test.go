@@ -71,7 +71,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	sc = &config.ServiceMiddlewareConfig{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
 	suite.True(sc.EnableAudit)
-	suite.True(sc.EnableRateLimit)
+	suite.True(sc.RateLimitConfig.EnableRateLimit)
 	ms = map[string]interface{}{
 		"audit.enable-audit": "false",
 		"enable-rate-limit":  "false",
@@ -82,7 +82,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	sc = &config.ServiceMiddlewareConfig{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
 	suite.False(sc.EnableAudit)
-	suite.False(sc.EnableRateLimit)
+	suite.False(sc.RateLimitConfig.EnableRateLimit)
 
 	// test empty
 	ms = map[string]interface{}{}
@@ -293,7 +293,7 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	sc := &config.ServiceMiddlewareConfig{}
 	re := suite.Require()
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.False(sc.EnableRateLimit)
+	suite.False(sc.RateLimitConfig.EnableRateLimit)
 
 	ms := map[string]interface{}{
 		"enable-rate-limit": "true",
@@ -303,7 +303,7 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.True(sc.EnableRateLimit)
+	suite.True(sc.RateLimitConfig.EnableRateLimit)
 	ms = map[string]interface{}{
 		"enable-rate-limit": "false",
 	}
@@ -312,7 +312,7 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.False(sc.EnableRateLimit)
+	suite.False(sc.RateLimitConfig.EnableRateLimit)
 
 	// test empty
 	ms = map[string]interface{}{}
@@ -341,7 +341,7 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item rate-limit not found")))
 }
 
-func (suite *rateLimitConfigTestSuite) TestConfigLimiterConifgByOriginAPI() {
+func (suite *rateLimitConfigTestSuite) TestConfigLimiterConfigByOriginAPI() {
 	// this test case is used to test updating `limiter-config` by origin API simply
 	addr := fmt.Sprintf("%s/service-middleware/config", suite.urlPrefix)
 	dimensionConfig := ratelimit.DimensionConfig{QPS: 1}
