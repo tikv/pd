@@ -400,7 +400,7 @@ func checkStoresAreUpdated(cluster sche.SchedulerCluster, slowStoreID uint64, sl
 			updatedStores += 1
 			continue
 		}
-		if slowStoreRecordTS.Before(store.GetLastHeartbeatTS()) {
+		if slowStoreRecordTS.Compare(store.GetLastHeartbeatTS()) <= 0 {
 			updatedStores += 1
 		}
 	}
@@ -503,4 +503,4 @@ func checkStoreCanResume(lastCaptureTs time.Time, candidate *core.StoreInfo) boo
 }
 
 const alterEpsilon = 1e-9
-const minimalResumeGap = 150 // unit: s
+const minimalResumeGap = 300 // unit: s
