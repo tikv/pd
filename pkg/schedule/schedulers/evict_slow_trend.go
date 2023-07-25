@@ -232,7 +232,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			log.Info("store evicted by slow trend has been removed",
 				zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:removed").Inc()
-		} else if checkStoreCanRecover(cluster, store) {
+		} else if checkStoreCanRecover(cluster, store) && checkStoreCanResume(s.conf.captureTS(), store) {
 			log.Info("store evicted by slow trend has been recovered",
 				zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:recovered").Inc()
@@ -336,11 +336,11 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster) (slowStore *core.StoreI
 					zap.Float64("result-rate", slowTrend.ResultRate),
 					zap.Float64("cause-value", slowTrend.CauseValue),
 					zap.Float64("result-value", slowTrend.ResultValue))
-			} else if slowTrend.CauseRate > alterEpsilon {
+			} else if slowTrend.CauseRate > alterEpsilon && !store.IsGrpcPaused() {
 				// TODO: move to restart-slow-store-scheduler.
 				candidates = append(candidates, store)
 				strategyOpt = PauseGrpc
-				storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
+				storeSlowTrendActionStatusGauge.WithLabelValues("cand.add:can-pause").Inc()
 				log.Info("evict-slow-trend-scheduler pre-canptured candidate for pause grpc server",
 					zap.Uint64("store-id", store.GetID()),
 					zap.Float64("cause-rate", slowTrend.CauseRate),
@@ -494,4 +494,13 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 	return fasterThanStores >= expected
 }
 
+func checkStoreCanResume(lastCaptureTs time.Time, candidate *core.StoreInfo) bool {
+	if candidate.IsGrpcPaused() {
+		tsGap := int64(candidate.GetLastHeartbeatTS().Sub(lastCaptureTs).Seconds())
+		return tsGap > minimalResumeGap
+	}
+	return true
+}
+
 const alterEpsilon = 1e-9
+const minimalResumeGap = 150 // unit: s
