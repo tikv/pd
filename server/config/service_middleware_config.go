@@ -85,9 +85,9 @@ func (c *RateLimitConfig) Clone() *RateLimitConfig {
 // GRPCRateLimitConfig is the configuration for gRPC rate limit
 type GRPCRateLimitConfig struct {
 	// EnableRateLimit controls the switch of the rate limit middleware
-	EnableRateLimit bool `json:"enable-rate-limit,string"`
+	EnableRateLimit bool `json:"enable-grpc-rate-limit,string"`
 	// RateLimitConfig is the config of rate limit middleware
-	LimiterConfig map[string]ratelimit.DimensionConfig `json:"limiter-config"`
+	LimiterConfig map[string]ratelimit.DimensionConfig `json:"grpc-limiter-config"`
 }
 
 // Clone returns a cloned rate limit config.

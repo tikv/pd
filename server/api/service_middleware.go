@@ -111,6 +111,8 @@ func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.Ser
 		return h.updateAudit(cfg, kp[len(kp)-1], value)
 	case "rate-limit":
 		return h.svr.UpdateRateLimit(&cfg.RateLimitConfig, kp[len(kp)-1], value)
+	case "grpc-rate-limit":
+		return h.svr.UpdateGRPCRateLimit(&cfg.GRPCRateLimitConfig, kp[len(kp)-1], value)
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
@@ -192,14 +194,14 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
 	qps, okq := input["qps"].(float64)
 	if okq {
-		brust := 0
+		burst := 0
 		if int(qps) > 1 {
-			brust = int(qps)
+			burst = int(qps)
 		} else if qps > 0 {
-			brust = 1
+			burst = 1
 		}
 		cfg.QPS = qps
-		cfg.QPSBurst = brust
+		cfg.QPSBurst = burst
 	}
 	if !okc && !okq {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
@@ -287,7 +289,7 @@ func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter,
 		case status&ratelimit.ConcurrencyDeleted != 0:
 			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
 		}
-		err := h.svr.UpdateGRPCRateLimitConfig("limiter-config", serviceLabel, cfg)
+		err := h.svr.UpdateGRPCRateLimitConfig("grpc-limiter-config", serviceLabel, cfg)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
