@@ -2023,12 +2023,12 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 
 	storeID := request.GetStoreId()
 	minResolvedTS := request.GetMinResolvedTs()
+	log.Info("report min resolved ts",
+		zap.Uint64("store-id", storeID),
+		zap.Uint64("min-resolved-ts", minResolvedTS))
 	if err := rc.SetMinResolvedTS(storeID, minResolvedTS); err != nil {
 		return nil, err
 	}
-	log.Debug("updated min resolved-ts",
-		zap.Uint64("store", storeID),
-		zap.Uint64("min resolved-ts", minResolvedTS))
 	return &pdpb.ReportMinResolvedTsResponse{
 		Header: s.header(),
 	}, nil
