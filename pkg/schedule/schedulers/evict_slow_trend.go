@@ -200,10 +200,14 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 	if store == nil {
 		return nil
 	}
-	if store.IsGrpcPaused() {
-		log.Info("evict-slow-trend-scheduler already paused grpc server, no need to evict leaders", zap.Uint64("store-id", store.GetStoreStats().StoreId))
-		return nil
-	}
+	// As the auto-election of leaders cost a lot of time when pausing grpc server, it make the eviction of leaders
+	// and pausing grpc server on the slow node concurrently.
+	/*
+		if store.IsGrpcPaused() {
+			log.Info("evict-slow-trend-scheduler already paused grpc server, no need to evict leaders", zap.Uint64("store-id", store.GetStoreStats().StoreId))
+			return nil
+		}
+	*/
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
 }
@@ -232,7 +236,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			log.Info("store evicted by slow trend has been removed",
 				zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:removed").Inc()
-		} else if checkStoreCanRecover(cluster, store) && checkStoreCanResume(s.conf.captureTS(), store) {
+		} else if checkStoreCanRecover(cluster, store) && checkStoreCanResume(store) {
 			log.Info("store evicted by slow trend has been recovered",
 				zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:recovered").Inc()
@@ -494,13 +498,12 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 	return fasterThanStores >= expected
 }
 
-func checkStoreCanResume(lastCaptureTs time.Time, candidate *core.StoreInfo) bool {
-	if candidate.IsGrpcPaused() {
-		tsGap := int64(candidate.GetLastHeartbeatTS().Sub(lastCaptureTs).Seconds())
-		return tsGap > minimalResumeGap
+func checkStoreCanResume(candidate *core.StoreInfo) bool {
+	slowTrend := candidate.GetSlowTrend()
+	if slowTrend != nil && candidate.IsGrpcPaused() {
+		return slowTrend.CauseRate < alterEpsilon
 	}
 	return true
 }
 
 const alterEpsilon = 1e-9
-const minimalResumeGap = 300 // unit: s
