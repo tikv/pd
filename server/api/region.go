@@ -56,11 +56,32 @@ type MetaPeer struct {
 	IsLearner bool `json:"is_learner,omitempty"`
 }
 
+func (m *MetaPeer) setDefaultIfNil() {
+	if m.Peer == nil {
+		m.Peer = &metapb.Peer{
+			Id:        m.GetId(),
+			StoreId:   m.GetStoreId(),
+			Role:      m.GetRole(),
+			IsWitness: m.GetIsWitness(),
+		}
+	}
+}
+
 // PDPeerStats is api compatible with *pdpb.PeerStats.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDPeerStats struct {
 	*pdpb.PeerStats
 	Peer MetaPeer `json:"peer"`
+}
+
+func (s *PDPeerStats) setDefaultIfNil() {
+	if s.PeerStats == nil {
+		s.PeerStats = &pdpb.PeerStats{
+			Peer:        s.GetPeer(),
+			DownSeconds: s.GetDownSeconds(),
+		}
+	}
+	s.Peer.setDefaultIfNil()
 }
 
 func fromPeer(peer *metapb.Peer) MetaPeer {
@@ -221,11 +242,25 @@ func (s *RegionsInfo) marshal(ctx context.Context) ([]byte, error) {
 		for i, r := range s.Regions {
 			select {
 			case <-ctx.Done():
+				// Return early, avoid the unnecessary computation.
+				// See more details in https://github.com/tikv/pd/issues/6835
 				return nil, ctx.Err()
 			default:
 			}
 			if i > 0 {
 				out.RawByte(',')
+			}
+			// EasyJSON will not check anonymous struct pointer field and will panic if the field is nil.
+			// So we need to set the field to default value explicitly when the anonymous struct pointer is nil.
+			r.Leader.setDefaultIfNil()
+			for i := range r.Peers {
+				r.Peers[i].setDefaultIfNil()
+			}
+			for i := range r.PendingPeers {
+				r.PendingPeers[i].setDefaultIfNil()
+			}
+			for i := range r.DownPeers {
+				r.DownPeers[i].setDefaultIfNil()
 			}
 			r.MarshalEasyJSON(out)
 		}

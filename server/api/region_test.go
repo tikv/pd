@@ -16,6 +16,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -733,6 +734,49 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 	err = tu.ReadGetJSON(re, testDialClient, url, &status)
 	suite.NoError(err)
 	suite.Equal("REPLICATED", status)
+}
+
+func TestRegionsInfoMarshal(t *testing.T) {
+	re := require.New(t)
+	cases := []*RegionsInfo{
+		{
+			Count: 0,
+		},
+		{
+			Count:   0,
+			Regions: []RegionInfo{},
+		},
+		{
+			Count: 1,
+			Regions: []RegionInfo{
+				{
+					ID:     1,
+					Leader: MetaPeer{},
+				},
+			},
+		},
+		{
+			Count: 2,
+			Regions: []RegionInfo{
+				{
+					ID:           1,
+					Peers:        []MetaPeer{},
+					PendingPeers: []MetaPeer{},
+					DownPeers:    []PDPeerStats{},
+				},
+				{
+					ID:           2,
+					Peers:        []MetaPeer{{}},
+					PendingPeers: []MetaPeer{{}},
+					DownPeers:    []PDPeerStats{{}},
+				},
+			},
+		},
+	}
+	for _, regions := range cases {
+		_, err := regions.marshal(context.Background())
+		re.NoError(err)
+	}
 }
 
 // Create n regions (0..n) of n stores (0..n).

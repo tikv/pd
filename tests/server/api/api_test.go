@@ -667,6 +667,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 func (suite *redirectorTestSuite) TestXForwardedFor() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	suite.NoError(leader.BootstrapCluster())
+	pdctl.MustPutRegion(suite.Require(), suite.cluster, 2, 1, []byte(""), []byte(""))
 	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
 	defer os.Remove(tempStdoutFile.Name())
 	cfg := &log.Config{}
