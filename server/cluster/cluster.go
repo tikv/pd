@@ -2414,13 +2414,25 @@ func (c *RaftCluster) checkAndUpdateMinResolvedTS() (uint64, bool) {
 	}
 	curMinResolvedTS := uint64(math.MaxUint64)
 	for _, s := range c.GetStores() {
-		if !core.IsAvailableForMinResolvedTS(s) {
+		isAvailable := core.IsAvailableForMinResolvedTS(s)
+		minResolvedTS := s.GetMinResolvedTS()
+		log.Info("check and update min resolved ts",
+			zap.Bool("is-available", isAvailable),
+			zap.Uint64("min-resolved-ts", minResolvedTS),
+			zap.Uint64("store-id", s.GetID()),
+			zap.Bool("is-removed", s.IsRemoved()),
+			zap.Bool("is-tiflash", s.IsTiFlash()),
+			zap.Int("leader-count", s.GetLeaderCount()))
+		if !isAvailable {
 			continue
 		}
-		if curMinResolvedTS > s.GetMinResolvedTS() {
-			curMinResolvedTS = s.GetMinResolvedTS()
+		if curMinResolvedTS > minResolvedTS {
+			curMinResolvedTS = minResolvedTS
 		}
 	}
+	log.Info("finish check and update min resolved ts",
+		zap.Uint64("min-resolved-ts", curMinResolvedTS),
+		zap.Uint64("current-min-resolved-ts", c.minResolvedTS))
 	if curMinResolvedTS == math.MaxUint64 || curMinResolvedTS <= c.minResolvedTS {
 		return c.minResolvedTS, false
 	}
