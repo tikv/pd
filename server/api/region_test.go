@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 )
@@ -798,5 +799,36 @@ func BenchmarkHexRegionKeyStr(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = core.HexRegionKeyStr(key)
+	}
+}
+
+func BenchmarkGetRegions(b *testing.B) {
+	re := require.New(b)
+	svr, cleanup := mustNewServer(re)
+	defer cleanup()
+	server.MustWaitLeader(re, []*server.Server{svr})
+
+	addr := svr.GetAddr()
+	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
+	mustBootstrapCluster(re, svr)
+	regionCount := 1000000
+	for i := 0; i < regionCount; i++ {
+		r := core.NewTestRegionInfo(uint64(i+2), 1,
+			[]byte(fmt.Sprintf("%09d", i)),
+			[]byte(fmt.Sprintf("%09d", i+1)),
+			core.SetApproximateKeys(10), core.SetApproximateSize(10))
+		mustRegionHeartbeat(re, svr, r)
+	}
+	resp, _ := apiutil.GetJSON(testDialClient, url, nil)
+	regions := &RegionsInfo{}
+	err := json.NewDecoder(resp.Body).Decode(regions)
+	re.NoError(err)
+	re.Equal(regionCount, regions.Count)
+	resp.Body.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		resp, _ := apiutil.GetJSON(testDialClient, url, nil)
+		resp.Body.Close()
 	}
 }
