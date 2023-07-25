@@ -220,7 +220,7 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 	convertStepsToStr := func(steps []string) string {
 		stepStrs := make([]string, len(steps))
 		for i := range steps {
-			stepStrs[i] = fmt.Sprintf("step-%d:{%s}", i, steps[i])
+			stepStrs[i] = fmt.Sprintf("%d:{%s}", i, steps[i])
 		}
 		return strings.Join(stepStrs, ", ")
 	}
