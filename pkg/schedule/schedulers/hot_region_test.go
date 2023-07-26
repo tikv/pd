@@ -277,7 +277,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	re.Len(ops, 0)
 }
 
-func TestSplitBuckets(t *testing.T) {
+func TestSplitBucketsBySize(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -290,83 +290,102 @@ func TestSplitBuckets(t *testing.T) {
 	solve.cur = &solution{}
 	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
 
-	// the hot range is [a,c],[e,f]
-	b := &metapb.Buckets{
-		RegionId:   1,
-		PeriodInMs: 1000,
-		Keys:       [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")},
-		Stats: &metapb.BucketStats{
-			ReadBytes:  []uint64{10 * units.KiB, 10 * units.KiB, 0, 10 * units.KiB, 10 * units.KiB},
-			ReadKeys:   []uint64{256, 256, 0, 256, 256},
-			ReadQps:    []uint64{0, 0, 0, 0, 0},
-			WriteBytes: []uint64{0, 0, 0, 0, 0},
-			WriteQps:   []uint64{0, 0, 0, 0, 0},
-			WriteKeys:  []uint64{0, 0, 0, 0, 0},
-		},
-	}
-
-	task := buckets.NewCheckPeerTask(b)
-	re.True(tc.HotBucketCache.CheckAsync(task))
-	time.Sleep(time.Millisecond * 10)
-	ops := solve.createSplitOperator([]*core.RegionInfo{region}, false)
-	re.Equal(1, len(ops))
-	op := ops[0]
-	re.Equal(splitHotReadBuckets, op.Desc())
-	expectKeys := [][]byte{[]byte("c"), []byte("d")}
-	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
-	re.NoError(err)
-	re.Equal(expectOp.Brief(), op.Brief())
-	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
-
 	testdata := []struct {
 		hotBuckets [][]byte
 		splitKeys  [][]byte
 	}{
 		{
-			[][]byte{[]byte(""), []byte("b")},
+			[][]byte{[]byte("a"), []byte("b"), []byte("f")},
 			[][]byte{[]byte("b")},
 		},
 		{
-			[][]byte{[]byte(""), []byte("")},
+			[][]byte{[]byte(""), []byte("a"), []byte("")},
 			nil,
 		},
 		{
-			[][]byte{[]byte(""), []byte("a")},
+			[][]byte{},
 			nil,
-		},
-		{
-			[][]byte{[]byte("b"), []byte("")},
-			[][]byte{[]byte("b")},
 		},
 	}
 
 	for _, data := range testdata {
-		b = &metapb.Buckets{
+		b := &metapb.Buckets{
 			RegionId:   1,
 			PeriodInMs: 1000,
 			Keys:       data.hotBuckets,
-			Stats: &metapb.BucketStats{
-				ReadBytes:  []uint64{10 * units.KiB},
-				ReadKeys:   []uint64{256},
-				ReadQps:    []uint64{0},
-				WriteBytes: []uint64{0},
-				WriteQps:   []uint64{0},
-				WriteKeys:  []uint64{0},
-			},
 		}
-		task = buckets.NewCheckPeerTask(b)
-		re.True(tc.HotBucketCache.CheckAsync(task))
-		time.Sleep(time.Millisecond * 10)
-		ops = solve.createSplitOperator([]*core.RegionInfo{region}, true)
+		region.UpdateBuckets(b, region.GetBuckets())
+		ops := solve.createSplitOperator([]*core.RegionInfo{region}, false)
 		if data.splitKeys == nil {
 			re.Equal(0, len(ops))
 			continue
 		}
 		re.Equal(1, len(ops))
-		op = ops[0]
+		op := ops[0]
 		re.Equal(splitHotReadBuckets, op.Desc())
 
-		expectOp, err = operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		re.NoError(err)
+		re.Equal(expectOp.Brief(), op.Brief())
+	}
+}
+
+func TestSplitBucketsWithRegionTooHot(t *testing.T) {
+	re := require.New(t)
+	statistics.Denoising = false
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tc.SetHotRegionCacheHitsThreshold(1)
+	tc.GetStoreConfig().SetRegionBucketEnabled(true)
+	defer cancel()
+	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	solve := newBalanceSolver(hb.(*hotScheduler), tc, statistics.Read, transferLeader)
+	solve.cur = &solution{}
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+	testdata := []struct {
+		hotBuckets [][]byte
+		splitKeys  [][]byte
+	}{
+		{
+			[][]byte{[]byte(""), []byte("b"), []byte("")},
+			[][]byte{[]byte("b")},
+		},
+		{
+			[][]byte{[]byte(""), []byte("a"), []byte("")},
+			nil,
+		},
+		{
+			[][]byte{[]byte("b"), []byte("c"), []byte("")},
+			[][]byte{[]byte("c")},
+		},
+	}
+	for _, data := range testdata {
+		b := &metapb.Buckets{
+			RegionId:   1,
+			PeriodInMs: 1000,
+			Keys:       data.hotBuckets,
+			Stats: &metapb.BucketStats{
+				ReadBytes:  []uint64{10 * units.KiB, 10 * units.MiB},
+				ReadKeys:   []uint64{256, 256},
+				ReadQps:    []uint64{0, 0},
+				WriteBytes: []uint64{0, 0},
+				WriteQps:   []uint64{0, 0},
+				WriteKeys:  []uint64{0, 0},
+			},
+		}
+		task := buckets.NewCheckPeerTask(b)
+		re.True(tc.HotBucketCache.CheckAsync(task))
+		time.Sleep(time.Millisecond * 10)
+		ops := solve.createSplitOperator([]*core.RegionInfo{region}, true)
+		if data.splitKeys == nil {
+			re.Equal(0, len(ops))
+			continue
+		}
+		re.Equal(1, len(ops))
+		op := ops[0]
+		re.Equal(splitHotReadBuckets, op.Desc())
+
+		expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
 		re.NoError(err)
 		re.Equal(expectOp.Brief(), op.Brief())
 	}

@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"bytes"
 	"fmt"
 	"math"
 	"math/rand"
@@ -24,7 +23,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -1539,6 +1537,7 @@ func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]
 	if bs.rwTy == statistics.Write {
 		des = splitHotWriteBuckets
 	}
+
 	op, err := operator.CreateSplitRegionOperator(des, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKeys)
 	if err != nil {
 		log.Error("fail to create split operator",
@@ -1551,6 +1550,10 @@ func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]
 }
 
 func (bs *balanceSolver) splitHotKeys(region *core.RegionInfo, stats []*buckets.BucketStat) *operator.Operator {
+	// if this region is too small, we can't split it into two hot region, so skip it.
+	if len(stats) <= 1 {
+		return nil
+	}
 	totalLoads := uint64(0)
 	dim := bs.bucketFirstStat()
 	for _, stat := range stats {
@@ -1579,32 +1582,19 @@ func (bs *balanceSolver) splitHotKeys(region *core.RegionInfo, stats []*buckets.
 	return op
 }
 
-func (bs *balanceSolver) splitIfRegionTooBig(region *core.RegionInfo, stats []*buckets.BucketStat) *operator.Operator {
+// splitBucketBySize splits the region order by bucket count if the region is too big.
+func (bs *balanceSolver) splitBucketBySize(region *core.RegionInfo) *operator.Operator {
 	splitKeys := make([][]byte, 0)
-	maxSize := bs.GetSchedulerConfig().GetMaxMovableHotPeerSize() * units.MB
-	size := bs.GetStoreConfig().GetRegionBucketSize()
-	step := maxSize / int64(size)
-	count := int64(0)
-	for _, stat := range stats {
-		count++
-		for _, key := range [][]byte{stat.StartKey, stat.EndKey} {
-			if len(splitKeys) == 0 {
-				splitKeys = append(splitKeys, key)
-				continue
-			}
-			// If the last split key is equal to the current start key, we can merge them.
-			// E.g. [a, b), [b, c) -> [a, c) split keys is [a,c]
-			// Otherwise, we should append the current start key and end key.
-			// E.g. [a, b), [c, d) -> [a, b), [c, d) split keys is [a,b,c,d]
-			if bytes.Equal(key, splitKeys[len(splitKeys)-1]) && count < step {
-				splitKeys[len(splitKeys)-1] = stat.EndKey
-			} else {
-				splitKeys = append(splitKeys, key)
-				count = 0
-			}
+	for _, key := range region.GetBuckets().Keys {
+		if keyutil.Between(region.GetStartKey(), region.GetEndKey(), key) {
+			splitKeys = append(splitKeys, key)
 		}
 	}
-	return bs.splitBucketsOperator(region, splitKeys)
+	if len(splitKeys) == 0 {
+		return nil
+	}
+	splitKey := splitKeys[len(splitKeys)/2]
+	return bs.splitBucketsOperator(region, [][]byte{splitKey})
 }
 
 // createSplitOperator creates split operators for the given regions.
@@ -1621,6 +1611,12 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHo
 	operators := make([]*operator.Operator, 0)
 
 	createFunc := func(region *core.RegionInfo) {
+		if !isTooHot {
+			if op := bs.splitBucketBySize(region); op != nil {
+				operators = append(operators, op)
+			}
+			return
+		}
 		stats, ok := hotBuckets[region.GetID()]
 		// If only one bucket is hot, we can't split it into two regions.
 		if !ok {
@@ -1640,15 +1636,8 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHo
 			hotSchedulerRegionBucketsNotHotCounter.Inc()
 			return
 		}
-
-		if isTooHot {
-			if op := bs.splitHotKeys(region, validStats); op != nil {
-				operators = append(operators, op)
-			}
-		} else {
-			if op := bs.splitIfRegionTooBig(region, validStats); op != nil {
-				operators = append(operators, op)
-			}
+		if op := bs.splitHotKeys(region, validStats); op != nil {
+			operators = append(operators, op)
 		}
 	}
 
