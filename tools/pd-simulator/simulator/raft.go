@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,11 +15,11 @@ package simulator
 
 import (
 	"context"
+	"sync"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -28,10 +27,11 @@ import (
 
 // RaftEngine records all raft information.
 type RaftEngine struct {
-	syncutil.RWMutex
+	sync.RWMutex
 	regionsInfo       *core.RegionsInfo
 	conn              *Connection
 	regionChange      map[uint64][]uint64
+	schedulerStats    *schedulerStatistics
 	regionSplitSize   int64
 	regionSplitKeys   int64
 	storeConfig       *SimConfig
@@ -44,6 +44,7 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		regionsInfo:     core.NewRegionsInfo(),
 		conn:            conn,
 		regionChange:    make(map[uint64][]uint64),
+		schedulerStats:  newSchedulerStatistics(),
 		regionSplitSize: conf.RegionSplitSize,
 		regionSplitKeys: conf.RegionSplitKeys,
 		storeConfig:     storeConfig,
@@ -68,17 +69,17 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		if i < len(conf.Regions)-1 {
 			meta.EndKey = []byte(splitKeys[i])
 		}
-		regionSize := storeConfig.Coprocessor.RegionSplitSize
 		regionInfo := core.NewRegionInfo(
 			meta,
 			region.Leader,
-			core.SetApproximateSize(int64(regionSize)),
-			core.SetApproximateKeys(int64(storeConfig.Coprocessor.RegionSplitKey)),
+			core.SetApproximateSize(region.Size),
+			core.SetApproximateKeys(region.Keys),
 		)
 		r.SetRegion(regionInfo)
 		peers := region.Peers
+		regionSize := uint64(region.Size)
 		for _, peer := range peers {
-			r.conn.Nodes[peer.StoreId].incUsedSize(uint64(regionSize))
+			r.conn.Nodes[peer.StoreId].incUsedSize(regionSize)
 		}
 	}
 
@@ -137,14 +138,14 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	if r.useTiDBEncodedKey {
 		splitKey, err = simutil.GenerateTiDBEncodedSplitKey(region.GetStartKey(), region.GetEndKey())
 		if err != nil {
-			simutil.Logger.Fatal("Generate TiDB encoded split key failed", zap.Error(err))
+			simutil.Logger.Fatal("generate TiDB encoded split key failed", zap.Error(err))
 		}
 	} else {
 		splitKey = simutil.GenerateSplitKey(region.GetStartKey(), region.GetEndKey())
 	}
 	left := region.Clone(
 		core.WithNewRegionID(ids[len(ids)-1]),
-		core.WithNewPeerIDs(ids[0:len(ids)-1]...),
+		core.WithNewPeerIds(ids[0:len(ids)-1]...),
 		core.WithIncVersion(),
 		core.SetApproximateKeys(region.GetApproximateKeys()/2),
 		core.SetApproximateSize(region.GetApproximateSize()/2),
@@ -194,7 +195,7 @@ func (r *RaftEngine) updateRegionStore(region *core.RegionInfo, size int64) {
 		core.SetApproximateSize(region.GetApproximateSize()+size),
 		core.SetWrittenBytes(uint64(size)),
 	)
-	storeIDs := region.GetStoreIDs()
+	storeIDs := region.GetStoreIds()
 	for storeID := range storeIDs {
 		r.conn.Nodes[storeID].incUsedSize(uint64(size))
 	}
@@ -218,7 +219,7 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 		unhealthy        int
 		newLeaderStoreID uint64
 	)
-	ids := region.GetStoreIDs()
+	ids := region.GetStoreIds()
 	for id := range ids {
 		if r.conn.nodeHealth(id) {
 			newLeaderStoreID = id
@@ -275,23 +276,21 @@ func (r *RaftEngine) GetRegions() []*core.RegionInfo {
 func (r *RaftEngine) SetRegion(region *core.RegionInfo) []*core.RegionInfo {
 	r.Lock()
 	defer r.Unlock()
-	origin, overlaps, rangeChanged := r.regionsInfo.SetRegion(region)
-	r.regionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
-	return overlaps
+	return r.regionsInfo.SetRegion(region)
 }
 
-// GetRegionByKey searches the RegionInfo from regionTree
-func (r *RaftEngine) GetRegionByKey(regionKey []byte) *core.RegionInfo {
+// SearchRegion searches the RegionInfo from regionTree
+func (r *RaftEngine) SearchRegion(regionKey []byte) *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
-	return r.regionsInfo.GetRegionByKey(regionKey)
+	return r.regionsInfo.SearchRegion(regionKey)
 }
 
 // BootstrapRegion gets a region to construct bootstrap info.
 func (r *RaftEngine) BootstrapRegion() *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
-	regions := r.regionsInfo.ScanRegions(nil, nil, 1)
+	regions := r.regionsInfo.ScanRange(nil, nil, 1)
 	if len(regions) > 0 {
 		return regions[0]
 	}

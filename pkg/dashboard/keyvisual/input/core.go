@@ -8,17 +8,16 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package input
 
 import (
+	regionpkg "github.com/pingcap-incubator/tidb-dashboard/pkg/keyvisual/region"
 	"github.com/pingcap/log"
-	regionpkg "github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/core"
 	"go.uber.org/zap"
 )
 
@@ -94,7 +93,7 @@ func clusterScan(rc *core.BasicCluster) RegionsInfo {
 	regions := make([]*core.RegionInfo, 0, limit)
 
 	for {
-		rs := rc.ScanRegions(startKey, endKey, limit)
+		rs := rc.ScanRange(startKey, endKey, limit)
 		length := len(rs)
 		if length == 0 {
 			break
@@ -108,6 +107,6 @@ func clusterScan(rc *core.BasicCluster) RegionsInfo {
 		}
 	}
 
-	log.Debug("update key visual regions", zap.Int("total-length", len(regions)))
+	log.Debug("Update key visual regions", zap.Int("total-length", len(regions)))
 	return regions
 }

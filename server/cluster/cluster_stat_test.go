@@ -8,19 +8,22 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// limitations under the License.
+// limitations under the License
 
 package cluster
 
 import (
 	"fmt"
-	"testing"
 
+	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
 )
+
+var _ = Suite(&testClusterStatSuite{})
+
+type testClusterStatSuite struct {
+}
 
 func cpu(usage int64) []*pdpb.RecordPair {
 	n := 10
@@ -35,20 +38,19 @@ func cpu(usage int64) []*pdpb.RecordPair {
 	return pairs
 }
 
-func TestCPUEntriesAppend(t *testing.T) {
-	re := require.New(t)
+func (s *testClusterStatSuite) TestCPUEntriesAppend(c *C) {
 	N := 10
 
 	checkAppend := func(appended bool, usage int64, threads ...string) {
 		entries := NewCPUEntries(N)
-		re.NotNil(entries)
+		c.Assert(entries, NotNil)
 		for i := 0; i < N; i++ {
 			entry := &StatEntry{
 				CpuUsages: cpu(usage),
 			}
-			re.Equal(appended, entries.Append(entry, threads...))
+			c.Assert(entries.Append(entry, threads...), Equals, appended)
 		}
-		re.Equal(float64(usage), entries.cpu.Get())
+		c.Assert(entries.cpu.Get(), Equals, float64(usage))
 	}
 
 	checkAppend(true, 20)
@@ -56,11 +58,10 @@ func TestCPUEntriesAppend(t *testing.T) {
 	checkAppend(false, 0, "cup")
 }
 
-func TestCPUEntriesCPU(t *testing.T) {
-	re := require.New(t)
+func (s *testClusterStatSuite) TestCPUEntriesCPU(c *C) {
 	N := 10
 	entries := NewCPUEntries(N)
-	re.NotNil(entries)
+	c.Assert(entries, NotNil)
 
 	usages := cpu(20)
 	for i := 0; i < N; i++ {
@@ -69,14 +70,13 @@ func TestCPUEntriesCPU(t *testing.T) {
 		}
 		entries.Append(entry)
 	}
-	re.Equal(float64(20), entries.CPU())
+	c.Assert(entries.CPU(), Equals, float64(20))
 }
 
-func TestStatEntriesAppend(t *testing.T) {
-	re := require.New(t)
+func (s *testClusterStatSuite) TestStatEntriesAppend(c *C) {
 	N := 10
 	cst := NewStatEntries(N)
-	re.NotNil(cst)
+	c.Assert(cst, NotNil)
 	ThreadsCollected = []string{"cpu:"}
 
 	// fill 2*N entries, 2 entries for each store
@@ -85,20 +85,19 @@ func TestStatEntriesAppend(t *testing.T) {
 			StoreId:   uint64(i % N),
 			CpuUsages: cpu(20),
 		}
-		re.True(cst.Append(entry))
+		c.Assert(cst.Append(entry), IsTrue)
 	}
 
 	// use i as the store ID
 	for i := 0; i < N; i++ {
-		re.Equal(float64(20), cst.stats[uint64(i)].CPU())
+		c.Assert(cst.stats[uint64(i)].CPU(), Equals, float64(20))
 	}
 }
 
-func TestStatEntriesCPU(t *testing.T) {
-	re := require.New(t)
+func (s *testClusterStatSuite) TestStatEntriesCPU(c *C) {
 	N := 10
 	cst := NewStatEntries(N)
-	re.NotNil(cst)
+	c.Assert(cst, NotNil)
 
 	// the average cpu usage is 20%
 	usages := cpu(20)
@@ -110,15 +109,14 @@ func TestStatEntriesCPU(t *testing.T) {
 			StoreId:   uint64(i % N),
 			CpuUsages: usages,
 		}
-		re.True(cst.Append(entry))
+		c.Assert(cst.Append(entry), IsTrue)
 	}
 
-	re.Equal(int64(2*N), cst.total)
+	c.Assert(cst.total, Equals, int64(2*N))
 	// the cpu usage of the whole cluster is 20%
-	re.Equal(float64(20), cst.CPU())
+	c.Assert(cst.CPU(), Equals, float64(20))
 }
-func TestStatEntriesCPUStale(t *testing.T) {
-	re := require.New(t)
+func (s *testClusterStatSuite) TestStatEntriesCPUStale(c *C) {
 	N := 10
 	cst := NewStatEntries(N)
 	// make all entries stale immediately
@@ -133,14 +131,13 @@ func TestStatEntriesCPUStale(t *testing.T) {
 		}
 		cst.Append(entry)
 	}
-	re.Equal(float64(0), cst.CPU())
+	c.Assert(cst.CPU(), Equals, float64(0))
 }
 
-func TestStatEntriesState(t *testing.T) {
-	re := require.New(t)
+func (s *testClusterStatSuite) TestStatEntriesState(c *C) {
 	Load := func(usage int64) *State {
 		cst := NewStatEntries(10)
-		re.NotNil(cst)
+		c.Assert(cst, NotNil)
 
 		usages := cpu(usage)
 		ThreadsCollected = []string{"cpu:"}
@@ -154,8 +151,8 @@ func TestStatEntriesState(t *testing.T) {
 		}
 		return &State{cst}
 	}
-	re.Equal(LoadStateIdle, Load(0).State())
-	re.Equal(LoadStateLow, Load(5).State())
-	re.Equal(LoadStateNormal, Load(10).State())
-	re.Equal(LoadStateHigh, Load(30).State())
+	c.Assert(Load(0).State(), Equals, LoadStateIdle)
+	c.Assert(Load(5).State(), Equals, LoadStateLow)
+	c.Assert(Load(10).State(), Equals, LoadStateNormal)
+	c.Assert(Load(30).State(), Equals, LoadStateHigh)
 }

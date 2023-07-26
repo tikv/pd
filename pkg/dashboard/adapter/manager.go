@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,14 +15,16 @@ package adapter
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/pingcap/log"
-	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 )
@@ -96,9 +97,7 @@ func (m *Manager) updateInfo() {
 	if !m.srv.GetMember().IsLeader() {
 		m.isLeader = false
 		m.members = nil
-		if err := m.srv.GetPersistOptions().Reload(m.srv.GetStorage()); err != nil {
-			log.Warn("failed to reload persist options")
-		}
+		m.srv.GetPersistOptions().Reload(m.srv.GetStorage())
 		return
 	}
 
@@ -111,12 +110,15 @@ func (m *Manager) updateInfo() {
 		return
 	}
 
+	allHasClientUrls := true
 	for _, member := range m.members {
 		if len(member.GetClientUrls()) == 0 {
-			log.Warn("failed to get member client urls")
-			m.members = nil
-			return
+			allHasClientUrls = false
 		}
+	}
+	if !allHasClientUrls {
+		log.Warn("failed to get member client urls")
+		m.members = nil
 	}
 }
 
@@ -165,25 +167,27 @@ func (m *Manager) needResetAddress(addr string) bool {
 }
 
 func (m *Manager) setNewAddress() {
-	// select the sever with minimum member ID(avoid the PD leader if possible) to run dashboard.
-	minMemberIdx := 0
-	if len(m.members) > 1 {
-		leaderID := m.srv.GetMemberInfo().GetMemberId()
-		for idx, member := range m.members {
-			curMemberID := member.GetMemberId()
-			if curMemberID != leaderID && curMemberID < m.members[minMemberIdx].GetMemberId() {
-				minMemberIdx = idx
+	// get new dashboard address
+	members := m.members
+	var addr string
+	switch len(members) {
+	case 1:
+		addr = members[0].GetClientUrls()[0]
+	default:
+		addr = members[0].GetClientUrls()[0]
+		leaderID := m.srv.GetMemberInfo().MemberId
+		sort.Slice(members, func(i, j int) bool { return members[i].GetMemberId() < members[j].GetMemberId() })
+		for _, member := range members {
+			if member.MemberId != leaderID {
+				addr = member.GetClientUrls()[0]
 				break
 			}
 		}
 	}
-
 	// set new dashboard address
 	cfg := m.srv.GetPersistOptions().GetPDServerConfig().Clone()
-	cfg.DashboardAddress = m.members[minMemberIdx].GetClientUrls()[0]
-	if err := m.srv.SetPDServerConfig(*cfg); err != nil {
-		log.Warn("failed to set persist options")
-	}
+	cfg.DashboardAddress = addr
+	m.srv.SetPDServerConfig(*cfg)
 }
 
 func (m *Manager) startService() {
@@ -191,9 +195,9 @@ func (m *Manager) startService() {
 		return
 	}
 	if err := m.service.Start(m.ctx); err != nil {
-		log.Error("can not start dashboard server", errs.ZapError(errs.ErrDashboardStart, err))
+		log.Error("Can not start dashboard server", errs.ZapError(errs.ErrDashboardStart, err))
 	} else {
-		log.Info("dashboard server is started")
+		log.Info("Dashboard server is started")
 	}
 }
 
@@ -202,8 +206,8 @@ func (m *Manager) stopService() {
 		return
 	}
 	if err := m.service.Stop(context.Background()); err != nil {
-		log.Error("stop dashboard server error", errs.ZapError(errs.ErrDashboardStop, err))
+		log.Error("Stop dashboard server error", errs.ZapError(errs.ErrDashboardStop, err))
 	} else {
-		log.Info("dashboard server is stopped")
+		log.Info("Dashboard server is stopped")
 	}
 }

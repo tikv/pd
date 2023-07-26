@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,18 +16,17 @@ package command
 import (
 	"bytes"
 	"encoding/json"
+	"io/ioutil"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
 	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
 var (
@@ -44,7 +42,6 @@ var (
 	ruleGroupsPrefix      = "pd/api/v1/config/rule_groups"
 	replicationModePrefix = "pd/api/v1/config/replication-mode"
 	ruleBundlePrefix      = "pd/api/v1/config/placement-rule"
-	pdServerPrefix        = "pd/api/v1/config/pd-server"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -73,7 +70,6 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(NewShowLabelPropertyCommand())
 	sc.AddCommand(NewShowClusterVersionCommand())
 	sc.AddCommand(newShowReplicationModeCommand())
-	sc.AddCommand(NewShowServerConfigCommand())
 	return sc
 }
 
@@ -132,15 +128,6 @@ func newShowReplicationModeCommand() *cobra.Command {
 		Use:   "replication-mode",
 		Short: "show replication mode config",
 		Run:   showReplicationModeCommandFunc,
-	}
-}
-
-// NewShowServerConfigCommand returns a server configuration of show subcommand.
-func NewShowServerConfigCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "server",
-		Short: "show PD server config",
-		Run:   showServerCommandFunc,
 	}
 }
 
@@ -206,7 +193,7 @@ func NewDeleteLabelPropertyConfigCommand() *cobra.Command {
 }
 
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
-	allR, err := doRequest(cmd, configPrefix, http.MethodGet, http.Header{})
+	allR, err := doRequest(cmd, configPrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
@@ -232,10 +219,9 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	for _, config := range hideConfig {
-		delete(scheduleConfig, config)
-	}
-
+	delete(scheduleConfig, "schedulers-v2")
+	delete(scheduleConfig, "schedulers-payload")
+	delete(scheduleConfig, "store-limit")
 	data["schedule"] = scheduleConfig
 	r, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -245,23 +231,8 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(string(r))
 }
 
-var hideConfig = []string{
-	"schedulers-v2",
-	"schedulers-payload",
-	"store-limit",
-	"enable-remove-down-replica",
-	"enable-replace-offline-replica",
-	"enable-make-up-replica",
-	"enable-remove-extra-replica",
-	"enable-location-replacement",
-	"enable-one-way-merge",
-	"enable-debug-metrics",
-	"store-limit-mode",
-	"scheduler-max-waiting-operator",
-}
-
 func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, schedulePrefix, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, schedulePrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
@@ -270,7 +241,7 @@ func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, replicatePrefix, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, replicatePrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
@@ -279,7 +250,7 @@ func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, labelPropertyPrefix, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, labelPropertyPrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
@@ -288,7 +259,7 @@ func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, configPrefix, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, configPrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
@@ -297,7 +268,7 @@ func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, clusterVersionPrefix, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, clusterVersionPrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get cluster version: %s\n", err)
 		return
@@ -306,18 +277,9 @@ func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, replicationModePrefix, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, replicationModePrefix, http.MethodGet)
 	if err != nil {
 		cmd.Printf("Failed to get replication mode config: %s\n", err)
-		return
-	}
-	cmd.Println(r)
-}
-
-func showServerCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, pdServerPrefix, http.MethodGet, http.Header{})
-	if err != nil {
-		cmd.Printf("Failed to get server config: %s\n", err)
 		return
 	}
 	cmd.Println(r)
@@ -336,7 +298,7 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 		return err
 	}
 	_, err = doRequest(cmd, path, http.MethodPost,
-		http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
+		WithBody("application/json", bytes.NewBuffer(reqData)))
 	if err != nil {
 		return err
 	}
@@ -395,8 +357,8 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 1 {
 		postJSON(cmd, replicationModePrefix, map[string]interface{}{"replication-mode": args[0]})
 	} else if len(args) == 3 {
-		t := reflectutil.FindFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
-		if t != nil && t.Kind() == reflect.Int {
+		t := findFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
+		if t != nil && t.Kind() != reflect.String {
 			// convert to number for numberic fields.
 			arg2, err := strconv.ParseInt(args[2], 10, 64)
 			if err != nil {
@@ -410,6 +372,25 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	} else {
 		cmd.Println(cmd.UsageString())
 	}
+}
+
+func findFieldByJSONTag(t reflect.Type, tags []string) reflect.Type {
+	if len(tags) == 0 {
+		return t
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	for i := 0; i < t.NumField(); i++ {
+		jsonTag := t.Field(i).Tag.Get("json")
+		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
+			jsonTag = jsonTag[:i]
+		}
+		if jsonTag == tags[0] {
+			return findFieldByJSONTag(t.Field(i).Type, tags[1:])
+		}
+	}
+	return nil
 }
 
 // NewPlacementRulesCommand placement rules subcommand
@@ -436,7 +417,6 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show.Flags().String("group", "", "group id")
 	show.Flags().String("id", "", "rule id")
 	show.Flags().String("region", "", "region id")
-	show.Flags().Bool("detail", false, "detailed match info for region")
 	load := &cobra.Command{
 		Use:   "load",
 		Short: "load placement rules to a file",
@@ -468,10 +448,9 @@ func NewPlacementRulesCommand() *cobra.Command {
 	}
 	ruleGroupDelete := &cobra.Command{
 		Use:   "delete <id>",
-		Short: "delete rule group configuration. Note: this command will be deprecated soon, use <rule-bundle delete> instead",
-		Run:   delRuleBundle,
+		Short: "delete rule group configuration",
+		Run:   deleteRuleGroupFunc,
 	}
-	ruleGroupDelete.Flags().Bool("regexp", false, "match group id by regular expression")
 	ruleGroup.AddCommand(ruleGroupShow, ruleGroupSet, ruleGroupDelete)
 	ruleBundle := &cobra.Command{
 		Use:   "rule-bundle",
@@ -507,7 +486,6 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   saveRuleBundle,
 	}
 	ruleBundleSave.Flags().String("in", "rules.json", "the file contains all group configs and all rules")
-	ruleBundleSave.Flags().Bool("partial", false, "do not drop all old configurations, partial update")
 	ruleBundle.AddCommand(ruleBundleGet, ruleBundleSet, ruleBundleDelete, ruleBundleLoad, ruleBundleSave)
 	c.AddCommand(enable, disable, show, load, save, ruleGroup, ruleBundle)
 	return c
@@ -554,14 +532,11 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		reqPath, respIsList = path.Join(rulePrefix, group, id), false
 	case region != "" && group == "" && id == "": // rules matches a region
 		reqPath = path.Join(rulesPrefix, "region", region)
-		if ok, _ := cmd.Flags().GetBool("detail"); ok {
-			reqPath = path.Join(reqPath, "detail")
-		}
 	default:
 		cmd.Println(`"region" should not be specified with "group" or "id" at the same time`)
 		return
 	}
-	res, err := doRequest(cmd, reqPath, http.MethodGet, http.Header{})
+	res, err := doRequest(cmd, reqPath, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -573,7 +548,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	if !respIsList {
 		res = "[\n" + res + "]\n"
 	}
-	err = os.WriteFile(file, []byte(res), 0644) // #nosec
+	err = ioutil.WriteFile(file, []byte(res), 0644)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -586,7 +561,7 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
-	content, err := os.ReadFile(file)
+	content, err := ioutil.ReadFile(file)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -610,7 +585,7 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	}
 
 	b, _ := json.Marshal(validOpts)
-	_, err = doRequest(cmd, rulesBatchPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(b)))
+	_, err = doRequest(cmd, rulesBatchPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(b)))
 	if err != nil {
 		cmd.Printf("failed to save rules %s: %s\n", b, err)
 		return
@@ -630,7 +605,7 @@ func showRuleGroupFunc(cmd *cobra.Command, args []string) {
 		reqPath = path.Join(ruleGroupPrefix, args[0])
 	}
 
-	res, err := doRequest(cmd, reqPath, http.MethodGet, http.Header{})
+	res, err := doRequest(cmd, reqPath, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -664,6 +639,19 @@ func updateRuleGroupFunc(cmd *cobra.Command, args []string) {
 	})
 }
 
+func deleteRuleGroupFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	_, err := doRequest(cmd, path.Join(ruleGroupPrefix, args[0]), http.MethodDelete)
+	if err != nil {
+		cmd.Printf("Failed to remove rule group config: %s \n", err)
+		return
+	}
+	cmd.Println("Success!")
+}
+
 func getRuleBundle(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
@@ -672,7 +660,7 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 
 	reqPath := path.Join(ruleBundlePrefix, args[0])
 
-	res, err := doRequest(cmd, reqPath, http.MethodGet, http.Header{})
+	res, err := doRequest(cmd, reqPath, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -687,7 +675,7 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	err = os.WriteFile(file, []byte(res), 0644) // #nosec
+	err = ioutil.WriteFile(file, []byte(res), 0644)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -700,7 +688,7 @@ func setRuleBundle(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
-	content, err := os.ReadFile(file)
+	content, err := ioutil.ReadFile(file)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -716,7 +704,7 @@ func setRuleBundle(cmd *cobra.Command, args []string) {
 
 	reqPath := path.Join(ruleBundlePrefix, id.GroupID)
 
-	res, err := doRequest(cmd, reqPath, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewReader(content)))
+	res, err := doRequest(cmd, reqPath, http.MethodPost, WithBody("application/json", bytes.NewReader(content)))
 	if err != nil {
 		cmd.Printf("failed to save rule bundle %s: %s\n", content, err)
 		return
@@ -733,11 +721,11 @@ func delRuleBundle(cmd *cobra.Command, args []string) {
 
 	reqPath := path.Join(ruleBundlePrefix, url.PathEscape(args[0]))
 
-	if ok, _ := cmd.Flags().GetBool("regexp"); ok {
+	if f := cmd.Flag("regexp"); f != nil {
 		reqPath += "?regexp"
 	}
 
-	res, err := doRequest(cmd, reqPath, http.MethodDelete, http.Header{})
+	res, err := doRequest(cmd, reqPath, http.MethodDelete)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -747,7 +735,7 @@ func delRuleBundle(cmd *cobra.Command, args []string) {
 }
 
 func loadRuleBundle(cmd *cobra.Command, args []string) {
-	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet, http.Header{})
+	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -762,7 +750,7 @@ func loadRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	err = os.WriteFile(file, []byte(res), 0644) // #nosec
+	err = ioutil.WriteFile(file, []byte(res), 0644)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -775,18 +763,13 @@ func saveRuleBundle(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
 	}
-	content, err := os.ReadFile(file)
+	content, err := ioutil.ReadFile(file)
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
 
-	path := ruleBundlePrefix
-	if ok, _ := cmd.Flags().GetBool("partial"); ok {
-		path += "?partial=true"
-	}
-
-	res, err := doRequest(cmd, path, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewReader(content)))
+	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodPost, WithBody("application/json", bytes.NewReader(content)))
 	if err != nil {
 		cmd.Printf("failed to save rule bundles %s: %s\n", content, err)
 		return

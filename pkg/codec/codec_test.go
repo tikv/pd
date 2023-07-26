@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,35 +16,39 @@ package codec
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	. "github.com/pingcap/check"
 )
 
-func TestDecodeBytes(t *testing.T) {
-	t.Parallel()
-	re := require.New(t)
+func TestTable(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&testCodecSuite{})
+
+type testCodecSuite struct{}
+
+func (s *testCodecSuite) TestDecodeBytes(c *C) {
 	key := "abcdefghijklmnopqrstuvwxyz"
 	for i := 0; i < len(key); i++ {
 		_, k, err := DecodeBytes(EncodeBytes([]byte(key[:i])))
-		re.NoError(err)
-		re.Equal(key[:i], string(k))
+		c.Assert(err, IsNil)
+		c.Assert(string(k), Equals, key[:i])
 	}
 }
 
-func TestTableID(t *testing.T) {
-	t.Parallel()
-	re := require.New(t)
+func (s *testCodecSuite) TestTableID(c *C) {
 	key := EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff"))
-	re.Equal(int64(0xff), key.TableID())
+	c.Assert(key.TableID(), Equals, int64(0xff))
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff_i\x01\x02"))
-	re.Equal(int64(0xff), key.TableID())
+	c.Assert(key.TableID(), Equals, int64(0xff))
 
 	key = []byte("t\x80\x00\x00\x00\x00\x00\x00\xff")
-	re.Equal(int64(0), key.TableID())
+	c.Assert(key.TableID(), Equals, int64(0))
 
 	key = EncodeBytes([]byte("T\x00\x00\x00\x00\x00\x00\x00\xff"))
-	re.Equal(int64(0), key.TableID())
+	c.Assert(key.TableID(), Equals, int64(0))
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\xff"))
-	re.Equal(int64(0), key.TableID())
+	c.Assert(key.TableID(), Equals, int64(0))
 }

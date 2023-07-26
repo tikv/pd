@@ -8,21 +8,20 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// limitations under the License.
+// limitations under the License
 
 package cluster
 
 import (
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/statistics"
 	"go.uber.org/zap"
 )
 
@@ -114,14 +113,14 @@ type StatEntry pdpb.StoreStats
 
 // CPUEntries saves a history of store statistics
 type CPUEntries struct {
-	cpu     movingaverage.MovingAvg
+	cpu     statistics.MovingAvg
 	updated time.Time
 }
 
 // NewCPUEntries returns the StateEntries with a fixed size
 func NewCPUEntries(size int) *CPUEntries {
 	return &CPUEntries{
-		cpu: movingaverage.NewMedianFilter(size),
+		cpu: statistics.NewMedianFilter(size),
 	}
 }
 
@@ -161,7 +160,7 @@ func (s *CPUEntries) CPU() float64 {
 
 // StatEntries saves the StatEntries for each store in the cluster
 type StatEntries struct {
-	m     syncutil.RWMutex
+	m     sync.RWMutex
 	stats map[uint64]*CPUEntries
 	size  int   // size of entries to keep for each store
 	total int64 // total of StatEntry appended
@@ -195,6 +194,15 @@ func (cst *StatEntries) Append(stat *StatEntry) bool {
 	return entries.Append(stat, ThreadsCollected...)
 }
 
+func contains(slice []uint64, value uint64) bool {
+	for i := range slice {
+		if slice[i] == value {
+			return true
+		}
+	}
+	return false
+}
+
 // CPU returns the cpu usage of the cluster
 func (cst *StatEntries) CPU(excludes ...uint64) float64 {
 	cst.m.Lock()
@@ -207,7 +215,7 @@ func (cst *StatEntries) CPU(excludes ...uint64) float64 {
 
 	sum := 0.0
 	for sid, stat := range cst.stats {
-		if slice.Contains(excludes, sid) {
+		if contains(excludes, sid) {
 			continue
 		}
 		if time.Since(stat.updated) > cst.ttl {

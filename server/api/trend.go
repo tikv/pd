@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,20 +18,18 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
 )
 
 // Trend describes the cluster's schedule trend.
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Trend struct {
 	Stores  []trendStore  `json:"stores"`
 	History *trendHistory `json:"history"`
 }
 
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendStore struct {
 	ID              uint64             `json:"id"`
 	Address         string             `json:"address"`
@@ -51,14 +48,12 @@ type trendStore struct {
 	HotReadRegionFlows  []float64 `json:"hot_read_region_flows"`
 }
 
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendHistory struct {
 	StartTime int64               `json:"start"`
 	EndTime   int64               `json:"end"`
 	Entries   []trendHistoryEntry `json:"entries"`
 }
 
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendHistoryEntry struct {
 	From  uint64 `json:"from"`
 	To    uint64 `json:"to"`
@@ -80,15 +75,15 @@ func newTrendHandler(s *server.Server, rd *render.Render) *trendHandler {
 	}
 }
 
-// @Tags     trend
-// @Summary  Get the growth and changes of data in the most recent period of time.
-// @Param    from  query  integer  false  "From Unix timestamp"
-// @Produce  json
-// @Success  200  {object}  Trend
-// @Failure  400  {string}  string  "The request is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /trend [get]
-func (h *trendHandler) GetTrend(w http.ResponseWriter, r *http.Request) {
+// @Tags trend
+// @Summary Get the growth and changes of data in the most recent period of time.
+// @Param from query integer false "From Unix timestamp"
+// @Produce json
+// @Success 200 {object} Trend
+// @Failure 400 {string} string "The request is invalid."
+// @Failure 500 {string} string "PD server failed to proceed the request."
+// @Router /trend [get]
+func (h *trendHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var from time.Time
 	if fromStr := r.URL.Query()["from"]; len(fromStr) > 0 {
 		fromInt, err := strconv.ParseInt(fromStr[0], 10, 64)
@@ -130,6 +125,7 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	trendStores := make([]trendStore, 0, len(stores))
 	for _, store := range stores {
 		info := newStoreInfo(h.svr.GetScheduleConfig(), store)
@@ -152,14 +148,14 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	return trendStores, nil
 }
 
-func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, storeID uint64) (storeByteFlow float64, regionByteFlows []float64) {
+func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, storeID uint64) (storeFlow float64, regionFlows []float64) {
 	if stats == nil {
 		return
 	}
 	if stat, ok := stats[storeID]; ok {
-		storeByteFlow = stat.TotalBytesRate
+		storeFlow = stat.TotalBytesRate
 		for _, flow := range stat.Stats {
-			regionByteFlows = append(regionByteFlows, flow.ByteRate)
+			regionFlows = append(regionFlows, flow.GetByteRate())
 		}
 	}
 	return

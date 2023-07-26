@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,17 +16,15 @@ package cluster
 import (
 	"bytes"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/statistics/buckets"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -37,26 +34,25 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 
-	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
+	// If the region peer count is 0, then we should not handle this.
+	if len(region.GetPeers()) == 0 {
+		log.Warn("invalid region, zero region peer count", zap.Stringer("region-meta", core.RegionToHexMeta(region.GetMeta())))
+		return errors.Errorf("invalid region, zero region peer count: %v", core.RegionToHexMeta(region.GetMeta()))
+	}
+
+	c.RLock()
+	co := c.coordinator
+	c.RUnlock()
+	co.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
 	return nil
 }
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
-	if c.isSchedulingHalted() {
-		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
-	}
-	if !c.opt.IsTikvRegionSplitEnabled() {
-		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
-	}
 	reqRegion := request.GetRegion()
 	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
 		return nil, err
-	}
-
-	if repMode := c.GetReplicationMode(); repMode != nil && repMode.IsRegionSplitPaused() {
-		return nil, errors.New("region split is paused by replication mode")
 	}
 
 	newRegionID, err := c.id.Alloc()
@@ -71,7 +67,7 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		}
 	}
 
-	if versioninfo.IsFeatureSupported(c.GetOpts().GetClusterVersion(), versioninfo.RegionMerge) {
+	if c.IsFeatureSupported(versioninfo.RegionMerge) {
 		// Disable merge for the 2 regions in a period of time.
 		c.GetMergeChecker().RecordRegionSplit([]uint64{reqRegion.GetId(), newRegionID})
 	}
@@ -86,16 +82,12 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	return split, nil
 }
 
-func (c *RaftCluster) isSchedulingHalted() bool {
-	return c.opt.IsSchedulingHalted()
-}
-
 // ValidRequestRegion is used to decide if the region is valid.
 func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
 	region := c.GetRegionByKey(startKey)
 	if region == nil {
-		return errors.Errorf("region not found, request region: %v", logutil.RedactStringer(core.RegionToHexMeta(reqRegion)))
+		return errors.Errorf("region not found, request region: %v", core.RegionToHexMeta(reqRegion))
 	}
 	// If the request epoch is less than current region epoch, then returns an error.
 	reqRegionEpoch := reqRegion.GetRegionEpoch()
@@ -109,20 +101,11 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 
 // HandleAskBatchSplit handles the batch split request.
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
-	if c.isSchedulingHalted() {
-		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
-	}
-	if !c.opt.IsTikvRegionSplitEnabled() {
-		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
-	}
 	reqRegion := request.GetRegion()
 	splitCount := request.GetSplitCount()
 	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
 		return nil, err
-	}
-	if repMode := c.GetReplicationMode(); repMode != nil && repMode.IsRegionSplitPaused() {
-		return nil, errors.New("region split is paused by replication mode")
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
@@ -150,7 +133,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	}
 
 	recordRegions = append(recordRegions, reqRegion.GetId())
-	if versioninfo.IsFeatureSupported(c.GetOpts().GetClusterVersion(), versioninfo.RegionMerge) {
+	if c.IsFeatureSupported(versioninfo.RegionMerge) {
 		// Disable merge the regions in a period of time.
 		c.GetMergeChecker().RecordRegionSplit(recordRegions)
 	}
@@ -207,19 +190,19 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	err := c.checkSplitRegion(left, right)
 	if err != nil {
 		log.Warn("report split region is invalid",
-			logutil.ZapRedactStringer("left-region", core.RegionToHexMeta(left)),
-			logutil.ZapRedactStringer("right-region", core.RegionToHexMeta(right)),
+			zap.Stringer("left-region", core.RegionToHexMeta(left)),
+			zap.Stringer("right-region", core.RegionToHexMeta(right)),
 			errs.ZapError(err))
 		return nil, err
 	}
 
 	// Build origin region by using left and right.
-	originRegion := typeutil.DeepClone(right, core.RegionFactory)
+	originRegion := proto.Clone(right).(*metapb.Region)
 	originRegion.RegionEpoch = nil
 	originRegion.StartKey = left.GetStartKey()
 	log.Info("region split, generate new region",
 		zap.Uint64("region-id", originRegion.GetId()),
-		logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(left)))
+		zap.Stringer("region-meta", core.RegionToHexMeta(left)))
 	return &pdpb.ReportSplitResponse{}, nil
 }
 
@@ -235,8 +218,9 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 			errs.ZapError(err))
 		return nil, err
 	}
+	c.collectSplitRegions(regions)
 	last := len(regions) - 1
-	originRegion := typeutil.DeepClone(regions[last], core.RegionFactory)
+	originRegion := proto.Clone(regions[last]).(*metapb.Region)
 	hrm = core.RegionsToHexMeta(regions[:last])
 	log.Info("region batch split, generate new regions",
 		zap.Uint64("region-id", originRegion.GetId()),
@@ -245,11 +229,28 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
 
-// HandleReportBuckets processes buckets reports from client
-func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
-	if err := c.processReportBuckets(b); err != nil {
-		return err
+func (c *RaftCluster) collectSplitRegions(regions []*metapb.Region) {
+	c.Lock()
+	defer c.Unlock()
+
+	regionInfos := make([]uint64, 0, len(regions)-1)
+	for _, r := range regions[:len(regions)-1] {
+		regionInfos = append(regionInfos, r.GetId())
 	}
-	c.hotBuckets.CheckAsync(buckets.NewCheckPeerTask(b))
-	return nil
+	originRegionID := regions[len(regions)-1].GetId()
+	c.splitRegionInfos[originRegionID] = regionInfos
+}
+
+// GetSplitRegionInfos returns the split region infos
+func (c *RaftCluster) GetSplitRegionInfos() map[uint64][]uint64 {
+	c.Lock()
+	defer c.Unlock()
+
+	splitRegionInfos := make(map[uint64][]uint64, len(c.splitRegionInfos))
+	for id, regionInfos := range c.splitRegionInfos {
+		splitRegionInfos[id] = regionInfos
+	}
+	// clear old infos
+	c.splitRegionInfos = make(map[uint64][]uint64)
+	return splitRegionInfos
 }

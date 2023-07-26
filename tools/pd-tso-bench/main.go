@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -18,8 +17,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
-	"math/rand"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -28,41 +26,21 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/influxdata/tdigest"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
-)
-
-const (
-	keepaliveTime    = 10 * time.Second
-	keepaliveTimeout = 3 * time.Second
 )
 
 var (
-	pdAddrs                        = flag.String("pd", "127.0.0.1:2379", "pd address")
-	clientNumber                   = flag.Int("client", 1, "the number of pd clients involved in each benchmark")
-	concurrency                    = flag.Int("c", 1000, "concurrency")
-	count                          = flag.Int("count", 1, "the count number that the test will run")
-	duration                       = flag.Duration("duration", 60*time.Second, "how many seconds the test will last")
-	dcLocation                     = flag.String("dc", "global", "which dc-location this bench will request")
-	verbose                        = flag.Bool("v", false, "output statistics info every interval and output metrics info at the end")
-	interval                       = flag.Duration("interval", time.Second, "interval to output the statistics")
-	caPath                         = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	certPath                       = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
-	keyPath                        = flag.String("key", "", "path of file that contains X509 key in PEM format")
-	maxBatchWaitInterval           = flag.Duration("batch-interval", 0, "the max batch wait interval")
-	enableTSOFollowerProxy         = flag.Bool("enable-tso-follower-proxy", false, "whether enable the TSO Follower Proxy")
-	enableFaultInjection           = flag.Bool("enable-fault-injection", false, "whether enable fault injection")
-	faultInjectionRate             = flag.Float64("fault-injection-rate", 0.01, "the failure rate [0.0001, 1]. 0.01 means 1% failure rate")
-	maxTSOSendIntervalMilliseconds = flag.Int("max-send-interval-ms", 0, "max tso send interval in milliseconds, 60s by default")
-	keyspaceID                     = flag.Uint("keyspace-id", 0, "the id of the keyspace to access")
-	keyspaceName                   = flag.String("keyspace-name", "", "the name of the keyspace to access")
-	wg                             sync.WaitGroup
+	pdAddrs     = flag.String("pd", "127.0.0.1:2379", "pd address")
+	concurrency = flag.Int("C", 1000, "concurrency")
+	interval    = flag.Duration("interval", time.Second, "interval to output the statistics")
+	caPath      = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
+	certPath    = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
+	keyPath     = flag.String("key", "", "path of file that contains X509 key in PEM format")
+	wg          sync.WaitGroup
 )
 
 var promServer *httptest.Server
@@ -70,14 +48,42 @@ var promServer *httptest.Server
 func collectMetrics(server *httptest.Server) string {
 	time.Sleep(1100 * time.Millisecond)
 	res, _ := http.Get(server.URL)
-	body, _ := io.ReadAll(res.Body)
+	body, _ := ioutil.ReadAll(res.Body)
 	res.Body.Close()
 	return string(body)
 }
 
 func main() {
+	promServer = httptest.NewServer(promhttp.Handler())
 	flag.Parse()
+
+	pdCli, err := pd.NewClient([]string{*pdAddrs}, pd.SecurityOption{
+		CAPath:   *caPath,
+		CertPath: *certPath,
+		KeyPath:  *keyPath,
+	})
+	if err != nil {
+		log.Fatal(fmt.Sprintf("%v", err))
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
+	// To avoid the first time high latency.
+	for i := 0; i < *concurrency; i++ {
+		_, _, err = pdCli.GetTS(ctx)
+		if err != nil {
+			log.Fatal("get tso failed", zap.Error(err))
+		}
+	}
+
+	durCh := make(chan time.Duration, *concurrency*2)
+
+	wg.Add(*concurrency)
+	for i := 0; i < *concurrency; i++ {
+		go reqWorker(ctx, pdCli, durCh)
+	}
+
+	wg.Add(1)
+	go showStats(ctx, durCh)
 
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
@@ -85,77 +91,16 @@ func main() {
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
+
 	go func() {
 		<-sc
 		cancel()
 	}()
 
-	for i := 0; i < *count; i++ {
-		fmt.Printf("\nStart benchmark #%d, duration: %+vs\n", i, duration.Seconds())
-		bench(ctx)
-	}
-}
-
-func bench(mainCtx context.Context) {
-	promServer = httptest.NewServer(promhttp.Handler())
-
-	// Initialize all clients
-	fmt.Printf("Create %d client(s) for benchmark\n", *clientNumber)
-	pdClients := make([]pd.Client, *clientNumber)
-	for idx := range pdClients {
-		pdCli, err := createPDClient(mainCtx)
-		if err != nil {
-			log.Fatal(fmt.Sprintf("create pd client #%d failed: %v", idx, err))
-		}
-		pdClients[idx] = pdCli
-	}
-
-	ctx, cancel := context.WithCancel(mainCtx)
-	// To avoid the first time high latency.
-	for idx, pdCli := range pdClients {
-		_, _, err := pdCli.GetLocalTS(ctx, *dcLocation)
-		if err != nil {
-			log.Fatal("get first time tso failed", zap.Int("client-number", idx), zap.Error(err))
-		}
-	}
-
-	durCh := make(chan time.Duration, 2*(*concurrency)*(*clientNumber))
-
-	if *enableFaultInjection {
-		fmt.Printf("Enable fault injection, failure rate: %f\n", *faultInjectionRate)
-		wg.Add(*clientNumber)
-		for i := 0; i < *clientNumber; i++ {
-			go reqWorker(ctx, pdClients, i, durCh)
-		}
-	} else {
-		wg.Add((*concurrency) * (*clientNumber))
-		for i := 0; i < *clientNumber; i++ {
-			for j := 0; j < *concurrency; j++ {
-				go reqWorker(ctx, pdClients, i, durCh)
-			}
-		}
-	}
-
-	wg.Add(1)
-	go showStats(ctx, durCh)
-
-	timer := time.NewTimer(*duration)
-	defer timer.Stop()
-
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
-	cancel()
-
 	wg.Wait()
 
-	for _, pdCli := range pdClients {
-		pdCli.Close()
-	}
+	pdCli.Close()
 }
-
-var latencyTDigest *tdigest.TDigest = tdigest.New()
 
 func showStats(ctx context.Context, durCh chan time.Duration) {
 	defer wg.Done()
@@ -164,67 +109,44 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 	defer cancel()
 
 	ticker := time.NewTicker(*interval)
-	defer ticker.Stop()
 
 	s := newStats()
 	total := newStats()
 
-	fmt.Println()
 	for {
 		select {
 		case <-ticker.C:
-			// runtime.GC()
-			if *verbose {
-				fmt.Println(s.Counter())
-			}
+			//runtime.GC()
+			println(s.String())
 			total.merge(s)
 			s = newStats()
 		case d := <-durCh:
 			s.update(d)
 		case <-statCtx.Done():
-			fmt.Println("\nTotal:")
-			fmt.Println(total.Counter())
-			fmt.Println(total.Percentage())
-			// Calculate the percentiles by using the tDigest algorithm.
-			fmt.Printf("P0.5: %.4fms, P0.8: %.4fms, P0.9: %.4fms, P0.99: %.4fms\n\n", latencyTDigest.Quantile(0.5), latencyTDigest.Quantile(0.8), latencyTDigest.Quantile(0.9), latencyTDigest.Quantile(0.99))
-			if *verbose {
-				fmt.Println(collectMetrics(promServer))
-			}
+			println("\nTotal:")
+			println(total.String())
+			println(collectMetrics(promServer))
 			return
 		}
 	}
 }
 
 const (
-	twoDur          = time.Millisecond * 2
-	fiveDur         = time.Millisecond * 5
-	tenDur          = time.Millisecond * 10
-	thirtyDur       = time.Millisecond * 30
-	fiftyDur        = time.Millisecond * 50
-	oneHundredDur   = time.Millisecond * 100
-	twoHundredDur   = time.Millisecond * 200
-	fourHundredDur  = time.Millisecond * 400
-	eightHundredDur = time.Millisecond * 800
-	oneThousandDur  = time.Millisecond * 1000
+	twoDur    = time.Millisecond * 2
+	fiveDur   = time.Millisecond * 5
+	tenDur    = time.Millisecond * 10
+	thirtyDur = time.Millisecond * 30
 )
 
 type stats struct {
-	maxDur          time.Duration
-	minDur          time.Duration
-	totalDur        time.Duration
-	count           int
-	submilliCnt     int
-	milliCnt        int
-	twoMilliCnt     int
-	fiveMilliCnt    int
-	tenMSCnt        int
-	thirtyCnt       int
-	fiftyCnt        int
-	oneHundredCnt   int
-	twoHundredCnt   int
-	fourHundredCnt  int
-	eightHundredCnt int
-	oneThousandCnt  int
+	maxDur       time.Duration
+	minDur       time.Duration
+	count        int
+	milliCnt     int
+	twoMilliCnt  int
+	fiveMilliCnt int
+	tenMSCnt     int
+	thirtyCnt    int
 }
 
 func newStats() *stats {
@@ -236,44 +158,12 @@ func newStats() *stats {
 
 func (s *stats) update(dur time.Duration) {
 	s.count++
-	s.totalDur += dur
-	latencyTDigest.Add(float64(dur.Nanoseconds())/1e6, 1)
 
 	if dur > s.maxDur {
 		s.maxDur = dur
 	}
 	if dur < s.minDur {
 		s.minDur = dur
-	}
-
-	if dur > oneThousandDur {
-		s.oneThousandCnt++
-		return
-	}
-
-	if dur > eightHundredDur {
-		s.eightHundredCnt++
-		return
-	}
-
-	if dur > fourHundredDur {
-		s.fourHundredCnt++
-		return
-	}
-
-	if dur > twoHundredDur {
-		s.twoHundredCnt++
-		return
-	}
-
-	if dur > oneHundredDur {
-		s.oneHundredCnt++
-		return
-	}
-
-	if dur > fiftyDur {
-		s.fiftyCnt++
-		return
 	}
 
 	if dur > thirtyDur {
@@ -300,8 +190,6 @@ func (s *stats) update(dur time.Duration) {
 		s.milliCnt++
 		return
 	}
-
-	s.submilliCnt++
 }
 
 func (s *stats) merge(other *stats) {
@@ -313,99 +201,36 @@ func (s *stats) merge(other *stats) {
 	}
 
 	s.count += other.count
-	s.totalDur += other.totalDur
-	s.submilliCnt += other.submilliCnt
 	s.milliCnt += other.milliCnt
 	s.twoMilliCnt += other.twoMilliCnt
 	s.fiveMilliCnt += other.fiveMilliCnt
 	s.tenMSCnt += other.tenMSCnt
 	s.thirtyCnt += other.thirtyCnt
-	s.fiftyCnt += other.fiftyCnt
-	s.oneHundredCnt += other.oneHundredCnt
-	s.twoHundredCnt += other.twoHundredCnt
-	s.fourHundredCnt += other.fourHundredCnt
-	s.eightHundredCnt += other.eightHundredCnt
-	s.oneThousandCnt += other.oneThousandCnt
 }
 
-func (s *stats) Counter() string {
-	return fmt.Sprintf(
-		"count: %d, max: %.4fms, min: %.4fms, avg: %.4fms\n<1ms: %d, >1ms: %d, >2ms: %d, >5ms: %d, >10ms: %d, >30ms: %d, >50ms: %d, >100ms: %d, >200ms: %d, >400ms: %d, >800ms: %d, >1s: %d",
-		s.count, float64(s.maxDur.Nanoseconds())/float64(time.Millisecond), float64(s.minDur.Nanoseconds())/float64(time.Millisecond), float64(s.totalDur.Nanoseconds())/float64(s.count)/float64(time.Millisecond),
-		s.submilliCnt, s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt, s.tenMSCnt, s.thirtyCnt, s.fiftyCnt, s.oneHundredCnt, s.twoHundredCnt, s.fourHundredCnt,
-		s.eightHundredCnt, s.oneThousandCnt)
+func (s *stats) String() string {
+	return fmt.Sprintf("count:%d, max:%d, min:%d, >1ms:%d, >2ms:%d, >5ms:%d, >10ms:%d, >30ms:%d",
+		s.count, s.maxDur.Nanoseconds()/int64(time.Millisecond), s.minDur.Nanoseconds()/int64(time.Millisecond),
+		s.milliCnt, s.twoMilliCnt, s.fiveMilliCnt, s.tenMSCnt, s.thirtyCnt)
 }
 
-func (s *stats) Percentage() string {
-	return fmt.Sprintf(
-		"count: %d, <1ms: %2.2f%%, >1ms: %2.2f%%, >2ms: %2.2f%%, >5ms: %2.2f%%, >10ms: %2.2f%%, >30ms: %2.2f%%, >50ms: %2.2f%%, >100ms: %2.2f%%, >200ms: %2.2f%%, >400ms: %2.2f%%, >800ms: %2.2f%%, >1s: %2.2f%%", s.count,
-		s.calculate(s.submilliCnt), s.calculate(s.milliCnt), s.calculate(s.twoMilliCnt), s.calculate(s.fiveMilliCnt), s.calculate(s.tenMSCnt), s.calculate(s.thirtyCnt), s.calculate(s.fiftyCnt),
-		s.calculate(s.oneHundredCnt), s.calculate(s.twoHundredCnt), s.calculate(s.fourHundredCnt), s.calculate(s.eightHundredCnt), s.calculate(s.oneThousandCnt))
-}
-
-func (s *stats) calculate(count int) float64 {
-	return float64(count) * 100 / float64(s.count)
-}
-
-func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh chan time.Duration) {
+func reqWorker(ctx context.Context, pdCli pd.Client, durCh chan time.Duration) {
 	defer wg.Done()
 
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	var (
-		err                    error
-		maxRetryTime           int           = 120
-		sleepIntervalOnFailure time.Duration = 1000 * time.Millisecond
-		totalSleepBeforeGetTS  time.Duration
-	)
-	pdCli := pdClients[clientIdx]
 
 	for {
-		if pdCli == nil || (*enableFaultInjection && shouldInjectFault()) {
-			if pdCli != nil {
-				pdCli.Close()
-			}
-			pdCli, err = createPDClient(ctx)
-			if err != nil {
-				log.Error(fmt.Sprintf("re-create pd client #%d failed: %v", clientIdx, err))
-				select {
-				case <-reqCtx.Done():
-				case <-time.After(100 * time.Millisecond):
-				}
-				continue
-			}
-			pdClients[clientIdx] = pdCli
-		}
-
-		totalSleepBeforeGetTS = 0
 		start := time.Now()
-
-		i := 0
-		for ; i < maxRetryTime; i++ {
-			if *maxTSOSendIntervalMilliseconds > 0 {
-				sleepBeforeGetTS := time.Duration(rand.Intn(*maxTSOSendIntervalMilliseconds)) * time.Millisecond
-				ticker := time.NewTicker(sleepBeforeGetTS)
-				defer ticker.Stop()
-				select {
-				case <-reqCtx.Done():
-				case <-ticker.C:
-					totalSleepBeforeGetTS += sleepBeforeGetTS
-				}
-			}
-			_, _, err = pdCli.GetLocalTS(reqCtx, *dcLocation)
-			if errors.Cause(err) == context.Canceled {
-				return
-			}
-			if err == nil {
-				break
-			}
-			log.Error(fmt.Sprintf("%v", err))
-			time.Sleep(sleepIntervalOnFailure)
+		_, _, err := pdCli.GetTS(reqCtx)
+		if errors.Cause(err) == context.Canceled {
+			return
 		}
+
 		if err != nil {
 			log.Fatal(fmt.Sprintf("%v", err))
 		}
-		dur := time.Since(start) - time.Duration(i)*sleepIntervalOnFailure - totalSleepBeforeGetTS
+		dur := time.Since(start)
 
 		select {
 		case <-reqCtx.Done():
@@ -413,45 +238,4 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 		case durCh <- dur:
 		}
 	}
-}
-
-func createPDClient(ctx context.Context) (pd.Client, error) {
-	var (
-		pdCli pd.Client
-		err   error
-	)
-
-	opts := make([]pd.ClientOption, 0)
-	opts = append(opts, pd.WithGRPCDialOptions(
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:    keepaliveTime,
-			Timeout: keepaliveTimeout,
-		}),
-	))
-
-	if len(*keyspaceName) > 0 {
-		apiCtx := pd.NewAPIContextV2(*keyspaceName)
-		pdCli, err = pd.NewClientWithAPIContext(ctx, apiCtx, []string{*pdAddrs}, pd.SecurityOption{
-			CAPath:   *caPath,
-			CertPath: *certPath,
-			KeyPath:  *keyPath,
-		}, opts...)
-	} else {
-		pdCli, err = pd.NewClientWithKeyspace(ctx, uint32(*keyspaceID), []string{*pdAddrs}, pd.SecurityOption{
-			CAPath:   *caPath,
-			CertPath: *certPath,
-			KeyPath:  *keyPath,
-		}, opts...)
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	pdCli.UpdateOption(pd.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
-	pdCli.UpdateOption(pd.EnableTSOFollowerProxy, *enableTSOFollowerProxy)
-	return pdCli, err
-}
-
-func shouldInjectFault() bool {
-	return rand.Intn(10000) < int(*faultInjectionRate*10000)
 }

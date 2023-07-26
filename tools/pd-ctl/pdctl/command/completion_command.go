@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -118,9 +117,7 @@ func runCompletionBash(out io.Writer, cmd *cobra.Command) error {
 func runCompletionZsh(out io.Writer, cmd *cobra.Command) error {
 	zshHead := "#compdef pd-ctl\n"
 
-	if _, err := out.Write([]byte(zshHead)); err != nil {
-		return err
-	}
+	out.Write([]byte(zshHead))
 
 	zshInitialization := `
 __pd-ctl_bash_source() {
@@ -264,17 +261,11 @@ __pd-ctl_convert_bash_to_zsh() {
 	-e "s/\\\$(type${RWORD}/\$(__pd-ctl_type/g" \
 	<<'BASH_COMPLETION_EOF'
 `
-	if _, err := out.Write([]byte(zshInitialization)); err != nil {
-		return err
-	}
+	out.Write([]byte(zshInitialization))
 
 	buf := new(bytes.Buffer)
-	if err := cmd.GenBashCompletion(buf); err != nil {
-		return err
-	}
-	if _, err := out.Write(buf.Bytes()); err != nil {
-		return err
-	}
+	cmd.GenBashCompletion(buf)
+	out.Write(buf.Bytes())
 
 	zshTail := `
 BASH_COMPLETION_EOF
@@ -283,8 +274,6 @@ BASH_COMPLETION_EOF
 __pd-ctl_bash_source <(__pd-ctl_convert_bash_to_zsh)
 _complete pd-ctl 2>/dev/null
 `
-	if _, err := out.Write([]byte(zshTail)); err != nil {
-		return err
-	}
+	out.Write([]byte(zshTail))
 	return nil
 }

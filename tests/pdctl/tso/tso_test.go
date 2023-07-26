@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -20,14 +19,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	. "github.com/pingcap/check"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests/pdctl"
-	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func TestTSO(t *testing.T) {
-	re := require.New(t)
-	cmd := pdctlCmd.GetRootCmd()
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&tsoTestSuite{})
+
+type tsoTestSuite struct{}
+
+func (s *tsoTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
+
+func (s *tsoTestSuite) TestTSO(c *C) {
+	cmd := pdctl.InitCommand()
 
 	const (
 		physicalShiftBits = 18
@@ -37,13 +47,14 @@ func TestTSO(t *testing.T) {
 	// tso command
 	ts := "395181938313123110"
 	args := []string{"-u", "127.0.0.1", "tso", ts}
-	output, err := pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	tsTime, err := strconv.ParseUint(ts, 10, 64)
-	re.NoError(err)
-	logicalTime := tsTime & logicalBits
-	physical := tsTime >> physicalShiftBits
+	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	t, e := strconv.ParseUint(ts, 10, 64)
+	c.Assert(e, IsNil)
+	c.Assert(err, IsNil)
+	logicalTime := t & logicalBits
+	physical := t >> physicalShiftBits
 	physicalTime := time.Unix(int64(physical/1000), int64(physical%1000)*time.Millisecond.Nanoseconds())
-	str := fmt.Sprintln("system: ", physicalTime) + fmt.Sprintln("logic:  ", logicalTime)
-	re.Equal(string(output), str)
+	str := fmt.Sprintln("system: ", physicalTime) + fmt.Sprintln("logic: ", logicalTime)
+	c.Assert(str, Equals, string(output))
 }

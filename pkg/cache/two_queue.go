@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -137,13 +136,13 @@ func (c *TwoQueue) Peek(key uint64) (interface{}, bool) {
 
 // Remove eliminates an item from cache.
 func (c *TwoQueue) Remove(key uint64) {
-	if c.frequent.removeIfExist(key) {
+	if c.frequent.remove(key) {
 		return
 	}
-	if c.recent.removeIfExist(key) {
+	if c.recent.remove(key) {
 		return
 	}
-	if c.ghost.removeIfExist(key) {
+	if c.ghost.remove(key) {
 		return
 	}
 }

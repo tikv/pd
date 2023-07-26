@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -33,11 +32,11 @@ func newReplicationModeHandler(svr *server.Server, rd *render.Render) *replicati
 	}
 }
 
-// @Tags     replication_mode
-// @Summary  Get status of replication mode
-// @Produce  json
-// @Success  200  {object}  replication.HTTPReplicationStatus
-// @Router   /replication_mode/status [get]
-func (h *replicationModeHandler) GetReplicationModeStatus(w http.ResponseWriter, r *http.Request) {
-	h.rd.JSON(w, http.StatusOK, getCluster(r).GetReplicationMode().GetReplicationStatusHTTP())
+// @Tags replication_mode
+// @Summary Get status of replication mode
+// @Produce json
+// @Success 200 {object} replication.HTTPReplicationStatus
+// @Router /replication_mode/status [get]
+func (h *replicationModeHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	h.rd.JSON(w, http.StatusOK, getCluster(r.Context()).GetReplicationMode().GetReplicationStatusHTTP())
 }

@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -89,11 +88,7 @@ func forEachLine(filename string, solve func(string) error) error {
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := fi.Close(); err != nil {
-			log.Printf("error closing file: %s\n", err)
-		}
-	}()
+	defer fi.Close()
 	br := bufio.NewReader(fi)
 	// For each
 	for {
@@ -123,6 +118,7 @@ func isExpectTime(expect, layout string, isBeforeThanExpect bool) func(time.Time
 	return func(current time.Time) bool {
 		return current.Before(expectTime) == isBeforeThanExpect
 	}
+
 }
 
 func currentTime(layout string) func(content string) (time.Time, error) {
@@ -134,7 +130,7 @@ func currentTime(layout string) func(content string) (time.Time, error) {
 			log.Fatal(err)
 		}
 	} else {
-		log.Fatal("unsupported time layout")
+		log.Fatal("Unsupported time layout.")
 	}
 	return func(content string) (time.Time, error) {
 		result := r.FindStringSubmatch(content)

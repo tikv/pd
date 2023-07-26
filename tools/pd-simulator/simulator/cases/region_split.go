@@ -8,16 +8,14 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package cases
 
 import (
-	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -29,8 +27,11 @@ func newRegionSplit() *Case {
 	storeNum := getStoreNum()
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     uint64(i),
-			Status: metapb.StoreState_Up,
+			ID:        uint64(i),
+			Status:    metapb.StoreState_Up,
+			Capacity:  1 * TB,
+			Available: 900 * GB,
+			Version:   "2.1.0",
 		})
 	}
 	peers := []*metapb.Peer{
@@ -40,17 +41,17 @@ func newRegionSplit() *Case {
 		ID:     5,
 		Peers:  peers,
 		Leader: peers[0],
-		Size:   1 * units.MiB,
+		Size:   1 * MB,
 		Keys:   10000,
 	})
 
-	simCase.RegionSplitSize = 128 * units.MiB
+	simCase.RegionSplitSize = 128 * MB
 	simCase.RegionSplitKeys = 10000
 	// Events description
 	e := &WriteFlowOnSpotDescriptor{}
 	e.Step = func(tick int64) map[string]int64 {
 		return map[string]int64{
-			"foobar": 8 * units.MiB,
+			"foobar": 8 * MB,
 		}
 	}
 	simCase.Events = []EventDescriptor{e}

@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,31 +16,31 @@ package server
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"os"
+	"io/ioutil"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/pingcap/check"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
-	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/tempurl"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/embed"
+
+	// Register schedulers
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
+// CleanupFunc closes test pd server(s) and deletes any files left behind.
+type CleanupFunc func()
+
 // NewTestServer creates a pd server for testing.
-func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, testutil.CleanupFunc, error) {
+func NewTestServer(c *check.C) (*Server, CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
-	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	s, err := CreateServer(ctx, cfg, nil, mockHandler)
+	s, err := CreateServer(ctx, cfg)
 	if err != nil {
 		cancel()
 		return nil, nil, err
@@ -54,7 +53,7 @@ func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, test
 	cleanup := func() {
 		cancel()
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
+		testutil.CleanServer(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
@@ -63,8 +62,7 @@ var zapLogOnce sync.Once
 
 // NewTestSingleConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
-func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
-	schedulers.Register()
+func NewTestSingleConfig(c *check.C) *config.Config {
 	cfg := &config.Config{
 		Name:       "pd",
 		ClientUrls: tempurl.Alloc(),
@@ -72,32 +70,32 @@ func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 
 		InitialClusterState: embed.ClusterStateFlagNew,
 
-		LeaderLease:     10,
+		LeaderLease:     1,
 		TSOSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
 	}
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = os.MkdirTemp("/tmp", "test_pd")
+	cfg.DataDir, _ = ioutil.TempDir("/tmp", "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.DisableStrictReconfigCheck = true
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
 	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
 	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
-	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-	c.AssertNil(err)
+	err := cfg.SetupLogger()
+	c.Assert(err, check.IsNil)
 	zapLogOnce.Do(func() {
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 	})
 
-	c.AssertNil(cfg.Adjust(nil, false))
+	c.Assert(cfg.Adjust(nil), check.IsNil)
 
 	return cfg
 }
 
 // NewTestMultiConfig is only for test to create multiple pd configurations.
 // Because PD client also needs this, so export here.
-func NewTestMultiConfig(c *assertutil.Checker, count int) []*config.Config {
+func NewTestMultiConfig(c *check.C, count int) []*config.Config {
 	cfgs := make([]*config.Config, count)
 
 	clusters := []string{}
@@ -116,40 +114,4 @@ func NewTestMultiConfig(c *assertutil.Checker, count int) []*config.Config {
 	}
 
 	return cfgs
-}
-
-// MustWaitLeader return the leader until timeout.
-func MustWaitLeader(re *require.Assertions, svrs []*Server) *Server {
-	var leader *Server
-	testutil.Eventually(re, func() bool {
-		for _, svr := range svrs {
-			// All servers' GetLeader should return the same leader.
-			if svr.GetLeader() == nil || (leader != nil && svr.GetLeader().GetMemberId() != leader.GetLeader().GetMemberId()) {
-				return false
-			}
-			if leader == nil && !svr.IsClosed() {
-				leader = svr
-			}
-		}
-		return true
-	})
-	return leader
-}
-
-// CreateMockHandler creates a mock handler for test.
-func CreateMockHandler(re *require.Assertions, ip string) HandlerBuilder {
-	return func(ctx context.Context, s *Server) (http.Handler, apiutil.APIServiceGroup, error) {
-		mux := http.NewServeMux()
-		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintln(w, "Hello World")
-			// test getting ip
-			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
-			re.Equal(ip, clientIP)
-		})
-		info := apiutil.APIServiceGroup{
-			Name:    "mock",
-			Version: "v1",
-		}
-		return mux, info, nil
-	}
 }

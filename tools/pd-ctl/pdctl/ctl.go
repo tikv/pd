@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -23,26 +22,53 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
+)
+
+// CommandFlags are flags that used in all Commands
+type CommandFlags struct {
+	URL      string
+	CAPath   string
+	CertPath string
+	KeyPath  string
+	Help     bool
+}
+
+var (
+	commandFlags = CommandFlags{}
+
+	detach            bool
+	interact          bool
+	version           bool
+	readlineCompleter *readline.PrefixCompleter
 )
 
 func init() {
 	cobra.EnablePrefixMatching = true
 }
 
-// GetRootCmd is exposed for integration tests. But it can be embedded into another suite, too.
-func GetRootCmd() *cobra.Command {
+func pdctlRun(cmd *cobra.Command, args []string) {
+	if version {
+		server.PrintPDInfo()
+		return
+	}
+	if interact {
+		loop()
+	}
+}
+
+func getBasicCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "pd-ctl",
 		Short: "Placement Driver control",
 	}
 
-	rootCmd.PersistentFlags().StringP("pd", "u", "http://127.0.0.1:2379", "address of pd")
-	rootCmd.PersistentFlags().String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	rootCmd.PersistentFlags().String("cert", "", "path of file that contains X509 certificate in PEM format")
-	rootCmd.PersistentFlags().String("key", "", "path of file that contains X509 key in PEM format")
+	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "http://127.0.0.1:2379", "address of pd")
+	rootCmd.PersistentFlags().StringVar(&commandFlags.CAPath, "cacert", "", "path of file that contains list of trusted SSL CAs")
+	rootCmd.PersistentFlags().StringVar(&commandFlags.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
+	rootCmd.PersistentFlags().StringVar(&commandFlags.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
+	rootCmd.PersistentFlags().BoolVarP(&commandFlags.Help, "help", "h", false, "help message")
 
 	rootCmd.AddCommand(
 		command.NewConfigCommand(),
@@ -62,71 +88,75 @@ func GetRootCmd() *cobra.Command {
 		command.NewLogCommand(),
 		command.NewPluginCommand(),
 		command.NewServiceGCSafepointCommand(),
-		command.NewMinResolvedTSCommand(),
 		command.NewCompletionCommand(),
-		command.NewUnsafeCommand(),
-		command.NewKeyspaceGroupCommand(),
-		command.NewKeyspaceCommand(),
 	)
 
 	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
 	rootCmd.SilenceErrors = true
 
-	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		CAPath, err := cmd.Flags().GetString("cacert")
-		if err == nil && len(CAPath) != 0 {
-			certPath, err := cmd.Flags().GetString("cert")
-			if err != nil {
-				return err
-			}
+	return rootCmd
+}
 
-			keyPath, err := cmd.Flags().GetString("key")
-			if err != nil {
-				return err
-			}
+func getInteractCmd(args []string) *cobra.Command {
+	rootCmd := getBasicCmd()
 
-			if err := command.InitHTTPSClient(CAPath, certPath, keyPath); err != nil {
-				rootCmd.Println(err)
-				return err
-			}
-		}
-		return nil
-	}
+	rootCmd.SetArgs(args)
+	rootCmd.ParseFlags(args)
+	rootCmd.SetOutput(os.Stdout)
+	hiddenFlag(rootCmd)
 
 	return rootCmd
 }
 
-// MainStart start main command
-func MainStart(args []string) {
-	rootCmd := GetRootCmd()
+func getMainCmd(args []string) *cobra.Command {
+	rootCmd := getBasicCmd()
 
-	rootCmd.Flags().BoolP("interact", "i", false, "Run pdctl with readline.")
-	rootCmd.Flags().BoolP("version", "V", false, "Print version information and exit.")
-	// TODO: deprecated
-	rootCmd.Flags().BoolP("detach", "d", true, "Run pdctl without readline.")
-
-	rootCmd.Run = func(cmd *cobra.Command, args []string) {
-		if v, err := cmd.Flags().GetBool("version"); err == nil && v {
-			versioninfo.Print()
-			return
-		}
-		if v, err := cmd.Flags().GetBool("interact"); err == nil && v {
-			readlineCompleter := readline.NewPrefixCompleter(genCompleter(cmd)...)
-			loop(cmd.PersistentFlags(), readlineCompleter)
-		}
-	}
+	rootCmd.Flags().BoolVarP(&detach, "detach", "d", true, "Run pdctl without readline.")
+	rootCmd.Flags().BoolVarP(&interact, "interact", "i", false, "Run pdctl with readline.")
+	rootCmd.Flags().BoolVarP(&version, "version", "V", false, "Print version information and exit.")
+	rootCmd.Run = pdctlRun
 
 	rootCmd.SetArgs(args)
 	rootCmd.ParseFlags(args)
 	rootCmd.SetOutput(os.Stdout)
 
+	readlineCompleter = readline.NewPrefixCompleter(genCompleter(rootCmd)...)
+	return rootCmd
+}
+
+// Hide the flags in help and usage messages.
+func hiddenFlag(cmd *cobra.Command) {
+	cmd.LocalFlags().MarkHidden("pd")
+	cmd.LocalFlags().MarkHidden("cacert")
+	cmd.LocalFlags().MarkHidden("cert")
+	cmd.LocalFlags().MarkHidden("key")
+}
+
+// MainStart start main command
+func MainStart(args []string) {
+	startCmd(getMainCmd, args)
+}
+
+// Start start interact command
+func Start(args []string) {
+	startCmd(getInteractCmd, args)
+}
+
+func startCmd(getCmd func([]string) *cobra.Command, args []string) {
+	rootCmd := getCmd(args)
+	if len(commandFlags.CAPath) != 0 {
+		if err := command.InitHTTPSClient(commandFlags.CAPath, commandFlags.CertPath, commandFlags.KeyPath); err != nil {
+			rootCmd.Println(err)
+			return
+		}
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)
-		os.Exit(1)
 	}
 }
 
-func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoCompleter) {
+func loop() {
 	l, err := readline.NewEx(&readline.Config{
 		Prompt:            "\033[31m»\033[0m ",
 		HistoryFile:       "/tmp/readline.tmp",
@@ -139,21 +169,6 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 		panic(err)
 	}
 	defer l.Close()
-
-	getREPLCmd := func() *cobra.Command {
-		rootCmd := GetRootCmd()
-		persistentFlags.VisitAll(func(flag *pflag.Flag) {
-			if flag.Changed {
-				rootCmd.PersistentFlags().Set(flag.Name, flag.Value.String())
-			}
-		})
-		rootCmd.LocalFlags().MarkHidden("pd")
-		rootCmd.LocalFlags().MarkHidden("cacert")
-		rootCmd.LocalFlags().MarkHidden("cert")
-		rootCmd.LocalFlags().MarkHidden("key")
-		rootCmd.SetOutput(os.Stdout)
-		return rootCmd
-	}
 
 	for {
 		line, err := l.Readline()
@@ -173,13 +188,11 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 			fmt.Printf("parse command err: %v\n", err)
 			continue
 		}
-
-		rootCmd := getREPLCmd()
-		rootCmd.SetArgs(args)
-		rootCmd.ParseFlags(args)
-		if err := rootCmd.Execute(); err != nil {
-			rootCmd.Println(err)
+		args = append(args, "-u", commandFlags.URL)
+		if commandFlags.CAPath != "" && commandFlags.CertPath != "" && commandFlags.KeyPath != "" {
+			args = append(args, "--cacert", commandFlags.CAPath, "--cert", commandFlags.CertPath, "--key", commandFlags.KeyPath)
 		}
+		Start(args)
 	}
 }
 
@@ -200,16 +213,4 @@ func genCompleter(cmd *cobra.Command) []readline.PrefixCompleterInterface {
 		}
 	}
 	return pc
-}
-
-// ReadStdin convert stdin to string array
-func ReadStdin(r io.Reader) (input []string, err error) {
-	b, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
-	if s := strings.TrimSpace(string(b)); len(s) > 0 {
-		input = strings.Split(s, " ")
-	}
-	return input, nil
 }

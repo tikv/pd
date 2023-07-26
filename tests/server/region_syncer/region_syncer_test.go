@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,20 +18,39 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
+	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
 
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+var _ = Suite(&serverTestSuite{})
+
+type serverTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *serverTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *serverTestSuite) TearDownSuite(c *C) {
+	s.cancel()
 }
 
 type idAllocator struct {
@@ -44,209 +62,19 @@ func (i *idAllocator) alloc() uint64 {
 	return v
 }
 
-func TestRegionSyncer(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
-
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+func (s *serverTestSuite) TestRegionSyncer(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
-	re.NoError(err)
-
-	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
-	rc := leaderServer.GetServer().GetRaftCluster()
-	re.NotNil(rc)
-	re.True(cluster.WaitRegionSyncerClientsReady(2))
-
-	regionLen := 110
-	regions := initRegions(regionLen)
-	for _, region := range regions {
-		err = rc.HandleRegionHeartbeat(region)
-		re.NoError(err)
-	}
-	// merge case
-	// region2 -> region1 -> region0
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
-	// region0 version is max(1, max(1, 1)+1)+1=3
-	regions[0] = regions[0].Clone(core.WithEndKey(regions[2].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
-	err = rc.HandleRegionHeartbeat(regions[0])
-	re.NoError(err)
-
-	// merge case
-	// region3 -> region4
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
-	// region4 version is max(1, 1)+1=2
-	regions[4] = regions[3].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
-	err = rc.HandleRegionHeartbeat(regions[4])
-	re.NoError(err)
-
-	// merge case
-	// region0 -> region4
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
-	// region4 version is max(3, 2)+1=4
-	regions[4] = regions[0].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
-	err = rc.HandleRegionHeartbeat(regions[4])
-	re.NoError(err)
-	regions = regions[4:]
-	regionLen = len(regions)
-
-	// change the statistics of regions
-	for i := 0; i < len(regions); i++ {
-		idx := uint64(i)
-		regions[i] = regions[i].Clone(
-			core.SetWrittenBytes(idx+10),
-			core.SetWrittenKeys(idx+20),
-			core.SetReadBytes(idx+30),
-			core.SetReadKeys(idx+40))
-		err = rc.HandleRegionHeartbeat(regions[i])
-		re.NoError(err)
-	}
-
-	// change the leader of region
-	for i := 0; i < len(regions); i++ {
-		regions[i] = regions[i].Clone(core.WithLeader(regions[i].GetPeers()[1]))
-		err = rc.HandleRegionHeartbeat(regions[i])
-		re.NoError(err)
-	}
-
-	// ensure flush to region storage, we use a duration larger than the
-	// region storage flush rate limit (3s).
-	time.Sleep(4 * time.Second)
-
-	// test All regions have been synchronized to the cache of followerServer
-	followerServer := cluster.GetServer(cluster.GetFollower())
-	re.NotNil(followerServer)
-	cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
-	re.Len(cacheRegions, regionLen)
-	testutil.Eventually(re, func() bool {
-		assert := assert.New(t)
-		for _, region := range cacheRegions {
-			r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
-			if !(assert.Equal(region.GetMeta(), r.GetMeta()) &&
-				assert.Equal(region.GetStat(), r.GetStat()) &&
-				assert.Equal(region.GetLeader(), r.GetLeader()) &&
-				assert.Equal(region.GetBuckets(), r.GetBuckets())) {
-				return false
-			}
-		}
-		return true
-	})
-
-	err = leaderServer.Stop()
-	re.NoError(err)
-	cluster.WaitLeader()
-	leaderServer = cluster.GetServer(cluster.GetLeader())
-	re.NotNil(leaderServer)
-	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
-	re.Len(loadRegions, regionLen)
-	for _, region := range regions {
-		r := leaderServer.GetRegionInfoByID(region.GetID())
-		re.Equal(region.GetMeta(), r.GetMeta())
-		re.Equal(region.GetStat(), r.GetStat())
-		re.Equal(region.GetLeader(), r.GetLeader())
-		re.Equal(region.GetBuckets(), r.GetBuckets())
-	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/noFastExitSync"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush"))
-}
-
-func TestFullSyncWithAddMember(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
-	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	rc := leaderServer.GetServer().GetRaftCluster()
-	re.NotNil(rc)
+	c.Assert(rc, NotNil)
 	regionLen := 110
-	regions := initRegions(regionLen)
-	for _, region := range regions {
-		err = rc.HandleRegionHeartbeat(region)
-		re.NoError(err)
-	}
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
-	// restart pd1
-	err = leaderServer.Stop()
-	re.NoError(err)
-	err = leaderServer.Run()
-	re.NoError(err)
-	re.Equal("pd1", cluster.WaitLeader())
-
-	// join new PD
-	pd2, err := cluster.Join(ctx)
-	re.NoError(err)
-	re.NoError(pd2.Run())
-	re.Equal("pd1", cluster.WaitLeader())
-	// waiting for synchronization to complete
-	time.Sleep(3 * time.Second)
-	re.NoError(cluster.ResignLeader())
-	re.Equal("pd2", cluster.WaitLeader())
-	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
-	re.Len(loadRegions, regionLen)
-}
-
-func TestPrepareChecker(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
-	defer cluster.Destroy()
-	re.NoError(err)
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
-	rc := leaderServer.GetServer().GetRaftCluster()
-	re.NotNil(rc)
-	regionLen := 110
-	regions := initRegions(regionLen)
-	for _, region := range regions {
-		err = rc.HandleRegionHeartbeat(region)
-		re.NoError(err)
-	}
-
-	// ensure flush to region storage
-	time.Sleep(3 * time.Second)
-	re.True(leaderServer.GetRaftCluster().IsPrepared())
-
-	// join new PD
-	pd2, err := cluster.Join(ctx)
-	re.NoError(err)
-	err = pd2.Run()
-	re.NoError(err)
-	// waiting for synchronization to complete
-	time.Sleep(3 * time.Second)
-	err = cluster.ResignLeader()
-	re.NoError(err)
-	re.Equal("pd2", cluster.WaitLeader())
-	leaderServer = cluster.GetServer(cluster.GetLeader())
-	rc = leaderServer.GetServer().GetRaftCluster()
-	for _, region := range regions {
-		err = rc.HandleRegionHeartbeat(region)
-		re.NoError(err)
-	}
-	time.Sleep(time.Second)
-	re.True(rc.IsPrepared())
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
-}
-
-func initRegions(regionLen int) []*core.RegionInfo {
 	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
 	regions := make([]*core.RegionInfo, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
@@ -259,22 +87,141 @@ func initRegions(regionLen int) []*core.RegionInfo {
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
 			Peers: []*metapb.Peer{
-				{Id: allocator.alloc(), StoreId: uint64(1)},
-				{Id: allocator.alloc(), StoreId: uint64(2)},
-				{Id: allocator.alloc(), StoreId: uint64(3)},
+				{Id: allocator.alloc(), StoreId: uint64(0)},
+				{Id: allocator.alloc(), StoreId: uint64(0)},
 			},
 		}
-		region := core.NewRegionInfo(r, r.Peers[0])
-		// Here is used to simulate the upgrade process.
-		if i < regionLen/2 {
-			buckets := &metapb.Buckets{
-				RegionId: r.Id,
-				Keys:     [][]byte{r.StartKey, r.EndKey},
-				Version:  1,
-			}
-			region.UpdateBuckets(buckets, region.GetBuckets())
-		}
-		regions = append(regions, region)
+		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
 	}
-	return regions
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+	}
+	// merge case
+	// region2 -> region1 -> region0
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	regions[0] = regions[0].Clone(core.WithEndKey(regions[2].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
+	err = rc.HandleRegionHeartbeat(regions[2])
+	c.Assert(err, IsNil)
+
+	// merge case
+	// region3 -> region4
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	regions[4] = regions[3].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
+	err = rc.HandleRegionHeartbeat(regions[4])
+	c.Assert(err, IsNil)
+
+	// merge case
+	// region0 -> region4
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	regions[4] = regions[0].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
+	err = rc.HandleRegionHeartbeat(regions[4])
+	c.Assert(err, IsNil)
+	regions = regions[4:]
+	regionLen = len(regions)
+
+	// change the statistics of regions
+	for i := 0; i < len(regions); i++ {
+		idx := uint64(i)
+		regions[i] = regions[i].Clone(
+			core.SetWrittenBytes(idx+10),
+			core.SetWrittenKeys(idx+20),
+			core.SetReadBytes(idx+30),
+			core.SetReadKeys(idx+40))
+		err = rc.HandleRegionHeartbeat(regions[i])
+		c.Assert(err, IsNil)
+	}
+
+	// change the leader of region
+	for i := 0; i < len(regions); i++ {
+		regions[i] = regions[i].Clone(core.WithLeader(regions[i].GetPeers()[1]))
+		err = rc.HandleRegionHeartbeat(regions[i])
+		c.Assert(err, IsNil)
+	}
+
+	// ensure flush to region storage, we use a duration larger than the
+	// region storage flush rate limit (3s).
+	time.Sleep(4 * time.Second)
+
+	//test All regions have been synchronized to the cache of followerServer
+	followerServer := cluster.GetServer(cluster.GetFollower())
+	c.Assert(followerServer, NotNil)
+	cacheRegions := followerServer.GetServer().GetBasicCluster().GetRegions()
+	c.Assert(cacheRegions, HasLen, regionLen)
+	for _, region := range cacheRegions {
+		r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
+		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
+		c.Assert(r.GetStat(), DeepEquals, region.GetStat())
+		c.Assert(r.GetLeader(), DeepEquals, region.GetLeader())
+	}
+
+	err = leaderServer.Stop()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer = cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer, NotNil)
+	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
+	c.Assert(len(loadRegions), Equals, regionLen)
+	for _, region := range regions {
+		r := leaderServer.GetRegionInfoByID(region.GetID())
+		c.Assert(r.GetMeta(), DeepEquals, region.GetMeta())
+		c.Assert(r.GetStat(), DeepEquals, region.GetStat())
+		c.Assert(r.GetLeader(), DeepEquals, region.GetLeader())
+	}
+}
+
+func (s *serverTestSuite) TestFullSyncWithAddMember(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	defer cluster.Destroy()
+	c.Assert(err, IsNil)
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	rc := leaderServer.GetServer().GetRaftCluster()
+	c.Assert(rc, NotNil)
+	regionLen := 110
+	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
+	regions := make([]*core.RegionInfo, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		r := &metapb.Region{
+			Id: allocator.alloc(),
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    []*metapb.Peer{{Id: allocator.alloc(), StoreId: uint64(0)}},
+		}
+		regions = append(regions, core.NewRegionInfo(r, r.Peers[0]))
+	}
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		c.Assert(err, IsNil)
+	}
+	// ensure flush to region storage
+	time.Sleep(3 * time.Second)
+	// restart pd1
+	err = leaderServer.Stop()
+	c.Assert(err, IsNil)
+	err = leaderServer.Run()
+	c.Assert(err, IsNil)
+	c.Assert(cluster.WaitLeader(), Equals, "pd1")
+
+	// join new PD
+	pd2, err := cluster.Join(s.ctx)
+	c.Assert(err, IsNil)
+	err = pd2.Run()
+	c.Assert(err, IsNil)
+	c.Assert(cluster.WaitLeader(), Equals, "pd1")
+	// waiting for synchronization to complete
+	time.Sleep(3 * time.Second)
+	err = cluster.ResignLeader()
+	c.Assert(err, IsNil)
+	c.Assert(cluster.WaitLeader(), Equals, "pd2")
+	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
+	c.Assert(len(loadRegions), Equals, regionLen)
 }

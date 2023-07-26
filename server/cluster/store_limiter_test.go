@@ -8,47 +8,49 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
-// limitations under the License.
+// limitations under the License
 
 package cluster
 
 import (
-	"testing"
-
+	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/storelimit"
 )
 
-func TestCollect(t *testing.T) {
-	re := require.New(t)
+var _ = Suite(&testStoreLimiterSuite{})
 
-	limiter := NewStoreLimiter(mockconfig.NewTestOptions())
+type testStoreLimiterSuite struct {
+	opt *config.PersistOptions
+}
+
+func (s *testStoreLimiterSuite) SetUpSuite(c *C) {
+	// Create a server for testing
+	s.opt = config.NewTestOptions()
+}
+
+func (s *testStoreLimiterSuite) TestCollect(c *C) {
+	limiter := NewStoreLimiter(s.opt)
 
 	limiter.Collect(&pdpb.StoreStats{})
-	re.Equal(int64(1), limiter.state.cst.total)
+	c.Assert(limiter.state.cst.total, Equals, int64(1))
 }
 
-func TestStoreLimitScene(t *testing.T) {
-	re := require.New(t)
-
-	limiter := NewStoreLimiter(mockconfig.NewTestOptions())
-	re.Equal(storelimit.DefaultScene(storelimit.AddPeer), limiter.scene[storelimit.AddPeer])
-	re.Equal(storelimit.DefaultScene(storelimit.RemovePeer), limiter.scene[storelimit.RemovePeer])
+func (s *testStoreLimiterSuite) TestStoreLimitScene(c *C) {
+	limiter := NewStoreLimiter(s.opt)
+	c.Assert(limiter.scene[storelimit.AddPeer], DeepEquals, storelimit.DefaultScene(storelimit.AddPeer))
+	c.Assert(limiter.scene[storelimit.RemovePeer], DeepEquals, storelimit.DefaultScene(storelimit.RemovePeer))
 }
 
-func TestReplaceStoreLimitScene(t *testing.T) {
-	re := require.New(t)
-
-	limiter := NewStoreLimiter(mockconfig.NewTestOptions())
+func (s *testStoreLimiterSuite) TestReplaceStoreLimitScene(c *C) {
+	limiter := NewStoreLimiter(s.opt)
 
 	sceneAddPeer := &storelimit.Scene{Idle: 4, Low: 3, Normal: 2, High: 1}
 	limiter.ReplaceStoreLimitScene(sceneAddPeer, storelimit.AddPeer)
 
-	re.Equal(sceneAddPeer, limiter.scene[storelimit.AddPeer])
+	c.Assert(limiter.scene[storelimit.AddPeer], DeepEquals, sceneAddPeer)
 
 	sceneRemovePeer := &storelimit.Scene{Idle: 5, Low: 4, Normal: 3, High: 2}
 	limiter.ReplaceStoreLimitScene(sceneRemovePeer, storelimit.RemovePeer)

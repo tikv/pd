@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,19 +16,14 @@ package api
 import (
 	"context"
 	"net/http"
-	"sort"
 	"sync"
 	"testing"
 
+	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/goleak"
@@ -44,9 +38,8 @@ var (
 	}
 
 	store = &metapb.Store{
-		Id:        1,
-		Address:   "localhost",
-		NodeState: metapb.NodeState_Serving,
+		Id:      1,
+		Address: "localhost",
 	}
 	peers = []*metapb.Peer{
 		{
@@ -64,37 +57,44 @@ var (
 	}
 )
 
+func TestAPIServer(t *testing.T) {
+	server.EnableZap = true
+	TestingT(t)
+}
+
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func mustNewServer(re *require.Assertions, opts ...func(cfg *config.Config)) (*server.Server, testutil.CleanupFunc) {
-	_, svrs, cleanup := mustNewCluster(re, 1, opts...)
+type cleanUpFunc func()
+
+func mustNewServer(c *C, opts ...func(cfg *config.Config)) (*server.Server, cleanUpFunc) {
+	_, svrs, cleanup := mustNewCluster(c, 1, opts...)
 	return svrs[0], cleanup
 }
 
 var zapLogOnce sync.Once
 
-func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, testutil.CleanupFunc) {
+func mustNewCluster(c *C, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, cleanUpFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svrs := make([]*server.Server, 0, num)
-	cfgs := server.NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), num)
+	cfgs := server.NewTestMultiConfig(c, num)
 
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
-			err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-			re.NoError(err)
+			err := cfg.SetupLogger()
+			c.Assert(err, IsNil)
 			zapLogOnce.Do(func() {
-				log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+				log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 			})
 			for _, opt := range opts {
 				opt(cfg)
 			}
-			s, err := server.CreateServer(ctx, cfg, nil, NewHandler)
-			re.NoError(err)
+			s, err := server.CreateServer(ctx, cfg, NewHandler)
+			c.Assert(err, IsNil)
 			err = s.Run()
-			re.NoError(err)
+			c.Assert(err, IsNil)
 			ch <- s
 		}(cfg)
 	}
@@ -105,7 +105,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 	}
 	close(ch)
 	// wait etcd and http servers
-	server.MustWaitLeader(re, svrs)
+	mustWaitLeader(c, svrs)
 
 	// clean up
 	clean := func() {
@@ -121,92 +121,36 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 	return cfgs, svrs, clean
 }
 
-func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
-	grpcPDClient := testutil.MustNewGrpcClient(re, s.GetAddr())
+func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
+	var leaderServer *server.Server
+	testutil.WaitUntil(c, func(c *C) bool {
+		var leader *pdpb.Member
+		for _, svr := range svrs {
+			l := svr.GetLeader()
+			// All servers' GetLeader should return the same leader.
+			if l == nil || (leader != nil && l.GetMemberId() != leader.GetMemberId()) {
+				return false
+			}
+			if leader == nil {
+				leader = l
+			}
+			if leader.GetMemberId() == svr.GetMember().ID() {
+				leaderServer = svr
+			}
+		}
+		return true
+	})
+	return leaderServer
+}
+
+func mustBootstrapCluster(c *C, s *server.Server) {
+	grpcPDClient := testutil.MustNewGrpcClient(c, s.GetAddr())
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(s.ClusterID()),
 		Store:  store,
 		Region: region,
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
-	re.NoError(err)
-	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
-}
-
-type serviceTestSuite struct {
-	suite.Suite
-	svr     *server.Server
-	cleanup testutil.CleanupFunc
-}
-
-func TestServiceTestSuite(t *testing.T) {
-	suite.Run(t, new(serviceTestSuite))
-}
-
-func (suite *serviceTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	mustBootstrapCluster(re, suite.svr)
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-}
-
-func (suite *serviceTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *serviceTestSuite) TestServiceLabels() {
-	accessPaths := suite.svr.GetServiceLabels("Profile")
-	suite.Len(accessPaths, 1)
-	suite.Equal("/pd/api/v1/debug/pprof/profile", accessPaths[0].Path)
-	suite.Equal("", accessPaths[0].Method)
-	serviceLabel := suite.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", ""))
-	suite.Equal("Profile", serviceLabel)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", http.MethodGet))
-	suite.Equal("Profile", serviceLabel)
-
-	accessPaths = suite.svr.GetServiceLabels("GetSchedulerConfig")
-	suite.Len(accessPaths, 1)
-	suite.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
-	suite.Equal("", accessPaths[0].Method)
-
-	accessPaths = suite.svr.GetServiceLabels("ResignLeader")
-	suite.Len(accessPaths, 1)
-	suite.Equal("/pd/api/v1/leader/resign", accessPaths[0].Path)
-	suite.Equal(http.MethodPost, accessPaths[0].Method)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodPost))
-	suite.Equal("ResignLeader", serviceLabel)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodGet))
-	suite.Equal("", serviceLabel)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAccessPath("/pd/api/v1/leader/resign", ""))
-	suite.Equal("", serviceLabel)
-
-	accessPaths = suite.svr.GetServiceLabels("QueryMetric")
-	suite.Len(accessPaths, 4)
-	sort.Slice(accessPaths, func(i, j int) bool {
-		if accessPaths[i].Path == accessPaths[j].Path {
-			return accessPaths[i].Method < accessPaths[j].Method
-		}
-		return accessPaths[i].Path < accessPaths[j].Path
-	})
-	suite.Equal("/pd/api/v1/metric/query", accessPaths[0].Path)
-	suite.Equal(http.MethodGet, accessPaths[0].Method)
-	suite.Equal("/pd/api/v1/metric/query", accessPaths[1].Path)
-	suite.Equal(http.MethodPost, accessPaths[1].Method)
-	suite.Equal("/pd/api/v1/metric/query_range", accessPaths[2].Path)
-	suite.Equal(http.MethodGet, accessPaths[2].Method)
-	suite.Equal("/pd/api/v1/metric/query_range", accessPaths[3].Path)
-	suite.Equal(http.MethodPost, accessPaths[3].Method)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodPost))
-	suite.Equal("QueryMetric", serviceLabel)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
-		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodGet))
-	suite.Equal("QueryMetric", serviceLabel)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
 }

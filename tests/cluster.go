@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -26,26 +25,19 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/autoscaling"
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/dashboard"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/keyspace"
-	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
-	"github.com/tikv/pd/pkg/tso"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
-	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/id"
 	"github.com/tikv/pd/server/join"
+	"github.com/tikv/pd/server/tso"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 // TestServer states.
@@ -61,55 +53,39 @@ var (
 	WaitLeaderReturnDelay = 20 * time.Millisecond
 	// WaitLeaderCheckInterval represents the time interval of WaitLeader running check.
 	WaitLeaderCheckInterval = 500 * time.Millisecond
-	// WaitLeaderRetryTimes represents the maximum number of loops of WaitLeader.
-	WaitLeaderRetryTimes = 100
 )
 
 // TestServer is only for test.
 type TestServer struct {
 	sync.RWMutex
-	server     *server.Server
-	grpcServer *server.GrpcServer
-	state      int32
+	server *server.Server
+	state  int32
 }
 
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
 func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
-	return createTestServer(ctx, cfg, nil)
-}
-
-// NewTestAPIServer creates a new TestServer.
-func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
-	return createTestServer(ctx, cfg, []string{utils.APIServiceName})
-}
-
-func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
-	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err := cfg.SetupLogger()
 	if err != nil {
 		return nil, err
 	}
 	zapLogOnce.Do(func() {
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
 	})
 	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
-	if swaggerserver.Enabled() {
-		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
-	}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, swaggerserver.NewHandler, autoscaling.NewHandler}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		return nil, err
 	}
 	return &TestServer{
-		server:     svr,
-		grpcServer: &server.GrpcServer{Server: svr},
-		state:      Initial,
+		server: svr,
+		state:  Initial,
 	}, nil
 }
 
@@ -157,7 +133,6 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().ResetLeader()
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
 }
 
@@ -175,11 +150,6 @@ func (s *TestServer) GetConfig() *config.Config {
 	return s.server.GetConfig()
 }
 
-// SetEnableLocalTSO sets the enable-local-tso flag of the TestServer.
-func (s *TestServer) SetEnableLocalTSO(enableLocalTSO bool) {
-	s.server.SetEnableLocalTSO(enableLocalTSO)
-}
-
 // GetPersistOptions returns the current TestServer's schedule option.
 func (s *TestServer) GetPersistOptions() *config.PersistOptions {
 	s.RLock()
@@ -188,7 +158,7 @@ func (s *TestServer) GetPersistOptions() *config.PersistOptions {
 }
 
 // GetAllocator returns the current TestServer's ID allocator.
-func (s *TestServer) GetAllocator() id.Allocator {
+func (s *TestServer) GetAllocator() *id.AllocatorImpl {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetAllocator()
@@ -222,28 +192,6 @@ func (s *TestServer) GetLeader() *pdpb.Member {
 	return s.server.GetLeader()
 }
 
-// GetAllocatorLeader returns current allocator leader
-// of PD cluster for given dc-location.
-func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
-	// For the leader of Global TSO Allocator, it's the PD leader
-	if dcLocation == tso.GlobalDCLocation {
-		return s.GetLeader()
-	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	allocator, err := tsoAllocatorManager.GetAllocator(dcLocation)
-	if err != nil {
-		return nil
-	}
-	return allocator.(*tso.LocalTSOAllocator).GetAllocatorLeader()
-}
-
-// GetKeyspaceManager returns the current TestServer's Keyspace Manager.
-func (s *TestServer) GetKeyspaceManager() *keyspace.Manager {
-	s.RLock()
-	defer s.RUnlock()
-	return s.server.GetKeyspaceManager()
-}
-
 // GetCluster returns PD cluster.
 func (s *TestServer) GetCluster() *metapb.Cluster {
 	s.RLock()
@@ -272,27 +220,14 @@ func (s *TestServer) IsLeader() bool {
 	return !s.server.IsClosed() && s.server.GetMember().IsLeader()
 }
 
-// IsAllocatorLeader returns whether the server is a TSO Allocator leader or not.
-func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
-	if dcLocation == tso.GlobalDCLocation {
-		return s.IsLeader()
-	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	allocator, err := tsoAllocatorManager.GetAllocator(dcLocation)
-	if err != nil {
-		return false
-	}
-	return !s.server.IsClosed() && allocator.(*tso.LocalTSOAllocator).IsAllocatorLeader()
-}
-
 // GetEtcdLeader returns the builtin etcd leader.
 func (s *TestServer) GetEtcdLeader() (string, error) {
 	s.RLock()
 	defer s.RUnlock()
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
-	members, _ := s.grpcServer.GetMembers(context.TODO(), req)
-	if members.Header.GetError() != nil {
-		return "", errors.WithStack(errors.New(members.Header.GetError().String()))
+	members, err := s.server.GetMembers(context.TODO(), req)
+	if err != nil {
+		return "", errors.WithStack(err)
 	}
 	return members.GetEtcdLeader().GetName(), nil
 }
@@ -302,12 +237,9 @@ func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
 	s.RLock()
 	defer s.RUnlock()
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
-	members, err := s.grpcServer.GetMembers(context.TODO(), req)
+	members, err := s.server.GetMembers(context.TODO(), req)
 	if err != nil {
 		return 0, errors.WithStack(err)
-	}
-	if members.GetHeader().GetError() != nil {
-		return 0, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
 	}
 	return members.GetEtcdLeader().GetMemberId(), nil
 }
@@ -377,13 +309,6 @@ func (s *TestServer) GetAdjacentRegions(region *core.RegionInfo) []*core.RegionI
 	return []*core.RegionInfo{left, right}
 }
 
-// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
-func (s *TestServer) GetRangeHoles() [][]string {
-	s.RLock()
-	defer s.RUnlock()
-	return s.server.GetRaftCluster().GetRangeHoles()
-}
-
 // GetStoreRegions returns all regions' information with a given storeID.
 func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	s.RLock()
@@ -395,15 +320,12 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 func (s *TestServer) BootstrapCluster() error {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: &pdpb.RequestHeader{ClusterId: s.GetClusterID()},
-		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
+		Store:  &metapb.Store{Id: 1, Address: "mock://1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
-	resp, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)
+	_, err := s.server.Bootstrap(context.Background(), bootstrapReq)
 	if err != nil {
 		return err
-	}
-	if resp.GetHeader().GetError() != nil {
-		return errors.New(resp.GetHeader().GetError().String())
 	}
 	return nil
 }
@@ -412,8 +334,8 @@ func (s *TestServer) BootstrapCluster() error {
 // make a test know the PD leader has been elected as soon as possible.
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
-	for i := 0; i < WaitLeaderRetryTimes; i++ {
-		if s.server.GetMember().IsLeader() {
+	for i := 0; i < 100; i++ {
+		if s.server.GetMember().IsStillLeader() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
@@ -430,11 +352,6 @@ func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
 type TestCluster struct {
 	config  *clusterConfig
 	servers map[string]*TestServer
-	// tsPool is used to check the TSO uniqueness among the test cluster
-	tsPool struct {
-		sync.Mutex
-		pool map[uint64]struct{}
-	}
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -445,106 +362,23 @@ type ConfigOption func(conf *config.Config, serverName string)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, false, opts...)
-}
-
-// NewTestAPICluster creates a new TestCluster with API service.
-func NewTestAPICluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, true, opts...)
-}
-
-func createTestCluster(ctx context.Context, initialServerCount int, isAPIServiceMode bool, opts ...ConfigOption) (*TestCluster, error) {
-	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
-	for _, cfg := range config.InitialServers {
-		serverConf, err := cfg.Generate(opts...)
+	for _, conf := range config.InitialServers {
+		serverConf, err := conf.Generate(opts...)
 		if err != nil {
 			return nil, err
 		}
-		var s *TestServer
-		if isAPIServiceMode {
-			s, err = NewTestAPIServer(ctx, serverConf)
-		} else {
-			s, err = NewTestServer(ctx, serverConf)
-		}
+		s, err := NewTestServer(ctx, serverConf)
 		if err != nil {
 			return nil, err
 		}
-		servers[cfg.Name] = s
+		servers[conf.Name] = s
 	}
 	return &TestCluster{
 		config:  config,
 		servers: servers,
-		tsPool: struct {
-			sync.Mutex
-			pool map[uint64]struct{}
-		}{
-			pool: make(map[uint64]struct{}),
-		},
 	}, nil
-}
-
-// RestartTestAPICluster restarts the API test cluster.
-func RestartTestAPICluster(ctx context.Context, cluster *TestCluster) (*TestCluster, error) {
-	return restartTestCluster(ctx, cluster, true)
-}
-
-func restartTestCluster(
-	ctx context.Context, cluster *TestCluster, isAPIServiceMode bool,
-) (newTestCluster *TestCluster, err error) {
-	schedulers.Register()
-	newTestCluster = &TestCluster{
-		config:  cluster.config,
-		servers: make(map[string]*TestServer, len(cluster.servers)),
-		tsPool: struct {
-			sync.Mutex
-			pool map[uint64]struct{}
-		}{
-			pool: make(map[uint64]struct{}),
-		},
-	}
-
-	var serverMap sync.Map
-	var errorMap sync.Map
-	wg := sync.WaitGroup{}
-	for serverName, server := range newTestCluster.servers {
-		serverCfg := server.GetConfig()
-		wg.Add(1)
-		go func(serverName string, server *TestServer) {
-			defer wg.Done()
-			server.Destroy()
-			var (
-				newServer *TestServer
-				serverErr error
-			)
-			if isAPIServiceMode {
-				newServer, serverErr = NewTestAPIServer(ctx, serverCfg)
-			} else {
-				newServer, serverErr = NewTestServer(ctx, serverCfg)
-			}
-			serverMap.Store(serverName, newServer)
-			errorMap.Store(serverName, serverErr)
-		}(serverName, server)
-	}
-	wg.Wait()
-
-	errorMap.Range(func(key, value interface{}) bool {
-		if value != nil {
-			err = value.(error)
-			return false
-		}
-		serverName := key.(string)
-		newServer, _ := serverMap.Load(serverName)
-		newTestCluster.servers[serverName] = newServer.(*TestServer)
-		return true
-	})
-
-	if err != nil {
-		return nil, errors.New("failed to restart cluster. " + err.Error())
-	}
-
-	return newTestCluster, nil
 }
 
 // RunServer starts to run TestServer.
@@ -619,23 +453,14 @@ func (c *TestCluster) GetFollower() string {
 
 // WaitLeader is used to get leader.
 // If it exceeds the maximum number of loops, it will return an empty string.
-func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
-	option := &WaitOp{
-		retryTimes:   WaitLeaderRetryTimes,
-		waitInterval: WaitLeaderCheckInterval,
-	}
-	for _, op := range ops {
-		op(option)
-	}
-	for i := 0; i < option.retryTimes; i++ {
+func (c *TestCluster) WaitLeader() string {
+	for i := 0; i < 100; i++ {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
-			s.RLock()
 			if s.state == Running {
 				running++
 			}
-			s.RUnlock()
 			n := s.GetLeader().GetName()
 			if n != "" {
 				counter[n]++
@@ -647,93 +472,18 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 				return name
 			}
 		}
-		time.Sleep(option.waitInterval)
+		time.Sleep(WaitLeaderCheckInterval)
 	}
 	return ""
-}
-
-// WaitRegionSyncerClientsReady is used to wait the region syncer clients establish the connection.
-// n means wait n clients.
-func (c *TestCluster) WaitRegionSyncerClientsReady(n int) bool {
-	option := &WaitOp{
-		retryTimes:   40,
-		waitInterval: WaitLeaderCheckInterval,
-	}
-	for i := 0; i < option.retryTimes; i++ {
-		name := c.GetLeader()
-		if len(name) == 0 {
-			time.Sleep(option.waitInterval)
-			continue
-		}
-		leaderServer := c.GetServer(name)
-		clus := leaderServer.GetServer().GetRaftCluster()
-		if clus != nil {
-			if len(clus.GetRegionSyncer().GetAllDownstreamNames()) == n {
-				return true
-			}
-		}
-		time.Sleep(option.waitInterval)
-	}
-	return false
 }
 
 // ResignLeader resigns the leader of the cluster.
 func (c *TestCluster) ResignLeader() error {
 	leader := c.GetLeader()
-	if leader != "" {
+	if len(leader) != 0 {
 		return c.servers[leader].ResignLeader()
 	}
 	return errors.New("no leader")
-}
-
-// WaitAllocatorLeader is used to get the Local TSO Allocator leader.
-// If it exceeds the maximum number of loops, it will return an empty string.
-func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) string {
-	option := &WaitOp{
-		retryTimes:   WaitLeaderRetryTimes,
-		waitInterval: WaitLeaderCheckInterval,
-	}
-	for _, op := range ops {
-		op(option)
-	}
-	for i := 0; i < option.retryTimes; i++ {
-		counter := make(map[string]int)
-		running := 0
-		for _, s := range c.servers {
-			if s.state == Running && s.GetTSOAllocatorManager().EnableLocalTSO() {
-				running++
-			}
-			serverName := s.GetAllocatorLeader(dcLocation).GetName()
-			if serverName != "" {
-				counter[serverName]++
-			}
-		}
-		for serverName, num := range counter {
-			if num == running && c.GetServer(serverName).IsAllocatorLeader(dcLocation) {
-				return serverName
-			}
-		}
-		time.Sleep(option.waitInterval)
-	}
-	return ""
-}
-
-// WaitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocator leaders.
-func (c *TestCluster) WaitAllLeaders(re *require.Assertions, dcLocations map[string]string) {
-	c.WaitLeader()
-	c.CheckClusterDCLocation()
-	// Wait for each DC's Local TSO Allocator leader
-	wg := sync.WaitGroup{}
-	for _, dcLocation := range dcLocations {
-		wg.Add(1)
-		go func(dc string) {
-			testutil.Eventually(re, func() bool {
-				return c.WaitAllocatorLeader(dc) != ""
-			})
-			wg.Done()
-		}(dcLocation)
-	}
-	wg.Wait()
 }
 
 // GetCluster returns PD cluster.
@@ -772,34 +522,13 @@ func (c *TestCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	return cluster.HandleRegionHeartbeat(region)
 }
 
-// HandleReportBuckets processes BucketInfo reports from the client.
-func (c *TestCluster) HandleReportBuckets(b *metapb.Buckets) error {
-	leader := c.GetLeader()
-	cluster := c.servers[leader].GetRaftCluster()
-	return cluster.HandleReportBuckets(b)
-}
-
 // Join is used to add a new TestServer into the cluster.
-func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.Join().Generate(opts...)
+func (c *TestCluster) Join(ctx context.Context) (*TestServer, error) {
+	conf, err := c.config.Join().Generate()
 	if err != nil {
 		return nil, err
 	}
 	s, err := NewTestServer(ctx, conf)
-	if err != nil {
-		return nil, err
-	}
-	c.servers[conf.Name] = s
-	return s, nil
-}
-
-// JoinAPIServer is used to add a new TestAPIServer into the cluster.
-func (c *TestCluster) JoinAPIServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.Join().Generate(opts...)
-	if err != nil {
-		return nil, err
-	}
-	s, err := NewTestAPIServer(ctx, conf)
 	if err != nil {
 		return nil, err
 	}
@@ -812,50 +541,7 @@ func (c *TestCluster) Destroy() {
 	for _, s := range c.servers {
 		err := s.Destroy()
 		if err != nil {
-			log.Error("failed to destroy the cluster:", errs.ZapError(err))
+			log.Error("failed to destroy the cluster:", zap.Error(err))
 		}
 	}
-}
-
-// CheckClusterDCLocation will force the cluster to do the dc-location check in order to speed up the test.
-func (c *TestCluster) CheckClusterDCLocation() {
-	wg := sync.WaitGroup{}
-	for _, server := range c.GetServers() {
-		wg.Add(1)
-		go func(ser *TestServer) {
-			ser.GetTSOAllocatorManager().ClusterDCLocationChecker()
-			wg.Done()
-		}(server)
-	}
-	wg.Wait()
-}
-
-// CheckTSOUnique will check whether the TSO is unique among the cluster in the past and present.
-func (c *TestCluster) CheckTSOUnique(ts uint64) bool {
-	c.tsPool.Lock()
-	defer c.tsPool.Unlock()
-	if _, exist := c.tsPool.pool[ts]; exist {
-		return false
-	}
-	c.tsPool.pool[ts] = struct{}{}
-	return true
-}
-
-// WaitOp represent the wait configuration
-type WaitOp struct {
-	retryTimes   int
-	waitInterval time.Duration
-}
-
-// WaitOption represent the wait configuration
-type WaitOption func(*WaitOp)
-
-// WithRetryTimes indicates the retry times
-func WithRetryTimes(r int) WaitOption {
-	return func(op *WaitOp) { op.retryTimes = r }
-}
-
-// WithWaitInterval indicates the wait interval
-func WithWaitInterval(i time.Duration) WaitOption {
-	return func(op *WaitOp) { op.waitInterval = i }
 }

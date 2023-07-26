@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,22 +16,28 @@ package completion_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	. "github.com/pingcap/check"
 	"github.com/tikv/pd/tests/pdctl"
-	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func TestCompletion(t *testing.T) {
-	re := require.New(t)
-	cmd := pdctlCmd.GetRootCmd()
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&completionTestSuite{})
+
+type completionTestSuite struct{}
+
+func (s *completionTestSuite) TestCompletion(c *C) {
+	cmd := pdctl.InitCommand()
 
 	// completion command
 	args := []string{"completion", "bash"}
-	_, err := pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	_, _, err := pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
 
 	// completion command
 	args = []string{"completion", "zsh"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	_, _, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
 }

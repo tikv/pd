@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -20,7 +19,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -58,8 +57,8 @@ type Resource struct {
 	// The basic unit of memory is byte.
 	Memory uint64 `json:"memory"`
 	// The basic unit of storage is byte.
-	Storage uint64  `json:"storage"`
-	Count   *uint64 `json:"count,omitempty"`
+	Storage uint64 `json:"storage"`
+	Count   uint64 `json:"count"`
 }
 
 // Plan is the final result of auto scaling, which indicates how to scale in or scale out.
@@ -162,13 +161,13 @@ func GetTiDB(etcdClient *clientv3.Client, address string) (*TiDBInfo, error) {
 }
 
 const (
-	tidbTTLPatternStr = "/topology/tidb/.+/ttl"
-	tidbInfoPrefix    = "/topology/tidb/"
+	tidbInfoPatternStr = "/topology/tidb/.+/info"
+	tidbInfoPrefix     = "/topology/tidb/"
 )
 
 // GetTiDBs list TiDB register in PD
 func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
-	tidbTTLPattern, err := regexp.Compile(tidbTTLPatternStr)
+	tidbInfoPattern, err := regexp.Compile(tidbInfoPatternStr)
 	if err != nil {
 		return nil, err
 	}
@@ -179,9 +178,9 @@ func GetTiDBs(etcdClient *clientv3.Client) ([]*TiDBInfo, error) {
 	tidbs := make([]*TiDBInfo, 0, resps.Count)
 	for _, resp := range resps.Kvs {
 		key := string(resp.Key)
-		if tidbTTLPattern.MatchString(key) {
-			address := key[len(tidbInfoPrefix) : len(key)-len("/ttl")]
-			// In order to avoid make "aaa/bbb" in "/topology/tidb/aaa/bbb/ttl" stored as tidb address
+		if tidbInfoPattern.MatchString(key) {
+			address := key[len(tidbInfoPrefix) : len(key)-len("/info")]
+			// In order to avoid make "aaa/bbb" in "/topology/tidb/aaa/bbb/info" stored as tidb address
 			if !strings.Contains(address, "/") {
 				tidbs = append(tidbs, &TiDBInfo{
 					Address: address,

@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -22,9 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 // TransferCounter is to count transfer schedule for judging whether redundant
@@ -42,7 +38,7 @@ type TransferCounter struct {
 	graphMat          [][]uint64
 	indexArray        []uint64
 	unIndexMap        map[uint64]int
-	mutex             syncutil.Mutex
+	mutex             sync.Mutex
 	loopResultPath    [][]int
 	loopResultCount   []uint64
 }
@@ -97,7 +93,7 @@ func (c *TransferCounter) AddSource(regionID, sourceStoreID uint64) {
 		}
 		delete(c.regionMap, regionID)
 	} else {
-		log.Fatal("error when add sourceStore in transfer region map", zap.Uint64("source-store", sourceStoreID), zap.Uint64("region", regionID))
+		log.Fatal("Error when add sourceStore in transfer region map. SourceStoreID: ", sourceStoreID, " regionID: ", regionID)
 	}
 }
 
@@ -124,7 +120,7 @@ func (c *TransferCounter) prepare() {
 		c.unIndexMap[storeID] = index
 	}
 
-	c.graphMat = nil
+	c.graphMat = make([][]uint64, 0)
 	for i := 0; i < c.scheduledStoreNum; i++ {
 		tmp := make([]uint64, c.scheduledStoreNum)
 		c.graphMat = append(c.graphMat, tmp)
@@ -144,7 +140,7 @@ func (c *TransferCounter) prepare() {
 // to the stack. If there is an edge of `v->u`, then the corresponding looped flow
 // is marked and removed. When all the output edges of the point v are traversed,
 // pop the point v out of the stack.
-func (c *TransferCounter) dfs(cur int, path []int) {
+func (c *TransferCounter) dfs(cur int, curFlow uint64, path []int) {
 	// push stack
 	path = append(path, cur)
 	c.visited[cur] = true
@@ -173,7 +169,7 @@ func (c *TransferCounter) dfs(cur int, path []int) {
 				c.graphMat[cur][target] -= curMinFlow
 			}
 		} else if !c.visited[target] {
-			c.dfs(target, path)
+			c.dfs(target, flow, path)
 		}
 	}
 	// pop stack
@@ -187,7 +183,7 @@ func (c *TransferCounter) Result() {
 	}
 
 	for i := 0; i < c.scheduledStoreNum; i++ {
-		c.dfs(i, make([]int, 0))
+		c.dfs(i, 1<<16, make([]int, 0))
 	}
 
 	for _, value := range c.loopResultCount {
@@ -221,31 +217,27 @@ func (c *TransferCounter) printGraph() {
 func (c *TransferCounter) PrintResult() {
 	c.prepare()
 	// Output log
-	log.Println("total schedules graph: ")
+	log.Println("Total Schedules Graph: ")
 	c.printGraph()
 	// Solve data
 	c.Result()
 	// Output log
-	log.Println("redundant loop: ")
+	log.Println("Redundant Loop: ")
 	for index, value := range c.loopResultPath {
 		fmt.Println(index, value, c.loopResultCount[index])
 	}
-	log.Println("necessary schedules graph: ")
+	log.Println("Necessary Schedules Graph: ")
 	c.printGraph()
-	log.Println("scheduled store: ", c.scheduledStoreNum)
-	log.Println("redundant schedules: ", c.Redundant)
-	log.Println("necessary schedules: ", c.Necessary)
+	log.Println("Scheduled Store: ", c.scheduledStoreNum)
+	log.Println("Redundant Schedules: ", c.Redundant)
+	log.Println("Necessary Schedules: ", c.Necessary)
 
 	// Output csv file
-	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
+	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer func() {
-		if err := fd.Close(); err != nil {
-			log.Printf("error closing file: %s\n", err)
-		}
-	}()
+	defer fd.Close()
 	fdContent := strings.Join([]string{
 		toString(uint64(c.storeNum)),
 		toString(uint64(c.regionNum)),

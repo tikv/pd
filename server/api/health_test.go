@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,38 +15,40 @@ package api
 
 import (
 	"encoding/json"
-	"io"
+	"io/ioutil"
 	"strings"
-	"testing"
 
-	"github.com/stretchr/testify/require"
+	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
 
-func checkSliceResponse(re *require.Assertions, body []byte, cfgs []*config.Config, unhealthy string) {
+var _ = Suite(&testHealthAPISuite{})
+
+type testHealthAPISuite struct{}
+
+func checkSliceResponse(c *C, body []byte, cfgs []*config.Config, unhealthy string) {
 	got := []Health{}
-	re.NoError(json.Unmarshal(body, &got))
-	re.Len(cfgs, len(got))
+	c.Assert(json.Unmarshal(body, &got), IsNil)
+	c.Assert(len(got), Equals, len(cfgs))
 
 	for _, h := range got {
 		for _, cfg := range cfgs {
 			if h.Name != cfg.Name {
 				continue
 			}
-			relaxEqualStings(re, h.ClientUrls, strings.Split(cfg.ClientUrls, ","))
+			relaxEqualStings(c, h.ClientUrls, strings.Split(cfg.ClientUrls, ","))
 		}
 		if h.Name == unhealthy {
-			re.False(h.Health)
+			c.Assert(h.Health, IsFalse)
 			continue
 		}
-		re.True(h.Health)
+		c.Assert(h.Health, IsTrue)
 	}
 }
 
-func TestHealthSlice(t *testing.T) {
-	re := require.New(t)
-	cfgs, svrs, clean := mustNewCluster(re, 3)
+func (s *testHealthAPISuite) TestHealthSlice(c *C) {
+	cfgs, svrs, clean := mustNewCluster(c, 3)
 	defer clean()
 	var leader, follow *server.Server
 
@@ -58,13 +59,13 @@ func TestHealthSlice(t *testing.T) {
 			follow = svr
 		}
 	}
-	mustBootstrapCluster(re, leader)
+	mustBootstrapCluster(c, leader)
 	addr := leader.GetConfig().ClientUrls + apiPrefix + "/api/v1/health"
 	follow.Close()
 	resp, err := testDialClient.Get(addr)
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	defer resp.Body.Close()
-	buf, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	checkSliceResponse(re, buf, cfgs, follow.GetConfig().Name)
+	buf, err := ioutil.ReadAll(resp.Body)
+	c.Assert(err, IsNil)
+	checkSliceResponse(c, buf, cfgs, follow.GetConfig().Name)
 }

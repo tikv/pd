@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,8 +15,10 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -47,15 +48,16 @@ func main() {
 		}
 	}()
 
-	var inputs []string
+	var input []string
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {
-		in, err := pdctl.ReadStdin(os.Stdin)
+		b, err := ioutil.ReadAll(os.Stdin)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		inputs = in
+		input = strings.Split(strings.TrimSpace(string(b[:])), " ")
 	}
-	pdctl.MainStart(append(os.Args[1:], inputs...))
+
+	pdctl.MainStart(append(os.Args[1:], input...))
 }

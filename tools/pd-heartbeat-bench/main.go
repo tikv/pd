@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,68 +15,53 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
-	"io"
-	"math/rand"
-	"os"
-	"os/signal"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"syscall"
+	"log"
 	"time"
 
-	"github.com/docker/go-units"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
-	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"go.etcd.io/etcd/pkg/report"
-	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
-const (
-	bytesUnit            = 8 * units.MiB
-	keysUint             = 8 * units.KiB
-	queryUnit            = 1 * units.KiB
-	regionReportInterval = 60 // 60s
-	storeReportInterval  = 10 // 10s
-	capacity             = 4 * units.TiB
+var (
+	pdAddr            = flag.String("pd", "127.0.0.1:2379", "pd address")
+	storeCount        = flag.Int("store", 20, "store count")
+	regionCount       = flag.Uint64("region", 1000000, "region count")
+	keyLen            = flag.Int("keylen", 56, "key length")
+	replica           = flag.Int("replica", 3, "replica count")
+	regionUpdateRatio = flag.Float64("region-update-ratio", 0.05, "ratio of the region need to update")
+	sample            = flag.Bool("sample", false, "sample per second")
+	heartbeatRounds   = flag.Int("heartbeat-rounds", 5, "total rounds of heartbeat")
 )
 
 var clusterID uint64
 
-func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
-	return str
-}
-
-func newClient(cfg *config.Config) pdpb.PDClient {
-	addr := trimHTTPPrefix(cfg.PDAddr)
-	cc, err := grpc.Dial(addr, grpc.WithInsecure())
+func newClient() pdpb.PDClient {
+	cc, err := grpc.Dial(*pdAddr, grpc.WithInsecure())
 	if err != nil {
-		log.Fatal("failed to create gRPC connection", zap.Error(err))
+		log.Fatal(err)
 	}
 	return pdpb.NewPDClient(cc)
 }
 
-func initClusterID(ctx context.Context, cli pdpb.PDClient) {
-	cctx, cancel := context.WithCancel(ctx)
-	res, err := cli.GetMembers(cctx, &pdpb.GetMembersRequest{})
-	cancel()
-	if err != nil {
-		log.Fatal("failed to get members", zap.Error(err))
+func newReport() report.Report {
+	p := "%4.4f"
+	if *sample {
+		return report.NewReportSample(p)
 	}
-	if res.GetHeader().GetError() != nil {
-		log.Fatal("failed to get members", zap.String("err", res.GetHeader().GetError().String()))
+	return report.NewReport(p)
+}
+
+func initClusterID(cli pdpb.PDClient) {
+	res, err := cli.GetMembers(context.TODO(), &pdpb.GetMembersRequest{})
+	if err != nil {
+		log.Fatal(err)
 	}
 	clusterID = res.GetHeader().GetClusterId()
-	log.Info("init cluster ID successfully", zap.Uint64("cluster-id", clusterID))
+	log.Println("ClusterID:", clusterID)
 }
 
 func header() *pdpb.RequestHeader {
@@ -86,22 +70,19 @@ func header() *pdpb.RequestHeader {
 	}
 }
 
-func bootstrap(ctx context.Context, cli pdpb.PDClient) {
-	cctx, cancel := context.WithCancel(ctx)
-	isBootstrapped, err := cli.IsBootstrapped(cctx, &pdpb.IsBootstrappedRequest{Header: header()})
-	cancel()
+func bootstrap(cli pdpb.PDClient) {
+	isBootstrapped, err := cli.IsBootstrapped(context.TODO(), &pdpb.IsBootstrappedRequest{Header: header()})
 	if err != nil {
-		log.Fatal("check if cluster has already bootstrapped failed", zap.Error(err))
+		log.Fatal(err)
 	}
 	if isBootstrapped.GetBootstrapped() {
-		log.Info("already bootstrapped")
+		log.Println("already bootstrapped")
 		return
 	}
 
 	store := &metapb.Store{
 		Id:      1,
-		Address: fmt.Sprintf("localhost:%d", 2),
-		Version: "6.4.0-alpha",
+		Address: fmt.Sprintf("localhost:%d", 1),
 	}
 	region := &metapb.Region{
 		Id:          1,
@@ -113,420 +94,129 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 		Store:  store,
 		Region: region,
 	}
-	cctx, cancel = context.WithCancel(ctx)
-	resp, err := cli.Bootstrap(cctx, req)
-	cancel()
+	_, err = cli.Bootstrap(context.TODO(), req)
 	if err != nil {
-		log.Fatal("failed to bootstrap the cluster", zap.Error(err))
+		log.Fatal(err)
 	}
-	if resp.GetHeader().GetError() != nil {
-		log.Fatal("failed to bootstrap the cluster", zap.String("err", resp.GetHeader().GetError().String()))
-	}
-	log.Info("bootstrapped")
+	log.Println("bootstrapped")
 }
 
-func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, stores *Stores) {
-	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
+func putStores(cli pdpb.PDClient) {
+	for i := uint64(1); i <= uint64(*storeCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
 			Address: fmt.Sprintf("localhost:%d", i),
-			Version: "6.4.0-alpha",
 		}
-		cctx, cancel := context.WithCancel(ctx)
-		resp, err := cli.PutStore(cctx, &pdpb.PutStoreRequest{Header: header(), Store: store})
-		cancel()
+		_, err := cli.PutStore(context.TODO(), &pdpb.PutStoreRequest{Header: header(), Store: store})
 		if err != nil {
-			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.Error(err))
+			log.Fatal(err)
 		}
-		if resp.GetHeader().GetError() != nil {
-			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
-		}
-		go func(ctx context.Context, storeID uint64) {
-			var heartbeatTicker = time.NewTicker(10 * time.Second)
-			defer heartbeatTicker.Stop()
-			for {
-				select {
-				case <-heartbeatTicker.C:
-					stores.heartbeat(ctx, cli, storeID)
-				case <-ctx.Done():
-					return
-				}
-			}
-		}(ctx, i)
 	}
 }
 
-func newStartKey(id uint64, keyLen int) []byte {
-	k := make([]byte, keyLen)
-	copy(k, fmt.Sprintf("%010d", id))
+func newStartKey(id uint64) []byte {
+	k := make([]byte, *keyLen)
+	copy(k, []byte(fmt.Sprintf("%010d", id)))
 	return k
 }
 
-func newEndKey(id uint64, keyLen int) []byte {
-	k := newStartKey(id, keyLen)
+func newEndKey(id uint64) []byte {
+	k := newStartKey(id)
 	k[len(k)-1]++
 	return k
 }
 
-// Regions simulates all regions to heartbeat.
-type Regions struct {
-	regions []*pdpb.RegionHeartbeatRequest
-
-	updateRound int
-
-	updateLeader []int
-	updateEpoch  []int
-	updateSpace  []int
-	updateFlow   []int
+// Store simulates a TiKV to heartbeat.
+type Store struct {
+	id uint64
 }
 
-func (rs *Regions) init(cfg *config.Config) {
-	rs.regions = make([]*pdpb.RegionHeartbeatRequest, 0, cfg.RegionCount)
-	rs.updateRound = 0
-
-	// Generate regions
-	id := uint64(1)
-	now := uint64(time.Now().Unix())
-
-	keyLen := cfg.KeyLength
-	for i := 0; i < cfg.RegionCount; i++ {
-		region := &pdpb.RegionHeartbeatRequest{
-			Header: header(),
-			Region: &metapb.Region{
-				Id:          id,
-				StartKey:    newStartKey(id, keyLen),
-				EndKey:      newEndKey(id, keyLen),
-				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1},
-			},
-			ApproximateSize: bytesUnit,
-			Interval: &pdpb.TimeInterval{
-				StartTimestamp: now,
-				EndTimestamp:   now + regionReportInterval,
-			},
-			QueryStats:      &pdpb.QueryStats{},
-			ApproximateKeys: keysUint,
-			Term:            1,
-		}
-		id += 1
-		if i == 0 {
-			region.Region.StartKey = []byte("")
-		}
-		if i == cfg.RegionCount-1 {
-			region.Region.EndKey = []byte("")
-		}
-
-		peers := make([]*metapb.Peer, 0, cfg.Replica)
-		for j := 0; j < cfg.Replica; j++ {
-			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%cfg.StoreCount + 1)})
-			id += 1
-		}
-
-		region.Region.Peers = peers
-		region.Leader = peers[0]
-		rs.regions = append(rs.regions, region)
-	}
-
-	// Generate sample index
-	slice := make([]int, cfg.RegionCount)
-	for i := range slice {
-		slice[i] = i
-	}
-
-	rand.New(rand.NewSource(0)) // Ensure consistent behavior multiple times
-	pick := func(ratio float64) []int {
-		rand.Shuffle(cfg.RegionCount, func(i, j int) {
-			slice[i], slice[j] = slice[j], slice[i]
-		})
-		return append(slice[:0:0], slice[0:int(float64(cfg.RegionCount)*ratio)]...)
-	}
-
-	rs.updateLeader = pick(cfg.LeaderUpdateRatio)
-	rs.updateEpoch = pick(cfg.EpochUpdateRatio)
-	rs.updateSpace = pick(cfg.SpaceUpdateRatio)
-	rs.updateFlow = pick(cfg.FlowUpdateRatio)
-}
-
-func (rs *Regions) update(replica int) {
-	rs.updateRound += 1
-
-	// update leader
-	for _, i := range rs.updateLeader {
-		region := rs.regions[i]
-		region.Leader = region.Region.Peers[rs.updateRound%replica]
-	}
-	// update epoch
-	for _, i := range rs.updateEpoch {
-		region := rs.regions[i]
-		region.Region.RegionEpoch.Version += 1
-	}
-	// update space
-	for _, i := range rs.updateSpace {
-		region := rs.regions[i]
-		region.ApproximateSize = uint64(bytesUnit * rand.Float64())
-		region.ApproximateKeys = uint64(keysUint * rand.Float64())
-	}
-	// update flow
-	for _, i := range rs.updateFlow {
-		region := rs.regions[i]
-		region.BytesWritten = uint64(bytesUnit * rand.Float64())
-		region.BytesRead = uint64(bytesUnit * rand.Float64())
-		region.KeysWritten = uint64(keysUint * rand.Float64())
-		region.KeysRead = uint64(keysUint * rand.Float64())
-		region.QueryStats = &pdpb.QueryStats{
-			Get: uint64(queryUnit * rand.Float64()),
-			Put: uint64(queryUnit * rand.Float64()),
-		}
-	}
-	// update interval
-	for _, region := range rs.regions {
-		region.Interval.StartTimestamp = region.Interval.EndTimestamp
-		region.Interval.EndTimestamp = region.Interval.StartTimestamp + regionReportInterval
-	}
-}
-
-func createHeartbeatStream(ctx context.Context, cfg *config.Config) pdpb.PD_RegionHeartbeatClient {
-	cli := newClient(cfg)
-	stream, err := cli.RegionHeartbeat(ctx)
+// Run runs the store.
+func (s *Store) Run(startNotifier chan report.Report, endNotifier chan struct{}) {
+	cli := newClient()
+	stream, err := cli.RegionHeartbeat(context.TODO())
 	if err != nil {
-		log.Fatal("create stream error", zap.Error(err))
+		log.Fatal(err)
+	}
+	var peers []*metapb.Peer
+	for i := 0; i < *replica; i++ {
+		storeID := s.id + uint64(i)
+		if storeID > uint64(*storeCount) {
+			storeID -= uint64(*storeCount)
+		}
+		peers = append(peers, &metapb.Peer{Id: uint64(i + 1), StoreId: storeID})
 	}
 
-	go func() {
-		// do nothing
-		for {
-			stream.Recv()
-		}
-	}()
-	return stream
-}
-
-func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_RegionHeartbeatClient, storeID uint64, rep report.Report) {
-	defer wg.Done()
-	var regions []*pdpb.RegionHeartbeatRequest
-	for _, region := range rs.regions {
-		if region.Leader.StoreId != storeID {
-			continue
-		}
-		regions = append(regions, region)
-	}
-
-	start := time.Now()
-	var err error
-	for _, region := range regions {
-		err = stream.Send(region)
-		rep.Results() <- report.Result{Start: start, End: time.Now(), Err: err}
-		if err == io.EOF {
-			log.Error("receive eof error", zap.Uint64("store-id", storeID), zap.Error(err))
-			err := stream.CloseSend()
-			if err != nil {
-				log.Error("fail to close stream", zap.Uint64("store-id", storeID), zap.Error(err))
+	count := 1
+	for r := range startNotifier {
+		startTime := time.Now()
+		for regionID := s.id; regionID <= *regionCount+uint64(*storeCount); regionID += uint64(*storeCount) {
+			updateRegionCount := uint64(float64(*regionCount) * (*regionUpdateRatio) / float64(*storeCount))
+			storeUpdateRegionMaxID := s.id + updateRegionCount*uint64(*storeCount)
+			meta := &metapb.Region{
+				Id:          regionID,
+				Peers:       peers,
+				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1},
+				StartKey:    newStartKey(regionID),
+				EndKey:      newEndKey(regionID),
 			}
-			return
-		}
-		if err != nil {
-			log.Error("send result error", zap.Uint64("store-id", storeID), zap.Error(err))
-			return
-		}
-	}
-	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)))
-}
-
-// Stores contains store stats with lock.
-type Stores struct {
-	stat []atomic.Value
-}
-
-func newStores(storeCount int) *Stores {
-	return &Stores{
-		stat: make([]atomic.Value, storeCount+1),
-	}
-}
-
-func (s *Stores) heartbeat(ctx context.Context, cli pdpb.PDClient, storeID uint64) {
-	cctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{Header: header(), Stats: s.stat[storeID].Load().(*pdpb.StoreStats)})
-}
-
-func (s *Stores) update(rs *Regions) {
-	stats := make([]*pdpb.StoreStats, len(s.stat))
-	now := uint64(time.Now().Unix())
-	for i := range stats {
-		stats[i] = &pdpb.StoreStats{
-			StoreId:    uint64(i),
-			Capacity:   capacity,
-			Available:  capacity,
-			QueryStats: &pdpb.QueryStats{},
-			PeerStats:  make([]*pdpb.PeerStat, 0),
-			Interval: &pdpb.TimeInterval{
-				StartTimestamp: now - storeReportInterval,
-				EndTimestamp:   now,
-			},
-		}
-	}
-	for _, region := range rs.regions {
-		for _, peer := range region.Region.Peers {
-			store := stats[peer.StoreId]
-			store.UsedSize += region.ApproximateSize
-			store.Available -= region.ApproximateSize
-			store.RegionCount += 1
-		}
-		store := stats[region.Leader.StoreId]
-		if region.BytesWritten != 0 {
-			store.BytesWritten += region.BytesWritten
-			store.BytesRead += region.BytesRead
-			store.KeysWritten += region.KeysWritten
-			store.KeysRead += region.KeysRead
-			store.QueryStats.Get += region.QueryStats.Get
-			store.QueryStats.Put += region.QueryStats.Put
-			store.PeerStats = append(store.PeerStats, &pdpb.PeerStat{
-				RegionId:     region.Region.Id,
-				ReadKeys:     region.KeysRead,
-				ReadBytes:    region.BytesRead,
-				WrittenKeys:  region.KeysWritten,
-				WrittenBytes: region.BytesWritten,
-				QueryStats:   region.QueryStats,
+			if regionID < storeUpdateRegionMaxID {
+				meta.RegionEpoch.Version = uint64(count)
+			}
+			reqStart := time.Now()
+			err = stream.Send(&pdpb.RegionHeartbeatRequest{
+				Header: header(),
+				Region: meta,
+				Leader: peers[0],
 			})
+
+			r.Results() <- report.Result{Start: reqStart, End: time.Now(), Err: err}
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
-	}
-	for i := range stats {
-		s.stat[i].Store(stats[i])
+		log.Printf("store %v finish heartbeat, cost time: %v", s.id, time.Since(startTime))
+		count++
+		endNotifier <- struct{}{}
 	}
 }
 
 func main() {
-	cfg := config.NewConfig()
-	err := cfg.Parse(os.Args[1:])
-	defer logutil.LogPanic()
+	log.SetFlags(0)
+	flag.Parse()
 
-	switch errors.Cause(err) {
-	case nil:
-	case pflag.ErrHelp:
-		exit(0)
-	default:
-		log.Fatal("parse cmd flags error", zap.Error(err))
+	cli := newClient()
+	initClusterID(cli)
+	bootstrap(cli)
+	putStores(cli)
+
+	log.Println("finish put stores")
+	groupStartNotify := make([]chan report.Report, *storeCount+1)
+	groupEndNotify := make([]chan struct{}, *storeCount+1)
+	for i := 1; i <= *storeCount; i++ {
+		s := Store{id: uint64(i)}
+		startNotifier := make(chan report.Report)
+		endNotifier := make(chan struct{})
+		groupStartNotify[i] = startNotifier
+		groupEndNotify[i] = endNotifier
+		go s.Run(startNotifier, endNotifier)
 	}
 
-	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps)
-	if err == nil {
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-	} else {
-		log.Fatal("initialize logger error", zap.Error(err))
-	}
-
-	// let PD have enough time to start
-	time.Sleep(5 * time.Second)
-	ctx, cancel := context.WithCancel(context.Background())
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-
-	var sig os.Signal
-	go func() {
-		sig = <-sc
-		cancel()
-	}()
-	cli := newClient(cfg)
-	initClusterID(ctx, cli)
-	regions := new(Regions)
-	regions.init(cfg)
-	log.Info("finish init regions")
-	stores := newStores(cfg.StoreCount)
-	stores.update(regions)
-	bootstrap(ctx, cli)
-	putStores(ctx, cfg, cli, stores)
-	log.Info("finish put stores")
-	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
-	for i := 1; i <= cfg.StoreCount; i++ {
-		streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
-	}
-	var heartbeatTicker = time.NewTicker(regionReportInterval * time.Second)
-	defer heartbeatTicker.Stop()
-	for {
-		select {
-		case <-heartbeatTicker.C:
-			if cfg.Round != 0 && regions.updateRound > cfg.Round {
-				exit(0)
-			}
-			rep := newReport(cfg)
-			r := rep.Stats()
-
-			startTime := time.Now()
-			wg := &sync.WaitGroup{}
-			for i := 1; i <= cfg.StoreCount; i++ {
-				id := uint64(i)
-				wg.Add(1)
-				go regions.handleRegionHeartbeat(wg, streams[id], id, rep)
-			}
-			wg.Wait()
-
-			since := time.Since(startTime).Seconds()
-			close(rep.Results())
-			regions.result(cfg.RegionCount, since)
-			stats := <-r
-			log.Info("region heartbeat stats", zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),
-				zap.String("slowest", fmt.Sprintf("%.4fs", stats.Slowest)),
-				zap.String("fastest", fmt.Sprintf("%.4fs", stats.Fastest)),
-				zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
-				zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
-				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
-			)
-			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
-			regions.update(cfg.Replica)
-			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
-		case <-ctx.Done():
-			log.Info("got signal to exit")
-			switch sig {
-			case syscall.SIGTERM:
-				exit(0)
-			default:
-				exit(1)
-			}
+	for i := 0; i < *heartbeatRounds; i++ {
+		log.Printf("\n--------- Bench heartbeat (Round %d) ----------\n", i+1)
+		report := newReport()
+		rs := report.Run()
+		// All stores start heartbeat.
+		for storeID := 1; storeID <= *storeCount; storeID++ {
+			startNotifier := groupStartNotify[storeID]
+			startNotifier <- report
 		}
-	}
-}
+		// All stores finished heartbeat once.
+		for storeID := 1; storeID <= *storeCount; storeID++ {
+			<-groupEndNotify[storeID]
+		}
 
-func exit(code int) {
-	os.Exit(code)
-}
-
-func newReport(cfg *config.Config) report.Report {
-	p := "%4.4f"
-	if cfg.Sample {
-		return report.NewReportSample(p)
+		close(report.Results())
+		log.Println(<-rs)
 	}
-	return report.NewReport(p)
-}
-
-func (rs *Regions) result(regionCount int, sec float64) {
-	if rs.updateRound == 0 {
-		// There was no difference in the first round
-		return
-	}
-
-	updated := make(map[int]struct{})
-	for _, i := range rs.updateLeader {
-		updated[i] = struct{}{}
-	}
-	for _, i := range rs.updateEpoch {
-		updated[i] = struct{}{}
-	}
-	for _, i := range rs.updateSpace {
-		updated[i] = struct{}{}
-	}
-	for _, i := range rs.updateFlow {
-		updated[i] = struct{}{}
-	}
-	inactiveCount := regionCount - len(updated)
-
-	log.Info("update speed of each category", zap.String("rps", fmt.Sprintf("%.4f", float64(regionCount)/sec)),
-		zap.String("save-tree", fmt.Sprintf("%.4f", float64(len(rs.updateLeader))/sec)),
-		zap.String("save-kv", fmt.Sprintf("%.4f", float64(len(rs.updateEpoch))/sec)),
-		zap.String("save-space", fmt.Sprintf("%.4f", float64(len(rs.updateSpace))/sec)),
-		zap.String("save-flow", fmt.Sprintf("%.4f", float64(len(rs.updateFlow))/sec)),
-		zap.String("skip", fmt.Sprintf("%.4f", float64(inactiveCount)/sec)))
 }

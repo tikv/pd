@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -33,7 +32,7 @@ import (
 
 const (
 	tikvSumCPUUsageMetricsPattern = `sum(increase(tikv_thread_cpu_seconds_total[%s])) by (instance, kubernetes_namespace)`
-	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{component="tidb"}[%s])) by (instance, kubernetes_namespace)`
+	tidbSumCPUUsageMetricsPattern = `sum(increase(process_cpu_seconds_total{job="tidb"}[%s])) by (instance, kubernetes_namespace)`
 	tikvCPUQuotaMetricsPattern    = `tikv_server_cpu_cores_quota`
 	tidbCPUQuotaMetricsPattern    = `tidb_server_maxprocs`
 	instanceLabelName             = "instance"
@@ -97,7 +96,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 		return nil, errs.ErrPrometheusQuery.Wrap(err).FastGenWithCause()
 	}
 
-	if len(warnings) > 0 {
+	if warnings != nil && len(warnings) > 0 {
 		log.Warn("prometheus query returns with warnings", zap.Strings("warnings", warnings))
 	}
 
@@ -146,7 +145,7 @@ func extractInstancesFromResponse(resp promModel.Value, addresses []string) (Que
 
 		instanceName := buildInstanceIdentifier(string(podName), string(namespace))
 
-		if addr, ok := instancesSet[instanceName]; ok {
+		if addr, ok := instancesSet[string(instanceName)]; ok {
 			result[addr] = float64(sample.Value)
 		}
 	}

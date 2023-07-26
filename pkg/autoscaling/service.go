@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -18,8 +17,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
+	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"github.com/urfave/negroni"
@@ -28,7 +26,7 @@ import (
 const autoScalingPrefix = "/autoscaling"
 
 var (
-	autoscalingServiceGroup = apiutil.APIServiceGroup{
+	autoscalingServiceGroup = server.ServiceGroup{
 		Name:       "autoscaling",
 		Version:    "v1alpha",
 		IsCore:     false,
@@ -37,7 +35,7 @@ var (
 )
 
 // NewHandler creates a HTTP handler for auto scaling.
-func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+func NewHandler(_ context.Context, svr *server.Server) (http.Handler, server.ServiceGroup, error) {
 	autoScalingHandler := http.NewServeMux()
 	rd := render.New(render.Options{
 		IndentJSON: true,

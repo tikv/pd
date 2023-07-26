@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -18,66 +17,86 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"sort"
 
-	"github.com/docker/go-units"
+	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/spf13/cobra"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
-// ExecuteCommand is used for test purpose.
-func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {
+// InitCommand is used to initialize command.
+func InitCommand() *cobra.Command {
+	commandFlags := pdctl.CommandFlags{}
+	rootCmd := &cobra.Command{}
+	rootCmd.PersistentFlags().StringVarP(&commandFlags.URL, "pd", "u", "", "")
+	rootCmd.Flags().StringVar(&commandFlags.CAPath, "cacert", "", "")
+	rootCmd.Flags().StringVar(&commandFlags.CertPath, "cert", "", "")
+	rootCmd.Flags().StringVar(&commandFlags.KeyPath, "key", "", "")
+	rootCmd.AddCommand(
+		command.NewConfigCommand(),
+		command.NewRegionCommand(),
+		command.NewStoreCommand(),
+		command.NewStoresCommand(),
+		command.NewMemberCommand(),
+		command.NewExitCommand(),
+		command.NewLabelCommand(),
+		command.NewPingCommand(),
+		command.NewOperatorCommand(),
+		command.NewSchedulerCommand(),
+		command.NewTSOCommand(),
+		command.NewHotSpotCommand(),
+		command.NewClusterCommand(),
+		command.NewHealthCommand(),
+		command.NewLogCommand(),
+		command.NewPluginCommand(),
+		command.NewCompletionCommand(),
+	)
+	return rootCmd
+}
+
+// ExecuteCommandC is used for test purpose.
+func ExecuteCommandC(root *cobra.Command, args ...string) (c *cobra.Command, output []byte, err error) {
 	buf := new(bytes.Buffer)
-	root.SetOut(buf)
+	root.SetOutput(buf)
 	root.SetArgs(args)
-	err = root.Execute()
-	return buf.Bytes(), err
+
+	c, err = root.ExecuteC()
+	return c, buf.Bytes(), err
 }
 
 // CheckStoresInfo is used to check the test results.
-// CheckStoresInfo will not check Store.State because this field has been omitted pd-ctl output
-func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*api.StoreInfo) {
-	re.Len(stores, len(want))
-	mapWant := make(map[uint64]*api.StoreInfo)
+func CheckStoresInfo(c *check.C, stores []*api.StoreInfo, want []*metapb.Store) {
+	c.Assert(len(stores), check.Equals, len(want))
+	mapWant := make(map[uint64]*metapb.Store)
 	for _, s := range want {
-		if _, ok := mapWant[s.Store.Id]; !ok {
-			mapWant[s.Store.Id] = s
+		if _, ok := mapWant[s.Id]; !ok {
+			mapWant[s.Id] = s
 		}
 	}
 	for _, s := range stores {
-		obtained := typeutil.DeepClone(s.Store.Store, core.StoreFactory)
-		expected := typeutil.DeepClone(mapWant[obtained.Id].Store.Store, core.StoreFactory)
-		// Ignore state
-		obtained.State, expected.State = 0, 0
-		obtained.NodeState, expected.NodeState = 0, 0
+		obtained := proto.Clone(s.Store.Store).(*metapb.Store)
+		expected := proto.Clone(mapWant[obtained.Id]).(*metapb.Store)
 		// Ignore lastHeartbeat
 		obtained.LastHeartbeat, expected.LastHeartbeat = 0, 0
-		re.Equal(expected, obtained)
-
-		obtainedStateName := s.Store.StateName
-		expectedStateName := mapWant[obtained.Id].Store.StateName
-		re.Equal(expectedStateName, obtainedStateName)
+		c.Assert(obtained, check.DeepEquals, expected)
 	}
 }
 
-// CheckRegionInfo is used to check the test results.
-func CheckRegionInfo(re *require.Assertions, output *api.RegionInfo, expected *core.RegionInfo) {
-	region := api.NewAPIRegionInfo(expected)
-	output.Adjust()
-	re.Equal(region, output)
-}
-
 // CheckRegionsInfo is used to check the test results.
-func CheckRegionsInfo(re *require.Assertions, output *api.RegionsInfo, expected []*core.RegionInfo) {
-	re.Len(expected, output.Count)
+func CheckRegionsInfo(c *check.C, output api.RegionsInfo, expected []*core.RegionInfo) {
+	c.Assert(output.Count, check.Equals, len(expected))
 	got := output.Regions
 	sort.Slice(got, func(i, j int) bool {
 		return got[i].ID < got[j].ID
@@ -86,34 +105,32 @@ func CheckRegionsInfo(re *require.Assertions, output *api.RegionsInfo, expected 
 		return expected[i].GetID() < expected[j].GetID()
 	})
 	for i, region := range expected {
-		CheckRegionInfo(re, &got[i], region)
+		c.Assert(api.NewRegionInfo(region), check.DeepEquals, got[i])
 	}
 }
 
 // MustPutStore is used for test purpose.
-func MustPutStore(re *require.Assertions, svr *server.Server, store *metapb.Store) {
-	store.Address = fmt.Sprintf("tikv%d", store.GetId())
-	if len(store.Version) == 0 {
-		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
-	}
-	grpcServer := &server.GrpcServer{Server: svr}
-	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
+func MustPutStore(c *check.C, svr *server.Server, id uint64, state metapb.StoreState, labels []*metapb.StoreLabel) {
+	_, err := svr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
-		Store:  store,
+		Store: &metapb.Store{
+			Id:      id,
+			Address: fmt.Sprintf("tikv%d", id),
+			State:   state,
+			Labels:  labels,
+			Version: versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
+		},
 	})
-	re.NoError(err)
-
-	storeInfo := grpcServer.GetRaftCluster().GetStore(store.GetId())
-	newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
-		Capacity:  uint64(10 * units.GiB),
-		UsedSize:  uint64(9 * units.GiB),
-		Available: uint64(1 * units.GiB),
-	}))
-	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
+	c.Assert(err, check.IsNil)
+	_, err = svr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Stats:  &pdpb.StoreStats{StoreId: id},
+	})
+	c.Assert(err, check.IsNil)
 }
 
 // MustPutRegion is used for test purpose.
-func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
+func MustPutRegion(c *check.C, cluster *tests.TestCluster, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
 	leader := &metapb.Peer{
 		Id:      regionID,
 		StoreId: storeID,
@@ -127,21 +144,20 @@ func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID,
 	}
 	r := core.NewRegionInfo(metaRegion, leader, opts...)
 	err := cluster.HandleRegionHeartbeat(r)
-	re.NoError(err)
+	c.Assert(err, check.IsNil)
 	return r
 }
 
-// MustReportBuckets is used for test purpose.
-func MustReportBuckets(re *require.Assertions, cluster *tests.TestCluster, regionID uint64, start, end []byte, stats *metapb.BucketStats) *metapb.Buckets {
-	buckets := &metapb.Buckets{
-		RegionId: regionID,
-		Version:  1,
-		Keys:     [][]byte{start, end},
-		Stats:    stats,
-		// report buckets interval is 10s
-		PeriodInMs: 10000,
-	}
-	err := cluster.HandleReportBuckets(buckets)
-	re.NoError(err)
-	return buckets
+// GetEcho is used to get echo from stdout.
+func GetEcho(args []string) string {
+	filename := filepath.Join(os.TempDir(), "stdout")
+	old := os.Stdout
+	temp, _ := os.Create(filename)
+	os.Stdout = temp
+	pdctl.Start(args)
+	temp.Close()
+	os.Stdout = old
+	out, _ := ioutil.ReadFile(filename)
+	_ = os.Remove(filename)
+	return string(out)
 }

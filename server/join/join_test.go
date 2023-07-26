@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,17 +16,23 @@ package join
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 )
 
+func TestJoin(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&testJoinServerSuite{})
+
+type testJoinServerSuite struct{}
+
 // A PD joins itself.
-func TestPDJoinsItself(t *testing.T) {
-	re := require.New(t)
-	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+func (s *testJoinServerSuite) TestPDJoinsItself(c *C) {
+	cfg := server.NewTestSingleConfig(c)
 	defer testutil.CleanServer(cfg.DataDir)
 	cfg.Join = cfg.AdvertiseClientUrls
-	re.Error(PrepareJoinCluster(cfg))
+	c.Assert(PrepareJoinCluster(cfg), NotNil)
 }
