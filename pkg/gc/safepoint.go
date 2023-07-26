@@ -45,11 +45,6 @@ func (manager *SafePointManager) LoadGCSafePoint() (uint64, error) {
 // UpdateGCSafePoint updates the safepoint if it is greater than the previous one
 // it returns the old safepoint in the storage.
 func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafePoint uint64, err error) {
-	if manager.cfg.BlockSafePointV1 {
-		oldSafePoint = 0
-		err = errors.Errorf("Don't allow update gc safe point v1.")
-		return
-	}
 	manager.gcLock.Lock()
 	defer manager.gcLock.Unlock()
 	// TODO: cache the safepoint in the storage.
@@ -57,6 +52,11 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 	if err != nil {
 		return
 	}
+	if manager.cfg.BlockSafePointV1 {
+		err = errors.Errorf("Don't allow update gc safe point v1.")
+		return
+	}
+
 	if oldSafePoint >= newSafePoint {
 		return
 	}
