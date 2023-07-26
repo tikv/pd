@@ -673,7 +673,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				}
 			}
 			bs.cur.mainPeerStat = mainPeerStat
-			if tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) && bs.GetStoreConfig().IsEnableRegionBucket() {
+			if bs.tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) && bs.GetStoreConfig().IsEnableRegionBucket() {
 				hotSchedulerRegionTooHotNeedSplitCounter.Inc()
 				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region}, true /*too hot need to split*/)
 				if len(ops) > 0 {
@@ -1909,8 +1909,8 @@ func prioritiesToDim(priorities []string) (firstPriority int, secondPriority int
 }
 
 // tooHotNeedSplit returns true if any dim of the hot region is greater than the store threshold.
-func tooHotNeedSplit(store *statistics.StoreLoadDetail, region *statistics.HotPeerStat, splitThresholds float64) bool {
-	return slice.AnyOf(store.LoadPred.Current.Loads, func(i int) bool {
+func (bs *balanceSolver) tooHotNeedSplit(store *statistics.StoreLoadDetail, region *statistics.HotPeerStat, splitThresholds float64) bool {
+	return bs.checkByPriorityAndTolerance(store.LoadPred.Current.Loads, func(i int) bool {
 		return region.Loads[i] > store.LoadPred.Current.Loads[i]*splitThresholds
 	})
 }
