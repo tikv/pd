@@ -1,4 +1,4 @@
-# Copyright 2022 TiKV Project Authors.
+# Copyright 2023 TiKV Project Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,47 +12,38 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-GO_TOOLS_BIN_PATH := $(shell pwd)/../../.tools/bin
+ROOT_PATH := ../../..
+GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 static: install-tools
+	@ echo "gofmt ..."
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
-<<<<<<< HEAD:tests/client/Makefile
-	@ golangci-lint run ./...
-	@ revive -formatter friendly -config ../../revive.toml .
-=======
 	@ echo "golangci-lint ..."
 	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
 	@ echo "revive ..."
 	@ revive -formatter friendly -config $(ROOT_PATH)/revive.toml ./...
->>>>>>> f916e90eb (rule_checker: can replace unhealthPeer with orphanPeer (#6831)):tests/integrations/client/Makefile
 
 tidy:
 	@ go mod tidy
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
-test: enable-codegen dashboard-ui
-	CGO_ENABLED=1 go test -tags deadlock -race -cover || { $(MAKE) disable-codegen && exit 1; }
-	$(MAKE) disable-codegen
+test: failpoint-enable
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
 
-basic-test:
-	# skip
-
-ci-test-job: enable-codegen
-	CGO_ENABLED=1 go test -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=../../... github.com/tikv/pd/tests/client
+ci-test-job:
+	CGO_ENABLED=1 go test ./... -v -timeout=15m -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=$(ROOT_PATH)/... github.com/tikv/pd/tests/integrations/mcs
 
 install-tools:
-	cd ../../ && $(MAKE) install-tools
+	cd $(ROOT_PATH) && $(MAKE) install-tools
 
-enable-codegen:
-	cd ../../ && $(MAKE) failpoint-enable
+failpoint-enable:
+	cd $(ROOT_PATH) && $(MAKE) failpoint-enable
 	go mod tidy
 
-disable-codegen:
-	cd ../../ && $(MAKE) failpoint-disable
+failpoint-disable:
+	cd $(ROOT_PATH) && $(MAKE) failpoint-disable
 	go mod tidy
-
-dashboard-ui:
-	cd ../../ && $(MAKE) dashboard-ui

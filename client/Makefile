@@ -32,8 +32,15 @@ install-tools:
 
 static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
+<<<<<<< HEAD
 	@ golangci-lint run -c ../.golangci.yml ./...
 	@ revive -formatter friendly -config ../revive.toml .
+=======
+	@ echo "golangci-lint ..."
+	@ golangci-lint run -c ../.golangci.yml --verbose ./... --allow-parallel-runners
+	@ echo "revive ..."
+	@ revive -formatter friendly -config ../revive.toml ./...
+>>>>>>> f916e90eb (rule_checker: can replace unhealthPeer with orphanPeer (#6831))
 
 tidy:
 	@ go mod tidy
