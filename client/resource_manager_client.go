@@ -68,7 +68,7 @@ func (c *client) resourceManagerClient() (rmpb.ResourceManagerClient, error) {
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *client) gRPCErrorHandler(err error) {
 	if strings.Contains(err.Error(), errNotPrimary) || strings.Contains(err.Error(), errNotLeader) {
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged(err)
 	}
 }
 
@@ -345,7 +345,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		// If the stream is still nil, return an error.
 		if stream == nil {
 			firstRequest.done <- errors.Errorf("failed to get the stream connection")
-			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.pdSvcDiscovery.ScheduleCheckMemberChanged(nil)
 			connection.reset()
 			continue
 		}
@@ -357,7 +357,7 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		default:
 		}
 		if err = c.processTokenRequests(stream, firstRequest); err != nil {
-			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.pdSvcDiscovery.ScheduleCheckMemberChanged(err)
 			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
 		}

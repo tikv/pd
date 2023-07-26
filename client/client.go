@@ -16,7 +16,6 @@ package pd
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
@@ -34,6 +33,7 @@ import (
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -968,10 +968,12 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 			continue
 		}
 		cc := pdpb.NewPDClient(conn)
+		ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 		resp, err = cc.GetRegion(ctx, &pdpb.GetRegionRequest{
 			Header:    c.requestHeader(),
 			RegionKey: key,
 		})
+		cancel()
 		if err != nil || resp.GetHeader().GetError() != nil {
 			log.Error("[pd] can't get region info", zap.String("member-URL", url), errs.ZapError(err))
 			continue
@@ -981,11 +983,8 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 		}
 	}
 
-	if resp == nil {
-		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
-		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
-		return nil, errors.WithStack(errors.New(errorMsg))
+	if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+		return nil, err
 	}
 	return handleRegionResponse(resp), nil
 }
@@ -1578,7 +1577,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.pdSvcDiscovery.ScheduleCheckMemberChanged(err)
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))

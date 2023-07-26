@@ -641,7 +641,7 @@ func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, o
 
 func waitLeader(re *require.Assertions, cli pd.ServiceDiscovery, leader string) {
 	testutil.Eventually(re, func() bool {
-		cli.ScheduleCheckMemberChanged()
+		cli.ScheduleCheckMemberChanged(nil)
 		return cli.GetServingAddr() == leader
 	})
 }

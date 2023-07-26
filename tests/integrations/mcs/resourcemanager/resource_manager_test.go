@@ -136,7 +136,7 @@ func (suite *resourceManagerClientTestSuite) waitLeader(cli pd.Client, leaderAdd
 	suite.True(ok)
 	suite.NotNil(innerCli)
 	testutil.Eventually(suite.Require(), func() bool {
-		innerCli.GetServiceDiscovery().ScheduleCheckMemberChanged()
+		innerCli.GetServiceDiscovery().ScheduleCheckMemberChanged(nil)
 		return innerCli.GetServiceDiscovery().GetServingAddr() == leaderAddr
 	})
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -141,7 +142,7 @@ type pdServiceDiscovery struct {
 	// leader is updated.
 	tsoGlobalAllocLeaderUpdatedCb tsoGlobalServAddrUpdatedFunc
 
-	checkMembershipCh chan struct{}
+	checkMembershipCh chan err
 
 	wg        *sync.WaitGroup
 	ctx       context.Context
@@ -165,7 +166,7 @@ func newPDServiceDiscovery(
 	urls []string, tlsCfg *tlsutil.TLSConfig, option *option,
 ) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
-		checkMembershipCh:   make(chan struct{}, 1),
+		checkMembershipCh:   make(chan error, 1),
 		ctx:                 ctx,
 		cancel:              cancel,
 		wg:                  wg,
@@ -244,7 +245,10 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-		case <-c.checkMembershipCh:
+		case err := <-c.checkMembershipCh:
+			if err != nil && strings.Contains(err.Error(), errs.ErrRateLimitExceeded) {
+				continue
+			}
 		}
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
@@ -279,7 +283,7 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 		if err := c.checkServiceModeChanged(); err != nil {
 			log.Error("[pd] failed to update service mode",
 				zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
-			c.ScheduleCheckMemberChanged() // check if the leader changed
+			c.ScheduleCheckMemberChanged(err) // check if the leader changed
 		}
 	}
 }
@@ -379,9 +383,9 @@ func (c *pdServiceDiscovery) GetBackupAddrs() []string {
 
 // ScheduleCheckMemberChanged is used to check if there is any membership
 // change among the leader and the followers.
-func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
+func (c *pdServiceDiscovery) ScheduleCheckMemberChanged(err error) {
 	select {
-	case c.checkMembershipCh <- struct{}{}:
+	case c.checkMembershipCh <- err:
 	default:
 	}
 }
