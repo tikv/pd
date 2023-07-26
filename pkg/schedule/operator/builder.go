@@ -63,7 +63,8 @@ type Builder struct {
 
 	// build flags
 	useJointConsensus bool
-	lightWeight       bool
+	lightRemovePeer   bool
+	lightAddPeer      bool
 	forceTargetLeader bool
 
 	// intermediate states
@@ -370,9 +371,15 @@ func (b *Builder) SetExpectedRoles(roles map[uint64]placement.PeerRoleType) *Bui
 	return b
 }
 
-// EnableLightWeight marks the region as light weight. It is used for scatter regions.
-func (b *Builder) EnableLightWeight() *Builder {
-	b.lightWeight = true
+// SetLightAddPeer marks the add peer as light weight. It is used for scatter regions.
+func (b *Builder) SetLightAddPeer() *Builder {
+	b.lightAddPeer = true
+	return b
+}
+
+// SetLightRemovePeer marks the remove peer as light weight. It is used for scatter regions.
+func (b *Builder) SetLightRemovePeer() *Builder {
+	b.lightRemovePeer = true
 	return b
 }
 
@@ -532,7 +539,7 @@ func (b *Builder) brief() string {
 	switch {
 	case len(b.toAdd) > 0 && len(b.toRemove) > 0:
 		op := "mv peer"
-		if b.lightWeight {
+		if b.lightAddPeer && b.lightRemovePeer {
 			op = "mv light peer"
 		}
 		return fmt.Sprintf("%s: store %s to %s", op, b.toRemove, b.toAdd)
@@ -775,7 +782,7 @@ func (b *Builder) execPromoteNonWitness(peer *metapb.Peer) {
 }
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
-	b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightWeight, IsWitness: peer.GetIsWitness(), SendStore: b.originLeaderStoreID})
+	b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightAddPeer, IsWitness: peer.GetIsWitness(), SendStore: b.originLeaderStoreID})
 	if !core.IsLearner(peer) {
 		b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness()})
 	}
@@ -791,7 +798,7 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	if store != nil {
 		isDownStore = store.DownTime() > b.GetSharedConfig().GetMaxStoreDownTime()
 	}
-	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore, IsLightWeight: b.lightWeight})
+	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore, IsLightWeight: b.lightRemovePeer})
 	delete(b.currentPeers, removeStoreID)
 	delete(b.toRemove, removeStoreID)
 }

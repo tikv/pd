@@ -1589,7 +1589,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	}
 
 	if len(request.GetRegionsId()) > 0 {
-		percentage, err := scatterRegions(rc, request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
+		percentage, err := scatterRegions(rc, request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()), request.GetSkipLimitCheck())
 		if err != nil {
 			return nil, err
 		}
@@ -1612,7 +1612,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
 
-	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
+	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup(), request.GetSkipLimitCheck())
 	if err != nil {
 		return nil, err
 	}
@@ -1986,7 +1986,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 	}
 	rc := s.GetRaftCluster()
 	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
-	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()))
+	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()), false)
 	if err != nil {
 		return nil, err
 	}
@@ -1999,8 +1999,8 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 }
 
 // scatterRegions add operators to scatter regions and return the processed percentage and error
-func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int) (int, error) {
-	opsCount, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int, skipCheckLimit bool) (int, error) {
+	opsCount, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit, skipCheckLimit)
 	if err != nil {
 		return 0, err
 	}

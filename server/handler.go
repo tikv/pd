@@ -854,7 +854,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 		return errors.Errorf("region %d is a hot region", regionID)
 	}
 
-	op, err := c.GetRegionScatter().Scatter(region, group)
+	op, err := c.GetRegionScatter().Scatter(region, group, false)
 	if err != nil {
 		return err
 	}
@@ -891,7 +891,7 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 			return 0, err
 		}
 	} else {
-		opsCount, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit)
+		opsCount, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit, false)
 		if err != nil {
 			return 0, err
 		}
