@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/server/config"
 )
 
 func newGCStorage() endpoint.GCSafePointStorage {
@@ -30,7 +31,7 @@ func newGCStorage() endpoint.GCSafePointStorage {
 }
 
 func TestGCSafePointUpdateSequentially(t *testing.T) {
-	gcSafePointManager := NewSafePointManager(newGCStorage())
+	gcSafePointManager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
 	re := require.New(t)
 	curSafePoint := uint64(0)
 	// update gc safePoint with asc value.
@@ -59,7 +60,7 @@ func TestGCSafePointUpdateSequentially(t *testing.T) {
 }
 
 func TestGCSafePointUpdateCurrently(t *testing.T) {
-	gcSafePointManager := NewSafePointManager(newGCStorage())
+	gcSafePointManager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
 	maxSafePoint := uint64(1000)
 	wg := sync.WaitGroup{}
 	re := require.New(t)
@@ -83,7 +84,7 @@ func TestGCSafePointUpdateCurrently(t *testing.T) {
 
 func TestServiceGCSafePointUpdate(t *testing.T) {
 	re := require.New(t)
-	manager := NewSafePointManager(newGCStorage())
+	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
 	gcworkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
 	brServiceID := "br"

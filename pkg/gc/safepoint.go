@@ -18,8 +18,10 @@ import (
 	"math"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/config"
 )
 
 // SafePointManager is the manager for safePoint of GC and services.
@@ -27,11 +29,12 @@ type SafePointManager struct {
 	gcLock        syncutil.Mutex
 	serviceGCLock syncutil.Mutex
 	store         endpoint.GCSafePointStorage
+	cfg           config.PDServerConfig
 }
 
 // NewSafePointManager creates a SafePointManager of GC and services.
-func NewSafePointManager(store endpoint.GCSafePointStorage) *SafePointManager {
-	return &SafePointManager{store: store}
+func NewSafePointManager(store endpoint.GCSafePointStorage, cfg config.PDServerConfig) *SafePointManager {
+	return &SafePointManager{store: store, cfg: cfg}
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.
@@ -42,6 +45,11 @@ func (manager *SafePointManager) LoadGCSafePoint() (uint64, error) {
 // UpdateGCSafePoint updates the safepoint if it is greater than the previous one
 // it returns the old safepoint in the storage.
 func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafePoint uint64, err error) {
+	if manager.cfg.BlockSafePointV1 {
+		oldSafePoint = 0
+		err = errors.Errorf("Don't allow update gc safe point v1.")
+		return
+	}
 	manager.gcLock.Lock()
 	defer manager.gcLock.Unlock()
 	// TODO: cache the safepoint in the storage.
@@ -58,6 +66,9 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 
 // UpdateServiceGCSafePoint update the safepoint for a specific service.
 func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
+	if manager.cfg.BlockSafePointV1 {
+		return nil, false, errors.Errorf("Don't allow update service safe point v1.")
+	}
 	manager.serviceGCLock.Lock()
 	defer manager.serviceGCLock.Unlock()
 	minServiceSafePoint, err = manager.store.LoadMinServiceGCSafePoint(now)
