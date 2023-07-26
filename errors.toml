@@ -701,9 +701,9 @@ error = '''
 leader is nil
 '''
 
-["PD:server:ErrReachRateLimit"]
+["PD:server:ErrRateLimitExceeded"]
 error = '''
-reach rate limit
+rate limit exceeded
 '''
 
 ["PD:server:ErrServerNotStarted"]

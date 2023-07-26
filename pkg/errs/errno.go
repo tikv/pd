@@ -182,7 +182,7 @@ var (
 	ErrCancelStartEtcd       = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
 	ErrConfigItem            = errors.Normalize("cannot set invalid configuration", errors.RFCCodeText("PD:server:ErrConfiguration"))
 	ErrServerNotStarted      = errors.Normalize("server not started", errors.RFCCodeText("PD:server:ErrServerNotStarted"))
-	ErrReachRateLimit        = errors.Normalize("reach rate limit", errors.RFCCodeText("PD:server:ErrReachRateLimit"))
+	ErrRateLimitExceeded     = errors.Normalize("rate limit exceeded", errors.RFCCodeText("PD:server:ErrRateLimitExceeded"))
 )
 
 // logutil errors
