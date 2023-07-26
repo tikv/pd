@@ -17,8 +17,6 @@ package schedulers
 import (
 	"bytes"
 	"fmt"
-	"github.com/docker/go-units"
-	"github.com/tikv/pd/pkg/statistics/buckets"
 	"math"
 	"math/rand"
 	"net/http"
@@ -26,6 +24,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -39,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
@@ -1550,6 +1550,7 @@ func (bs *balanceSolver) splitHotKeys(region *core.RegionInfo, stats []*buckets.
 		totalLoads += stat.Loads[dim]
 	}
 
+	// find the half point of the total loads.
 	acc, splitIdx := uint64(0), 0
 	for ; acc < totalLoads/2 && splitIdx < len(stats); splitIdx++ {
 		acc += stats[splitIdx].Loads[dim]
