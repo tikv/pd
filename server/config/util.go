@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,11 +16,9 @@ package config
 import (
 	"net/url"
 	"regexp"
-	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/errs"
 )
 
 const (
@@ -54,11 +51,6 @@ func ValidateLabels(labels []*metapb.StoreLabel) error {
 	return nil
 }
 
-// ValidateLabelKey checks the legality of the label key.
-func ValidateLabelKey(key string) error {
-	return validateFormat(key, keyFormat)
-}
-
 // ValidateURLWithScheme checks the format of the URL.
 func ValidateURLWithScheme(rawURL string) error {
 	u, err := url.ParseRequestURI(rawURL)
@@ -71,18 +63,26 @@ func ValidateURLWithScheme(rawURL string) error {
 	return nil
 }
 
-// parseUrls parse a string into multiple urls.
-func parseUrls(s string) ([]url.URL, error) {
-	items := strings.Split(s, ",")
-	urls := make([]url.URL, 0, len(items))
-	for _, item := range items {
-		u, err := url.Parse(item)
-		if err != nil {
-			return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
-		}
+var schedulerMap = make(map[string]struct{})
 
-		urls = append(urls, *u)
+// RegisterScheduler registers the scheduler type.
+func RegisterScheduler(typ string) {
+	schedulerMap[typ] = struct{}{}
+}
+
+// IsSchedulerRegistered checks if the named scheduler type is registered.
+func IsSchedulerRegistered(name string) bool {
+	_, ok := schedulerMap[name]
+	return ok
+}
+
+// NewTestOptions creates default options for testing.
+func NewTestOptions() *PersistOptions {
+	// register default schedulers in case config check fail.
+	for _, d := range DefaultSchedulers {
+		RegisterScheduler(d.Type)
 	}
-
-	return urls, nil
+	c := NewConfig()
+	c.Adjust(nil)
+	return NewPersistOptions(c)
 }

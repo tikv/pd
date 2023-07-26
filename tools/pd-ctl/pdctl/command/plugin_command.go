@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -20,7 +19,7 @@ import (
 	"net/http"
 
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/server/cluster"
 )
 
 var (
@@ -59,11 +58,11 @@ func NewUnloadPluginCommand() *cobra.Command {
 }
 
 func loadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	sendPluginCommand(cmd, schedule.PluginLoad, args)
+	sendPluginCommand(cmd, cluster.PluginLoad, args)
 }
 
 func unloadPluginCommandFunc(cmd *cobra.Command, args []string) {
-	sendPluginCommand(cmd, schedule.PluginUnload, args)
+	sendPluginCommand(cmd, cluster.PluginUnload, args)
 }
 
 func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
@@ -80,10 +79,10 @@ func sendPluginCommand(cmd *cobra.Command, action string, args []string) {
 		return
 	}
 	switch action {
-	case schedule.PluginLoad:
-		_, err = doRequest(cmd, pluginPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
-	case schedule.PluginUnload:
-		_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
+	case cluster.PluginLoad:
+		_, err = doRequest(cmd, pluginPrefix, http.MethodPost, WithBody("application/json", bytes.NewBuffer(reqData)))
+	case cluster.PluginUnload:
+		_, err = doRequest(cmd, pluginPrefix, http.MethodDelete, WithBody("application/json", bytes.NewBuffer(reqData)))
 	default:
 		cmd.Printf("Unknown action %s\n", action)
 		return

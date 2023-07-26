@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -48,10 +47,10 @@ func main() {
 	InitLogger(*logLevel)
 	analysis.GetTransferCounter().Init(0, 0)
 	if *input == "" {
-		Logger.Fatal("need to specify one input pd log")
+		Logger.Fatal("Need to specify one input pd log.")
 	}
 	if *output != "" {
-		f, err := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_SYNC|os.O_APPEND, 0600)
+		f, err := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_SYNC|os.O_APPEND, 0755)
 		if err != nil {
 			Logger.Fatal(err.Error())
 		} else {
@@ -63,7 +62,7 @@ func main() {
 	case "transfer-counter":
 		{
 			if *operator == "" {
-				Logger.Fatal("need to specify one operator")
+				Logger.Fatal("Need to specify one operator.")
 			}
 			r, err := analysis.GetTransferCounter().CompileRegex(*operator)
 			if err != nil {
@@ -77,6 +76,7 @@ func main() {
 			break
 		}
 	default:
-		Logger.Fatal("style is not exist")
+		Logger.Fatal("Style is not exist.")
 	}
+
 }

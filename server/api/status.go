@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,8 +16,8 @@ package api
 import (
 	"net/http"
 
-	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/versioninfo"
 	"github.com/unrolled/render"
 )
 
@@ -27,7 +26,6 @@ type statusHandler struct {
 	rd  *render.Render
 }
 
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type status struct {
 	BuildTS        string `json:"build_ts"`
 	Version        string `json:"version"`
@@ -42,11 +40,11 @@ func newStatusHandler(svr *server.Server, rd *render.Render) *statusHandler {
 	}
 }
 
-// @Summary  Get the build info of PD server.
-// @Produce  json
-// @Success  200  {object}  status
-// @Router   /status [get]
-func (h *statusHandler) GetPDStatus(w http.ResponseWriter, r *http.Request) {
+// @Summary Get the build info of PD server.
+// @Produce json
+// @Success 200 {object} status
+// @Router /status [get]
+func (h *statusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	version := status{
 		BuildTS:        versioninfo.PDBuildTS,
 		GitHash:        versioninfo.PDGitHash,

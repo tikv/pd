@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -20,7 +19,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/server"
 )
 
@@ -32,7 +31,7 @@ func newQueryMetric(s *server.Server) *queryMetric {
 	return &queryMetric{s: s}
 }
 
-func (h *queryMetric) QueryMetric(w http.ResponseWriter, r *http.Request) {
+func (h *queryMetric) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	metricAddr := h.s.GetConfig().PDServerCfg.MetricStorage
 	if metricAddr == "" {
 		http.Error(w, "metric storage doesn't set", http.StatusInternalServerError)
@@ -48,7 +47,7 @@ func (h *queryMetric) QueryMetric(w http.ResponseWriter, r *http.Request) {
 	case "http", "https":
 		// Replace the pd path with the prometheus http API path.
 		r.URL.Path = strings.Replace(r.URL.Path, "pd/api/v1/metric", "api/v1", 1)
-		apiutil.NewCustomReverseProxies(h.s.GetHTTPClient(), []url.URL{*u}).ServeHTTP(w, r)
+		serverapi.NewCustomReverseProxies(h.s.GetHTTPClient(), []url.URL{*u}).ServeHTTP(w, r)
 	default:
 		// TODO: Support read data by self after support store metric data in PD/TiKV.
 		http.Error(w, fmt.Sprintf("schema of metric storage address is no supported, address: %v", metricAddr), http.StatusInternalServerError)

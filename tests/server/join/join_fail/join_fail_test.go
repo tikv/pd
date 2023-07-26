@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,29 +15,48 @@ package join_fail_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
-	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
+	"go.uber.org/goleak"
 )
 
-func TestFailedPDJoinInStep1(t *testing.T) {
-	re := require.New(t)
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+var _ = Suite(&joinTestSuite{})
+
+type joinTestSuite struct{}
+
+func (s *joinTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
+
+func (s *joinTestSuite) TestFailedPDJoinInStep1(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	// Join the second PD.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/join/add-member-failed", `return`))
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/join/add-member-failed", `return`), IsNil)
 	_, err = cluster.Join(ctx)
-	re.Error(err)
-	re.Contains(err.Error(), "join failed")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/join/add-member-failed"))
+	c.Assert(err, NotNil)
+	c.Assert(strings.Contains(err.Error(), "join failed"), IsTrue)
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/join/add-member-failed"), IsNil)
 }

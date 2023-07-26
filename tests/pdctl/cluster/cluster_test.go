@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,72 +18,75 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
+	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/server"
 	clusterpkg "github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
-	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func TestClusterAndPing(t *testing.T) {
-	re := require.New(t)
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&clusterTestSuite{})
+
+type clusterTestSuite struct{}
+
+func (s *clusterTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
+
+func (s *clusterTestSuite) TestClusterAndPing(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	err = cluster.GetServer(cluster.GetLeader()).BootstrapCluster()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	pdAddr := cluster.GetConfig().GetClientURL()
 	i := strings.Index(pdAddr, "//")
 	pdAddr = pdAddr[i+2:]
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := pdctl.InitCommand()
+	defer cluster.Destroy()
 
 	// cluster
 	args := []string{"-u", pdAddr, "cluster"}
-	output, err := pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
 	ci := &metapb.Cluster{}
-	re.NoError(json.Unmarshal(output, ci))
-	re.Equal(cluster.GetCluster(), ci)
+	c.Assert(json.Unmarshal(output, ci), IsNil)
+	c.Assert(ci, DeepEquals, cluster.GetCluster())
+
+	echo := pdctl.GetEcho([]string{"-u", pdAddr, "--cacert=ca.pem", "cluster"})
+	c.Assert(strings.Contains(echo, "no such file or directory"), IsTrue)
 
 	// cluster info
 	args = []string{"-u", pdAddr, "cluster"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
 	ci = &metapb.Cluster{}
-	re.NoError(json.Unmarshal(output, ci))
-	re.Equal(cluster.GetCluster(), ci)
+	c.Assert(json.Unmarshal(output, ci), IsNil)
+	c.Assert(ci, DeepEquals, cluster.GetCluster())
 
 	// cluster status
 	args = []string{"-u", pdAddr, "cluster", "status"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
 	cs := &clusterpkg.Status{}
-	re.NoError(json.Unmarshal(output, cs))
+	c.Assert(json.Unmarshal(output, cs), IsNil)
 	clusterStatus, err := cluster.GetClusterStatus()
-	re.NoError(err)
-	re.True(clusterStatus.RaftBootstrapTime.Equal(cs.RaftBootstrapTime))
-	// ref: https://github.com/onsi/gomega/issues/264
-	clusterStatus.RaftBootstrapTime = time.Time{}
-	cs.RaftBootstrapTime = time.Time{}
-
-	re.Equal(clusterStatus, cs)
+	c.Assert(err, IsNil)
+	c.Assert(cs, DeepEquals, clusterStatus)
 
 	// ping
 	args = []string{"-u", pdAddr, "ping"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.NotNil(output)
-
-	// does not exist
-	args = []string{"-u", pdAddr, "--cacert=ca.pem", "cluster"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
-	re.Contains(err.Error(), "no such file or directory")
+	_, output, err = pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
+	c.Assert(output, NotNil)
 }

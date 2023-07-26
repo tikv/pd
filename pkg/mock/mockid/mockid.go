@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -29,15 +28,4 @@ func NewIDAllocator() *IDAllocator {
 // Alloc returns a new id.
 func (alloc *IDAllocator) Alloc() (uint64, error) {
 	return atomic.AddUint64(&alloc.base, 1), nil
-}
-
-// SetBase implements the IDAllocator interface.
-func (alloc *IDAllocator) SetBase(newBase uint64) error {
-	atomic.StoreUint64(&alloc.base, newBase)
-	return nil
-}
-
-// Rebase implements the IDAllocator interface.
-func (alloc *IDAllocator) Rebase() error {
-	return nil
 }

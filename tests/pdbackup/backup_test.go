@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -22,20 +21,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	. "github.com/pingcap/check"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tools/pd-backup/pdbackup"
 	"go.etcd.io/etcd/clientv3"
 )
 
-func TestBackup(t *testing.T) {
-	re := require.New(t)
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&backupTestSuite{})
+
+type backupTestSuite struct{}
+
+func (s *backupTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
+
+func (s *backupTestSuite) TestBackup(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	urls := strings.Split(pdAddr, ",")
@@ -45,18 +56,18 @@ func TestBackup(t *testing.T) {
 		DialTimeout: 3 * time.Second,
 		TLS:         nil,
 	})
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	backupInfo, err := pdbackup.GetBackupInfo(client, pdAddr)
-	re.NoError(err)
-	re.NotNil(backupInfo)
+	c.Assert(err, IsNil)
+	c.Assert(backupInfo, NotNil)
 	backBytes, err := json.Marshal(backupInfo)
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	var formatBuffer bytes.Buffer
-	err = json.Indent(&formatBuffer, backBytes, "", "    ")
-	re.NoError(err)
+	err = json.Indent(&formatBuffer, []byte(backBytes), "", "    ")
+	c.Assert(err, IsNil)
 	newInfo := &pdbackup.BackupInfo{}
 	err = json.Unmarshal(formatBuffer.Bytes(), newInfo)
-	re.NoError(err)
-	re.Equal(newInfo, backupInfo)
+	c.Assert(err, IsNil)
+	c.Assert(backupInfo, DeepEquals, newInfo)
 }

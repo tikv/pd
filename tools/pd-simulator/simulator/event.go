@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,7 +16,7 @@ package simulator
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -84,7 +83,7 @@ type WriteFlowOnSpot struct {
 func (e *WriteFlowOnSpot) Run(raft *RaftEngine, tickCount int64) bool {
 	res := e.descriptor.Step(tickCount)
 	for key, size := range res {
-		region := raft.GetRegionByKey([]byte(key))
+		region := raft.SearchRegion([]byte(key))
 		simutil.Logger.Debug("search the region", zap.Reflect("region", region.GetMeta()))
 		if region == nil {
 			simutil.Logger.Error("region not found for key", zap.String("key", key))
@@ -145,12 +144,13 @@ func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
 
 	config := raft.storeConfig
 	s := &cases.Store{
-		ID:       id,
-		Status:   metapb.StoreState_Up,
-		Capacity: uint64(config.RaftStore.Capacity),
-		Version:  config.StoreVersion,
+		ID:        id,
+		Status:    metapb.StoreState_Up,
+		Capacity:  config.StoreCapacityGB * cases.GB,
+		Available: config.StoreAvailableGB * cases.GB,
+		Version:   config.StoreVersion,
 	}
-	n, err := NewNode(s, raft.conn.pdAddr, config)
+	n, err := NewNode(s, raft.conn.pdAddr, config.StoreIOMBPerSecond)
 	if err != nil {
 		simutil.Logger.Error("add node failed", zap.Uint64("node-id", id), zap.Error(err))
 		return false
@@ -186,7 +186,7 @@ func (e *DeleteNodes) Run(raft *RaftEngine, tickCount int64) bool {
 
 	regions := raft.GetRegions()
 	for _, region := range regions {
-		storeIDs := region.GetStoreIDs()
+		storeIDs := region.GetStoreIds()
 		if _, ok := storeIDs[id]; ok {
 			downPeer := &pdpb.PeerStats{
 				Peer:        region.GetStorePeer(id),

@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -20,50 +19,41 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"testing"
+	"strings"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
+	. "github.com/pingcap/check"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/schedule/placement"
 )
 
-type ruleTestSuite struct {
-	suite.Suite
+var _ = Suite(&testRuleSuite{})
+
+type testRuleSuite struct {
 	svr       *server.Server
-	cleanup   tu.CleanupFunc
+	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func TestRuleTestSuite(t *testing.T) {
-	suite.Run(t, new(ruleTestSuite))
-}
+func (s *testRuleSuite) SetUpSuite(c *C) {
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
 
-func (suite *ruleTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1/config", addr, apiPrefix)
 
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/config", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-	PDServerCfg := suite.svr.GetConfig().PDServerCfg
+	mustBootstrapCluster(c, s.svr)
+	PDServerCfg := s.svr.GetConfig().PDServerCfg
 	PDServerCfg.KeyType = "raw"
-	err := suite.svr.SetPDServerConfig(PDServerCfg)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, suite.urlPrefix, []byte(`{"enable-placement-rules":"true"}`), tu.StatusOK(re)))
+	err := s.svr.SetPDServerConfig(PDServerCfg)
+	c.Assert(err, IsNil)
+	c.Assert(postJSON(testDialClient, s.urlPrefix, []byte(`{"enable-placement-rules":"true"}`)), IsNil)
 }
 
-func (suite *ruleTestSuite) TearDownSuite() {
-	suite.cleanup()
+func (s *testRuleSuite) TearDownSuite(c *C) {
+	s.cleanup()
 }
 
-func (suite *ruleTestSuite) TearDownTest() {
+func (s *testRuleSuite) TearDownTest(c *C) {
 	def := placement.GroupBundle{
 		ID: "pd",
 		Rules: []*placement.Rule{
@@ -71,35 +61,35 @@ func (suite *ruleTestSuite) TearDownTest() {
 		},
 	}
 	data, err := json.Marshal([]placement.GroupBundle{def})
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule", data, tu.StatusOK(suite.Require()))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule", data)
+	c.Assert(err, IsNil)
 }
 
-func (suite *ruleTestSuite) TestSet() {
+func (s *testRuleSuite) TestSet(c *C) {
 	rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	successData, err := json.Marshal(rule)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	oldEndKey, err := hex.DecodeString(rule.EndKeyHex)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	parseErrData := []byte("foo")
 	rule1 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
 	checkErrData, err := json.Marshal(rule1)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	rule2 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
 	setErrData, err := json.Marshal(rule2)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	rule3 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "follower", Count: 3}
 	updateData, err := json.Marshal(rule3)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	newStartKey, err := hex.DecodeString(rule.StartKeyHex)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	newEndKey, err := hex.DecodeString(rule.EndKeyHex)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
-	testCases := []struct {
+	testcases := []struct {
 		name        string
 		rawData     []byte
 		success     bool
@@ -145,7 +135,7 @@ func (suite *ruleTestSuite) TestSet() {
 			name:    "Check rule failed",
 			rawData: checkErrData,
 			success: false,
-			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
+			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
 `,
 		},
 		{
@@ -156,138 +146,120 @@ func (suite *ruleTestSuite) TestSet() {
 `,
 		},
 	}
-	re := suite.Require()
-	for _, testCase := range testCases {
-		suite.T().Log(testCase.name)
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
 		// clear suspect keyRanges to prevent test case from others
-		suite.svr.GetRaftCluster().ClearSuspectKeyRanges()
-		if testCase.success {
-			err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", testCase.rawData, tu.StatusOK(re))
+		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
+		err = postJSON(testDialClient, s.urlPrefix+"/rule", testcase.rawData)
+		if testcase.success {
+			c.Assert(err, IsNil)
+
 			popKeyRangeMap := map[string]struct{}{}
-			for i := 0; i < len(testCase.popKeyRange)/2; i++ {
-				v, got := suite.svr.GetRaftCluster().PopOneSuspectKeyRange()
-				suite.True(got)
+			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
+				v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				c.Assert(got, Equals, true)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
-			suite.Len(popKeyRangeMap, len(testCase.popKeyRange))
+			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
 			for k := range popKeyRangeMap {
-				_, ok := testCase.popKeyRange[k]
-				suite.True(ok)
+				_, ok := testcase.popKeyRange[k]
+				c.Assert(ok, Equals, true)
 			}
+
 		} else {
-			err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", testCase.rawData,
-				tu.StatusNotOK(re),
-				tu.StringEqual(re, testCase.response))
+			c.Assert(err, NotNil)
+			c.Assert(err.Error(), Equals, testcase.response)
 		}
-		suite.NoError(err)
 	}
 }
 
-func (suite *ruleTestSuite) TestGet() {
+func (s *testRuleSuite) TestGet(c *C) {
 	rule := placement.Rule{GroupID: "a", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
-	suite.NoError(err)
-	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
+	c.Assert(err, IsNil)
 
-	testCases := []struct {
+	testcases := []struct {
 		name  string
 		rule  placement.Rule
 		found bool
-		code  int
+		code  string
 	}{
 		{
 			name:  "found",
 			rule:  rule,
 			found: true,
-			code:  200,
+			code:  "",
 		},
 		{
 			name:  "not found",
 			rule:  placement.Rule{GroupID: "a", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 			found: false,
-			code:  404,
+			code:  "404",
 		},
 	}
-	for _, testCase := range testCases {
-		suite.T().Log(testCase.name)
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
 		var resp placement.Rule
-		url := fmt.Sprintf("%s/rule/%s/%s", suite.urlPrefix, testCase.rule.GroupID, testCase.rule.ID)
-		if testCase.found {
-			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-			suite.compareRule(&resp, &testCase.rule)
+		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.rule.GroupID, testcase.rule.ID)
+		err = readJSON(testDialClient, url, &resp)
+		if testcase.found {
+			c.Assert(err, IsNil)
+			compareRule(c, &resp, &testcase.rule)
 		} else {
-			err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, testCase.code))
+			c.Assert(err, NotNil)
+			c.Assert(strings.HasSuffix(err.Error(), testcase.code), Equals, true)
 		}
-		suite.NoError(err)
 	}
 }
 
-func (suite *ruleTestSuite) TestGetAll() {
+func (s *testRuleSuite) TestGetAll(c *C) {
 	rule := placement.Rule{GroupID: "b", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
-	suite.NoError(err)
-	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
+	c.Assert(err, IsNil)
 
 	var resp2 []*placement.Rule
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/rules", &resp2)
-	suite.NoError(err)
-	suite.GreaterOrEqual(len(resp2), 1)
+	err = readJSON(testDialClient, s.urlPrefix+"/rules", &resp2)
+	c.Assert(err, IsNil)
+	c.Assert(len(resp2), GreaterEqual, 1)
 }
 
-func (suite *ruleTestSuite) TestSetAll() {
+func (s *testRuleSuite) TestSetAll(c *C) {
 	rule1 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
-	rule5 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 1,
-		LocationLabels: []string{"host"}}
-	rule6 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 3}
-
-	suite.svr.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
-	defaultRule := suite.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
-	defaultRule.LocationLabels = []string{"host"}
-	suite.svr.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
 
 	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
 	checkErrData, err := json.Marshal([]*placement.Rule{&rule1, &rule3})
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
 	setErrData, err := json.Marshal([]*placement.Rule{&rule1, &rule4})
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
-	defaultData, err := json.Marshal([]*placement.Rule{&rule1, &rule5})
-	suite.NoError(err)
-
-	recoverData, err := json.Marshal([]*placement.Rule{&rule1, &rule6})
-	suite.NoError(err)
-
-	testCases := []struct {
-		name          string
-		rawData       []byte
-		success       bool
-		response      string
-		isDefaultRule bool
-		count         int
+	testcases := []struct {
+		name     string
+		rawData  []byte
+		success  bool
+		response string
 	}{
 		{
-			name:          "Set rules successfully, with oldRules full of nil",
-			rawData:       successData,
-			success:       true,
-			response:      "",
-			isDefaultRule: false,
+			name:     "Set rules successfully, with oldRules full of nil",
+			rawData:  successData,
+			success:  true,
+			response: "",
 		},
 		{
-			name:          "Parse Json failed",
-			rawData:       []byte("foo"),
-			success:       false,
-			isDefaultRule: false,
+			name:    "Parse Json failed",
+			rawData: []byte("foo"),
+			success: false,
 			response: `{
   "code": "input",
   "msg": "invalid character 'o' in literal false (expecting 'a')",
@@ -298,70 +270,47 @@ func (suite *ruleTestSuite) TestSetAll() {
 `,
 		},
 		{
-			name:          "Check rule failed",
-			rawData:       checkErrData,
-			success:       false,
-			isDefaultRule: false,
-			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
+			name:    "Check rule failed",
+			rawData: checkErrData,
+			success: false,
+			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
 `,
 		},
 		{
-			name:          "Set Rule Failed",
-			rawData:       setErrData,
-			success:       false,
-			isDefaultRule: false,
+			name:    "Set Rule Failed",
+			rawData: setErrData,
+			success: false,
 			response: `"[PD:placement:ErrRuleContent]invalid rule content, invalid count -1"
 `,
 		},
-		{
-			name:          "set default rule",
-			rawData:       defaultData,
-			success:       true,
-			response:      "",
-			isDefaultRule: true,
-			count:         1,
-		},
-		{
-			name:          "recover default rule",
-			rawData:       recoverData,
-			success:       true,
-			response:      "",
-			isDefaultRule: true,
-			count:         3,
-		},
 	}
-	re := suite.Require()
-	for _, testCase := range testCases {
-		suite.T().Log(testCase.name)
-		if testCase.success {
-			err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rules", testCase.rawData, tu.StatusOK(re))
-			suite.NoError(err)
-			if testCase.isDefaultRule {
-				suite.Equal(int(suite.svr.GetPersistOptions().GetReplicationConfig().MaxReplicas), testCase.count)
-			}
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		err := postJSON(testDialClient, s.urlPrefix+"/rules", testcase.rawData)
+		if testcase.success {
+			c.Assert(err, IsNil)
 		} else {
-			err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rules", testCase.rawData,
-				tu.StringEqual(re, testCase.response))
-			suite.NoError(err)
+			c.Assert(err, NotNil)
+			c.Assert(err.Error(), Equals, testcase.response)
 		}
 	}
 }
 
-func (suite *ruleTestSuite) TestGetAllByGroup() {
-	re := suite.Require()
+func (s *testRuleSuite) TestGetAllByGroup(c *C) {
 	rule := placement.Rule{GroupID: "c", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
+	c.Assert(err, IsNil)
 
 	rule1 := placement.Rule{GroupID: "c", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err = json.Marshal(rule1)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
+	c.Assert(err, IsNil)
 
-	testCases := []struct {
+	testcases := []struct {
 		name    string
 		groupID string
 		count   int
@@ -378,36 +327,35 @@ func (suite *ruleTestSuite) TestGetAllByGroup() {
 		},
 	}
 
-	for _, testCase := range testCases {
-		suite.T().Log(testCase.name)
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
 		var resp []*placement.Rule
-		url := fmt.Sprintf("%s/rules/group/%s", suite.urlPrefix, testCase.groupID)
-		err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-		suite.NoError(err)
-		suite.Len(resp, testCase.count)
-		if testCase.count == 2 {
-			suite.compareRule(resp[0], &rule)
-			suite.compareRule(resp[1], &rule1)
+		url := fmt.Sprintf("%s/rules/group/%s", s.urlPrefix, testcase.groupID)
+		err = readJSON(testDialClient, url, &resp)
+		c.Assert(err, IsNil)
+		c.Assert(len(resp), Equals, testcase.count)
+		if testcase.count == 2 {
+			compareRule(c, resp[0], &rule)
+			compareRule(c, resp[1], &rule1)
 		}
 	}
 }
 
-func (suite *ruleTestSuite) TestGetAllByRegion() {
+func (s *testRuleSuite) TestGetAllByRegion(c *C) {
 	rule := placement.Rule{GroupID: "e", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
-	suite.NoError(err)
-	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
+	c.Assert(err, IsNil)
 
-	r := core.NewTestRegionInfo(4, 1, []byte{0x22, 0x22}, []byte{0x33, 0x33})
-	mustRegionHeartbeat(re, suite.svr, r)
+	r := newTestRegionInfo(4, 1, []byte([]byte{0x22, 0x22}), []byte{0x33, 0x33})
+	mustRegionHeartbeat(c, s.svr, r)
 
-	testCases := []struct {
+	testcases := []struct {
 		name     string
 		regionID string
 		success  bool
-		code     int
+		code     string
 	}{
 		{
 			name:     "found region",
@@ -418,48 +366,47 @@ func (suite *ruleTestSuite) TestGetAllByRegion() {
 			name:     "parse regionId failed",
 			regionID: "abc",
 			success:  false,
-			code:     400,
+			code:     "400",
 		},
 		{
 			name:     "region not found",
 			regionID: "5",
 			success:  false,
-			code:     404,
+			code:     "404",
 		},
 	}
-	for _, testCase := range testCases {
-		suite.T().Log(testCase.name)
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
 		var resp []*placement.Rule
-		url := fmt.Sprintf("%s/rules/region/%s", suite.urlPrefix, testCase.regionID)
-
-		if testCase.success {
-			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+		url := fmt.Sprintf("%s/rules/region/%s", s.urlPrefix, testcase.regionID)
+		err = readJSON(testDialClient, url, &resp)
+		if testcase.success {
+			c.Assert(err, IsNil)
 			for _, r := range resp {
 				if r.GroupID == "e" {
-					suite.compareRule(r, &rule)
+					compareRule(c, r, &rule)
 				}
 			}
 		} else {
-			err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, testCase.code))
+			c.Assert(err, NotNil)
+			c.Assert(strings.HasSuffix(err.Error(), testcase.code), Equals, true)
 		}
-		suite.NoError(err)
 	}
 }
 
-func (suite *ruleTestSuite) TestGetAllByKey() {
+func (s *testRuleSuite) TestGetAllByKey(c *C) {
 	rule := placement.Rule{GroupID: "f", ID: "40", StartKeyHex: "8888", EndKeyHex: "9111", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
-	suite.NoError(err)
-	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
+	c.Assert(err, IsNil)
 
-	testCases := []struct {
+	testcases := []struct {
 		name     string
 		key      string
 		success  bool
 		respSize int
-		code     int
+		code     string
 	}{
 		{
 			name:     "key in range",
@@ -471,7 +418,7 @@ func (suite *ruleTestSuite) TestGetAllByKey() {
 			name:     "parse key failed",
 			key:      "abc",
 			success:  false,
-			code:     400,
+			code:     "400",
 			respSize: 0,
 		},
 		{
@@ -481,32 +428,34 @@ func (suite *ruleTestSuite) TestGetAllByKey() {
 			respSize: 1,
 		},
 	}
-	for _, testCase := range testCases {
-		suite.T().Log(testCase.name)
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
 		var resp []*placement.Rule
-		url := fmt.Sprintf("%s/rules/key/%s", suite.urlPrefix, testCase.key)
-		if testCase.success {
-			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-			suite.Len(resp, testCase.respSize)
+		url := fmt.Sprintf("%s/rules/key/%s", s.urlPrefix, testcase.key)
+		err = readJSON(testDialClient, url, &resp)
+		if testcase.success {
+			c.Assert(err, IsNil)
+			c.Assert(len(resp), Equals, testcase.respSize)
 		} else {
-			err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, testCase.code))
+			c.Assert(err, NotNil)
+			c.Assert(strings.HasSuffix(err.Error(), testcase.code), Equals, true)
 		}
-		suite.NoError(err)
 	}
 }
 
-func (suite *ruleTestSuite) TestDelete() {
+func (s *testRuleSuite) TestDelete(c *C) {
 	rule := placement.Rule{GroupID: "g", ID: "10", StartKeyHex: "8888", EndKeyHex: "9111", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(suite.Require()))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/rule", data)
+	c.Assert(err, IsNil)
 	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	oldEndKey, err := hex.DecodeString(rule.EndKeyHex)
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
-	testCases := []struct {
+	testcases := []struct {
 		name        string
 		groupID     string
 		id          string
@@ -528,41 +477,41 @@ func (suite *ruleTestSuite) TestDelete() {
 			popKeyRange: map[string]struct{}{},
 		},
 	}
-	for _, testCase := range testCases {
-		suite.T().Log(testCase.name)
-		url := fmt.Sprintf("%s/rule/%s/%s", suite.urlPrefix, testCase.groupID, testCase.id)
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		url := fmt.Sprintf("%s/rule/%s/%s", s.urlPrefix, testcase.groupID, testcase.id)
 		// clear suspect keyRanges to prevent test case from others
-		suite.svr.GetRaftCluster().ClearSuspectKeyRanges()
-		statusCode, err := apiutil.DoDelete(testDialClient, url)
-		suite.NoError(err)
-		suite.Equal(http.StatusOK, statusCode)
-		if len(testCase.popKeyRange) > 0 {
+		s.svr.GetRaftCluster().ClearSuspectKeyRanges()
+		resp, err := doDelete(testDialClient, url)
+		c.Assert(err, IsNil)
+		c.Assert(resp.StatusCode, Equals, http.StatusOK)
+		if len(testcase.popKeyRange) > 0 {
 			popKeyRangeMap := map[string]struct{}{}
-			for i := 0; i < len(testCase.popKeyRange)/2; i++ {
-				v, got := suite.svr.GetRaftCluster().PopOneSuspectKeyRange()
-				suite.True(got)
+			for i := 0; i < len(testcase.popKeyRange)/2; i++ {
+				v, got := s.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				c.Assert(got, Equals, true)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
 			}
-			suite.Len(popKeyRangeMap, len(testCase.popKeyRange))
+			c.Assert(len(popKeyRangeMap), Equals, len(testcase.popKeyRange))
 			for k := range popKeyRangeMap {
-				_, ok := testCase.popKeyRange[k]
-				suite.True(ok)
+				_, ok := testcase.popKeyRange[k]
+				c.Assert(ok, Equals, true)
 			}
 		}
 	}
 }
 
-func (suite *ruleTestSuite) compareRule(r1 *placement.Rule, r2 *placement.Rule) {
-	suite.Equal(r2.GroupID, r1.GroupID)
-	suite.Equal(r2.ID, r1.ID)
-	suite.Equal(r2.StartKeyHex, r1.StartKeyHex)
-	suite.Equal(r2.EndKeyHex, r1.EndKeyHex)
-	suite.Equal(r2.Role, r1.Role)
-	suite.Equal(r2.Count, r1.Count)
+func compareRule(c *C, r1 *placement.Rule, r2 *placement.Rule) {
+	c.Assert(r1.GroupID, Equals, r2.GroupID)
+	c.Assert(r1.ID, Equals, r2.ID)
+	c.Assert(r1.StartKeyHex, Equals, r2.StartKeyHex)
+	c.Assert(r1.EndKeyHex, Equals, r2.EndKeyHex)
+	c.Assert(r1.Role, Equals, r2.Role)
+	c.Assert(r1.Count, Equals, r2.Count)
 }
 
-func (suite *ruleTestSuite) TestBatch() {
+func (s *testRuleSuite) TestBatch(c *C) {
 	opt1 := placement.RuleOp{
 		Action: placement.RuleOpAdd,
 		Rule:   &placement.Rule{GroupID: "a", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
@@ -602,21 +551,21 @@ func (suite *ruleTestSuite) TestBatch() {
 	}
 
 	successData1, err := json.Marshal([]placement.RuleOp{opt1, opt2, opt3})
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
 	successData2, err := json.Marshal([]placement.RuleOp{opt5, opt7})
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
 	successData3, err := json.Marshal([]placement.RuleOp{opt4, opt6})
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
 	checkErrData, err := json.Marshal([]placement.RuleOp{opt8})
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
 	setErrData, err := json.Marshal([]placement.RuleOp{opt9})
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 
-	testCases := []struct {
+	testcases := []struct {
 		name     string
 		rawData  []byte
 		success  bool
@@ -657,7 +606,7 @@ func (suite *ruleTestSuite) TestBatch() {
 			name:    "Check rule failed",
 			rawData: checkErrData,
 			success: false,
-			response: `"[PD:hex:ErrHexDecodingString]decode string XXXX error"
+			response: `"start key is not in hex format: encoding/hex: invalid byte: U+0058 'X'"
 `,
 		},
 		{
@@ -668,23 +617,20 @@ func (suite *ruleTestSuite) TestBatch() {
 `,
 		},
 	}
-	re := suite.Require()
-	for _, testCase := range testCases {
-		suite.T().Log(testCase.name)
-		if testCase.success {
-			err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rules/batch", testCase.rawData, tu.StatusOK(re))
-			suite.NoError(err)
+
+	for _, testcase := range testcases {
+		c.Log(testcase.name)
+		err := postJSON(testDialClient, s.urlPrefix+"/rules/batch", testcase.rawData)
+		if testcase.success {
+			c.Assert(err, IsNil)
 		} else {
-			err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rules/batch", testCase.rawData,
-				tu.StatusNotOK(re),
-				tu.StringEqual(re, testCase.response))
-			suite.NoError(err)
+			c.Assert(err, NotNil)
+			c.Assert(err.Error(), Equals, testcase.response)
 		}
 	}
 }
 
-func (suite *ruleTestSuite) TestBundle() {
-	re := suite.Require()
+func (s *testRuleSuite) TestBundle(c *C) {
 	// GetAll
 	b1 := placement.GroupBundle{
 		ID: "pd",
@@ -693,10 +639,10 @@ func (suite *ruleTestSuite) TestBundle() {
 		},
 	}
 	var bundles []placement.GroupBundle
-	err := tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
-	suite.NoError(err)
-	suite.Len(bundles, 1)
-	suite.compareBundle(bundles[0], b1)
+	err := readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 1)
+	compareBundle(c, bundles[0], b1)
 
 	// Set
 	b2 := placement.GroupBundle{
@@ -708,267 +654,67 @@ func (suite *ruleTestSuite) TestBundle() {
 		},
 	}
 	data, err := json.Marshal(b2)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule/foo", data, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule/foo", data)
+	c.Assert(err, IsNil)
 
 	// Get
 	var bundle placement.GroupBundle
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule/foo", &bundle)
-	suite.NoError(err)
-	suite.compareBundle(bundle, b2)
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule/foo", &bundle)
+	c.Assert(err, IsNil)
+	compareBundle(c, bundle, b2)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
-	suite.NoError(err)
-	suite.Len(bundles, 2)
-	suite.compareBundle(bundles[0], b1)
-	suite.compareBundle(bundles[1], b2)
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 2)
+	compareBundle(c, bundles[0], b1)
+	compareBundle(c, bundles[1], b2)
 
 	// Delete
-	_, err = apiutil.DoDelete(testDialClient, suite.urlPrefix+"/placement-rule/pd")
-	suite.NoError(err)
+	_, err = doDelete(testDialClient, s.urlPrefix+"/placement-rule/pd")
+	c.Assert(err, IsNil)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
-	suite.NoError(err)
-	suite.Len(bundles, 1)
-	suite.compareBundle(bundles[0], b2)
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 1)
+	compareBundle(c, bundles[0], b2)
 
 	// SetAll
 	b2.Rules = append(b2.Rules, &placement.Rule{GroupID: "foo", ID: "baz", Index: 2, Role: "follower", Count: 1})
 	b2.Index, b2.Override = 0, false
 	b3 := placement.GroupBundle{ID: "foobar", Index: 100}
 	data, err = json.Marshal([]placement.GroupBundle{b1, b2, b3})
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, s.urlPrefix+"/placement-rule", data)
+	c.Assert(err, IsNil)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
-	suite.NoError(err)
-	suite.Len(bundles, 3)
-	suite.compareBundle(bundles[0], b2)
-	suite.compareBundle(bundles[1], b1)
-	suite.compareBundle(bundles[2], b3)
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 3)
+	compareBundle(c, bundles[0], b2)
+	compareBundle(c, bundles[1], b1)
+	compareBundle(c, bundles[2], b3)
 
 	// Delete using regexp
-	_, err = apiutil.DoDelete(testDialClient, suite.urlPrefix+"/placement-rule/"+url.PathEscape("foo.*")+"?regexp")
-	suite.NoError(err)
+	_, err = doDelete(testDialClient, s.urlPrefix+"/placement-rule/"+url.PathEscape("foo.*")+"?regexp")
+	c.Assert(err, IsNil)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
-	suite.NoError(err)
-	suite.Len(bundles, 1)
-	suite.compareBundle(bundles[0], b1)
-
-	// Set
-	id := "rule-without-group-id"
-	b4 := placement.GroupBundle{
-		Index: 4,
-		Rules: []*placement.Rule{
-			{ID: "bar", Index: 1, Override: true, Role: "voter", Count: 1},
-		},
-	}
-	data, err = json.Marshal(b4)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule/"+id, data, tu.StatusOK(re))
-	suite.NoError(err)
-
-	b4.ID = id
-	b4.Rules[0].GroupID = b4.ID
-
-	// Get
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule/"+id, &bundle)
-	suite.NoError(err)
-	suite.compareBundle(bundle, b4)
-
-	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
-	suite.NoError(err)
-	suite.Len(bundles, 2)
-	suite.compareBundle(bundles[0], b1)
-	suite.compareBundle(bundles[1], b4)
-
-	// SetAll
-	b5 := placement.GroupBundle{
-		ID:    "rule-without-group-id-2",
-		Index: 5,
-		Rules: []*placement.Rule{
-			{ID: "bar", Index: 1, Override: true, Role: "voter", Count: 1},
-		},
-	}
-	data, err = json.Marshal([]placement.GroupBundle{b1, b4, b5})
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule", data, tu.StatusOK(re))
-	suite.NoError(err)
-
-	b5.Rules[0].GroupID = b5.ID
-
-	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
-	suite.NoError(err)
-	suite.Len(bundles, 3)
-	suite.compareBundle(bundles[0], b1)
-	suite.compareBundle(bundles[1], b4)
-	suite.compareBundle(bundles[2], b5)
+	err = readJSON(testDialClient, s.urlPrefix+"/placement-rule", &bundles)
+	c.Assert(err, IsNil)
+	c.Assert(bundles, HasLen, 1)
+	compareBundle(c, bundles[0], b1)
 }
 
-func (suite *ruleTestSuite) TestBundleBadRequest() {
-	testCases := []struct {
-		uri  string
-		data string
-		ok   bool
-	}{
-		{"/placement-rule/foo", `{"group_id":"foo"}`, true},
-		{"/placement-rule/foo", `{"group_id":"bar"}`, false},
-		{"/placement-rule/foo", `{"group_id":"foo", "rules": [{"group_id":"foo", "id":"baz", "role":"voter", "count":1}]}`, true},
-		{"/placement-rule/foo", `{"group_id":"foo", "rules": [{"group_id":"bar", "id":"baz", "role":"voter", "count":1}]}`, false},
-		{"/placement-rule", `[{"group_id":"foo", "rules": [{"group_id":"foo", "id":"baz", "role":"voter", "count":1}]}]`, true},
-		{"/placement-rule", `[{"group_id":"foo", "rules": [{"group_id":"bar", "id":"baz", "role":"voter", "count":1}]}]`, false},
-	}
-	for _, testCase := range testCases {
-		err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+testCase.uri, []byte(testCase.data),
-			func(_ []byte, code int) {
-				suite.Equal(testCase.ok, code == http.StatusOK)
-			})
-		suite.NoError(err)
-	}
-}
-
-func (suite *ruleTestSuite) compareBundle(b1, b2 placement.GroupBundle) {
-	suite.Equal(b2.ID, b1.ID)
-	suite.Equal(b2.Index, b1.Index)
-	suite.Equal(b2.Override, b1.Override)
-	suite.Len(b2.Rules, len(b1.Rules))
+func compareBundle(c *C, b1, b2 placement.GroupBundle) {
+	c.Assert(b1.ID, Equals, b2.ID)
+	c.Assert(b1.Index, Equals, b2.Index)
+	c.Assert(b1.Override, Equals, b2.Override)
+	c.Assert(len(b1.Rules), Equals, len(b2.Rules))
 	for i := range b1.Rules {
-		suite.compareRule(b1.Rules[i], b2.Rules[i])
+		compareRule(c, b1.Rules[i], b2.Rules[i])
 	}
-}
-
-type regionRuleTestSuite struct {
-	suite.Suite
-	svr       *server.Server
-	grpcSvr   *server.GrpcServer
-	cleanup   tu.CleanupFunc
-	urlPrefix string
-	stores    []*metapb.Store
-	regions   []*core.RegionInfo
-}
-
-func TestRegionRuleTestSuite(t *testing.T) {
-	suite.Run(t, new(regionRuleTestSuite))
-}
-
-func (suite *regionRuleTestSuite) SetupSuite() {
-	suite.stores = []*metapb.Store{
-		{
-			Id:        1,
-			Address:   "tikv1",
-			State:     metapb.StoreState_Up,
-			NodeState: metapb.NodeState_Serving,
-			Version:   "2.0.0",
-		},
-		{
-			Id:        2,
-			Address:   "tikv2",
-			State:     metapb.StoreState_Up,
-			NodeState: metapb.NodeState_Serving,
-			Version:   "2.0.0",
-		},
-	}
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
-		cfg.Replication.EnablePlacementRules = true
-		cfg.Replication.MaxReplicas = 1
-	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-
-	for _, store := range suite.stores {
-		mustPutStore(re, suite.svr, store.Id, store.State, store.NodeState, nil)
-	}
-	suite.regions = make([]*core.RegionInfo, 0)
-	peers1 := []*metapb.Peer{
-		{Id: 102, StoreId: 1, Role: metapb.PeerRole_Voter},
-		{Id: 103, StoreId: 2, Role: metapb.PeerRole_Voter}}
-	suite.regions = append(suite.regions, core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers1, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}, peers1[0],
-		core.WithStartKey([]byte("abc")), core.WithEndKey([]byte("def"))))
-	peers2 := []*metapb.Peer{
-		{Id: 104, StoreId: 1, Role: metapb.PeerRole_Voter},
-		{Id: 105, StoreId: 2, Role: metapb.PeerRole_Learner}}
-	suite.regions = append(suite.regions, core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers2, RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}, peers2[0],
-		core.WithStartKey([]byte("ghi")), core.WithEndKey([]byte("jkl"))))
-	peers3 := []*metapb.Peer{
-		{Id: 106, StoreId: 1, Role: metapb.PeerRole_Voter},
-		{Id: 107, StoreId: 2, Role: metapb.PeerRole_Learner}}
-	suite.regions = append(suite.regions, core.NewRegionInfo(&metapb.Region{Id: 3, Peers: peers3, RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 3}}, peers3[0],
-		core.WithStartKey([]byte("mno")), core.WithEndKey([]byte("pqr"))))
-	for _, rg := range suite.regions {
-		suite.svr.GetBasicCluster().PutRegion(rg)
-	}
-}
-
-func (suite *regionRuleTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
-	ruleManager := suite.svr.GetRaftCluster().GetRuleManager()
-	ruleManager.SetRule(&placement.Rule{
-		GroupID:     "test",
-		ID:          "test2",
-		StartKeyHex: hex.EncodeToString([]byte("ghi")),
-		EndKeyHex:   hex.EncodeToString([]byte("jkl")),
-		Role:        placement.Learner,
-		Count:       1,
-	})
-	ruleManager.SetRule(&placement.Rule{
-		GroupID:     "test",
-		ID:          "test3",
-		StartKeyHex: hex.EncodeToString([]byte("ooo")),
-		EndKeyHex:   hex.EncodeToString([]byte("ppp")),
-		Role:        placement.Learner,
-		Count:       1,
-	})
-	re := suite.Require()
-	url := fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 1)
-	fit := &placement.RegionFit{}
-	err := tu.ReadGetJSON(re, testDialClient, url, fit)
-	suite.Equal(len(fit.RuleFits), 1)
-	suite.Equal(len(fit.OrphanPeers), 1)
-	suite.NoError(err)
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 2)
-	fit = &placement.RegionFit{}
-	err = tu.ReadGetJSON(re, testDialClient, url, fit)
-	suite.Equal(len(fit.RuleFits), 2)
-	suite.Equal(len(fit.OrphanPeers), 0)
-	suite.NoError(err)
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 3)
-	fit = &placement.RegionFit{}
-	err = tu.ReadGetJSON(re, testDialClient, url, fit)
-	suite.Equal(len(fit.RuleFits), 0)
-	suite.Equal(len(fit.OrphanPeers), 2)
-	suite.NoError(err)
-
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 4)
-	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusNotFound), tu.StringContain(
-		re, "region 4 not found"))
-	suite.NoError(err)
-
-	url = fmt.Sprintf("%s/config/rules/region/%s/detail", suite.urlPrefix, "id")
-	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest), tu.StringContain(
-		re, "invalid region id"))
-	suite.NoError(err)
-
-	suite.svr.GetRaftCluster().GetReplicationConfig().EnablePlacementRules = false
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 1)
-	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusPreconditionFailed), tu.StringContain(
-		re, "placement rules feature is disabled"))
-	suite.NoError(err)
 }

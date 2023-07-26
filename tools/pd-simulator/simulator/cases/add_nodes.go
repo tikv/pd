@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,9 +16,8 @@ package cases
 import (
 	"math/rand"
 
-	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -34,8 +32,11 @@ func newAddNodes() *Case {
 
 	for i := 1; i <= storeNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
-			Status: metapb.StoreState_Up,
+			ID:        IDAllocator.nextID(),
+			Status:    metapb.StoreState_Up,
+			Capacity:  1 * TB,
+			Available: 900 * GB,
+			Version:   "2.1.0",
 		})
 	}
 
@@ -49,7 +50,7 @@ func newAddNodes() *Case {
 			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   96 * units.MiB,
+			Size:   96 * MB,
 			Keys:   960000,
 		})
 	}

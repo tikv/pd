@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,32 +18,43 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	. "github.com/pingcap/check"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
-	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func TestHealth(t *testing.T) {
-	re := require.New(t)
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
+var _ = Suite(&healthTestSuite{})
+
+type healthTestSuite struct{}
+
+func (s *healthTestSuite) SetUpSuite(c *C) {
+	server.EnableZap = true
+}
+
+func (s *healthTestSuite) TestHealth(c *C) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	err = tc.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	tc.WaitLeader()
 	leaderServer := tc.GetServer(tc.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
 	pdAddr := tc.GetConfig().GetClientURL()
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := pdctl.InitCommand()
 	defer tc.Destroy()
 
 	client := tc.GetEtcdClient()
 	members, err := cluster.GetMembers(client)
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	healthMembers := cluster.CheckHealth(tc.GetHTTPClient(), members)
 	healths := []api.Health{}
 	for _, member := range members {
@@ -62,9 +72,10 @@ func TestHealth(t *testing.T) {
 
 	// health command
 	args := []string{"-u", pdAddr, "health"}
-	output, err := pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	_, output, err := pdctl.ExecuteCommandC(cmd, args...)
+	c.Assert(err, IsNil)
 	h := make([]api.Health, len(healths))
-	re.NoError(json.Unmarshal(output, &h))
-	re.Equal(healths, h)
+	c.Assert(json.Unmarshal(output, &h), IsNil)
+	c.Assert(err, IsNil)
+	c.Assert(h, DeepEquals, healths)
 }

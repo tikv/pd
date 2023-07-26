@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,12 +18,17 @@ import (
 	"sync"
 	"testing"
 
+	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
@@ -32,24 +36,37 @@ func TestMain(m *testing.M) {
 
 const allocStep = uint64(1000)
 
-func TestID(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
+var _ = Suite(&testAllocIDSuite{})
+
+type testAllocIDSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *testAllocIDSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *testAllocIDSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+func (s *testAllocIDSuite) TestID(c *C) {
+	var err error
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
 	var last uint64
 	for i := uint64(0); i < allocStep; i++ {
 		id, err := leaderServer.GetAllocator().Alloc()
-		re.NoError(err)
-		re.Greater(id, last)
+		c.Assert(err, IsNil)
+		c.Assert(id, Greater, last)
 		last = id
 	}
 
@@ -65,12 +82,12 @@ func TestID(t *testing.T) {
 
 			for i := 0; i < 200; i++ {
 				id, err := leaderServer.GetAllocator().Alloc()
-				re.NoError(err)
+				c.Assert(err, IsNil)
 				m.Lock()
 				_, ok := ids[id]
 				ids[id] = struct{}{}
 				m.Unlock()
-				re.False(ok)
+				c.Assert(ok, IsFalse)
 			}
 		}()
 	}
@@ -78,108 +95,27 @@ func TestID(t *testing.T) {
 	wg.Wait()
 }
 
-func TestCommand(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
+func (s *testAllocIDSuite) TestCommand(c *C) {
+	var err error
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	leaderServer := cluster.GetServer(cluster.GetLeader())
-	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(leaderServer.GetClusterID())}
+	req := &pdpb.AllocIDRequest{
+		Header: testutil.NewRequestHeader(leaderServer.GetClusterID()),
+	}
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
 	var last uint64
 	for i := uint64(0); i < 2*allocStep; i++ {
 		resp, err := grpcPDClient.AllocID(context.Background(), req)
-		re.NoError(err)
-		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
-		re.Greater(resp.GetId(), last)
+		c.Assert(err, IsNil)
+		c.Assert(resp.GetId(), Greater, last)
 		last = resp.GetId()
-	}
-}
-
-func TestMonotonicID(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2)
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	var last1 uint64
-	for i := uint64(0); i < 10; i++ {
-		id, err := leaderServer.GetAllocator().Alloc()
-		re.NoError(err)
-		re.Greater(id, last1)
-		last1 = id
-	}
-	err = cluster.ResignLeader()
-	re.NoError(err)
-	cluster.WaitLeader()
-	leaderServer = cluster.GetServer(cluster.GetLeader())
-	var last2 uint64
-	for i := uint64(0); i < 10; i++ {
-		id, err := leaderServer.GetAllocator().Alloc()
-		re.NoError(err)
-		re.Greater(id, last2)
-		last2 = id
-	}
-	err = cluster.ResignLeader()
-	re.NoError(err)
-	cluster.WaitLeader()
-	leaderServer = cluster.GetServer(cluster.GetLeader())
-	id, err := leaderServer.GetAllocator().Alloc()
-	re.NoError(err)
-	re.Greater(id, last2)
-	var last3 uint64
-	for i := uint64(0); i < 1000; i++ {
-		id, err := leaderServer.GetAllocator().Alloc()
-		re.NoError(err)
-		re.Greater(id, last3)
-		last3 = id
-	}
-}
-
-func TestPDRestart(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-
-	var last uint64
-	for i := uint64(0); i < 10; i++ {
-		id, err := leaderServer.GetAllocator().Alloc()
-		re.NoError(err)
-		re.Greater(id, last)
-		last = id
-	}
-
-	re.NoError(leaderServer.Stop())
-	re.NoError(leaderServer.Run())
-	cluster.WaitLeader()
-
-	for i := uint64(0); i < 10; i++ {
-		id, err := leaderServer.GetAllocator().Alloc()
-		re.NoError(err)
-		re.Greater(id, last)
-		last = id
 	}
 }

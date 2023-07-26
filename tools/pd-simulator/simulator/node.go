@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -21,18 +20,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/go-units"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
 const (
 	storeHeartBeatPeriod  = 10
+	regionHeartBeatPeriod = 60
 	compactionDelayPeriod = 600
 )
 
@@ -43,69 +42,50 @@ type Node struct {
 	stats                    *info.StoreStats
 	tick                     uint64
 	wg                       sync.WaitGroup
-	tasks                    map[uint64]*Task
+	tasks                    map[uint64]Task
 	client                   Client
 	receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
-	limiter                  *ratelimit.RateLimiter
+	ioRate                   int64
 	sizeMutex                sync.Mutex
-	hasExtraUsedSpace        bool
-	snapStats                []*pdpb.SnapshotStat
 }
 
 // NewNode returns a Node.
-func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
+func NewNode(s *cases.Store, pdAddr string, ioRate int64) (*Node, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &metapb.Store{
 		Id:      s.ID,
 		Address: fmt.Sprintf("mock:://tikv-%d", s.ID),
-		Version: config.StoreVersion,
+		Version: s.Version,
 		Labels:  s.Labels,
 		State:   s.Status,
 	}
 	stats := &info.StoreStats{
 		StoreStats: pdpb.StoreStats{
 			StoreId:   s.ID,
-			Capacity:  uint64(config.RaftStore.Capacity),
+			Capacity:  s.Capacity,
+			Available: s.Available,
 			StartTime: uint32(time.Now().Unix()),
 		},
 	}
 	tag := fmt.Sprintf("store %d", s.ID)
-	var (
-		client                   Client
-		receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
-		err                      error
-	)
-
-	// Client should wait if PD server is not ready.
-	for i := 0; i < maxInitClusterRetries; i++ {
-		client, receiveRegionHeartbeatCh, err = NewClient(pdAddr, tag)
-		if err == nil {
-			break
-		}
-		time.Sleep(time.Second)
-	}
-
+	client, receiveRegionHeartbeatCh, err := NewClient(pdAddr, tag)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	ratio := config.speed()
-	speed := config.StoreIOMBPerSecond * units.MiB * int64(ratio)
 	return &Node{
 		Store:                    store,
 		stats:                    stats,
 		client:                   client,
 		ctx:                      ctx,
 		cancel:                   cancel,
-		tasks:                    make(map[uint64]*Task),
+		tasks:                    make(map[uint64]Task),
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
-		limiter:                  ratelimit.NewRateLimiter(float64(speed), int(speed)),
+		ioRate:                   ioRate * cases.MB,
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
-		hasExtraUsedSpace:        s.HasExtraUsedSpace,
-		snapStats:                make([]*pdpb.SnapshotStat, 0),
 	}, nil
 }
 
@@ -128,7 +108,7 @@ func (n *Node) receiveRegionHeartbeat() {
 	for {
 		select {
 		case resp := <-n.receiveRegionHeartbeatCh:
-			task := responseToTask(n.raftEngine, resp)
+			task := responseToTask(resp, n.raftEngine)
 			if task != nil {
 				n.AddTask(task)
 			}
@@ -141,7 +121,7 @@ func (n *Node) receiveRegionHeartbeat() {
 // Tick steps node status change.
 func (n *Node) Tick(wg *sync.WaitGroup) {
 	defer wg.Done()
-	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
+	if n.GetState() != metapb.StoreState_Up {
 		return
 	}
 	n.stepHeartBeat()
@@ -159,8 +139,9 @@ func (n *Node) stepTask() {
 	n.Lock()
 	defer n.Unlock()
 	for _, task := range n.tasks {
-		if isFinished := task.Step(n.raftEngine); isFinished {
-			simutil.Logger.Debug("task status",
+		task.Step(n.raftEngine)
+		if task.IsFinished() {
+			simutil.Logger.Debug("task finished",
 				zap.Uint64("node-id", n.Id),
 				zap.Uint64("region-id", task.RegionID()),
 				zap.String("task", task.Desc()))
@@ -170,14 +151,10 @@ func (n *Node) stepTask() {
 }
 
 func (n *Node) stepHeartBeat() {
-	config := n.raftEngine.storeConfig
-
-	period := uint64(config.RaftStore.StoreHeartBeatInterval.Duration / config.SimTickInterval.Duration)
-	if n.tick%period == 0 {
+	if n.tick%storeHeartBeatPeriod == 0 {
 		n.storeHeartBeat()
 	}
-	period = uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
-	if n.tick%period == 0 {
+	if n.tick%regionHeartBeatPeriod == 0 {
 		n.regionHeartBeat()
 	}
 }
@@ -189,14 +166,10 @@ func (n *Node) stepCompaction() {
 }
 
 func (n *Node) storeHeartBeat() {
-	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
+	if n.GetState() != metapb.StoreState_Up {
 		return
 	}
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
-	stats := make([]*pdpb.SnapshotStat, len(n.snapStats))
-	copy(stats, n.snapStats)
-	n.snapStats = n.snapStats[:0]
-	n.stats.SnapshotStats = stats
 	err := n.client.StoreHeartbeat(ctx, &n.stats.StoreStats)
 	if err != nil {
 		simutil.Logger.Info("report heartbeat error",
@@ -215,7 +188,7 @@ func (n *Node) compaction() {
 }
 
 func (n *Node) regionHeartBeat() {
-	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
+	if n.GetState() != metapb.StoreState_Up {
 		return
 	}
 	regions := n.raftEngine.GetRegions()
@@ -252,7 +225,7 @@ func (n *Node) reportRegionChange() {
 }
 
 // AddTask adds task in this node.
-func (n *Node) AddTask(task *Task) {
+func (n *Node) AddTask(task Task) {
 	n.Lock()
 	defer n.Unlock()
 	if t, ok := n.tasks[task.RegionID()]; ok {
@@ -284,13 +257,4 @@ func (n *Node) decUsedSize(size uint64) {
 	n.sizeMutex.Lock()
 	defer n.sizeMutex.Unlock()
 	n.stats.ToCompactionSize += size
-}
-
-func (n *Node) registerSnapStats(generate, send, total uint64) {
-	stat := pdpb.SnapshotStat{
-		GenerateDurationSec: generate,
-		SendDurationSec:     send,
-		TotalDurationSec:    total,
-	}
-	n.snapStats = append(n.snapStats, &stat)
 }

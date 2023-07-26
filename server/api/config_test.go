@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,86 +16,77 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"testing"
+	"strings"
 	"time"
 
-	"github.com/stretchr/testify/suite"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/pkg/versioninfo"
+	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/versioninfo"
 )
 
-type configTestSuite struct {
-	suite.Suite
+var _ = Suite(&testConfigSuite{})
+
+type testConfigSuite struct {
 	svr       *server.Server
-	cleanup   tu.CleanupFunc
+	cleanup   cleanUpFunc
 	urlPrefix string
 }
 
-func TestConfigTestSuite(t *testing.T) {
-	suite.Run(t, new(configTestSuite))
+func (s *testConfigSuite) SetUpSuite(c *C) {
+	s.svr, s.cleanup = mustNewServer(c)
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	addr := s.svr.GetAddr()
+	s.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
 }
 
-func (suite *configTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
-		cfg.Replication.EnablePlacementRules = false
-	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+func (s *testConfigSuite) TearDownSuite(c *C) {
+	s.cleanup()
 }
 
-func (suite *configTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *configTestSuite) TestConfigAll() {
-	re := suite.Require()
-	addr := fmt.Sprintf("%s/config", suite.urlPrefix)
+func (s *testConfigSuite) TestConfigAll(c *C) {
+	addr := fmt.Sprintf("%s/config", s.urlPrefix)
 	cfg := &config.Config{}
-	err := tu.ReadGetJSON(re, testDialClient, addr, cfg)
-	suite.NoError(err)
+	err := readJSON(testDialClient, addr, cfg)
+	c.Assert(err, IsNil)
 
 	// the original way
 	r := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(r)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 	l := map[string]interface{}{
 		"location-labels":       "zone,rack",
 		"region-schedule-limit": 10,
 	}
 	postData, err = json.Marshal(l)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 
 	l = map[string]interface{}{
 		"metric-storage": "http://127.0.0.1:9090",
 	}
 	postData, err = json.Marshal(l)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 
 	newCfg := &config.Config{}
-	err = tu.ReadGetJSON(re, testDialClient, addr, newCfg)
-	suite.NoError(err)
+	err = readJSON(testDialClient, addr, newCfg)
+	c.Assert(err, IsNil)
 	cfg.Replication.MaxReplicas = 5
 	cfg.Replication.LocationLabels = []string{"zone", "rack"}
 	cfg.Schedule.RegionScheduleLimit = 10
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:9090"
-	suite.Equal(newCfg, cfg)
+	c.Assert(cfg, DeepEquals, newCfg)
 
 	// the new way
 	l = map[string]interface{}{
 		"schedule.tolerant-size-ratio":            2.5,
-		"schedule.enable-tikv-split-region":       "false",
 		"replication.location-labels":             "idc,host",
 		"pd-server.metric-storage":                "http://127.0.0.1:1234",
 		"log.level":                               "warn",
@@ -105,13 +95,12 @@ func (suite *configTestSuite) TestConfigAll() {
 		"replication-mode.dr-auto-sync.label-key": "foobar",
 	}
 	postData, err = json.Marshal(l)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 	newCfg1 := &config.Config{}
-	err = tu.ReadGetJSON(re, testDialClient, addr, newCfg1)
-	suite.NoError(err)
-	cfg.Schedule.EnableTiKVSplitRegion = false
+	err = readJSON(testDialClient, addr, newCfg1)
+	c.Assert(err, IsNil)
 	cfg.Schedule.TolerantSizeRatio = 2.5
 	cfg.Replication.LocationLabels = []string{"idc", "host"}
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:1234"
@@ -119,112 +108,105 @@ func (suite *configTestSuite) TestConfigAll() {
 	cfg.ReplicationMode.DRAutoSync.LabelKey = "foobar"
 	cfg.ReplicationMode.ReplicationMode = "dr-auto-sync"
 	v, err := versioninfo.ParseVersion("v4.0.0-beta")
-	suite.NoError(err)
+	c.Assert(err, IsNil)
 	cfg.ClusterVersion = *v
-	suite.Equal(cfg, newCfg1)
+	c.Assert(newCfg1, DeepEquals, cfg)
 
-	// revert this to avoid it affects TestConfigTTL
-	l["schedule.enable-tikv-split-region"] = "true"
 	postData, err = json.Marshal(l)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 
 	// illegal prefix
 	l = map[string]interface{}{
 		"replicate.max-replicas": 1,
 	}
 	postData, err = json.Marshal(l)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData,
-		tu.StatusNotOK(re),
-		tu.StringContain(re, "not found"))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
 
 	// update prefix directly
 	l = map[string]interface{}{
 		"replication-mode": nil,
 	}
 	postData, err = json.Marshal(l)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData,
-		tu.StatusNotOK(re),
-		tu.StringContain(re, "cannot update config prefix"))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(strings.Contains(err.Error(), "cannot update config prefix"), IsTrue)
 
 	// config item not found
 	l = map[string]interface{}{
 		"schedule.region-limit": 10,
 	}
 	postData, err = json.Marshal(l)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusNotOK(re), tu.StringContain(re, "not found"))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(strings.Contains(err.Error(), "not found"), IsTrue)
 }
 
-func (suite *configTestSuite) TestConfigSchedule() {
-	re := suite.Require()
-	addr := fmt.Sprintf("%s/config/schedule", suite.urlPrefix)
+func (s *testConfigSuite) TestConfigSchedule(c *C) {
+	addr := fmt.Sprintf("%s/config/schedule", s.urlPrefix)
 	sc := &config.ScheduleConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
+	c.Assert(readJSON(testDialClient, addr, sc), IsNil)
+
 	sc.MaxStoreDownTime.Duration = time.Second
 	postData, err := json.Marshal(sc)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 
 	sc1 := &config.ScheduleConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc1))
-	suite.Equal(*sc1, *sc)
+	c.Assert(readJSON(testDialClient, addr, sc1), IsNil)
+	c.Assert(*sc, DeepEquals, *sc1)
 }
 
-func (suite *configTestSuite) TestConfigReplication() {
-	re := suite.Require()
-	addr := fmt.Sprintf("%s/config/replicate", suite.urlPrefix)
+func (s *testConfigSuite) TestConfigReplication(c *C) {
+	addr := fmt.Sprintf("%s/config/replicate", s.urlPrefix)
 	rc := &config.ReplicationConfig{}
-	err := tu.ReadGetJSON(re, testDialClient, addr, rc)
-	suite.NoError(err)
+	err := readJSON(testDialClient, addr, rc)
+	c.Assert(err, IsNil)
 
 	rc.MaxReplicas = 5
 	rc1 := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(rc1)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 
 	rc.LocationLabels = []string{"zone", "rack"}
 	rc2 := map[string]string{"location-labels": "zone,rack"}
 	postData, err = json.Marshal(rc2)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 
 	rc.IsolationLevel = "zone"
 	rc3 := map[string]string{"isolation-level": "zone"}
 	postData, err = json.Marshal(rc3)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 
 	rc4 := &config.ReplicationConfig{}
-	err = tu.ReadGetJSON(re, testDialClient, addr, rc4)
-	suite.NoError(err)
+	err = readJSON(testDialClient, addr, rc4)
+	c.Assert(err, IsNil)
 
-	suite.Equal(*rc4, *rc)
+	c.Assert(*rc, DeepEquals, *rc4)
 }
 
-func (suite *configTestSuite) TestConfigLabelProperty() {
-	re := suite.Require()
-	addr := suite.svr.GetAddr() + apiPrefix + "/api/v1/config/label-property"
+func (s *testConfigSuite) TestConfigLabelProperty(c *C) {
+	addr := s.svr.GetAddr() + apiPrefix + "/api/v1/config/label-property"
+
 	loadProperties := func() config.LabelPropertyConfig {
 		var cfg config.LabelPropertyConfig
-		err := tu.ReadGetJSON(re, testDialClient, addr, &cfg)
-		suite.NoError(err)
+		err := readJSON(testDialClient, addr, &cfg)
+		c.Assert(err, IsNil)
 		return cfg
 	}
 
 	cfg := loadProperties()
-	suite.Empty(cfg)
+	c.Assert(cfg, HasLen, 0)
 
 	cmds := []string{
 		`{"type": "foo", "action": "set", "label-key": "zone", "label-value": "cn1"}`,
@@ -232,208 +214,64 @@ func (suite *configTestSuite) TestConfigLabelProperty() {
 		`{"type": "bar", "action": "set", "label-key": "host", "label-value": "h1"}`,
 	}
 	for _, cmd := range cmds {
-		err := tu.CheckPostJSON(testDialClient, addr, []byte(cmd), tu.StatusOK(re))
-		suite.NoError(err)
+		err := postJSON(testDialClient, addr, []byte(cmd))
+		c.Assert(err, IsNil)
 	}
 
 	cfg = loadProperties()
-	suite.Len(cfg, 2)
-	suite.Equal([]config.StoreLabel{
+	c.Assert(cfg, HasLen, 2)
+	c.Assert(cfg["foo"], DeepEquals, []config.StoreLabel{
 		{Key: "zone", Value: "cn1"},
 		{Key: "zone", Value: "cn2"},
-	}, cfg["foo"])
-	suite.Equal([]config.StoreLabel{{Key: "host", Value: "h1"}}, cfg["bar"])
+	})
+	c.Assert(cfg["bar"], DeepEquals, []config.StoreLabel{{Key: "host", Value: "h1"}})
 
 	cmds = []string{
 		`{"type": "foo", "action": "delete", "label-key": "zone", "label-value": "cn1"}`,
 		`{"type": "bar", "action": "delete", "label-key": "host", "label-value": "h1"}`,
 	}
 	for _, cmd := range cmds {
-		err := tu.CheckPostJSON(testDialClient, addr, []byte(cmd), tu.StatusOK(re))
-		suite.NoError(err)
+		err := postJSON(testDialClient, addr, []byte(cmd))
+		c.Assert(err, IsNil)
 	}
 
 	cfg = loadProperties()
-	suite.Len(cfg, 1)
-	suite.Equal([]config.StoreLabel{{Key: "zone", Value: "cn2"}}, cfg["foo"])
+	c.Assert(cfg, HasLen, 1)
+	c.Assert(cfg["foo"], DeepEquals, []config.StoreLabel{{Key: "zone", Value: "cn2"}})
 }
 
-func (suite *configTestSuite) TestConfigDefault() {
-	addr := fmt.Sprintf("%s/config", suite.urlPrefix)
+func (s *testConfigSuite) TestConfigDefault(c *C) {
+	addr := fmt.Sprintf("%s/config", s.urlPrefix)
 
 	r := map[string]int{"max-replicas": 5}
 	postData, err := json.Marshal(r)
-	suite.NoError(err)
-	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 	l := map[string]interface{}{
 		"location-labels":       "zone,rack",
 		"region-schedule-limit": 10,
 	}
 	postData, err = json.Marshal(l)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 
 	l = map[string]interface{}{
 		"metric-storage": "http://127.0.0.1:9090",
 	}
 	postData, err = json.Marshal(l)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(err, IsNil)
+	err = postJSON(testDialClient, addr, postData)
+	c.Assert(err, IsNil)
 
-	addr = fmt.Sprintf("%s/config/default", suite.urlPrefix)
+	addr = fmt.Sprintf("%s/config/default", s.urlPrefix)
 	defaultCfg := &config.Config{}
-	err = tu.ReadGetJSON(re, testDialClient, addr, defaultCfg)
-	suite.NoError(err)
+	err = readJSON(testDialClient, addr, defaultCfg)
+	c.Assert(err, IsNil)
 
-	suite.Equal(uint64(3), defaultCfg.Replication.MaxReplicas)
-	suite.Equal(typeutil.StringSlice([]string{}), defaultCfg.Replication.LocationLabels)
-	suite.Equal(uint64(2048), defaultCfg.Schedule.RegionScheduleLimit)
-	suite.Equal("", defaultCfg.PDServerCfg.MetricStorage)
-}
-
-func (suite *configTestSuite) TestConfigPDServer() {
-	re := suite.Require()
-	addrPost := fmt.Sprintf("%s/config", suite.urlPrefix)
-	ms := map[string]interface{}{
-		"metric-storage": "",
-	}
-	postData, err := json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addrPost, postData, tu.StatusOK(re)))
-	addrGet := fmt.Sprintf("%s/config/pd-server", suite.urlPrefix)
-	sc := &config.PDServerConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addrGet, sc))
-	suite.Equal(bool(true), sc.UseRegionStorage)
-	suite.Equal("table", sc.KeyType)
-	suite.Equal(typeutil.StringSlice([]string{}), sc.RuntimeServices)
-	suite.Equal("", sc.MetricStorage)
-	suite.Equal("auto", sc.DashboardAddress)
-	suite.Equal(int(3), sc.FlowRoundByDigit)
-	suite.Equal(typeutil.NewDuration(time.Second), sc.MinResolvedTSPersistenceInterval)
-	suite.Equal(24*time.Hour, sc.MaxResetTSGap.Duration)
-}
-
-var ttlConfig = map[string]interface{}{
-	"schedule.max-snapshot-count":             999,
-	"schedule.enable-location-replacement":    false,
-	"schedule.max-merge-region-size":          999,
-	"schedule.max-merge-region-keys":          999,
-	"schedule.scheduler-max-waiting-operator": 999,
-	"schedule.leader-schedule-limit":          999,
-	"schedule.region-schedule-limit":          999,
-	"schedule.hot-region-schedule-limit":      999,
-	"schedule.replica-schedule-limit":         999,
-	"schedule.merge-schedule-limit":           999,
-	"schedule.enable-tikv-split-region":       false,
-}
-
-var invalidTTLConfig = map[string]interface{}{
-	"schedule.invalid-ttl-config": 0,
-}
-
-func assertTTLConfig(
-	options *config.PersistOptions,
-	equality func(interface{}, interface{}, ...interface{}) bool,
-) {
-	equality(uint64(999), options.GetMaxSnapshotCount())
-	equality(false, options.IsLocationReplacementEnabled())
-	equality(uint64(999), options.GetMaxMergeRegionSize())
-	equality(uint64(999), options.GetMaxMergeRegionKeys())
-	equality(uint64(999), options.GetSchedulerMaxWaitingOperator())
-	equality(uint64(999), options.GetLeaderScheduleLimit())
-	equality(uint64(999), options.GetRegionScheduleLimit())
-	equality(uint64(999), options.GetHotRegionScheduleLimit())
-	equality(uint64(999), options.GetReplicaScheduleLimit())
-	equality(uint64(999), options.GetMergeScheduleLimit())
-	equality(false, options.IsTikvRegionSplitEnabled())
-}
-
-func createTTLUrl(url string, ttl int) string {
-	return fmt.Sprintf("%s/config?ttlSecond=%d", url, ttl)
-}
-
-func (suite *configTestSuite) TestConfigTTL() {
-	postData, err := json.Marshal(ttlConfig)
-	suite.NoError(err)
-
-	// test no config and cleaning up
-	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 0), postData, tu.StatusOK(re))
-	suite.NoError(err)
-	assertTTLConfig(suite.svr.GetPersistOptions(), suite.NotEqual)
-
-	// test time goes by
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 1), postData, tu.StatusOK(re))
-	suite.NoError(err)
-	assertTTLConfig(suite.svr.GetPersistOptions(), suite.Equal)
-	time.Sleep(2 * time.Second)
-	assertTTLConfig(suite.svr.GetPersistOptions(), suite.NotEqual)
-
-	// test cleaning up
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 1), postData, tu.StatusOK(re))
-	suite.NoError(err)
-	assertTTLConfig(suite.svr.GetPersistOptions(), suite.Equal)
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 0), postData, tu.StatusOK(re))
-	suite.NoError(err)
-	assertTTLConfig(suite.svr.GetPersistOptions(), suite.NotEqual)
-
-	postData, err = json.Marshal(invalidTTLConfig)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 1), postData,
-		tu.StatusNotOK(re), tu.StringEqual(re, "\"unsupported ttl config schedule.invalid-ttl-config\"\n"))
-	suite.NoError(err)
-
-	// only set max-merge-region-size
-	mergeConfig := map[string]interface{}{
-		"schedule.max-merge-region-size": 999,
-	}
-	postData, err = json.Marshal(mergeConfig)
-	suite.NoError(err)
-
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 1), postData, tu.StatusOK(re))
-	suite.NoError(err)
-	suite.Equal(uint64(999), suite.svr.GetPersistOptions().GetMaxMergeRegionSize())
-	// max-merge-region-keys should keep consistence with max-merge-region-size.
-	suite.Equal(uint64(999*10000), suite.svr.GetPersistOptions().GetMaxMergeRegionKeys())
-
-	// on invalid value, we use default config
-	mergeConfig = map[string]interface{}{
-		"schedule.enable-tikv-split-region": "invalid",
-	}
-	postData, err = json.Marshal(mergeConfig)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 1), postData, tu.StatusOK(re))
-	suite.NoError(err)
-	suite.True(suite.svr.GetPersistOptions().IsTikvRegionSplitEnabled())
-}
-
-func (suite *configTestSuite) TestTTLConflict() {
-	addr := createTTLUrl(suite.urlPrefix, 1)
-	postData, err := json.Marshal(ttlConfig)
-	suite.NoError(err)
-	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
-	assertTTLConfig(suite.svr.GetPersistOptions(), suite.Equal)
-
-	cfg := map[string]interface{}{"max-snapshot-count": 30}
-	postData, err = json.Marshal(cfg)
-	suite.NoError(err)
-	addr = fmt.Sprintf("%s/config", suite.urlPrefix)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusNotOK(re), tu.StringEqual(re, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n"))
-	suite.NoError(err)
-	addr = fmt.Sprintf("%s/config/schedule", suite.urlPrefix)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusNotOK(re), tu.StringEqual(re, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n"))
-	suite.NoError(err)
-	cfg = map[string]interface{}{"schedule.max-snapshot-count": 30}
-	postData, err = json.Marshal(cfg)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(suite.urlPrefix, 0), postData, tu.StatusOK(re))
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	c.Assert(defaultCfg.Replication.MaxReplicas, Equals, uint64(3))
+	c.Assert(defaultCfg.Replication.LocationLabels, DeepEquals, typeutil.StringSlice([]string{}))
+	c.Assert(defaultCfg.Schedule.RegionScheduleLimit, Equals, uint64(2048))
+	c.Assert(defaultCfg.PDServerCfg.MetricStorage, Equals, "")
 }

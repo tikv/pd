@@ -8,11 +8,9 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !without_dashboard
 // +build !without_dashboard
 
 package dashboard
@@ -22,27 +20,25 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
-	"github.com/pingcap/tidb-dashboard/pkg/config"
-	"github.com/pingcap/tidb-dashboard/pkg/uiserver"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/uiserver"
 
 	"github.com/tikv/pd/pkg/dashboard/adapter"
-	"github.com/tikv/pd/pkg/dashboard/distroutil"
 	"github.com/tikv/pd/pkg/dashboard/keyvisual"
 	ui "github.com/tikv/pd/pkg/dashboard/uiserver"
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
 
 var (
-	apiServiceGroup = apiutil.APIServiceGroup{
+	apiServiceGroup = server.ServiceGroup{
 		Name:       "dashboard-api",
 		Version:    "v1",
 		IsCore:     false,
 		PathPrefix: config.APIPathPrefix,
 	}
 
-	uiServiceGroup = apiutil.APIServiceGroup{
+	uiServiceGroup = server.ServiceGroup{
 		Name:       "dashboard-ui",
 		Version:    "v1",
 		IsCore:     false,
@@ -69,9 +65,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 	// The order of execution must be sequential.
 	return []server.HandlerBuilder{
 		// Dashboard API Service
-		func(ctx context.Context, srv *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
-			distroutil.MustLoadAndReplaceStrings()
-
+		func(ctx context.Context, srv *server.Server) (http.Handler, server.ServiceGroup, error) {
 			if cfg, err = adapter.GenDashboardConfig(srv); err != nil {
 				return nil, apiServiceGroup, err
 			}
@@ -99,7 +93,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 			return apiserver.Handler(s), apiServiceGroup, nil
 		},
 		// Dashboard UI
-		func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
 			if err != nil {
 				return nil, uiServiceGroup, err
 			}

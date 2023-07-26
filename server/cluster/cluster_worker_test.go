@@ -8,48 +8,42 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
 package cluster
 
 import (
-	"context"
-	"testing"
-
+	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/core"
+
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/kv"
+	_ "github.com/tikv/pd/server/schedulers"
 )
 
-func TestReportSplit(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+var _ = Suite(&testClusterWorkerSuite{})
 
+type testClusterWorkerSuite struct{}
+
+func (s *testClusterWorkerSuite) TestReportSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	left := &metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("b")}
 	right := &metapb.Region{Id: 2, StartKey: []byte("b"), EndKey: []byte("c")}
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: left, Right: right})
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	_, err = cluster.HandleReportSplit(&pdpb.ReportSplitRequest{Left: right, Right: left})
-	re.Error(err)
+	c.Assert(err, NotNil)
 }
 
-func TestReportBatchSplit(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
+func (s *testClusterWorkerSuite) TestReportBatchSplit(c *C) {
 	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	c.Assert(err, IsNil)
+	cluster := newTestRaftCluster(mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	regions := []*metapb.Region{
 		{Id: 1, StartKey: []byte(""), EndKey: []byte("a")},
 		{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")},
@@ -57,5 +51,5 @@ func TestReportBatchSplit(t *testing.T) {
 		{Id: 3, StartKey: []byte("c"), EndKey: []byte("")},
 	}
 	_, err = cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
-	re.NoError(err)
+	c.Assert(err, IsNil)
 }

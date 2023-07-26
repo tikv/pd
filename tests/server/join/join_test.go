@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -21,110 +20,120 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
+	. "github.com/pingcap/check"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/tests"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 // TODO: enable it when we fix TestFailedAndDeletedPDJoinsPreviousCluster
 // func TestMain(m *testing.M) {
 // 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 // }
 
-func TestSimpleJoin(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
+var _ = Suite(&joinTestSuite{})
+
+type joinTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *joinTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+	server.EtcdStartTimeout = 10 * time.Second
+}
+
+func (s *joinTestSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+func (s *joinTestSuite) TestSimpleJoin(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	pd1 := cluster.GetServer("pd1")
 	client := pd1.GetEtcdClient()
 	members, err := etcdutil.ListEtcdMembers(client)
-	re.NoError(err)
-	re.Len(members.Members, 1)
+	c.Assert(err, IsNil)
+	c.Assert(members.Members, HasLen, 1)
 
 	// Join the second PD.
-	pd2, err := cluster.Join(ctx)
-	re.NoError(err)
+	pd2, err := cluster.Join(s.ctx)
+	c.Assert(err, IsNil)
 	err = pd2.Run()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	_, err = os.Stat(path.Join(pd2.GetConfig().DataDir, "join"))
-	re.False(os.IsNotExist(err))
+	c.Assert(os.IsNotExist(err), IsFalse)
 	members, err = etcdutil.ListEtcdMembers(client)
-	re.NoError(err)
-	re.Len(members.Members, 2)
-	re.Equal(pd1.GetClusterID(), pd2.GetClusterID())
+	c.Assert(err, IsNil)
+	c.Assert(members.Members, HasLen, 2)
+	c.Assert(pd2.GetClusterID(), Equals, pd1.GetClusterID())
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
 	// Join another PD.
-	pd3, err := cluster.Join(ctx)
-	re.NoError(err)
+	pd3, err := cluster.Join(s.ctx)
+	c.Assert(err, IsNil)
 	err = pd3.Run()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	_, err = os.Stat(path.Join(pd3.GetConfig().DataDir, "join"))
-	re.False(os.IsNotExist(err))
+	c.Assert(os.IsNotExist(err), IsFalse)
 	members, err = etcdutil.ListEtcdMembers(client)
-	re.NoError(err)
-	re.Len(members.Members, 3)
-	re.Equal(pd1.GetClusterID(), pd3.GetClusterID())
+	c.Assert(err, IsNil)
+	c.Assert(members.Members, HasLen, 3)
+	c.Assert(pd3.GetClusterID(), Equals, pd1.GetClusterID())
 }
 
 // A failed PD tries to join the previous cluster but it has been deleted
 // during its downtime.
-func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	server.EtcdStartTimeout = 10 * time.Second
-	cluster, err := tests.NewTestCluster(ctx, 3)
+func (s *joinTestSuite) TestFailedAndDeletedPDJoinsPreviousCluster(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
 	pd3 := cluster.GetServer("pd3")
 	err = pd3.Stop()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	client := cluster.GetServer("pd1").GetEtcdClient()
 	_, err = client.MemberRemove(context.TODO(), pd3.GetServerID())
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	// The server should not successfully start.
 	res := cluster.RunServer(pd3)
-	re.Error(<-res)
+	c.Assert(<-res, NotNil)
 
 	members, err := etcdutil.ListEtcdMembers(client)
-	re.NoError(err)
-	re.Len(members.Members, 2)
+	c.Assert(err, IsNil)
+	c.Assert(members.Members, HasLen, 2)
 }
 
 // A deleted PD joins the previous cluster.
-func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	server.EtcdStartTimeout = 10 * time.Second
-	cluster, err := tests.NewTestCluster(ctx, 3)
+func (s *joinTestSuite) TestDeletedPDJoinsPreviousCluster(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
@@ -132,36 +141,38 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	pd3 := cluster.GetServer("pd3")
 	client := cluster.GetServer("pd1").GetEtcdClient()
 	_, err = client.MemberRemove(context.TODO(), pd3.GetServerID())
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = pd3.Stop()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	// The server should not successfully start.
+	//ctx, cancel := context.WithCancel(context.Background())
 	res := cluster.RunServer(pd3)
-	re.Error(<-res)
+	c.Assert(<-res, NotNil)
 
 	members, err := etcdutil.ListEtcdMembers(client)
-	re.NoError(err)
-	re.Len(members.Members, 2)
+	c.Assert(err, IsNil)
+	c.Assert(members.Members, HasLen, 2)
 }
 
-func TestFailedPDJoinsPreviousCluster(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
+func (s *joinTestSuite) TestFailedPDJoinsPreviousCluster(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 1)
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
-	re.NoError(cluster.RunInitialServers())
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	// Join the second PD.
-	pd2, err := cluster.Join(ctx)
-	re.NoError(err)
-	re.NoError(pd2.Run())
-	re.NoError(pd2.Stop())
-	re.NoError(pd2.Destroy())
-	re.Error(join.PrepareJoinCluster(pd2.GetConfig()))
+	pd2, err := cluster.Join(s.ctx)
+	c.Assert(err, IsNil)
+	err = pd2.Run()
+	c.Assert(err, IsNil)
+	err = pd2.Stop()
+	c.Assert(err, IsNil)
+	err = pd2.Destroy()
+	c.Assert(err, IsNil)
+	c.Assert(join.PrepareJoinCluster(pd2.GetConfig()), NotNil)
 }

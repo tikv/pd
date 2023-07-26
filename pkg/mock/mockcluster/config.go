@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,8 +16,7 @@ package mockcluster
 import (
 	"time"
 
-	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -82,11 +80,6 @@ func (mc *Cluster) SetTolerantSizeRatio(v float64) {
 	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.TolerantSizeRatio = v })
 }
 
-// SetRegionScoreFormulaVersion updates the RegionScoreFormulaVersion configuration.
-func (mc *Cluster) SetRegionScoreFormulaVersion(v string) {
-	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.RegionScoreFormulaVersion = v })
-}
-
 // SetLeaderScheduleLimit updates the LeaderScheduleLimit configuration.
 func (mc *Cluster) SetLeaderScheduleLimit(v int) {
 	mc.updateScheduleConfig(func(s *config.ScheduleConfig) { s.LeaderScheduleLimit = uint64(v) })
@@ -130,11 +123,6 @@ func (mc *Cluster) SetLocationLabels(v []string) {
 	mc.updateReplicationConfig(func(r *config.ReplicationConfig) { r.LocationLabels = v })
 }
 
-// SetIsolationLevel updates the IsolationLevel configuration.
-func (mc *Cluster) SetIsolationLevel(v string) {
-	mc.updateReplicationConfig(func(r *config.ReplicationConfig) { r.IsolationLevel = v })
-}
-
 func (mc *Cluster) updateScheduleConfig(f func(*config.ScheduleConfig)) {
 	s := mc.GetScheduleConfig().Clone()
 	f(s)
@@ -145,43 +133,4 @@ func (mc *Cluster) updateReplicationConfig(f func(*config.ReplicationConfig)) {
 	r := mc.GetReplicationConfig().Clone()
 	f(r)
 	mc.SetReplicationConfig(r)
-}
-
-// SetMaxReplicasWithLabel sets the max replicas for the cluster in two ways.
-func (mc *Cluster) SetMaxReplicasWithLabel(enablePlacementRules bool, num int, labels ...string) {
-	if len(labels) == 0 {
-		labels = []string{"zone", "rack", "host"}
-	}
-	if enablePlacementRules {
-		rule := &placement.Rule{
-			GroupID:        "pd",
-			ID:             "default",
-			Index:          1,
-			StartKey:       []byte(""),
-			EndKey:         []byte(""),
-			Role:           placement.Voter,
-			Count:          num,
-			LocationLabels: labels,
-		}
-		mc.SetRule(rule)
-	} else {
-		mc.SetMaxReplicas(num)
-		mc.SetLocationLabels(labels)
-	}
-}
-
-// SetRegionMaxSize sets the region max size.
-func (mc *Cluster) SetRegionMaxSize(v string) {
-	mc.updateStoreConfig(func(r *config.StoreConfig) { r.RegionMaxSize = v })
-}
-
-// SetRegionSizeMB sets the region max size.
-func (mc *Cluster) SetRegionSizeMB(v uint64) {
-	mc.updateStoreConfig(func(r *config.StoreConfig) { r.RegionMaxSizeMB = v })
-}
-
-func (mc *Cluster) updateStoreConfig(f func(*config.StoreConfig)) {
-	r := mc.StoreConfigManager.GetStoreConfig().Clone()
-	f(r)
-	mc.SetStoreConfig(r)
 }

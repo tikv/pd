@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,6 +15,7 @@ package join
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 	"strings"
@@ -25,11 +25,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
-	"go.uber.org/zap"
 )
 
 const (
@@ -45,10 +44,9 @@ var listMemberRetryTimes = 20
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
 // and returns the initial configuration of the PD cluster.
 //
-// TL;DR: The join functionality is safe. With data, join does nothing, w/o data
-//
-//	and it is not a member of cluster, join does MemberAdd, it returns an
-//	error if PD tries to join itself, missing data or join a duplicated PD.
+// TL;TR: The join functionality is safe. With data, join does nothing, w/o data
+//        and it is not a member of cluster, join does MemberAdd, it returns an
+//        error if PD tries to join itself, missing data or join a duplicated PD.
 //
 // Etcd automatically re-joins the cluster if there is a data directory. So
 // first it checks if there is a data directory or not. If there is, it returns
@@ -57,29 +55,29 @@ var listMemberRetryTimes = 20
 //
 // If there is no data directory, there are following cases:
 //
-//   - A new PD joins an existing cluster.
-//     What join does: MemberAdd, MemberList, then generate initial-cluster.
+//  - A new PD joins an existing cluster.
+//      What join does: MemberAdd, MemberList, then generate initial-cluster.
 //
-//   - A failed PD re-joins the previous cluster.
-//     What join does: return an error. (etcd reports: raft log corrupted,
-//     truncated, or lost?)
+//  - A failed PD re-joins the previous cluster.
+//      What join does: return an error. (etcd reports: raft log corrupted,
+//                      truncated, or lost?)
 //
-//   - A deleted PD joins to previous cluster.
-//     What join does: MemberAdd, MemberList, then generate initial-cluster.
-//     (it is not in the member list and there is no data, so
-//     we can treat it as a new PD.)
+//  - A deleted PD joins to previous cluster.
+//      What join does: MemberAdd, MemberList, then generate initial-cluster.
+//                      (it is not in the member list and there is no data, so
+//                       we can treat it as a new PD.)
 //
 // If there is a data directory, there are following special cases:
 //
-//   - A failed PD tries to join the previous cluster but it has been deleted
-//     during its downtime.
-//     What join does: return "" (etcd will connect to other peers and find
-//     that the PD itself has been removed.)
+//  - A failed PD tries to join the previous cluster but it has been deleted
+//    during its downtime.
+//      What join does: return "" (etcd will connect to other peers and find
+//                      that the PD itself has been removed.)
 //
-//   - A deleted PD joins the previous cluster.
-//     What join does: return "" (as etcd will read data directory and find
-//     that the PD itself has been removed, so an empty string
-//     is fine.)
+//  - A deleted PD joins the previous cluster.
+//      What join does: return "" (as etcd will read data directory and find
+//                      that the PD itself has been removed, so an empty string
+//                      is fine.)
 func PrepareJoinCluster(cfg *config.Config) error {
 	// - A PD tries to join itself.
 	if cfg.Join == "" {
@@ -93,7 +91,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	filePath := path.Join(cfg.DataDir, "join")
 	// Read the persist join config
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
-		s, err := os.ReadFile(filePath)
+		s, err := ioutil.ReadFile(filePath)
 		if err != nil {
 			log.Fatal("read the join config meet error", errs.ZapError(errs.ErrIORead, err))
 		}
@@ -115,13 +113,10 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	lgc := zap.NewProductionConfig()
-	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   strings.Split(cfg.Join, ","),
 		DialTimeout: etcdutil.DefaultDialTimeout,
 		TLS:         tlsConfig,
-		LogConfig:   &lgc,
 	})
 	if err != nil {
 		return errors.WithStack(err)
@@ -208,21 +203,17 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.WithStack(err)
 	}
 
-	err = os.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
+	err = ioutil.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
 	return errors.WithStack(err)
 }
 
 func isDataExist(d string) bool {
 	dir, err := os.Open(d)
 	if err != nil {
-		log.Info("failed to open directory, maybe start for the first time", errs.ZapError(err))
+		log.Error("failed to open directory", errs.ZapError(errs.ErrOSOpen, err))
 		return false
 	}
-	defer func() {
-		if err := dir.Close(); err != nil {
-			log.Error("failed to close file", errs.ZapError(err))
-		}
-	}()
+	defer dir.Close()
 
 	names, err := dir.Readdirnames(-1)
 	if err != nil {

@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,10 +18,10 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"sync"
 
-	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
-	"github.com/pingcap/tidb-dashboard/pkg/utils"
-	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/apiserver"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/utils"
 )
 
 const (
@@ -31,7 +30,7 @@ const (
 
 // Redirector is used to redirect when the dashboard is started in another PD.
 type Redirector struct {
-	mu syncutil.RWMutex
+	mu sync.RWMutex
 
 	name      string
 	tlsConfig *tls.Config
@@ -76,7 +75,7 @@ func (h *Redirector) SetAddress(addr string) {
 	defaultDirector := h.proxy.Director
 	h.proxy.Director = func(r *http.Request) {
 		defaultDirector(r)
-		r.Header.Add(proxyHeader, h.name)
+		r.Header.Set(proxyHeader, h.name)
 	}
 
 	if h.tlsConfig != nil {
@@ -118,12 +117,9 @@ func (h *Redirector) ReverseProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proxySources := r.Header.Values(proxyHeader)
-	for _, proxySource := range proxySources {
-		if proxySource == h.name {
-			w.WriteHeader(http.StatusLoopDetected)
-			return
-		}
+	if len(r.Header.Get(proxyHeader)) > 0 {
+		w.WriteHeader(http.StatusLoopDetected)
+		return
 	}
 
 	proxy.ServeHTTP(w, r)

@@ -8,11 +8,9 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build without_dashboard
 // +build without_dashboard
 
 package dashboard
@@ -23,14 +21,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pingcap/tidb-dashboard/pkg/config"
+	"github.com/pingcap-incubator/tidb-dashboard/pkg/config"
 
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 )
 
 var (
-	serviceGroup = apiutil.APIServiceGroup{
+	serviceGroup = server.ServiceGroup{
 		Name:       "dashboard",
 		Version:    "v1",
 		IsCore:     false,
@@ -44,7 +41,7 @@ func SetCheckInterval(time.Duration) {}
 // GetServiceBuilders returns a empty Dashboard Builder
 func GetServiceBuilders() []server.HandlerBuilder {
 	return []server.HandlerBuilder{
-		func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		func(context.Context, *server.Server) (http.Handler, server.ServiceGroup, error) {
 			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.WriteString(w, "Dashboard is not built.\n")
 			})

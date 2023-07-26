@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,15 +18,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path"
 	"strconv"
 
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/etcdutil"
+	"github.com/tikv/pd/pkg/typeutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -46,7 +44,7 @@ type BackupInfo struct {
 	Config            *config.Config `json:"config"`
 }
 
-// GetBackupInfo return the BackupInfo
+//GetBackupInfo return the BackupInfo
 func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) {
 	backInfo := &BackupInfo{}
 	resp, err := etcdutil.EtcdKVGet(client, pdClusterIDPath)
@@ -75,7 +73,8 @@ func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) 
 
 	backInfo.AllocIDMax = allocIDMax
 
-	resp, err = etcdutil.EtcdKVGet(client, endpoint.TimestampPath(rootPath))
+	timestampPath := path.Join(rootPath, "timestamp")
+	resp, err = etcdutil.EtcdKVGet(client, timestampPath)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +91,7 @@ func GetBackupInfo(client *clientv3.Client, pdAddr string) (*BackupInfo, error) 
 	return backInfo, nil
 }
 
-// OutputToFile output the backupInfo to the file.
+//OutputToFile output the backupInfo to the file.
 func OutputToFile(backInfo *BackupInfo, f *os.File) error {
 	w := bufio.NewWriter(f)
 	defer w.Flush()
@@ -101,7 +100,7 @@ func OutputToFile(backInfo *BackupInfo, f *os.File) error {
 		return err
 	}
 	var formatBuffer bytes.Buffer
-	err = json.Indent(&formatBuffer, backBytes, "", "    ")
+	err = json.Indent(&formatBuffer, []byte(backBytes), "", "    ")
 	if err != nil {
 		return err
 	}
@@ -115,7 +114,7 @@ func getConfig(pdAddr string) (*config.Config, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

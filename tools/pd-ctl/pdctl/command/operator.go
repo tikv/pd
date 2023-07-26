@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -25,28 +24,9 @@ import (
 
 var (
 	operatorsPrefix = "pd/api/v1/operators"
-	peerRoles       = map[string]struct{}{
-		"leader":   {},
-		"voter":    {},
-		"follower": {},
-		"learner":  {},
-	}
 )
 
-const (
-	// HistoryExample history command example.
-	HistoryExample = `
-  If the timestamp is right, the the output will be like:
-
-  [
-    "admin-remove-peer {rm peer: store [2]} (kind:admin,region, region:1(1,1), createAt:2022-02-15 15:11:14.974435 +0800 
-	CST m=+0.663988396, startAt:2022-02-15 15:11:14.974485 +0800 CST m=+0.664038719, currentStep:0, size:1, steps:[remove peer on store 2]) 
-	(finishAt:2022-02-15 15:11:14.975531 +0800 CST m=+0.665084434, duration:1.045715ms)"
-  ]
-`
-)
-
-// NewOperatorCommand returns an operator command.
+// NewOperatorCommand returns a operator command.
 func NewOperatorCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "operator",
@@ -56,7 +36,6 @@ func NewOperatorCommand() *cobra.Command {
 	c.AddCommand(NewCheckOperatorCommand())
 	c.AddCommand(NewAddOperatorCommand())
 	c.AddCommand(NewRemoveOperatorCommand())
-	c.AddCommand(NewHistoryOperatorCommand())
 	return c
 }
 
@@ -91,7 +70,7 @@ func showOperatorCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, path, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -110,7 +89,7 @@ func checkOperatorCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
+	r, err := doRequest(cmd, path, http.MethodGet)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -168,7 +147,7 @@ func transferLeaderCommandFunc(cmd *cobra.Command, args []string) {
 // NewTransferRegionCommand returns a command to transfer region.
 func NewTransferRegionCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "transfer-region <region_id> <to_store_id> [leader|voter|follower|learner] ...",
+		Use:   "transfer-region <region_id> <to_store_id>...",
 		Short: "transfer a region's peers to the specified stores",
 		Run:   transferRegionCommandFunc,
 	}
@@ -181,14 +160,9 @@ func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	ids, roles, err := parseUit64sAndPeerRole(args)
+	ids, err := parseUint64s(args)
 	if err != nil {
 		cmd.Println(err)
-		return
-	}
-
-	if len(roles) > 0 && len(roles)+1 != len(ids) {
-		cmd.Println("peer role is not match with store")
 		return
 	}
 
@@ -196,9 +170,6 @@ func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["to_store_ids"] = ids[1:]
-	if len(roles) > 0 {
-		input["peer_roles"] = roles
-	}
 	postJSON(cmd, operatorsPrefix, input)
 }
 
@@ -351,17 +322,19 @@ func removePeerCommandFunc(cmd *cobra.Command, args []string) {
 // NewSplitRegionCommand returns a command to split a region.
 func NewSplitRegionCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "split-region <region_id> [--policy=scan|approximate|usekey] [--keys]",
+		Use:   "split-region <region_id> [--policy=scan|approximate|ratio]",
 		Short: "split a region",
 		Run:   splitRegionCommandFunc,
 	}
 	c.Flags().String("policy", "scan", "the policy to get region split key")
-	c.Flags().String("keys", "", "the split key, hex encoded")
+	c.Flags().String("dim_id", "0", "the id of dimension to perform ratio splitting")
+	c.Flags().String("ratio", "0.5", "the splitting ratio")
+	c.Flags().String("rw_type", "0", "split type: read 0, write 1")
 	return c
 }
 
 func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) < 1 {
+	if len(args) != 1 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
@@ -372,9 +345,32 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	var dimID uint64
+	var ratio float64
+	var rwType uint64
 	policy := cmd.Flags().Lookup("policy").Value.String()
 	switch policy {
-	case "scan", "approximate", "usekey":
+	case "scan", "approximate":
+		break
+	case "ratio":
+		dimIDStr := cmd.Flags().Lookup("dim_id").Value.String()
+		dimID, err = strconv.ParseUint(dimIDStr, 10, 64)
+		if err != nil {
+			cmd.Println(err)
+			return
+		}
+		ratioStr := cmd.Flags().Lookup("ratio").Value.String()
+		ratio, err = strconv.ParseFloat(ratioStr, 64)
+		if err != nil {
+			cmd.Println(err)
+			return
+		}
+		rwStr := cmd.Flags().Lookup("rw_type").Value.String()
+		rwType, err = strconv.ParseUint(rwStr, 10, 64)
+		if err != nil {
+			cmd.Println(err)
+			return
+		}
 		break
 	default:
 		cmd.Println("Error: unknown policy")
@@ -385,10 +381,9 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["policy"] = policy
-	keys := cmd.Flags().Lookup("keys").Value.String()
-	if len(keys) > 0 {
-		input["keys"] = []string{keys}
-	}
+	input["dim_id"] = dimID
+	input["ratio"] = ratio
+	input["rw_type"] = rwType
 	postJSON(cmd, operatorsPrefix, input)
 }
 
@@ -438,36 +433,12 @@ func removeOperatorCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	path := operatorsPrefix + "/" + args[0]
-	_, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
+	_, err := doRequest(cmd, path, http.MethodDelete)
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
 	cmd.Println("Success!")
-}
-
-// NewHistoryOperatorCommand returns a command to history finished operators.
-func NewHistoryOperatorCommand() *cobra.Command {
-	c := &cobra.Command{
-		Use:     "history <start>",
-		Short:   "list all finished operators since start, start is a timestamp",
-		Run:     historyOperatorCommandFunc,
-		Example: HistoryExample,
-	}
-	return c
-}
-
-func historyOperatorCommandFunc(cmd *cobra.Command, args []string) {
-	path := operatorsPrefix + "/" + "records"
-	if len(args) == 1 {
-		path += "?from=" + args[0]
-	}
-	records, err := doRequest(cmd, path, http.MethodGet, http.Header{})
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	cmd.Println(records)
 }
 
 func parseUint64s(args []string) ([]uint64, error) {
@@ -480,32 +451,4 @@ func parseUint64s(args []string) ([]uint64, error) {
 		results = append(results, v)
 	}
 	return results, nil
-}
-
-func parseUit64sAndPeerRole(args []string) ([]uint64, []string, error) {
-	if len(args) <= 2 {
-		ids, err := parseUint64s(args)
-		return ids, nil, err
-	}
-	if _, ok := peerRoles[args[2]]; !ok {
-		ids, err := parseUint64s(args)
-		return ids, nil, err
-	}
-
-	ids := make([]uint64, 0, len(args))
-	roles := make([]string, 0, len(args))
-	for idx, arg := range args {
-		if idx == 0 || idx&1 == 1 {
-			v, err := strconv.ParseUint(arg, 10, 64)
-			if err != nil {
-				return nil, nil, errors.WithStack(err)
-			}
-			ids = append(ids, v)
-			continue
-		}
-		if _, ok := peerRoles[arg]; ok {
-			roles = append(roles, arg)
-		}
-	}
-	return ids, roles, nil
 }

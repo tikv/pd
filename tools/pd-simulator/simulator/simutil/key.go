@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -76,7 +75,7 @@ func GenerateTableKeys(tableCount, size int) []string {
 
 // GenerateSplitKey generate the split key.
 func GenerateSplitKey(start, end []byte) []byte {
-	key := make([]byte, 0, len(start))
+	var key []byte
 	// lessThanEnd is set as true when the key is already less than end key.
 	lessThanEnd := len(end) == 0
 	for i, s := range start {

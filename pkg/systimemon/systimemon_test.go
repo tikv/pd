@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -26,11 +25,11 @@ func TestSystimeMonitor(t *testing.T) {
 	defer cancel()
 	var jumpForward int32
 
-	triggered := false
+	trigged := false
 	go StartMonitor(ctx,
 		func() time.Time {
-			if !triggered {
-				triggered = true
+			if !trigged {
+				trigged = true
 				return time.Now()
 			}
 
@@ -39,7 +38,7 @@ func TestSystimeMonitor(t *testing.T) {
 			atomic.StoreInt32(&jumpForward, 1)
 		})
 
-	time.Sleep(time.Second)
+	time.Sleep(1 * time.Second)
 
 	if atomic.LoadInt32(&jumpForward) != 1 {
 		t.Error("should detect time error")

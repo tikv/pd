@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -33,7 +32,7 @@ func NewConnection(simCase *cases.Case, pdAddr string, storeConfig *SimConfig) (
 	}
 
 	for _, store := range simCase.Stores {
-		node, err := NewNode(store, pdAddr, storeConfig)
+		node, err := NewNode(store, pdAddr, storeConfig.StoreIOMBPerSecond)
 		if err != nil {
 			return nil, err
 		}
@@ -49,5 +48,5 @@ func (c *Connection) nodeHealth(storeID uint64) bool {
 		return false
 	}
 
-	return n.GetNodeState() == metapb.NodeState_Preparing || n.GetNodeState() == metapb.NodeState_Serving
+	return n.GetState() == metapb.StoreState_Up
 }

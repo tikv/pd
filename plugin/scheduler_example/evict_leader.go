@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -18,21 +17,19 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/apiutil"
 	"github.com/tikv/pd/pkg/errs"
-	sche "github.com/tikv/pd/pkg/schedule/core"
-	"github.com/tikv/pd/pkg/schedule/filter"
-	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/filter"
+	"github.com/tikv/pd/server/schedule/operator"
+	"github.com/tikv/pd/server/schedule/opt"
+	"github.com/tikv/pd/server/schedulers"
 	"github.com/unrolled/render"
 )
 
@@ -45,7 +42,7 @@ const (
 )
 
 func init() {
-	schedulers.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedulers.ConfigDecoder {
+	schedule.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -65,10 +62,11 @@ func init() {
 			}
 			conf.StoreIDWitRanges[id] = ranges
 			return nil
+
 		}
 	})
 
-	schedulers.RegisterScheduler(EvictLeaderType, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, removeSchedulerCb ...func(string) error) (schedulers.Scheduler, error) {
+	schedule.RegisterScheduler(EvictLeaderType, func(opController *schedule.OperatorController, storage *core.Storage, decoder schedule.ConfigDecoder) (schedule.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -79,23 +77,23 @@ func init() {
 }
 
 // SchedulerType returns the type of the scheduler
-// nolint
+//nolint
 func SchedulerType() string {
 	return EvictLeaderType
 }
 
 // SchedulerArgs returns the args for the scheduler
-// nolint
+//nolint
 func SchedulerArgs() []string {
 	args := []string{"1"}
 	return args
 }
 
 type evictLeaderSchedulerConfig struct {
-	mu               syncutil.RWMutex
-	storage          endpoint.ConfigStorage
+	mu               sync.RWMutex
+	storage          *core.Storage
 	StoreIDWitRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster          *core.BasicCluster
+	cluster          opt.Cluster
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -129,7 +127,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	name := conf.getScheduleName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	data, err := schedulers.EncodeConfig(conf)
+	data, err := schedule.EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
@@ -143,9 +141,10 @@ func (conf *evictLeaderSchedulerConfig) getScheduleName() string {
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
-	res := make([]string, 0, len(conf.StoreIDWitRanges[id])*2)
+	var res []string
 	for index := range conf.StoreIDWitRanges[id] {
-		res = append(res, (string)(conf.StoreIDWitRanges[id][index].StartKey), (string)(conf.StoreIDWitRanges[id][index].EndKey))
+		res = append(res, (string)(conf.StoreIDWitRanges[id][index].StartKey))
+		res = append(res, (string)(conf.StoreIDWitRanges[id][index].EndKey))
 	}
 	return res
 }
@@ -158,7 +157,7 @@ type evictLeaderScheduler struct {
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
-func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) schedulers.Scheduler {
+func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *evictLeaderSchedulerConfig) schedule.Scheduler {
 	base := schedulers.NewBaseScheduler(opController)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
@@ -183,10 +182,10 @@ func (s *evictLeaderScheduler) GetType() string {
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
-	return schedulers.EncodeConfig(s.conf)
+	return schedule.EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
+func (s *evictLeaderScheduler) Prepare(cluster opt.Cluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -198,7 +197,7 @@ func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	return res
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
+func (s *evictLeaderScheduler) Cleanup(cluster opt.Cluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
@@ -206,41 +205,36 @@ func (s *evictLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	}
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
-	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
-	}
-	return allowed
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster opt.Cluster) bool {
+	return s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWitRanges))
+func (s *evictLeaderScheduler) Schedule(cluster opt.Cluster) []*operator.Operator {
+	var ops []*operator.Operator
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
-	pendingFilter := filter.NewRegionPendingFilter()
-	downFilter := filter.NewRegionDownFilter()
 	for id, ranges := range s.conf.StoreIDWitRanges {
-		region := filter.SelectOneRegion(cluster.RandLeaderRegions(id, ranges), nil, pendingFilter, downFilter)
+		region := cluster.RandLeaderRegion(id, ranges, opt.HealthRegion(cluster))
 		if region == nil {
 			continue
 		}
 		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true, OperatorLevel: constant.Urgent}).
+			FilterTarget(cluster.GetOpts(), filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true}).
 			RandomPick()
 		if target == nil {
 			continue
 		}
-		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), []uint64{}, operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
+
 		}
-		op.SetPriorityLevel(constant.High)
+		op.SetPriorityLevel(core.HighPriority)
 		ops = append(ops, op)
 	}
 
-	return ops, nil
+	return ops
 }
 
 type evictLeaderHandler struct {
@@ -324,9 +318,9 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
-	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods(http.MethodDelete)
+	router.HandleFunc("/config", h.UpdateConfig).Methods("POST")
+	router.HandleFunc("/list", h.ListConfig).Methods("GET")
+	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods("DELETE")
 	return router
 }
 

@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,11 +15,10 @@ package cache
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
 
@@ -29,9 +27,9 @@ type ttlCacheItem struct {
 	expire time.Time
 }
 
-// ttlCache is a cache that assigns TTL (Time-To-Live) for each items.
+// ttlCache is a cache that assigns TTL(Time-To-Live) for each items.
 type ttlCache struct {
-	syncutil.RWMutex
+	sync.RWMutex
 	ctx context.Context
 
 	items      map[interface{}]ttlCacheItem
@@ -143,7 +141,6 @@ func (c *ttlCache) Clear() {
 }
 
 func (c *ttlCache) doGC() {
-	defer logutil.LogPanic()
 	ticker := time.NewTicker(c.gcInterval)
 	defer ticker.Stop()
 
@@ -167,23 +164,6 @@ func (c *ttlCache) doGC() {
 			return
 		}
 	}
-}
-
-// UpdateTTL updates the TTL for the cache.
-func (c *ttlCache) UpdateTTL(duration time.Duration) {
-	c.Lock()
-	defer c.Unlock()
-	if c.ttl == duration {
-		return
-	}
-
-	for key := range c.items {
-		c.items[key] = ttlCacheItem{
-			value:  c.items[key].value,
-			expire: time.Now().Add(duration),
-		}
-	}
-	c.ttl = duration
 }
 
 // TTLUint64 is simple TTL saves only uint64s.
@@ -254,11 +234,6 @@ func (c *TTLString) Put(key string, value interface{}) {
 	c.ttlCache.put(key, value)
 }
 
-// PutWithTTL puts an item into cache with specified TTL.
-func (c *TTLString) PutWithTTL(key string, value interface{}, ttl time.Duration) {
-	c.ttlCache.putWithTTL(key, value, ttl)
-}
-
 // Pop one key/value that is not expired
 func (c *TTLString) Pop() (string, interface{}, bool) {
 	k, v, success := c.ttlCache.pop()
@@ -270,22 +245,4 @@ func (c *TTLString) Pop() (string, interface{}, bool) {
 		return "", nil, false
 	}
 	return key, v, true
-}
-
-// Get return the value by key id
-func (c *TTLString) Get(id string) (interface{}, bool) {
-	return c.ttlCache.get(id)
-}
-
-// GetAllID returns all key ids
-func (c *TTLString) GetAllID() []string {
-	keys := c.ttlCache.getKeys()
-	var ids []string
-	for _, key := range keys {
-		id, ok := key.(string)
-		if ok {
-			ids = append(ids, id)
-		}
-	}
-	return ids
 }

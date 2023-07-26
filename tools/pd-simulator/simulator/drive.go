@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -16,19 +15,14 @@ package simulator
 
 import (
 	"context"
-	"path"
-	"strconv"
 	"sync"
-	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +37,6 @@ type Driver struct {
 	raftEngine  *RaftEngine
 	conn        *Connection
 	simConfig   *SimConfig
-	pdConfig    *PDConfig
 }
 
 // NewDriver returns a driver.
@@ -52,14 +45,10 @@ func NewDriver(pdAddr string, caseName string, simConfig *SimConfig) (*Driver, e
 	if simCase == nil {
 		return nil, errors.Errorf("failed to create case %s", caseName)
 	}
-	pdConfig := &PDConfig{}
-	pdConfig.PlacementRules = simCase.Rules
-	pdConfig.LocationLabels = simCase.Labels
 	return &Driver{
 		pdAddr:    pdAddr,
 		simCase:   simCase,
 		simConfig: simConfig,
-		pdConfig:  pdConfig,
 	}, nil
 }
 
@@ -73,8 +62,6 @@ func (d *Driver) Prepare() error {
 
 	d.raftEngine = NewRaftEngine(d.simCase, d.conn, d.simConfig)
 	d.eventRunner = NewEventRunner(d.simCase.Events, d.raftEngine)
-
-	d.updateNodeAvailable()
 
 	// Bootstrap.
 	store, region, err := d.GetBootstrapInfo(d.raftEngine)
@@ -93,28 +80,7 @@ func (d *Driver) Prepare() error {
 	}
 
 	// Setup alloc id.
-	// TODO: This is a hack way. Once we have reset alloc ID API, we need to replace it.
 	maxID := cases.IDAllocator.GetID()
-	requestTimeout := 10 * time.Second
-	etcdTimeout := 3 * time.Second
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{d.pdAddr},
-		DialTimeout: etcdTimeout,
-	})
-	if err != nil {
-		return err
-	}
-	ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
-	clusterID := d.client.GetClusterID(ctx)
-	rootPath := path.Join("/pd", strconv.FormatUint(clusterID, 10))
-	allocIDPath := path.Join(rootPath, "alloc_id")
-	_, err = etcdClient.Put(ctx, allocIDPath, string(typeutil.Uint64ToBytes(maxID+1000)))
-	if err != nil {
-		cancel()
-		return err
-	}
-	cancel()
-
 	for {
 		var id uint64
 		id, err = d.client.AllocID(context.Background())
@@ -163,6 +129,11 @@ func (d *Driver) Check() bool {
 	return d.simCase.Checker(d.raftEngine.regionsInfo, stats)
 }
 
+// PrintStatistics prints the statistics of the scheduler.
+func (d *Driver) PrintStatistics() {
+	d.raftEngine.schedulerStats.PrintStatistics()
+}
+
 // Start starts all nodes.
 func (d *Driver) Start() error {
 	for _, n := range d.conn.Nodes {
@@ -171,13 +142,6 @@ func (d *Driver) Start() error {
 			return err
 		}
 	}
-	d.ChangePDConfig()
-	return nil
-}
-
-// ChangePDConfig changes pd config
-func (d *Driver) ChangePDConfig() error {
-	d.client.PutPDConfig(d.pdConfig)
 	return nil
 }
 
@@ -214,14 +178,4 @@ func (d *Driver) GetBootstrapInfo(r *RaftEngine) (*metapb.Store, *metapb.Region,
 		return nil, nil, errors.Errorf("bootstrap store %v not found", region.GetLeader().GetStoreId())
 	}
 	return store.Store, region.GetMeta(), nil
-}
-
-func (d *Driver) updateNodeAvailable() {
-	for storeID, n := range d.conn.Nodes {
-		if n.hasExtraUsedSpace {
-			n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID)) - uint64(d.simConfig.RaftStore.ExtraUsedSpace)
-		} else {
-			n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID))
-		}
-	}
 }

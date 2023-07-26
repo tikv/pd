@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,50 +18,55 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
 	"sync"
 	"testing"
 	"time"
 
+	. "github.com/pingcap/check"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
 
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestMemberDelete(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-2",
-		"pd3": "dc-3",
-	}
-	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.EnableLocalTSO = true
-		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
-	})
+var _ = Suite(&serverTestSuite{})
+
+type serverTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *serverTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *serverTestSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+func (s *serverTestSuite) TestMemberDelete(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	leaderName := cluster.WaitLeader()
-	re.NotEmpty(leaderName)
+	c.Assert(leaderName, Not(Equals), "")
 	leader := cluster.GetServer(leaderName)
 	var members []*tests.TestServer
 	for _, s := range cluster.GetConfig().InitialServers {
@@ -70,9 +74,9 @@ func TestMemberDelete(t *testing.T) {
 			members = append(members, cluster.GetServer(s.Name))
 		}
 	}
-	re.Len(members, 2)
+	c.Assert(members, HasLen, 2)
 
-	var tables = []struct {
+	var table = []struct {
 		path    string
 		status  int
 		members []*config.Config
@@ -84,18 +88,18 @@ func TestMemberDelete(t *testing.T) {
 	}
 
 	httpClient := &http.Client{Timeout: 15 * time.Second}
-	for _, table := range tables {
-		t.Log(time.Now(), "try to delete:", table.path)
-		testutil.Eventually(re, func() bool {
-			addr := leader.GetConfig().ClientUrls + "/pd/api/v1/members/" + table.path
-			req, err := http.NewRequest(http.MethodDelete, addr, nil)
-			re.NoError(err)
+	for _, t := range table {
+		c.Log(time.Now(), "try to delete:", t.path)
+		testutil.WaitUntil(c, func(c *C) bool {
+			addr := leader.GetConfig().ClientUrls + "/pd/api/v1/members/" + t.path
+			req, err := http.NewRequest("DELETE", addr, nil)
+			c.Assert(err, IsNil)
 			res, err := httpClient.Do(req)
-			re.NoError(err)
+			c.Assert(err, IsNil)
 			defer res.Body.Close()
 			// Check by status.
-			if table.status != 0 {
-				if res.StatusCode != table.status {
+			if t.status != 0 {
+				if res.StatusCode != t.status {
 					time.Sleep(time.Second)
 					return false
 				}
@@ -103,31 +107,24 @@ func TestMemberDelete(t *testing.T) {
 			}
 			// Check by member list.
 			cluster.WaitLeader()
-			if err = checkMemberList(re, leader.GetConfig().ClientUrls, table.members); err != nil {
-				t.Logf("check member fail: %v", err)
+			if err = s.checkMemberList(c, leader.GetConfig().ClientUrls, t.members); err != nil {
+				c.Logf("check member fail: %v", err)
 				time.Sleep(time.Second)
 				return false
 			}
 			return true
 		})
 	}
-	// Check whether the dc-location info of the corresponding member is deleted.
-	for _, member := range members {
-		key := member.GetServer().GetMember().GetDCLocationPath(member.GetServerID())
-		resp, err := etcdutil.EtcdKVGet(leader.GetEtcdClient(), key)
-		re.NoError(err)
-		re.Empty(resp.Kvs)
-	}
 }
 
-func checkMemberList(re *require.Assertions, clientURL string, configs []*config.Config) error {
+func (s *serverTestSuite) checkMemberList(c *C, clientURL string, configs []*config.Config) error {
 	httpClient := &http.Client{Timeout: 15 * time.Second}
 	addr := clientURL + "/pd/api/v1/members"
 	res, err := httpClient.Get(addr)
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	defer res.Body.Close()
-	buf, err := io.ReadAll(res.Body)
-	re.NoError(err)
+	buf, err := ioutil.ReadAll(res.Body)
+	c.Assert(err, IsNil)
 	if res.StatusCode != http.StatusOK {
 		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
 	}
@@ -139,144 +136,97 @@ func checkMemberList(re *require.Assertions, clientURL string, configs []*config
 	for _, member := range data["members"] {
 		for _, cfg := range configs {
 			if member.GetName() == cfg.Name {
-				re.Equal([]string{cfg.ClientUrls}, member.ClientUrls)
-				re.Equal([]string{cfg.PeerUrls}, member.PeerUrls)
+				c.Assert(member.ClientUrls, DeepEquals, []string{cfg.ClientUrls})
+				c.Assert(member.PeerUrls, DeepEquals, []string{cfg.PeerUrls})
 			}
 		}
 	}
 	return nil
 }
 
-func TestLeaderPriority(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3)
+func (s *serverTestSuite) TestLeaderPriority(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	cluster.WaitLeader()
 
 	leader1, err := cluster.GetServer("pd1").GetEtcdLeader()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	server1 := cluster.GetServer(leader1)
 	addr := server1.GetConfig().ClientUrls
 	// PD leader should sync with etcd leader.
-	testutil.Eventually(re, func() bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		return cluster.GetLeader() == leader1
 	})
 	// Bind a lower priority to current leader.
-	post(t, re, addr+"/pd/api/v1/members/name/"+leader1, `{"leader-priority": -1}`)
+	s.post(c, addr+"/pd/api/v1/members/name/"+leader1, `{"leader-priority": -1}`)
 	// Wait etcd leader change.
-	leader2 := waitEtcdLeaderChange(re, server1, leader1)
+	leader2 := s.waitEtcdLeaderChange(c, server1, leader1)
 	// PD leader should sync with etcd leader again.
-	testutil.Eventually(re, func() bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		return cluster.GetLeader() == leader2
 	})
 }
 
-func post(t *testing.T, re *require.Assertions, url string, body string) {
-	testutil.Eventually(re, func() bool {
-		res, err := http.Post(url, "", bytes.NewBufferString(body)) // #nosec
-		re.NoError(err)
-		b, err := io.ReadAll(res.Body)
+func (s *serverTestSuite) post(c *C, url string, body string) {
+	testutil.WaitUntil(c, func(c *C) bool {
+		res, err := http.Post(url, "", bytes.NewBufferString(body))
+		c.Assert(err, IsNil)
+		b, err := ioutil.ReadAll(res.Body)
 		res.Body.Close()
-		re.NoError(err)
-		t.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))
+		c.Assert(err, IsNil)
+		c.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))
 		return res.StatusCode == http.StatusOK
 	})
 }
 
-func waitEtcdLeaderChange(re *require.Assertions, server *tests.TestServer, old string) string {
+func (s *serverTestSuite) waitEtcdLeaderChange(c *C, server *tests.TestServer, old string) string {
 	var leader string
-	testutil.Eventually(re, func() bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		var err error
 		leader, err = server.GetEtcdLeader()
 		if err != nil {
 			return false
 		}
+		if leader == old {
+			// Priority check could be slow. So we sleep longer here.
+			time.Sleep(5 * time.Second)
+		}
 		return leader != old
-	}, testutil.WithWaitFor(90*time.Second), testutil.WithTickInterval(time.Second))
+	})
 	return leader
 }
 
-func TestLeaderResign(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3)
+func (s *serverTestSuite) TestLeaderResign(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	leader1 := cluster.WaitLeader()
 	addr1 := cluster.GetServer(leader1).GetConfig().ClientUrls
 
-	post(t, re, addr1+"/pd/api/v1/leader/resign", "")
-	leader2 := waitLeaderChange(re, cluster, leader1)
-	t.Log("leader2:", leader2)
+	s.post(c, addr1+"/pd/api/v1/leader/resign", "")
+	leader2 := s.waitLeaderChange(c, cluster, leader1)
+	c.Log("leader2:", leader2)
 	addr2 := cluster.GetServer(leader2).GetConfig().ClientUrls
-	post(t, re, addr2+"/pd/api/v1/leader/transfer/"+leader1, "")
-	leader3 := waitLeaderChange(re, cluster, leader2)
-	re.Equal(leader1, leader3)
+	s.post(c, addr2+"/pd/api/v1/leader/transfer/"+leader1, "")
+	leader3 := s.waitLeaderChange(c, cluster, leader2)
+	c.Assert(leader3, Equals, leader1)
 }
 
-func TestLeaderResignWithBlock(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3)
-	defer cluster.Destroy()
-	re.NoError(err)
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-
-	leader1 := cluster.WaitLeader()
-	addr1 := cluster.GetServer(leader1).GetConfig().ClientUrls
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/raftclusterIsBusy", `pause`))
-	post(t, re, addr1+"/pd/api/v1/leader/resign", "")
-	leader2 := waitLeaderChange(re, cluster, leader1)
-	t.Log("leader2:", leader2)
-	re.NotEqual(leader1, leader2)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/raftclusterIsBusy"))
-}
-
-func TestPDLeaderLostWhileEtcdLeaderIntact(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2)
-	defer cluster.Destroy()
-	re.NoError(err)
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-
-	leader1 := cluster.WaitLeader()
-	memberID := cluster.GetServer(leader1).GetLeader().GetMemberId()
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
-	leader2 := waitLeaderChange(re, cluster, leader1)
-	re.NotEqual(leader1, leader2)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
-}
-
-func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string) string {
+func (s *serverTestSuite) waitLeaderChange(c *C, cluster *tests.TestCluster, old string) string {
 	var leader string
-	testutil.Eventually(re, func() bool {
+	testutil.WaitUntil(c, func(c *C) bool {
 		leader = cluster.GetLeader()
 		if leader == old || leader == "" {
+			time.Sleep(time.Second)
 			return false
 		}
 		return true
@@ -284,16 +234,13 @@ func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old st
 	return leader
 }
 
-func TestMoveLeader(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 5)
+func (s *serverTestSuite) TestMoveLeader(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 5)
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	var wg sync.WaitGroup
@@ -319,53 +266,86 @@ func TestMoveLeader(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(10 * time.Second):
-		t.Fatal("move etcd leader does not return in 10 seconds")
+		c.Fatal("move etcd leader does not return in 10 seconds")
 	}
 }
 
-func TestGetLeader(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
-	done := make(chan bool)
-	svr, err := server.CreateServer(ctx, cfg, nil, server.CreateMockHandler(re, "127.0.0.1"))
-	re.NoError(err)
-	defer svr.Close()
-	re.NoError(svr.Run())
-	// Send requests after server has started.
-	go sendRequest(re, wg, done, cfg.ClientUrls)
-	time.Sleep(100 * time.Millisecond)
+var _ = Suite(&leaderTestSuite{})
 
-	server.MustWaitLeader(re, []*server.Server{svr})
-
-	re.NotNil(svr.GetLeader())
-
-	done <- true
-	wg.Wait()
-
-	testutil.CleanServer(cfg.DataDir)
+type leaderTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	svr    *server.Server
+	wg     sync.WaitGroup
+	done   chan bool
+	cfg    *config.Config
 }
 
-func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, addr string) {
-	defer wg.Done()
+func (s *leaderTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.cfg = server.NewTestSingleConfig(c)
+	s.wg.Add(1)
+	s.done = make(chan bool)
+	svr, err := server.CreateServer(s.ctx, s.cfg)
+	c.Assert(err, IsNil)
+	err = svr.Run()
+	// Send requests after server has started.
+	go s.sendRequest(c, s.cfg.ClientUrls)
+	time.Sleep(100 * time.Millisecond)
+	c.Assert(err, IsNil)
 
-	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(0)}
+	s.svr = svr
+}
+
+func (s *leaderTestSuite) TearDownSuite(c *C) {
+	s.cancel()
+	s.svr.Close()
+	testutil.CleanServer(s.cfg.DataDir)
+}
+
+func (s *leaderTestSuite) TestGetLeader(c *C) {
+	mustWaitLeader(c, []*server.Server{s.svr})
+
+	leader := s.svr.GetLeader()
+	c.Assert(leader, NotNil)
+
+	s.done <- true
+	s.wg.Wait()
+}
+
+func (s *leaderTestSuite) sendRequest(c *C, addr string) {
+	defer s.wg.Done()
+
+	req := &pdpb.AllocIDRequest{
+		Header: testutil.NewRequestHeader(0),
+	}
 
 	for {
 		select {
-		case <-done:
+		case <-s.done:
 			return
 		default:
 			// We don't need to check the response and error,
 			// just make sure the server will not panic.
-			grpcPDClient := testutil.MustNewGrpcClient(re, addr)
+			grpcPDClient := testutil.MustNewGrpcClient(c, addr)
 			if grpcPDClient != nil {
 				_, _ = grpcPDClient.AllocID(context.Background(), req)
 			}
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func mustWaitLeader(c *C, svrs []*server.Server) *server.Server {
+	var leader *server.Server
+	testutil.WaitUntil(c, func(c *C) bool {
+		for _, s := range svrs {
+			if !s.IsClosed() && s.GetMember().IsLeader() {
+				leader = s
+				return true
+			}
+		}
+		return false
+	})
+	return leader
 }

@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,36 +18,39 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/errors"
+	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/client/testutil"
-	"github.com/tikv/pd/client/tlsutil"
-	"github.com/tikv/pd/client/tsoutil"
+	"github.com/tikv/pd/pkg/testutil"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )
+
+func Test(t *testing.T) {
+	TestingT(t)
+}
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestTSLessEqual(t *testing.T) {
-	re := require.New(t)
-	re.True(tsoutil.TSLessEqual(9, 9, 9, 9))
-	re.True(tsoutil.TSLessEqual(8, 9, 9, 8))
-	re.False(tsoutil.TSLessEqual(9, 8, 8, 9))
-	re.False(tsoutil.TSLessEqual(9, 8, 9, 6))
-	re.True(tsoutil.TSLessEqual(9, 6, 9, 8))
+var _ = Suite(&testClientSuite{})
+
+type testClientSuite struct{}
+
+func (s *testClientSuite) TestTsLessEqual(c *C) {
+	c.Assert(tsLessEqual(9, 9, 9, 9), IsTrue)
+	c.Assert(tsLessEqual(8, 9, 9, 8), IsTrue)
+	c.Assert(tsLessEqual(9, 8, 8, 9), IsFalse)
+	c.Assert(tsLessEqual(9, 8, 9, 6), IsFalse)
+	c.Assert(tsLessEqual(9, 6, 9, 8), IsTrue)
 }
 
-func TestUpdateURLs(t *testing.T) {
-	re := require.New(t)
+func (s *testClientSuite) TestUpdateURLs(c *C) {
 	members := []*pdpb.Member{
-		{Name: "pd4", ClientUrls: []string{"tmp://pd4"}},
-		{Name: "pd1", ClientUrls: []string{"tmp://pd1"}},
-		{Name: "pd3", ClientUrls: []string{"tmp://pd3"}},
-		{Name: "pd2", ClientUrls: []string{"tmp://pd2"}},
+		{Name: "pd4", ClientUrls: []string{"tmp//pd4"}},
+		{Name: "pd1", ClientUrls: []string{"tmp//pd1"}},
+		{Name: "pd3", ClientUrls: []string{"tmp//pd3"}},
+		{Name: "pd2", ClientUrls: []string{"tmp//pd2"}},
 	}
 	getURLs := func(ms []*pdpb.Member) (urls []string) {
 		for _, m := range ms {
@@ -56,78 +58,48 @@ func TestUpdateURLs(t *testing.T) {
 		}
 		return
 	}
-	cli := &pdServiceDiscovery{option: newOption()}
-	cli.urls.Store([]string{})
+	cli := &baseClient{}
 	cli.updateURLs(members[1:])
-	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
 	cli.updateURLs(members[1:])
-	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2]}))
 	cli.updateURLs(members)
-	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetServiceURLs())
+	c.Assert(cli.urls, DeepEquals, getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}))
 }
 
-const testClientURL = "tmp://test.url:5255"
+var _ = Suite(&testClientCtxSuite{})
 
-func TestClientCtx(t *testing.T) {
-	re := require.New(t)
+type testClientCtxSuite struct{}
+
+func (s *testClientCtxSuite) TestClientCtx(c *C) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
 	defer cancel()
-	_, err := NewClientWithContext(ctx, []string{testClientURL}, SecurityOption{})
-	re.Error(err)
-	re.Less(time.Since(start), time.Second*5)
+	_, err := NewClientWithContext(ctx, []string{"localhost:8080"}, SecurityOption{})
+	c.Assert(err, NotNil)
+	c.Assert(time.Since(start), Less, time.Second*4)
 }
 
-func TestClientWithRetry(t *testing.T) {
-	re := require.New(t)
-	start := time.Now()
-	_, err := NewClientWithContext(context.TODO(), []string{testClientURL}, SecurityOption{}, WithMaxErrorRetry(5))
-	re.Error(err)
-	re.Less(time.Since(start), time.Second*10)
-}
+var _ = Suite(&testClientDialOptionSuite{})
 
-func TestGRPCDialOption(t *testing.T) {
-	re := require.New(t)
+type testClientDialOptionSuite struct{}
+
+func (s *testClientDialOptionSuite) TestGRPCDialOption(c *C) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
-	cli := &pdServiceDiscovery{
-		checkMembershipCh: make(chan struct{}, 1),
-		ctx:               ctx,
-		cancel:            cancel,
-		tlsCfg:            &tlsutil.TLSConfig{},
-		option:            newOption(),
+	// nolint
+	cli := &baseClient{
+		urls:            []string{"localhost:8080"},
+		checkLeaderCh:   make(chan struct{}, 1),
+		ctx:             ctx,
+		cancel:          cancel,
+		security:        SecurityOption{},
+		gRPCDialOptions: []grpc.DialOption{grpc.WithBlock()},
 	}
-	cli.urls.Store([]string{testClientURL})
-	cli.option.gRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
-	err := cli.updateMember()
-	re.Error(err)
-	re.Greater(time.Since(start), 500*time.Millisecond)
-}
+	cli.connMu.clientConns = make(map[string]*grpc.ClientConn)
 
-func TestTsoRequestWait(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	req := &tsoRequest{
-		done:       make(chan error, 1),
-		physical:   0,
-		logical:    0,
-		requestCtx: context.TODO(),
-		clientCtx:  ctx,
-	}
-	cancel()
-	_, _, err := req.Wait()
-	re.ErrorIs(errors.Cause(err), context.Canceled)
-
-	ctx, cancel = context.WithCancel(context.Background())
-	req = &tsoRequest{
-		done:       make(chan error, 1),
-		physical:   0,
-		logical:    0,
-		requestCtx: ctx,
-		clientCtx:  context.TODO(),
-	}
-	cancel()
-	_, _, err = req.Wait()
-	re.ErrorIs(errors.Cause(err), context.Canceled)
+	err := cli.updateLeader()
+	c.Assert(err, NotNil)
+	c.Assert(time.Since(start), Greater, 500*time.Millisecond)
 }

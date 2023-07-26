@@ -8,7 +8,6 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -19,79 +18,96 @@ import (
 	"testing"
 	"time"
 
+	. "github.com/pingcap/check"
 	"github.com/pingcap/failpoint"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
 
+func Test(t *testing.T) {
+	TestingT(t)
+}
+
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestWatcher(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
+var _ = Suite(&serverTestSuite{})
+
+type serverTestSuite struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (s *serverTestSuite) SetUpSuite(c *C) {
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	server.EnableZap = true
+}
+
+func (s *serverTestSuite) TearDownSuite(c *C) {
+	s.cancel()
+}
+
+func (s *serverTestSuite) TestWatcher(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pd1 := cluster.GetServer(cluster.GetLeader())
-	re.NotNil(pd1)
+	c.Assert(pd1, NotNil)
 
-	pd2, err := cluster.Join(ctx)
-	re.NoError(err)
+	pd2, err := cluster.Join(s.ctx)
+	c.Assert(err, IsNil)
 	err = pd2.Run()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 
 	time.Sleep(5 * time.Second)
-	pd3, err := cluster.Join(ctx)
-	re.NoError(err)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
+	pd3, err := cluster.Join(s.ctx)
+	c.Assert(err, IsNil)
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`), IsNil)
 	err = pd3.Run()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	time.Sleep(200 * time.Millisecond)
-	re.Equal(pd1.GetConfig().Name, pd3.GetLeader().GetName())
+	c.Assert(pd3.GetLeader().GetName(), Equals, pd1.GetConfig().Name)
 	err = pd1.Stop()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
-	re.Equal(pd2.GetConfig().Name, pd2.GetLeader().GetName())
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
-	testutil.Eventually(re, func() bool {
-		return pd3.GetLeader().GetName() == pd2.GetConfig().Name
+	c.Assert(pd2.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
+	failpoint.Disable("github.com/tikv/pd/server/delayWatcher")
+	testutil.WaitUntil(c, func(c *C) bool {
+		return c.Check(pd3.GetLeader().GetName(), Equals, pd2.GetConfig().Name)
 	})
+	c.Succeed()
 }
 
-func TestWatcherCompacted(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
+func (s *serverTestSuite) TestWatcherCompacted(c *C) {
+	cluster, err := tests.NewTestCluster(s.ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 
 	err = cluster.RunInitialServers()
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	cluster.WaitLeader()
 	pd1 := cluster.GetServer(cluster.GetLeader())
-	re.NotNil(pd1)
+	c.Assert(pd1, NotNil)
 	client := pd1.GetEtcdClient()
 	_, err = client.Put(context.Background(), "test", "v")
-	re.NoError(err)
+	c.Assert(err, IsNil)
 	// wait compaction
 	time.Sleep(2 * time.Second)
-	pd2, err := cluster.Join(ctx)
-	re.NoError(err)
+	pd2, err := cluster.Join(s.ctx)
+	c.Assert(err, IsNil)
 	err = pd2.Run()
-	re.NoError(err)
-	testutil.Eventually(re, func() bool {
-		return pd2.GetLeader().GetName() == pd1.GetConfig().Name
+	c.Assert(err, IsNil)
+	testutil.WaitUntil(c, func(c *C) bool {
+		return c.Check(pd2.GetLeader().GetName(), Equals, pd1.GetConfig().Name)
 	})
+	c.Succeed()
 }
