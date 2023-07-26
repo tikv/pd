@@ -427,7 +427,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
 	}
-	var pinDownPeer *pdpb.PeerStats
+	var pinDownPeer *metapb.Peer
 	isUnhealthyPeer := func(id uint64) bool {
 		for _, downPeer := range region.GetDownPeers() {
 			if downPeer.Peer.GetId() == id {
@@ -452,7 +452,7 @@ loopFits:
 		}
 		for _, p := range rf.Peers {
 			if isUnhealthyPeer(p.GetId()) {
-				pinDownPeer = region.GetDownPeerStats(p.GetId())
+				pinDownPeer = p
 				hasUnhealthyFit = true
 				break loopFits
 			}
@@ -473,24 +473,24 @@ loopFits:
 				continue
 			}
 			// no consider witness in this path.
-			if pinDownPeer.GetPeer().GetIsWitness() || orphanPeer.GetIsWitness() {
+			if pinDownPeer.GetIsWitness() || orphanPeer.GetIsWitness() {
 				continue
 			}
 			// down peer's store should be down.
-			if !c.isStoreDownTimeHitMaxDownTime(pinDownPeer.GetPeer().GetStoreId()) {
+			if !c.isStoreDownTimeHitMaxDownTime(pinDownPeer.GetStoreId()) {
 				continue
 			}
 			// check if down peer can replace with orphan peer.
 			dstStore := c.cluster.GetStore(orphanPeer.GetStoreId())
-			if fit.Replace(pinDownPeer.GetPeer().GetStoreId(), dstStore) {
-				destRole := pinDownPeer.GetPeer().Role
+			if fit.Replace(pinDownPeer.GetStoreId(), dstStore) {
+				destRole := pinDownPeer.GetRole()
 				orphanPeerRole := orphanPeer.GetRole()
 				ruleCheckerReplaceOrphanPeerCounter.Inc()
 				switch {
 				case orphanPeerRole == metapb.PeerRole_Learner && destRole == metapb.PeerRole_Voter:
-					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer.GetPeer())
+					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
 				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
-					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer.GetPeer())
+					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
 				default:
 					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
 					// destRole never be leader, so we not consider it.
