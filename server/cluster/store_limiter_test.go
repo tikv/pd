@@ -17,12 +17,12 @@ package cluster
 import (
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core/storelimit"
 )
 
+<<<<<<< HEAD
 func TestCollect(t *testing.T) {
 	re := require.New(t)
 
@@ -32,6 +32,8 @@ func TestCollect(t *testing.T) {
 	re.Equal(int64(1), limiter.state.cst.total)
 }
 
+=======
+>>>>>>> 2c030264a (cluster: remove store limit collect logic (#6832))
 func TestStoreLimitScene(t *testing.T) {
 	re := require.New(t)
 
