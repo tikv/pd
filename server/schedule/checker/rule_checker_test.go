@@ -807,7 +807,7 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthPeersAndTiFlash() {
 	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
-	suite.Equal("fast-replace-rule-down-peer", op.Desc())
+	suite.Equal("replace-rule-down-peer", op.Desc())
 }
 
 func (suite *ruleCheckerTestSuite) TestIssue3293() {
