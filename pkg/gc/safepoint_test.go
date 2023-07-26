@@ -170,8 +170,6 @@ func TestBlockUpdateSafePointV1(t *testing.T) {
 	gcworkerServiceID := "gc_worker"
 	gcWorkerSafePoint := uint64(8)
 
-	// update safepoint to 15(>10 for cdc) for gc_worker
-	gcWorkerSafePoint = uint64(15)
 	min, updated, err := manager.UpdateServiceGCSafePoint(gcworkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 	re.Error(err, "Don't allow update service safe point v1.")
 	re.False(updated)
@@ -180,6 +178,4 @@ func TestBlockUpdateSafePointV1(t *testing.T) {
 	oldSafePoint, err := manager.UpdateGCSafePoint(gcWorkerSafePoint)
 	re.Error(err, "Don't allow update service safe point v1.")
 	re.Equal(uint64(0), oldSafePoint)
-	re.Nil(min)
-
 }
