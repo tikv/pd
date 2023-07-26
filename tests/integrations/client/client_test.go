@@ -1551,7 +1551,7 @@ func TestGRPCRateLimitMiddleware(t *testing.T) {
 	re.NoError(err)
 	resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
-	expectErr := "reach rate limit"
+	expectErr := errs.ErrRateLimitExceeded.Error()
 	for i := 0; i < 3; i++ {
 		_, err := client.GetStore(ctx, 1)
 		if i > 0 {

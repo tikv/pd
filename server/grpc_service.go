@@ -284,7 +284,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 			defer limiter.Release(fName)
 		} else {
 			return &pdpb.GetMembersResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrReachRateLimit.FastGenByArgs().Error()),
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
 			}, nil
 		}
 	}
@@ -775,7 +775,7 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 			defer limiter.Release(fName)
 		} else {
 			return &pdpb.GetStoreResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrReachRateLimit.FastGenByArgs().Error()),
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
 			}, nil
 		}
 	}
@@ -878,7 +878,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 			defer limiter.Release(fName)
 		} else {
 			return &pdpb.GetAllStoresResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrReachRateLimit.FastGenByArgs().Error()),
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
 			}, nil
 		}
 	}
@@ -923,7 +923,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			defer limiter.Release(fName)
 		} else {
 			return &pdpb.StoreHeartbeatResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrReachRateLimit.FastGenByArgs().Error()),
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
 			}, nil
 		}
 	}
@@ -1304,7 +1304,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 			defer limiter.Release(fName)
 		} else {
 			return &pdpb.GetRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrReachRateLimit.FastGenByArgs().Error()),
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
 			}, nil
 		}
 	}
@@ -1348,7 +1348,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 			defer limiter.Release(fName)
 		} else {
 			return &pdpb.GetRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrReachRateLimit.FastGenByArgs().Error()),
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
 			}, nil
 		}
 	}
@@ -1393,7 +1393,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 			defer limiter.Release(fName)
 		} else {
 			return &pdpb.GetRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrReachRateLimit.FastGenByArgs().Error()),
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
 			}, nil
 		}
 	}
@@ -1437,7 +1437,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 			defer limiter.Release(fName)
 		} else {
 			return &pdpb.ScanRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrReachRateLimit.FastGenByArgs().Error()),
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
 			}, nil
 		}
 	}
