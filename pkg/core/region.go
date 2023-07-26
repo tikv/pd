@@ -294,6 +294,16 @@ func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
+// GetDownPeerStats returns the down peer with specified peer id.
+func (r *RegionInfo) GetDownPeerStats(peerID uint64) *pdpb.PeerStats {
+	for _, down := range r.downPeers {
+		if down.GetPeer().GetId() == peerID {
+			return down
+		}
+	}
+	return nil
+}
+
 // GetDownVoter returns the down voter with specified peer id.
 func (r *RegionInfo) GetDownVoter(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {

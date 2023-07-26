@@ -431,7 +431,6 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	isUnhealthyPeer := func(id uint64) bool {
 		for _, downPeer := range region.GetDownPeers() {
 			if downPeer.Peer.GetId() == id {
-				pinDownPeer = downPeer
 				return true
 			}
 		}
@@ -453,6 +452,7 @@ loopFits:
 		}
 		for _, p := range rf.Peers {
 			if isUnhealthyPeer(p.GetId()) {
+				pinDownPeer = region.GetDownPeerStats(p.GetId())
 				hasUnhealthyFit = true
 				break loopFits
 			}
@@ -467,20 +467,20 @@ loopFits:
 
 	// try to use orphan peers to replace unhealthy down peers.
 	for _, orphanPeer := range fit.OrphanPeers {
-		if isUnhealthyPeer(orphanPeer.GetId()) {
-			continue
-		}
 		if pinDownPeer != nil {
+			// make sure the orphan peer is healthy.
+			if isUnhealthyPeer(orphanPeer.GetId()) {
+				continue
+			}
 			// no consider witness in this path.
 			if pinDownPeer.GetPeer().GetIsWitness() || orphanPeer.GetIsWitness() {
 				continue
 			}
-			// store should be down.
+			// down peer's store should be down.
 			if !c.isStoreDownTimeHitMaxDownTime(pinDownPeer.GetPeer().GetStoreId()) {
 				continue
 			}
 			// check if down peer can replace with orphan peer.
-
 			dstStore := c.cluster.GetStore(orphanPeer.GetStoreId())
 			if fit.Replace(pinDownPeer.GetPeer().GetStoreId(), dstStore) {
 				destRole := pinDownPeer.GetPeer().Role
