@@ -540,15 +540,11 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 
 func (c *RuleChecker) isStoreDownTimeHitMaxDownTime(storeID uint64) bool {
 	store := c.cluster.GetStore(storeID)
-<<<<<<< HEAD
-	return store.DownTime() >= c.cluster.GetOpts().GetMaxStoreDownTime()
-=======
 	if store == nil {
 		log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 		return false
 	}
-	return store.DownTime() >= c.cluster.GetCheckerConfig().GetMaxStoreDownTime()
->>>>>>> f916e90eb (rule_checker: can replace unhealthPeer with orphanPeer (#6831))
+	return store.DownTime() >= c.cluster.GetOpts().GetMaxStoreDownTime()
 }
 
 func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {

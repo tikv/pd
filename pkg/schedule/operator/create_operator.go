@@ -51,7 +51,7 @@ func CreatePromoteLearnerOperator(desc string, ci ClusterInformer, region *core.
 }
 
 // CreatePromoteLearnerOperatorAndRemovePeer creates an operator that promotes a learner and removes a peer.
-func CreatePromoteLearnerOperatorAndRemovePeer(desc string, ci sche.SharedCluster, region *core.RegionInfo, toPromote *metapb.Peer, toRemove *metapb.Peer) (*Operator, error) {
+func CreatePromoteLearnerOperatorAndRemovePeer(desc string, ci ClusterInformer, region *core.RegionInfo, toPromote *metapb.Peer, toRemove *metapb.Peer) (*Operator, error) {
 	return NewBuilder(desc, ci, region).
 		PromoteLearner(toPromote.GetStoreId()).
 		RemovePeer(toRemove.GetStoreId()).
@@ -59,8 +59,8 @@ func CreatePromoteLearnerOperatorAndRemovePeer(desc string, ci sche.SharedCluste
 }
 
 // CreateDemoteLearnerOperatorAndRemovePeer creates an operator that demotes a learner and removes a peer.
-func CreateDemoteLearnerOperatorAndRemovePeer(desc string, ci sche.SharedCluster, region *core.RegionInfo, toDemote *metapb.Peer, toRemove *metapb.Peer) (*Operator, error) {
-	if !ci.GetSharedConfig().IsUseJointConsensus() {
+func CreateDemoteLearnerOperatorAndRemovePeer(desc string, ci ClusterInformer, region *core.RegionInfo, toDemote *metapb.Peer, toRemove *metapb.Peer) (*Operator, error) {
+	if !ci.GetOpts().IsUseJointConsensus() {
 		return nil, errors.Errorf("cannot build demote learner operator due to disabling using joint state")
 	}
 	return NewBuilder(desc, ci, region).
