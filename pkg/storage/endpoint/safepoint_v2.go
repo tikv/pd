@@ -125,6 +125,9 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 
 	min := &ServiceSafePointV2{KeyspaceID: keyspaceID, SafePoint: math.MaxUint64}
 	minGlobalServiceSafePoint, err := se.LoadMinGlobalServiceSafePoint(globalServiceID)
+	if err != nil {
+		return nil, err
+	}
 	if minGlobalServiceSafePoint != nil {
 		min.KeyspaceID = utils.NullKeyspaceID
 		min.SafePoint = minGlobalServiceSafePoint.SafePoint
@@ -168,6 +171,7 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 	return min, nil
 }
 
+// LoadMinGlobalServiceSafePoint returns the minimum global service safe point.
 func (se *StorageEndpoint) LoadMinGlobalServiceSafePoint(globalServiceID []string) (*ServiceSafePoint, error) {
 	if len(globalServiceID) == 0 {
 		return nil, nil

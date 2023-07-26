@@ -132,7 +132,6 @@ func TestLoadMinGlobalServiceSafePoint(t *testing.T) {
 	minSafePoint, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime, globalServiceIDs)
 	re.NoError(err)
 	re.Equal(uint64(50), minSafePoint.SafePoint)
-
 }
 
 func TestRemoveServiceSafePoint(t *testing.T) {
