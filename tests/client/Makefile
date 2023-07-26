@@ -18,15 +18,8 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
-<<<<<<< HEAD:tests/client/Makefile
 	@ golangci-lint run ./...
 	@ revive -formatter friendly -config ../../revive.toml .
-=======
-	@ echo "golangci-lint ..."
-	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
-	@ echo "revive ..."
-	@ revive -formatter friendly -config $(ROOT_PATH)/revive.toml ./...
->>>>>>> f916e90eb (rule_checker: can replace unhealthPeer with orphanPeer (#6831)):tests/integrations/client/Makefile
 
 tidy:
 	@ go mod tidy

@@ -42,38 +42,6 @@ var (
 	errPeerCannotBeWitness = errors.New("peer cannot be witness")
 	errNoNewLeader         = errors.New("no new leader")
 	errRegionNoLeader      = errors.New("region no leader")
-<<<<<<< HEAD:server/schedule/checker/rule_checker.go
-=======
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	ruleCheckerCounter                            = checkerCounter.WithLabelValues(ruleChecker, "check")
-	ruleCheckerPausedCounter                      = checkerCounter.WithLabelValues(ruleChecker, "paused")
-	ruleCheckerRegionNoLeaderCounter              = checkerCounter.WithLabelValues(ruleChecker, "region-no-leader")
-	ruleCheckerGetCacheCounter                    = checkerCounter.WithLabelValues(ruleChecker, "get-cache")
-	ruleCheckerNeedSplitCounter                   = checkerCounter.WithLabelValues(ruleChecker, "need-split")
-	ruleCheckerSetCacheCounter                    = checkerCounter.WithLabelValues(ruleChecker, "set-cache")
-	ruleCheckerReplaceDownCounter                 = checkerCounter.WithLabelValues(ruleChecker, "replace-down")
-	ruleCheckerPromoteWitnessCounter              = checkerCounter.WithLabelValues(ruleChecker, "promote-witness")
-	ruleCheckerReplaceOfflineCounter              = checkerCounter.WithLabelValues(ruleChecker, "replace-offline")
-	ruleCheckerAddRulePeerCounter                 = checkerCounter.WithLabelValues(ruleChecker, "add-rule-peer")
-	ruleCheckerNoStoreAddCounter                  = checkerCounter.WithLabelValues(ruleChecker, "no-store-add")
-	ruleCheckerNoStoreReplaceCounter              = checkerCounter.WithLabelValues(ruleChecker, "no-store-replace")
-	ruleCheckerFixPeerRoleCounter                 = checkerCounter.WithLabelValues(ruleChecker, "fix-peer-role")
-	ruleCheckerFixLeaderRoleCounter               = checkerCounter.WithLabelValues(ruleChecker, "fix-leader-role")
-	ruleCheckerNotAllowLeaderCounter              = checkerCounter.WithLabelValues(ruleChecker, "not-allow-leader")
-	ruleCheckerFixFollowerRoleCounter             = checkerCounter.WithLabelValues(ruleChecker, "fix-follower-role")
-	ruleCheckerNoNewLeaderCounter                 = checkerCounter.WithLabelValues(ruleChecker, "no-new-leader")
-	ruleCheckerDemoteVoterRoleCounter             = checkerCounter.WithLabelValues(ruleChecker, "demote-voter-role")
-	ruleCheckerRecentlyPromoteToNonWitnessCounter = checkerCounter.WithLabelValues(ruleChecker, "recently-promote-to-non-witness")
-	ruleCheckerCancelSwitchToWitnessCounter       = checkerCounter.WithLabelValues(ruleChecker, "cancel-switch-to-witness")
-	ruleCheckerSetVoterWitnessCounter             = checkerCounter.WithLabelValues(ruleChecker, "set-voter-witness")
-	ruleCheckerSetLearnerWitnessCounter           = checkerCounter.WithLabelValues(ruleChecker, "set-learner-witness")
-	ruleCheckerSetVoterNonWitnessCounter          = checkerCounter.WithLabelValues(ruleChecker, "set-voter-non-witness")
-	ruleCheckerSetLearnerNonWitnessCounter        = checkerCounter.WithLabelValues(ruleChecker, "set-learner-non-witness")
-	ruleCheckerMoveToBetterLocationCounter        = checkerCounter.WithLabelValues(ruleChecker, "move-to-better-location")
-	ruleCheckerSkipRemoveOrphanPeerCounter        = checkerCounter.WithLabelValues(ruleChecker, "skip-remove-orphan-peer")
-	ruleCheckerRemoveOrphanPeerCounter            = checkerCounter.WithLabelValues(ruleChecker, "remove-orphan-peer")
-	ruleCheckerReplaceOrphanPeerCounter           = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer")
->>>>>>> f916e90eb (rule_checker: can replace unhealthPeer with orphanPeer (#6831)):pkg/schedule/checker/rule_checker.go
 )
 
 const maxPendingListLen = 100000
@@ -483,7 +451,7 @@ loopFits:
 			if fit.Replace(pinDownPeer.GetStoreId(), dstStore) {
 				destRole := pinDownPeer.GetRole()
 				orphanPeerRole := orphanPeer.GetRole()
-				ruleCheckerReplaceOrphanPeerCounter.Inc()
+				checkerCounter.WithLabelValues("rule_checker", "replace-orphan-peer").Inc()
 				switch {
 				case orphanPeerRole == metapb.PeerRole_Learner && destRole == metapb.PeerRole_Voter:
 					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
@@ -535,15 +503,11 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 
 func (c *RuleChecker) isStoreDownTimeHitMaxDownTime(storeID uint64) bool {
 	store := c.cluster.GetStore(storeID)
-<<<<<<< HEAD:server/schedule/checker/rule_checker.go
-	return store.DownTime() >= c.cluster.GetOpts().GetMaxStoreDownTime()
-=======
 	if store == nil {
 		log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 		return false
 	}
-	return store.DownTime() >= c.cluster.GetCheckerConfig().GetMaxStoreDownTime()
->>>>>>> f916e90eb (rule_checker: can replace unhealthPeer with orphanPeer (#6831)):pkg/schedule/checker/rule_checker.go
+	return store.DownTime() >= c.cluster.GetOpts().GetMaxStoreDownTime()
 }
 
 func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
