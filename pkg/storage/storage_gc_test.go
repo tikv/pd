@@ -86,15 +86,53 @@ func TestLoadMinServiceSafePoint(t *testing.T) {
 	}
 	// enabling failpoint to make expired key removal immediately observable
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys", "return(true)"))
-	minSafePoint, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime)
+	minSafePoint, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime, nil)
 	re.NoError(err)
 	re.Equal(serviceSafePoints[0].SafePoint, minSafePoint.SafePoint)
 
 	// gc_worker service safepoint will not be removed.
-	ssp, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime.Add(5000*time.Second))
+	ssp, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime.Add(5000*time.Second), nil)
 	re.NoError(err)
 	re.Equal(ssp.ServiceID, endpoint.GCWorkerServiceSafePointID)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys"))
+}
+
+func TestLoadMinGlobalServiceSafePoint(t *testing.T) {
+	re := require.New(t)
+	storage := NewStorageWithMemoryBackend()
+	currentTime := time.Now()
+	expireAt1 := currentTime.Add(1000 * time.Second).Unix()
+	expireAt2 := currentTime.Add(2000 * time.Second).Unix()
+	expireAt3 := currentTime.Add(3000 * time.Second).Unix()
+
+	testKeyspaceID := uint32(1)
+	serviceSafePoints := []*endpoint.ServiceSafePointV2{
+		{KeyspaceID: testKeyspaceID, ServiceID: "0", ExpiredAt: expireAt1, SafePoint: 300},
+		{KeyspaceID: testKeyspaceID, ServiceID: "1", ExpiredAt: expireAt2, SafePoint: 400},
+		{KeyspaceID: testKeyspaceID, ServiceID: "2", ExpiredAt: expireAt3, SafePoint: 500},
+	}
+
+	globalServiceIDs := []string{"test01", "test02"}
+	minGlobalSafePoints := []uint64{uint64(100), uint64(50)}
+
+	for i, globalServiceID := range globalServiceIDs {
+		ssp := &endpoint.ServiceSafePoint{
+			ServiceID: globalServiceID,
+			ExpiredAt: expireAt3,
+			SafePoint: minGlobalSafePoints[i],
+		}
+		storage.SaveServiceGCSafePoint(ssp)
+	}
+
+	for _, serviceSafePoint := range serviceSafePoints {
+		re.NoError(storage.SaveServiceSafePointV2(serviceSafePoint))
+	}
+	// enabling failpoint to make expired key removal immediately observable
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys", "return(true)"))
+	minSafePoint, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime, globalServiceIDs)
+	re.NoError(err)
+	re.Equal(uint64(50), minSafePoint.SafePoint)
+
 }
 
 func TestRemoveServiceSafePoint(t *testing.T) {
