@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
@@ -454,6 +455,40 @@ func (suite *regionTestSuite) TestTopN() {
 	}
 }
 
+func TestRegionsWithKillRequest(t *testing.T) {
+	re := require.New(t)
+	svr, cleanup := mustNewServer(re)
+	defer cleanup()
+	server.MustWaitLeader(re, []*server.Server{svr})
+
+	addr := svr.GetAddr()
+	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
+	mustBootstrapCluster(re, svr)
+	regionCount := 100000
+	for i := 0; i < regionCount; i++ {
+		r := core.NewTestRegionInfo(uint64(i+2), 1,
+			[]byte(fmt.Sprintf("%09d", i)),
+			[]byte(fmt.Sprintf("%09d", i+1)),
+			core.SetApproximateKeys(10), core.SetApproximateSize(10))
+		mustRegionHeartbeat(re, svr, r)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewBuffer(nil))
+	re.NoError(err)
+	respCh := make(chan *http.Response)
+	go func() {
+		resp, err := testDialClient.Do(req) // nolint:bodyclose
+		re.Error(err)
+		re.Contains(err.Error(), "context canceled")
+		respCh <- resp
+	}()
+	time.Sleep(100 * time.Millisecond) // wait for the request to be sent
+	cancel()                           // close the request
+	resp := <-respCh
+	re.Nil(resp)
+}
+
 type getRegionTestSuite struct {
 	suite.Suite
 	svr       *server.Server
@@ -738,95 +773,58 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 
 func TestRegionsInfoMarshal(t *testing.T) {
 	re := require.New(t)
-	cases := []*RegionsInfo{
+	regionWithNilPeer := core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1})
+	core.SetPeers([]*metapb.Peer{{Id: 2}, nil})(regionWithNilPeer)
+	cases := [][]*core.RegionInfo{
+		{},
 		{
-			Count: 0,
+			// leader is nil
+			core.NewRegionInfo(&metapb.Region{Id: 1}, nil),
+			// Peers is empty
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.SetPeers([]*metapb.Peer{})),
+			// There is nil peer in peers.
+			regionWithNilPeer,
 		},
 		{
-			Count:   0,
-			Regions: []RegionInfo{},
+			// PendingPeers is empty
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.WithPendingPeers([]*metapb.Peer{})),
+			// There is nil peer in peers.
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.WithPendingPeers([]*metapb.Peer{nil})),
 		},
 		{
-			Count: 1,
-			Regions: []RegionInfo{
-				{
-					ID:     1,
-					Leader: MetaPeer{},
-				},
-			},
+			// DownPeers is empty
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.WithDownPeers([]*pdpb.PeerStats{})),
+			// There is nil peer in peers.
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.WithDownPeers([]*pdpb.PeerStats{{Peer: nil}})),
 		},
 		{
-			Count: 2,
-			Regions: []RegionInfo{
-				{
-					ID:           1,
-					Peers:        []MetaPeer{},
-					PendingPeers: []MetaPeer{},
-					DownPeers:    []PDPeerStats{},
-				},
-				{
-					ID:           2,
-					Peers:        []MetaPeer{{}},
-					PendingPeers: []MetaPeer{{}},
-					DownPeers:    []PDPeerStats{{}},
-				},
-			},
+			// Buckets is nil
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.SetBuckets(nil)),
+			// Buckets is empty
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.SetBuckets(&metapb.Buckets{})),
+		},
+		{
+			core.NewRegionInfo(&metapb.Region{Id: 1, StartKey: []byte{}, EndKey: []byte{},
+				RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}},
+				&metapb.Peer{Id: 1}, core.SetCPUUsage(10),
+				core.SetApproximateKeys(10), core.SetApproximateSize(10),
+				core.SetWrittenBytes(10), core.SetReadBytes(10),
+				core.SetReadKeys(10), core.SetWrittenKeys(10)),
 		},
 	}
+	regionsInfo := &RegionsInfo{}
 	for _, regions := range cases {
-		_, err := regions.marshal(context.Background())
+		b, err := regionsToBytes(context.Background(), regions)
 		re.NoError(err)
-	}
-}
-
-// Create n regions (0..n) of n stores (0..n).
-// Each region contains np peers, the first peer is the leader.
-// (copied from server/cluster_test.go)
-func newTestRegions() []*core.RegionInfo {
-	n := uint64(10000)
-	np := uint64(3)
-
-	regions := make([]*core.RegionInfo, 0, n)
-	for i := uint64(0); i < n; i++ {
-		peers := make([]*metapb.Peer, 0, np)
-		for j := uint64(0); j < np; j++ {
-			peer := &metapb.Peer{
-				Id: i*np + j,
-			}
-			peer.StoreId = (i + j) % n
-			peers = append(peers, peer)
-		}
-		region := &metapb.Region{
-			Id:          i,
-			Peers:       peers,
-			StartKey:    []byte(fmt.Sprintf("%d", i)),
-			EndKey:      []byte(fmt.Sprintf("%d", i+1)),
-			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
-		}
-		regions = append(regions, core.NewRegionInfo(region, peers[0]))
-	}
-	return regions
-}
-
-func BenchmarkRenderJSON(b *testing.B) {
-	regionInfos := newTestRegions()
-	rd := createStreamingRender()
-	regions := convertToAPIRegions(regionInfos)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		var buffer bytes.Buffer
-		rd.JSON(&buffer, 200, regions)
-	}
-}
-
-func BenchmarkConvertToAPIRegions(b *testing.B) {
-	regionInfos := newTestRegions()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		regions := convertToAPIRegions(regionInfos)
-		_ = regions.Count
+		err = json.Unmarshal(b, regionsInfo)
+		re.NoError(err)
 	}
 }
 

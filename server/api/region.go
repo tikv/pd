@@ -227,50 +227,6 @@ func (s *RegionsInfo) Adjust() {
 	}
 }
 
-func (s *RegionsInfo) marshal(ctx context.Context) ([]byte, error) {
-	out := &jwriter.Writer{}
-	out.RawByte('{')
-
-	out.RawString("\"count\":")
-	out.Int(s.Count)
-
-	out.RawString(",\"regions\":")
-	if s.Regions == nil {
-		out.RawString("null")
-	} else {
-		out.RawByte('[')
-		for i, r := range s.Regions {
-			select {
-			case <-ctx.Done():
-				// Return early, avoid the unnecessary computation.
-				// See more details in https://github.com/tikv/pd/issues/6835
-				return nil, ctx.Err()
-			default:
-			}
-			if i > 0 {
-				out.RawByte(',')
-			}
-			// EasyJSON will not check anonymous struct pointer field and will panic if the field is nil.
-			// So we need to set the field to default value explicitly when the anonymous struct pointer is nil.
-			r.Leader.setDefaultIfNil()
-			for i := range r.Peers {
-				r.Peers[i].setDefaultIfNil()
-			}
-			for i := range r.PendingPeers {
-				r.PendingPeers[i].setDefaultIfNil()
-			}
-			for i := range r.DownPeers {
-				r.DownPeers[i].setDefaultIfNil()
-			}
-			r.MarshalEasyJSON(out)
-		}
-		out.RawByte(']')
-	}
-
-	out.RawByte('}')
-	return out.Buffer.BuildBytes(), out.Error
-}
-
 type regionHandler struct {
 	svr *server.Server
 	rd  *render.Render
@@ -381,15 +337,48 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 	}
 }
 
-func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
-	regionInfos := make([]RegionInfo, len(regions))
+// regionsToBytes converts regions to bytes, which is `RegionsInfo`'s json format.
+// It is used to reduce the cost of json serialization.
+func regionsToBytes(ctx context.Context, regions []*core.RegionInfo) ([]byte, error) {
+	out := &jwriter.Writer{}
+	out.RawByte('{')
+
+	out.RawString("\"count\":")
+	out.Int(len(regions))
+
+	out.RawString(",\"regions\":")
+	out.RawByte('[')
+	region := &RegionInfo{}
 	for i, r := range regions {
-		InitRegion(r, &regionInfos[i])
+		select {
+		case <-ctx.Done():
+			// Return early, avoid the unnecessary computation.
+			// See more details in https://github.com/tikv/pd/issues/6835
+			return nil, ctx.Err()
+		default:
+		}
+		if i > 0 {
+			out.RawByte(',')
+		}
+		InitRegion(r, region)
+		// EasyJSON will not check anonymous struct pointer field and will panic if the field is nil.
+		// So we need to set the field to default value explicitly when the anonymous struct pointer is nil.
+		region.Leader.setDefaultIfNil()
+		for i := range region.Peers {
+			region.Peers[i].setDefaultIfNil()
+		}
+		for i := range region.PendingPeers {
+			region.PendingPeers[i].setDefaultIfNil()
+		}
+		for i := range region.DownPeers {
+			region.DownPeers[i].setDefaultIfNil()
+		}
+		region.MarshalEasyJSON(out)
 	}
-	return &RegionsInfo{
-		Count:   len(regions),
-		Regions: regionInfos,
-	}
+	out.RawByte(']')
+
+	out.RawByte('}')
+	return out.Buffer.BuildBytes(), out.Error
 }
 
 // @Tags     region
@@ -400,8 +389,7 @@ func convertToAPIRegions(regions []*core.RegionInfo) *RegionsInfo {
 func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	regions := rc.GetRegions()
-	regionsInfo := convertToAPIRegions(regions)
-	b, err := regionsInfo.marshal(r.Context())
+	b, err := regionsToBytes(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -436,8 +424,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 		limit = maxRegionLimit
 	}
 	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), limit)
-	regionsInfo := convertToAPIRegions(regions)
-	b, err := regionsInfo.marshal(r.Context())
+	b, err := regionsToBytes(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -473,8 +460,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	regions := rc.GetStoreRegions(uint64(id))
-	regionsInfo := convertToAPIRegions(regions)
-	b, err := regionsInfo.marshal(r.Context())
+	b, err := regionsToBytes(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -528,8 +514,7 @@ func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Reque
 		txnRegion := rc.ScanRegions(regionBound.TxnLeftBound, regionBound.TxnRightBound, limit-len(regions))
 		regions = append(regions, txnRegion...)
 	}
-	regionsInfo := convertToAPIRegions(regions)
-	b, err := regionsInfo.marshal(r.Context())
+	b, err := regionsToBytes(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -558,8 +543,7 @@ func (h *regionsHandler) getRegionsByType(
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	regionsInfo := convertToAPIRegions(regions)
-	b, err := regionsInfo.marshal(r.Context())
+	b, err := regionsToBytes(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -784,8 +768,7 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 	}
 
 	left, right := rc.GetAdjacentRegions(region)
-	regionsInfo := convertToAPIRegions([]*core.RegionInfo{left, right})
-	b, err := regionsInfo.marshal(r.Context())
+	b, err := regionsToBytes(r.Context(), []*core.RegionInfo{left, right})
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1008,8 +991,7 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 		limit = maxRegionLimit
 	}
 	regions := TopNRegions(rc.GetRegions(), less, limit)
-	regionsInfo := convertToAPIRegions(regions)
-	b, err := regionsInfo.marshal(r.Context())
+	b, err := regionsToBytes(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
