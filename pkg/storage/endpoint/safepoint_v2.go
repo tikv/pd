@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -47,7 +48,7 @@ type SafePointV2Storage interface {
 	SaveGCSafePointV2(gcSafePoint *GCSafePointV2) error
 	LoadAllGCSafePoints() ([]*GCSafePointV2, error)
 
-	LoadMinServiceSafePointV2(keyspaceID uint32, now time.Time) (*ServiceSafePointV2, error)
+	LoadMinServiceSafePointV2(keyspaceID uint32, now time.Time, globalServiceID []string) (*ServiceSafePointV2, error)
 	LoadServiceSafePointV2(keyspaceID uint32, serviceID string) (*ServiceSafePointV2, error)
 
 	SaveServiceSafePointV2(serviceSafePoint *ServiceSafePointV2) error
@@ -109,7 +110,7 @@ func (se *StorageEndpoint) LoadAllGCSafePoints() ([]*GCSafePointV2, error) {
 // LoadMinServiceSafePointV2 returns the minimum safepoint for the given keyspace.
 // If no service safe point exist for the given key space or all the service safe points just expired, return nil.
 // This also attempt to remove expired service safe point.
-func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time.Time) (*ServiceSafePointV2, error) {
+func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time.Time, globalServiceID []string) (*ServiceSafePointV2, error) {
 	prefix := ServiceSafePointV2Prefix(keyspaceID)
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
@@ -121,7 +122,13 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 	}
 
 	hasGCWorker := false
+
 	min := &ServiceSafePointV2{KeyspaceID: keyspaceID, SafePoint: math.MaxUint64}
+	minGlobalServiceSafePoint, err := se.LoadMinGlobalServiceSafePoint(globalServiceID)
+	if minGlobalServiceSafePoint != nil {
+		min.KeyspaceID = utils.NullKeyspaceID
+		min.SafePoint = minGlobalServiceSafePoint.SafePoint
+	}
 	for i, key := range keys {
 		serviceSafePoint := &ServiceSafePointV2{}
 		if err = json.Unmarshal([]byte(values[i]), serviceSafePoint); err != nil {
@@ -159,6 +166,40 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 		return se.initServiceSafePointV2ForGCWorker(keyspaceID, min.SafePoint)
 	}
 	return min, nil
+}
+
+func (se *StorageEndpoint) LoadMinGlobalServiceSafePoint(globalServiceID []string) (*ServiceSafePoint, error) {
+	if len(globalServiceID) == 0 {
+		return nil, nil
+	}
+	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
+	for _, serviceID := range globalServiceID {
+		// Load global service safe point
+		serviceSafePointV1, err := se.loadServiceGCSafePointV1(serviceID)
+		if err != nil {
+			return nil, err
+		}
+		if serviceSafePointV1.SafePoint < min.SafePoint {
+			min = serviceSafePointV1
+		}
+	}
+	return min, nil
+}
+
+// LoadGCSafePoint loads current GC safe point from storage.
+func (se *StorageEndpoint) loadServiceGCSafePointV1(serviceID string) (*ServiceSafePoint, error) {
+	serviceIDPath := GCSafePointServicePrefixPath() + serviceID
+	value, err := se.Load(serviceIDPath)
+	if err != nil || value == "" {
+		return nil, err
+	}
+
+	ssp := &ServiceSafePoint{}
+	if err := json.Unmarshal([]byte(value), ssp); err != nil {
+		return nil, err
+	}
+
+	return ssp, nil
 }
 
 // LoadServiceSafePointV2 returns ServiceSafePointV2 for given keyspaceID and serviceID.

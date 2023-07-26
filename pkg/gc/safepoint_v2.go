@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -48,6 +49,8 @@ type SafePointV2Manager struct {
 	v2Storage endpoint.SafePointV2Storage
 	// v1Storage is the storage for v1 format GCSafePoint and ServiceGCSafePoint, it's used during pd update.
 	v1Storage endpoint.GCSafePointStorage
+
+	cfg config.PDServerConfig
 }
 
 // NewSafePointManagerV2 returns a new SafePointV2Manager.
@@ -56,6 +59,7 @@ func NewSafePointManagerV2(
 	keyspaceStore endpoint.KeyspaceStorage,
 	v2Storage endpoint.SafePointV2Storage,
 	v1Storage endpoint.GCSafePointStorage,
+	cfg config.PDServerConfig,
 ) *SafePointV2Manager {
 	return &SafePointV2Manager{
 		ctx:             ctx,
@@ -63,6 +67,7 @@ func NewSafePointManagerV2(
 		keyspaceStorage: keyspaceStore,
 		v2Storage:       v2Storage,
 		v1Storage:       v1Storage,
+		cfg:             cfg,
 	}
 }
 
@@ -163,7 +168,8 @@ func (manager *SafePointV2Manager) UpdateServiceSafePoint(serviceSafePoint *endp
 	if err := manager.checkKeyspace(serviceSafePoint.KeyspaceID, true); err != nil {
 		return nil, err
 	}
-	minServiceSafePoint, err := manager.v2Storage.LoadMinServiceSafePointV2(serviceSafePoint.KeyspaceID, now)
+
+	minServiceSafePoint, err := manager.v2Storage.LoadMinServiceSafePointV2(serviceSafePoint.KeyspaceID, now, manager.cfg.GlobalServiceSafePointIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +187,7 @@ func (manager *SafePointV2Manager) UpdateServiceSafePoint(serviceSafePoint *endp
 	}
 	// If the updated safe point is the original min safe point, reload min safe point.
 	if serviceSafePoint.ServiceID == minServiceSafePoint.ServiceID {
-		minServiceSafePoint, err = manager.v2Storage.LoadMinServiceSafePointV2(serviceSafePoint.KeyspaceID, now)
+		minServiceSafePoint, err = manager.v2Storage.LoadMinServiceSafePointV2(serviceSafePoint.KeyspaceID, now, manager.cfg.GlobalServiceSafePointIDs)
 	}
 	if err != nil {
 		log.Info("update service safe point",
@@ -206,7 +212,7 @@ func (manager *SafePointV2Manager) RemoveServiceSafePoint(keyspaceID uint32, ser
 		return nil, err
 	}
 	// Load min safe point.
-	minServiceSafePoint, err := manager.v2Storage.LoadMinServiceSafePointV2(keyspaceID, now)
+	minServiceSafePoint, err := manager.v2Storage.LoadMinServiceSafePointV2(keyspaceID, now, manager.cfg.GlobalServiceSafePointIDs)
 	if err != nil {
 		return nil, err
 	}
