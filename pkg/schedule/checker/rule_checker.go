@@ -452,7 +452,10 @@ loopFits:
 		}
 		for _, p := range rf.Peers {
 			if isUnhealthyPeer(p.GetId()) {
-				pinDownPeer = p
+				// make sure is down peer.
+				if region.GetDownPeer(p.GetId()) != nil {
+					pinDownPeer = p
+				}
 				hasUnhealthyFit = true
 				break loopFits
 			}

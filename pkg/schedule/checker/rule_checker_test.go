@@ -711,6 +711,12 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthWithDifferentRole1() {
 	suite.Equal(uint64(3), op.Step(1).(operator.ChangePeerV2Leave).DemoteVoters[0].ToStore)
 	suite.Equal(uint64(4), op.Step(1).(operator.ChangePeerV2Leave).PromoteLearners[0].ToStore)
 	suite.Equal("replace-down-peer-with-orphan-peer", op.Desc())
+
+	// set peer3 only pending
+	r1 = r1.Clone(core.WithDownPeers(nil))
+	suite.cluster.PutRegion(r1)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.Nil(op)
 }
 
 func (suite *ruleCheckerTestSuite) TestPriorityFitHealthWithDifferentRole2() {
