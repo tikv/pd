@@ -1524,7 +1524,14 @@ func (bs *balanceSolver) bucketFirstStat() statistics.RegionStatKind {
 }
 
 func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]byte) *operator.Operator {
-	if len(keys) == 0 {
+	splitKeys := make([][]byte, 0, len(keys))
+	for _, key := range keys {
+		// make sure that this split key is in the region
+		if keyutil.Between(region.GetStartKey(), region.GetEndKey(), key) {
+			splitKeys = append(splitKeys, key)
+		}
+	}
+	if len(splitKeys) == 0 {
 		hotSchedulerNotFoundSplitKeysCounter.Inc()
 		return nil
 	}
@@ -1532,7 +1539,7 @@ func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]
 	if bs.rwTy == statistics.Write {
 		des = splitHotWriteBuckets
 	}
-	op, err := operator.CreateSplitRegionOperator(des, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, keys)
+	op, err := operator.CreateSplitRegionOperator(des, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKeys)
 	if err != nil {
 		log.Error("fail to create split operator",
 			zap.Stringer("resource-type", bs.resourceTy),
@@ -1560,6 +1567,10 @@ func (bs *balanceSolver) splitHotKeys(region *core.RegionInfo, stats []*buckets.
 		return nil
 	}
 	splitKey := stats[splitIdx-1].EndKey
+	// if the split key is not in the region, we should use the start key of the bucket.
+	if !keyutil.Between(region.GetStartKey(), region.GetEndKey(), splitKey) {
+		splitKey = stats[splitIdx-1].StartKey
+	}
 	op := bs.splitBucketsOperator(region, [][]byte{splitKey})
 	if op != nil {
 		op.AdditionalInfos["accLoads"] = strconv.FormatUint(acc-stats[splitIdx-1].Loads[dim], 10)
@@ -1612,13 +1623,14 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHo
 	createFunc := func(region *core.RegionInfo) {
 		stats, ok := hotBuckets[region.GetID()]
 		// If only one bucket is hot, we can't split it into two regions.
-		if !ok || len(stats) <= 1 {
+		if !ok {
 			hotSchedulerRegionBucketsNotHotCounter.Inc()
 			return
 		}
 		// bucket key range maybe not match the region key range, so we should filter the invalid buckets.
 		validStats := make([]*buckets.BucketStat, 0, len(hotBuckets))
 		startKey, endKey := region.GetStartKey(), region.GetEndKey()
+		// filter some buckets key range not match the region start key and end key.
 		for _, stat := range stats {
 			if keyutil.Between(startKey, endKey, stat.StartKey) || keyutil.Between(startKey, endKey, stat.EndKey) {
 				validStats = append(validStats, stat)

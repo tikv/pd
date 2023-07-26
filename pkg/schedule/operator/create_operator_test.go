@@ -131,6 +131,16 @@ func (suite *createOperatorTestSuite) TestCreateSplitRegionOperator() {
 			},
 			policy:        pdpb.CheckPolicy_APPROXIMATE,
 			expectedError: true,
+		}, {
+			startKey: []byte("k"),
+			endKey:   []byte("l"),
+			originPeers: []*metapb.Peer{
+				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+				{Id: 3, StoreId: 3, Role: metapb.PeerRole_DemotingVoter},
+			},
+			policy:        pdpb.CheckPolicy_APPROXIMATE,
+			expectedError: true,
 		},
 	}
 

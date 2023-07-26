@@ -288,7 +288,7 @@ func TestSplitBuckets(t *testing.T) {
 	re.NoError(err)
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, statistics.Read, transferLeader)
 	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
 
 	// the hot range is [a,c],[e,f]
 	b := &metapb.Buckets{
@@ -312,20 +312,64 @@ func TestSplitBuckets(t *testing.T) {
 	re.Equal(1, len(ops))
 	op := ops[0]
 	re.Equal(splitHotReadBuckets, op.Desc())
-	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
+	expectKeys := [][]byte{[]byte("c"), []byte("d")}
 	expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
 	re.NoError(err)
 	re.Equal(expectOp.Brief(), op.Brief())
 	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
 
-	ops = solve.createSplitOperator([]*core.RegionInfo{region}, true)
-	re.Equal(1, len(ops))
-	op = ops[0]
-	re.Equal(splitHotReadBuckets, op.Desc())
-	expectKeys = [][]byte{[]byte("c")}
-	expectOp, err = operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
-	re.NoError(err)
-	re.Equal(expectOp.Brief(), op.Brief())
+	testdata := []struct {
+		hotBuckets [][]byte
+		splitKeys  [][]byte
+	}{
+		{
+			[][]byte{[]byte(""), []byte("b")},
+			[][]byte{[]byte("b")},
+		},
+		{
+			[][]byte{[]byte(""), []byte("")},
+			nil,
+		},
+		{
+			[][]byte{[]byte(""), []byte("a")},
+			nil,
+		},
+		{
+			[][]byte{[]byte("b"), []byte("")},
+			[][]byte{[]byte("b")},
+		},
+	}
+
+	for _, data := range testdata {
+		b = &metapb.Buckets{
+			RegionId:   1,
+			PeriodInMs: 1000,
+			Keys:       data.hotBuckets,
+			Stats: &metapb.BucketStats{
+				ReadBytes:  []uint64{10 * units.KiB},
+				ReadKeys:   []uint64{256},
+				ReadQps:    []uint64{0},
+				WriteBytes: []uint64{0},
+				WriteQps:   []uint64{0},
+				WriteKeys:  []uint64{0},
+			},
+		}
+		task = buckets.NewCheckPeerTask(b)
+		re.True(tc.HotBucketCache.CheckAsync(task))
+		time.Sleep(time.Millisecond * 10)
+		ops = solve.createSplitOperator([]*core.RegionInfo{region}, true)
+		if data.splitKeys == nil {
+			re.Equal(0, len(ops))
+			continue
+		}
+		re.Equal(1, len(ops))
+		op = ops[0]
+		re.Equal(splitHotReadBuckets, op.Desc())
+
+		expectOp, err = operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		re.NoError(err)
+		re.Equal(expectOp.Brief(), op.Brief())
+	}
 }
 
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
