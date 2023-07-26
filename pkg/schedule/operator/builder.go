@@ -393,7 +393,6 @@ func (b *Builder) Build(kind OpKind) (*Operator, error) {
 	if brief, b.err = b.prepareBuild(); b.err != nil {
 		return nil, b.err
 	}
-
 	if b.useJointConsensus {
 		kind, b.err = b.buildStepsWithJointConsensus(kind)
 	} else {
@@ -539,6 +538,10 @@ func (b *Builder) brief() string {
 		return fmt.Sprintf("%s: store %s to %s", op, b.toRemove, b.toAdd)
 	case len(b.toAdd) > 0:
 		return fmt.Sprintf("add peer: store %s", b.toAdd)
+	case len(b.toRemove) > 0 && len(b.toPromote) > 0:
+		return fmt.Sprintf("promote peer: store %s, rm peer: store %s", b.toRemove, b.toPromote)
+	case len(b.toRemove) > 0 && len(b.toDemote) > 0:
+		return fmt.Sprintf("demote peer: store %s, rm peer: store %s", b.toDemote, b.toRemove)
 	case len(b.toRemove) > 0:
 		return fmt.Sprintf("rm peer: store %s", b.toRemove)
 	case len(b.toPromote) > 0:
