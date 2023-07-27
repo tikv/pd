@@ -821,7 +821,7 @@ func TestRegionsInfoMarshal(t *testing.T) {
 	}
 	regionsInfo := &RegionsInfo{}
 	for _, regions := range cases {
-		b, err := regionsToBytes(context.Background(), regions)
+		b, err := marshalRegionsInfoJSON(context.Background(), regions)
 		re.NoError(err)
 		err = json.Unmarshal(b, regionsInfo)
 		re.NoError(err)

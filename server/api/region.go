@@ -337,9 +337,9 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 	}
 }
 
-// regionsToBytes converts regions to bytes, which is `RegionsInfo`'s json format.
-// It is used to reduce the cost of json serialization.
-func regionsToBytes(ctx context.Context, regions []*core.RegionInfo) ([]byte, error) {
+// marshalRegionsInfoJSON marshals regions to bytes in `RegionsInfo`'s JSON format.
+// It is used to reduce the cost of JSON serialization.
+func marshalRegionsInfoJSON(ctx context.Context, regions []*core.RegionInfo) ([]byte, error) {
 	out := &jwriter.Writer{}
 	out.RawByte('{')
 
@@ -389,7 +389,7 @@ func regionsToBytes(ctx context.Context, regions []*core.RegionInfo) ([]byte, er
 func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	regions := rc.GetRegions()
-	b, err := regionsToBytes(r.Context(), regions)
+	b, err := marshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -424,7 +424,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 		limit = maxRegionLimit
 	}
 	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), limit)
-	b, err := regionsToBytes(r.Context(), regions)
+	b, err := marshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -460,7 +460,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	regions := rc.GetStoreRegions(uint64(id))
-	b, err := regionsToBytes(r.Context(), regions)
+	b, err := marshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -514,7 +514,7 @@ func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Reque
 		txnRegion := rc.ScanRegions(regionBound.TxnLeftBound, regionBound.TxnRightBound, limit-len(regions))
 		regions = append(regions, txnRegion...)
 	}
-	b, err := regionsToBytes(r.Context(), regions)
+	b, err := marshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -543,7 +543,7 @@ func (h *regionsHandler) getRegionsByType(
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	b, err := regionsToBytes(r.Context(), regions)
+	b, err := marshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -768,7 +768,7 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 	}
 
 	left, right := rc.GetAdjacentRegions(region)
-	b, err := regionsToBytes(r.Context(), []*core.RegionInfo{left, right})
+	b, err := marshalRegionsInfoJSON(r.Context(), []*core.RegionInfo{left, right})
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -991,7 +991,7 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 		limit = maxRegionLimit
 	}
 	regions := TopNRegions(rc.GetRegions(), less, limit)
-	b, err := regionsToBytes(r.Context(), regions)
+	b, err := marshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
