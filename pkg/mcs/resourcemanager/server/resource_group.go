@@ -106,7 +106,6 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 			return errors.New("invalid resource group settings, RU mode should set RU settings")
 		}
 		rg.RUSettings.RU.patch(settings.GetRU())
-		log.Info("patch resource group ru settings", zap.String("name", rg.Name), zap.Any("settings", settings))
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
 	}

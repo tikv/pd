@@ -56,6 +56,7 @@ type Manager struct {
 	consumptionDispatcher chan struct {
 		resourceGroupName string
 		*rmpb.Consumption
+		isBackground bool
 	}
 	// record update time of each resource group
 	consumptionRecord map[string]time.Time
@@ -76,6 +77,7 @@ func NewManager[T ResourceManagerConfigProvider](srv bs.Server) *Manager {
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
+			isBackground bool
 		}, defaultConsumptionChanSize),
 		consumptionRecord: make(map[string]time.Time),
 	}
@@ -300,15 +302,20 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if consumption == nil {
 				continue
 			}
+			backgroundType := ""
+			if consumptionInfo.isBackground {
+				backgroundType = backgroundTypeLabel
+			}
+
 			var (
 				name                     = consumptionInfo.resourceGroupName
-				rruMetrics               = readRequestUnitCost.WithLabelValues(name)
-				wruMetrics               = writeRequestUnitCost.WithLabelValues(name)
+				rruMetrics               = readRequestUnitCost.WithLabelValues(name, backgroundType)
+				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, backgroundType)
 				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name)
-				readByteMetrics          = readByteCost.WithLabelValues(name)
-				writeByteMetrics         = writeByteCost.WithLabelValues(name)
-				kvCPUMetrics             = kvCPUCost.WithLabelValues(name)
-				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name)
+				readByteMetrics          = readByteCost.WithLabelValues(name, backgroundType)
+				writeByteMetrics         = writeByteCost.WithLabelValues(name, backgroundType)
+				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, backgroundType)
+				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, backgroundType)
 				readRequestCountMetrics  = requestCount.WithLabelValues(name, readTypeLabel)
 				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
 			)
