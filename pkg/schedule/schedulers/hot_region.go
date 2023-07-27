@@ -672,7 +672,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				}
 			}
 			bs.cur.mainPeerStat = mainPeerStat
-			if bs.tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) && bs.GetStoreConfig().IsEnableRegionBucket() {
+			if bs.GetStoreConfig().IsEnableRegionBucket() && bs.tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) {
 				hotSchedulerRegionTooHotNeedSplitCounter.Inc()
 				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region}, byLoad)
 				if len(ops) > 0 {
@@ -1509,17 +1509,16 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 // bucketFirstStat returns the first priority statistics of the bucket.
 // if the first priority is query rate, it will return the second priority .
 func (bs *balanceSolver) bucketFirstStat() statistics.RegionStatKind {
-	dim := statistics.RegionReadBytes
-	diff := bs.firstPriority
+	base := statistics.RegionReadBytes
+	if bs.rwTy == statistics.Write {
+		base = statistics.RegionWriteBytes
+	}
+	offset := bs.firstPriority
 	// todo: remove it if bucket's qps has been supported.
 	if bs.firstPriority == statistics.QueryDim {
-		diff = bs.secondPriority
+		offset = bs.secondPriority
 	}
-	if bs.rwTy == statistics.Write {
-		dim = statistics.RegionWriteBytes
-	}
-	dim += statistics.RegionStatKind(diff)
-	return dim
+	return base + statistics.RegionStatKind(offset)
 }
 
 func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]byte) *operator.Operator {
@@ -1534,12 +1533,12 @@ func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]
 		hotSchedulerNotFoundSplitKeysCounter.Inc()
 		return nil
 	}
-	des := splitHotReadBuckets
+	desc := splitHotReadBuckets
 	if bs.rwTy == statistics.Write {
-		des = splitHotWriteBuckets
+		desc = splitHotWriteBuckets
 	}
 
-	op, err := operator.CreateSplitRegionOperator(des, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKeys)
+	op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKeys)
 	if err != nil {
 		log.Error("fail to create split operator",
 			zap.Stringer("resource-type", bs.resourceTy),

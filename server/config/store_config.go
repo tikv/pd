@@ -22,7 +22,6 @@ import (
 	"reflect"
 	"sync/atomic"
 
-	"github.com/docker/go-units"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
@@ -37,7 +36,7 @@ var (
 	// default region split size is 96MB
 	defaultRegionSplitSize = uint64(96)
 	// default bucket size is 96MB
-	defaultBucketSize = uint64(96 * units.MB)
+	defaultBucketSize = uint64(96)
 	// default region max key is 144000
 	defaultRegionMaxKey = uint64(1440000)
 	// default region split key is 960000
@@ -143,17 +142,6 @@ func (c *StoreConfig) SetRegionBucketEnabled(enabled bool) {
 		return
 	}
 	c.Coprocessor.EnableRegionBucket = enabled
-}
-
-// GetRegionBucketSize returns region bucket size if enable region buckets.
-func (c *StoreConfig) GetRegionBucketSize() uint64 {
-	if c == nil || !c.Coprocessor.EnableRegionBucket {
-		return 0
-	}
-	if len(c.RegionBucketSize) == 0 {
-		return defaultBucketSize
-	}
-	return c.RegionBucketSizeMB
 }
 
 // CheckRegionSize return error if the smallest region's size is less than mergeSize

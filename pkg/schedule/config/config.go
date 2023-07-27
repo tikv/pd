@@ -122,7 +122,6 @@ type StoreConfig interface {
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool
 	IsRaftKV2() bool
-	GetRegionBucketSize() uint64
 	// for test purpose
 	SetRegionBucketEnabled(bool)
 }
