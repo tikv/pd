@@ -315,7 +315,7 @@ func TestSplitBucketsBySize(t *testing.T) {
 			Keys:       data.hotBuckets,
 		}
 		region.UpdateBuckets(b, region.GetBuckets())
-		ops := solve.createSplitOperator([]*core.RegionInfo{region}, false)
+		ops := solve.createSplitOperator([]*core.RegionInfo{region}, bySize)
 		if data.splitKeys == nil {
 			re.Equal(0, len(ops))
 			continue
@@ -324,13 +324,13 @@ func TestSplitBucketsBySize(t *testing.T) {
 		op := ops[0]
 		re.Equal(splitHotReadBuckets, op.Desc())
 
-		expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
 		re.NoError(err)
 		re.Equal(expectOp.Brief(), op.Brief())
 	}
 }
 
-func TestSplitBucketsWithRegionTooHot(t *testing.T) {
+func TestSplitBucketsByLoad(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -376,7 +376,7 @@ func TestSplitBucketsWithRegionTooHot(t *testing.T) {
 		task := buckets.NewCheckPeerTask(b)
 		re.True(tc.HotBucketCache.CheckAsync(task))
 		time.Sleep(time.Millisecond * 10)
-		ops := solve.createSplitOperator([]*core.RegionInfo{region}, true)
+		ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
 		if data.splitKeys == nil {
 			re.Equal(0, len(ops))
 			continue
@@ -385,7 +385,7 @@ func TestSplitBucketsWithRegionTooHot(t *testing.T) {
 		op := ops[0]
 		re.Equal(splitHotReadBuckets, op.Desc())
 
-		expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
 		re.NoError(err)
 		re.Equal(expectOp.Brief(), op.Brief())
 	}

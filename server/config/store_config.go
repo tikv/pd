@@ -17,12 +17,12 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/docker/go-units"
 	"io"
 	"net/http"
 	"reflect"
 	"sync/atomic"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"

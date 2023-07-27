@@ -59,6 +59,8 @@ var (
 	// counter related with the split region
 	hotSchedulerNotFoundSplitKeysCounter          = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
 	hotSchedulerRegionBucketsNotHotCounter        = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
+	hotSchedulerOnlyOneBucketsHotCounter          = schedulerCounter.WithLabelValues(HotRegionName, "only_one_buckets_hot")
+	hotSchedulerHotBucketNotValidHotCounter       = schedulerCounter.WithLabelValues(HotRegionName, "hot_buckets_not_valid")
 	hotSchedulerRegionBucketsSingleHotSpotCounter = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_single_hot_spot")
 	hotSchedulerSplitSuccessCounter               = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
 	hotSchedulerNeedSplitBeforeScheduleCounter    = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
@@ -217,7 +219,6 @@ var (
 	// as it implies that this dimension is sufficiently uniform.
 	stddevThreshold = 0.1
 
-	splitBucket          = "split-hot-region"
 	splitHotReadBuckets  = "split-hot-read-region"
 	splitHotWriteBuckets = "split-hot-write-region"
 	splitProgressiveRank = int64(-5)
@@ -673,7 +674,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 			bs.cur.mainPeerStat = mainPeerStat
 			if bs.tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) && bs.GetStoreConfig().IsEnableRegionBucket() {
 				hotSchedulerRegionTooHotNeedSplitCounter.Inc()
-				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region}, true /*too hot need to split*/)
+				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region}, byLoad)
 				if len(ops) > 0 {
 					bs.ops = ops
 					bs.cur.calcPeersRate(bs.firstPriority, bs.secondPriority)
@@ -1466,7 +1467,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 		}
 	}
 	if len(splitRegions) > 0 {
-		return bs.createSplitOperator(splitRegions, false /* region is too big need split before move */)
+		return bs.createSplitOperator(splitRegions, bySize)
 	}
 
 	srcStoreID := bs.cur.srcStore.GetID()
@@ -1549,9 +1550,10 @@ func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]
 	return op
 }
 
-func (bs *balanceSolver) splitHotKeys(region *core.RegionInfo, stats []*buckets.BucketStat) *operator.Operator {
+func (bs *balanceSolver) splitBucketsByLoad(region *core.RegionInfo, stats []*buckets.BucketStat) *operator.Operator {
 	// if this region is too small, we can't split it into two hot region, so skip it.
 	if len(stats) <= 1 {
+		hotSchedulerOnlyOneBucketsHotCounter.Inc()
 		return nil
 	}
 	totalLoads := uint64(0)
@@ -1599,7 +1601,7 @@ func (bs *balanceSolver) splitBucketBySize(region *core.RegionInfo) *operator.Op
 
 // createSplitOperator creates split operators for the given regions.
 // isTooHot true indicates that the region is too hot and needs split.
-func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHot bool) []*operator.Operator {
+func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strategy splitStrategy) []*operator.Operator {
 	if len(regions) == 0 {
 		return nil
 	}
@@ -1611,33 +1613,34 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHo
 	operators := make([]*operator.Operator, 0)
 
 	createFunc := func(region *core.RegionInfo) {
-		if !isTooHot {
+		switch strategy {
+		case bySize:
 			if op := bs.splitBucketBySize(region); op != nil {
 				operators = append(operators, op)
 			}
-			return
-		}
-		stats, ok := hotBuckets[region.GetID()]
-		// If only one bucket is hot, we can't split it into two regions.
-		if !ok {
-			hotSchedulerRegionBucketsNotHotCounter.Inc()
-			return
-		}
-		// bucket key range maybe not match the region key range, so we should filter the invalid buckets.
-		validStats := make([]*buckets.BucketStat, 0, len(hotBuckets))
-		startKey, endKey := region.GetStartKey(), region.GetEndKey()
-		// filter some buckets key range not match the region start key and end key.
-		for _, stat := range stats {
-			if keyutil.Between(startKey, endKey, stat.StartKey) || keyutil.Between(startKey, endKey, stat.EndKey) {
-				validStats = append(validStats, stat)
+		case byLoad:
+			stats, ok := hotBuckets[region.GetID()]
+			// If only one bucket is hot, we can't split it into two regions.
+			if !ok {
+				hotSchedulerRegionBucketsNotHotCounter.Inc()
+				return
 			}
-		}
-		if len(validStats) == 0 {
-			hotSchedulerRegionBucketsNotHotCounter.Inc()
-			return
-		}
-		if op := bs.splitHotKeys(region, validStats); op != nil {
-			operators = append(operators, op)
+			// bucket key range maybe not match the region key range, so we should filter the invalid buckets.
+			validStats := make([]*buckets.BucketStat, 0, len(hotBuckets))
+			startKey, endKey := region.GetStartKey(), region.GetEndKey()
+			// filter some buckets key range not match the region start key and end key.
+			for _, stat := range stats {
+				if keyutil.Between(startKey, endKey, stat.StartKey) || keyutil.Between(startKey, endKey, stat.EndKey) {
+					validStats = append(validStats, stat)
+				}
+			}
+			if len(validStats) == 0 {
+				hotSchedulerHotBucketNotValidHotCounter.Inc()
+				return
+			}
+			if op := bs.splitBucketsByLoad(region, validStats); op != nil {
+				operators = append(operators, op)
+			}
 		}
 	}
 
@@ -1915,3 +1918,10 @@ func (bs *balanceSolver) tooHotNeedSplit(store *statistics.StoreLoadDetail, regi
 		return region.Loads[i] > store.LoadPred.Current.Loads[i]*splitThresholds
 	})
 }
+
+type splitStrategy int
+
+const (
+	byLoad splitStrategy = iota
+	bySize
+)
