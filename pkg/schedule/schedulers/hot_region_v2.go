@@ -27,7 +27,7 @@ const (
 	firstPriorityPerceivedRatio = 0.2  // PeerRate needs to be 20% above what needs to be balanced.
 	firstPriorityMinHotRatio    = 0.02 // PeerRate needs to be greater than 1% lowRate
 
-	secondPriorityPerceivedRatio = 0.3  // PeerRate needs to be 20% above what needs to be balanced.
+	secondPriorityPerceivedRatio = 0.3  // PeerRate needs to be 30% above what needs to be balanced.
 	secondPriorityMinHotRatio    = 0.03 // PeerRate needs to be greater than 1.5% lowRate
 )
 
@@ -39,14 +39,40 @@ func isAvailableV2(s *solution) bool {
 	return s.progressiveRank <= -3 || (s.progressiveRank < 0 && s.revertRegion == nil)
 }
 
+type balanceChecker struct {
+	// We use the following example to illustrate the calculation process.
+	// Suppose preBalancedRatio is 0.9, balancedRatio is 0.95.
+	// If 0.95<=low/high, the two stores are considered balanced after the operator is completed.
+	// If low/high<0.9, the two stores are considered unbalanced after the operator is completed.
+	// If 0.9<=low/high<0.95, the two stores are considered pre-balanced after the operator is completed.
+	preBalancedRatio float64
+	balancedRatio    float64
+}
+
+// rankV2Ratios is used to calculate the balanced state.
+// every rankV2Ratios only effect one dim.
+
+// There are three states of balance: balanced, pre-balanced, and unbalanced.
+// It is determined by the ratio of the high and low values of the two stores.
+// If the ratio is greater than the balancedRatio(0.95), it is considered to be in the balanced state.
+// If the ratio is less than the preBalancedRatio(0.9), it is considered to be in the unbalanced state.
+// If the ratio is between the two, it is considered to be in the pre-balanced state.
+
 // TODO: Unified with stddevThreshold.
 type rankV2Ratios struct {
-	preBalancedRatio      float64
-	balancedRatio         float64
-	preBalancedCheckRatio float64
-	balancedCheckRatio    float64
-	perceivedRatio        float64
-	minHotRatio           float64
+	// futureChecker is used to calculate the balanced state after the operator is completed.
+	// It is more strict than the currentChecker.
+	futureChecker *balanceChecker
+	// currentChecker is used to calculate the balanced state in the currentChecker state, which means that the operator is not triggered.
+	currentChecker *balanceChecker
+
+	// perceivedRatio avoid to not worse in a state with a large region.
+	// For example, if the region is 20MB, the high store is 100MB, the low store is 80MB, the high/low is 0.8.
+	// If scheduling to the low store, the high store will be 80MB, the low store will be 100MB, the high/low still be 0.8, it is not worse.
+	// we need to avoid scheduling to the low store, so introduce perceivedRatio.
+	perceivedRatio float64
+	// minHotRatio is the minimum ratio for the hot region to be scheduled.
+	minHotRatio float64
 }
 
 func newRankV2Ratios(balancedRatio, perceivedRatio, minHotRatio float64) *rankV2Ratios {
@@ -58,19 +84,29 @@ func newRankV2Ratios(balancedRatio, perceivedRatio, minHotRatio float64) *rankV2
 		balancedRatio = 0.95
 	}
 
-	rs := &rankV2Ratios{balancedRatio: balancedRatio, perceivedRatio: perceivedRatio, minHotRatio: minHotRatio}
-	// preBalancedRatio = 1.0 - 2*(1.0-balancedRatio)
-	// The maximum value with `balancedRatio-0.1` is to prevent the preBalance range becoming too large.
-	rs.preBalancedRatio = math.Max(2.0*balancedRatio-1.0, balancedRatio-0.1)
-	rs.balancedCheckRatio = balancedRatio - 0.02
-	rs.preBalancedCheckRatio = rs.preBalancedRatio - 0.03
+	futureStateChecker := &balanceChecker{
+		balancedRatio: balancedRatio,
+		// preBalancedRatio = 1.0 - 2*(1.0-balancedRatio)
+		// The maximum value with `balancedRatio-0.1` is to prevent the preBalance range becoming too large.
+		preBalancedRatio: math.Max(2.0*balancedRatio-1.0, balancedRatio-0.1),
+	}
+	currentStateChecker := &balanceChecker{
+		balancedRatio:    balancedRatio - 0.02,
+		preBalancedRatio: futureStateChecker.preBalancedRatio - 0.03,
+	}
+
+	rs := &rankV2Ratios{
+		futureChecker:  futureStateChecker,
+		currentChecker: currentStateChecker,
+		perceivedRatio: perceivedRatio, minHotRatio: minHotRatio}
+
 	return rs
 }
 
 func (bs *balanceSolver) initRankV2() {
 	bs.firstPriorityV2Ratios = newRankV2Ratios(bs.sche.conf.GetGreatDecRatio(), firstPriorityPerceivedRatio, firstPriorityMinHotRatio)
 	// The second priority is less demanding. Set the preBalancedRatio of the first priority to the balancedRatio of the second dimension.
-	bs.secondPriorityV2Ratios = newRankV2Ratios(bs.firstPriorityV2Ratios.preBalancedRatio, secondPriorityPerceivedRatio, secondPriorityMinHotRatio)
+	bs.secondPriorityV2Ratios = newRankV2Ratios(bs.firstPriorityV2Ratios.futureChecker.preBalancedRatio, secondPriorityPerceivedRatio, secondPriorityMinHotRatio)
 
 	bs.isAvailable = isAvailableV2
 	bs.filterUniformStore = bs.filterUniformStoreV2
@@ -82,6 +118,9 @@ func (bs *balanceSolver) initRankV2() {
 	bs.pickCheckPolicyV2()
 }
 
+// pickCheckPolicyV2 will set checkByPriorityAndTolerance to the corresponding function.
+// Note: PolicyV2 will search more possible solutions than PolicyV1.
+// so it allows to schedule when any of the two dimensions is not balanced.
 func (bs *balanceSolver) pickCheckPolicyV2() {
 	switch {
 	case bs.resourceTy == writeLeader:
@@ -93,6 +132,7 @@ func (bs *balanceSolver) pickCheckPolicyV2() {
 	}
 }
 
+// filterUniformStoreV2 filters stores by stddev.
 func (bs *balanceSolver) filterUniformStoreV2() (string, bool) {
 	if !bs.enableExpectation() {
 		return "", false
@@ -141,7 +181,7 @@ func (bs *balanceSolver) setSearchRevertRegionsV2() {
 	}
 }
 
-// calcProgressiveRank calculates `bs.cur.progressiveRank`.
+// calcProgressiveRankV2 calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 // isBetter: score > 0
 // isNotWorsened: score == 0
@@ -192,15 +232,32 @@ func (bs *balanceSolver) calcProgressiveRankV2() {
 }
 
 func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
-	// minNotWorsenedRate, minBetterRate, minBalancedRate, maxBalancedRate, maxBetterRate, maxNotWorsenedRate can be determined from src and dst.
-	// * peersRate < minNotWorsenedRate                   ====> score == -2
-	// * minNotWorsenedRate <= peersRate < minBetterRate  ====> score == 0
-	// * minBetterRate <= peersRate < minBalancedRate     ====> score == 2
-	// * minBalancedRate <= peersRate <= maxBalancedRate  ====> score == 3
-	// * maxBalancedRate < peersRate <= maxBetterRate     ====> score == 1
-	// * maxBetterRate < peersRate <= maxNotWorsenedRate  ====> score == -1
-	// * peersRate > maxNotWorsenedRate                   ====> score == -2
-	// The higher the score, the better.
+	// For unbalanced state,
+	// roughly speaking, as long as the diff is reduced, it is either better or not worse.
+	// To distinguish the small regions, the one where the diff is reduced too little is defined as not worse,
+	// and the one where the diff is reversed is regarded as worse.
+	// For pre-balanced state,
+	// it is better only if it reach the balanced state,
+	// and it is not worse if it still in the pre-balanced state.
+	// and it is worse if it becomes the unbalanced state.
+	// For balanced state,
+	// there is no better state to move to,
+	// it is not worse if it still in the balanced state.
+	// and it is worse if it becomes the pre-balanced state or unbalanced state.
+
+	// minNotWorsenedRate, minBetterRate, minBalancedRate, maxBalancedRate, maxBetterRate, maxNotWorsenedRate
+	// can be determined from src, dst and peer. The higher the score, the better.
+	// The closer to the center the higher the score, the higher the score for symmetrical zones without revert than with revert.
+	// so d is higher than c and e, c is higher than e, only when state is better, the score is positive.
+	// so c and e are higher than b and f, b are higher than f, only when state is not worsened and not revert, the score is zero.
+	// so b and f are higher than a and g, the worse tate have the same score.
+	// * a: peersRate < minNotWorsenedRate                   ====> score == -2
+	// * b: minNotWorsenedRate <= peersRate < minBetterRate  ====> score == 0
+	// * c: minBetterRate <= peersRate < minBalancedRate     ====> score == 2
+	// * d: minBalancedRate <= peersRate <= maxBalancedRate  ====> score == 3
+	// * e: maxBalancedRate < peersRate <= maxBetterRate     ====> score == 1
+	// * f: maxBetterRate < peersRate <= maxNotWorsenedRate  ====> score == -1
+	// * g: peersRate > maxNotWorsenedRate                   ====> score == -2
 
 	srcRate, dstRate := bs.cur.getExtremeLoad(dim)
 	srcPendingRate, dstPendingRate := bs.cur.getPendingLoad(dim)
@@ -213,19 +270,32 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		reverse = true
 	}
 
-	if highRate*rs.balancedCheckRatio <= lowRate {
-		// At this time, it is considered to be in the balanced state, and score > 1 will not be judged.
-		// If the balanced state is not broken, score == 0.
+	if rs.currentChecker.balancedRatio <= lowRate/highRate {
+		// At this time, it is considered to be in the balanced state.
+		// Because rs.currentChecker.balancedRatio <= lowRate/highRate.
+
+		// We use the following example to illustrate the calculation process.
+		// Suppose futureChecker.balancedRatio is 0.95, and currentChecker.balancedRatio is 0.93.
+		// Suppose the low and high are 94 and 101.
+		// So their ratio is 94/101≈0.9306, 0.93<0.9306, it is considered to be in the balanced state.
+		// If we hope the future stores are not worse than the current stores
+		// we need to ensure that the ratio of the future stores is 0.95.
+		// So the future stores need to be 94+1, 101-1, that is 95/100=0.95.
+		// Or the future stores need to be 94+6, 101-6, that is 95/100=0.95.
+		// So not-worse peer range is [1,6]
+
+		// Because it has been balanced state, there is no better state to move to, so there's no 1 or 2 or 3 score.
+		// And there is no balanced state to move to.
+		// If the balanced state is not broken, but the loads are closer, score == 0, that is, peer range is [1,6].
 		// If the balanced state is broken, score = -2.
-		// minNotWorsenedRate == minBetterRate == minBalancedRate <= maxBalancedRate == maxBetterRate == maxNotWorsenedRate
 
-		// highRate - (highRate+lowRate)/(1.0+balancedRatio)
-		minNotWorsenedRate := (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
-		// highRate - (highRate+lowRate)/(1.0+balancedRatio)*balancedRatio
-		maxNotWorsenedRate := (highRate - lowRate*rs.balancedRatio) / (1.0 + rs.balancedRatio)
+		// (lowRate+minNotWorsenedRate) / (highRate-minNotWorsenedRate) = futureChecker.balancedRatio
+		minNotWorsenedRate := (highRate*rs.futureChecker.balancedRatio - lowRate) / (1.0 + rs.futureChecker.balancedRatio)
+		// (highRate-minNotWorsenedRate) / (lowRate+minNotWorsenedRate) = futureChecker.balancedRatio
+		maxNotWorsenedRate := (highRate - lowRate*rs.futureChecker.balancedRatio) / (1.0 + rs.futureChecker.balancedRatio)
 
-		if minNotWorsenedRate > 0 {
-			minNotWorsenedRate = 0
+		if minNotWorsenedRate > -bs.getMinRate(dim) { // use min rate as 0 value
+			minNotWorsenedRate = -bs.getMinRate(dim)
 		}
 
 		if peersRate >= minNotWorsenedRate && peersRate <= maxNotWorsenedRate {
@@ -234,43 +304,103 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		return -2
 	}
 
-	var minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate float64
-	minBalancedRate := (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
-	maxBalancedRate := (highRate - lowRate*rs.balancedRatio) / (1.0 + rs.balancedRatio)
-	pendingRateLimit := false
+	// When it is not in the balanced state, it is considered to be in the unbalanced state or pre-balanced state.
+	// We use the following example to illustrate the calculation process.
+	// Suppose futureChecker.balancedRatio is 0.95
+	// Suppose the low and high are 75 and 120.
+	// If we hope it can reach the balanced state, we need to ensure that the ratio of the future stores is greater than 0.95.
+	// So the future stores need to be 75+20, 120-20, that is 95/100=0.95.
+	// Or the future stores need to be 75+25, 120-25, that is 95/100=0.95.
+	// So balanced peer range is [20,25]
 
-	if highRate*rs.preBalancedCheckRatio <= lowRate {
+	// (lowRate+minBalancedRate) / (highRate-minBalancedRate) = futureChecker.balancedRatio
+	minBalancedRate := (highRate*rs.futureChecker.balancedRatio - lowRate) / (1.0 + rs.futureChecker.balancedRatio)
+	// (highRate-maxBalancedRate) / (lowRate+maxBalancedRate) = futureChecker.balancedRatio
+	maxBalancedRate := (highRate - lowRate*rs.futureChecker.balancedRatio) / (1.0 + rs.futureChecker.balancedRatio)
+
+	pendingRateLimit := false
+	var minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate float64
+	if rs.currentChecker.preBalancedRatio <= lowRate/highRate {
 		// At this time, it is considered to be in pre-balanced state.
-		// Only the schedules that reach the balanced state will be judged as 2,
-		// and the schedules that do not destroy the pre-balanced state will be judged as 0.
-		// minNotWorsenedRate <= minBetterRate <= maxBalancedRate == maxBetterRate <= maxNotWorsenedRate
-		// To generate a score of -2 at this state, the pendingRate needs to be 0.
-		minNotWorsenedRate = (highRate*rs.preBalancedRatio - lowRate) / (1.0 + rs.preBalancedRatio)
-		minBetterRate = (highRate*rs.balancedRatio - lowRate) / (1.0 + rs.balancedRatio)
-		maxBetterRate = maxBalancedRate
-		maxNotWorsenedRate = (highRate - lowRate*rs.preBalancedRatio) / (1.0 + rs.preBalancedRatio)
-		if minNotWorsenedRate > 0 {
-			minNotWorsenedRate = 0
+		// Because rs.currentChecker.preBalancedRatio <= lowRate/highRate < rs.currentChecker.balancedRatio.
+
+		// We use the following example to illustrate the calculation process.
+		// Suppose futureChecker.balancedRatio is 0.95, and currentChecker.balancedRatio is 0.93.
+		// Suppose futureChecker.preBalancedRatio is 0.9, and currentChecker.preBalancedRatio is 0.87.
+		// Suppose the low and high are 93 and 102.
+		// So their ratio is 93/102≈0.91, 0.87<0.91<0.93, it is considered to be in the pre-balanced state.
+		// For the pre-balanced state, only the schedules that reach the balanced state is considered to be better.
+		// So minBetterRate is minBalancedRate, maxBetterRate is maxBalancedRate.
+		// If we hope the future stores are better than the current stores
+		// we need to ensure that the ratio of the future stores is greater than 0.95.
+		// So the future stores need to be 93+2, 102-2, that is 95/100=0.95.
+		// Or the future stores need to be 93+7, 102-7, that is 95/100=0.95.
+		// So better range is [2,7]
+		// If we hope the future stores are not worse than the current stores,
+		// we need to ensure that the ratio of the future stores is 0.9.
+		// So the future stores need to be 93+(-1), 102-(-1), that is 92/103≈0.9.
+		// Or the future stores need to be 93+10, 102-10, that is 92/103≈0.9.
+		// So not-worse peer range is [-1,2) and (7,10],
+		// [-1,2) means there is no revert region, (7,10] means there is revert region.
+		// And we need to avoid scheduling with negative operators.
+		// not-worse peer range is [max(0,-1),2), which is [0,2).
+
+		minBetterRate, maxBetterRate = minBalancedRate, maxBalancedRate
+		// (lowRate+minNotWorsenedRate) / (highRate-minNotWorsenedRate) = futureChecker.preBalancedRatio
+		minNotWorsenedRate = (highRate*rs.futureChecker.preBalancedRatio - lowRate) / (1.0 + rs.futureChecker.preBalancedRatio)
+		// (highRate-maxNotWorsenedRate) / (lowRate+maxNotWorsenedRate) = futureChecker.preBalancedRatio
+		maxNotWorsenedRate = (highRate - lowRate*rs.futureChecker.preBalancedRatio) / (1.0 + rs.futureChecker.preBalancedRatio)
+		if minNotWorsenedRate > -bs.getMinRate(dim) { // use min rate as 0 value
+			minNotWorsenedRate = -bs.getMinRate(dim)
 		}
 		// When approaching the balanced state, wait for pending influence to zero before scheduling to reduce jitter.
+		// From pre-balanced state to balanced state, we don't need other more schedule.
 		pendingRateLimit = true
 	} else {
 		// At this time, it is considered to be in the unbalanced state.
-		// As long as the balance is significantly improved, it is judged as 1.
-		// If the balance is not reduced, it is judged as 0.
-		// If the rate relationship between src and dst is reversed, there will be a certain penalty.
-		// maxBetterRate may be less than minBetterRate, in which case a positive fraction cannot be produced.
-		minNotWorsenedRate = -bs.getMinRate(dim)
-		minBetterRate = math.Min(minBalancedRate*rs.perceivedRatio, lowRate*rs.minHotRatio)
-		maxBetterRate = maxBalancedRate + (highRate-lowRate-minBetterRate-maxBalancedRate)*rs.perceivedRatio
-		maxNotWorsenedRate = maxBalancedRate + (highRate-lowRate-minNotWorsenedRate-maxBalancedRate)*rs.perceivedRatio
+		// Because lowRate/highRate < rs.currentChecker.balancedRatio.
+
+		// We use the following example to illustrate the calculation process.
+		// Suppose futureChecker.balancedRatio is 0.95, and currentChecker.balancedRatio is 0.93.
+		// Suppose futureChecker.preBalancedRatio is 0.9, and currentChecker.preBalancedRatio is 0.87.
+		// Suppose the low and high are 75 and 120.
+		// So their ratio is 75/120=0.625, 0.625<0.87, it is considered to be in the unbalanced state.
+		// If we hope the future stores are balanced,
+		// we need to ensure that the ratio of the future stores is 0.95.
+		// So the future stores need to be 75+20, 120-20, that is 95/100=0.95.
+		// Or the future stores need to be 75+25, 120-25, that is 95/100=0.95.
+		// So balanced peer range is [20,25]
+
+		// For the unbalanced state, as long as the diff is reduced, it is better.
+		// And we need to ensure that the ratio of the two store are not reversed,
+		// so the future stores need to be 75+45, 120-45.
+		// So better peer range is [0,17) and (28,45].
+		// If that's all it is,
+		// min better is too small, and we don't want to give too high a score to a region that's too small.
+		// To avoid scheduling small regions, we take the minimum value of the three,
+		// which are according some of minBalancedRate, some of the low store and the top10 peer.
+		// Suppose perceivedRatio is 0.2, minHotRatio is 0.02, top10 is 5.
+		// So minBetterRate is min(0.2*20,0.02*75,1)=4
+		// So minNotWorsenedRate is 0
+		// Similarly,
+		// we don't want to dispatch a particularly large region to reverse the high store and the low store, which is worse for us.
+		// From the above, we know maxBetterRate is 25, and max rate which not reverse high store are low store is 45,
+		// we reduce it by a factor, namely perceivedRatio.
+		// So maxBetterRate is 25+(45-25-4)*0.2=28.2
+		// So maxNotWorsenedRate is 25+(45-25-0)*0.2=29
+
+		minBetterRate = math.Min(minBalancedRate*rs.perceivedRatio, lowRate*rs.minHotRatio /*,top10*/)
+		maxBetterRate = maxBalancedRate + rs.perceivedRatio*(highRate-lowRate-maxBalancedRate-minBetterRate)
+
+		maxNotWorsenedRate = maxBalancedRate + rs.perceivedRatio*(highRate-lowRate-maxBalancedRate-minNotWorsenedRate)
+		minNotWorsenedRate = -bs.getMinRate(dim) // use min rate as 0 value
 	}
 
 	switch {
 	case minBetterRate <= peersRate && peersRate <= maxBetterRate:
 		// Positive score requires some restrictions.
 		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) &&
-			(!pendingRateLimit || math.Abs(srcPendingRate)+math.Abs(dstPendingRate) < 1) {
+			(!pendingRateLimit || math.Abs(srcPendingRate)+math.Abs(dstPendingRate) < 1 /*byte*/) { // avoid with pending influence when approaching the balanced state
 			switch {
 			case peersRate < minBalancedRate:
 				return 2

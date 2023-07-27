@@ -86,14 +86,16 @@ type baseHotScheduler struct {
 	// store information, including pending Influence by resource type
 	// Every time `Schedule()` will recalculate it.
 	stInfos map[uint64]*statistics.StoreSummaryInfo
-	// temporary states but exported to API or metrics
+	// stLoadInfos is temporary states but exported to API or metrics
 	// Every time `Schedule()` will recalculate it.
-	stLoadInfos    [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
+	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
+	// stHistoryLoads stores the history `stLoadInfos`
+	// Every time `Schedule()` will rolling update it.
 	stHistoryLoads *statistics.StoreHistoryLoads
-	// temporary states
+	// storesLoads is temporary states.
 	// Every time `Schedule()` will recalculate it.
 	storesLoads map[uint64][]float64
-	// regionPendings stores regionID -> pendingInfluence
+	// regionPendings stores regionID -> pendingInfluence,
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
 	regionPendings  map[uint64]*pendingInfluence
@@ -405,7 +407,8 @@ type solution struct {
 	secondScore int
 }
 
-// getExtremeLoad returns the min load of the src store and the max load of the dst store.
+// getExtremeLoad returns the closest load in the selected src and dst statistics.
+// in other word, the min load of the src store and the max load of the dst store.
 // If peersRate is negative, the direction is reversed.
 func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
 	if s.getPeersRateFromCache(dim) >= 0 {
@@ -1344,10 +1347,16 @@ func (bs *balanceSolver) getRkCmpPrioritiesV1(old *solution) (firstCmp int, seco
 	return
 }
 
-// smaller is better
+// compareSrcStore compares the source store of detail1, detail2, the result is:
+// 1. if detail1 is better than detail2, return -1
+// 2. if detail1 is worse than detail2, return 1
+// 3. if detail1 is equal to detail2, return 0
+// The comparison is based on the following principles:
+// 1. select the min load of store in current and future, because we want to select the store as source store;
+// 2. compare detail1 and detail2 by first priority and second priority, we pick the larger one to speed up the convergence;
+// 3. if the first priority and second priority are equal, we pick the diff of current and future is smaller in order to reduce the oscillation.
 func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadDetail) int {
 	if detail1 != detail2 {
-		// compare source store
 		var lpCmp storeLPCmp
 		if bs.resourceTy == writeLeader {
 			lpCmp = sliceLPCmp(
@@ -1377,7 +1386,14 @@ func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadD
 	return 0
 }
 
-// smaller is better
+// compareDstStore compares the destination store of detail1, detail2, the result is:
+// 1. if detail1 is better than detail2, return -1
+// 2. if detail1 is worse than detail2, return 1
+// 3. if detail1 is equal to detail2, return 0
+// The comparison is based on the following principles:
+// 1. select the max load of store in current and future, because we want to select the store as destination store;
+// 2. compare detail1 and detail2 by first priority and second priority, we pick the smaller one to speed up the convergence;
+// 3. if the first priority and second priority are equal, we pick the diff of current and future is smaller in order to reduce the oscillation.
 func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadDetail) int {
 	if detail1 != detail2 {
 		// compare destination store
@@ -1409,6 +1425,8 @@ func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadD
 	return 0
 }
 
+// stepRank returns a function can calculate the discretized data,
+// where `rate` will be discretized by `step`.
 func stepRank(rk0 float64, step float64) func(float64) int64 {
 	return func(rate float64) int64 {
 		return int64((rate - rk0) / step)
