@@ -193,9 +193,9 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ApproximateSize = r.GetApproximateSize()
 	s.ApproximateKeys = r.GetApproximateKeys()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
+	s.Buckets = nil
 
 	keys := r.GetBuckets().GetKeys()
-
 	if len(keys) > 0 {
 		s.Buckets = make([]string, len(keys))
 		for i, key := range keys {

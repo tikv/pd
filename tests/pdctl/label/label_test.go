@@ -99,7 +99,6 @@ func TestLabel(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store.Store.Store)
 	}
 	defer cluster.Destroy()
-	pdctl.MustPutRegion(re, cluster, 2, 1, []byte(""), []byte(""))
 
 	// label command
 	args := []string{"-u", pdAddr, "label"}
