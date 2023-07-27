@@ -304,7 +304,7 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 	return r.scatterRegion(region, group, skipStoreLimit), nil
 }
 
-func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, skipCheckLimit bool) *operator.Operator {
+func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, skipStoreLimit bool) *operator.Operator {
 	engineFilter := filter.NewEngineFilter(r.name, filter.NotSpecialEngines)
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
@@ -383,7 +383,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		r.Put(targetPeers, targetLeader, group)
 		return nil
 	}
-	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, skipCheckLimit)
+	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
 		scatterFailCounter.Inc()
 		for _, peer := range region.GetPeers() {
