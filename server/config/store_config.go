@@ -144,6 +144,17 @@ func (c *StoreConfig) SetRegionBucketEnabled(enabled bool) {
 	c.Coprocessor.EnableRegionBucket = enabled
 }
 
+// GetRegionBucketSize returns region bucket size if enable region buckets.
+func (c *StoreConfig) GetRegionBucketSize() uint64 {
+	if c == nil || !c.Coprocessor.EnableRegionBucket {
+		return 0
+	}
+	if len(c.RegionBucketSize) == 0 {
+		return defaultBucketSize
+	}
+	return c.RegionBucketSizeMB
+}
+
 // CheckRegionSize return error if the smallest region's size is less than mergeSize
 func (c *StoreConfig) CheckRegionSize(size, mergeSize uint64) error {
 	// the merged region will not be split if it's size less than region max size.

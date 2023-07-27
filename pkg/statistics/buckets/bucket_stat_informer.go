@@ -47,7 +47,6 @@ type BucketStat struct {
 	Interval  uint64
 	// the order should see statistics.RegionStatKind
 	Loads []uint64
-	Size  uint64
 }
 
 func (b *BucketStat) clone() *BucketStat {
@@ -58,7 +57,6 @@ func (b *BucketStat) clone() *BucketStat {
 		StartKey:  b.StartKey,
 		EndKey:    b.EndKey,
 		Loads:     make([]uint64, len(b.Loads)),
-		Size:      b.Size,
 	}
 	copy(c.Loads, b.Loads)
 	return c
