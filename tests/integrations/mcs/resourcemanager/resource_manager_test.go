@@ -128,6 +128,20 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 				},
 			},
 		},
+		{
+			Name: "background_job",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   10000,
+						BurstLimit: -1,
+					},
+					Tokens: 100000,
+				},
+			},
+			BackgroundSettings: &rmpb.BackgroundSettings{JobTypes: []string{"br", "lightning"}},
+		},
 	}
 }
 
@@ -576,7 +590,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	resp := controller.NewTestResponseInfo(0, time.Duration(30), true)
 	_, penalty, err := c.OnRequestWait(suite.ctx, resourceGroupName, req)
 	re.NoError(err)
-	re.Equal(penalty.WriteBytes, float64(0))
+	re.Equal(penalty.WriteBytes, 0.0)
 	re.Equal(penalty.TotalCpuTimeMs, 0.0)
 	_, err = c.OnResponse(resourceGroupName, req, resp)
 	re.NoError(err)
@@ -585,7 +599,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	resp = controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
 	re.NoError(err)
-	re.Equal(penalty.WriteBytes, float64(0))
+	re.Equal(penalty.WriteBytes, 0.0)
 	re.Equal(penalty.TotalCpuTimeMs, 0.0)
 	_, err = c.OnResponse(resourceGroupName, req, resp)
 	re.NoError(err)
@@ -595,7 +609,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	resp = controller.NewTestResponseInfo(0, time.Duration(0), false)
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
 	re.NoError(err)
-	re.Equal(penalty.WriteBytes, float64(0))
+	re.Equal(penalty.WriteBytes, 0.0)
 	re.Equal(penalty.TotalCpuTimeMs, 0.0)
 	_, err = c.OnResponse(resourceGroupName, req, resp)
 	re.NoError(err)
@@ -605,7 +619,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	resp1 := controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req1)
 	re.NoError(err)
-	re.Equal(penalty.WriteBytes, float64(0))
+	re.Equal(penalty.WriteBytes, 0.0)
 	_, err = c.OnResponse(resourceGroupName, req1, resp1)
 	re.NoError(err)
 
@@ -614,7 +628,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	resp2 := controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req2)
 	re.NoError(err)
-	re.Equal(penalty.WriteBytes, float64(60))
+	re.Equal(penalty.WriteBytes, 60.0)
 	re.InEpsilon(penalty.TotalCpuTimeMs, 10.0/1000.0/1000.0, 1e-6)
 	_, err = c.OnResponse(resourceGroupName, req2, resp2)
 	re.NoError(err)
@@ -624,7 +638,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	resp3 := controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req3)
 	re.NoError(err)
-	re.Equal(penalty.WriteBytes, float64(0))
+	re.Equal(penalty.WriteBytes, 0.0)
 	_, err = c.OnResponse(resourceGroupName, req3, resp3)
 	re.NoError(err)
 
@@ -634,9 +648,11 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	resp4 := controller.NewTestResponseInfo(0, time.Duration(10), true)
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req4)
 	re.NoError(err)
-	re.Equal(penalty.WriteBytes, float64(0))
+	re.Equal(penalty.WriteBytes, 0.0)
 	_, err = c.OnResponse(resourceGroupName, req4, resp4)
 	re.NoError(err)
+
+	c.Stop()
 }
 
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
@@ -678,7 +694,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		re.NoError(err)
 		for _, resp := range aresp {
 			re.Len(resp.GrantedRUTokens, 1)
-			re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, float64(30000.))
+			re.Equal(resp.GrantedRUTokens[0].GrantedTokens.Tokens, 30000.)
 			if resp.ResourceGroupName == "test2" {
 				re.Equal(int64(-1), resp.GrantedRUTokens[0].GrantedTokens.GetSettings().GetBurstLimit())
 			}
@@ -702,6 +718,19 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 		re.NoError(err)
 		checkFunc(gresp, groups[0])
 	}
+
+	// Test for background request upload.
+	reqs.Requests = nil
+	reqs.Requests = append(reqs.Requests, &rmpb.TokenBucketRequest{
+		ResourceGroupName: "background_job",
+		IsBackground:      true,
+	})
+	aresp, err := cli.AcquireTokenBuckets(suite.ctx, reqs)
+	re.NoError(err)
+	for _, resp := range aresp {
+		re.Len(resp.GrantedRUTokens, 0)
+	}
+
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastPersist"))
 }
 
@@ -1055,15 +1084,16 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 		rruTokensAtATime: 0,
 		wruTokensAtATime: 2,
 	}
-	controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
+	resourceName := "modetest"
+	controller.OnRequestWait(suite.ctx, resourceName, tc.makeWriteRequest())
 	time.Sleep(time.Second * 2)
 	beginTime := time.Now()
 	// This is used to make sure resource group in lowRU.
 	for i := 0; i < 100; i++ {
-		controller.OnRequestWait(suite.ctx, "modetest", tc2.makeWriteRequest())
+		controller.OnRequestWait(suite.ctx, resourceName, tc2.makeWriteRequest())
 	}
 	for i := 0; i < 100; i++ {
-		controller.OnRequestWait(suite.ctx, "modetest", tc.makeWriteRequest())
+		controller.OnRequestWait(suite.ctx, resourceName, tc.makeWriteRequest())
 	}
 	endTime := time.Now()
 	// we can not check `inDegradedMode` because of data race.
@@ -1152,4 +1182,73 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
 	controller.Stop()
+}
+
+func (suite *resourceManagerClientTestSuite) TestSkipConsumptionForBackgroundJobs() {
+	re := suite.Require()
+	cli := suite.client
+
+	for _, group := range suite.initGroups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+
+	cfg := &controller.RequestUnitConfig{
+		ReadBaseCost:     1,
+		ReadCostPerByte:  1,
+		WriteBaseCost:    1,
+		WriteCostPerByte: 1,
+		CPUMsCost:        1,
+	}
+	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
+	c.Start(suite.ctx)
+
+	resourceGroupName := suite.initGroups[1].Name
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_default"))
+	// test fallback for nil.
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, ""))
+
+	resourceGroupName = "background_job"
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_br"))
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
+	// test fallback for nil.
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
+
+	// modify `Default` to check fallback.
+	resp, err := cli.ModifyResourceGroup(suite.ctx, &rmpb.ResourceGroup{
+		Name: "default",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   1,
+					BurstLimit: -1,
+				},
+				Tokens: 1,
+			},
+		},
+		BackgroundSettings: &rmpb.BackgroundSettings{JobTypes: []string{"lightning", "ddl"}},
+	})
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	// wait for watch event modify.
+	time.Sleep(time.Millisecond * 100)
+
+	resourceGroupName = suite.initGroups[1].Name
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_default"))
+	// test fallback for `"lightning", "ddl"`.
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, ""))
+
+	resourceGroupName = "background_job"
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_br"))
+	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
+	// test fallback for `"lightning", "ddl"`.
+	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
+
+	c.Stop()
 }
