@@ -34,6 +34,11 @@ const (
 	EvictSlowTrendName = "evict-slow-trend-scheduler"
 	// EvictSlowTrendType is evict leader by slow trend scheduler type.
 	EvictSlowTrendType = "evict-slow-trend"
+
+	// Use minimal interval of store heartbeat as interval.
+	minSlowTrendScheduleInterval = time.Second
+	// Use default interval of store heartbeat as default.
+	maxSlowTrendScheduleInterval = 10 * time.Second
 )
 
 type StrategyOption int8
@@ -84,8 +89,12 @@ func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []core.Ke
 	return []core.KeyRange{core.NewKeyRange("", "")}
 }
 
+func (conf *evictSlowTrendSchedulerConfig) isEmpty() bool {
+	return len(conf.EvictedStores) == 0
+}
+
 func (conf *evictSlowTrendSchedulerConfig) evictedStore() uint64 {
-	if len(conf.EvictedStores) == 0 {
+	if conf.isEmpty() {
 		return 0
 	}
 	return conf.EvictedStores[0]
@@ -152,6 +161,22 @@ func (s *evictSlowTrendScheduler) GetType() string {
 
 func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
+}
+
+func (s *evictSlowTrendScheduler) GetMinInterval() time.Duration {
+	return minSlowTrendScheduleInterval
+}
+
+func (s *evictSlowTrendScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	var growthType intervalGrowthType
+	// If it already found slow node, the next interval should be shorter to make the
+	// next scheduling as soon as possible.
+	if !s.conf.isEmpty() {
+		growthType = zeroGrowth
+	} else {
+		growthType = exponentialGrowth
+	}
+	return intervalGrow(s.GetMinInterval(), maxSlowTrendScheduleInterval, growthType)
 }
 
 func (s *evictSlowTrendScheduler) Prepare(cluster sche.SchedulerCluster) error {
