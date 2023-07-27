@@ -176,7 +176,7 @@ func WithExcludeTombstone() GetStoreOption {
 type RegionsOp struct {
 	group          string
 	retryLimit     uint64
-	skipLimitCheck bool
+	skipStoreLimit bool
 }
 
 // RegionsOption configures RegionsOp
@@ -192,9 +192,9 @@ func WithRetry(retry uint64) RegionsOption {
 	return func(op *RegionsOp) { op.retryLimit = retry }
 }
 
-// WithSkipLimitCheck specify if skip the store limit check during Scatter/Split Regions
-func WithSkipLimitCheck() RegionsOption {
-	return func(op *RegionsOp) { op.skipLimitCheck = true }
+// WithSkipStoreLimit specify if skip the store limit check during Scatter/Split Regions
+func WithSkipStoreLimit() RegionsOption {
+	return func(op *RegionsOp) { op.skipStoreLimit = true }
 }
 
 // GetRegionOp represents available options when getting regions.
@@ -1403,7 +1403,7 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 		Group:          options.group,
 		RegionsId:      regionsID,
 		RetryLimit:     options.retryLimit,
-		SkipLimitCheck: options.skipLimitCheck,
+		SkipStoreLimit: options.skipStoreLimit,
 	}
 
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())

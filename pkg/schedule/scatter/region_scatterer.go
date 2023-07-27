@@ -198,7 +198,7 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 }
 
 // ScatterRegionsByID directly scatter regions by ScatterRegions
-func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int, skipCheckLimit bool) (int, map[uint64]error, error) {
+func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int, skipStoreLimit bool) (int, map[uint64]error, error) {
 	if len(regionsID) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
 		return 0, nil, errors.New("empty region")
@@ -220,7 +220,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 		regionMap[region.GetID()] = region
 	}
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit, skipCheckLimit)
+	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit, skipStoreLimit)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -233,7 +233,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 // time.Sleep between each retry.
 // Failures indicates the regions which are failed to be relocated, the key of the failures indicates the regionID
 // and the value of the failures indicates the failure error.
-func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int, skipCheckLimit bool) (int, error) {
+func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int, skipStoreLimit bool) (int, error) {
 	if len(regions) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
 		return 0, errors.New("empty region")
@@ -244,7 +244,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 	opsCount := 0
 	for currentRetry := 0; currentRetry <= retryLimit; currentRetry++ {
 		for _, region := range regions {
-			op, err := r.Scatter(region, group, skipCheckLimit)
+			op, err := r.Scatter(region, group, skipStoreLimit)
 			failpoint.Inject("scatterFail", func() {
 				if region.GetID() == 1 {
 					err = errors.New("mock error")
@@ -281,7 +281,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
 // in a group level instead of cluster level.
-func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipCheckLimit bool) (*operator.Operator, error) {
+func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipStoreLimit bool) (*operator.Operator, error) {
 	if !filter.IsRegionReplicated(r.cluster, region) {
 		r.cluster.AddSuspectRegions(region.GetID())
 		scatterSkipNotReplicatedCounter.Inc()
@@ -301,7 +301,7 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipChe
 		return nil, errors.Errorf("region %d is hot", region.GetID())
 	}
 
-	return r.scatterRegion(region, group, skipCheckLimit), nil
+	return r.scatterRegion(region, group, skipStoreLimit), nil
 }
 
 func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, skipCheckLimit bool) *operator.Operator {
