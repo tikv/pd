@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
-	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -960,6 +959,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	start := time.Now()
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
+	var err error
 	var resp *pdpb.GetRegionResponse
 	for _, url := range memberURLs {
 		conn, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(url)

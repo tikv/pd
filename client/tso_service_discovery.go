@@ -344,7 +344,7 @@ func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn
 }
 
 // ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in service endpoints.
-func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
+func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged(err error) {
 	select {
 	case c.checkMembershipCh <- struct{}{}:
 	default:

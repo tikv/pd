@@ -76,7 +76,7 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
 		log.Error("[tso] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
-		c.svcDiscovery.ScheduleCheckMemberChanged()
+		c.svcDiscovery.ScheduleCheckMemberChanged(nil)
 		return err
 	}
 	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
@@ -439,7 +439,7 @@ tsoBatchLoop:
 				case <-streamLoopTimer.C:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
-					c.svcDiscovery.ScheduleCheckMemberChanged()
+					c.svcDiscovery.ScheduleCheckMemberChanged(nil)
 					c.finishRequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
 					timer.Stop()
 					continue tsoBatchLoop
@@ -483,7 +483,7 @@ tsoBatchLoop:
 				return
 			default:
 			}
-			c.svcDiscovery.ScheduleCheckMemberChanged()
+			c.svcDiscovery.ScheduleCheckMemberChanged(nil)
 			log.Error("[tso] getTS error",
 				zap.String("dc-location", dc),
 				zap.String("stream-addr", streamAddr),
@@ -589,7 +589,7 @@ func (c *tsoClient) tryConnectToTSO(
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
-		c.svcDiscovery.ScheduleCheckMemberChanged()
+		c.svcDiscovery.ScheduleCheckMemberChanged(nil)
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)

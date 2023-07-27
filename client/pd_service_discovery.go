@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tlsutil"
-	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -84,7 +83,7 @@ type ServiceDiscovery interface {
 	// ScheduleCheckMemberChanged is used to trigger a check to see if there is any membership change
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
 	// primary/secondary configured cluster.
-	ScheduleCheckMemberChanged()
+	ScheduleCheckMemberChanged(err error)
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
 	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
@@ -142,7 +141,7 @@ type pdServiceDiscovery struct {
 	// leader is updated.
 	tsoGlobalAllocLeaderUpdatedCb tsoGlobalServAddrUpdatedFunc
 
-	checkMembershipCh chan err
+	checkMembershipCh chan error
 
 	wg        *sync.WaitGroup
 	ctx       context.Context
@@ -246,7 +245,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 			return
 		case <-ticker.C:
 		case err := <-c.checkMembershipCh:
-			if err != nil && strings.Contains(err.Error(), errs.ErrRateLimitExceeded) {
+			if err != nil && strings.Contains(err.Error(), errs.ErrRateLimitExceeded.Error()) {
 				continue
 			}
 		}
