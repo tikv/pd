@@ -24,6 +24,9 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
+var blockGCSafePointErrmsg = "don't allow update gc safe point v1."
+var blockServiceSafepointErrmsg = "don't allow update service safe point v1."
+
 // SafePointManager is the manager for safePoint of GC and services.
 type SafePointManager struct {
 	gcLock        syncutil.Mutex
@@ -53,7 +56,7 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 		return
 	}
 	if manager.cfg.BlockSafePointV1 {
-		err = errors.Errorf("Don't allow update gc safe point v1.")
+		err = errors.Errorf(blockGCSafePointErrmsg)
 		return
 	}
 
@@ -67,7 +70,7 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 // UpdateServiceGCSafePoint update the safepoint for a specific service.
 func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	if manager.cfg.BlockSafePointV1 {
-		return nil, false, errors.Errorf("Don't allow update service safe point v1.")
+		return nil, false, errors.Errorf(blockServiceSafepointErrmsg)
 	}
 	manager.serviceGCLock.Lock()
 	defer manager.serviceGCLock.Unlock()
