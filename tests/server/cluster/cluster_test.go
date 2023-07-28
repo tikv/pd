@@ -30,9 +30,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/dashboard"
@@ -50,6 +47,8 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (

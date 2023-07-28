@@ -22,7 +22,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"

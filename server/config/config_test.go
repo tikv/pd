@@ -26,7 +26,6 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
-
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"

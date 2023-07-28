@@ -19,7 +19,6 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
-
 	"github.com/tikv/pd/pkg/errs"
 )
 

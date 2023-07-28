@@ -29,8 +29,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
-
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
@@ -49,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
+	"go.uber.org/zap"
 )
 
 var (

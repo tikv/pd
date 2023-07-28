@@ -31,10 +31,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/transport"
-	"go.uber.org/zap"
-
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -43,6 +39,9 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/pkg/transport"
+	"go.uber.org/zap"
 )
 
 // Config is the pd server configuration.

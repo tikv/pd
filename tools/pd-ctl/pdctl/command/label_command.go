@@ -20,7 +20,6 @@ import (
 	"net/http"
 
 	"github.com/spf13/cobra"
-
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/statistics"

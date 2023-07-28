@@ -42,13 +42,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.etcd.io/etcd/pkg/types"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
@@ -84,6 +77,12 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/mvcc/mvccpb"
+	"go.etcd.io/etcd/pkg/types"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 const (

@@ -16,16 +16,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.uber.org/goleak"
-
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
+	"go.uber.org/goleak"
 )
 
 var (

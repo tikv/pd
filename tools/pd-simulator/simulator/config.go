@@ -21,7 +21,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/docker/go-units"
-
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/configutil"

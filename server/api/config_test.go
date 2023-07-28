@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
