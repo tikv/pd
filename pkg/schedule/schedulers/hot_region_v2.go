@@ -25,10 +25,10 @@ import (
 
 const (
 	firstPriorityPerceivedRatio = 0.2  // PeerRate needs to be 20% above what needs to be balanced.
-	firstPriorityMinHotRatio    = 0.02 // PeerRate needs to be greater than 1% lowRate
+	firstPriorityMinHotRatio    = 0.02 // PeerRate needs to be greater than 2% lowRate
 
 	secondPriorityPerceivedRatio = 0.3  // PeerRate needs to be 30% above what needs to be balanced.
-	secondPriorityMinHotRatio    = 0.03 // PeerRate needs to be greater than 1.5% lowRate
+	secondPriorityMinHotRatio    = 0.03 // PeerRate needs to be greater than 3% lowRate
 )
 
 // isAvailable returns the solution is available.
