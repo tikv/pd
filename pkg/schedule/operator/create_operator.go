@@ -252,13 +252,13 @@ func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *cor
 
 	builder := NewBuilder(desc, ci, origin)
 	if skipLimitCheck {
-		builder.SetLightRemovePeer()
+		builder.SetRemoveLightPeer()
 	}
 
 	return builder.
 		SetPeers(targetPeers).
 		SetLeader(leader).
-		SetLightAddPeer().
+		SetAddLightPeer().
 		// EnableForceTargetLeader in order to ignore the leader schedule limit
 		EnableForceTargetLeader().
 		Build(OpAdmin)

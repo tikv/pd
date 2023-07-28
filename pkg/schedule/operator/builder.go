@@ -63,8 +63,8 @@ type Builder struct {
 
 	// build flags
 	useJointConsensus bool
-	lightRemovePeer   bool
-	lightAddPeer      bool
+	removeLightPeer   bool
+	addLightPeer      bool
 	forceTargetLeader bool
 
 	// intermediate states
@@ -371,15 +371,15 @@ func (b *Builder) SetExpectedRoles(roles map[uint64]placement.PeerRoleType) *Bui
 	return b
 }
 
-// SetLightAddPeer marks the add peer as light weight. It is used for scatter regions.
-func (b *Builder) SetLightAddPeer() *Builder {
-	b.lightAddPeer = true
+// SetAddLightPeer marks the add peer as light weight. It is used for scatter regions.
+func (b *Builder) SetAddLightPeer() *Builder {
+	b.addLightPeer = true
 	return b
 }
 
-// SetLightRemovePeer marks the remove peer as light weight. It is used for scatter regions.
-func (b *Builder) SetLightRemovePeer() *Builder {
-	b.lightRemovePeer = true
+// SetRemoveLightPeer marks the remove peer as light weight. It is used for scatter regions.
+func (b *Builder) SetRemoveLightPeer() *Builder {
+	b.removeLightPeer = true
 	return b
 }
 
@@ -539,7 +539,7 @@ func (b *Builder) brief() string {
 	switch {
 	case len(b.toAdd) > 0 && len(b.toRemove) > 0:
 		op := "mv peer"
-		if b.lightAddPeer && b.lightRemovePeer {
+		if b.addLightPeer && b.removeLightPeer {
 			op = "mv light peer"
 		}
 		return fmt.Sprintf("%s: store %s to %s", op, b.toRemove, b.toAdd)
@@ -782,7 +782,7 @@ func (b *Builder) execPromoteNonWitness(peer *metapb.Peer) {
 }
 
 func (b *Builder) execAddPeer(peer *metapb.Peer) {
-	b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.lightAddPeer, IsWitness: peer.GetIsWitness(), SendStore: b.originLeaderStoreID})
+	b.steps = append(b.steps, AddLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsLightWeight: b.addLightPeer, IsWitness: peer.GetIsWitness(), SendStore: b.originLeaderStoreID})
 	if !core.IsLearner(peer) {
 		b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness()})
 	}
@@ -798,7 +798,7 @@ func (b *Builder) execRemovePeer(peer *metapb.Peer) {
 	if store != nil {
 		isDownStore = store.DownTime() > b.GetSharedConfig().GetMaxStoreDownTime()
 	}
-	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore, IsLightWeight: b.lightRemovePeer})
+	b.steps = append(b.steps, RemovePeer{FromStore: removeStoreID, PeerID: peer.GetId(), IsDownStore: isDownStore, IsLightWeight: b.removeLightPeer})
 	delete(b.currentPeers, removeStoreID)
 	delete(b.toRemove, removeStoreID)
 }
