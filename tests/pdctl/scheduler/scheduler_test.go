@@ -22,9 +22,10 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -476,7 +477,7 @@ func TestScheduler(t *testing.T) {
 	re.Contains(echo, "Success!")
 	cfg := leaderServer.GetServer().GetScheduleConfig()
 	origin := cfg.Schedulers
-	cfg.Schedulers = config.SchedulerConfigs{{Type: "label", Disable: true}}
+	cfg.Schedulers = sc.SchedulerConfigs{{Type: "label", Disable: true}}
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
 	checkSchedulerWithStatusCommand(nil, "disabled", []string{"label-scheduler"})

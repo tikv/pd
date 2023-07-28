@@ -293,7 +293,7 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 // @Tags     config
 // @Summary  Get schedule config.
 // @Produce  json
-// @Success  200  {object}  config.ScheduleConfig
+// @Success  200  {object}  sc.ScheduleConfig
 // @Router   /config/schedule [get]
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetScheduleConfig()
@@ -356,7 +356,7 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Tags     config
 // @Summary  Get replication config.
 // @Produce  json
-// @Success  200  {object}  config.ReplicationConfig
+// @Success  200  {object}  sc.ReplicationConfig
 // @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())

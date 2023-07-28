@@ -16,14 +16,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/embed"
+	"go.uber.org/goleak"
+
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.uber.org/goleak"
 )
 
 var (
@@ -95,7 +97,7 @@ func setupServer() (*httptest.Server, *config.Config) {
 		InitialClusterState: "new",
 		InitialClusterToken: "test-token",
 		LeaderLease:         int64(1),
-		Replication: config.ReplicationConfig{
+		Replication: sc.ReplicationConfig{
 			LocationLabels: typeutil.StringSlice{},
 		},
 		PDServerCfg: config.PDServerConfig{

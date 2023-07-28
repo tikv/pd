@@ -54,13 +54,13 @@ var DiagnosableSummaryFunc = map[string]plan.Summary{
 // DiagnosticRecorder is used to manage diagnostic for one scheduler.
 type DiagnosticRecorder struct {
 	schedulerName string
-	config        sc.SchedulerConfig
+	config        sc.SchedulerConfigProvider
 	summaryFunc   plan.Summary
 	results       *cache.FIFO
 }
 
 // NewDiagnosticRecorder creates a new DiagnosticRecorder.
-func NewDiagnosticRecorder(name string, config sc.SchedulerConfig) *DiagnosticRecorder {
+func NewDiagnosticRecorder(name string, config sc.SchedulerConfigProvider) *DiagnosticRecorder {
 	summaryFunc, ok := DiagnosableSummaryFunc[name]
 	if !ok {
 		return nil

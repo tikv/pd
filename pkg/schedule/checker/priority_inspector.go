@@ -30,12 +30,12 @@ const defaultPriorityQueueSize = 1280
 // PriorityInspector ensures high priority region should run first
 type PriorityInspector struct {
 	cluster sche.CheckerCluster
-	conf    config.CheckerConfig
+	conf    config.CheckerConfigProvider
 	queue   *cache.PriorityQueue
 }
 
 // NewPriorityInspector creates a priority inspector.
-func NewPriorityInspector(cluster sche.CheckerCluster, conf config.CheckerConfig) *PriorityInspector {
+func NewPriorityInspector(cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *PriorityInspector {
 	return &PriorityInspector{
 		cluster: cluster,
 		conf:    conf,
