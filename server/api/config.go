@@ -27,14 +27,20 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/unrolled/render"
+
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-	"github.com/unrolled/render"
 )
+
+// This line is to ensure the package `sc` could always be imported so that
+// the swagger could generate the right definitions for the config structs.
+var _ *sc.ScheduleConfig = nil
 
 type confHandler struct {
 	svr *server.Server
