@@ -67,6 +67,11 @@ const (
 	keyLen = 20
 )
 
+// PDRootPath returns the PD root path.
+func PDRootPath(clusterID uint64) string {
+	return path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
+}
+
 // AppendToRootPath appends the given key to the rootPath.
 func AppendToRootPath(rootPath string, key string) string {
 	return path.Join(rootPath, key)
@@ -80,6 +85,11 @@ func ClusterRootPath(rootPath string) string {
 // ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
 func ClusterBootstrapTimeKey() string {
 	return path.Join(clusterPath, "status", "raft_bootstrap_time")
+}
+
+// ConfigPath returns the path to save the PD config.
+func ConfigPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), configPath)
 }
 
 func scheduleConfigPath(scheduleName string) string {
