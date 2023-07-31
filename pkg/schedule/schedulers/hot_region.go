@@ -60,7 +60,7 @@ var (
 	hotSchedulerNotFoundSplitKeysCounter          = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
 	hotSchedulerRegionBucketsNotHotCounter        = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
 	hotSchedulerOnlyOneBucketsHotCounter          = schedulerCounter.WithLabelValues(HotRegionName, "only_one_buckets_hot")
-	hotSchedulerHotBucketNotValidHotCounter       = schedulerCounter.WithLabelValues(HotRegionName, "hot_buckets_not_valid")
+	hotSchedulerHotBucketNotValidCounter          = schedulerCounter.WithLabelValues(HotRegionName, "hot_buckets_not_valid")
 	hotSchedulerRegionBucketsSingleHotSpotCounter = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_single_hot_spot")
 	hotSchedulerSplitSuccessCounter               = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
 	hotSchedulerNeedSplitBeforeScheduleCounter    = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
@@ -1549,9 +1549,23 @@ func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]
 	return op
 }
 
-func (bs *balanceSolver) splitBucketsByLoad(region *core.RegionInfo, stats []*buckets.BucketStat) *operator.Operator {
-	// if this region is too small, we can't split it into two hot region, so skip it.
-	if len(stats) <= 1 {
+func (bs *balanceSolver) splitBucketsByLoad(region *core.RegionInfo, bucketStats []*buckets.BucketStat) *operator.Operator {
+	// bucket key range maybe not match the region key range, so we should filter the invalid buckets.
+	// filter some buckets key range not match the region start key and end key.
+	stats := make([]*buckets.BucketStat, 0, len(bucketStats))
+	startKey, endKey := region.GetStartKey(), region.GetEndKey()
+	for _, stat := range bucketStats {
+		if keyutil.Between(startKey, endKey, stat.StartKey) || keyutil.Between(startKey, endKey, stat.EndKey) {
+			stats = append(stats, stat)
+		}
+	}
+	if len(stats) == 0 {
+		hotSchedulerHotBucketNotValidCounter.Inc()
+		return nil
+	}
+
+	// if this region has only one buckets, we can't split it into two hot region, so skip it.
+	if len(stats) == 1 {
 		hotSchedulerOnlyOneBucketsHotCounter.Inc()
 		return nil
 	}
@@ -1586,7 +1600,7 @@ func (bs *balanceSolver) splitBucketsByLoad(region *core.RegionInfo, stats []*bu
 // splitBucketBySize splits the region order by bucket count if the region is too big.
 func (bs *balanceSolver) splitBucketBySize(region *core.RegionInfo) *operator.Operator {
 	splitKeys := make([][]byte, 0)
-	for _, key := range region.GetBuckets().Keys {
+	for _, key := range region.GetBuckets().GetKeys() {
 		if keyutil.Between(region.GetStartKey(), region.GetEndKey(), key) {
 			splitKeys = append(splitKeys, key)
 		}
@@ -1607,8 +1621,8 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strateg
 	for i, region := range regions {
 		ids[i] = region.GetID()
 	}
-	hotBuckets := bs.SchedulerCluster.BucketsStats(bs.minHotDegree, ids...)
 	operators := make([]*operator.Operator, 0)
+	var hotBuckets map[uint64][]*buckets.BucketStat
 
 	createFunc := func(region *core.RegionInfo) {
 		switch strategy {
@@ -1617,25 +1631,15 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strateg
 				operators = append(operators, op)
 			}
 		case byLoad:
+			if hotBuckets == nil {
+				hotBuckets = bs.SchedulerCluster.BucketsStats(bs.minHotDegree, ids...)
+			}
 			stats, ok := hotBuckets[region.GetID()]
 			if !ok {
 				hotSchedulerRegionBucketsNotHotCounter.Inc()
 				return
 			}
-			// bucket key range maybe not match the region key range, so we should filter the invalid buckets.
-			validStats := make([]*buckets.BucketStat, 0, len(hotBuckets))
-			startKey, endKey := region.GetStartKey(), region.GetEndKey()
-			// filter some buckets key range not match the region start key and end key.
-			for _, stat := range stats {
-				if keyutil.Between(startKey, endKey, stat.StartKey) || keyutil.Between(startKey, endKey, stat.EndKey) {
-					validStats = append(validStats, stat)
-				}
-			}
-			if len(validStats) == 0 {
-				hotSchedulerHotBucketNotValidHotCounter.Inc()
-				return
-			}
-			if op := bs.splitBucketsByLoad(region, validStats); op != nil {
+			if op := bs.splitBucketsByLoad(region, stats); op != nil {
 				operators = append(operators, op)
 			}
 		}
