@@ -145,7 +145,7 @@ type hotRegionSchedulerConfig struct {
 	RankFormulaVersion string `json:"rank-formula-version"`
 	// forbid read or write scheduler, only for test
 	ForbidRWType string `json:"forbid-rw-type,omitempty"`
-	// SplitThresholds is the threshold to split hot region if the flow of on hot region exceeds it.
+	// SplitThresholds is the threshold to split hot region if the first priority flow of on hot region exceeds it.
 	SplitThresholds float64 `json:"split-thresholds"`
 }
 

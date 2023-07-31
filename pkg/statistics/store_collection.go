@@ -77,9 +77,11 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
 	// Store state.
+	isDown := false
 	switch store.GetNodeState() {
 	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
 		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
+			isDown = true
 			s.Down++
 		} else if store.IsUnhealthy() {
 			s.Unhealthy++
@@ -104,7 +106,8 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		s.resetStoreStatistics(storeAddress, id)
 		return
 	}
-	if store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
+
+	if !isDown && store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
 		s.LowSpace++
 	}
 

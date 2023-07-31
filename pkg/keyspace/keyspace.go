@@ -194,14 +194,6 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if err != nil {
 		return nil, err
 	}
-	// If the request to create a keyspace is pre-allocated when the PD starts,
-	// there is no need to wait for the region split, because TiKV has not started.
-	waitRegionSplit := !request.IsPreAlloc && manager.config.ToWaitRegionSplit()
-	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(newID, waitRegionSplit)
-	if err != nil {
-		return nil, err
-	}
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
@@ -215,16 +207,51 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
 	}
-	// Create and save keyspace metadata.
+	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             newID,
 		Name:           request.Name,
-		State:          keyspacepb.KeyspaceState_ENABLED,
+		State:          keyspacepb.KeyspaceState_DISABLED,
 		CreatedAt:      request.CreateTime,
 		StateChangedAt: request.CreateTime,
 		Config:         request.Config,
 	}
 	err = manager.saveNewKeyspace(keyspace)
+	if err != nil {
+		log.Warn("[keyspace] failed to save keyspace before split",
+			zap.Uint32("keyspace-id", keyspace.GetId()),
+			zap.String("name", keyspace.GetName()),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	// If the request to create a keyspace is pre-allocated when the PD starts,
+	// there is no need to wait for the region split, because TiKV has not started.
+	waitRegionSplit := !request.IsPreAlloc && manager.config.ToWaitRegionSplit()
+	// Split keyspace region.
+	err = manager.splitKeyspaceRegion(newID, waitRegionSplit)
+	if err != nil {
+		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+			idPath := endpoint.KeyspaceIDPath(request.Name)
+			metaPath := endpoint.KeyspaceMetaPath(newID)
+			e := txn.Remove(idPath)
+			if e != nil {
+				return e
+			}
+			return txn.Remove(metaPath)
+		})
+		if err2 != nil {
+			log.Warn("[keyspace] failed to remove pre-created keyspace after split failed",
+				zap.Uint32("keyspace-id", keyspace.GetId()),
+				zap.String("name", keyspace.GetName()),
+				zap.Error(err2),
+			)
+		}
+		return nil, err
+	}
+	// enable the keyspace metadata after split.
+	keyspace.State = keyspacepb.KeyspaceState_ENABLED
+	_, err = manager.UpdateKeyspaceStateByID(newID, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
 	if err != nil {
 		log.Warn("[keyspace] failed to create keyspace",
 			zap.Uint32("keyspace-id", keyspace.GetId()),

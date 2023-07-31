@@ -19,6 +19,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
@@ -32,6 +33,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	statistics.Denoising = false
+	statisticsInterval = 0
 
 	sche, err := CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
@@ -145,6 +147,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -2.
 	re := require.New(t)
 	statistics.Denoising = false
+	statisticsInterval = 0
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -207,6 +210,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -1.
 	re := require.New(t)
 	statistics.Denoising = false
+	statisticsInterval = 0
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -268,6 +272,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 func TestSkipUniformStore(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
+	statisticsInterval = 0
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -344,4 +349,124 @@ func TestSkipUniformStore(t *testing.T) {
 	re.Len(ops, 1)
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 3, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
+}
+
+func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
+	// This is a test that we can schedule small hot region,
+	// which is smaller than 20% of diff or 2% of low node. (#6645)
+	// 20% is from `firstPriorityPerceivedRatio`, 2% is from `firstPriorityMinHotRatio`.
+	// The byte of high node is 2000MB/s, the low node is 200MB/s.
+	// The query of high node is 2000qps, the low node is 200qps.
+	// There are all small hot regions in the cluster, which are smaller than 20% of diff or 2% of low node.
+	re := require.New(t)
+	emptyFunc := func(*mockcluster.Cluster, *hotScheduler) {}
+	highLoad, lowLoad := uint64(2000), uint64(200)
+	bigHotRegionByte := uint64(float64(lowLoad) * firstPriorityMinHotRatio * 10 * units.MiB * statistics.ReadReportInterval)
+	bigHotRegionQuery := uint64(float64(lowLoad) * firstPriorityMinHotRatio * 10 * statistics.ReadReportInterval)
+
+	// Case1: Before #6827, we only use minHotRatio, so cannot schedule small hot region in this case.
+	// Because 10000 is larger than the length of hotRegions, so `filterHotPeers` will skip the topn calculation.
+	origin := topnPosition
+	topnPosition = 10000
+	ops := checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, emptyFunc)
+	re.Empty(ops)
+	topnPosition = origin
+
+	// Case2: After #6827, we use top10 as the threshold of minHotPeer.
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, emptyFunc)
+	re.Len(ops, 1)
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, lowLoad, highLoad, emptyFunc)
+	re.Len(ops, 0)
+
+	// Case3: If there is larger hot region, we will schedule it.
+	hotRegionID := uint64(100)
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, func(tc *mockcluster.Cluster, _ *hotScheduler) {
+		tc.AddRegionWithReadInfo(hotRegionID, 1, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{2, 3})
+	})
+	re.Len(ops, 1)
+	re.Equal(hotRegionID, ops[0].RegionID())
+
+	// Case4: If there is larger hot region, but it need to cool down, we will schedule small hot region.
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, func(tc *mockcluster.Cluster, _ *hotScheduler) {
+		// just transfer leader
+		tc.AddRegionWithReadInfo(hotRegionID, 2, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{1, 3})
+		tc.AddRegionWithReadInfo(hotRegionID, 1, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{2, 3})
+	})
+	re.Len(ops, 1)
+	re.NotEqual(hotRegionID, ops[0].RegionID())
+
+	// Case5: If there is larger hot region, but it is pending, we will schedule small hot region.
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, func(tc *mockcluster.Cluster, hb *hotScheduler) {
+		tc.AddRegionWithReadInfo(hotRegionID, 1, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{2, 3})
+		hb.regionPendings[hotRegionID] = &pendingInfluence{}
+	})
+	re.Len(ops, 1)
+	re.NotEqual(hotRegionID, ops[0].RegionID())
+
+	// Case5: If there are more than topnPosition hot regions, but them need to cool down,
+	// we will schedule large hot region rather than small hot region, so there is no operator.
+	topnPosition = 2
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, func(tc *mockcluster.Cluster, _ *hotScheduler) {
+		// just transfer leader
+		tc.AddRegionWithReadInfo(hotRegionID, 2, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{1, 3})
+		tc.AddRegionWithReadInfo(hotRegionID, 1, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{2, 3})
+		// just transfer leader
+		tc.AddRegionWithReadInfo(hotRegionID+1, 2, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{1, 3})
+		tc.AddRegionWithReadInfo(hotRegionID+1, 1, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{2, 3})
+	})
+	re.Len(ops, 0)
+	topnPosition = origin
+
+	// Case6: If there are more than topnPosition hot regions, but them are pending,
+	// we will schedule large hot region rather than small hot region, so there is no operator.
+	topnPosition = 2
+	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, func(tc *mockcluster.Cluster, hb *hotScheduler) {
+		tc.AddRegionWithReadInfo(hotRegionID, 1, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{2, 3})
+		hb.regionPendings[hotRegionID] = &pendingInfluence{}
+		tc.AddRegionWithReadInfo(hotRegionID+1, 1, bigHotRegionByte, 0, bigHotRegionQuery, statistics.ReadReportInterval, []uint64{2, 3})
+		hb.regionPendings[hotRegionID+1] = &pendingInfluence{}
+	})
+	re.Len(ops, 0)
+	topnPosition = origin
+}
+
+func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLoad, lowLoad uint64,
+	addOtherRegions func(*mockcluster.Cluster, *hotScheduler)) []*operator.Operator {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	statistics.Denoising = false
+	sche, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	hb.conf.SetSrcToleranceRatio(1)
+	hb.conf.SetDstToleranceRatio(1)
+	hb.conf.SetRankFormulaVersion("v2")
+	hb.conf.ReadPriorities = []string{statistics.QueryPriority, statistics.BytePriority}
+	tc.SetHotRegionCacheHitsThreshold(0)
+	tc.AddRegionStore(1, 40)
+	tc.AddRegionStore(2, 10)
+	tc.AddRegionStore(3, 10)
+
+	tc.UpdateStorageReadQuery(1, highLoad*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadQuery(2, lowLoad*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadQuery(3, (highLoad+lowLoad)/2*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(1, highLoad*units.MiB*statistics.StoreHeartBeatReportInterval, 0)
+	tc.UpdateStorageReadStats(2, lowLoad*units.MiB*statistics.StoreHeartBeatReportInterval, 0)
+	tc.UpdateStorageReadStats(3, (highLoad+lowLoad)/2*units.MiB*statistics.StoreHeartBeatReportInterval, 0)
+
+	smallHotPeerQuery := float64(lowLoad) * firstPriorityMinHotRatio * 0.9             // it's a small hot region than the firstPriorityMinHotRatio
+	smallHotPeerByte := float64(lowLoad) * secondPriorityMinHotRatio * 0.9 * units.MiB // it's a small hot region than the secondPriorityMinHotRatio
+	regions := make([]testRegionInfo, 0)
+	for i := 10; i < 50; i++ {
+		regions = append(regions, testRegionInfo{uint64(i), []uint64{1, 2, 3}, smallHotPeerByte, 0, smallHotPeerQuery})
+		if i < 20 {
+			regions = append(regions, testRegionInfo{uint64(i), []uint64{2, 1, 3}, smallHotPeerByte, 0, smallHotPeerQuery})
+			regions = append(regions, testRegionInfo{uint64(i), []uint64{3, 1, 2}, smallHotPeerByte, 0, smallHotPeerQuery})
+		}
+	}
+	addRegionInfo(tc, statistics.Read, regions)
+	tc.SetHotRegionCacheHitsThreshold(1)
+	addOtherRegions(tc, hb)
+	ops, _ := hb.Schedule(tc, false)
+	return ops
 }
