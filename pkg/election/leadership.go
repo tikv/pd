@@ -18,6 +18,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -28,6 +29,11 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
+)
+
+const (
+	watchLoopUnhealthyTimeout = 60 * time.Second
+	detectHealthyInterval     = 10 * time.Second
 )
 
 // GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
@@ -182,26 +188,86 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	if ls == nil {
 		return
 	}
+
+	interval := detectHealthyInterval
+	unhealthyTimeout := watchLoopUnhealthyTimeout
+	failpoint.Inject("fastTick", func() {
+		unhealthyTimeout = 5 * time.Second
+		interval = 1 * time.Second
+	})
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	lastHealthyTime := time.Now()
+
 	watcher := clientv3.NewWatcher(ls.client)
 	defer watcher.Close()
-	ctx, cancel := context.WithCancel(serverCtx)
-	defer cancel()
-	// The revision is the revision of last modification on this key.
-	// If the revision is compacted, will meet required revision has been compacted error.
-	// In this case, use the compact revision to re-watch the key.
+	var watchChanCancel context.CancelFunc
+	defer func() {
+		if watchChanCancel != nil {
+			watchChanCancel()
+		}
+	}()
 	for {
 		failpoint.Inject("delayWatcher", nil)
-		rch := watcher.Watch(ctx, ls.leaderKey, clientv3.WithRev(revision))
-		for wresp := range rch {
+		if watchChanCancel != nil {
+			watchChanCancel()
+		}
+		// In order to prevent a watch stream being stuck in a partitioned node,
+		// make sure to wrap context with "WithRequireLeader".
+		watchChanCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(serverCtx))
+		watchChanCancel = cancel
+
+		// When etcd is not available, the watcher.Watch will block,
+		// so we check the etcd availability first.
+		if !etcdutil.IsHealthy(serverCtx, ls.client) {
+			if time.Since(lastHealthyTime) > unhealthyTimeout {
+				log.Error("the connect of leadership watcher is unhealthy",
+					zap.Int64("revision", revision),
+					zap.String("leader-key", ls.leaderKey),
+					zap.String("purpose", ls.purpose))
+				return
+			}
+			select {
+			case <-serverCtx.Done():
+				log.Info("server is closed, exit leader watch loop",
+					zap.String("leader-key", ls.leaderKey),
+					zap.String("purpose", ls.purpose))
+				return
+			case <-ticker.C:
+				// continue to check the etcd availability
+				continue
+			}
+		}
+
+		watchChan := watcher.Watch(watchChanCtx, ls.leaderKey, clientv3.WithRev(revision))
+	WatchChanLoop:
+		select {
+		case <-serverCtx.Done():
+			log.Info("server is closed, exit leader watch loop",
+				zap.String("leader-key", ls.leaderKey),
+				zap.String("purpose", ls.purpose))
+			return
+		case <-ticker.C:
+			if !etcdutil.IsHealthy(serverCtx, ls.client) {
+				if time.Since(lastHealthyTime) > unhealthyTimeout {
+					log.Error("the connect of leadership watcher is unhealthy",
+						zap.Int64("revision", revision),
+						zap.String("leader-key", ls.leaderKey),
+						zap.String("purpose", ls.purpose))
+					return
+				}
+				goto WatchChanLoop
+			}
+		case wresp := <-watchChan:
 			// meet compacted error, use the compact revision.
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision",
 					zap.Int64("required-revision", revision),
 					zap.Int64("compact-revision", wresp.CompactRevision))
 				revision = wresp.CompactRevision
-				break
-			}
-			if wresp.Canceled {
+				lastHealthyTime = time.Now()
+				continue
+			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
 				log.Error("leadership watcher is canceled with",
 					zap.Int64("revision", revision),
 					zap.String("leader-key", ls.leaderKey),
@@ -213,19 +279,16 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			for _, ev := range wresp.Events {
 				if ev.Type == mvccpb.DELETE {
 					log.Info("current leadership is deleted",
+						zap.Int64("revision", wresp.Header.Revision),
 						zap.String("leader-key", ls.leaderKey),
 						zap.String("purpose", ls.purpose))
 					return
 				}
 			}
+			revision = wresp.Header.Revision + 1
 		}
-
-		select {
-		case <-ctx.Done():
-			// server closed, return
-			return
-		default:
-		}
+		lastHealthyTime = time.Now()
+		goto WatchChanLoop // use goto to avoid to create a new watchChan
 	}
 }
 

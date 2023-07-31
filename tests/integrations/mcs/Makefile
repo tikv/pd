@@ -21,7 +21,7 @@ static: install-tools
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
-	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./...
+	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
 	@ echo "revive ..."
 	@ revive -formatter friendly -config $(ROOT_PATH)/revive.toml ./...
 

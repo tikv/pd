@@ -84,22 +84,22 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 }
 
 // GetStoreConfig returns the store config.
-func (mc *Cluster) GetStoreConfig() sc.StoreConfig {
+func (mc *Cluster) GetStoreConfig() sc.StoreConfigProvider {
 	return mc.StoreConfigManager.GetStoreConfig()
 }
 
 // GetCheckerConfig returns the checker config.
-func (mc *Cluster) GetCheckerConfig() sc.CheckerConfig {
+func (mc *Cluster) GetCheckerConfig() sc.CheckerConfigProvider {
 	return mc
 }
 
 // GetSchedulerConfig returns the scheduler config.
-func (mc *Cluster) GetSchedulerConfig() sc.SchedulerConfig {
+func (mc *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider {
 	return mc
 }
 
 // GetSharedConfig returns the shared config.
-func (mc *Cluster) GetSharedConfig() sc.SharedConfig {
+func (mc *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return mc
 }
 
