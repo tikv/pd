@@ -1,0 +1,98 @@
+// Copyright 2023 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package scheduling
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/tests"
+)
+
+type schedulingMetaTestSuite struct {
+	suite.Suite
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// The PD cluster.
+	cluster *tests.TestCluster
+	// pdLeaderServer is the leader server of the PD cluster.
+	pdLeaderServer *tests.TestServer
+}
+
+func TestSchedulingMeta(t *testing.T) {
+	suite.Run(t, &schedulingMetaTestSuite{})
+}
+
+func (suite *schedulingMetaTestSuite) SetupSuite() {
+	re := suite.Require()
+
+	var err error
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	re.NoError(err)
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := suite.cluster.WaitLeader()
+	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
+	re.NoError(suite.pdLeaderServer.BootstrapCluster())
+}
+
+func (suite *schedulingMetaTestSuite) TearDownSuite() {
+	suite.cancel()
+	suite.cluster.Destroy()
+}
+
+func (suite *schedulingMetaTestSuite) TestConfigWatch() {
+	re := suite.Require()
+
+	// Make sure the config is persisted before the watcher is created.
+	persistConfig(re, suite.pdLeaderServer)
+	// Create a config watcher.
+	watcher, err := meta.NewConfigWatcher(
+		suite.ctx,
+		suite.pdLeaderServer.GetEtcdClient(),
+		endpoint.ConfigPath(suite.cluster.GetCluster().GetId()),
+	)
+	re.NoError(err)
+	// Check the initial config value.
+	re.Equal(uint64(sc.DefaultMaxReplicas), watcher.GetReplicationConfig().MaxReplicas)
+	re.Equal(sc.DefaultSplitMergeInterval, watcher.GetScheduleConfig().SplitMergeInterval.Duration)
+	// Update the config and check if the scheduling config watcher can get the latest value.
+	suite.pdLeaderServer.GetPersistOptions().SetMaxReplicas(5)
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return watcher.GetReplicationConfig().MaxReplicas == 5
+	})
+	suite.pdLeaderServer.GetPersistOptions().SetSplitMergeInterval(2 * sc.DefaultSplitMergeInterval)
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return watcher.GetScheduleConfig().SplitMergeInterval.Duration == 2*sc.DefaultSplitMergeInterval
+	})
+	watcher.Close()
+}
+
+// Manually trigger the config persistence in the PD API server side.
+func persistConfig(re *require.Assertions, pdLeaderServer *tests.TestServer) {
+	err := pdLeaderServer.GetPersistOptions().Persist(pdLeaderServer.GetServer().GetStorage())
+	re.NoError(err)
+}
