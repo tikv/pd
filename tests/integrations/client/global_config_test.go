@@ -17,6 +17,7 @@ package client_test
 import (
 	"path"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,6 +54,7 @@ type globalConfigTestSuite struct {
 	server  *server.GrpcServer
 	client  pd.Client
 	cleanup testutil.CleanupFunc
+	mu      sync.Mutex
 }
 
 func TestGlobalConfigTestSuite(t *testing.T) {
@@ -321,4 +323,32 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 			}
 		}
 	}
+}
+
+func (suite *globalConfigTestSuite) TestEtcdNotStart() {
+	cli := suite.server.GetClient()
+	defer func() {
+		suite.mu.Lock()
+		suite.server.SetClient(cli)
+		suite.mu.Unlock()
+	}()
+	suite.mu.Lock()
+	suite.server.SetClient(nil)
+	suite.mu.Unlock()
+	err := suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+		Revision:   0,
+	}, nil)
+	suite.Error(err)
+
+	_, err = suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
+		ConfigPath: globalConfigPath,
+		Changes:    []*pdpb.GlobalConfigItem{{Kind: pdpb.EventType_PUT, Name: "0", Payload: []byte("0")}},
+	})
+	suite.Error(err)
+
+	_, err = suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+		Names: []string{"test_etcd"},
+	})
+	suite.Error(err)
 }
