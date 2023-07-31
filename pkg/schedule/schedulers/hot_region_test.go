@@ -375,6 +375,7 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 func TestSplitIfRegionTooHot(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
+	statisticsInterval = 0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetHotRegionCacheHitsThreshold(1)
