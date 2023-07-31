@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -412,7 +411,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	s.rootPath = endpoint.PDRootPath(s.clusterID)
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
@@ -602,8 +601,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.encryptionKeyManagerLoop()
 	if s.IsAPIServiceMode() {
 		s.initTSOPrimaryWatcher()
-		s.serverLoopWg.Add(1)
-		go s.tsoPrimaryWatcher.StartWatchLoop()
+		s.tsoPrimaryWatcher.StartWatchLoop()
 	}
 }
 
@@ -1939,4 +1937,10 @@ func (s *Server) GetTSOUpdatePhysicalInterval() time.Duration {
 // GetMaxResetTSGap gets the max gap to reset the tso.
 func (s *Server) GetMaxResetTSGap() time.Duration {
 	return s.persistOptions.GetMaxResetTSGap()
+}
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
 }
