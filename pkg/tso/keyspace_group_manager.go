@@ -460,10 +460,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		func() error { return nil },
 		clientv3.WithRange(tsoServiceEndKey),
 	)
-
-	kgm.wg.Add(1)
-	go kgm.tsoNodesWatcher.StartWatchLoop()
-
+	kgm.tsoNodesWatcher.StartWatchLoop()
 	if err := kgm.tsoNodesWatcher.WaitLoad(); err != nil {
 		log.Error("failed to load the registered tso servers", errs.ZapError(err))
 		return err
@@ -530,10 +527,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	if kgm.loadKeyspaceGroupsBatchSize > 0 {
 		kgm.groupWatcher.SetLoadBatchSize(kgm.loadKeyspaceGroupsBatchSize)
 	}
-
-	kgm.wg.Add(1)
-	go kgm.groupWatcher.StartWatchLoop()
-
+	kgm.groupWatcher.StartWatchLoop()
 	if err := kgm.groupWatcher.WaitLoad(); err != nil {
 		log.Error("failed to initialize keyspace group manager", errs.ZapError(err))
 		// We might have partially loaded/initialized the keyspace groups. Close the manager to clean up.

@@ -26,7 +26,8 @@ import (
 )
 
 const (
-	defaultMaxReplicas            = 3
+	// DefaultMaxReplicas is the default number of replicas for each region.
+	DefaultMaxReplicas            = 3
 	defaultMaxSnapshotCount       = 64
 	defaultMaxPendingPeerCount    = 64
 	defaultMaxMergeRegionSize     = 20
@@ -60,8 +61,8 @@ const (
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
 	defaultStoreLimitVersion         = "v1"
-
-	defaultSplitMergeInterval      = time.Hour
+	// DefaultSplitMergeInterval is the default value of config split merge interval.
+	DefaultSplitMergeInterval      = time.Hour
 	defaultSwitchWitnessInterval   = time.Hour
 	defaultPatrolRegionInterval    = 10 * time.Millisecond
 	defaultMaxStoreDownTime        = 30 * time.Minute
@@ -298,7 +299,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("max-merge-region-size") {
 		configutil.AdjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	}
-	configutil.AdjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
+	configutil.AdjustDuration(&c.SplitMergeInterval, DefaultSplitMergeInterval)
 	configutil.AdjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
 	configutil.AdjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
@@ -599,7 +600,7 @@ func (c *ReplicationConfig) Validate() error {
 
 // Adjust adjusts the config.
 func (c *ReplicationConfig) Adjust(meta *configutil.ConfigMetaData) error {
-	configutil.AdjustUint64(&c.MaxReplicas, defaultMaxReplicas)
+	configutil.AdjustUint64(&c.MaxReplicas, DefaultMaxReplicas)
 	if !meta.IsDefined("enable-placement-rules") {
 		c.EnablePlacementRules = defaultEnablePlacementRules
 	}

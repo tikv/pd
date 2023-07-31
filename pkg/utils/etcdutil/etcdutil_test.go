@@ -564,9 +564,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 		func(kv *mvccpb.KeyValue) error { return nil },
 		func() error { return nil },
 	)
-
-	suite.wg.Add(1)
-	go watcher.StartWatchLoop()
+	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	suite.NoError(err) // although no key, watcher returns no error
 	cache.RLock()
@@ -609,9 +607,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 		},
 		clientv3.WithPrefix(),
 	)
-
-	suite.wg.Add(1)
-	go watcher.StartWatchLoop()
+	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	suite.NoError(err)
 
@@ -669,8 +665,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 				},
 				clientv3.WithPrefix(),
 			)
-			suite.wg.Add(1)
-			go watcher.StartWatchLoop()
+			watcher.StartWatchLoop()
 			err := watcher.WaitLoad()
 			suite.NoError(err)
 			cache.RLock()
@@ -712,9 +707,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 		func() error { return nil },
 	)
 	watcher.watchChangeRetryInterval = 100 * time.Millisecond
-
-	suite.wg.Add(1)
-	go watcher.StartWatchLoop()
+	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	suite.NoError(err)
 	checkCache("")
