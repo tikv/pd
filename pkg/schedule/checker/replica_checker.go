@@ -62,12 +62,12 @@ var (
 type ReplicaChecker struct {
 	PauseController
 	cluster           sche.CheckerCluster
-	conf              config.CheckerConfig
+	conf              config.CheckerConfigProvider
 	regionWaitingList cache.Cache
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfig, regionWaitingList cache.Cache) *ReplicaChecker {
+func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, regionWaitingList cache.Cache) *ReplicaChecker {
 	return &ReplicaChecker{
 		cluster:           cluster,
 		conf:              conf,

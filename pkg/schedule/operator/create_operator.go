@@ -234,7 +234,7 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 }
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
-func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64) (*Operator, error) {
+func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool) (*Operator, error) {
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
@@ -249,10 +249,16 @@ func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *cor
 	if targetLeader != 0 {
 		leader = targetLeader
 	}
-	return NewBuilder(desc, ci, origin).
+
+	builder := NewBuilder(desc, ci, origin)
+	if skipLimitCheck {
+		builder.SetRemoveLightPeer()
+	}
+
+	return builder.
 		SetPeers(targetPeers).
 		SetLeader(leader).
-		EnableLightWeight().
+		SetAddLightPeer().
 		// EnableForceTargetLeader in order to ignore the leader schedule limit
 		EnableForceTargetLeader().
 		Build(OpAdmin)
