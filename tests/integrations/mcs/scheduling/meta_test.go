@@ -16,13 +16,13 @@ package scheduling
 
 import (
 	"context"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
@@ -71,7 +71,7 @@ func (suite *schedulingMetaTestSuite) TestConfigWatch() {
 	watcher, err := meta.NewConfigWatcher(
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
-		fmt.Sprintf("/pd/%d/config", suite.cluster.GetCluster().GetId()),
+		endpoint.ConfigPath(suite.cluster.GetCluster().GetId()),
 	)
 	re.NoError(err)
 	// Check the initial config value.
