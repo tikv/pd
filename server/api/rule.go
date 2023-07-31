@@ -70,7 +70,7 @@ func (h *ruleHandler) GetAllRules(w http.ResponseWriter, r *http.Request) {
 // @Failure  400    {string}  string            "The input is invalid."
 // @Failure  412    {string}  string            "Placement rules feature is disabled."
 // @Failure  500    {string}  string            "PD server failed to proceed the request."
-// @Router   /config/rules [get]
+// @Router   /config/rules [post]
 func (h *ruleHandler) SetAllRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {

@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -35,6 +36,10 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
 )
+
+// This line is to ensure the package `sc` could always be imported so that
+// the swagger could generate the right definitions for the config structs.
+var _ *sc.ScheduleConfig = nil
 
 type confHandler struct {
 	svr *server.Server
@@ -293,7 +298,7 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 // @Tags     config
 // @Summary  Get schedule config.
 // @Produce  json
-// @Success  200  {object}  config.ScheduleConfig
+// @Success  200  {object}  sc.ScheduleConfig
 // @Router   /config/schedule [get]
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetScheduleConfig()
@@ -356,7 +361,7 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Tags     config
 // @Summary  Get replication config.
 // @Produce  json
-// @Success  200  {object}  config.ReplicationConfig
+// @Success  200  {object}  sc.ReplicationConfig
 // @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())

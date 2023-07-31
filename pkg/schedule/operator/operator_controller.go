@@ -56,7 +56,7 @@ var (
 type Controller struct {
 	syncutil.RWMutex
 	ctx             context.Context
-	config          config.SharedConfig
+	config          config.SharedConfigProvider
 	cluster         *core.BasicCluster
 	operators       map[uint64]*Operator
 	hbStreams       *hbstream.HeartbeatStreams
@@ -69,7 +69,7 @@ type Controller struct {
 }
 
 // NewController creates a Controller.
-func NewController(ctx context.Context, cluster *core.BasicCluster, config config.SharedConfig, hbStreams *hbstream.HeartbeatStreams) *Controller {
+func NewController(ctx context.Context, cluster *core.BasicCluster, config config.SharedConfigProvider, hbStreams *hbstream.HeartbeatStreams) *Controller {
 	return &Controller{
 		ctx:             ctx,
 		cluster:         cluster,
