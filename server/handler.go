@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -137,7 +138,7 @@ func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 }
 
 // GetScheduleConfig returns ScheduleConfig.
-func (h *Handler) GetScheduleConfig() *config.ScheduleConfig {
+func (h *Handler) GetScheduleConfig() *sc.ScheduleConfig {
 	return h.s.GetScheduleConfig()
 }
 
@@ -543,7 +544,7 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]config.StoreLimitConfig, error) {
+func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]sc.StoreLimitConfig, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, err
@@ -854,7 +855,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 		return errors.Errorf("region %d is a hot region", regionID)
 	}
 
-	op, err := c.GetRegionScatter().Scatter(region, group)
+	op, err := c.GetRegionScatter().Scatter(region, group, false)
 	if err != nil {
 		return err
 	}
@@ -891,7 +892,7 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 			return 0, err
 		}
 	} else {
-		opsCount, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit)
+		opsCount, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit, false)
 		if err != nil {
 			return 0, err
 		}
@@ -925,15 +926,6 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
 	return mux, nil
-}
-
-// GetOfflinePeer gets the region with offline peer.
-func (h *Handler) GetOfflinePeer(typ statistics.RegionStatisticType) ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetOfflineRegionStatsByType(typ), nil
 }
 
 // ResetTS resets the ts with specified tso.

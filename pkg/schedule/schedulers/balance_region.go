@@ -113,15 +113,15 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetOpts().GetRegionScheduleLimit()
+func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *balanceRegionScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {
@@ -129,10 +129,10 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.ScheduleCluster, dryRun b
 	}
 	balanceRegionScheduleCounter.Inc()
 	stores := cluster.GetStores()
-	opts := cluster.GetOpts()
+	conf := cluster.GetSchedulerConfig()
 	snapshotFilter := filter.NewSnapshotSendFilter(stores, constant.Medium)
-	faultTargets := filter.SelectUnavailableTargetStores(stores, s.filters, opts, collector, s.filterCounter)
-	sourceStores := filter.SelectSourceStores(stores, s.filters, opts, collector, s.filterCounter)
+	faultTargets := filter.SelectUnavailableTargetStores(stores, s.filters, conf, collector, s.filterCounter)
+	sourceStores := filter.SelectSourceStores(stores, s.filters, conf, collector, s.filterCounter)
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	s.OpController.GetFastOpInfluence(cluster.GetBasicCluster(), opInfluence)
 	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
@@ -141,8 +141,8 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.ScheduleCluster, dryRun b
 	sort.Slice(sourceStores, func(i, j int) bool {
 		iOp := solver.GetOpInfluence(sourceStores[i].GetID())
 		jOp := solver.GetOpInfluence(sourceStores[j].GetID())
-		return sourceStores[i].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), iOp) >
-			sourceStores[j].RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), jOp)
+		return sourceStores[i].RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), iOp) >
+			sourceStores[j].RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), jOp)
 	})
 
 	pendingFilter := filter.NewRegionPendingFilter()
@@ -239,12 +239,13 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	}
 	// the order of the filters should be sorted by the cost of the cpu overhead.
 	// the more expensive the filter is, the later it should be placed.
+	conf := solver.GetSchedulerConfig()
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
-		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(),
+		filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(),
 			solver.Region, solver.Source, solver.fit),
 	}
-	candidates := filter.NewCandidates(dstStores).FilterTarget(solver.GetOpts(), collector, s.filterCounter, filters...)
+	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
 	if len(candidates.Stores) != 0 {
 		solver.Step++
 	}

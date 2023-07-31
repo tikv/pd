@@ -138,7 +138,7 @@ func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]
 type RegionScatterer struct {
 	ctx            context.Context
 	name           string
-	cluster        sche.ClusterInformer
+	cluster        sche.ScatterCluster
 	ordinaryEngine engineContext
 	specialEngines sync.Map
 	opController   *operator.Controller
@@ -146,7 +146,7 @@ type RegionScatterer struct {
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(ctx context.Context, cluster sche.ClusterInformer, opController *operator.Controller) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster sche.ScatterCluster, opController *operator.Controller) *RegionScatterer {
 	return &RegionScatterer{
 		ctx:          ctx,
 		name:         regionScatterName,
@@ -190,7 +190,7 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 		regionMap[region.GetID()] = region
 	}
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit)
+	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit, false)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -198,7 +198,7 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 }
 
 // ScatterRegionsByID directly scatter regions by ScatterRegions
-func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int) (int, map[uint64]error, error) {
+func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int, skipStoreLimit bool) (int, map[uint64]error, error) {
 	if len(regionsID) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
 		return 0, nil, errors.New("empty region")
@@ -220,7 +220,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 		regionMap[region.GetID()] = region
 	}
 	// If there existed any region failed to relocated after retry, add it into unProcessedRegions
-	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit)
+	opsCount, err := r.scatterRegions(regionMap, failures, group, retryLimit, skipStoreLimit)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -233,7 +233,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 // time.Sleep between each retry.
 // Failures indicates the regions which are failed to be relocated, the key of the failures indicates the regionID
 // and the value of the failures indicates the failure error.
-func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int) (int, error) {
+func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int, skipStoreLimit bool) (int, error) {
 	if len(regions) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
 		return 0, errors.New("empty region")
@@ -244,7 +244,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 	opsCount := 0
 	for currentRetry := 0; currentRetry <= retryLimit; currentRetry++ {
 		for _, region := range regions {
-			op, err := r.Scatter(region, group)
+			op, err := r.Scatter(region, group, skipStoreLimit)
 			failpoint.Inject("scatterFail", func() {
 				if region.GetID() == 1 {
 					err = errors.New("mock error")
@@ -281,7 +281,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
 // in a group level instead of cluster level.
-func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*operator.Operator, error) {
+func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipStoreLimit bool) (*operator.Operator, error) {
 	if !filter.IsRegionReplicated(r.cluster, region) {
 		r.cluster.AddSuspectRegions(region.GetID())
 		scatterSkipNotReplicatedCounter.Inc()
@@ -301,10 +301,10 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string) (*opera
 		return nil, errors.Errorf("region %d is hot", region.GetID())
 	}
 
-	return r.scatterRegion(region, group), nil
+	return r.scatterRegion(region, group, skipStoreLimit), nil
 }
 
-func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *operator.Operator {
+func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, skipStoreLimit bool) *operator.Operator {
 	engineFilter := filter.NewEngineFilter(r.name, filter.NotSpecialEngines)
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
@@ -315,7 +315,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		if store == nil {
 			return nil
 		}
-		if engineFilter.Target(r.cluster.GetOpts(), store).IsOK() {
+		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			ordinaryPeers[peer.GetStoreId()] = peer
 		} else {
 			engine := store.GetLabelValue(core.EngineKey)
@@ -383,7 +383,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		r.Put(targetPeers, targetLeader, group)
 		return nil
 	}
-	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader)
+	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
 		scatterFailCounter.Inc()
 		for _, peer := range region.GetPeers() {
@@ -439,7 +439,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, oldFit *plac
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(r.name, nil, selectedStores),
 	}
-	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
+	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
 	for _, filterFunc := range context.filterFuncs {
 		filters = append(filters, filterFunc())
 	}
@@ -463,7 +463,7 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, oldFit *plac
 		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
 		// could be selected as candidate.
 		if storeCount < maxStoreTotalCount || maxStoreTotalCount == minStoreTotalCount {
-			if filter.Target(r.cluster.GetOpts(), store, filters) {
+			if filter.Target(r.cluster.GetSharedConfig(), store, filters) {
 				candidates = append(candidates, store.GetID())
 			}
 		}
@@ -533,7 +533,7 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 		if store == nil {
 			continue
 		}
-		if engineFilter.Target(r.cluster.GetOpts(), store).IsOK() {
+		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
 				fmt.Sprintf("%v", storeID),

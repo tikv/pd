@@ -217,7 +217,13 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 	regionURL := fmt.Sprintf("%s/operators/%d", suite.urlPrefix, region.GetId())
 	operator := mustReadURL(re, regionURL)
 	suite.Contains(operator, "operator not found")
-
+	convertStepsToStr := func(steps []string) string {
+		stepStrs := make([]string, len(steps))
+		for i := range steps {
+			stepStrs[i] = fmt.Sprintf("%d:{%s}", i, steps[i])
+		}
+		return strings.Join(stepStrs, ", ")
+	}
 	testCases := []struct {
 		name                string
 		placementRuleEnable bool
@@ -231,25 +237,25 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			placementRuleEnable: false,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`),
 			expectedError:       nil,
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 1}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 1}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
-			}, ", "),
+			}),
 		},
 		{
 			name:                "placement rule disable with peer role",
 			placementRuleEnable: false,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError:       nil,
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 2}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 2}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 2}.String(),
 				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
-			}, ", "),
+			}),
 		},
 		{
 			name:                "default placement rule without peer role",
@@ -262,13 +268,13 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			name:                "default placement rule with peer role",
 			placementRuleEnable: true,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 3}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
-			}, ", "),
+			}),
 		},
 		{
 			name:                "default placement rule with invalid input",
@@ -323,12 +329,12 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			},
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError: nil,
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 5}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
-			}, ", "),
+			}),
 		},
 		{
 			name:                "customized placement rule with valid peer role2",
@@ -363,12 +369,12 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			},
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader", "follower"]}`),
 			expectedError: nil,
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 6}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
-			}, ", "),
+			}),
 		},
 	}
 	for _, testCase := range testCases {

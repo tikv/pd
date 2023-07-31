@@ -27,27 +27,50 @@ import (
 
 // ClusterInformer provides the necessary information of a cluster.
 type ClusterInformer interface {
-	ScheduleCluster
+	SchedulerCluster
+	CheckerCluster
+	ScatterCluster
 
 	GetStorage() storage.Storage
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
-	AddSuspectRegions(ids ...uint64)
 	GetPersistOptions() *config.PersistOptions
 }
 
-// ScheduleCluster is an aggregate interface that wraps multiple interfaces for schedulers use
-type ScheduleCluster interface {
-	BasicCluster
+// SchedulerCluster is an aggregate interface that wraps multiple interfaces
+type SchedulerCluster interface {
+	SharedCluster
 
 	statistics.StoreStatInformer
-	statistics.RegionStatInformer
 	buckets.BucketStatInformer
 
-	GetOpts() sc.Config
-	GetRuleManager() *placement.RuleManager
+	GetSchedulerConfig() sc.SchedulerConfigProvider
 	GetRegionLabeler() *labeler.RegionLabeler
+	GetStoreConfig() sc.StoreConfigProvider
+}
+
+// CheckerCluster is an aggregate interface that wraps multiple interfaces
+type CheckerCluster interface {
+	SharedCluster
+
+	GetCheckerConfig() sc.CheckerConfigProvider
+	GetStoreConfig() sc.StoreConfigProvider
+}
+
+// ScatterCluster is an aggregate interface that wraps multiple interfaces
+type ScatterCluster interface {
+	SharedCluster
+
+	AddSuspectRegions(ids ...uint64)
+}
+
+// SharedCluster is an aggregate interface that wraps multiple interfaces
+type SharedCluster interface {
+	BasicCluster
+	statistics.RegionStatInformer
+
 	GetBasicCluster() *core.BasicCluster
-	GetStoreConfig() sc.StoreConfig
+	GetSharedConfig() sc.SharedConfigProvider
+	GetRuleManager() *placement.RuleManager
 	AllocID() (uint64, error)
 }
 

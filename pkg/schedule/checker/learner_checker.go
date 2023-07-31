@@ -25,7 +25,7 @@ import (
 // LearnerChecker ensures region has a learner will be promoted.
 type LearnerChecker struct {
 	PauseController
-	cluster sche.ClusterInformer
+	cluster sche.CheckerCluster
 }
 
 var (
@@ -34,7 +34,7 @@ var (
 )
 
 // NewLearnerChecker creates a learner checker.
-func NewLearnerChecker(cluster sche.ClusterInformer) *LearnerChecker {
+func NewLearnerChecker(cluster sche.CheckerCluster) *LearnerChecker {
 	return &LearnerChecker{
 		cluster: cluster,
 	}

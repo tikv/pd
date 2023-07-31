@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -69,22 +70,22 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 }
 
 // GetScheduleConfig returns scheduling configurations.
-func (o *PersistOptions) GetScheduleConfig() *ScheduleConfig {
-	return o.schedule.Load().(*ScheduleConfig)
+func (o *PersistOptions) GetScheduleConfig() *sc.ScheduleConfig {
+	return o.schedule.Load().(*sc.ScheduleConfig)
 }
 
 // SetScheduleConfig sets the PD scheduling configuration.
-func (o *PersistOptions) SetScheduleConfig(cfg *ScheduleConfig) {
+func (o *PersistOptions) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	o.schedule.Store(cfg)
 }
 
 // GetReplicationConfig returns replication configurations.
-func (o *PersistOptions) GetReplicationConfig() *ReplicationConfig {
-	return o.replication.Load().(*ReplicationConfig)
+func (o *PersistOptions) GetReplicationConfig() *sc.ReplicationConfig {
+	return o.replication.Load().(*sc.ReplicationConfig)
 }
 
 // SetReplicationConfig sets the PD replication configuration.
-func (o *PersistOptions) SetReplicationConfig(cfg *ReplicationConfig) {
+func (o *PersistOptions) SetReplicationConfig(cfg *sc.ReplicationConfig) {
 	o.replication.Store(cfg)
 }
 
@@ -335,25 +336,25 @@ func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
 // SetStoreLimit sets a store limit for a given type and rate.
 func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
 	v := o.GetScheduleConfig().Clone()
-	var sc StoreLimitConfig
+	var slc sc.StoreLimitConfig
 	var rate float64
 	switch typ {
 	case storelimit.AddPeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
 		} else {
 			rate = v.StoreLimit[storeID].RemovePeer
 		}
-		sc = StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
+		slc = sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
 	case storelimit.RemovePeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 		} else {
 			rate = v.StoreLimit[storeID].AddPeer
 		}
-		sc = StoreLimitConfig{AddPeer: rate, RemovePeer: ratePerMin}
+		slc = sc.StoreLimitConfig{AddPeer: rate, RemovePeer: ratePerMin}
 	}
-	v.StoreLimit[storeID] = sc
+	v.StoreLimit[storeID] = slc
 	o.SetScheduleConfig(v)
 }
 
@@ -362,15 +363,15 @@ func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
 	case storelimit.AddPeer:
-		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
 		for storeID := range v.StoreLimit {
-			sc := StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
+			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
 			v.StoreLimit[storeID] = sc
 		}
 	case storelimit.RemovePeer:
-		DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 		for storeID := range v.StoreLimit {
-			sc := StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
+			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
 			v.StoreLimit[storeID] = sc
 		}
 	}
@@ -434,7 +435,7 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 }
 
 // GetStoreLimit returns the limit of a store.
-func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfig) {
+func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
 	defer func() {
 		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
 		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
@@ -443,9 +444,9 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC StoreLimitConfi
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-	sc := StoreLimitConfig{
-		AddPeer:    DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	sc := sc.StoreLimitConfig{
+		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
 	v, ok1, err := o.getTTLFloat("default-add-peer")
 	if err != nil {
@@ -497,13 +498,8 @@ func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type
 }
 
 // GetAllStoresLimit returns the limit of all stores.
-func (o *PersistOptions) GetAllStoresLimit() map[uint64]StoreLimitConfig {
+func (o *PersistOptions) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLimit
-}
-
-// GetStoreLimitMode returns the limit mode of store.
-func (o *PersistOptions) GetStoreLimitMode() string {
-	return o.GetScheduleConfig().StoreLimitMode
 }
 
 // GetStoreLimitVersion returns the limit version of store.
@@ -650,12 +646,12 @@ func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 }
 
 // GetStoresLimit gets the stores' limit.
-func (o *PersistOptions) GetStoresLimit() map[uint64]StoreLimitConfig {
+func (o *PersistOptions) GetStoresLimit() map[uint64]sc.StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLimit
 }
 
 // GetSchedulers gets the scheduler configurations.
-func (o *PersistOptions) GetSchedulers() SchedulerConfigs {
+func (o *PersistOptions) GetSchedulers() sc.SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers
 }
 
@@ -687,18 +683,18 @@ func (o *PersistOptions) AddSchedulerCfg(tp string, args []string) {
 		// comparing args is to cover the case that there are schedulers in same type but not with same name
 		// such as two schedulers of type "evict-leader",
 		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: false}) {
+		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: tp, Args: args, Disable: false}) {
 			return
 		}
 
-		if reflect.DeepEqual(schedulerCfg, SchedulerConfig{Type: tp, Args: args, Disable: true}) {
+		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: tp, Args: args, Disable: true}) {
 			schedulerCfg.Disable = false
 			v.Schedulers[i] = schedulerCfg
 			o.SetScheduleConfig(v)
 			return
 		}
 	}
-	v.Schedulers = append(v.Schedulers, SchedulerConfig{Type: tp, Args: args, Disable: false})
+	v.Schedulers = append(v.Schedulers, sc.SchedulerConfig{Type: tp, Args: args, Disable: false})
 	o.SetScheduleConfig(v)
 }
 
@@ -707,7 +703,7 @@ func (o *PersistOptions) RemoveSchedulerCfg(tp string) {
 	v := o.GetScheduleConfig().Clone()
 	for i, schedulerCfg := range v.Schedulers {
 		if tp == schedulerCfg.Type {
-			if IsDefaultScheduler(tp) {
+			if sc.IsDefaultScheduler(tp) {
 				schedulerCfg.Disable = true
 				v.Schedulers[i] = schedulerCfg
 			} else {
@@ -790,9 +786,9 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	return nil
 }
 
-func (o *PersistOptions) adjustScheduleCfg(scheduleCfg *ScheduleConfig) {
+func (o *PersistOptions) adjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 	// In case we add new default schedulers.
-	for _, ps := range DefaultSchedulers {
+	for _, ps := range sc.DefaultSchedulers {
 		if slice.NoneOf(scheduleCfg.Schedulers, func(i int) bool {
 			return scheduleCfg.Schedulers[i].Type == ps.Type
 		}) {

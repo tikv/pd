@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/schedule"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -978,7 +979,11 @@ func TestRegionSizeChanged(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.regionStats = statistics.NewRegionStatistics(
+		cluster.GetBasicCluster(),
+		cluster.GetOpts(),
+		cluster.ruleManager,
+		cluster.storeConfigManager)
 	region := newTestRegions(1, 3, 3)[0]
 	cluster.opt.GetMaxMergeRegionKeys()
 	curMaxMergeSize := int64(cluster.opt.GetMaxMergeRegionSize())
@@ -1260,7 +1265,11 @@ func TestOfflineAndMerge(t *testing.T) {
 			panic(err)
 		}
 	}
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.regionStats = statistics.NewRegionStatistics(
+		cluster.GetBasicCluster(),
+		cluster.GetOpts(),
+		cluster.ruleManager,
+		cluster.storeConfigManager)
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	// Put 4 stores.
@@ -1300,13 +1309,13 @@ func TestOfflineAndMerge(t *testing.T) {
 		regions = core.SplitRegions(regions)
 	}
 	heartbeatRegions(re, cluster, regions)
-	re.Len(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), len(regions))
+	re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
 
 	// Merge.
 	for i := 0; i < n; i++ {
 		regions = core.MergeRegions(regions)
 		heartbeatRegions(re, cluster, regions)
-		re.Len(cluster.GetOfflineRegionStatsByType(statistics.OfflinePeer), len(regions))
+		re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
 	}
 }
 
@@ -1514,7 +1523,11 @@ func TestCalculateStoreSize1(t *testing.T) {
 	opt.SetReplicationConfig(cfg)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.regionStats = statistics.NewRegionStatistics(
+		cluster.GetBasicCluster(),
+		cluster.GetOpts(),
+		cluster.ruleManager,
+		cluster.storeConfigManager)
 
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
@@ -1597,7 +1610,11 @@ func TestCalculateStoreSize2(t *testing.T) {
 	opt.SetMaxReplicas(3)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.regionStats = statistics.NewRegionStatistics(cluster.GetOpts(), cluster.ruleManager, cluster.storeConfigManager)
+	cluster.regionStats = statistics.NewRegionStatistics(
+		cluster.GetBasicCluster(),
+		cluster.GetOpts(),
+		cluster.ruleManager,
+		cluster.storeConfigManager)
 
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
@@ -1974,7 +1991,7 @@ type testCluster struct {
 	*RaftCluster
 }
 
-func newTestScheduleConfig() (*config.ScheduleConfig, *config.PersistOptions, error) {
+func newTestScheduleConfig() (*sc.ScheduleConfig, *config.PersistOptions, error) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
@@ -2309,12 +2326,12 @@ func TestDispatch(t *testing.T) {
 
 	// Wait for schedule and turn off balance.
 	waitOperator(re, co, 1)
-	sc := co.GetSchedulersController()
+	controller := co.GetSchedulersController()
 	operatorutil.CheckTransferPeer(re, co.GetOperatorController().GetOperator(1), operator.OpKind(0), 4, 1)
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceRegionName))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	waitOperator(re, co, 2)
 	operatorutil.CheckTransferLeader(re, co.GetOperatorController().GetOperator(2), operator.OpKind(0), 4, 2)
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceLeaderName))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 
 	stream := mockhbstream.NewHeartbeatStream()
 
@@ -2351,7 +2368,11 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
+		tc.regionStats = statistics.NewRegionStatistics(
+			tc.GetBasicCluster(),
+			tc.GetOpts(),
+			nil,
+			tc.storeConfigManager)
 	}, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
 
@@ -2367,14 +2388,14 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 			}
 		}(i)
 	}
-	sc := co.GetSchedulersController()
+	controller := co.GetSchedulersController()
 	for i := 0; i < 1000; i++ {
 		co.CollectHotSpotMetrics()
-		sc.CollectSchedulerMetrics()
+		controller.CollectSchedulerMetrics()
 		co.GetCluster().(*RaftCluster).collectClusterMetrics()
 	}
 	co.ResetHotSpotMetrics()
-	sc.ResetSchedulerMetrics()
+	controller.ResetSchedulerMetrics()
 	co.GetCluster().(*RaftCluster).resetClusterMetrics()
 	wg.Wait()
 }
@@ -2383,7 +2404,11 @@ func TestCollectMetrics(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, func(tc *testCluster) {
-		tc.regionStats = statistics.NewRegionStatistics(tc.GetOpts(), nil, tc.storeConfigManager)
+		tc.regionStats = statistics.NewRegionStatistics(
+			tc.GetBasicCluster(),
+			tc.GetOpts(),
+			nil,
+			tc.storeConfigManager)
 	}, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
 	count := 10
@@ -2399,16 +2424,16 @@ func TestCollectMetrics(t *testing.T) {
 			tc.hotStat.HotCache.Update(item, statistics.Write)
 		}
 	}
-	sc := co.GetSchedulersController()
+	controller := co.GetSchedulersController()
 	for i := 0; i < 1000; i++ {
 		co.CollectHotSpotMetrics()
-		sc.CollectSchedulerMetrics()
+		controller.CollectSchedulerMetrics()
 		co.GetCluster().(*RaftCluster).collectClusterMetrics()
 	}
 	stores := co.GetCluster().GetStores()
 	regionStats := co.GetCluster().RegionWriteStats()
 	status1 := statistics.CollectHotPeerInfos(stores, regionStats)
-	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, statistics.Write, co.GetCluster().GetOpts().IsTraceRegionFlow())
+	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, statistics.Write, co.GetCluster().GetSchedulerConfig().IsTraceRegionFlow())
 	for _, s := range status2.AsLeader {
 		s.Stats = nil
 	}
@@ -2417,11 +2442,11 @@ func TestCollectMetrics(t *testing.T) {
 	}
 	re.Equal(status1, status2)
 	co.ResetHotSpotMetrics()
-	sc.ResetSchedulerMetrics()
+	controller.ResetSchedulerMetrics()
 	co.GetCluster().(*RaftCluster).resetClusterMetrics()
 }
 
-func prepare(setCfg func(*config.ScheduleConfig), setTc func(*testCluster), run func(*schedule.Coordinator), re *require.Assertions) (*testCluster, *schedule.Coordinator, func()) {
+func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func(*schedule.Coordinator), re *require.Assertions) (*testCluster, *schedule.Coordinator, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg, opt, err := newTestScheduleConfig()
 	re.NoError(err)
@@ -2542,7 +2567,7 @@ func TestCheckRegionWithScheduleDeny(t *testing.T) {
 func TestCheckerIsBusy(t *testing.T) {
 	re := require.New(t)
 
-	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0 // ensure replica checker is busy
 		cfg.MergeScheduleLimit = 10
 	}, nil, nil, re)
@@ -2617,7 +2642,7 @@ func TestMergeRegionCancelOneOperator(t *testing.T) {
 func TestReplica(t *testing.T) {
 	re := require.New(t)
 
-	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		// Turn off balance.
 		cfg.LeaderScheduleLimit = 0
 		cfg.RegionScheduleLimit = 0
@@ -2678,7 +2703,7 @@ func TestReplica(t *testing.T) {
 func TestCheckCache(t *testing.T) {
 	re := require.New(t)
 
-	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		// Turn off replica scheduling.
 		cfg.ReplicaScheduleLimit = 0
 	}, nil, nil, re)
@@ -2869,14 +2894,14 @@ func TestAddScheduler(t *testing.T) {
 
 	tc, co, cleanup := prepare(nil, nil, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
-	sc := co.GetSchedulersController()
-	re.Len(sc.GetSchedulerNames(), len(config.DefaultSchedulers))
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceLeaderName))
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceRegionName))
-	re.NoError(sc.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(sc.RemoveScheduler(schedulers.TransferWitnessLeaderName))
-	re.Empty(sc.GetSchedulerNames())
+	controller := co.GetSchedulersController()
+	re.Len(controller.GetSchedulerNames(), len(sc.DefaultSchedulers))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
+	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
+	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
+	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
 
@@ -2903,14 +2928,14 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	batch := data["batch"].(float64)
 	re.Equal(4, int(batch))
-	gls, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}), sc.RemoveScheduler)
+	gls, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NotNil(sc.AddScheduler(gls))
-	re.NotNil(sc.RemoveScheduler(gls.GetName()))
+	re.NotNil(controller.AddScheduler(gls))
+	re.NotNil(controller.RemoveScheduler(gls.GetName()))
 
-	gls, err = schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), sc.RemoveScheduler)
+	gls, err = schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NoError(sc.AddScheduler(gls))
+	re.NoError(controller.AddScheduler(gls))
 
 	hb, err := schedulers.CreateScheduler(schedulers.HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigJSONDecoder([]byte("{}")))
 	re.NoError(err)
@@ -2945,34 +2970,34 @@ func TestPersistScheduler(t *testing.T) {
 	tc, co, cleanup := prepare(nil, nil, func(co *schedule.Coordinator) { co.Run() }, re)
 	hbStreams := co.GetHeartbeatStreams()
 	defer cleanup()
-	defaultCount := len(config.DefaultSchedulers)
+	defaultCount := len(sc.DefaultSchedulers)
 	// Add stores 1,2
 	re.NoError(tc.addLeaderStore(1, 1))
 	re.NoError(tc.addLeaderStore(2, 1))
 
-	sc := co.GetSchedulersController()
-	re.Len(sc.GetSchedulerNames(), defaultCount)
+	controller := co.GetSchedulersController()
+	re.Len(controller.GetSchedulerNames(), defaultCount)
 	oc := co.GetOperatorController()
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), sc.RemoveScheduler)
+	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NoError(sc.AddScheduler(gls1, "1"))
-	evict, err := schedulers.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}), sc.RemoveScheduler)
+	re.NoError(controller.AddScheduler(gls1, "1"))
+	evict, err := schedulers.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NoError(sc.AddScheduler(evict, "2"))
-	re.Len(sc.GetSchedulerNames(), defaultCount+2)
+	re.NoError(controller.AddScheduler(evict, "2"))
+	re.Len(controller.GetSchedulerNames(), defaultCount+2)
 	sches, _, err := storage.LoadAllScheduleConfig()
 	re.NoError(err)
 	re.Len(sches, defaultCount+2)
 
 	// remove 5 schedulers
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceLeaderName))
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceRegionName))
-	re.NoError(sc.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(sc.RemoveScheduler(schedulers.TransferWitnessLeaderName))
-	re.Len(sc.GetSchedulerNames(), defaultCount-3)
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
+	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
+	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
+	re.Len(controller.GetSchedulerNames(), defaultCount-3)
 	re.NoError(co.GetCluster().GetPersistOptions().Persist(storage))
 	co.Stop()
 	co.GetSchedulersController().Wait()
@@ -2984,9 +3009,9 @@ func TestPersistScheduler(t *testing.T) {
 	_, err = schedulers.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedulers.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	// suppose we add a new default enable scheduler
-	config.DefaultSchedulers = append(config.DefaultSchedulers, config.SchedulerConfig{Type: "shuffle-region"})
+	sc.DefaultSchedulers = append(sc.DefaultSchedulers, sc.SchedulerConfig{Type: "shuffle-region"})
 	defer func() {
-		config.DefaultSchedulers = config.DefaultSchedulers[:len(config.DefaultSchedulers)-1]
+		sc.DefaultSchedulers = sc.DefaultSchedulers[:len(sc.DefaultSchedulers)-1]
 	}()
 	re.Len(newOpt.GetSchedulers(), defaultCount)
 	re.NoError(newOpt.Reload(storage))
@@ -3002,8 +3027,8 @@ func TestPersistScheduler(t *testing.T) {
 
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
-	sc = co.GetSchedulersController()
-	re.Len(sc.GetSchedulerNames(), 3)
+	controller = co.GetSchedulersController()
+	re.Len(controller.GetSchedulerNames(), 3)
 	co.Stop()
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
@@ -3014,23 +3039,23 @@ func TestPersistScheduler(t *testing.T) {
 	tc.RaftCluster.opt = newOpt
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
-	sc = co.GetSchedulersController()
-	re.Len(sc.GetSchedulerNames(), 3)
+	controller = co.GetSchedulersController()
+	re.Len(controller.GetSchedulerNames(), 3)
 	bls, err := schedulers.CreateScheduler(schedulers.BalanceLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
-	re.NoError(sc.AddScheduler(bls))
+	re.NoError(controller.AddScheduler(bls))
 	brs, err := schedulers.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
-	re.NoError(sc.AddScheduler(brs))
-	re.Len(sc.GetSchedulerNames(), defaultCount)
+	re.NoError(controller.AddScheduler(brs))
+	re.Len(controller.GetSchedulerNames(), defaultCount)
 
 	// the scheduler option should contain 6 items
 	// the `hot scheduler` are disabled
 	re.Len(co.GetCluster().GetPersistOptions().GetSchedulers(), defaultCount+3)
-	re.NoError(sc.RemoveScheduler(schedulers.GrantLeaderName))
+	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
 	// the scheduler that is not enable by default will be completely deleted
 	re.Len(co.GetCluster().GetPersistOptions().GetSchedulers(), defaultCount+2)
-	re.Len(sc.GetSchedulerNames(), 4)
+	re.Len(controller.GetSchedulerNames(), 4)
 	re.NoError(co.GetCluster().GetPersistOptions().Persist(co.GetCluster().GetStorage()))
 	co.Stop()
 	co.GetSchedulersController().Wait()
@@ -3042,10 +3067,10 @@ func TestPersistScheduler(t *testing.T) {
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	co.Run()
-	sc = co.GetSchedulersController()
-	re.Len(sc.GetSchedulerNames(), defaultCount-1)
-	re.NoError(sc.RemoveScheduler(schedulers.EvictLeaderName))
-	re.Len(sc.GetSchedulerNames(), defaultCount-2)
+	controller = co.GetSchedulersController()
+	re.Len(controller.GetSchedulerNames(), defaultCount-1)
+	re.NoError(controller.RemoveScheduler(schedulers.EvictLeaderName))
+	re.Len(controller.GetSchedulerNames(), defaultCount-2)
 }
 
 func TestRemoveScheduler(t *testing.T) {
@@ -3053,7 +3078,7 @@ func TestRemoveScheduler(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		cfg.ReplicaScheduleLimit = 0
 	}, nil, func(co *schedule.Coordinator) { co.Run() }, re)
 	hbStreams := co.GetHeartbeatStreams()
@@ -3062,32 +3087,32 @@ func TestRemoveScheduler(t *testing.T) {
 	// Add stores 1,2
 	re.NoError(tc.addLeaderStore(1, 1))
 	re.NoError(tc.addLeaderStore(2, 1))
-	defaultCount := len(config.DefaultSchedulers)
-	sc := co.GetSchedulersController()
-	re.Len(sc.GetSchedulerNames(), defaultCount)
+	defaultCount := len(sc.DefaultSchedulers)
+	controller := co.GetSchedulersController()
+	re.Len(controller.GetSchedulerNames(), defaultCount)
 	oc := co.GetOperatorController()
 	storage := tc.RaftCluster.storage
 
-	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), sc.RemoveScheduler)
+	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NoError(sc.AddScheduler(gls1, "1"))
-	re.Len(sc.GetSchedulerNames(), defaultCount+1)
+	re.NoError(controller.AddScheduler(gls1, "1"))
+	re.Len(controller.GetSchedulerNames(), defaultCount+1)
 	sches, _, err := storage.LoadAllScheduleConfig()
 	re.NoError(err)
 	re.Len(sches, defaultCount+1)
 
 	// remove all schedulers
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceLeaderName))
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceRegionName))
-	re.NoError(sc.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(sc.RemoveScheduler(schedulers.GrantLeaderName))
-	re.NoError(sc.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(sc.RemoveScheduler(schedulers.TransferWitnessLeaderName))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
+	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
+	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
+	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
+	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
 	re.NoError(err)
 	re.Empty(sches)
-	re.Empty(sc.GetSchedulerNames())
+	re.Empty(controller.GetSchedulerNames())
 	re.NoError(co.GetCluster().GetPersistOptions().Persist(co.GetCluster().GetStorage()))
 	co.Stop()
 	co.GetSchedulersController().Wait()
@@ -3100,7 +3125,7 @@ func TestRemoveScheduler(t *testing.T) {
 	tc.RaftCluster.opt = newOpt
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
-	re.Empty(sc.GetSchedulerNames())
+	re.Empty(controller.GetSchedulerNames())
 	// the option remains default scheduler
 	re.Len(co.GetCluster().GetPersistOptions().GetSchedulers(), defaultCount)
 	co.Stop()
@@ -3113,7 +3138,7 @@ func TestRestart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		// Turn off balance, we test add replica only.
 		cfg.LeaderScheduleLimit = 0
 		cfg.RegionScheduleLimit = 0
@@ -3154,18 +3179,18 @@ func TestPauseScheduler(t *testing.T) {
 
 	_, co, cleanup := prepare(nil, nil, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
-	sc := co.GetSchedulersController()
-	_, err := sc.IsSchedulerAllowed("test")
+	controller := co.GetSchedulersController()
+	_, err := controller.IsSchedulerAllowed("test")
 	re.Error(err)
-	sc.PauseOrResumeScheduler(schedulers.BalanceLeaderName, 60)
-	paused, _ := sc.IsSchedulerPaused(schedulers.BalanceLeaderName)
+	controller.PauseOrResumeScheduler(schedulers.BalanceLeaderName, 60)
+	paused, _ := controller.IsSchedulerPaused(schedulers.BalanceLeaderName)
 	re.True(paused)
-	pausedAt, err := sc.GetPausedSchedulerDelayAt(schedulers.BalanceLeaderName)
+	pausedAt, err := controller.GetPausedSchedulerDelayAt(schedulers.BalanceLeaderName)
 	re.NoError(err)
-	resumeAt, err := sc.GetPausedSchedulerDelayUntil(schedulers.BalanceLeaderName)
+	resumeAt, err := controller.GetPausedSchedulerDelayUntil(schedulers.BalanceLeaderName)
 	re.NoError(err)
 	re.Equal(int64(60), resumeAt-pausedAt)
-	allowed, _ := sc.IsSchedulerAllowed(schedulers.BalanceLeaderName)
+	allowed, _ := controller.IsSchedulerAllowed(schedulers.BalanceLeaderName)
 	re.False(allowed)
 }
 
@@ -3175,7 +3200,7 @@ func BenchmarkPatrolRegion(b *testing.B) {
 	mergeLimit := uint64(4100)
 	regionNum := 10000
 
-	tc, co, cleanup := prepare(func(cfg *config.ScheduleConfig) {
+	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
 		cfg.MergeScheduleLimit = mergeLimit
 	}, nil, nil, re)
 	defer cleanup()
@@ -3390,7 +3415,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 

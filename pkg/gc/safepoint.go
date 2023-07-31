@@ -18,20 +18,26 @@ import (
 	"math"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/config"
 )
+
+var blockGCSafePointErrmsg = "don't allow update gc safe point v1."
+var blockServiceSafepointErrmsg = "don't allow update service safe point v1."
 
 // SafePointManager is the manager for safePoint of GC and services.
 type SafePointManager struct {
 	gcLock        syncutil.Mutex
 	serviceGCLock syncutil.Mutex
 	store         endpoint.GCSafePointStorage
+	cfg           config.PDServerConfig
 }
 
 // NewSafePointManager creates a SafePointManager of GC and services.
-func NewSafePointManager(store endpoint.GCSafePointStorage) *SafePointManager {
-	return &SafePointManager{store: store}
+func NewSafePointManager(store endpoint.GCSafePointStorage, cfg config.PDServerConfig) *SafePointManager {
+	return &SafePointManager{store: store, cfg: cfg}
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.
@@ -49,6 +55,11 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 	if err != nil {
 		return
 	}
+	if manager.cfg.BlockSafePointV1 {
+		err = errors.Errorf(blockGCSafePointErrmsg)
+		return
+	}
+
 	if oldSafePoint >= newSafePoint {
 		return
 	}
@@ -58,6 +69,9 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 
 // UpdateServiceGCSafePoint update the safepoint for a specific service.
 func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
+	if manager.cfg.BlockSafePointV1 {
+		return nil, false, errors.Errorf(blockServiceSafepointErrmsg)
+	}
 	manager.serviceGCLock.Lock()
 	defer manager.serviceGCLock.Unlock()
 	minServiceSafePoint, err = manager.store.LoadMinServiceGCSafePoint(now)

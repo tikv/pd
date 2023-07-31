@@ -229,7 +229,7 @@ type balanceLeaderSchedulerTestSuite struct {
 	tc     *mockcluster.Cluster
 	lb     Scheduler
 	oc     *operator.Controller
-	conf   config.Config
+	conf   config.SchedulerConfigProvider
 }
 
 func TestBalanceLeaderSchedulerTestSuite(t *testing.T) {

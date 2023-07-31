@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/diagnostic"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -38,7 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -86,23 +86,22 @@ type Coordinator struct {
 // NewCoordinator creates a new Coordinator.
 func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
 	ctx, cancel := context.WithCancel(ctx)
-	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetOpts(), hbStreams)
+	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
-	c := &Coordinator{
-		ctx:             ctx,
-		cancel:          cancel,
-		cluster:         cluster,
-		prepareChecker:  newPrepareChecker(),
-		checkers:        checker.NewController(ctx, cluster, cluster.GetOpts(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController),
-		regionScatterer: scatter.NewRegionScatterer(ctx, cluster, opController),
-		regionSplitter:  splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController)),
-		schedulers:      schedulers,
-		opController:    opController,
-		hbStreams:       hbStreams,
-		pluginInterface: NewPluginInterface(),
+	return &Coordinator{
+		ctx:               ctx,
+		cancel:            cancel,
+		cluster:           cluster,
+		prepareChecker:    newPrepareChecker(),
+		checkers:          checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController),
+		regionScatterer:   scatter.NewRegionScatterer(ctx, cluster, opController),
+		regionSplitter:    splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController)),
+		schedulers:        schedulers,
+		opController:      opController,
+		hbStreams:         hbStreams,
+		pluginInterface:   NewPluginInterface(),
+		diagnosticManager: diagnostic.NewManager(schedulers, cluster.GetSchedulerConfig()),
 	}
-	c.diagnosticManager = diagnostic.NewManager(schedulers, cluster.GetOpts())
-	return c
 }
 
 // GetWaitingRegions returns the regions in the waiting list.
@@ -122,7 +121,7 @@ func (c *Coordinator) PatrolRegions() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	ticker := time.NewTicker(c.cluster.GetOpts().GetPatrolRegionInterval())
+	ticker := time.NewTicker(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 	defer ticker.Stop()
 
 	log.Info("Coordinator starts patrol regions")
@@ -135,7 +134,7 @@ func (c *Coordinator) PatrolRegions() {
 		select {
 		case <-ticker.C:
 			// Note: we reset the ticker here to support updating configuration dynamically.
-			ticker.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
+			ticker.Reset(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 		case <-c.ctx.Done():
 			log.Info("patrol regions has been stopped")
 			return
@@ -380,7 +379,7 @@ func (c *Coordinator) initSchedulers() {
 	for i, name := range scheduleNames {
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
-		var cfg config.SchedulerConfig
+		var cfg sc.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
 			if c.Type == typ {
 				cfg = c
@@ -505,7 +504,7 @@ func (c *Coordinator) Stop() {
 
 // GetHotRegionsByType gets hot regions' statistics by RWType.
 func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.StoreHotPeersInfos {
-	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
+	isTraceFlow := c.cluster.GetSchedulerConfig().IsTraceRegionFlow()
 	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
 	var infos *statistics.StoreHotPeersInfos
