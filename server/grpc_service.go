@@ -68,6 +68,7 @@ var (
 	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
 	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
 	ErrTSOProxyRecvFromClientTimeout    = status.Errorf(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server")
+	ErrEtcdNotStarted                   = status.Errorf(codes.Unavailable, "server is started, but etcd not started")
 )
 
 // GrpcServer wraps Server to provide grpc service.
@@ -2283,7 +2284,7 @@ const globalConfigPath = "/global/config/"
 // it should be set to `Payload bytes` instead of `Value string`
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
 	if s.client == nil {
-		return nil, errors.New("failed to store global config, etcd client not found")
+		return nil, ErrEtcdNotStarted
 	}
 	configPath := request.GetConfigPath()
 	if configPath == "" {
@@ -2320,7 +2321,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 // - `ConfigPath` if `Names` is nil can get all values and revision of current path
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
 	if s.client == nil {
-		return nil, errors.New("failed to load global config, etcd client not found")
+		return nil, ErrEtcdNotStarted
 	}
 	configPath := request.GetConfigPath()
 	if configPath == "" {
@@ -2359,7 +2360,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	if s.client == nil {
-		return errors.Errorf("failed to watch global config, etcd client not found")
+		return ErrEtcdNotStarted
 	}
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
