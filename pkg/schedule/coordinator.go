@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/diagnostic"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -38,7 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -379,7 +379,7 @@ func (c *Coordinator) initSchedulers() {
 	for i, name := range scheduleNames {
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
-		var cfg config.SchedulerConfig
+		var cfg sc.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
 			if c.Type == typ {
 				cfg = c

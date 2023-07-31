@@ -24,10 +24,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/config"
 )
 
 type scheduleTestSuite struct {
@@ -470,12 +470,12 @@ func (suite *scheduleTestSuite) TestDisable() {
 
 	re := suite.Require()
 	u := fmt.Sprintf("%s%s/api/v1/config/schedule", suite.svr.GetAddr(), apiPrefix)
-	var scheduleConfig config.ScheduleConfig
+	var scheduleConfig sc.ScheduleConfig
 	err = tu.ReadGetJSON(re, testDialClient, u, &scheduleConfig)
 	suite.NoError(err)
 
 	originSchedulers := scheduleConfig.Schedulers
-	scheduleConfig.Schedulers = config.SchedulerConfigs{config.SchedulerConfig{Type: "shuffle-leader", Disable: true}}
+	scheduleConfig.Schedulers = sc.SchedulerConfigs{sc.SchedulerConfig{Type: "shuffle-leader", Disable: true}}
 	body, err = json.Marshal(scheduleConfig)
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, u, body, tu.StatusOK(re))

@@ -57,6 +57,7 @@ import (
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -962,12 +963,12 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 }
 
 // GetScheduleConfig gets the balance config information.
-func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
+func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 	return s.persistOptions.GetScheduleConfig().Clone()
 }
 
 // SetScheduleConfig sets the balance config information.
-func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
+func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -990,12 +991,12 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 }
 
 // GetReplicationConfig get the replication config.
-func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
+func (s *Server) GetReplicationConfig() *sc.ReplicationConfig {
 	return s.persistOptions.GetReplicationConfig().Clone()
 }
 
 // SetReplicationConfig sets the replication config.
-func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
+func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}

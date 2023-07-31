@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -165,23 +166,23 @@ func (suite *configTestSuite) TestConfigAll() {
 func (suite *configTestSuite) TestConfigSchedule() {
 	re := suite.Require()
 	addr := fmt.Sprintf("%s/config/schedule", suite.urlPrefix)
-	sc := &config.ScheduleConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	sc.MaxStoreDownTime.Duration = time.Second
-	postData, err := json.Marshal(sc)
+	scheduleConfig := &sc.ScheduleConfig{}
+	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, scheduleConfig))
+	scheduleConfig.MaxStoreDownTime.Duration = time.Second
+	postData, err := json.Marshal(scheduleConfig)
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	suite.NoError(err)
 
-	sc1 := &config.ScheduleConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc1))
-	suite.Equal(*sc1, *sc)
+	scheduleConfig1 := &sc.ScheduleConfig{}
+	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, scheduleConfig1))
+	suite.Equal(*scheduleConfig1, *scheduleConfig)
 }
 
 func (suite *configTestSuite) TestConfigReplication() {
 	re := suite.Require()
 	addr := fmt.Sprintf("%s/config/replicate", suite.urlPrefix)
-	rc := &config.ReplicationConfig{}
+	rc := &sc.ReplicationConfig{}
 	err := tu.ReadGetJSON(re, testDialClient, addr, rc)
 	suite.NoError(err)
 
@@ -206,7 +207,7 @@ func (suite *configTestSuite) TestConfigReplication() {
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	suite.NoError(err)
 
-	rc4 := &config.ReplicationConfig{}
+	rc4 := &sc.ReplicationConfig{}
 	err = tu.ReadGetJSON(re, testDialClient, addr, rc4)
 	suite.NoError(err)
 
