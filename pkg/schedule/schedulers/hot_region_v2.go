@@ -263,11 +263,17 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 	srcPendingRate, dstPendingRate := bs.cur.getPendingLoad(dim)
 	peersRate := bs.cur.getPeersRateFromCache(dim)
 	highRate, lowRate := srcRate, dstRate
+	topnHotPeer := bs.nthHotPeer[bs.cur.srcStore.GetID()][dim]
 	reverse := false
 	if srcRate < dstRate {
 		highRate, lowRate = dstRate, srcRate
 		peersRate = -peersRate
 		reverse = true
+		topnHotPeer = bs.nthHotPeer[bs.cur.dstStore.GetID()][dim]
+	}
+	topnRate := math.MaxFloat64
+	if topnHotPeer != nil {
+		topnRate = topnHotPeer.GetLoad(dim)
 	}
 
 	if rs.currentChecker.balancedRatio <= lowRate/highRate {
@@ -389,7 +395,8 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		// So maxBetterRate is 25+(45-25-4)*0.2=28.2
 		// So maxNotWorsenedRate is 25+(45-25-0)*0.2=29
 
-		minBetterRate = math.Min(minBalancedRate*rs.perceivedRatio, lowRate*rs.minHotRatio /*,top10*/)
+		minBetterRate = math.Min(minBalancedRate*rs.perceivedRatio, lowRate*rs.minHotRatio)
+		minBetterRate = math.Min(minBetterRate, topnRate)
 		maxBetterRate = maxBalancedRate + rs.perceivedRatio*(highRate-lowRate-maxBalancedRate-minBetterRate)
 
 		maxNotWorsenedRate = maxBalancedRate + rs.perceivedRatio*(highRate-lowRate-maxBalancedRate-minNotWorsenedRate)

@@ -192,22 +192,22 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.
 }
 
 // GetStoreConfig returns the store config.
-func (c *RaftCluster) GetStoreConfig() sc.StoreConfig {
+func (c *RaftCluster) GetStoreConfig() sc.StoreConfigProvider {
 	return c.storeConfigManager.GetStoreConfig()
 }
 
 // GetCheckerConfig returns the checker config.
-func (c *RaftCluster) GetCheckerConfig() sc.CheckerConfig {
+func (c *RaftCluster) GetCheckerConfig() sc.CheckerConfigProvider {
 	return c.GetOpts()
 }
 
 // GetSchedulerConfig returns the scheduler config.
-func (c *RaftCluster) GetSchedulerConfig() sc.SchedulerConfig {
+func (c *RaftCluster) GetSchedulerConfig() sc.SchedulerConfigProvider {
 	return c.GetOpts()
 }
 
 // GetSharedConfig returns the shared config.
-func (c *RaftCluster) GetSharedConfig() sc.SharedConfig {
+func (c *RaftCluster) GetSharedConfig() sc.SharedConfigProvider {
 	return c.GetOpts()
 }
 
@@ -755,7 +755,7 @@ func (c *RaftCluster) GetStorage() storage.Storage {
 
 // GetOpts returns cluster's configuration.
 // There is no need a lock since it won't changed.
-func (c *RaftCluster) GetOpts() sc.Config {
+func (c *RaftCluster) GetOpts() sc.ConfProvider {
 	return c.opt
 }
 
@@ -765,17 +765,17 @@ func (c *RaftCluster) GetPersistOptions() *config.PersistOptions {
 }
 
 // GetScheduleConfig returns scheduling configurations.
-func (c *RaftCluster) GetScheduleConfig() *config.ScheduleConfig {
+func (c *RaftCluster) GetScheduleConfig() *sc.ScheduleConfig {
 	return c.opt.GetScheduleConfig()
 }
 
 // SetScheduleConfig sets the PD scheduling configuration.
-func (c *RaftCluster) SetScheduleConfig(cfg *config.ScheduleConfig) {
+func (c *RaftCluster) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	c.opt.SetScheduleConfig(cfg)
 }
 
 // GetReplicationConfig returns replication configurations.
-func (c *RaftCluster) GetReplicationConfig() *config.ReplicationConfig {
+func (c *RaftCluster) GetReplicationConfig() *sc.ReplicationConfig {
 	return c.opt.GetReplicationConfig()
 }
 
@@ -891,11 +891,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	c.slowStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-
-	// c.limiter is nil before "start" is called
-	if c.limiter != nil {
-		c.limiter.Collect(newStore.GetStoreStats())
-	}
 
 	regions := make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
 	for _, peerStat := range stats.GetPeerStats() {
@@ -2332,7 +2327,7 @@ func (c *RaftCluster) GetStoreLimitByType(storeID uint64, typ storelimit.Type) f
 }
 
 // GetAllStoresLimit returns all store limit
-func (c *RaftCluster) GetAllStoresLimit() map[uint64]config.StoreLimitConfig {
+func (c *RaftCluster) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 	return c.opt.GetAllStoresLimit()
 }
 
@@ -2344,18 +2339,18 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 		return
 	}
 
-	sc := config.StoreLimitConfig{
-		AddPeer:    config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	slc := sc.StoreLimitConfig{
+		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
 	if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
-		sc = config.StoreLimitConfig{
-			AddPeer:    config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-			RemovePeer: config.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		slc = sc.StoreLimitConfig{
+			AddPeer:    sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+			RemovePeer: sc.DefaultTiFlashStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 		}
 	}
 
-	cfg.StoreLimit[storeID] = sc
+	cfg.StoreLimit[storeID] = slc
 	c.opt.SetScheduleConfig(cfg)
 	var err error
 	for i := 0; i < persistLimitRetryTimes; i++ {
@@ -2528,14 +2523,14 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
 	old := c.opt.GetScheduleConfig().Clone()
-	oldAdd := config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
-	oldRemove := config.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	oldAdd := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemove := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
 	if err := c.opt.Persist(c.storage); err != nil {
 		// roll back the store limit
 		c.opt.SetScheduleConfig(old)
-		config.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAdd)
-		config.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemove)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAdd)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemove)
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}

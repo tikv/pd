@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +33,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -56,8 +58,10 @@ const (
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, *rmpb.Consumption, error)
-	// OnResponse is used to consume tokens after receiving response
+	// OnResponse is used to consume tokens after receiving response.
 	OnResponse(resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, error)
+	// IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
+	IsBackgroundRequest(ctx context.Context, resourceGroupName, requestResource string) bool
 }
 
 // ResourceGroupProvider provides some api to interact with resource manager server.
@@ -454,7 +458,6 @@ func (c *ResourceGroupsController) OnRequestWait(
 ) (*rmpb.Consumption, *rmpb.Consumption, error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
-		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
 		return nil, nil, err
 	}
 	return gc.onRequestWait(ctx, info)
@@ -470,6 +473,41 @@ func (c *ResourceGroupsController) OnResponse(
 		return &rmpb.Consumption{}, nil
 	}
 	return tmp.(*groupCostController).onResponse(req, resp)
+}
+
+// IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
+func (c *ResourceGroupsController) IsBackgroundRequest(ctx context.Context,
+	resourceGroupName, requestResource string) bool {
+	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
+	if err != nil {
+		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
+		return false
+	}
+
+	return c.checkBackgroundSettings(ctx, gc.getMeta().BackgroundSettings, requestResource)
+}
+
+func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, bg *rmpb.BackgroundSettings, requestResource string) bool {
+	// fallback to default resource group.
+	if bg == nil {
+		resourceGroupName := "default"
+		gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
+		if err != nil {
+			failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
+			return false
+		}
+		bg = gc.getMeta().BackgroundSettings
+	}
+
+	if bg == nil || len(requestResource) == 0 || len(bg.JobTypes) == 0 {
+		return false
+	}
+
+	if idx := strings.LastIndex(requestResource, "_"); idx != -1 {
+		return slices.Contains(bg.JobTypes, requestResource[idx+1:])
+	}
+
+	return false
 }
 
 // GetResourceGroup returns the meta setting of the given resource group name.
@@ -518,7 +556,7 @@ type groupCostController struct {
 		lastRequestTime time.Time
 
 		// requestInProgress is set true when sending token bucket request.
-		// And it is set false when reciving token bucket response.
+		// And it is set false when receiving token bucket response.
 		// This triggers a retry attempt on the next tick.
 		requestInProgress bool
 
@@ -1045,8 +1083,8 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 }
 
 func (gc *groupCostController) getMeta() *rmpb.ResourceGroup {
-	gc.metaLock.Lock()
-	defer gc.metaLock.Unlock()
+	gc.metaLock.RLock()
+	defer gc.metaLock.RUnlock()
 	return gc.meta
 }
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -95,7 +96,7 @@ func setupServer() (*httptest.Server, *config.Config) {
 		InitialClusterState: "new",
 		InitialClusterToken: "test-token",
 		LeaderLease:         int64(1),
-		Replication: config.ReplicationConfig{
+		Replication: sc.ReplicationConfig{
 			LocationLabels: typeutil.StringSlice{},
 		},
 		PDServerCfg: config.PDServerConfig{

@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
-func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.SchedulerConfig, *mockcluster.Cluster, *operator.Controller) {
+func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.SchedulerConfigProvider, *mockcluster.Cluster, *operator.Controller) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
 	opt := mockconfig.NewTestOptions()

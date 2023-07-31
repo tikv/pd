@@ -25,6 +25,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -36,10 +37,10 @@ import (
 type testCase struct {
 	name  string
 	value interface{}
-	read  func(scheduleConfig *config.ScheduleConfig) interface{}
+	read  func(scheduleConfig *sc.ScheduleConfig) interface{}
 }
 
-func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*config.ScheduleConfig) {
+func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*sc.ScheduleConfig) {
 	value := t.value
 	for _, scheduleConfig := range scheduleConfigs {
 		re.NotNil(scheduleConfig)
@@ -112,7 +113,7 @@ func TestConfig(t *testing.T) {
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	scheduleCfg := config.ScheduleConfig{}
+	scheduleCfg := sc.ScheduleConfig{}
 	re.NoError(json.Unmarshal(output, &scheduleCfg))
 	scheduleConfig = svr.GetScheduleConfig()
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
@@ -149,7 +150,7 @@ func TestConfig(t *testing.T) {
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	replicationCfg := config.ReplicationConfig{}
+	replicationCfg := sc.ReplicationConfig{}
 	re.NoError(json.Unmarshal(output, &replicationCfg))
 	re.Equal(svr.GetReplicationConfig(), &replicationCfg)
 
@@ -221,20 +222,20 @@ func TestConfig(t *testing.T) {
 
 	// test config read and write
 	testCases := []testCase{
-		{"leader-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"leader-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.LeaderScheduleLimit
-		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.HotRegionScheduleLimit
-		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.HotRegionCacheHitsThreshold
-		}}, {"enable-remove-down-replica", false, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"enable-remove-down-replica", false, func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableRemoveDownReplica
 		}},
-		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 		// set again
-		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 	}
@@ -678,7 +679,7 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		replicationCfg := config.ReplicationConfig{}
+		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
 		re.Equal(expect, replicationCfg.MaxReplicas)
 	}
@@ -687,7 +688,7 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		replicationCfg := config.ReplicationConfig{}
+		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
 		re.Len(replicationCfg.LocationLabels, expect)
 	}

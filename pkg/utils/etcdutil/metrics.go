@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package mockconfig
+package etcdutil
 
-import (
-	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/server/config"
-)
+import "github.com/prometheus/client_golang/prometheus"
 
-// NewTestOptions creates default options for testing.
-func NewTestOptions() *config.PersistOptions {
-	// register default schedulers in case config check fail.
-	for _, d := range sc.DefaultSchedulers {
-		sc.RegisterScheduler(d.Type)
-	}
-	c := config.NewConfig()
-	c.Adjust(nil, false)
-	return config.NewPersistOptions(c)
+var etcdStateGauge = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Namespace: "pd",
+		Subsystem: "server",
+		Name:      "etcd_client",
+		Help:      "Etcd client states.",
+	}, []string{"type"})
+
+func init() {
+	prometheus.MustRegister(etcdStateGauge)
 }
