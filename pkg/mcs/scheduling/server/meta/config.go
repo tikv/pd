@@ -45,6 +45,7 @@ type ConfigWatcher struct {
 	watcher    *etcdutil.LoopWatcher
 
 	config *persistedConfig
+	// TODO: watch the scheduler config change.
 }
 
 // NewConfigWatcher creates a new watcher to watch the config meta change from PD API server.
