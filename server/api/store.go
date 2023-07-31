@@ -734,13 +734,13 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 }
 
 // @Tags     store
-// @Summary  Get stores in the cluster.
+// @Summary  Get all stores in the cluster.
 // @Param    state  query  array  true  "Specify accepted store states."
 // @Produce  json
 // @Success  200  {object}  StoresInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /stores [get]
-func (h *storesHandler) GetStores(w http.ResponseWriter, r *http.Request) {
+func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	stores := rc.GetMetaStores()
 	StoresInfo := &StoresInfo{
