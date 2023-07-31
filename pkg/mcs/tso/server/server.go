@@ -33,11 +33,9 @@ import (
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/pkg/errors"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -143,6 +141,16 @@ func (s *Server) GetAddr() string {
 	return s.cfg.ListenAddr
 }
 
+// GetBackendEndpoints returns the backend endpoints.
+func (s *Server) GetBackendEndpoints() string {
+	return s.cfg.BackendEndpoints
+}
+
+// GetClientConns returns the client connections.
+func (s *Server) GetClientConns() *sync.Map {
+	return &s.clientConns
+}
+
 // Run runs the TSO server.
 func (s *Server) Run() error {
 	skipWaitAPIServiceReady := false
@@ -150,7 +158,7 @@ func (s *Server) Run() error {
 		skipWaitAPIServiceReady = true
 	})
 	if !skipWaitAPIServiceReady {
-		if err := s.waitAPIServiceReady(); err != nil {
+		if err := utils.WaitAPIServiceReady(s); err != nil {
 			return err
 		}
 	}
@@ -574,57 +582,6 @@ func (s *Server) startServer() (err error) {
 
 	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
-}
-
-func (s *Server) waitAPIServiceReady() error {
-	var (
-		ready bool
-		err   error
-	)
-	ticker := time.NewTicker(utils.RetryIntervalWaitAPIService)
-	defer ticker.Stop()
-	for i := 0; i < utils.MaxRetryTimesWaitAPIService; i++ {
-		ready, err = s.isAPIServiceReady()
-		if err == nil && ready {
-			return nil
-		}
-		log.Debug("api server is not ready, retrying", errs.ZapError(err), zap.Bool("ready", ready))
-		select {
-		case <-s.ctx.Done():
-			return errors.New("context canceled while waiting api server ready")
-		case <-ticker.C:
-		}
-	}
-	if err != nil {
-		log.Warn("failed to check api server ready", errs.ZapError(err))
-	}
-	return errors.Errorf("failed to wait api server ready after retrying %d times", utils.MaxRetryTimesWaitAPIService)
-}
-
-func (s *Server) isAPIServiceReady() (bool, error) {
-	urls := strings.Split(s.cfg.BackendEndpoints, ",")
-	if len(urls) == 0 {
-		return false, errors.New("no backend endpoints")
-	}
-	cc, err := s.GetDelegateClient(s.ctx, urls[0])
-	if err != nil {
-		return false, err
-	}
-	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(s.ctx, &pdpb.GetClusterInfoRequest{})
-	if err != nil {
-		return false, err
-	}
-	if clusterInfo.GetHeader().GetError() != nil {
-		return false, errors.Errorf(clusterInfo.GetHeader().GetError().String())
-	}
-	modes := clusterInfo.ServiceModes
-	if len(modes) == 0 {
-		return false, errors.New("no service mode")
-	}
-	if modes[0] == pdpb.ServiceMode_API_SVC_MODE {
-		return true, nil
-	}
-	return false, nil
 }
 
 // CreateServer creates the Server
