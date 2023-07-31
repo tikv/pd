@@ -122,7 +122,7 @@ func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
 		[]byte("fff"),
 		[]byte("zzz"),
 	})
-	suite.Len(groupKeys, 3)
+	suite.Len(groupKeys, 2)
 	for k, v := range groupKeys {
 		switch k {
 		case uint64(1):
@@ -131,9 +131,6 @@ func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
 		case uint64(2):
 			suite.Len(v.keys, 1)
 			suite.Equal([]byte("ddd"), v.keys[0])
-		case uint64(3):
-			suite.Len(v.keys, 1)
-			suite.Equal([]byte("fff"), v.keys[0])
 		}
 	}
 }

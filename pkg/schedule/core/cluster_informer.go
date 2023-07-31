@@ -43,17 +43,17 @@ type SchedulerCluster interface {
 	statistics.StoreStatInformer
 	buckets.BucketStatInformer
 
-	GetSchedulerConfig() sc.SchedulerConfig
+	GetSchedulerConfig() sc.SchedulerConfigProvider
 	GetRegionLabeler() *labeler.RegionLabeler
-	GetStoreConfig() sc.StoreConfig
+	GetStoreConfig() sc.StoreConfigProvider
 }
 
 // CheckerCluster is an aggregate interface that wraps multiple interfaces
 type CheckerCluster interface {
 	SharedCluster
 
-	GetCheckerConfig() sc.CheckerConfig
-	GetStoreConfig() sc.StoreConfig
+	GetCheckerConfig() sc.CheckerConfigProvider
+	GetStoreConfig() sc.StoreConfigProvider
 }
 
 // ScatterCluster is an aggregate interface that wraps multiple interfaces
@@ -69,7 +69,7 @@ type SharedCluster interface {
 	statistics.RegionStatInformer
 
 	GetBasicCluster() *core.BasicCluster
-	GetSharedConfig() sc.SharedConfig
+	GetSharedConfig() sc.SharedConfigProvider
 	GetRuleManager() *placement.RuleManager
 	AllocID() (uint64, error)
 }
