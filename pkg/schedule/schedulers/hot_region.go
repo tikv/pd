@@ -1599,7 +1599,6 @@ func (bs *balanceSolver) splitBucketBySize(region *core.RegionInfo) *operator.Op
 }
 
 // createSplitOperator creates split operators for the given regions.
-// isTooHot true indicates that the region is too hot and needs split.
 func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strategy splitStrategy) []*operator.Operator {
 	if len(regions) == 0 {
 		return nil
@@ -1619,7 +1618,6 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strateg
 			}
 		case byLoad:
 			stats, ok := hotBuckets[region.GetID()]
-			// If only one bucket is hot, we can't split it into two regions.
 			if !ok {
 				hotSchedulerRegionBucketsNotHotCounter.Inc()
 				return
