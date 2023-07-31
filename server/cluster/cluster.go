@@ -1025,7 +1025,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
-		// However it can't solve the race condition of concurrent heartbeats from the same region.
+		// However, it can't solve the race condition of concurrent heartbeats from the same region.
 		if overlaps, err = c.core.AtomicCheckAndPutRegion(region); err != nil {
 			return err
 		}
@@ -1080,6 +1080,72 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	return nil
+}
+
+func (c *RaftCluster) processRegionSplit(regions []*metapb.Region) []error {
+	if err := c.checkSplitRegions(regions); err != nil {
+		return []error{err}
+	}
+	total := len(regions) - 1
+	regions[0], regions[total] = regions[total], regions[0]
+	leaderStoreID := uint64(0)
+	if r := c.core.GetRegion(regions[0].GetId()); r != nil {
+		leaderStoreID = r.GetLeader().GetStoreId()
+	}
+	errList := make([]error, 0, total)
+	for _, region := range regions {
+		// It should update rightmost because it can override by left.
+		if len(region.GetPeers()) == 0 {
+			errList = append(errList, errors.New(fmt.Sprintf("region:%d has no peer", region.GetId())))
+			continue
+		}
+		// region split initiator store will be leader with a high probability
+		leader := region.Peers[0]
+		if leaderStoreID > 0 {
+			for _, peer := range region.GetPeers() {
+				if peer.GetStoreId() == leaderStoreID {
+					leader = peer
+					break
+				}
+			}
+		}
+		region := core.NewRegionInfo(region, leader)
+		overlaps, perr := c.core.AtomicCheckAndPutRegion(region)
+		if perr != nil {
+			errList = append(errList, perr)
+			continue
+		}
+		for _, item := range overlaps {
+			if c.regionStats != nil {
+				c.regionStats.ClearDefunctRegion(item.GetID())
+			}
+			c.labelLevelStats.ClearDefunctRegion(item.GetID())
+			c.ruleManager.InvalidCache(item.GetID())
+		}
+		regionUpdateCacheEventCounter.Inc()
+		if c.storage != nil {
+			// If there are concurrent heartbeats from the same region, the last write will win even if
+			// writes to storage in the critical area. So don't use mutex to protect it.
+			// Not successfully saved to storage is not fatal, it only leads to longer warm-up
+			// after restart. Here we only log the error then go on updating cache.
+			for _, item := range overlaps {
+				if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
+					log.Error("failed to delete region from storage",
+						zap.Uint64("region-id", item.GetID()),
+						logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
+						errs.ZapError(err))
+				}
+			}
+			if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
+				log.Error("failed to save region to storage",
+					zap.Uint64("region-id", region.GetID()),
+					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
+					errs.ZapError(err))
+			}
+			regionUpdateKVEventCounter.Inc()
+		}
+	}
+	return errList
 }
 
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {

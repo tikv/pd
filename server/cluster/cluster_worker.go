@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
 )
@@ -166,19 +165,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 }
 
 func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region) error {
-	if left == nil || right == nil {
-		return errors.New("invalid split region")
-	}
-
-	if !bytes.Equal(left.GetEndKey(), right.GetStartKey()) {
-		return errors.New("invalid split region")
-	}
-
-	if len(right.GetEndKey()) == 0 || bytes.Compare(left.GetStartKey(), right.GetEndKey()) < 0 {
-		return nil
-	}
-
-	return errors.New("invalid split region")
+	return c.checkSplitRegions([]*metapb.Region{left, right})
 }
 
 func (c *RaftCluster) checkSplitRegions(regions []*metapb.Region) error {
@@ -204,21 +191,18 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 	left := request.GetLeft()
 	right := request.GetRight()
 
-	err := c.checkSplitRegion(left, right)
-	if err != nil {
+	if errs := c.processRegionSplit([]*metapb.Region{left, right}); len(errs) > 0 {
 		log.Warn("report split region is invalid",
 			logutil.ZapRedactStringer("left-region", core.RegionToHexMeta(left)),
 			logutil.ZapRedactStringer("right-region", core.RegionToHexMeta(right)),
-			errs.ZapError(err))
-		return nil, err
+			zap.Errors("errs", errs),
+		)
+		// error[0] may be checker error, others are ignored.
+		return nil, errs[0]
 	}
 
-	// Build origin region by using left and right.
-	originRegion := typeutil.DeepClone(right, core.RegionFactory)
-	originRegion.RegionEpoch = nil
-	originRegion.StartKey = left.GetStartKey()
 	log.Info("region split, generate new region",
-		zap.Uint64("region-id", originRegion.GetId()),
+		zap.Uint64("region-id", right.GetId()),
 		logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(left)))
 	return &pdpb.ReportSplitResponse{}, nil
 }
@@ -226,21 +210,19 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 // HandleBatchReportSplit handles the batch report split request.
 func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
 	regions := request.GetRegions()
-
 	hrm := core.RegionsToHexMeta(regions)
-	err := c.checkSplitRegions(regions)
-	if err != nil {
+	if errs := c.processRegionSplit(regions); len(errs) > 0 {
 		log.Warn("report batch split region is invalid",
 			zap.Stringer("region-meta", hrm),
-			errs.ZapError(err))
-		return nil, err
+			zap.Errors("errs", errs))
+		// error[0] may be checker error, others are ignored.
+		return nil, errs[0]
 	}
 	last := len(regions) - 1
-	originRegion := typeutil.DeepClone(regions[last], core.RegionFactory)
-	hrm = core.RegionsToHexMeta(regions[:last])
+	originRegionId := regions[last].GetId()
 	log.Info("region batch split, generate new regions",
-		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Stringer("origin", hrm),
+		zap.Uint64("region-id", originRegionId),
+		zap.Stringer("new_peer", hrm[:last]),
 		zap.Int("total", last))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
