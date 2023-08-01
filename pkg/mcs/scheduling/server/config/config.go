@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package config
 
 import (
 	"fmt"
@@ -32,10 +32,10 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -43,20 +43,6 @@ const (
 	defaultName             = "Scheduling"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
-)
-
-const (
-	defaultMaxReplicas                 = 3
-	defaultMaxSnapshotCount            = 64
-	defaultMaxPendingPeerCount         = 64
-	defaultMaxStoreDownTime            = 30 * time.Minute
-	defaultMergeScheduleLimit          = 8
-	defaultSchedulerMaxWaitingOperator = 5
-	defaultEnableCrossTableMerge       = true
-	defaultEnableOneWayMerge           = false
-	defaultLowSpaceRatio               = 0.8
-	defaultHighSpaceRatio              = 0.7
-	defaultRegionScoreFormulaVersion   = "v2"
 )
 
 // Config is the configuration for the scheduling.
@@ -88,7 +74,8 @@ type Config struct {
 
 	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
 
-	SchedulingConfig SchedulingConfig `toml:"scheduling" json:"scheduling"`
+	Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
+	Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
 }
 
 // NewConfig creates a new config.
@@ -162,7 +149,10 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
 
-	return c.SchedulingConfig.adjust(configMetaData.Child("scheduling"))
+	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
+		return err
+	}
+	return c.Replication.Adjust(configMetaData.Child("replication"))
 }
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
@@ -197,89 +187,20 @@ func (c *Config) validate() error {
 	return nil
 }
 
-// SchedulingConfig is the configuration for the scheduling.
-type SchedulingConfig struct {
-	EnablePlacementRules      bool                        `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
-	EnableCrossTableMerge     bool                        `toml:"enable-cross-table-merge" json:"enable-cross-table-merge,string"`
-	EnableOneWayMerge         bool                        `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
-	MaxReplicas               int                         `toml:"max-replicas" json:"max-replicas"`
-	MaxSnapshotCount          uint64                      `toml:"max-snapshot-count" json:"max-snapshot-count"`
-	MaxPendingPeerCount       uint64                      `toml:"max-pending-peer-count" json:"max-pending-peer-count"`
-	MergeScheduleLimit        uint64                      `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
-	MaxWaitingOperator        uint64                      `toml:"max-waiting-operator" json:"max-waiting-operator"`
-	LowSpaceRatio             float64                     `toml:"low-space-ratio" json:"low-space-ratio"`
-	HighSpaceRatio            float64                     `toml:"high-space-ratio" json:"high-space-ratio"`
-	MaxStoreDownTime          typeutil.Duration           `toml:"max-store-down-time" json:"max-store-down-time"`
-	RegionScoreFormulaVersion string                      `toml:"region-score-formula-version" json:"region-score-formula-version"`
-	LocationLabels            []string                    `toml:"location-labels" json:"location-labels"`
-	StoreLimit                map[storelimit.Type]float64 `toml:"store-limit" json:"store-limit"`
-}
-
-func (c *SchedulingConfig) adjust(meta *configutil.ConfigMetaData) error {
-	if !meta.IsDefined("max-replicas") {
-		configutil.AdjustInt(&c.MaxReplicas, defaultMaxReplicas)
-	}
-	if !meta.IsDefined("max-snapshot-count") {
-		configutil.AdjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
-	}
-	if !meta.IsDefined("max-pending-peer-count") {
-		configutil.AdjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
-	}
-	if !meta.IsDefined("max-store-down-time") {
-		configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
-	}
-	if !meta.IsDefined("merge-schedule-limit") {
-		configutil.AdjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
-	}
-	if !meta.IsDefined("max-waiting-operator") {
-		configutil.AdjustUint64(&c.MaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
-	}
-	if !meta.IsDefined("enable-cross-table-merge") {
-		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
-	}
-	if !meta.IsDefined("enable-one-way-merge") {
-		c.EnableOneWayMerge = defaultEnableOneWayMerge
-	}
-	if !meta.IsDefined("low-space-ratio") {
-		configutil.AdjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
-	}
-	if !meta.IsDefined("high-space-ratio") {
-		configutil.AdjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
-	}
-	// new cluster:v2, old cluster:v1
-	if !meta.IsDefined("region-score-formula-version") {
-		configutil.AdjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
-	}
-
-	return c.validate()
-}
-
-// validate is used to validate if some scheduling configurations are right.
-func (c *SchedulingConfig) validate() error {
-	if c.LowSpaceRatio < 0 || c.LowSpaceRatio > 1 {
-		return errors.New("low-space-ratio should between 0 and 1")
-	}
-	if c.HighSpaceRatio < 0 || c.HighSpaceRatio > 1 {
-		return errors.New("high-space-ratio should between 0 and 1")
-	}
-	if c.LowSpaceRatio <= c.HighSpaceRatio {
-		return errors.New("low-space-ratio should be larger than high-space-ratio")
-	}
-	return nil
-}
-
 // PersistConfig wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistConfig struct {
 	clusterVersion unsafe.Pointer
-	scheduling     atomic.Value
+	schedule       atomic.Value
+	replication    atomic.Value
 }
 
 // NewPersistConfig creates a new PersistConfig instance.
 func NewPersistConfig(cfg *Config) *PersistConfig {
 	o := &PersistConfig{}
 	o.SetClusterVersion(&cfg.ClusterVersion)
-	o.scheduling.Store(&cfg.SchedulingConfig)
+	o.schedule.Store(&cfg.Schedule)
+	o.replication.Store(&cfg.Replication)
 	return o
 }
 
@@ -293,54 +214,64 @@ func (o *PersistConfig) SetClusterVersion(v *semver.Version) {
 	atomic.StorePointer(&o.clusterVersion, unsafe.Pointer(v))
 }
 
-// GetSchedulingConfig returns the scheduling configurations.
-func (o *PersistConfig) GetSchedulingConfig() *SchedulingConfig {
-	return o.scheduling.Load().(*SchedulingConfig)
+// GetScheduleConfig returns the scheduling configurations.
+func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
+	return o.schedule.Load().(*sc.ScheduleConfig)
 }
 
-// SetSchedulingConfig sets the scheduling configuration.
-func (o *PersistConfig) SetSchedulingConfig(cfg *SchedulingConfig) {
-	o.scheduling.Store(cfg)
+// SetScheduleConfig sets the scheduling configuration.
+func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	o.schedule.Store(cfg)
+}
+
+// GetReplicationConfig returns replication configurations.
+func (o *PersistConfig) GetReplicationConfig() *sc.ReplicationConfig {
+	return o.replication.Load().(*sc.ReplicationConfig)
+}
+
+// SetReplicationConfig sets the PD replication configuration.
+func (o *PersistConfig) SetReplicationConfig(cfg *sc.ReplicationConfig) {
+	o.replication.Store(cfg)
 }
 
 // GetMaxReplicas returns the max replicas.
 func (o *PersistConfig) GetMaxReplicas() int {
-	return o.GetSchedulingConfig().MaxReplicas
+	return int(o.GetReplicationConfig().MaxReplicas)
 }
 
 // GetMaxSnapshotCount returns the max snapshot count.
 func (o *PersistConfig) GetMaxSnapshotCount() uint64 {
-	return o.GetSchedulingConfig().MaxSnapshotCount
+	return o.GetScheduleConfig().MaxSnapshotCount
 }
 
 // GetMaxPendingPeerCount returns the max pending peer count.
 func (o *PersistConfig) GetMaxPendingPeerCount() uint64 {
-	return o.GetSchedulingConfig().MaxPendingPeerCount
+	return o.GetScheduleConfig().MaxPendingPeerCount
 }
 
 // IsPlacementRulesEnabled returns if the placement rules is enabled.
 func (o *PersistConfig) IsPlacementRulesEnabled() bool {
-	return o.GetSchedulingConfig().EnablePlacementRules
+	return o.GetReplicationConfig().EnablePlacementRules
 }
 
 // GetLowSpaceRatio returns the low space ratio.
 func (o *PersistConfig) GetLowSpaceRatio() float64 {
-	return o.GetSchedulingConfig().LowSpaceRatio
+	return o.GetScheduleConfig().LowSpaceRatio
 }
 
 // GetHighSpaceRatio returns the high space ratio.
 func (o *PersistConfig) GetHighSpaceRatio() float64 {
-	return o.GetSchedulingConfig().HighSpaceRatio
+	return o.GetScheduleConfig().HighSpaceRatio
 }
 
 // GetMaxStoreDownTime returns the max store downtime.
 func (o *PersistConfig) GetMaxStoreDownTime() time.Duration {
-	return o.GetSchedulingConfig().MaxStoreDownTime.Duration
+	return o.GetScheduleConfig().MaxStoreDownTime.Duration
 }
 
 // GetLocationLabels returns the location labels.
 func (o *PersistConfig) GetLocationLabels() []string {
-	return o.GetSchedulingConfig().LocationLabels
+	return o.GetReplicationConfig().LocationLabels
 }
 
 // CheckLabelProperty checks if the label property is satisfied.
@@ -360,32 +291,59 @@ func (o *PersistConfig) GetKeyType() constant.KeyType {
 
 // IsCrossTableMergeEnabled returns if the cross table merge is enabled.
 func (o *PersistConfig) IsCrossTableMergeEnabled() bool {
-	return o.GetSchedulingConfig().EnableCrossTableMerge
+	return o.GetScheduleConfig().EnableCrossTableMerge
 }
 
 // IsOneWayMergeEnabled returns if the one way merge is enabled.
 func (o *PersistConfig) IsOneWayMergeEnabled() bool {
-	return o.GetSchedulingConfig().EnableOneWayMerge
+	return o.GetScheduleConfig().EnableOneWayMerge
 }
 
 // GetMergeScheduleLimit returns the merge schedule limit.
 func (o *PersistConfig) GetMergeScheduleLimit() uint64 {
-	return o.GetSchedulingConfig().MergeScheduleLimit
+	return o.GetScheduleConfig().MergeScheduleLimit
 }
 
 // GetRegionScoreFormulaVersion returns the region score formula version.
 func (o *PersistConfig) GetRegionScoreFormulaVersion() string {
-	return o.GetSchedulingConfig().RegionScoreFormulaVersion
+	return o.GetScheduleConfig().RegionScoreFormulaVersion
 }
 
 // GetSchedulerMaxWaitingOperator returns the scheduler max waiting operator.
 func (o *PersistConfig) GetSchedulerMaxWaitingOperator() uint64 {
-	return o.GetSchedulingConfig().MaxWaitingOperator
+	return o.GetScheduleConfig().SchedulerMaxWaitingOperator
 }
 
-// GetStoreLimitByType returns the store limit by type.
-func (o *PersistConfig) GetStoreLimitByType(id uint64, typ storelimit.Type) float64 {
-	return o.GetSchedulingConfig().StoreLimit[typ]
+// GetStoreLimitByType returns the limit of a store with a given type.
+func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
+	limit := o.GetStoreLimit(storeID)
+	switch typ {
+	case storelimit.AddPeer:
+		return limit.AddPeer
+	case storelimit.RemovePeer:
+		return limit.RemovePeer
+	// todo: impl it in store limit v2.
+	case storelimit.SendSnapshot:
+		return 0.0
+	default:
+		panic("no such limit type")
+	}
+}
+
+// GetStoreLimit returns the limit of a store.
+func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
+	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
+		return limit
+	}
+	cfg := o.GetScheduleConfig().Clone()
+	sc := sc.StoreLimitConfig{
+		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+
+	cfg.StoreLimit[storeID] = sc
+	o.SetScheduleConfig(cfg)
+	return o.GetScheduleConfig().StoreLimit[storeID]
 }
 
 // IsWitnessAllowed returns if the witness is allowed.

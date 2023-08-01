@@ -40,6 +40,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -70,7 +71,7 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg         *Config
+	cfg         *config.Config
 	name        string
 	clusterID   uint64
 	listenURL   *url.URL
@@ -524,7 +525,7 @@ func (s *Server) startServer() (err error) {
 }
 
 // CreateServer creates the Server
-func CreateServer(ctx context.Context, cfg *Config) *Server {
+func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		startTimestamp:    time.Now().Unix(),
@@ -537,7 +538,7 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	cmd.Flags().Parse(args)
-	cfg := NewConfig()
+	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
 	err := cfg.Parse(flagSet)
 	defer logutil.LogPanic()

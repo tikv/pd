@@ -78,6 +78,7 @@ type server interface {
 	GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error)
 }
 
+// WaitAPIServiceReady waits for the api service ready.
 func WaitAPIServiceReady(s server) error {
 	var (
 		ready bool

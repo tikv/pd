@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -15,15 +16,15 @@ type Cluster struct {
 	basicCluster   *core.BasicCluster
 	ruleManager    *placement.RuleManager
 	labelerManager *labeler.RegionLabeler
-	persistConfig  *PersistConfig
+	persistConfig  *config.PersistConfig
 }
 
 const regionLabelGCInterval = time.Hour
 
 // NewCluster creates a new cluster.
-func NewCluster(ctx context.Context, storage endpoint.RuleStorage, cfg *Config) (*Cluster, error) {
+func NewCluster(ctx context.Context, storage endpoint.RuleStorage, cfg *config.Config) (*Cluster, error) {
 	basicCluster := core.NewBasicCluster()
-	persistConfig := NewPersistConfig(cfg)
+	persistConfig := config.NewPersistConfig(cfg)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
 		return nil, err
