@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"runtime/trace"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -237,7 +238,9 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
-		ts, err := s.tsoAllocatorManager.HandleRequest(request.GetDcLocation(), count)
+		ctx, task := trace.NewTask(ctx, "Tso")
+		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, request.GetDcLocation(), count)
+		task.End()
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
@@ -1330,7 +1333,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	if s.IsAPIServiceMode() {
 		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
 	} else {
-		nowTSO, err = s.tsoAllocatorManager.HandleRequest(tso.GlobalDCLocation, 1)
+		nowTSO, err = s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
 	}
 	if err != nil {
 		return nil, err
@@ -2035,7 +2038,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 	if s.IsAPIServiceMode() {
 		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
 	} else {
-		nowTSO, err = s.tsoAllocatorManager.HandleRequest(tso.GlobalDCLocation, 1)
+		nowTSO, err = s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
 	}
 	if err != nil {
 		return nil, err

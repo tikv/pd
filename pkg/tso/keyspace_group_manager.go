@@ -746,7 +746,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err != nil {
 		return pdpb.Timestamp{}, currentKeyspaceGroupID, err
 	}
-	ts, err = am.HandleRequest(dcLocation, count)
+	ts, err = am.HandleRequest(context.Background(), dcLocation, count)
 	return ts, keyspaceGroupID, err
 }
 
@@ -791,11 +791,11 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	if err != nil {
 		return err
 	}
-	splitTSO, err := splitAllocator.GenerateTSO(1)
+	splitTSO, err := splitAllocator.GenerateTSO(context.Background(), 1)
 	if err != nil {
 		return err
 	}
-	splitSourceTSO, err := splitSourceAllocator.GenerateTSO(1)
+	splitSourceTSO, err := splitSourceAllocator.GenerateTSO(context.Background(), 1)
 	if err != nil {
 		return err
 	}

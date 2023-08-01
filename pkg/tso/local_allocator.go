@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"runtime/trace"
 	"sync/atomic"
 	"time"
 
@@ -103,13 +104,14 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCh
 
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
-func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
+func (lta *LocalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
+	defer trace.StartRegion(ctx, "LocalTSOAllocator.GenerateTSO").End()
 	if !lta.leadership.Check() {
 		tsoCounter.WithLabelValues("not_leader", lta.timestampOracle.dcLocation).Inc()
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(
 			fmt.Sprintf("requested pd %s of %s allocator", errs.NotLeaderErr, lta.timestampOracle.dcLocation))
 	}
-	return lta.timestampOracle.getTS(lta.leadership, count, lta.allocatorManager.GetSuffixBits())
+	return lta.timestampOracle.getTS(ctx, lta.leadership, count, lta.allocatorManager.GetSuffixBits())
 }
 
 // Reset is used to reset the TSO allocator.
@@ -161,7 +163,7 @@ func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
 	if tsoutil.CompareTimestamp(currentTSO, maxTS) >= 0 {
 		return nil
 	}
-	return lta.timestampOracle.resetUserTimestamp(lta.leadership, tsoutil.GenerateTS(maxTS), true)
+	return lta.timestampOracle.resetUserTimestamp(context.Background(), lta.leadership, tsoutil.GenerateTS(maxTS), true)
 }
 
 // EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.

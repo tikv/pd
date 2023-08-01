@@ -15,8 +15,10 @@
 package tso
 
 import (
+	"context"
 	"fmt"
 	"path"
+	"runtime/trace"
 	"sync/atomic"
 	"time"
 
@@ -106,7 +108,8 @@ func (t *timestampOracle) getTSO() (time.Time, int64) {
 }
 
 // generateTSO will add the TSO's logical part with the given count and returns the new TSO result.
-func (t *timestampOracle) generateTSO(count int64, suffixBits int) (physical int64, logical int64, lastUpdateTime time.Time) {
+func (t *timestampOracle) generateTSO(ctx context.Context, count int64, suffixBits int) (physical int64, logical int64, lastUpdateTime time.Time) {
+	defer trace.StartRegion(ctx, "timestampOracle.generateTSO").End()
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	if t.tsoMux.physical == typeutil.ZeroTime {
@@ -201,7 +204,8 @@ func (t *timestampOracle) isInitialized() bool {
 // When ignoreSmaller is true, resetUserTimestamp will ignore the smaller tso resetting error and do nothing.
 // It's used to write MaxTS during the Global TSO synchronization without failing the writing as much as possible.
 // cannot set timestamp to one which >= current + maxResetTSGap
-func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller bool) error {
+func (t *timestampOracle) resetUserTimestamp(ctx context.Context, leadership *election.Leadership, tso uint64, ignoreSmaller bool) error {
+	defer trace.StartRegion(ctx, "timestampOracle.resetUserTimestamp").End()
 	return t.resetUserTimestampInner(leadership, tso, ignoreSmaller, false)
 }
 
@@ -328,7 +332,8 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 var maxRetryCount = 10
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
+	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
 	if count == 0 {
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
@@ -345,7 +350,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 		}
 		// Get a new TSO result with the given count
-		resp.Physical, resp.Logical, _ = t.generateTSO(int64(count), suffixBits)
+		resp.Physical, resp.Logical, _ = t.generateTSO(ctx, int64(count), suffixBits)
 		if resp.GetPhysical() == 0 {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
