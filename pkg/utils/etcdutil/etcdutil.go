@@ -590,36 +590,39 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 
 // StartWatchLoop starts a loop to watch the key.
 func (lw *LoopWatcher) StartWatchLoop() {
-	defer logutil.LogPanic()
-	defer lw.wg.Done()
+	lw.wg.Add(1)
+	go func() {
+		defer logutil.LogPanic()
+		defer lw.wg.Done()
 
-	ctx, cancel := context.WithCancel(lw.ctx)
-	defer cancel()
-	watchStartRevision := lw.initFromEtcd(ctx)
+		ctx, cancel := context.WithCancel(lw.ctx)
+		defer cancel()
+		watchStartRevision := lw.initFromEtcd(ctx)
 
-	log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
-			return
-		default:
+		log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+				return
+			default:
+			}
+			nextRevision, err := lw.watch(ctx, watchStartRevision)
+			if err != nil {
+				log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
+					zap.String("name", lw.name),
+					zap.String("key", lw.key),
+					zap.Int64("next-revision", nextRevision),
+					zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
+					zap.Error(err))
+				watchStartRevision = nextRevision
+				time.Sleep(lw.watchChangeRetryInterval)
+				failpoint.Inject("updateClient", func() {
+					lw.client = <-lw.updateClientCh
+				})
+			}
 		}
-		nextRevision, err := lw.watch(ctx, watchStartRevision)
-		if err != nil {
-			log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
-				zap.String("name", lw.name),
-				zap.String("key", lw.key),
-				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
-				zap.Error(err))
-			watchStartRevision = nextRevision
-			time.Sleep(lw.watchChangeRetryInterval)
-			failpoint.Inject("updateClient", func() {
-				lw.client = <-lw.updateClientCh
-			})
-		}
-	}
+	}()
 }
 
 func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
