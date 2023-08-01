@@ -334,7 +334,9 @@ func (s *Server) watchLeader(leader *pdpb.Member, revision int64) {
 	for {
 		failpoint.Inject("delayWatcher", nil)
 		rch := watcher.Watch(ctx, s.getLeaderPath(), clientv3.WithRev(revision))
+		log.Info("[watchLeader] start watch leader", zap.String("key", s.getLeaderPath()), zap.Int64("revision", revision))
 		for wresp := range rch {
+			log.Info("[watchLeader] leader key changed", zap.Int64("revision", revision), zap.Int("event-count", len(wresp.Events)))
 			// meet compacted error, use the compact revision.
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision",

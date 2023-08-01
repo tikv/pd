@@ -103,6 +103,7 @@ func (s *RegionSyncer) RunServer(regionNotifier <-chan *core.RegionInfo, quit ch
 			log.Info("region syncer has been stopped")
 			return
 		case first := <-regionNotifier:
+			log.Info("[sync region] RunServer get first", zap.Uint64("region-id", first.GetID()))
 			requests = append(requests, first.GetMeta())
 			startIndex := s.history.GetNextIndex()
 			s.history.Record(first)

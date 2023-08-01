@@ -46,3 +46,5 @@ require (
 	google.golang.org/grpc v1.23.1
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
+
+replace google.golang.org/grpcgrpc => github.com/HuSharp/grpc-go v0.0.0-20230731085747-8a15bcfb3a9d
