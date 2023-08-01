@@ -150,6 +150,79 @@ func TestRuleFitFilter(t *testing.T) {
 	re.False(leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).IsOK())
 }
 
+func TestRuleFitFilterWithPlacementRule(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	testCluster := mockcluster.NewCluster(ctx, opt)
+	testCluster.SetEnablePlacementRules(true)
+	ruleManager := testCluster.RuleManager
+	ruleManager.DeleteRule("pd", "default")
+	err := ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID: "test",
+			ID:      "r1",
+			Index:   100,
+			Role:    placement.Leader,
+			Count:   1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "dc", Op: "in", Values: []string{"dc1"}},
+			},
+			LocationLabels: []string{"dc", "zone", "host"},
+		},
+		{
+			GroupID: "test",
+			ID:      "r2",
+			Index:   100,
+			Role:    placement.Voter,
+			Count:   2,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "dc", Op: "in", Values: []string{"dc1"}},
+			},
+			LocationLabels: []string{"dc", "zone", "host"},
+		},
+		{
+			GroupID: "test",
+			ID:      "r3",
+			Index:   100,
+			Role:    placement.Voter,
+			Count:   2,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "dc", Op: "in", Values: []string{"dc2"}},
+			},
+			LocationLabels: []string{"dc", "zone", "host"},
+		},
+	})
+	re.NoError(err)
+	stores := []struct {
+		storeID     uint64
+		regionCount int
+		labels      map[string]string
+	}{
+		{1, 1, map[string]string{"dc": "dc1", "zone": "z1", "host": "h1"}},
+		{2, 1, map[string]string{"dc": "dc1", "zone": "z2", "host": "h2"}},
+		{3, 1, map[string]string{"dc": "dc1", "zone": "z3", "host": "h3"}},
+		{4, 1, map[string]string{"dc": "dc1", "zone": "z4", "host": "h4"}},
+		{5, 1, map[string]string{"dc": "dc2", "zone": "z5", "host": "h5"}},
+		{6, 1, map[string]string{"dc": "dc2", "zone": "z6", "host": "h6"}},
+	}
+	// Init cluster
+	for _, store := range stores {
+		testCluster.AddLabelsStore(store.storeID, store.regionCount, store.labels)
+	}
+	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+		{StoreId: 1, Id: 1},
+		{StoreId: 2, Id: 2},
+		{StoreId: 3, Id: 3},
+		{StoreId: 5, Id: 4},
+		{StoreId: 6, Id: 5},
+	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
+	re.Equal(plan.StatusText(plan.StatusStoreNotMatchRule), leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).String())
+}
+
 func TestSendStateFilter(t *testing.T) {
 	re := require.New(t)
 	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SetStoreLimit(storelimit.NewSlidingWindows()))

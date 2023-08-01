@@ -218,14 +218,16 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 			[]byte(fmt.Sprintf("%21d", 11)),
 			[]byte(fmt.Sprintf("%21d", 12)),
 			[]byte(fmt.Sprintf("%21d", 13)),
+			[]byte(fmt.Sprintf("%21d", 14)),
+			[]byte(fmt.Sprintf("%21d", 15)),
 		},
 		Stats: &metapb.BucketStats{
-			ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB},
-			ReadKeys:   []uint64{256, 256},
-			ReadQps:    []uint64{0, 0},
-			WriteBytes: []uint64{0, 0},
-			WriteQps:   []uint64{0, 0},
-			WriteKeys:  []uint64{0, 0},
+			ReadBytes:  []uint64{10 * units.KiB, 11 * units.KiB, 11 * units.KiB, 10 * units.KiB},
+			ReadKeys:   []uint64{256, 256, 156, 256},
+			ReadQps:    []uint64{0, 0, 0, 0},
+			WriteBytes: []uint64{100 * units.KiB, 10 * units.KiB, 10 * units.KiB, 10 * units.KiB},
+			WriteQps:   []uint64{256, 256, 156, 256},
+			WriteKeys:  []uint64{0, 0, 0, 0},
 		},
 	}
 
@@ -247,7 +249,11 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	tc.GetStoreConfig().SetRegionBucketEnabled(true)
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
-	re.Equal(operator.OpSplit, ops[0].Kind())
+	expectOp, _ := operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
+		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 13))})
+	re.Equal(expectOp.Brief(), ops[0].Brief())
+	re.Equal(expectOp.Kind(), ops[0].Kind())
+
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 0)
 
@@ -261,60 +267,128 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	hb, _ = CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
+	expectOp, _ = operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
+		pdpb.CheckPolicy_USEKEY, [][]byte{[]byte(fmt.Sprintf("%21d", 12))})
+	re.Equal(expectOp.Brief(), ops[0].Brief())
+	re.Equal(expectOp.Kind(), ops[0].Kind())
 	re.Equal(operator.OpSplit, ops[0].Kind())
+
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 0)
 }
 
-func TestSplitBuckets(t *testing.T) {
+func TestSplitBucketsBySize(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	cancel, _, tc, oc := prepareSchedulersTest()
 	tc.SetHotRegionCacheHitsThreshold(1)
+	tc.GetStoreConfig().SetRegionBucketEnabled(true)
 	defer cancel()
 	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	solve := newBalanceSolver(hb.(*hotScheduler), tc, statistics.Read, transferLeader)
 	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
 
-	// the hot range is [a,c],[e,f]
-	b := &metapb.Buckets{
-		RegionId:   1,
-		PeriodInMs: 1000,
-		Keys:       [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")},
-		Stats: &metapb.BucketStats{
-			ReadBytes:  []uint64{10 * units.KiB, 10 * units.KiB, 0, 10 * units.KiB, 10 * units.KiB},
-			ReadKeys:   []uint64{256, 256, 0, 256, 256},
-			ReadQps:    []uint64{0, 0, 0, 0, 0},
-			WriteBytes: []uint64{0, 0, 0, 0, 0},
-			WriteQps:   []uint64{0, 0, 0, 0, 0},
-			WriteKeys:  []uint64{0, 0, 0, 0, 0},
+	testdata := []struct {
+		hotBuckets [][]byte
+		splitKeys  [][]byte
+	}{
+		{
+			[][]byte{[]byte("a"), []byte("b"), []byte("f")},
+			[][]byte{[]byte("b")},
+		},
+		{
+			[][]byte{[]byte(""), []byte("a"), []byte("")},
+			nil,
+		},
+		{
+			[][]byte{},
+			nil,
 		},
 	}
 
-	task := buckets.NewCheckPeerTask(b)
-	re.True(tc.HotBucketCache.CheckAsync(task))
-	time.Sleep(time.Millisecond * 10)
-	ops := solve.createSplitOperator([]*core.RegionInfo{region}, false)
-	re.Equal(1, len(ops))
-	op := ops[0]
-	re.Equal(splitBucket, op.Desc())
-	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
-	expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
-	re.NoError(err)
-	re.Equal(expectOp.Brief(), op.Brief())
-	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
+	for _, data := range testdata {
+		b := &metapb.Buckets{
+			RegionId:   1,
+			PeriodInMs: 1000,
+			Keys:       data.hotBuckets,
+		}
+		region.UpdateBuckets(b, region.GetBuckets())
+		ops := solve.createSplitOperator([]*core.RegionInfo{region}, bySize)
+		if data.splitKeys == nil {
+			re.Equal(0, len(ops))
+			continue
+		}
+		re.Equal(1, len(ops))
+		op := ops[0]
+		re.Equal(splitHotReadBuckets, op.Desc())
 
-	ops = solve.createSplitOperator([]*core.RegionInfo{region}, true)
-	re.Equal(1, len(ops))
-	op = ops[0]
-	re.Equal(splitBucket, op.Desc())
-	expectKeys = [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")}
-	expectOp, err = operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
+		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		re.NoError(err)
+		re.Equal(expectOp.Brief(), op.Brief())
+	}
+}
+
+func TestSplitBucketsByLoad(t *testing.T) {
+	re := require.New(t)
+	statistics.Denoising = false
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tc.SetHotRegionCacheHitsThreshold(1)
+	tc.GetStoreConfig().SetRegionBucketEnabled(true)
+	defer cancel()
+	hb, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	re.Equal(expectOp.Brief(), op.Brief())
-	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
+	solve := newBalanceSolver(hb.(*hotScheduler), tc, statistics.Read, transferLeader)
+	solve.cur = &solution{}
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+	testdata := []struct {
+		hotBuckets [][]byte
+		splitKeys  [][]byte
+	}{
+		{
+			[][]byte{[]byte(""), []byte("b"), []byte("")},
+			[][]byte{[]byte("b")},
+		},
+		{
+			[][]byte{[]byte(""), []byte("a"), []byte("")},
+			nil,
+		},
+		{
+			[][]byte{[]byte("b"), []byte("c"), []byte("")},
+			[][]byte{[]byte("c")},
+		},
+	}
+	for _, data := range testdata {
+		b := &metapb.Buckets{
+			RegionId:   1,
+			PeriodInMs: 1000,
+			Keys:       data.hotBuckets,
+			Stats: &metapb.BucketStats{
+				ReadBytes:  []uint64{10 * units.KiB, 10 * units.MiB},
+				ReadKeys:   []uint64{256, 256},
+				ReadQps:    []uint64{0, 0},
+				WriteBytes: []uint64{0, 0},
+				WriteQps:   []uint64{0, 0},
+				WriteKeys:  []uint64{0, 0},
+			},
+		}
+		task := buckets.NewCheckPeerTask(b)
+		re.True(tc.HotBucketCache.CheckAsync(task))
+		time.Sleep(time.Millisecond * 10)
+		ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
+		if data.splitKeys == nil {
+			re.Equal(0, len(ops))
+			continue
+		}
+		re.Equal(1, len(ops))
+		op := ops[0]
+		re.Equal(splitHotReadBuckets, op.Desc())
+
+		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		re.NoError(err)
+		re.Equal(expectOp.Brief(), op.Brief())
+	}
 }
 
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
@@ -1907,20 +1981,23 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 		},
 	}}
 
+	st := &statistics.StoreLoadDetail{
+		HotPeers: hotPeers,
+	}
 	leaderSolver.maxPeerNum = 1
-	u := leaderSolver.sortHotPeers(hotPeers)
+	u := leaderSolver.filterHotPeers(st)
 	checkSortResult(re, []uint64{1}, u)
 
 	leaderSolver.maxPeerNum = 2
-	u = leaderSolver.sortHotPeers(hotPeers)
+	u = leaderSolver.filterHotPeers(st)
 	checkSortResult(re, []uint64{1, 2}, u)
 }
 
-func checkSortResult(re *require.Assertions, regions []uint64, hotPeers map[*statistics.HotPeerStat]struct{}) {
+func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {
 	re.Equal(len(hotPeers), len(regions))
 	for _, region := range regions {
 		in := false
-		for hotPeer := range hotPeers {
+		for _, hotPeer := range hotPeers {
 			if hotPeer.RegionID == region {
 				in = true
 				break
@@ -2870,4 +2947,47 @@ func TestEncodeConfig(t *testing.T) {
 	data, err := sche.EncodeConfig()
 	re.NoError(err)
 	re.NotEqual("null", string(data))
+}
+
+func TestBucketFirstStat(t *testing.T) {
+	re := require.New(t)
+	testdata := []struct {
+		firstPriority  int
+		secondPriority int
+		rwTy           statistics.RWType
+		expect         statistics.RegionStatKind
+	}{
+		{
+			firstPriority:  statistics.KeyDim,
+			secondPriority: statistics.ByteDim,
+			rwTy:           statistics.Write,
+			expect:         statistics.RegionWriteKeys,
+		},
+		{
+			firstPriority:  statistics.QueryDim,
+			secondPriority: statistics.ByteDim,
+			rwTy:           statistics.Write,
+			expect:         statistics.RegionWriteBytes,
+		},
+		{
+			firstPriority:  statistics.KeyDim,
+			secondPriority: statistics.ByteDim,
+			rwTy:           statistics.Read,
+			expect:         statistics.RegionReadKeys,
+		},
+		{
+			firstPriority:  statistics.QueryDim,
+			secondPriority: statistics.ByteDim,
+			rwTy:           statistics.Read,
+			expect:         statistics.RegionReadBytes,
+		},
+	}
+	for _, data := range testdata {
+		bs := &balanceSolver{
+			firstPriority:  data.firstPriority,
+			secondPriority: data.secondPriority,
+			rwTy:           data.rwTy,
+		}
+		re.Equal(data.expect, bs.bucketFirstStat())
+	}
 }

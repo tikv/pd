@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -137,7 +138,7 @@ func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 }
 
 // GetScheduleConfig returns ScheduleConfig.
-func (h *Handler) GetScheduleConfig() *config.ScheduleConfig {
+func (h *Handler) GetScheduleConfig() *sc.ScheduleConfig {
 	return h.s.GetScheduleConfig()
 }
 
@@ -543,7 +544,7 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]config.StoreLimitConfig, error) {
+func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]sc.StoreLimitConfig, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, err

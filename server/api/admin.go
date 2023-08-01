@@ -21,10 +21,13 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 type adminHandler struct {
@@ -57,6 +60,43 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 	}
 	rc.DropCacheRegion(regionID)
 	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache.")
+}
+
+// @Tags     admin
+// @Summary  Remove target region from region cache and storage.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {string}  string  "The region is removed from server storage."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /admin/storage/region/{id} [delete]
+func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	vars := mux.Vars(r)
+	regionIDStr := vars["id"]
+	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	targetRegion := rc.GetRegion(regionID)
+	if targetRegion == nil {
+		h.rd.JSON(w, http.StatusBadRequest, "failed to get target region from cache")
+		return
+	}
+
+	// Remove region from storage
+	if err = rc.GetStorage().DeleteRegion(targetRegion.GetMeta()); err != nil {
+		log.Error("failed to delete region from storage",
+			zap.Uint64("region-id", targetRegion.GetID()),
+			zap.Stringer("region-meta", core.RegionToHexMeta(targetRegion.GetMeta())),
+			errs.ZapError(err))
+		h.rd.JSON(w, http.StatusOK, "failed to delete region from storage.")
+		return
+	}
+	// Remove region from cache.
+	rc.DropCacheRegion(regionID)
+
+	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache and region meta storage.")
 }
 
 // @Tags     admin

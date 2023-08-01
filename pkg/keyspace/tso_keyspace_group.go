@@ -105,8 +105,7 @@ func NewKeyspaceGroupManager(
 	// The PD(TSO) Client relies on this info to discover tso servers.
 	if m.client != nil {
 		m.initTSONodesWatcher(m.client, m.clusterID)
-		m.wg.Add(1)
-		go m.tsoNodesWatcher.StartWatchLoop()
+		m.tsoNodesWatcher.StartWatchLoop()
 	}
 	return m
 }

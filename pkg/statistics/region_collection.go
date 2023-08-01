@@ -88,7 +88,7 @@ type RegionInfoWithTS struct {
 type RegionStatistics struct {
 	sync.RWMutex
 	rip                RegionInfoProvider
-	conf               sc.CheckerConfig
+	conf               sc.CheckerConfigProvider
 	stats              map[RegionStatisticType]map[uint64]*RegionInfoWithTS
 	index              map[uint64]RegionStatisticType
 	ruleManager        *placement.RuleManager
@@ -98,7 +98,7 @@ type RegionStatistics struct {
 // NewRegionStatistics creates a new RegionStatistics.
 func NewRegionStatistics(
 	rip RegionInfoProvider,
-	conf sc.CheckerConfig,
+	conf sc.CheckerConfigProvider,
 	ruleManager *placement.RuleManager,
 	storeConfigManager *config.StoreConfigManager,
 ) *RegionStatistics {
