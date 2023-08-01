@@ -1861,6 +1861,7 @@ func (s *Server) initTSOPrimaryWatcher() {
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		log.Info("delete tso primary")
 		s.servicePrimaryMap.Delete(serviceName)
 		return nil
 	}
