@@ -168,6 +168,7 @@ func (u *Controller) reset() {
 	u.output = make([]StageOutput, 0)
 	u.AffectedTableIDs = make(map[int64]struct{}, 0)
 	u.affectedMetaRegions = make(map[uint64]struct{}, 0)
+	u.newlyCreatedRegions = make(map[uint64]struct{}, 0)
 	u.err = nil
 }
 
@@ -673,6 +674,8 @@ func (u *Controller) getAffectedTableDigest() []string {
 			regions += fmt.Sprintf("%d, ", r)
 		}
 		details = append(details, "newly created empty regions: "+strings.Trim(regions, ", "))
+	} else {
+		details = append(details, "no newly created empty regions")
 	}
 	return details
 }
