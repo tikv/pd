@@ -136,6 +136,7 @@ type Controller struct {
 	// exposed to the outside for testing
 	AffectedTableIDs    map[int64]struct{}
 	affectedMetaRegions map[uint64]struct{}
+	newlyCreatedRegions map[uint64]struct{}
 	err                 error
 }
 
@@ -665,6 +666,13 @@ func (u *Controller) getAffectedTableDigest() []string {
 			tables += fmt.Sprintf("%d, ", t)
 		}
 		details = append(details, "affected table ids: "+strings.Trim(tables, ", "))
+	}
+	if len(u.newlyCreatedRegions) != 0 {
+		regions := ""
+		for r := range u.newlyCreatedRegions {
+			regions += fmt.Sprintf("%d, ", r)
+		}
+		details = append(details, "newly created empty regions: "+strings.Trim(regions, ", "))
 	}
 	return details
 }
@@ -1201,6 +1209,7 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 			storeRecoveryPlan := u.getRecoveryPlan(storeID)
 			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
 			u.recordAffectedRegion(newRegion)
+			u.newlyCreatedRegions[newRegion.GetId()] = struct{}{}
 			hasPlan = true
 		}
 		lastEnd = region.EndKey
