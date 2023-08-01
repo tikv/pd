@@ -1048,7 +1048,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			h.rd.JSON(w, http.StatusBadRequest, "regions_id is invalid")
 			return
 		}
-		opsCount, failures, err = rc.GetRegionScatter().ScatterRegionsByID(ids, group, retryLimit)
+		opsCount, failures, err = rc.GetRegionScatter().ScatterRegionsByID(ids, group, retryLimit, false)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return

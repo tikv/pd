@@ -21,9 +21,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/server/api"
-	"github.com/tikv/pd/server/config"
 )
 
 var (
@@ -95,13 +95,13 @@ func NewCheckLabels() *cobra.Command {
 	}
 }
 
-func getReplicationConfig(cmd *cobra.Command, _ []string) (*config.ReplicationConfig, error) {
+func getReplicationConfig(cmd *cobra.Command, _ []string) (*sc.ReplicationConfig, error) {
 	prefix := configPrefix + "/replicate"
 	body, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		return nil, err
 	}
-	var config config.ReplicationConfig
+	var config sc.ReplicationConfig
 	if err := json.Unmarshal([]byte(body), &config); err != nil {
 		return nil, err
 	}

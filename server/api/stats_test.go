@@ -74,6 +74,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 		},
 			&metapb.Peer{Id: 101, StoreId: 1},
 			core.SetApproximateSize(100),
+			core.SetApproximateKvSize(80),
 			core.SetApproximateKeys(50),
 		),
 		core.NewRegionInfo(
@@ -90,6 +91,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 			},
 			&metapb.Peer{Id: 105, StoreId: 4},
 			core.SetApproximateSize(200),
+			core.SetApproximateKvSize(180),
 			core.SetApproximateKeys(150),
 		),
 		core.NewRegionInfo(
@@ -105,6 +107,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 			},
 			&metapb.Peer{Id: 107, StoreId: 5},
 			core.SetApproximateSize(1),
+			core.SetApproximateKvSize(1),
 			core.SetApproximateKeys(1),
 		),
 		core.NewRegionInfo(
@@ -119,6 +122,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 			},
 			&metapb.Peer{Id: 108, StoreId: 4},
 			core.SetApproximateSize(50),
+			core.SetApproximateKvSize(30),
 			core.SetApproximateKeys(20),
 		),
 	}
@@ -139,6 +143,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 		Count:            4,
 		EmptyCount:       1,
 		StorageSize:      351,
+		UserStorageSize:  291,
 		StorageKeys:      221,
 		StoreLeaderCount: map[uint64]int{1: 1, 4: 2, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 3, 2: 1, 3: 1, 4: 2, 5: 2},
@@ -152,6 +157,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 		Count:            2,
 		EmptyCount:       1,
 		StorageSize:      201,
+		UserStorageSize:  181,
 		StorageKeys:      151,
 		StoreLeaderCount: map[uint64]int{4: 1, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 2, 4: 1, 5: 2},

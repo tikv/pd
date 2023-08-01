@@ -68,6 +68,7 @@ var (
 	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
 	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
 	ErrTSOProxyRecvFromClientTimeout    = status.Errorf(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server")
+	ErrEtcdNotStarted                   = status.Errorf(codes.Unavailable, "server is started, but etcd not started")
 )
 
 // GrpcServer wraps Server to provide grpc service.
@@ -1589,7 +1590,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	}
 
 	if len(request.GetRegionsId()) > 0 {
-		percentage, err := scatterRegions(rc, request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()))
+		percentage, err := scatterRegions(rc, request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()), request.GetSkipStoreLimit())
 		if err != nil {
 			return nil, err
 		}
@@ -1612,7 +1613,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
 	}
 
-	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup())
+	op, err := rc.GetRegionScatter().Scatter(region, request.GetGroup(), request.GetSkipStoreLimit())
 	if err != nil {
 		return nil, err
 	}
@@ -1986,7 +1987,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 	}
 	rc := s.GetRaftCluster()
 	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
-	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()))
+	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()), false)
 	if err != nil {
 		return nil, err
 	}
@@ -1999,8 +2000,8 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 }
 
 // scatterRegions add operators to scatter regions and return the processed percentage and error
-func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int) (int, error) {
-	opsCount, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit)
+func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int, skipStoreLimit bool) (int, error) {
+	opsCount, failures, err := cluster.GetRegionScatter().ScatterRegionsByID(regionsID, group, retryLimit, skipStoreLimit)
 	if err != nil {
 		return 0, err
 	}
@@ -2282,6 +2283,9 @@ const globalConfigPath = "/global/config/"
 // Since item value needs to support marshal of different struct types,
 // it should be set to `Payload bytes` instead of `Value string`
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
+	if s.client == nil {
+		return nil, ErrEtcdNotStarted
+	}
 	configPath := request.GetConfigPath()
 	if configPath == "" {
 		configPath = globalConfigPath
@@ -2316,6 +2320,9 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 // - `Names` iteratively get value from `ConfigPath/Name` but not care about revision
 // - `ConfigPath` if `Names` is nil can get all values and revision of current path
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
+	if s.client == nil {
+		return nil, ErrEtcdNotStarted
+	}
 	configPath := request.GetConfigPath()
 	if configPath == "" {
 		configPath = globalConfigPath
@@ -2352,6 +2359,9 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // by Etcd.Watch() as long as the context has not been canceled or timed out.
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
+	if s.client == nil {
+		return ErrEtcdNotStarted
+	}
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
 	configPath := req.GetConfigPath()

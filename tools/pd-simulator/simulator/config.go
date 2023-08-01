@@ -21,6 +21,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/docker/go-units"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -80,7 +81,7 @@ type Coprocessor struct {
 
 // NewSimConfig create a new configuration of the simulator.
 func NewSimConfig(serverLogLevel string) *SimConfig {
-	config.DefaultStoreLimit = config.StoreLimit{AddPeer: 2000, RemovePeer: 2000}
+	sc.DefaultStoreLimit = sc.StoreLimit{AddPeer: 2000, RemovePeer: 2000}
 	cfg := &config.Config{
 		Name:       "pd",
 		ClientUrls: tempurl.Alloc(),
