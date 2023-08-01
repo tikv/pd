@@ -73,25 +73,25 @@ func (sr *ServiceRegister) Register() error {
 	go func() {
 		defer logutil.LogPanic()
 		for {
+		KeepaliveLoop:
 			select {
 			case <-sr.ctx.Done():
 				log.Info("exit register process", zap.String("key", sr.key))
 				return
 			case _, ok := <-kresp:
-				if !ok {
-					log.Error("keep alive failed", zap.String("key", sr.key))
-					// retry
-					t := time.NewTicker(time.Duration(sr.ttl) * time.Second / 2)
-					defer t.Stop()
-					for {
-						select {
-						case <-sr.ctx.Done():
-							log.Info("exit register process", zap.String("key", sr.key))
-							return
-						default:
-						}
-
-						<-t.C
+				if ok {
+					continue
+				}
+				log.Error("keep alive failed", zap.String("key", sr.key))
+				// retry
+				t := time.NewTicker(time.Duration(sr.ttl) * time.Second / 2)
+				for {
+					select {
+					case <-sr.ctx.Done():
+						log.Info("exit register process", zap.String("key", sr.key))
+						t.Stop()
+						return
+					case <-t.C:
 						resp, err := sr.cli.Grant(sr.ctx, sr.ttl)
 						if err != nil {
 							log.Error("grant lease failed", zap.String("key", sr.key), zap.Error(err))
@@ -102,6 +102,8 @@ func (sr *ServiceRegister) Register() error {
 							log.Error("put the key failed", zap.String("key", sr.key), zap.Error(err))
 							continue
 						}
+						t.Stop()
+						goto KeepaliveLoop
 					}
 				}
 			}
