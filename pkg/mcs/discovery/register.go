@@ -102,6 +102,12 @@ func (sr *ServiceRegister) Register() error {
 							log.Error("put the key failed", zap.String("key", sr.key), zap.Error(err))
 							continue
 						}
+
+						kresp, err = sr.cli.KeepAlive(sr.ctx, resp.ID)
+						if err != nil {
+							log.Error("client keep alive failed", zap.String("key", sr.key), zap.Error(err))
+							continue
+						}
 						t.Stop()
 						goto KeepaliveLoop
 					}
