@@ -50,6 +50,7 @@ func (s *RegionSyncer) reset() {
 }
 
 func (s *RegionSyncer) establish(addr string) (ClientStream, error) {
+	log.Info("[RegionSyncer] establishing connection with leader", zap.String("addr", addr))
 	s.reset()
 
 	cc, err := grpcutil.GetClientConn(addr, s.securityConfig["caPath"], s.securityConfig["certPath"], s.securityConfig["keyPath"], grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize)))

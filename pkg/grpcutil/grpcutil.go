@@ -19,6 +19,9 @@ import (
 	"io/ioutil"
 	"net/url"
 
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -61,6 +64,7 @@ func GetClientConn(addr string, caPath string, certPath string, keyPath string, 
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
+	log.Info("dialing gRPC server", zap.String("address", u.Host), zap.Any("dial options", do), zap.Any("tls options", opt))
 	cc, err := grpc.Dial(u.Host, append(do, opt)...)
 	if err != nil {
 		return nil, errors.WithStack(err)

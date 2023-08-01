@@ -173,6 +173,7 @@ func (c *RaftCluster) runCoordinator() {
 func (c *RaftCluster) syncRegions() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
+	log.Info("[syncRegions] syncer is started")
 	c.regionSyncer.RunServer(c.cachedCluster.changedRegionNotifier(), c.quit)
 }
 
