@@ -73,7 +73,6 @@ func (sr *ServiceRegister) Register() error {
 	go func() {
 		defer logutil.LogPanic()
 		for {
-		KeepaliveLoop:
 			select {
 			case <-sr.ctx.Done():
 				log.Info("exit register process", zap.String("key", sr.key))
@@ -83,40 +82,42 @@ func (sr *ServiceRegister) Register() error {
 					continue
 				}
 				log.Error("keep alive failed", zap.String("key", sr.key))
-				// retry
-				t := time.NewTicker(time.Duration(sr.ttl) * time.Second / 2)
-				for {
-					select {
-					case <-sr.ctx.Done():
-						log.Info("exit register process", zap.String("key", sr.key))
-						t.Stop()
-						return
-					case <-t.C:
-						resp, err := sr.cli.Grant(sr.ctx, sr.ttl)
-						if err != nil {
-							log.Error("grant lease failed", zap.String("key", sr.key), zap.Error(err))
-							continue
-						}
-
-						if _, err := sr.cli.Put(sr.ctx, sr.key, sr.value, clientv3.WithLease(resp.ID)); err != nil {
-							log.Error("put the key failed", zap.String("key", sr.key), zap.Error(err))
-							continue
-						}
-
-						kresp, err = sr.cli.KeepAlive(sr.ctx, resp.ID)
-						if err != nil {
-							log.Error("client keep alive failed", zap.String("key", sr.key), zap.Error(err))
-							continue
-						}
-						t.Stop()
-						goto KeepaliveLoop
-					}
-				}
+				kresp = sr.renew()
 			}
 		}
 	}()
 
 	return nil
+}
+
+func (sr *ServiceRegister) renew() <-chan *clientv3.LeaseKeepAliveResponse {
+	t := time.NewTicker(time.Duration(sr.ttl) * time.Second / 2)
+	defer t.Stop()
+	for {
+		select {
+		case <-sr.ctx.Done():
+			log.Info("exit register process", zap.String("key", sr.key))
+			return nil
+		case <-t.C:
+			resp, err := sr.cli.Grant(sr.ctx, sr.ttl)
+			if err != nil {
+				log.Error("grant lease failed", zap.String("key", sr.key), zap.Error(err))
+				continue
+			}
+
+			if _, err := sr.cli.Put(sr.ctx, sr.key, sr.value, clientv3.WithLease(resp.ID)); err != nil {
+				log.Error("put the key failed", zap.String("key", sr.key), zap.Error(err))
+				continue
+			}
+
+			kresp, err := sr.cli.KeepAlive(sr.ctx, resp.ID)
+			if err != nil {
+				log.Error("client keep alive failed", zap.String("key", sr.key), zap.Error(err))
+				continue
+			}
+			return kresp
+		}
+	}
 }
 
 // Deregister deregisters the service from etcd.
