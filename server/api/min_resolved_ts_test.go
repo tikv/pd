@@ -132,7 +132,7 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTSByStores() {
 	rc.SetMinResolvedTS(1, ts)
 	storeIDs := []string{"1"}
 	suite.checkMinResolvedTSByStores(&minResolvedTS{
-		MinResolvedTS:   0,
+		MinResolvedTS:   233,
 		IsRealTime:      true,
 		PersistInterval: interval,
 		StoreMinResolvedTS: map[uint64]uint64{

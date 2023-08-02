@@ -94,7 +94,7 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 			return
 		}
 		c := h.svr.GetRaftCluster()
-		storeMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
+		value, storeMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
 	}
 
 	h.rd.JSON(w, http.StatusOK, minResolvedTS{
