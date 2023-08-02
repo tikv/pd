@@ -29,8 +29,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+<<<<<<< HEAD:server/replication/replication_mode.go
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/slice"
+=======
+	sche "github.com/tikv/pd/pkg/schedule/core"
+>>>>>>> d65d309b1 (dr-autosync: move state replicate to different goroutine (#6874)):pkg/replication/replication_mode.go
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -71,11 +75,19 @@ type ModeManager struct {
 	initTime time.Time
 
 	syncutil.RWMutex
+<<<<<<< HEAD:server/replication/replication_mode.go
 	config            config.ReplicationModeConfig
 	storage           endpoint.ReplicationStatusStorage
 	cluster           schedule.Cluster
 	fileReplicater    FileReplicater
 	replicatedMembers []uint64
+=======
+	config         config.ReplicationModeConfig
+	storage        endpoint.ReplicationStatusStorage
+	cluster        sche.ClusterInformer
+	fileReplicater FileReplicater
+	replicateState sync.Map
+>>>>>>> d65d309b1 (dr-autosync: move state replicate to different goroutine (#6874)):pkg/replication/replication_mode.go
 
 	drAutoSync drAutoSyncStatus
 	// intermediate states of the recovery process
@@ -241,7 +253,6 @@ func (m *ModeManager) drSwitchToAsyncWait(availableStores []uint64) error {
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateAsyncWait, StateID: id, AvailableStores: availableStores}
-	m.drPersistStatusWithLock(dr)
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -264,7 +275,6 @@ func (m *ModeManager) drSwitchToAsyncWithLock(availableStores []uint64) error {
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateAsync, StateID: id, AvailableStores: availableStores}
-	m.drPersistStatusWithLock(dr)
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -288,7 +298,6 @@ func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
 	}
 	now := time.Now()
 	dr := drAutoSyncStatus{State: drStateSyncRecover, StateID: id, RecoverStartTime: &now}
-	m.drPersistStatusWithLock(dr)
 	if err = m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to sync_recover state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -308,7 +317,6 @@ func (m *ModeManager) drSwitchToSync() error {
 		return err
 	}
 	dr := drAutoSyncStatus{State: drStateSync, StateID: id}
-	m.drPersistStatusWithLock(dr)
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to sync state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
 		return err
@@ -318,6 +326,7 @@ func (m *ModeManager) drSwitchToSync() error {
 	return nil
 }
 
+<<<<<<< HEAD:server/replication/replication_mode.go
 func (m *ModeManager) drPersistStatusWithLock(status drAutoSyncStatus) {
 	ctx, cancel := context.WithTimeout(context.Background(), persistFileTimeout)
 	defer cancel()
@@ -362,6 +371,8 @@ func (m *ModeManager) drPersistStatus() {
 	m.drPersistStatusWithLock(drAutoSyncStatus{State: m.drAutoSync.State, StateID: m.drAutoSync.StateID})
 }
 
+=======
+>>>>>>> d65d309b1 (dr-autosync: move state replicate to different goroutine (#6874)):pkg/replication/replication_mode.go
 func (m *ModeManager) drGetState() string {
 	m.RLock()
 	defer m.RUnlock()
@@ -369,8 +380,9 @@ func (m *ModeManager) drGetState() string {
 }
 
 const (
-	idleTimeout  = time.Minute
-	tickInterval = 500 * time.Millisecond
+	idleTimeout            = time.Minute
+	tickInterval           = 500 * time.Millisecond
+	replicateStateInterval = time.Second * 5
 )
 
 // Run starts the background job.
@@ -381,17 +393,46 @@ func (m *ModeManager) Run(ctx context.Context) {
 	case <-ctx.Done():
 		return
 	}
+<<<<<<< HEAD:server/replication/replication_mode.go
 	for {
 		select {
 		case <-time.After(tickInterval):
 		case <-ctx.Done():
 			return
+=======
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-time.After(tickInterval):
+			case <-ctx.Done():
+				return
+			}
+			m.tickUpdateState()
+>>>>>>> d65d309b1 (dr-autosync: move state replicate to different goroutine (#6874)):pkg/replication/replication_mode.go
 		}
-		m.tickDR()
-	}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-time.After(replicateStateInterval):
+			case <-ctx.Done():
+				return
+			}
+			m.tickReplicateStatus()
+		}
+	}()
+
+	wg.Wait()
 }
 
-func (m *ModeManager) tickDR() {
+func (m *ModeManager) tickUpdateState() {
 	if m.getModeName() != modeDRAutoSync {
 		return
 	}
@@ -484,8 +525,42 @@ func (m *ModeManager) tickDR() {
 			}
 		}
 	}
+}
 
-	m.checkReplicateFile()
+func (m *ModeManager) tickReplicateStatus() {
+	if m.getModeName() != modeDRAutoSync {
+		return
+	}
+
+	m.RLock()
+	state := drAutoSyncStatus{
+		State:            m.drAutoSync.State,
+		StateID:          m.drAutoSync.StateID,
+		AvailableStores:  m.drAutoSync.AvailableStores,
+		RecoverStartTime: m.drAutoSync.RecoverStartTime,
+	}
+	m.RUnlock()
+
+	data, _ := json.Marshal(state)
+
+	members, err := m.fileReplicater.GetMembers()
+	if err != nil {
+		log.Warn("failed to get members", zap.String("replicate-mode", modeDRAutoSync))
+		return
+	}
+	for _, member := range members {
+		stateID, ok := m.replicateState.Load(member.GetMemberId())
+		if !ok || stateID.(uint64) != state.StateID {
+			ctx, cancel := context.WithTimeout(context.Background(), persistFileTimeout)
+			err := m.fileReplicater.ReplicateFileToMember(ctx, member, drStatusFile, data)
+			if err != nil {
+				log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", state.State), errs.ZapError(err))
+			} else {
+				m.replicateState.Store(member.GetMemberId(), state.StateID)
+			}
+			cancel()
+		}
+	}
 }
 
 const (
@@ -555,17 +630,6 @@ func (m *ModeManager) drCheckStoreStateUpdated(stores []uint64) bool {
 		}
 	}
 	return true
-}
-
-func (m *ModeManager) checkReplicateFile() {
-	members, err := m.fileReplicater.GetMembers()
-	if err != nil {
-		log.Warn("failed to get members", zap.String("replicate-mode", modeDRAutoSync))
-		return
-	}
-	if m.drCheckNeedPersistStatus(members) {
-		m.drPersistStatus()
-	}
 }
 
 var (
