@@ -316,10 +316,6 @@ func handleGetStores(ctx context.Context, pdClis []pdpb.PDClient) {
 	}
 }
 
-// func handleUnaryRequest() {
-
-// }
-
 func exit(code int) {
 	os.Exit(code)
 }

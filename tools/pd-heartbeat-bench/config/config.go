@@ -72,7 +72,11 @@ func (c *Config) Parse(arguments []string) error {
 	var meta *toml.MetaData
 	if c.configFile != "" {
 		meta, err = configutil.ConfigFromFile(c, c.configFile)
+		if err != nil {
+			return err
+		}
 	}
+
 	// Parse again to replace with command line options.
 	err = c.flagSet.Parse(arguments)
 	if err != nil {
