@@ -78,11 +78,10 @@ func (sr *ServiceRegister) Register() error {
 				log.Info("exit register process", zap.String("key", sr.key))
 				return
 			case _, ok := <-kresp:
-				if ok {
-					continue
+				if !ok {
+					log.Error("keep alive failed", zap.String("key", sr.key))
+					kresp = sr.renewKeepalive()
 				}
-				log.Error("keep alive failed", zap.String("key", sr.key))
-				kresp = sr.renew()
 			}
 		}
 	}()
@@ -90,7 +89,7 @@ func (sr *ServiceRegister) Register() error {
 	return nil
 }
 
-func (sr *ServiceRegister) renew() <-chan *clientv3.LeaseKeepAliveResponse {
+func (sr *ServiceRegister) renewKeepalive() <-chan *clientv3.LeaseKeepAliveResponse {
 	t := time.NewTicker(time.Duration(sr.ttl) * time.Second / 2)
 	defer t.Stop()
 	for {
