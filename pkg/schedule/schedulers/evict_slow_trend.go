@@ -289,7 +289,7 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster) (slowStore *core.StoreI
 		if slowTrend != nil && slowTrend.CauseRate > alterEpsilon && slowTrend.ResultRate < -alterEpsilon {
 			candidates = append(candidates, store)
 			storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
-			log.Info("evict-slow-trend-scheduler pre-canptured candidate",
+			log.Info("evict-slow-trend-scheduler pre-captured candidate",
 				zap.Uint64("store-id", store.GetID()),
 				zap.Float64("cause-rate", slowTrend.CauseRate),
 				zap.Float64("result-rate", slowTrend.ResultRate),

@@ -724,6 +724,14 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, err
 	}
 
+	if s.cluster.GetStoreConfig().IsRaftKV2() {
+		// If the cluster was set up with `raft-kv-2` engine, this cluster should
+		// open `evict-slow-trend` scheduler as default.
+		if err := s.handler.AddEvictSlowTrendScheduler(); err != nil {
+			log.Warn("bootstrapping evict-slow-trend scheduler failed", zap.Uint64("cluster-id", clusterID))
+		}
+	}
+
 	if err = s.GetKeyspaceManager().Bootstrap(); err != nil {
 		log.Warn("bootstrapping keyspace manager failed", errs.ZapError(err))
 	}
