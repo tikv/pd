@@ -390,14 +390,15 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
 	}
+	var pinDownPeer *metapb.Peer
 	isUnhealthyPeer := func(id uint64) bool {
-		for _, pendingPeer := range region.GetPendingPeers() {
-			if pendingPeer.GetId() == id {
+		for _, downPeer := range region.GetDownPeers() {
+			if downPeer.Peer.GetId() == id {
 				return true
 			}
 		}
-		for _, downPeer := range region.GetDownPeers() {
-			if downPeer.Peer.GetId() == id {
+		for _, pendingPeer := range region.GetPendingPeers() {
+			if pendingPeer.GetId() == id {
 				return true
 			}
 		}
@@ -414,16 +415,56 @@ loopFits:
 		}
 		for _, p := range rf.Peers {
 			if isUnhealthyPeer(p.GetId()) {
+				// make sure is down peer.
+				if region.GetDownPeer(p.GetId()) != nil {
+					pinDownPeer = p
+				}
 				hasUnhealthyFit = true
 				break loopFits
 			}
 		}
 	}
+
 	// If hasUnhealthyFit is false, it is safe to delete the OrphanPeer.
 	if !hasUnhealthyFit {
 		checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 		return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, fit.OrphanPeers[0].StoreId)
 	}
+
+	// try to use orphan peers to replace unhealthy down peers.
+	for _, orphanPeer := range fit.OrphanPeers {
+		if pinDownPeer != nil {
+			// make sure the orphan peer is healthy.
+			if isUnhealthyPeer(orphanPeer.GetId()) {
+				continue
+			}
+			// no consider witness in this path.
+			if pinDownPeer.GetIsWitness() || orphanPeer.GetIsWitness() {
+				continue
+			}
+			// down peer's store should be down.
+			if !c.isStoreDownTimeHitMaxDownTime(pinDownPeer.GetStoreId()) {
+				continue
+			}
+			// check if down peer can replace with orphan peer.
+			dstStore := c.cluster.GetStore(orphanPeer.GetStoreId())
+			if fit.Replace(pinDownPeer.GetStoreId(), dstStore) {
+				destRole := pinDownPeer.GetRole()
+				orphanPeerRole := orphanPeer.GetRole()
+				checkerCounter.WithLabelValues("rule_checker", "replace-orphan-peer").Inc()
+				switch {
+				case orphanPeerRole == metapb.PeerRole_Learner && destRole == metapb.PeerRole_Voter:
+					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
+				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
+					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
+				default:
+					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
+					// destRole never be leader, so we not consider it.
+				}
+			}
+		}
+	}
+
 	// If hasUnhealthyFit is true, try to remove unhealthy orphan peers only if number of OrphanPeers is >= 2.
 	// Ref https://github.com/tikv/pd/issues/4045
 	if len(fit.OrphanPeers) >= 2 {
@@ -462,6 +503,10 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 
 func (c *RuleChecker) isStoreDownTimeHitMaxDownTime(storeID uint64) bool {
 	store := c.cluster.GetStore(storeID)
+	if store == nil {
+		log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
+		return false
+	}
 	return store.DownTime() >= c.cluster.GetOpts().GetMaxStoreDownTime()
 }
 

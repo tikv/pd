@@ -377,6 +377,15 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	}
 }
 
+func (suite *middlewareTestSuite) TestSwaggerUrl() {
+	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", nil)
+	resp, err := dialClient.Do(req)
+	suite.NoError(err)
+	suite.True(resp.StatusCode == http.StatusNotFound)
+	resp.Body.Close()
+}
+
 func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	input := map[string]interface{}{
