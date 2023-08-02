@@ -32,6 +32,7 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
@@ -39,10 +40,13 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -56,6 +60,7 @@ import (
 // Server is the scheduling server, and it implements bs.Server.
 type Server struct {
 	diagnosticspb.DiagnosticsServer
+
 	// Server state. 0 is not running, 1 is running.
 	isRunning int64
 	// Server start timestamp
@@ -66,18 +71,29 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg       *Config
-	clusterID uint64
-	name      string
-	listenURL *url.URL
+	cfg         *config.Config
+	name        string
+	clusterID   uint64
+	listenURL   *url.URL
+	backendUrls []url.URL
+
+	// etcd client
+	etcdClient *clientv3.Client
+	// http client
+	httpClient *http.Client
+
+	// Store as map[string]*grpc.ClientConn
+	clientConns sync.Map
 
 	// for the primary election of scheduling
 	participant *member.Participant
-	etcdClient  *clientv3.Client
-	httpClient  *http.Client
 
-	muxListener net.Listener
-	service     *Service
+	secure       bool
+	muxListener  net.Listener
+	httpListener net.Listener
+	grpcServer   *grpc.Server
+	httpServer   *http.Server
+	service      *Service
 
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
@@ -85,7 +101,12 @@ type Server struct {
 	// primaryCallbacks will be called after the server becomes leader.
 	primaryCallbacks []func(context.Context)
 
+	// for service registry
+	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+
+	cluster *Cluster
+	storage *endpoint.StorageEndpoint
 }
 
 // Name returns the unique etcd name for this server in etcd cluster.
@@ -103,18 +124,32 @@ func (s *Server) GetAddr() string {
 	return s.cfg.ListenAddr
 }
 
-// Run runs the Scheduling server.
-func (s *Server) Run() (err error) {
-	if err = s.initClient(); err != nil {
-		return err
-	}
-	if err = s.startServer(); err != nil {
-		return err
+// GetBackendEndpoints returns the backend endpoints.
+func (s *Server) GetBackendEndpoints() string {
+	return s.cfg.BackendEndpoints
+}
+
+// GetClientConns returns the client connections.
+func (s *Server) GetClientConns() *sync.Map {
+	return &s.clientConns
+}
+
+// Run runs the scheduling server.
+func (s *Server) Run() error {
+	skipWaitAPIServiceReady := false
+	failpoint.Inject("skipWaitAPIServiceReady", func() {
+		skipWaitAPIServiceReady = true
+	})
+	if !skipWaitAPIServiceReady {
+		if err := utils.WaitAPIServiceReady(s); err != nil {
+			return err
+		}
 	}
 
-	s.startServerLoop()
-
-	return nil
+	if err := s.initClient(); err != nil {
+		return err
+	}
+	return s.startServer()
 }
 
 func (s *Server) startServerLoop() {
@@ -209,6 +244,8 @@ func (s *Server) Close() {
 
 	log.Info("closing scheduling server ...")
 	s.serviceRegister.Deregister()
+	s.stopHTTPServer()
+	s.stopGRPCServer()
 	s.muxListener.Close()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
@@ -222,7 +259,6 @@ func (s *Server) Close() {
 	if s.httpClient != nil {
 		s.httpClient.CloseIdleConnections()
 	}
-
 	log.Info("scheduling server is closed")
 }
 
@@ -256,16 +292,39 @@ func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 
+// GetDelegateClient returns grpc client connection talking to the forwarded host
+func (s *Server) GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
+	client, ok := s.clientConns.Load(forwardedHost)
+	if !ok {
+		tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+		if err != nil {
+			return nil, err
+		}
+		cc, err := grpcutil.GetClientConn(ctx, forwardedHost, tlsConfig)
+		if err != nil {
+			return nil, err
+		}
+		client = cc
+		s.clientConns.Store(forwardedHost, cc)
+	}
+	return client.(*grpc.ClientConn), nil
+}
+
+// GetTLSConfig gets the security config.
+func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
+	return &s.cfg.Security.TLSConfig
+}
+
 func (s *Server) initClient() error {
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
 	}
-	u, err := types.NewURLs(strings.Split(s.cfg.BackendEndpoints, ","))
+	s.backendUrls, err = types.NewURLs(strings.Split(s.cfg.BackendEndpoints, ","))
 	if err != nil {
 		return err
 	}
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL(u))
+	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, s.backendUrls)
 	return err
 }
 
@@ -273,28 +332,8 @@ func (s *Server) startGRPCServer(l net.Listener) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
-	gs := grpc.NewServer()
-	s.service.RegisterGRPCService(gs)
-	err := gs.Serve(l)
-	log.Info("gRPC server stop serving")
-
-	// Attempt graceful stop (waits for pending RPCs), but force a stop if
-	// it doesn't happen in a reasonable amount of time.
-	done := make(chan struct{})
-	go func() {
-		defer logutil.LogPanic()
-		log.Info("try to gracefully stop the server now")
-		gs.GracefulStop()
-		close(done)
-	}()
-	timer := time.NewTimer(utils.DefaultGRPCGracefulStopTimeout)
-	defer timer.Stop()
-	select {
-	case <-done:
-	case <-timer.C:
-		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", utils.DefaultGRPCGracefulStopTimeout))
-		gs.Stop()
-	}
+	log.Info("grpc server starts serving", zap.String("address", l.Addr().String()))
+	err := s.grpcServer.Serve(l)
 	if s.IsClosed() {
 		log.Info("grpc server stopped")
 	} else {
@@ -306,22 +345,8 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
-	handler, _ := SetUpRestHandler(s.service)
-	hs := &http.Server{
-		Handler:           handler,
-		ReadTimeout:       5 * time.Minute,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	err := hs.Serve(l)
-	log.Info("http server stop serving")
-
-	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
-	defer cancel()
-	if err := hs.Shutdown(ctx); err != nil {
-		log.Error("http server shutdown encountered problem", errs.ZapError(err))
-	} else {
-		log.Info("all http(s) requests finished")
-	}
+	log.Info("http server starts serving", zap.String("address", l.Addr().String()))
+	err := s.httpServer.Serve(l)
 	if s.IsClosed() {
 		log.Info("http server stopped")
 	} else {
@@ -329,23 +354,40 @@ func (s *Server) startHTTPServer(l net.Listener) {
 	}
 }
 
-func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
+func (s *Server) startGRPCAndHTTPServers(serverReadyChan chan<- struct{}, l net.Listener) {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
 	mux := cmux.New(l)
+	// Don't hang on matcher after closing listener
+	mux.SetReadTimeout(3 * time.Second)
 	grpcL := mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
-	httpL := mux.Match(cmux.Any())
+	if s.secure {
+		s.httpListener = mux.Match(cmux.Any())
+	} else {
+		s.httpListener = mux.Match(cmux.HTTP1())
+	}
 
-	s.serverLoopWg.Add(2)
+	s.grpcServer = grpc.NewServer()
+	s.service.RegisterGRPCService(s.grpcServer)
+	diagnosticspb.RegisterDiagnosticsServer(s.grpcServer, s)
+	s.serverLoopWg.Add(1)
 	go s.startGRPCServer(grpcL)
-	go s.startHTTPServer(httpL)
 
+	handler, _ := SetUpRestHandler(s.service)
+	s.httpServer = &http.Server{
+		Handler:     handler,
+		ReadTimeout: 3 * time.Second,
+	}
+	s.serverLoopWg.Add(1)
+	go s.startHTTPServer(s.httpListener)
+
+	serverReadyChan <- struct{}{}
 	if err := mux.Serve(); err != nil {
 		if s.IsClosed() {
-			log.Info("mux stop serving", errs.ZapError(err))
+			log.Info("mux stopped serving", errs.ZapError(err))
 		} else {
-			log.Fatal("mux stop serving unexpectedly", errs.ZapError(err))
+			log.Fatal("mux stopped serving unexpectedly", errs.ZapError(err))
 		}
 	}
 }
@@ -353,6 +395,68 @@ func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
 func (s *Server) GetLeaderListenUrls() []string {
 	return s.participant.GetLeaderListenUrls()
+}
+
+func (s *Server) stopHTTPServer() {
+	log.Info("stopping http server")
+	defer log.Info("http server stopped")
+
+	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
+	defer cancel()
+
+	// First, try to gracefully shutdown the http server
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		s.httpServer.Shutdown(ctx)
+	}()
+
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		// Took too long, manually close open transports
+		log.Warn("http server graceful shutdown timeout, forcing close")
+		s.httpServer.Close()
+		// concurrent Graceful Shutdown should be interrupted
+		<-ch
+	}
+}
+
+func (s *Server) stopGRPCServer() {
+	log.Info("stopping grpc server")
+	defer log.Info("grpc server stopped")
+
+	// Do not grpc.Server.GracefulStop with TLS enabled etcd server
+	// See https://github.com/grpc/grpc-go/issues/1384#issuecomment-317124531
+	// and https://github.com/etcd-io/etcd/issues/8916
+	if s.secure {
+		s.grpcServer.Stop()
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultGRPCGracefulStopTimeout)
+	defer cancel()
+
+	// First, try to gracefully shutdown the grpc server
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		// Close listeners to stop accepting new connections,
+		// will block on any existing transports
+		s.grpcServer.GracefulStop()
+	}()
+
+	// Wait until all pending RPCs are finished
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		// Took too long, manually close open transports
+		// e.g. watch streams
+		log.Warn("grpc server graceful shutdown timeout, forcing close")
+		s.grpcServer.Stop()
+		// concurrent GracefulStop should be interrupted
+		<-ch
+	}
 }
 
 func (s *Server) startServer() (err error) {
@@ -370,17 +474,19 @@ func (s *Server) startServer() (err error) {
 	schedulingPrimaryPrefix := endpoint.SchedulingSvcRootPath(s.clusterID)
 	s.participant = member.NewParticipant(s.etcdClient)
 	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
-		utils.KeyspaceGroupsPrimaryKey, "keyspace group primary election", s.cfg.AdvertiseListenAddr)
-
+		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
+	s.storage = endpoint.NewStorageEndpoint(
+		kv.NewEtcdKVBase(s.etcdClient, endpoint.SchedulingSvcRootPath(s.clusterID)), nil)
+	s.cluster, err = NewCluster(s.ctx, s.storage, s.cfg)
+	if err != nil {
+		return err
+	}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
 	}
-	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
-	if err != nil {
-		return err
-	}
 	if tlsConfig != nil {
+		s.secure = true
 		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
 	} else {
 		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
@@ -389,8 +495,12 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 
+	serverReadyChan := make(chan struct{})
+	defer close(serverReadyChan)
 	s.serverLoopWg.Add(1)
-	go s.startGRPCAndHTTPServers(s.muxListener)
+	go s.startGRPCAndHTTPServers(serverReadyChan, s.muxListener)
+	<-serverReadyChan
+	s.startServerLoop()
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
@@ -399,8 +509,7 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
-	serializedEntry, err := entry.Serialize()
+	serializedEntry, err := s.serviceID.Serialize()
 	if err != nil {
 		return err
 	}
@@ -410,12 +519,13 @@ func (s *Server) startServer() (err error) {
 		log.Error("failed to register the service", zap.String("service-name", utils.SchedulingServiceName), errs.ZapError(err))
 		return err
 	}
+
 	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
 }
 
 // CreateServer creates the Server
-func CreateServer(ctx context.Context, cfg *Config) *Server {
+func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		startTimestamp:    time.Now().Unix(),
@@ -428,7 +538,7 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	cmd.Flags().Parse(args)
-	cfg := NewConfig()
+	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
 	err := cfg.Parse(flagSet)
 	defer logutil.LogPanic()

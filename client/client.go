@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"runtime/trace"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -823,6 +824,7 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 }
 
 func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {
+	defer trace.StartRegion(ctx, "GetLocalTSAsync").End()
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("GetLocalTSAsync", opentracing.ChildOf(span.Context()))
 		ctx = opentracing.ContextWithSpan(ctx, span)
