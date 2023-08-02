@@ -58,6 +58,7 @@ type TestResponseInfo struct {
 	succeed   bool
 }
 
+// NewTestResponseInfo creates a new TestResponseInfo.
 func NewTestResponseInfo(readBytes uint64, kvCPU time.Duration, succeed bool) *TestResponseInfo {
 	return &TestResponseInfo{
 		readBytes: readBytes,

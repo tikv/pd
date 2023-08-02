@@ -1047,9 +1047,8 @@ func (gc *groupCostController) onRequestWait(
 			sub(gc.mu.consumption, delta)
 			gc.mu.Unlock()
 			return nil, nil, err
-		} else {
-			gc.successfulRequestDuration.Observe(d.Seconds())
 		}
+		gc.successfulRequestDuration.Observe(d.Seconds())
 	}
 
 	gc.mu.Lock()
