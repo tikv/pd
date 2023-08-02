@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ type minResolvedTSTestSuite struct {
 	cleanup         testutil.CleanupFunc
 	url             string
 	defaultInterval time.Duration
+	storesNum       int
 }
 
 func TestMinResolvedTSTestSuite(t *testing.T) {
@@ -56,11 +58,13 @@ func (suite *minResolvedTSTestSuite) SetupSuite() {
 	suite.url = fmt.Sprintf("%s%s/api/v1/min-resolved-ts", addr, apiPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-	r1 := core.NewTestRegionInfo(7, 1, []byte("a"), []byte("b"))
-	mustRegionHeartbeat(re, suite.svr, r1)
-	r2 := core.NewTestRegionInfo(8, 1, []byte("b"), []byte("c"))
-	mustRegionHeartbeat(re, suite.svr, r2)
+	suite.storesNum = 3
+	for i := 1; i <= suite.storesNum; i++ {
+		id := uint64(i)
+		mustPutStore(re, suite.svr, id, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+		r := core.NewTestRegionInfo(id, id, []byte(fmt.Sprintf("%da", id)), []byte(fmt.Sprintf("%db", id)))
+		mustRegionHeartbeat(re, suite.svr, r)
+	}
 }
 
 func (suite *minResolvedTSTestSuite) TearDownSuite() {
@@ -95,9 +99,8 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTS() {
 		PersistInterval: interval,
 	})
 	// case4: set min resolved ts
-	rc := suite.svr.GetRaftCluster()
 	ts := uint64(233)
-	rc.SetMinResolvedTS(1, ts)
+	suite.setAllStoresMinResolvedTS(ts)
 	suite.checkMinResolvedTS(&minResolvedTS{
 		MinResolvedTS:   ts,
 		IsRealTime:      true,
@@ -111,7 +114,7 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTS() {
 		IsRealTime:      false,
 		PersistInterval: interval,
 	})
-	rc.SetMinResolvedTS(1, ts+1)
+	suite.setAllStoresMinResolvedTS(ts)
 	suite.checkMinResolvedTS(&minResolvedTS{
 		MinResolvedTS:   ts, // last persist value
 		IsRealTime:      false,
@@ -120,31 +123,56 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTS() {
 }
 
 func (suite *minResolvedTSTestSuite) TestMinResolvedTSByStores() {
-	// default run job
+	// run job.
 	interval := typeutil.Duration{Duration: suite.defaultInterval}
 	suite.setMinResolvedTSPersistenceInterval(interval)
 	suite.Eventually(func() bool {
 		return interval == suite.svr.GetRaftCluster().GetPDServerConfig().MinResolvedTSPersistenceInterval
 	}, time.Second*10, time.Millisecond*20)
-	// set min resolved ts
+	// set min resolved ts.
 	rc := suite.svr.GetRaftCluster()
 	ts := uint64(233)
-	rc.SetMinResolvedTS(1, ts)
-	storeIDs := []string{"1"}
+
+	// set all stores min resolved ts.
+	testStoresID := make([]string, 0)
+	testMap := make(map[uint64]uint64)
+	for i := 1; i <= suite.storesNum; i++ {
+		storeID := uint64(i)
+		testTS := ts + storeID
+		testMap[storeID] = testTS
+		rc.SetMinResolvedTS(storeID, testTS)
+
+		testStoresID = append(testStoresID, strconv.Itoa(i))
+	}
 	suite.checkMinResolvedTSByStores(&minResolvedTS{
-		MinResolvedTS:   233,
-		IsRealTime:      true,
-		PersistInterval: interval,
-		StoresMinResolvedTS: map[uint64]uint64{
-			1: ts,
-		},
-	}, storeIDs)
+		MinResolvedTS:       234,
+		IsRealTime:          true,
+		PersistInterval:     interval,
+		StoresMinResolvedTS: testMap,
+	}, testStoresID)
+
+	// remove last store for test.
+	testStoresID = testStoresID[:len(testStoresID)-1]
+	delete(testMap, uint64(suite.storesNum))
+	suite.checkMinResolvedTSByStores(&minResolvedTS{
+		MinResolvedTS:       234,
+		IsRealTime:          true,
+		PersistInterval:     interval,
+		StoresMinResolvedTS: testMap,
+	}, testStoresID)
 }
 
 func (suite *minResolvedTSTestSuite) setMinResolvedTSPersistenceInterval(duration typeutil.Duration) {
 	cfg := suite.svr.GetRaftCluster().GetPDServerConfig().Clone()
 	cfg.MinResolvedTSPersistenceInterval = duration
 	suite.svr.GetRaftCluster().SetPDServerConfig(cfg)
+}
+
+func (suite *minResolvedTSTestSuite) setAllStoresMinResolvedTS(ts uint64) {
+	rc := suite.svr.GetRaftCluster()
+	for i := 1; i <= suite.storesNum; i++ {
+		rc.SetMinResolvedTS(uint64(i), ts)
+	}
 }
 
 func (suite *minResolvedTSTestSuite) checkMinResolvedTS(expect *minResolvedTS) {
