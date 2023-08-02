@@ -15,7 +15,10 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"reflect"
 	"testing"
 	"time"
@@ -116,6 +119,28 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTS() {
 	})
 }
 
+func (suite *minResolvedTSTestSuite) TestMinResolvedTSByStores() {
+	// default run job
+	interval := typeutil.Duration{Duration: suite.defaultInterval}
+	suite.setMinResolvedTSPersistenceInterval(interval)
+	suite.Eventually(func() bool {
+		return interval == suite.svr.GetRaftCluster().GetPDServerConfig().MinResolvedTSPersistenceInterval
+	}, time.Second*10, time.Millisecond*20)
+	// set min resolved ts
+	rc := suite.svr.GetRaftCluster()
+	ts := uint64(233)
+	rc.SetMinResolvedTS(1, ts)
+	storeIDs := []string{"1"}
+	suite.checkMinResolvedTSByStores(&minResolvedTS{
+		MinResolvedTS:   0,
+		IsRealTime:      true,
+		PersistInterval: interval,
+		StoreMinResolvedTS: map[uint64]uint64{
+			1: ts,
+		},
+	}, storeIDs)
+}
+
 func (suite *minResolvedTSTestSuite) setMinResolvedTSPersistenceInterval(duration typeutil.Duration) {
 	cfg := suite.svr.GetRaftCluster().GetPDServerConfig().Clone()
 	cfg.MinResolvedTSPersistenceInterval = duration
@@ -125,6 +150,20 @@ func (suite *minResolvedTSTestSuite) setMinResolvedTSPersistenceInterval(duratio
 func (suite *minResolvedTSTestSuite) checkMinResolvedTS(expect *minResolvedTS) {
 	suite.Eventually(func() bool {
 		res, err := testDialClient.Get(suite.url)
+		suite.NoError(err)
+		defer res.Body.Close()
+		listResp := &minResolvedTS{}
+		err = apiutil.ReadJSON(res.Body, listResp)
+		suite.NoError(err)
+		return reflect.DeepEqual(expect, listResp)
+	}, time.Second*10, time.Millisecond*20)
+}
+
+func (suite *minResolvedTSTestSuite) checkMinResolvedTSByStores(expect *minResolvedTS, storeIDs []string) {
+	suite.Eventually(func() bool {
+		data, _ := json.Marshal(storeIDs)
+		req, _ := http.NewRequest(http.MethodGet, suite.url, bytes.NewBuffer(data))
+		res, err := testDialClient.Do(req)
 		suite.NoError(err)
 		defer res.Body.Close()
 		listResp := &minResolvedTS{}

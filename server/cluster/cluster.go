@@ -2487,6 +2487,20 @@ func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
 	return c.GetStore(storeID).GetMinResolvedTS()
 }
 
+// GetMinResolvedTSByStoreIDs returns the min resolved ts of the stores.
+func (c *RaftCluster) GetMinResolvedTSByStoreIDs(ids []string) map[uint64]uint64 {
+	allMinResolvedTS := make(map[uint64]uint64)
+	for _, idStr := range ids {
+		storeID, err := strconv.ParseUint(idStr, 10, 64)
+		if err != nil {
+			log.Error("parse store id failed", errs.ZapError(err))
+			continue
+		}
+		allMinResolvedTS[storeID] = c.GetStoreMinResolvedTS(storeID)
+	}
+	return allMinResolvedTS
+}
+
 // GetExternalTS returns the external timestamp.
 func (c *RaftCluster) GetExternalTS() uint64 {
 	c.RLock()

@@ -15,6 +15,8 @@
 package api
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -38,17 +40,18 @@ func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolved
 
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type minResolvedTS struct {
-	IsRealTime      bool              `json:"is_real_time,omitempty"`
-	MinResolvedTS   uint64            `json:"min_resolved_ts"`
-	PersistInterval typeutil.Duration `json:"persist_interval,omitempty"`
+	IsRealTime         bool              `json:"is_real_time,omitempty"`
+	MinResolvedTS      uint64            `json:"min_resolved_ts"`
+	PersistInterval    typeutil.Duration `json:"persist_interval,omitempty"`
+	StoreMinResolvedTS map[uint64]uint64 `json:"store_min_resolved_ts"`
 }
 
 // @Tags     min_store_resolved_ts
 // @Summary  Get store-level min resolved ts.
-// @Produce  json
-// @Success  200  {array}   minResolvedTS
+// @Produce      json
+// @Success      200  {array}   minResolvedTS
 // @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Failure      500  {string}  string  "PD server failed to proceed the request."
 // @Router   /min-resolved-ts/{store_id} [get]
 func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := h.svr.GetRaftCluster()
@@ -67,19 +70,37 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 	})
 }
 
-// @Tags     min_resolved_ts
-// @Summary  Get cluster-level min resolved ts.
+// @Tags         min_resolved_ts
+// @Summary      Get cluster-level min resolved ts.
+// @Description  Optionally, if a list of store IDs is provided in the request body,
+// it also returns the min_resolved_ts for the specified stores in a separate map.
 // @Produce  json
 // @Success  200  {array}   minResolvedTS
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /min-resolved-ts [get]
+// @Router       /min-resolved-ts [get]
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := h.svr.GetRaftCluster()
 	value := c.GetMinResolvedTS()
 	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
+
+	var storeMinResolvedTS map[uint64]uint64
+	if b, err := io.ReadAll(r.Body); err == nil && len(b) != 0 {
+		// stores ids is an optional parameter.
+		// if it is not empty, return the min resolved ts of the specified stores into map.
+		var ids []string
+		err = json.Unmarshal(b, &ids)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		c := h.svr.GetRaftCluster()
+		storeMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
+	}
+
 	h.rd.JSON(w, http.StatusOK, minResolvedTS{
-		MinResolvedTS:   value,
-		PersistInterval: persistInterval,
-		IsRealTime:      persistInterval.Duration != 0,
+		MinResolvedTS:      value,
+		PersistInterval:    persistInterval,
+		IsRealTime:         persistInterval.Duration != 0,
+		StoreMinResolvedTS: storeMinResolvedTS,
 	})
 }
