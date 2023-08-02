@@ -15,7 +15,6 @@
 package endpoint
 
 import (
-	"path"
 	"strings"
 
 	"go.etcd.io/etcd/clientv3"
@@ -38,7 +37,7 @@ var _ RuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
 func (se *StorageEndpoint) SaveRule(ruleKey string, rule interface{}) error {
-	return se.saveJSON(path.Join(rulesPath, ruleKey), rule)
+	return se.saveJSON(ruleKeyPath(ruleKey), rule)
 }
 
 // DeleteRule removes a rule from storage.
@@ -48,12 +47,12 @@ func (se *StorageEndpoint) DeleteRule(ruleKey string) error {
 
 // LoadRuleGroups loads all rule groups from storage.
 func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
-	return se.loadRangeByPrefix(ruleGroupPath+"/", f)
+	return se.loadRangeByPrefix(RuleGroupPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
 func (se *StorageEndpoint) SaveRuleGroup(groupID string, group interface{}) error {
-	return se.saveJSON(path.Join(ruleGroupPath, groupID), group)
+	return se.saveJSON(ruleGroupIDPath(groupID), group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
@@ -63,12 +62,12 @@ func (se *StorageEndpoint) DeleteRuleGroup(groupID string) error {
 
 // LoadRegionRules loads region rules from storage.
 func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
-	return se.loadRangeByPrefix(regionLabelPath+"/", f)
+	return se.loadRangeByPrefix(RegionLabelPath+"/", f)
 }
 
 // SaveRegionRule saves a region rule to the storage.
 func (se *StorageEndpoint) SaveRegionRule(ruleKey string, rule interface{}) error {
-	return se.saveJSON(path.Join(regionLabelPath, ruleKey), rule)
+	return se.saveJSON(regionLabelKeyPath(ruleKey), rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.
@@ -78,7 +77,7 @@ func (se *StorageEndpoint) DeleteRegionRule(ruleKey string) error {
 
 // LoadRules loads placement rules from storage.
 func (se *StorageEndpoint) LoadRules(f func(k, v string)) error {
-	return se.loadRangeByPrefix(rulesPath+"/", f)
+	return se.loadRangeByPrefix(RulesPath+"/", f)
 }
 
 // loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
