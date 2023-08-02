@@ -19,7 +19,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/requestutil"
+	"github.com/tikv/pd/pkg/utils/requestutil"
 	"go.uber.org/zap"
 )
 
@@ -123,6 +123,6 @@ func (l *LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	log.Info("Audit Log", zap.String("service-info", requestInfo.String()))
+	log.Info("audit log", zap.String("service-info", requestInfo.String()))
 	return true
 }

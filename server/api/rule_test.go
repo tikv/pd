@@ -24,18 +24,18 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/apiutil"
-	tu "github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/placement"
 )
 
 type ruleTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -400,7 +400,7 @@ func (suite *ruleTestSuite) TestGetAllByRegion() {
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
-	r := newTestRegionInfo(4, 1, []byte{0x22, 0x22}, []byte{0x33, 0x33})
+	r := core.NewTestRegionInfo(4, 1, []byte{0x22, 0x22}, []byte{0x33, 0x33})
 	mustRegionHeartbeat(re, suite.svr, r)
 
 	testCases := []struct {
@@ -850,7 +850,7 @@ type regionRuleTestSuite struct {
 	suite.Suite
 	svr       *server.Server
 	grpcSvr   *server.GrpcServer
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 	stores    []*metapb.Store
 	regions   []*core.RegionInfo
@@ -966,7 +966,7 @@ func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
 		re, "invalid region id"))
 	suite.NoError(err)
 
-	suite.svr.GetRaftCluster().GetOpts().GetReplicationConfig().EnablePlacementRules = false
+	suite.svr.GetRaftCluster().GetReplicationConfig().EnablePlacementRules = false
 	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 1)
 	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusPreconditionFailed), tu.StringContain(
 		re, "placement rules feature is disabled"))

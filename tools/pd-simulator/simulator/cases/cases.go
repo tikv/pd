@@ -16,23 +16,23 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/placement"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 // Store is used to simulate tikv.
 type Store struct {
-	ID           uint64
-	Status       metapb.StoreState
-	Labels       []*metapb.StoreLabel
-	Capacity     uint64
-	Available    uint64
-	LeaderWeight float32
-	RegionWeight float32
-	Version      string
+	ID                uint64
+	Status            metapb.StoreState
+	Labels            []*metapb.StoreLabel
+	Capacity          uint64
+	LeaderWeight      float32
+	RegionWeight      float32
+	Version           string
+	HasExtraUsedSpace bool
 }
 
 // Region is used to simulate a region.
@@ -126,7 +126,7 @@ func isUniform(count, meanCount int, threshold float64) bool {
 func getStoreNum() int {
 	storeNum := simutil.CaseConfigure.StoreNum
 	if storeNum < 3 {
-		simutil.Logger.Fatal("Store num should be larger than or equal to 3.")
+		simutil.Logger.Fatal("store num should be larger than or equal to 3")
 	}
 	return storeNum
 }
@@ -134,7 +134,7 @@ func getStoreNum() int {
 func getRegionNum() int {
 	regionNum := simutil.CaseConfigure.RegionNum
 	if regionNum <= 0 {
-		simutil.Logger.Fatal("Region num should be larger than 0.")
+		simutil.Logger.Fatal("region num should be larger than 0")
 	}
 	return regionNum
 }

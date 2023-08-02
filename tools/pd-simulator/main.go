@@ -28,22 +28,22 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	flag "github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"github.com/tikv/pd/tools/pd-simulator/simulator"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
-
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
 )
 
 var (
-	pdAddr                      = flag.String("pd", "", "pd address")
+	pdAddr                      = flag.String("pd-endpoints", "", "pd address")
 	configFile                  = flag.String("config", "conf/simconfig.toml", "config file")
 	caseName                    = flag.String("case", "", "case name")
 	serverLogLevel              = flag.String("serverLog", "info", "pd server log level")
@@ -69,6 +69,7 @@ func main() {
 		analysis.GetTransferCounter().Init(simutil.CaseConfigure.StoreNum, simutil.CaseConfigure.RegionNum)
 	}
 
+	schedulers.Register() // register schedulers, which is needed by simConfig.Adjust
 	simConfig := simulator.NewSimConfig(*serverLogLevel)
 	var meta toml.MetaData
 	var err error
@@ -132,20 +133,15 @@ func runHTTPServer() {
 }
 
 // NewSingleServer creates a pd server for simulator.
-func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*server.Server, server.CleanupFunc) {
-	err := simConfig.ServerConfig.SetupLogger()
+func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*server.Server, testutil.CleanupFunc) {
+	err := logutil.SetupLogger(simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps)
 	if err == nil {
-		log.ReplaceGlobals(simConfig.ServerConfig.GetZapLogger(), simConfig.ServerConfig.GetZapLogProperties())
+		log.ReplaceGlobals(simConfig.ServerConfig.Logger, simConfig.ServerConfig.LogProps)
 	} else {
 		log.Fatal("setup logger error", zap.Error(err))
 	}
 
-	simConfig.ServerConfig.SetupLogger()
-	if err != nil {
-		log.Fatal("initialize logger error", zap.Error(err))
-	}
-
-	s, err := server.CreateServer(ctx, simConfig.ServerConfig, api.NewHandler)
+	s, err := server.CreateServer(ctx, simConfig.ServerConfig, nil, api.NewHandler)
 	if err != nil {
 		panic("create server failed")
 	}
@@ -162,7 +158,7 @@ func cleanServer(cfg *config.Config) {
 	os.RemoveAll(cfg.DataDir)
 }
 
-func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, clean ...server.CleanupFunc) {
+func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, clean ...testutil.CleanupFunc) {
 	start := time.Now()
 	driver, err := simulator.NewDriver(pdAddr, simCase, simConfig)
 	if err != nil {
@@ -201,12 +197,11 @@ EXIT:
 	}
 
 	driver.Stop()
-	if len(clean) != 0 {
+	if len(clean) != 0 && clean[0] != nil {
 		clean[0]()
 	}
 
 	fmt.Printf("%s [%s] total iteration: %d, time cost: %v\n", simResult, simCase, driver.TickCount(), time.Since(start))
-	driver.PrintStatistics()
 	if analysis.GetTransferCounter().IsValid {
 		analysis.GetTransferCounter().PrintResult()
 	}

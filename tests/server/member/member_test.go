@@ -29,9 +29,9 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/assertutil"
-	"github.com/tikv/pd/pkg/etcdutil"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -248,6 +248,30 @@ func TestLeaderResignWithBlock(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/raftclusterIsBusy"))
 }
 
+func TestPDLeaderLostWhileEtcdLeaderIntact(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leader1 := cluster.WaitLeader()
+	memberID := cluster.GetServer(leader1).GetLeader().GetMemberId()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
+	leader2 := waitLeaderChange(re, cluster, leader1)
+	re.NotEqual(leader1, leader2)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+}
+
 func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string) string {
 	var leader string
 	testutil.Eventually(re, func() bool {
@@ -307,7 +331,7 @@ func TestGetLeader(t *testing.T) {
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	done := make(chan bool)
-	svr, err := server.CreateServer(ctx, cfg)
+	svr, err := server.CreateServer(ctx, cfg, nil, server.CreateMockHandler(re, "127.0.0.1"))
 	re.NoError(err)
 	defer svr.Close()
 	re.NoError(svr.Run())

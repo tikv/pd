@@ -23,8 +23,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -73,6 +73,8 @@ func (d *Driver) Prepare() error {
 
 	d.raftEngine = NewRaftEngine(d.simCase, d.conn, d.simConfig)
 	d.eventRunner = NewEventRunner(d.simCase.Events, d.raftEngine)
+
+	d.updateNodeAvailable()
 
 	// Bootstrap.
 	store, region, err := d.GetBootstrapInfo(d.raftEngine)
@@ -161,11 +163,6 @@ func (d *Driver) Check() bool {
 	return d.simCase.Checker(d.raftEngine.regionsInfo, stats)
 }
 
-// PrintStatistics prints the statistics of the scheduler.
-func (d *Driver) PrintStatistics() {
-	d.raftEngine.schedulerStats.PrintStatistics()
-}
-
 // Start starts all nodes.
 func (d *Driver) Start() error {
 	for _, n := range d.conn.Nodes {
@@ -217,4 +214,14 @@ func (d *Driver) GetBootstrapInfo(r *RaftEngine) (*metapb.Store, *metapb.Region,
 		return nil, nil, errors.Errorf("bootstrap store %v not found", region.GetLeader().GetStoreId())
 	}
 	return store.Store, region.GetMeta(), nil
+}
+
+func (d *Driver) updateNodeAvailable() {
+	for storeID, n := range d.conn.Nodes {
+		if n.hasExtraUsedSpace {
+			n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID)) - uint64(d.simConfig.RaftStore.ExtraUsedSpace)
+		} else {
+			n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID))
+		}
+	}
 }

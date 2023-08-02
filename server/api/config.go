@@ -27,14 +27,19 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/jsonutil"
-	"github.com/tikv/pd/pkg/logutil"
-	"github.com/tikv/pd/pkg/reflectutil"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/jsonutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
 )
+
+// This line is to ensure the package `sc` could always be imported so that
+// the swagger could generate the right definitions for the config structs.
+var _ *sc.ScheduleConfig = nil
 
 type confHandler struct {
 	svr *server.Server
@@ -161,8 +166,26 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value interfa
 	case "cluster-version":
 		return h.updateClusterVersion(value)
 	case "label-property": // TODO: support changing label-property
+	case "keyspace":
+		return h.updateKeyspaceConfig(cfg, kp[len(kp)-1], value)
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
+}
+
+func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, value interface{}) error {
+	updated, found, err := jsonutil.AddKeyValue(&config.Keyspace, key, value)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
+	if updated {
+		err = h.svr.SetKeyspaceConfig(config.Keyspace)
+	}
+	return err
 }
 
 func (h *confHandler) updateSchedule(config *config.Config, key string, value interface{}) error {
@@ -275,7 +298,7 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 // @Tags     config
 // @Summary  Get schedule config.
 // @Produce  json
-// @Success  200  {object}  config.ScheduleConfig
+// @Success  200  {object}  sc.ScheduleConfig
 // @Router   /config/schedule [get]
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetScheduleConfig()
@@ -338,7 +361,7 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Tags     config
 // @Summary  Get replication config.
 // @Produce  json
-// @Success  200  {object}  config.ReplicationConfig
+// @Success  200  {object}  sc.ReplicationConfig
 // @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())

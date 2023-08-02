@@ -20,8 +20,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/apiutil/serverapi"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 )
@@ -29,8 +30,8 @@ import (
 // Redirector is a middleware to redirect the request to the right place.
 func Redirector() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		svr := c.MustGet("server").(*server.Server)
-		allowFollowerHandle := len(c.Request.Header.Get(serverapi.AllowFollowerHandle)) > 0
+		svr := c.MustGet(ServerContextKey).(*server.Server)
+		allowFollowerHandle := len(c.Request.Header.Get(serverapi.PDAllowFollowerHandle)) > 0
 		isLeader := svr.GetMember().IsLeader()
 		if !svr.IsClosed() && (allowFollowerHandle || isLeader) {
 			c.Next()
@@ -38,13 +39,13 @@ func Redirector() gin.HandlerFunc {
 		}
 
 		// Prevent more than one redirection.
-		if name := c.Request.Header.Get(serverapi.RedirectorHeader); len(name) != 0 {
+		if name := c.Request.Header.Get(serverapi.PDRedirectorHeader); len(name) != 0 {
 			log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirect))
 			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrRedirect.FastGenByArgs().Error())
 			return
 		}
 
-		c.Request.Header.Set(serverapi.RedirectorHeader, svr.Name())
+		c.Request.Header.Set(serverapi.PDRedirectorHeader, svr.Name())
 
 		leader := svr.GetMember().GetLeader()
 		if leader == nil {
@@ -64,7 +65,7 @@ func Redirector() gin.HandlerFunc {
 		}
 
 		client := svr.GetHTTPClient()
-		serverapi.NewCustomReverseProxies(client, urls).ServeHTTP(c.Writer, c.Request)
+		apiutil.NewCustomReverseProxies(client, urls).ServeHTTP(c.Writer, c.Request)
 		c.Abort()
 	}
 }

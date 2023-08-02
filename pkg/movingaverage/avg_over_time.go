@@ -16,6 +16,8 @@ package movingaverage
 
 import (
 	"time"
+
+	"github.com/phf/go-queue/queue"
 )
 
 type deltaWithInterval struct {
@@ -29,8 +31,8 @@ type deltaWithInterval struct {
 // stores recent changes that happened in the last avgInterval,
 // then calculates the change rate by (sum of changes) / (sum of intervals).
 type AvgOverTime struct {
-	que         *SafeQueue        // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
-	margin      deltaWithInterval // The last element from `PopFront` in `que`
+	que         *queue.Queue      // The element is `deltaWithInterval`, sum of all elements' interval is less than `avgInterval`
+	margin      deltaWithInterval // The last element from `PopFront` in `que`, it will be changed if the sum exclude it is greater than `avgInterval`
 	deltaSum    float64           // Including `margin` and all elements in `que`
 	intervalSum time.Duration     // Including `margin` and all elements in `que`
 	avgInterval time.Duration
@@ -39,7 +41,7 @@ type AvgOverTime struct {
 // NewAvgOverTime returns an AvgOverTime with given interval.
 func NewAvgOverTime(interval time.Duration) *AvgOverTime {
 	return &AvgOverTime{
-		que: NewSafeQueue(),
+		que: queue.New(),
 		margin: deltaWithInterval{
 			delta:    0,
 			interval: 0,
@@ -55,13 +57,16 @@ func (aot *AvgOverTime) Get() float64 {
 	if aot.intervalSum < aot.avgInterval {
 		return 0
 	}
+
 	marginDelta := aot.margin.delta * (aot.intervalSum.Seconds() - aot.avgInterval.Seconds()) / aot.margin.interval.Seconds()
 	return (aot.deltaSum - marginDelta) / aot.avgInterval.Seconds()
 }
 
 // Clear clears the AvgOverTime.
 func (aot *AvgOverTime) Clear() {
-	aot.que.Init()
+	for aot.que.Len() > 0 {
+		aot.que.PopFront()
+	}
 	aot.margin = deltaWithInterval{
 		delta:    0,
 		interval: 0,
@@ -71,6 +76,11 @@ func (aot *AvgOverTime) Clear() {
 }
 
 // Add adds recent change to AvgOverTime.
+// It will pop item until the retain item's sum is greater than avgInterval.
+// such as:
+// que [1,1,1,6], avgInterval is 5.
+// It will pop 6 if adding 2, the retaining item's sum is 5(2,1,1,1) >= avgInterval.
+// It can't pop 6 if adding 1, the retaining item's sum is 4(1,1,1,1) < avgInterval.
 func (aot *AvgOverTime) Add(delta float64, interval time.Duration) {
 	if interval == 0 {
 		return
@@ -104,13 +114,18 @@ func (aot *AvgOverTime) IsFull() bool {
 
 // Clone returns a copy of AvgOverTime
 func (aot *AvgOverTime) Clone() *AvgOverTime {
-	que := aot.que.Clone()
+	q := queue.New()
+	for i := 0; i < aot.que.Len(); i++ {
+		v := aot.que.PopFront()
+		aot.que.PushBack(v)
+		q.PushBack(v)
+	}
 	margin := deltaWithInterval{
 		delta:    aot.margin.delta,
 		interval: aot.margin.interval,
 	}
 	return &AvgOverTime{
-		que:         que,
+		que:         q,
 		margin:      margin,
 		deltaSum:    aot.deltaSum,
 		intervalSum: aot.intervalSum,
@@ -121,4 +136,16 @@ func (aot *AvgOverTime) Clone() *AvgOverTime {
 // GetIntervalSum returns the sum of interval
 func (aot *AvgOverTime) GetIntervalSum() time.Duration {
 	return aot.intervalSum
+}
+
+// GetInstantaneous returns the value just added.
+func (aot *AvgOverTime) GetInstantaneous() float64 {
+	if aot.que.Len() == 0 || aot.que.Back() == nil {
+		if aot.margin.interval != 0 {
+			return aot.margin.delta / aot.margin.interval.Seconds()
+		}
+		return aot.margin.delta
+	}
+	data := aot.que.Back().(deltaWithInterval)
+	return data.delta / data.interval.Seconds()
 }

@@ -16,6 +16,7 @@ package operator_test
 
 import (
 	"context"
+	"encoding/hex"
 	"strconv"
 	"strings"
 	"testing"
@@ -23,8 +24,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -87,7 +88,7 @@ func TestOperator(t *testing.T) {
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
 	}))
-	pdctl.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("c"), core.SetPeers([]*metapb.Peer{
+	pdctl.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
 		{Id: 3, StoreId: 1},
 		{Id: 4, StoreId: 2},
 	}))
@@ -135,31 +136,39 @@ func TestOperator(t *testing.T) {
 			reset:  []string{"-u", pdAddr, "operator", "remove", "1"},
 		},
 		{
-			// operator add split-region <region_id> [--policy=scan|approximate]
+			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--keys=xxx(xxx is hex encoded string)]
 			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=scan"},
 			show:   []string{"-u", pdAddr, "operator", "show"},
 			expect: "split region with policy SCAN",
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
 		{
-			// operator add split-region <region_id> [--policy=scan|approximate]
+			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--keys=xxx(xxx is hex encoded string)]
 			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=approximate"},
 			show:   []string{"-u", pdAddr, "operator", "show"},
 			expect: "split region with policy APPROXIMATE",
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
 		{
-			// operator add split-region <region_id> [--policy=scan|approximate]
+			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--keys=xxx(xxx is hex encoded string)]
 			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=scan"},
 			show:   []string{"-u", pdAddr, "operator", "check", "3"},
 			expect: "split region with policy SCAN",
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
 		{
-			// operator add split-region <region_id> [--policy=scan|approximate]
+			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--keys=xxx(xxx is hex encoded string)]
 			cmd:    []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=approximate"},
 			show:   []string{"-u", pdAddr, "operator", "check", "3"},
 			expect: "status: RUNNING",
+			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
+		},
+		{
+			// operator add split-region <region_id> [--policy=scan|approximate|usekey] [--keys=xxx(xxx is hex encoded string)]
+			cmd: []string{"-u", pdAddr, "operator", "add", "split-region", "3", "--policy=usekey",
+				"--keys=" + hex.EncodeToString([]byte("c"))},
+			show:   []string{"-u", pdAddr, "operator", "show"},
+			expect: "split: region 3 use policy USEKEY and keys [" + hex.EncodeToString([]byte("c")) + "]",
 			reset:  []string{"-u", pdAddr, "operator", "remove", "3"},
 		},
 	}

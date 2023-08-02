@@ -16,9 +16,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/etcdutil"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -94,7 +96,7 @@ func setupServer() (*httptest.Server, *config.Config) {
 		InitialClusterState: "new",
 		InitialClusterToken: "test-token",
 		LeaderLease:         int64(1),
-		Replication: config.ReplicationConfig{
+		Replication: sc.ReplicationConfig{
 			LocationLabels: typeutil.StringSlice{},
 		},
 		PDServerCfg: config.PDServerConfig{
@@ -133,10 +135,9 @@ func (s *backupTestSuite) BeforeTest(suiteName, testName string) {
 
 	var (
 		rootPath               = path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
-		timestampPath          = path.Join(rootPath, "timestamp")
 		allocTimestampMaxBytes = typeutil.Uint64ToBytes(allocTimestampMax)
 	)
-	_, err = s.etcdClient.Put(ctx, timestampPath, string(allocTimestampMaxBytes))
+	_, err = s.etcdClient.Put(ctx, endpoint.TimestampPath(rootPath), string(allocTimestampMaxBytes))
 	s.NoError(err)
 
 	var (

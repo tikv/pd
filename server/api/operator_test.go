@@ -29,21 +29,21 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
-	tu "github.com/tikv/pd/pkg/testutil"
+	pdoperator "github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	pdoperator "github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/versioninfo"
 )
 
 type operatorTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -53,7 +53,7 @@ func TestOperatorTestSuite(t *testing.T) {
 
 func (suite *operatorTestSuite) SetupSuite() {
 	re := suite.Require()
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/unexpectedOperator", "return(true)"))
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 1 })
 	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
@@ -139,11 +139,11 @@ func (suite *operatorTestSuite) TestAddRemovePeer() {
 
 func (suite *operatorTestSuite) TestMergeRegionOperator() {
 	re := suite.Require()
-	r1 := newTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
+	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	mustRegionHeartbeat(re, suite.svr, r1)
-	r2 := newTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
+	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
 	mustRegionHeartbeat(re, suite.svr, r2)
-	r3 := newTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(re, suite.svr, r3)
 
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
@@ -166,7 +166,7 @@ func (suite *operatorTestSuite) TestMergeRegionOperator() {
 type transferRegionOperatorTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -176,7 +176,7 @@ func TestTransferRegionOperatorTestSuite(t *testing.T) {
 
 func (suite *transferRegionOperatorTestSuite) SetupSuite() {
 	re := suite.Require()
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/schedule/unexpectedOperator", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/unexpectedOperator", "return(true)"))
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 3 })
 	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
@@ -217,7 +217,13 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 	regionURL := fmt.Sprintf("%s/operators/%d", suite.urlPrefix, region.GetId())
 	operator := mustReadURL(re, regionURL)
 	suite.Contains(operator, "operator not found")
-
+	convertStepsToStr := func(steps []string) string {
+		stepStrs := make([]string, len(steps))
+		for i := range steps {
+			stepStrs[i] = fmt.Sprintf("%d:{%s}", i, steps[i])
+		}
+		return strings.Join(stepStrs, ", ")
+	}
 	testCases := []struct {
 		name                string
 		placementRuleEnable bool
@@ -231,25 +237,25 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			placementRuleEnable: false,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`),
 			expectedError:       nil,
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 1}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 1}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
-			}, ", "),
+			}),
 		},
 		{
 			name:                "placement rule disable with peer role",
 			placementRuleEnable: false,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError:       nil,
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 2}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 2}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 2}.String(),
 				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
-			}, ", "),
+			}),
 		},
 		{
 			name:                "default placement rule without peer role",
@@ -262,13 +268,13 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			name:                "default placement rule with peer role",
 			placementRuleEnable: true,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 3}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
-			}, ", "),
+			}),
 		},
 		{
 			name:                "default placement rule with invalid input",
@@ -323,12 +329,12 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			},
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError: nil,
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 5}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
-			}, ", "),
+			}),
 		},
 		{
 			name:                "customized placement rule with valid peer role2",
@@ -363,12 +369,12 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			},
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader", "follower"]}`),
 			expectedError: nil,
-			expectSteps: strings.Join([]string{
+			expectSteps: convertStepsToStr([]string{
 				pdoperator.AddLearner{ToStore: 3, PeerID: 6}.String(),
 				pdoperator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
 				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
 				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
-			}, ", "),
+			}),
 		},
 	}
 	for _, testCase := range testCases {

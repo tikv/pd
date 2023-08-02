@@ -20,7 +20,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -35,20 +35,14 @@ func newLabelNotMatch1() *Case {
 	for i := 0; i < num1; i++ {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        id,
-			Status:    metapb.StoreState_Up,
-			Capacity:  100 * units.GiB,
-			Available: 50 * units.GiB,
-			Version:   "2.1.0",
-			Labels:    []*metapb.StoreLabel{{Key: "host", Value: fmt.Sprintf("host%d", id)}},
+			ID:     id,
+			Status: metapb.StoreState_Up,
+			Labels: []*metapb.StoreLabel{{Key: "host", Value: fmt.Sprintf("host%d", id)}},
 		})
 	}
 	simCase.Stores = append(simCase.Stores, &Store{
-		ID:        IDAllocator.nextID(),
-		Status:    metapb.StoreState_Up,
-		Capacity:  100 * units.GiB,
-		Available: 50 * units.GiB,
-		Version:   "2.1.0",
+		ID:     IDAllocator.nextID(),
+		Status: metapb.StoreState_Up,
 	})
 
 	for i := 0; i < regionNum; i++ {
@@ -103,23 +97,17 @@ func newLabelIsolation1() *Case {
 	for i := 0; i < num1; i++ {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        id,
-			Status:    metapb.StoreState_Up,
-			Capacity:  1000 * units.GiB,
-			Available: 500 * units.GiB,
-			Version:   "2.1.0",
-			Labels:    []*metapb.StoreLabel{{Key: "host", Value: fmt.Sprintf("host%d", id)}},
+			ID:     id,
+			Status: metapb.StoreState_Up,
+			Labels: []*metapb.StoreLabel{{Key: "host", Value: fmt.Sprintf("host%d", id)}},
 		})
 	}
 	id := IDAllocator.GetID() + 1
 	for i := 0; i < num2; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        IDAllocator.nextID(),
-			Status:    metapb.StoreState_Up,
-			Capacity:  1000 * units.GiB,
-			Available: 500 * units.GiB,
-			Version:   "2.1.0",
-			Labels:    []*metapb.StoreLabel{{Key: "host", Value: fmt.Sprintf("host%d", id)}},
+			ID:     IDAllocator.nextID(),
+			Status: metapb.StoreState_Up,
+			Labels: []*metapb.StoreLabel{{Key: "host", Value: fmt.Sprintf("host%d", id)}},
 		})
 	}
 
@@ -174,11 +162,8 @@ func newLabelIsolation2() *Case {
 	for i := 0; i < storeNum; i++ {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        id,
-			Status:    metapb.StoreState_Up,
-			Capacity:  100 * units.GiB,
-			Available: 50 * units.GiB,
-			Version:   "2.1.0",
+			ID:     id,
+			Status: metapb.StoreState_Up,
 		})
 	}
 	simCase.Stores[0].Labels = []*metapb.StoreLabel{{Key: "dc", Value: "dc1"}, {Key: "zone", Value: "zone1"}, {Key: "host", Value: "host1"}}

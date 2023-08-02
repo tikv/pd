@@ -20,11 +20,11 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/unrolled/render"
 )
 
@@ -44,7 +44,7 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 // @Summary  Get a Region's pending operator.
 // @Param    region_id  path  int  true  "A Region's Id"
 // @Produce  json
-// @Success  200  {object}  schedule.OperatorWithStatus
+// @Success  200  {object}  operator.OpWithStatus
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /operators/{region_id} [get]

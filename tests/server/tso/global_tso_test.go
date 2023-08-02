@@ -19,18 +19,17 @@ package tso_test
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/grpcutil"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 )
 
@@ -42,62 +41,6 @@ import (
 // 3. Synchronized global TSO, the new way to get a global TSO from the PD leader,
 //    which will coordinate and synchronize a TSO with other Local TSO Allocator
 //    leaders.
-
-func TestConcurrentlyReset(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
-	re.NoError(err)
-
-	re.NoError(cluster.RunInitialServers())
-
-	cluster.WaitLeader()
-	leader := cluster.GetServer(cluster.GetLeader())
-	re.NotNil(leader)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	now := time.Now()
-	for i := 0; i < 2; i++ {
-		go func() {
-			defer wg.Done()
-			for i := 0; i <= 100; i++ {
-				physical := now.Add(time.Duration(2*i)*time.Minute).UnixNano() / int64(time.Millisecond)
-				ts := uint64(physical << 18)
-				leader.GetServer().GetHandler().ResetTS(ts, false, false)
-			}
-		}()
-	}
-	wg.Wait()
-}
-
-func TestZeroTSOCount(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
-	re.NoError(err)
-	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
-
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
-	clusterID := leaderServer.GetClusterID()
-
-	req := &pdpb.TsoRequest{
-		Header:     testutil.NewRequestHeader(clusterID),
-		DcLocation: tso.GlobalDCLocation,
-	}
-	tsoClient, err := grpcPDClient.Tso(ctx)
-	re.NoError(err)
-	defer tsoClient.CloseSend()
-	re.NoError(tsoClient.Send(req))
-	_, err = tsoClient.Recv()
-	re.Error(err)
-}
 
 func TestRequestFollower(t *testing.T) {
 	re := require.New(t)
@@ -171,7 +114,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 		DcLocation: tso.GlobalDCLocation,
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/delaySyncTimestamp", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp", `return(true)`))
 
 	// Make the old leader resign and wait for the new leader to get a lease
 	leaderServer.ResignLeader()
@@ -185,7 +128,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	resp, err := tsoClient.Recv()
 	re.NoError(err)
 	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp"))
 }
 
 func TestLogicalOverflow(t *testing.T) {
@@ -211,7 +154,7 @@ func TestLogicalOverflow(t *testing.T) {
 		defer tsoClient.CloseSend()
 
 		begin := time.Now()
-		for i := 0; i < 2; i += 1 { // the 2nd request may (but not must) overflow, as max logical interval is 262144
+		for i := 0; i < 3; i++ {
 			req := &pdpb.TsoRequest{
 				Header:     testutil.NewRequestHeader(clusterID),
 				Count:      150000,
@@ -220,12 +163,13 @@ func TestLogicalOverflow(t *testing.T) {
 			re.NoError(tsoClient.Send(req))
 			_, err = tsoClient.Recv()
 			re.NoError(err)
+			if i == 1 {
+				// the 2nd request may (but not must) overflow, as max logical interval is 262144
+				re.Less(time.Since(begin), updateInterval+20*time.Millisecond) // additional 20ms for gRPC latency
+			}
 		}
-		elapse := time.Since(begin)
-		if updateInterval >= 20*time.Millisecond { // on small interval, the physical may update before overflow
-			re.GreaterOrEqual(elapse, updateInterval)
-		}
-		re.Less(elapse, updateInterval+20*time.Millisecond) // additional 20ms for gRPC latency
+		// the 3rd request must overflow
+		re.GreaterOrEqual(time.Since(begin), updateInterval)
 	}
 
 	for _, updateInterval := range []int{1, 5, 30, 50} {

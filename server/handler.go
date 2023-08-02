@@ -29,22 +29,24 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/syncutil"
+	"github.com/tikv/pd/pkg/schedule"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/tikv/pd/server/schedule"
-	"github.com/tikv/pd/server/schedule/filter"
-	"github.com/tikv/pd/server/schedule/operator"
-	"github.com/tikv/pd/server/schedule/placement"
-	"github.com/tikv/pd/server/schedulers"
-	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage"
-	"github.com/tikv/pd/server/tso"
 	"go.uber.org/zap"
 )
 
@@ -52,8 +54,6 @@ var (
 	// SchedulerConfigHandlerPath is the api router path of the schedule config handler.
 	SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
 
-	// ErrServerNotStarted is error info for server not started.
-	ErrServerNotStarted = errors.New("The server has not been started")
 	// ErrOperatorNotFound is error info for operator not found.
 	ErrOperatorNotFound = errors.New("operator not found")
 	// ErrAddOperator is error info for already have an operator when adding operator.
@@ -102,7 +102,7 @@ func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
 }
 
 // GetOperatorController returns OperatorController.
-func (h *Handler) GetOperatorController() (*schedule.OperatorController, error) {
+func (h *Handler) GetOperatorController() (*operator.Controller, error) {
 	rc := h.s.GetRaftCluster()
 	if rc == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
@@ -116,7 +116,7 @@ func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.IsSchedulerPaused(name)
+	return rc.GetCoordinator().GetSchedulersController().IsSchedulerPaused(name)
 }
 
 // IsSchedulerDisabled returns whether scheduler is disabled.
@@ -125,7 +125,7 @@ func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.IsSchedulerDisabled(name)
+	return rc.GetCoordinator().GetSchedulersController().IsSchedulerDisabled(name)
 }
 
 // IsSchedulerExisted returns whether scheduler is existed.
@@ -134,11 +134,11 @@ func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.IsSchedulerExisted(name)
+	return rc.GetCoordinator().GetSchedulersController().IsSchedulerExisted(name)
 }
 
 // GetScheduleConfig returns ScheduleConfig.
-func (h *Handler) GetScheduleConfig() *config.ScheduleConfig {
+func (h *Handler) GetScheduleConfig() *sc.ScheduleConfig {
 	return h.s.GetScheduleConfig()
 }
 
@@ -157,7 +157,7 @@ func (h *Handler) IsCheckerPaused(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return rc.IsCheckerPaused(name)
+	return rc.GetCoordinator().IsCheckerPaused(name)
 }
 
 // GetStores returns all stores in the cluster.
@@ -186,6 +186,16 @@ func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
 		return nil
 	}
 	return c.GetHotWriteRegions()
+}
+
+// GetHotBuckets returns all hot buckets stats.
+func (h *Handler) GetHotBuckets(regionIDs ...uint64) map[uint64][]*buckets.BucketStat {
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil
+	}
+	degree := c.GetOpts().GetHotRegionCacheHitsThreshold()
+	return c.BucketsStats(degree, regionIDs...)
 }
 
 // GetHotReadRegions gets all hot read regions stats.
@@ -223,7 +233,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		return err
 	}
 
-	s, err := schedule.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedule.ConfigSliceDecoder(name, args))
+	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().GetSchedulersController().RemoveScheduler)
 	if err != nil {
 		return err
 	}
@@ -299,6 +309,16 @@ func (h *Handler) AddBalanceLeaderScheduler() error {
 	return h.AddScheduler(schedulers.BalanceLeaderType)
 }
 
+// AddBalanceWitnessScheduler adds a balance-witness-scheduler.
+func (h *Handler) AddBalanceWitnessScheduler() error {
+	return h.AddScheduler(schedulers.BalanceWitnessType)
+}
+
+// AddTransferWitnessLeaderScheduler adds a transfer-witness-leader-scheduler.
+func (h *Handler) AddTransferWitnessLeaderScheduler() error {
+	return h.AddScheduler(schedulers.TransferWitnessLeaderType)
+}
+
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
 	return h.AddScheduler(schedulers.BalanceRegionType)
@@ -307,6 +327,11 @@ func (h *Handler) AddBalanceRegionScheduler() error {
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
 	return h.AddScheduler(schedulers.HotRegionType)
+}
+
+// AddEvictSlowTrendScheduler adds a evict-slow-trend-scheduler.
+func (h *Handler) AddEvictSlowTrendScheduler() error {
+	return h.AddScheduler(schedulers.EvictSlowTrendType)
 }
 
 // AddLabelScheduler adds a label-scheduler.
@@ -380,7 +405,7 @@ func (h *Handler) GetOperator(regionID uint64) (*operator.Operator, error) {
 }
 
 // GetOperatorStatus returns the status of the region operator.
-func (h *Handler) GetOperatorStatus(regionID uint64) (*schedule.OperatorWithStatus, error) {
+func (h *Handler) GetOperatorStatus(regionID uint64) (*operator.OpWithStatus, error) {
 	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
@@ -406,7 +431,7 @@ func (h *Handler) RemoveOperator(regionID uint64) error {
 		return ErrOperatorNotFound
 	}
 
-	_ = c.RemoveOperator(op)
+	_ = c.RemoveOperator(op, operator.AdminStop)
 	return nil
 }
 
@@ -519,7 +544,7 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 }
 
 // GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]config.StoreLimitConfig, error) {
+func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]sc.StoreLimitConfig, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, err
@@ -830,7 +855,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 		return errors.Errorf("region %d is a hot region", regionID)
 	}
 
-	op, err := c.GetRegionScatter().Scatter(region, group)
+	op, err := c.GetRegionScatter().Scatter(region, group, false)
 	if err != nil {
 		return err
 	}
@@ -867,7 +892,7 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 			return 0, err
 		}
 	} else {
-		opsCount, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit)
+		opsCount, failures, err = c.GetRegionScatter().ScatterRegionsByID(regionIDs, group, retryLimit, false)
 		if err != nil {
 			return 0, err
 		}
@@ -903,17 +928,8 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	return mux, nil
 }
 
-// GetOfflinePeer gets the region with offline peer.
-func (h *Handler) GetOfflinePeer(typ statistics.RegionStatisticType) ([]*core.RegionInfo, error) {
-	c := h.s.GetRaftCluster()
-	if c == nil {
-		return nil, errs.ErrNotBootstrapped.FastGenByArgs()
-	}
-	return c.GetOfflineRegionStatsByType(typ), nil
-}
-
 // ResetTS resets the ts with specified tso.
-func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
+func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ uint32) error {
 	log.Info("reset-ts",
 		zap.Uint64("new-ts", ts),
 		zap.Bool("ignore-smaller", ignoreSmaller),
@@ -923,7 +939,7 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) er
 		return err
 	}
 	if tsoAllocator == nil {
-		return ErrServerNotStarted
+		return errs.ErrServerNotStarted
 	}
 	return tsoAllocator.SetTSO(ts, ignoreSmaller, skipUpperBoundCheck)
 }
@@ -970,7 +986,7 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 	h.pluginChMapLock.Lock()
 	defer h.pluginChMapLock.Unlock()
 	if ch, ok := h.pluginChMap[pluginPath]; ok {
-		ch <- cluster.PluginUnload
+		ch <- schedule.PluginUnload
 		return nil
 	}
 	return ErrPluginNotFound(pluginPath)
@@ -1032,12 +1048,14 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 			}
 			stat := storage.HistoryHotRegion{
 				// store in ms.
-				UpdateTime:     hotPeerStat.LastUpdateTime.UnixNano() / int64(time.Millisecond),
+				// TODO: distinguish store heartbeat interval and region heartbeat interval
+				// read statistic from store heartbeat, write statistic from region heartbeat
+				UpdateTime:     int64(region.GetInterval().GetEndTimestamp() * 1000),
 				RegionID:       hotPeerStat.RegionID,
 				StoreID:        hotPeerStat.StoreID,
 				PeerID:         region.GetStorePeer(hotPeerStat.StoreID).GetId(),
 				IsLeader:       hotPeerStat.IsLeader,
-				IsLearner:      hotPeerStat.IsLearner,
+				IsLearner:      core.IsLearner(region.GetPeer(hotPeerStat.StoreID)),
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
 				KeyRate:        hotPeerStat.KeyRate,

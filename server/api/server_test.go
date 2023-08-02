@@ -26,9 +26,10 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/assertutil"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/goleak"
@@ -67,16 +68,14 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-type cleanUpFunc func()
-
-func mustNewServer(re *require.Assertions, opts ...func(cfg *config.Config)) (*server.Server, cleanUpFunc) {
+func mustNewServer(re *require.Assertions, opts ...func(cfg *config.Config)) (*server.Server, testutil.CleanupFunc) {
 	_, svrs, cleanup := mustNewCluster(re, 1, opts...)
 	return svrs[0], cleanup
 }
 
 var zapLogOnce sync.Once
 
-func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, cleanUpFunc) {
+func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Config)) ([]*config.Config, []*server.Server, testutil.CleanupFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	svrs := make([]*server.Server, 0, num)
 	cfgs := server.NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), num)
@@ -84,15 +83,15 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
-			err := cfg.SetupLogger()
+			err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 			re.NoError(err)
 			zapLogOnce.Do(func() {
-				log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+				log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 			})
 			for _, opt := range opts {
 				opt(cfg)
 			}
-			s, err := server.CreateServer(ctx, cfg, NewHandler)
+			s, err := server.CreateServer(ctx, cfg, nil, NewHandler)
 			re.NoError(err)
 			err = s.Run()
 			re.NoError(err)
@@ -137,7 +136,7 @@ func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
 type serviceTestSuite struct {
 	suite.Suite
 	svr     *server.Server
-	cleanup cleanUpFunc
+	cleanup testutil.CleanupFunc
 }
 
 func TestServiceTestSuite(t *testing.T) {

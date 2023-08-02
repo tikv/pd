@@ -22,9 +22,9 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/apiutil"
-	"github.com/tikv/pd/pkg/assertutil"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"go.uber.org/zap"
@@ -32,7 +32,7 @@ import (
 
 func TestSendAndGetComponent(t *testing.T) {
 	re := require.New(t)
-	handler := func(ctx context.Context, s *server.Server) (http.Handler, server.ServiceGroup, error) {
+	handler := func(ctx context.Context, s *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 			component := apiutil.GetComponentNameOnHTTP(r)
@@ -43,14 +43,14 @@ func TestSendAndGetComponent(t *testing.T) {
 			re.Equal("pdctl", component)
 			fmt.Fprint(w, component)
 		})
-		info := server.ServiceGroup{
+		info := apiutil.APIServiceGroup{
 			IsCore: true,
 		}
 		return mux, info, nil
 	}
 	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := server.CreateServer(ctx, cfg, handler)
+	svr, err := server.CreateServer(ctx, cfg, nil, handler)
 	re.NoError(err)
 	err = svr.Run()
 	re.NoError(err)

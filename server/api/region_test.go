@@ -16,6 +16,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"net/url"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
@@ -31,10 +33,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	tu "github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/placement"
 )
 
 func TestPeer(t *testing.T) {
@@ -86,7 +89,7 @@ func TestPeerStats(t *testing.T) {
 type regionTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -109,33 +112,12 @@ func (suite *regionTestSuite) TearDownSuite() {
 	suite.cleanup()
 }
 
-func newTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
-	leader := &metapb.Peer{
-		Id:      regionID,
-		StoreId: storeID,
-	}
-	metaRegion := &metapb.Region{
-		Id:          regionID,
-		StartKey:    start,
-		EndKey:      end,
-		Peers:       []*metapb.Peer{leader},
-		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
-	}
-	newOpts := []core.RegionCreateOption{
-		core.SetApproximateKeys(10),
-		core.SetApproximateSize(10),
-		core.SetWrittenBytes(100 * units.MiB),
-		core.SetWrittenKeys(1 * units.MiB),
-		core.SetReadBytes(200 * units.MiB),
-		core.SetReadKeys(2 * units.MiB),
-	}
-	newOpts = append(newOpts, opts...)
-	region := core.NewRegionInfo(metaRegion, leader, newOpts...)
-	return region
-}
-
 func (suite *regionTestSuite) TestRegion() {
-	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r := core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"),
+		core.SetWrittenBytes(100*units.MiB),
+		core.SetWrittenKeys(1*units.MiB),
+		core.SetReadBytes(200*units.MiB),
+		core.SetReadKeys(2*units.MiB))
 	buckets := &metapb.Buckets{
 		RegionId: 2,
 		Keys:     [][]byte{[]byte("a"), []byte("b")},
@@ -168,9 +150,14 @@ func (suite *regionTestSuite) TestRegion() {
 }
 
 func (suite *regionTestSuite) TestRegionCheck() {
-	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r := core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"),
+		core.SetApproximateKeys(10),
+		core.SetApproximateSize(10))
 	downPeer := &metapb.Peer{Id: 13, StoreId: 2}
-	r = r.Clone(core.WithAddPeer(downPeer), core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}), core.WithPendingPeers([]*metapb.Peer{downPeer}))
+	r = r.Clone(
+		core.WithAddPeer(downPeer),
+		core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}),
+		core.WithPendingPeers([]*metapb.Peer{downPeer}))
 	re := suite.Require()
 	mustRegionHeartbeat(re, suite.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
@@ -220,6 +207,15 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, &r7))
 	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
 	suite.Equal(histKeys, r7)
+
+	mustPutStore(re, suite.svr, 2, metapb.StoreState_Offline, metapb.NodeState_Removing, []*metapb.StoreLabel{})
+	mustRegionHeartbeat(re, suite.svr, r)
+	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
+	r8 := &RegionsInfo{}
+	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r8))
+	r4.Adjust()
+	suite.Equal(1, r8.Count)
+	suite.Equal(r.GetID(), r8.Regions[0].ID)
 }
 
 func (suite *regionTestSuite) TestRegions() {
@@ -228,9 +224,9 @@ func (suite *regionTestSuite) TestRegions() {
 	suite.Len(r.Leader.RoleName, 0)
 
 	rs := []*core.RegionInfo{
-		newTestRegionInfo(2, 1, []byte("a"), []byte("b")),
-		newTestRegionInfo(3, 1, []byte("b"), []byte("c")),
-		newTestRegionInfo(4, 2, []byte("c"), []byte("d")),
+		core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"), core.SetApproximateKeys(10), core.SetApproximateSize(10)),
+		core.NewTestRegionInfo(3, 1, []byte("b"), []byte("c"), core.SetApproximateKeys(10), core.SetApproximateSize(10)),
+		core.NewTestRegionInfo(4, 2, []byte("c"), []byte("d"), core.SetApproximateKeys(10), core.SetApproximateSize(10)),
 	}
 	regions := make([]RegionInfo, 0, len(rs))
 	re := suite.Require()
@@ -255,9 +251,9 @@ func (suite *regionTestSuite) TestRegions() {
 
 func (suite *regionTestSuite) TestStoreRegions() {
 	re := suite.Require()
-	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
-	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
-	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("d"))
+	r1 := core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r2 := core.NewTestRegionInfo(3, 1, []byte("b"), []byte("c"))
+	r3 := core.NewTestRegionInfo(4, 2, []byte("c"), []byte("d"))
 	mustRegionHeartbeat(re, suite.svr, r1)
 	mustRegionHeartbeat(re, suite.svr, r2)
 	mustRegionHeartbeat(re, suite.svr, r3)
@@ -291,13 +287,14 @@ func (suite *regionTestSuite) TestStoreRegions() {
 	suite.Len(regionIDs, r6.Count)
 }
 
-func (suite *regionTestSuite) TestTopFlow() {
+func (suite *regionTestSuite) TestTop() {
+	// Top flow.
 	re := suite.Require()
-	r1 := newTestRegionInfo(1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
+	r1 := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	mustRegionHeartbeat(re, suite.svr, r1)
-	r2 := newTestRegionInfo(2, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
+	r2 := core.NewTestRegionInfo(2, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
 	mustRegionHeartbeat(re, suite.svr, r2)
-	r3 := newTestRegionInfo(3, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	r3 := core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(re, suite.svr, r3)
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/writeflow", suite.urlPrefix), []uint64{2, 1, 3})
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/readflow", suite.urlPrefix), []uint64{1, 3, 2})
@@ -306,29 +303,39 @@ func (suite *regionTestSuite) TestTopFlow() {
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/confver?limit=2", suite.urlPrefix), []uint64{3, 2})
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/version", suite.urlPrefix), []uint64{2, 3, 1})
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/version?limit=2", suite.urlPrefix), []uint64{2, 3})
-}
-
-func (suite *regionTestSuite) TestTopSize() {
-	re := suite.Require()
+	// Top size.
 	baseOpt := []core.RegionCreateOption{core.SetRegionConfVer(3), core.SetRegionVersion(3)}
 	opt := core.SetApproximateSize(1000)
-	r1 := newTestRegionInfo(7, 1, []byte("a"), []byte("b"), append(baseOpt, opt)...)
+	r1 = core.NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r1)
 	opt = core.SetApproximateSize(900)
-	r2 := newTestRegionInfo(8, 1, []byte("b"), []byte("c"), append(baseOpt, opt)...)
+	r2 = core.NewTestRegionInfo(2, 1, []byte("b"), []byte("c"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r2)
 	opt = core.SetApproximateSize(800)
-	r3 := newTestRegionInfo(9, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
+	r3 = core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r3)
-	// query with limit
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/size?limit=%d", suite.urlPrefix, 2), []uint64{7, 8})
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/size?limit=2", suite.urlPrefix), []uint64{1, 2})
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/size", suite.urlPrefix), []uint64{1, 2, 3})
+	// Top CPU usage.
+	baseOpt = []core.RegionCreateOption{core.SetRegionConfVer(4), core.SetRegionVersion(4)}
+	opt = core.SetCPUUsage(100)
+	r1 = core.NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), append(baseOpt, opt)...)
+	mustRegionHeartbeat(re, suite.svr, r1)
+	opt = core.SetCPUUsage(300)
+	r2 = core.NewTestRegionInfo(2, 1, []byte("b"), []byte("c"), append(baseOpt, opt)...)
+	mustRegionHeartbeat(re, suite.svr, r2)
+	opt = core.SetCPUUsage(500)
+	r3 = core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
+	mustRegionHeartbeat(re, suite.svr, r3)
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/cpu?limit=2", suite.urlPrefix), []uint64{3, 2})
+	suite.checkTopRegions(fmt.Sprintf("%s/regions/cpu", suite.urlPrefix), []uint64{3, 2, 1})
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
 	re := suite.Require()
-	r1 := newTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
-	r2 := newTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
-	r3 := newTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
+	r1 := core.NewTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
+	r2 := core.NewTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
+	r3 := core.NewTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
 	mustRegionHeartbeat(re, suite.svr, r1)
 	mustRegionHeartbeat(re, suite.svr, r2)
 	mustRegionHeartbeat(re, suite.svr, r3)
@@ -340,13 +347,33 @@ func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
 	suite.Len(idList, 2)
 }
 
+func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
+	re := suite.Require()
+	r1 := core.NewTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
+	r2 := core.NewTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
+	r3 := core.NewTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
+	r4 := core.NewTestRegionInfo(560, 16, []byte("a4"), []byte("a5"))
+	r5 := core.NewTestRegionInfo(561, 17, []byte("a5"), []byte("a6"))
+	mustRegionHeartbeat(re, suite.svr, r1)
+	mustRegionHeartbeat(re, suite.svr, r2)
+	mustRegionHeartbeat(re, suite.svr, r3)
+	mustRegionHeartbeat(re, suite.svr, r4)
+	mustRegionHeartbeat(re, suite.svr, r5)
+	body := fmt.Sprintf(`[{"start_key":"%s", "end_key": "%s"}, {"start_key":"%s", "end_key": "%s"}]`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
+
+	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", suite.urlPrefix), []byte(body), tu.StatusOK(re))
+	suite.NoError(err)
+	idList := suite.svr.GetRaftCluster().GetSuspectRegions()
+	suite.Len(idList, 4)
+}
+
 func (suite *regionTestSuite) TestScatterRegions() {
 	re := suite.Require()
-	r1 := newTestRegionInfo(601, 13, []byte("b1"), []byte("b2"))
+	r1 := core.NewTestRegionInfo(601, 13, []byte("b1"), []byte("b2"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
-	r2 := newTestRegionInfo(602, 13, []byte("b2"), []byte("b3"))
+	r2 := core.NewTestRegionInfo(602, 13, []byte("b2"), []byte("b3"))
 	r2.GetMeta().Peers = append(r2.GetMeta().Peers, &metapb.Peer{Id: 7, StoreId: 14}, &metapb.Peer{Id: 8, StoreId: 15})
-	r3 := newTestRegionInfo(603, 13, []byte("b4"), []byte("b4"))
+	r3 := core.NewTestRegionInfo(603, 13, []byte("b4"), []byte("b4"))
 	r3.GetMeta().Peers = append(r3.GetMeta().Peers, &metapb.Peer{Id: 9, StoreId: 14}, &metapb.Peer{Id: 10, StoreId: 15})
 	mustRegionHeartbeat(re, suite.svr, r1)
 	mustRegionHeartbeat(re, suite.svr, r2)
@@ -372,7 +399,7 @@ func (suite *regionTestSuite) TestScatterRegions() {
 
 func (suite *regionTestSuite) TestSplitRegions() {
 	re := suite.Require()
-	r1 := newTestRegionInfo(601, 13, []byte("aaa"), []byte("ggg"))
+	r1 := core.NewTestRegionInfo(601, 13, []byte("aaa"), []byte("ggg"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 13}, &metapb.Peer{Id: 6, StoreId: 13})
 	mustRegionHeartbeat(re, suite.svr, r1)
 	mustPutStore(re, suite.svr, 13, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
@@ -413,7 +440,7 @@ func (suite *regionTestSuite) TestTopN() {
 		regions := make([]*core.RegionInfo, 0, len(writtenBytes))
 		for _, i := range rand.Perm(len(writtenBytes)) {
 			id := uint64(i + 1)
-			region := newTestRegionInfo(id, id, nil, nil, core.SetWrittenBytes(writtenBytes[i]))
+			region := core.NewTestRegionInfo(id, id, nil, nil, core.SetWrittenBytes(writtenBytes[i]))
 			regions = append(regions, region)
 		}
 		topN := TopNRegions(regions, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, n)
@@ -428,10 +455,44 @@ func (suite *regionTestSuite) TestTopN() {
 	}
 }
 
+func TestRegionsWithKillRequest(t *testing.T) {
+	re := require.New(t)
+	svr, cleanup := mustNewServer(re)
+	defer cleanup()
+	server.MustWaitLeader(re, []*server.Server{svr})
+
+	addr := svr.GetAddr()
+	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
+	mustBootstrapCluster(re, svr)
+	regionCount := 100000
+	for i := 0; i < regionCount; i++ {
+		r := core.NewTestRegionInfo(uint64(i+2), 1,
+			[]byte(fmt.Sprintf("%09d", i)),
+			[]byte(fmt.Sprintf("%09d", i+1)),
+			core.SetApproximateKeys(10), core.SetApproximateSize(10))
+		mustRegionHeartbeat(re, svr, r)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewBuffer(nil))
+	re.NoError(err)
+	respCh := make(chan *http.Response)
+	go func() {
+		resp, err := testDialClient.Do(req) // nolint:bodyclose
+		re.Error(err)
+		re.Contains(err.Error(), "context canceled")
+		respCh <- resp
+	}()
+	time.Sleep(100 * time.Millisecond) // wait for the request to be sent
+	cancel()                           // close the request
+	resp := <-respCh
+	re.Nil(resp)
+}
+
 type getRegionTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -456,7 +517,7 @@ func (suite *getRegionTestSuite) TearDownSuite() {
 
 func (suite *getRegionTestSuite) TestRegionKey() {
 	re := suite.Require()
-	r := newTestRegionInfo(99, 1, []byte{0xFF, 0xFF, 0xAA}, []byte{0xFF, 0xFF, 0xCC}, core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	r := core.NewTestRegionInfo(99, 1, []byte{0xFF, 0xFF, 0xAA}, []byte{0xFF, 0xFF, 0xCC}, core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url := fmt.Sprintf("%s/region/key/%s", suite.urlPrefix, url.QueryEscape(string([]byte{0xFF, 0xFF, 0xBB})))
 	RegionInfo := &RegionInfo{}
@@ -467,11 +528,11 @@ func (suite *getRegionTestSuite) TestRegionKey() {
 
 func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	re := suite.Require()
-	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
-	r2 := newTestRegionInfo(3, 1, []byte("b"), []byte("c"))
-	r3 := newTestRegionInfo(4, 2, []byte("c"), []byte("e"))
-	r4 := newTestRegionInfo(5, 2, []byte("x"), []byte("z"))
-	r := newTestRegionInfo(99, 1, []byte{0xFF, 0xFF, 0xAA}, []byte{0xFF, 0xFF, 0xCC}, core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	r1 := core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r2 := core.NewTestRegionInfo(3, 1, []byte("b"), []byte("c"))
+	r3 := core.NewTestRegionInfo(4, 2, []byte("c"), []byte("e"))
+	r4 := core.NewTestRegionInfo(5, 2, []byte("x"), []byte("z"))
+	r := core.NewTestRegionInfo(99, 1, []byte{0xFF, 0xFF, 0xAA}, []byte{0xFF, 0xFF, 0xCC}, core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(re, suite.svr, r1)
 	mustRegionHeartbeat(re, suite.svr, r2)
 	mustRegionHeartbeat(re, suite.svr, r3)
@@ -539,7 +600,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 type getRegionRangeHolesTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -563,12 +624,12 @@ func (suite *getRegionRangeHolesTestSuite) TearDownSuite() {
 func (suite *getRegionRangeHolesTestSuite) TestRegionRangeHoles() {
 	re := suite.Require()
 	// Missing r0 with range [0, 0xEA]
-	r1 := newTestRegionInfo(2, 1, []byte{0xEA}, []byte{0xEB})
+	r1 := core.NewTestRegionInfo(2, 1, []byte{0xEA}, []byte{0xEB})
 	// Missing r2 with range [0xEB, 0xEC]
-	r3 := newTestRegionInfo(3, 1, []byte{0xEC}, []byte{0xED})
-	r4 := newTestRegionInfo(4, 2, []byte{0xED}, []byte{0xEE})
+	r3 := core.NewTestRegionInfo(3, 1, []byte{0xEC}, []byte{0xED})
+	r4 := core.NewTestRegionInfo(4, 2, []byte{0xED}, []byte{0xEE})
 	// Missing r5 with range [0xEE, 0xFE]
-	r6 := newTestRegionInfo(5, 2, []byte{0xFE}, []byte{0xFF})
+	r6 := core.NewTestRegionInfo(5, 2, []byte{0xFE}, []byte{0xFF})
 	mustRegionHeartbeat(re, suite.svr, r1)
 	mustRegionHeartbeat(re, suite.svr, r3)
 	mustRegionHeartbeat(re, suite.svr, r4)
@@ -588,7 +649,7 @@ func (suite *getRegionRangeHolesTestSuite) TestRegionRangeHoles() {
 type regionsReplicatedTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -620,7 +681,7 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 	}()
 
 	// add test region
-	r1 := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r1 := core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	mustRegionHeartbeat(re, suite.svr, r1)
 
 	// set the bundle
@@ -666,7 +727,7 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 	suite.Equal("PENDING", status)
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/api/mockPending"))
 	// test multiple rules
-	r1 = newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1})
 	mustRegionHeartbeat(re, suite.svr, r1)
 
@@ -701,7 +762,7 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 	suite.NoError(err)
 	suite.Equal("INPROGRESS", status)
 
-	r1 = newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1}, &metapb.Peer{Id: 6, StoreId: 1}, &metapb.Peer{Id: 7, StoreId: 1})
 	mustRegionHeartbeat(re, suite.svr, r1)
 
@@ -710,54 +771,60 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 	suite.Equal("REPLICATED", status)
 }
 
-// Create n regions (0..n) of n stores (0..n).
-// Each region contains np peers, the first peer is the leader.
-// (copied from server/cluster_test.go)
-func newTestRegions() []*core.RegionInfo {
-	n := uint64(10000)
-	np := uint64(3)
-
-	regions := make([]*core.RegionInfo, 0, n)
-	for i := uint64(0); i < n; i++ {
-		peers := make([]*metapb.Peer, 0, np)
-		for j := uint64(0); j < np; j++ {
-			peer := &metapb.Peer{
-				Id: i*np + j,
-			}
-			peer.StoreId = (i + j) % n
-			peers = append(peers, peer)
-		}
-		region := &metapb.Region{
-			Id:          i,
-			Peers:       peers,
-			StartKey:    []byte(fmt.Sprintf("%d", i)),
-			EndKey:      []byte(fmt.Sprintf("%d", i+1)),
-			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
-		}
-		regions = append(regions, core.NewRegionInfo(region, peers[0]))
+func TestRegionsInfoMarshal(t *testing.T) {
+	re := require.New(t)
+	regionWithNilPeer := core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1})
+	core.SetPeers([]*metapb.Peer{{Id: 2}, nil})(regionWithNilPeer)
+	cases := [][]*core.RegionInfo{
+		{},
+		{
+			// leader is nil
+			core.NewRegionInfo(&metapb.Region{Id: 1}, nil),
+			// Peers is empty
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.SetPeers([]*metapb.Peer{})),
+			// There is nil peer in peers.
+			regionWithNilPeer,
+		},
+		{
+			// PendingPeers is empty
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.WithPendingPeers([]*metapb.Peer{})),
+			// There is nil peer in peers.
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.WithPendingPeers([]*metapb.Peer{nil})),
+		},
+		{
+			// DownPeers is empty
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.WithDownPeers([]*pdpb.PeerStats{})),
+			// There is nil peer in peers.
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.WithDownPeers([]*pdpb.PeerStats{{Peer: nil}})),
+		},
+		{
+			// Buckets is nil
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.SetBuckets(nil)),
+			// Buckets is empty
+			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+				core.SetBuckets(&metapb.Buckets{})),
+		},
+		{
+			core.NewRegionInfo(&metapb.Region{Id: 1, StartKey: []byte{}, EndKey: []byte{},
+				RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}},
+				&metapb.Peer{Id: 1}, core.SetCPUUsage(10),
+				core.SetApproximateKeys(10), core.SetApproximateSize(10),
+				core.SetWrittenBytes(10), core.SetReadBytes(10),
+				core.SetReadKeys(10), core.SetWrittenKeys(10)),
+		},
 	}
-	return regions
-}
-
-func BenchmarkRenderJSON(b *testing.B) {
-	regionInfos := newTestRegions()
-	rd := createStreamingRender()
-	regions := convertToAPIRegions(regionInfos)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		var buffer bytes.Buffer
-		rd.JSON(&buffer, 200, regions)
-	}
-}
-
-func BenchmarkConvertToAPIRegions(b *testing.B) {
-	regionInfos := newTestRegions()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		regions := convertToAPIRegions(regionInfos)
-		_ = regions.Count
+	regionsInfo := &RegionsInfo{}
+	for _, regions := range cases {
+		b, err := marshalRegionsInfoJSON(context.Background(), regions)
+		re.NoError(err)
+		err = json.Unmarshal(b, regionsInfo)
+		re.NoError(err)
 	}
 }
 
@@ -774,5 +841,36 @@ func BenchmarkHexRegionKeyStr(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = core.HexRegionKeyStr(key)
+	}
+}
+
+func BenchmarkGetRegions(b *testing.B) {
+	re := require.New(b)
+	svr, cleanup := mustNewServer(re)
+	defer cleanup()
+	server.MustWaitLeader(re, []*server.Server{svr})
+
+	addr := svr.GetAddr()
+	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
+	mustBootstrapCluster(re, svr)
+	regionCount := 1000000
+	for i := 0; i < regionCount; i++ {
+		r := core.NewTestRegionInfo(uint64(i+2), 1,
+			[]byte(fmt.Sprintf("%09d", i)),
+			[]byte(fmt.Sprintf("%09d", i+1)),
+			core.SetApproximateKeys(10), core.SetApproximateSize(10))
+		mustRegionHeartbeat(re, svr, r)
+	}
+	resp, _ := apiutil.GetJSON(testDialClient, url, nil)
+	regions := &RegionsInfo{}
+	err := json.NewDecoder(resp.Body).Decode(regions)
+	re.NoError(err)
+	re.Equal(regionCount, regions.Count)
+	resp.Body.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		resp, _ := apiutil.GetJSON(testDialClient, url, nil)
+		resp.Body.Close()
 	}
 }

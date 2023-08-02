@@ -21,10 +21,13 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/docker/go-units"
-	"github.com/tikv/pd/pkg/tempurl"
-	"github.com/tikv/pd/pkg/typeutil"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/configutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/schedule/placement"
 )
 
 const (
@@ -32,12 +35,14 @@ const (
 	defaultSimTickInterval = 100 * time.Millisecond
 	// store
 	defaultStoreIOMBPerSecond = 40
-	defaultStoreVersion       = "2.1.0"
 	defaultStoreHeartbeat     = 10 * time.Second
 	defaultRegionHeartbeat    = 1 * time.Minute
 	defaultRegionSplitKeys    = 960000
 	defaultRegionSplitSize    = 96 * units.MiB
-	defaultCapacity           = 3000 * units.GiB
+	defaultCapacity           = 1 * units.TiB
+	defaultExtraUsedSpace     = 0
+	// TSO Proxy related
+	defaultMaxConcurrentTSOProxyStreamings = 5000
 	// server
 	defaultLeaderLease                 = 3
 	defaultTSOSaveInterval             = 200 * time.Millisecond
@@ -63,7 +68,7 @@ type SimConfig struct {
 // RaftStore the configuration for raft store.
 type RaftStore struct {
 	Capacity                typeutil.ByteSize `toml:"capacity" json:"capacity"`
-	Available               typeutil.ByteSize `toml:"available" json:"available"`
+	ExtraUsedSpace          typeutil.ByteSize `toml:"extra-used-space" json:"extra-used-space"`
 	RegionHeartBeatInterval typeutil.Duration `toml:"pd-heartbeat-tick-interval" json:"pd-heartbeat-tick-interval"`
 	StoreHeartBeatInterval  typeutil.Duration `toml:"pd-store-heartbeat-tick-interval" json:"pd-store-heartbeat-tick-interval"`
 }
@@ -76,7 +81,7 @@ type Coprocessor struct {
 
 // NewSimConfig create a new configuration of the simulator.
 func NewSimConfig(serverLogLevel string) *SimConfig {
-	config.DefaultStoreLimit = config.StoreLimit{AddPeer: 2000, RemovePeer: 2000}
+	sc.DefaultStoreLimit = sc.StoreLimit{AddPeer: 2000, RemovePeer: 2000}
 	cfg := &config.Config{
 		Name:       "pd",
 		ClientUrls: tempurl.Alloc(),
@@ -91,54 +96,30 @@ func NewSimConfig(serverLogLevel string) *SimConfig {
 	return &SimConfig{ServerConfig: cfg}
 }
 
-func adjustDuration(v *typeutil.Duration, defValue time.Duration) {
-	if v.Duration == 0 {
-		v.Duration = defValue
-	}
-}
-
-func adjustString(v *string, defValue string) {
-	if len(*v) == 0 {
-		*v = defValue
-	}
-}
-
-func adjustUint64(v *uint64, defValue uint64) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
-func adjustInt64(v *int64, defValue int64) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
-func adjustByteSize(v *typeutil.ByteSize, defValue typeutil.ByteSize) {
-	if *v == 0 {
-		*v = defValue
-	}
-}
-
 // Adjust is used to adjust configurations
 func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
-	adjustDuration(&sc.SimTickInterval, defaultSimTickInterval)
-	adjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
-	adjustString(&sc.StoreVersion, defaultStoreVersion)
-	adjustDuration(&sc.RaftStore.RegionHeartBeatInterval, defaultRegionHeartbeat)
-	adjustDuration(&sc.RaftStore.StoreHeartBeatInterval, defaultStoreHeartbeat)
-	adjustByteSize(&sc.RaftStore.Capacity, defaultCapacity)
-	adjustUint64(&sc.Coprocessor.RegionSplitKey, defaultRegionSplitKeys)
-	adjustByteSize(&sc.Coprocessor.RegionSplitSize, defaultRegionSplitSize)
+	configutil.AdjustDuration(&sc.SimTickInterval, defaultSimTickInterval)
+	configutil.AdjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
+	configutil.AdjustString(&sc.StoreVersion, versioninfo.PDReleaseVersion)
+	configutil.AdjustDuration(&sc.RaftStore.RegionHeartBeatInterval, defaultRegionHeartbeat)
+	configutil.AdjustDuration(&sc.RaftStore.StoreHeartBeatInterval, defaultStoreHeartbeat)
+	configutil.AdjustByteSize(&sc.RaftStore.Capacity, defaultCapacity)
+	configutil.AdjustByteSize(&sc.RaftStore.ExtraUsedSpace, defaultExtraUsedSpace)
+	configutil.AdjustUint64(&sc.Coprocessor.RegionSplitKey, defaultRegionSplitKeys)
+	configutil.AdjustByteSize(&sc.Coprocessor.RegionSplitSize, defaultRegionSplitSize)
 
-	adjustInt64(&sc.ServerConfig.LeaderLease, defaultLeaderLease)
-	adjustDuration(&sc.ServerConfig.TSOSaveInterval, defaultTSOSaveInterval)
-	adjustDuration(&sc.ServerConfig.TickInterval, defaultTickInterval)
-	adjustDuration(&sc.ServerConfig.ElectionInterval, defaultElectionInterval)
-	adjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
+	configutil.AdjustInt(&sc.ServerConfig.MaxConcurrentTSOProxyStreamings, defaultMaxConcurrentTSOProxyStreamings)
+
+	configutil.AdjustInt64(&sc.ServerConfig.LeaderLease, defaultLeaderLease)
+	configutil.AdjustDuration(&sc.ServerConfig.TSOSaveInterval, defaultTSOSaveInterval)
+	configutil.AdjustDuration(&sc.ServerConfig.TickInterval, defaultTickInterval)
+	configutil.AdjustDuration(&sc.ServerConfig.ElectionInterval, defaultElectionInterval)
+	configutil.AdjustDuration(&sc.ServerConfig.LeaderPriorityCheckInterval, defaultLeaderPriorityCheckInterval)
 
 	return sc.ServerConfig.Adjust(meta, false)
+}
+func (sc *SimConfig) speed() uint64 {
+	return uint64(time.Second / sc.SimTickInterval.Duration)
 }
 
 // PDConfig saves some config which may be changed in PD.

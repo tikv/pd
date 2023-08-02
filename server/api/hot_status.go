@@ -21,15 +21,43 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/statistics"
-	"github.com/tikv/pd/server/storage"
 	"github.com/unrolled/render"
 )
 
 type hotStatusHandler struct {
 	*server.Handler
 	rd *render.Render
+}
+
+// HotBucketsResponse is the response for hot buckets.
+type HotBucketsResponse map[uint64][]*HotBucketsItem
+
+// HotBucketsItem is the item of hot buckets.
+type HotBucketsItem struct {
+	StartKey   string `json:"start_key"`
+	EndKey     string `json:"end_key"`
+	HotDegree  int    `json:"hot_degree"`
+	ReadBytes  uint64 `json:"read_bytes"`
+	ReadKeys   uint64 `json:"read_keys"`
+	WriteBytes uint64 `json:"write_bytes"`
+	WriteKeys  uint64 `json:"write_keys"`
+}
+
+func convert(buckets *buckets.BucketStat) *HotBucketsItem {
+	return &HotBucketsItem{
+		StartKey:   core.HexRegionKeyStr(buckets.StartKey),
+		EndKey:     core.HexRegionKeyStr(buckets.EndKey),
+		HotDegree:  buckets.HotDegree,
+		ReadBytes:  buckets.Loads[statistics.RegionReadBytes],
+		ReadKeys:   buckets.Loads[statistics.RegionReadKeys],
+		WriteBytes: buckets.Loads[statistics.RegionWriteBytes],
+		WriteKeys:  buckets.Loads[statistics.RegionWriteKeys],
+	}
 }
 
 // HotStoreStats is used to record the status of hot stores.
@@ -170,6 +198,30 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 }
 
 // @Tags     hotspot
+// @Summary  List the hot buckets.
+// @Produce  json
+// @Success  200  {object}  HotBucketsResponse
+// @Router   /hotspot/buckets [get]
+func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request) {
+	regionIDs := r.URL.Query()["region_id"]
+	ids := make([]uint64, len(regionIDs))
+	for i, regionID := range regionIDs {
+		if id, err := strconv.ParseUint(regionID, 10, 64); err == nil {
+			ids[i] = id
+		}
+	}
+	stats := h.Handler.GetHotBuckets(ids...)
+	ret := HotBucketsResponse{}
+	for regionID, stats := range stats {
+		ret[regionID] = make([]*HotBucketsItem, len(stats))
+		for i, stat := range stats {
+			ret[regionID][i] = convert(stat)
+		}
+	}
+	h.rd.JSON(w, http.StatusOK, ret)
+}
+
+// @Tags     hotspot
 // @Summary  List the history hot regions.
 // @Accept   json
 // @Produce  json
@@ -190,7 +242,7 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	results, err := getAllRequestHistroyHotRegion(h.Handler, historyHotRegionsRequest)
+	results, err := getAllRequestHistoryHotRegion(h.Handler, historyHotRegionsRequest)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -198,7 +250,7 @@ func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, results)
 }
 
-func getAllRequestHistroyHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*storage.HistoryHotRegions, error) {
+func getAllRequestHistoryHotRegion(handler *server.Handler, request *HistoryHotRegionsRequest) (*storage.HistoryHotRegions, error) {
 	var hotRegionTypes = storage.HotRegionTypes
 	if len(request.HotRegionTypes) != 0 {
 		hotRegionTypes = request.HotRegionTypes

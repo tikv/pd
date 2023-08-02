@@ -23,12 +23,12 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
-	"github.com/tikv/pd/pkg/apiutil"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/unrolled/render"
 )
 
@@ -70,7 +70,7 @@ func (h *ruleHandler) GetAllRules(w http.ResponseWriter, r *http.Request) {
 // @Failure  400    {string}  string            "The input is invalid."
 // @Failure  412    {string}  string            "Placement rules feature is disabled."
 // @Failure  500    {string}  string            "PD server failed to proceed the request."
-// @Router   /config/rules [get]
+// @Router   /config/rules [post]
 func (h *ruleHandler) SetAllRules(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	if !cluster.GetOpts().IsPlacementRulesEnabled() {

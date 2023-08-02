@@ -19,8 +19,8 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/syncutil"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -32,7 +32,6 @@ type RaftEngine struct {
 	regionsInfo       *core.RegionsInfo
 	conn              *Connection
 	regionChange      map[uint64][]uint64
-	schedulerStats    *schedulerStatistics
 	regionSplitSize   int64
 	regionSplitKeys   int64
 	storeConfig       *SimConfig
@@ -45,7 +44,6 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *
 		regionsInfo:     core.NewRegionsInfo(),
 		conn:            conn,
 		regionChange:    make(map[uint64][]uint64),
-		schedulerStats:  newSchedulerStatistics(),
 		regionSplitSize: conf.RegionSplitSize,
 		regionSplitKeys: conf.RegionSplitKeys,
 		storeConfig:     storeConfig,
@@ -277,7 +275,9 @@ func (r *RaftEngine) GetRegions() []*core.RegionInfo {
 func (r *RaftEngine) SetRegion(region *core.RegionInfo) []*core.RegionInfo {
 	r.Lock()
 	defer r.Unlock()
-	return r.regionsInfo.SetRegion(region)
+	origin, overlaps, rangeChanged := r.regionsInfo.SetRegion(region)
+	r.regionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	return overlaps
 }
 
 // GetRegionByKey searches the RegionInfo from regionTree
@@ -291,7 +291,7 @@ func (r *RaftEngine) GetRegionByKey(regionKey []byte) *core.RegionInfo {
 func (r *RaftEngine) BootstrapRegion() *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
-	regions := r.regionsInfo.ScanRange(nil, nil, 1)
+	regions := r.regionsInfo.ScanRegions(nil, nil, 1)
 	if len(regions) > 0 {
 		return regions[0]
 	}

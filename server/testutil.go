@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -24,25 +25,23 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/assertutil"
-	"github.com/tikv/pd/pkg/tempurl"
-	"github.com/tikv/pd/pkg/testutil"
-	"github.com/tikv/pd/pkg/typeutil"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/embed"
-
-	// Register schedulers
-	_ "github.com/tikv/pd/server/schedulers"
 )
 
-// CleanupFunc closes test pd server(s) and deletes any files left behind.
-type CleanupFunc func()
-
 // NewTestServer creates a pd server for testing.
-func NewTestServer(c *assertutil.Checker) (*Server, CleanupFunc, error) {
+func NewTestServer(re *require.Assertions, c *assertutil.Checker) (*Server, testutil.CleanupFunc, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := NewTestSingleConfig(c)
-	s, err := CreateServer(ctx, cfg)
+	mockHandler := CreateMockHandler(re, "127.0.0.1")
+	s, err := CreateServer(ctx, cfg, nil, mockHandler)
 	if err != nil {
 		cancel()
 		return nil, nil, err
@@ -65,6 +64,7 @@ var zapLogOnce sync.Once
 // NewTestSingleConfig is only for test to create one pd.
 // Because PD client also needs this, so export here.
 func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
+	schedulers.Register()
 	cfg := &config.Config{
 		Name:       "pd",
 		ClientUrls: tempurl.Alloc(),
@@ -84,10 +84,10 @@ func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
 	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
 	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
-	err := cfg.SetupLogger()
+	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	c.AssertNil(err)
 	zapLogOnce.Do(func() {
-		log.ReplaceGlobals(cfg.GetZapLogger(), cfg.GetZapLogProperties())
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	})
 
 	c.AssertNil(cfg.Adjust(nil, false))
@@ -134,4 +134,22 @@ func MustWaitLeader(re *require.Assertions, svrs []*Server) *Server {
 		return true
 	})
 	return leader
+}
+
+// CreateMockHandler creates a mock handler for test.
+func CreateMockHandler(re *require.Assertions, ip string) HandlerBuilder {
+	return func(ctx context.Context, s *Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintln(w, "Hello World")
+			// test getting ip
+			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
+			re.Equal(ip, clientIP)
+		})
+		info := apiutil.APIServiceGroup{
+			Name:    "mock",
+			Version: "v1",
+		}
+		return mux, info, nil
+	}
 }

@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -36,11 +36,8 @@ func newImportData() *Case {
 	// Initialize the cluster
 	for i := 1; i <= 10; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:        IDAllocator.nextID(),
-			Status:    metapb.StoreState_Up,
-			Capacity:  1 * units.TiB,
-			Available: 900 * units.GiB,
-			Version:   "2.1.0",
+			ID:     IDAllocator.nextID(),
+			Status: metapb.StoreState_Up,
 		})
 	}
 
@@ -87,7 +84,7 @@ func newImportData() *Case {
 		leaderTotal := 0
 		peerTotal := 0
 		res := make([]*core.RegionInfo, 0, 100)
-		regions.ScanRangeWithIterator([]byte(table12), func(region *core.RegionInfo) bool {
+		regions.ScanRegionWithIterator([]byte(table12), func(region *core.RegionInfo) bool {
 			if bytes.Compare(region.GetEndKey(), []byte(table13)) < 0 {
 				res = append(res, regions.GetRegion(region.GetID()))
 				return true
@@ -119,7 +116,7 @@ func newImportData() *Case {
 				tablePeerLog = fmt.Sprintf("%s [store %d]:%.2f%%", tablePeerLog, storeID, float64(peerCount)/float64(peerTotal)*100)
 			}
 		}
-		regionTotal := regions.GetRegionCount()
+		regionTotal := regions.GetTotalRegionCount()
 		totalLeaderLog := fmt.Sprintf("%d leader:", regionTotal)
 		totalPeerLog := fmt.Sprintf("%d peer:", regionTotal*3)
 		isEnd := false
@@ -187,6 +184,6 @@ func renderPlot(name string, data [][3]int, len, minCount, maxCount int) {
 	f, _ := os.Create(name)
 	err := bar3d.Render(f)
 	if err != nil {
-		log.Error("Render error", zap.Error(err))
+		log.Error("render error", zap.Error(err))
 	}
 }

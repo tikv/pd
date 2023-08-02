@@ -21,16 +21,16 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
-	tu "github.com/tikv/pd/pkg/testutil"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/config"
 )
 
 type clusterTestSuite struct {
 	suite.Suite
 	svr       *server.Server
-	cleanup   cleanUpFunc
+	cleanup   tu.CleanupFunc
 	urlPrefix string
 }
 
@@ -70,7 +70,7 @@ func (suite *clusterTestSuite) TestCluster() {
 	suite.NoError(err)
 
 	c2 := &metapb.Cluster{}
-	r := config.ReplicationConfig{
+	r := sc.ReplicationConfig{
 		MaxReplicas:          6,
 		EnablePlacementRules: true,
 	}
@@ -98,7 +98,7 @@ func (suite *clusterTestSuite) testGetClusterStatus() {
 	suite.NoError(err)
 	suite.True(status.RaftBootstrapTime.After(now))
 	suite.False(status.IsInitialized)
-	suite.svr.SetReplicationConfig(config.ReplicationConfig{MaxReplicas: 1})
+	suite.svr.SetReplicationConfig(sc.ReplicationConfig{MaxReplicas: 1})
 	err = tu.ReadGetJSON(re, testDialClient, url, &status)
 	suite.NoError(err)
 	suite.True(status.RaftBootstrapTime.After(now))

@@ -51,6 +51,8 @@ type Node struct {
 	raftEngine               *RaftEngine
 	limiter                  *ratelimit.RateLimiter
 	sizeMutex                sync.Mutex
+	hasExtraUsedSpace        bool
+	snapStats                []*pdpb.SnapshotStat
 }
 
 // NewNode returns a Node.
@@ -59,7 +61,7 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 	store := &metapb.Store{
 		Id:      s.ID,
 		Address: fmt.Sprintf("mock:://tikv-%d", s.ID),
-		Version: s.Version,
+		Version: config.StoreVersion,
 		Labels:  s.Labels,
 		State:   s.Status,
 	}
@@ -67,7 +69,6 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		StoreStats: pdpb.StoreStats{
 			StoreId:   s.ID,
 			Capacity:  uint64(config.RaftStore.Capacity),
-			Available: uint64(config.RaftStore.Available),
 			StartTime: uint32(time.Now().Unix()),
 		},
 	}
@@ -91,8 +92,8 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		cancel()
 		return nil, err
 	}
-	ratio := int64(time.Second) / config.SimTickInterval.Milliseconds()
-	speed := config.StoreIOMBPerSecond * units.MiB * ratio
+	ratio := config.speed()
+	speed := config.StoreIOMBPerSecond * units.MiB * int64(ratio)
 	return &Node{
 		Store:                    store,
 		stats:                    stats,
@@ -103,6 +104,8 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		receiveRegionHeartbeatCh: receiveRegionHeartbeatCh,
 		limiter:                  ratelimit.NewRateLimiter(float64(speed), int(speed)),
 		tick:                     uint64(rand.Intn(storeHeartBeatPeriod)),
+		hasExtraUsedSpace:        s.HasExtraUsedSpace,
+		snapStats:                make([]*pdpb.SnapshotStat, 0),
 	}, nil
 }
 
@@ -190,6 +193,10 @@ func (n *Node) storeHeartBeat() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
+	stats := make([]*pdpb.SnapshotStat, len(n.snapStats))
+	copy(stats, n.snapStats)
+	n.snapStats = n.snapStats[:0]
+	n.stats.SnapshotStats = stats
 	err := n.client.StoreHeartbeat(ctx, &n.stats.StoreStats)
 	if err != nil {
 		simutil.Logger.Info("report heartbeat error",
@@ -277,4 +284,13 @@ func (n *Node) decUsedSize(size uint64) {
 	n.sizeMutex.Lock()
 	defer n.sizeMutex.Unlock()
 	n.stats.ToCompactionSize += size
+}
+
+func (n *Node) registerSnapStats(generate, send, total uint64) {
+	stat := pdpb.SnapshotStat{
+		GenerateDurationSec: generate,
+		SendDurationSec:     send,
+		TotalDurationSec:    total,
+	}
+	n.snapStats = append(n.snapStats, &stat)
 }

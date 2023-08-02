@@ -14,7 +14,7 @@
 
 package ratelimit
 
-import "github.com/tikv/pd/pkg/syncutil"
+import "github.com/tikv/pd/pkg/utils/syncutil"
 
 type concurrencyLimiter struct {
 	mu      syncutil.RWMutex

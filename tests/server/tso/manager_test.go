@@ -25,10 +25,10 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/etcdutil"
-	"github.com/tikv/pd/pkg/testutil"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -160,7 +160,7 @@ func TestNextLeaderKey(t *testing.T) {
 	})
 	defer cluster.Destroy()
 	re.NoError(err)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/tso/injectNextLeaderKey", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/injectNextLeaderKey", "return(true)"))
 	re.NoError(cluster.RunInitialServers())
 
 	cluster.WaitLeader(tests.WithWaitInterval(5*time.Second), tests.WithRetryTimes(3))
@@ -168,7 +168,7 @@ func TestNextLeaderKey(t *testing.T) {
 	cluster.CheckClusterDCLocation()
 	originName := cluster.WaitAllocatorLeader("dc-1", tests.WithRetryTimes(5), tests.WithWaitInterval(5*time.Second))
 	re.Equal("", originName)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/injectNextLeaderKey"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/injectNextLeaderKey"))
 	cluster.CheckClusterDCLocation()
 	originName = cluster.WaitAllocatorLeader("dc-1")
 	re.NotEqual("", originName)

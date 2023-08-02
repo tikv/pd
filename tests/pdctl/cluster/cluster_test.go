@@ -35,6 +35,7 @@ func TestClusterAndPing(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
@@ -44,7 +45,6 @@ func TestClusterAndPing(t *testing.T) {
 	i := strings.Index(pdAddr, "//")
 	pdAddr = pdAddr[i+2:]
 	cmd := pdctlCmd.GetRootCmd()
-	defer cluster.Destroy()
 
 	// cluster
 	args := []string{"-u", pdAddr, "cluster"}

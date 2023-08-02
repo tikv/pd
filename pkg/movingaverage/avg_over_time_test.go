@@ -42,6 +42,20 @@ func TestPulse(t *testing.T) {
 	}
 }
 
+func TestPulse2(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	dur := 5 * time.Second
+	aot := NewAvgOverTime(dur)
+	re.Equal(float64(0), aot.GetInstantaneous())
+	aot.Add(1000, dur)
+	re.Equal(float64(1000)/dur.Seconds(), aot.GetInstantaneous())
+	re.True(aot.IsFull())
+	aot.Clear()
+	aot.Add(1000, dur)
+	re.Equal(float64(1000)/dur.Seconds(), aot.GetInstantaneous())
+}
+
 func TestChange(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
@@ -84,7 +98,7 @@ func TestMinFilled(t *testing.T) {
 	for aotSize := 2; aotSize < 10; aotSize++ {
 		for mfSize := 2; mfSize < 10; mfSize++ {
 			tm := NewTimeMedian(aotSize, mfSize, interval)
-			for i := 0; i < tm.GetFilledPeriod(); i++ {
+			for i := 0; i < aotSize; i++ {
 				re.Equal(0.0, tm.Get())
 				tm.Add(rate*interval.Seconds(), interval)
 			}
