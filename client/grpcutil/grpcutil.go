@@ -78,6 +78,7 @@ func BuildForwardContext(ctx context.Context, addr string) context.Context {
 func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string, tlsCfg *tlsutil.TLSConfig, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
 	conn, ok := clientConns.Load(addr)
 	if ok {
+		// TODO: check the connection state.
 		return conn.(*grpc.ClientConn), nil
 	}
 	tlsConfig, err := tlsCfg.ToTLSConfig()
@@ -90,11 +91,13 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string
 	if err != nil {
 		return nil, err
 	}
-	if old, ok := clientConns.Load(addr); ok {
-		cc.Close()
-		log.Debug("use old connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
-		return old.(*grpc.ClientConn), nil
+	conn, loaded := clientConns.LoadOrStore(addr, cc)
+	if !loaded {
+		// Successfully stored the connection.
+		return cc, nil
 	}
-	clientConns.Store(addr, cc)
+	cc.Close()
+	cc = conn.(*grpc.ClientConn)
+	log.Debug("use existing connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
 	return cc, nil
 }

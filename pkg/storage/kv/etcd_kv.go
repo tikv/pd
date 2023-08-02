@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
@@ -195,10 +194,8 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 // Transaction commit will be successful only if all conditions are met,
 // aka, no other transaction has modified values loaded during current transaction.
 type etcdTxn struct {
-	kv  *etcdKVBase
-	ctx context.Context
-	// mu protects conditions and operations.
-	mu         syncutil.Mutex
+	kv         *etcdKVBase
+	ctx        context.Context
 	conditions []clientv3.Cmp
 	operations []clientv3.Op
 }
@@ -221,8 +218,6 @@ func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error
 func (txn *etcdTxn) Save(key, value string) error {
 	key = path.Join(txn.kv.rootPath, key)
 	operation := clientv3.OpPut(key, value)
-	txn.mu.Lock()
-	defer txn.mu.Unlock()
 	txn.operations = append(txn.operations, operation)
 	return nil
 }
@@ -231,8 +226,6 @@ func (txn *etcdTxn) Save(key, value string) error {
 func (txn *etcdTxn) Remove(key string) error {
 	key = path.Join(txn.kv.rootPath, key)
 	operation := clientv3.OpDelete(key)
-	txn.mu.Lock()
-	defer txn.mu.Unlock()
 	txn.operations = append(txn.operations, operation)
 	return nil
 }
@@ -261,8 +254,6 @@ func (txn *etcdTxn) Load(key string) (string, error) {
 		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
 	}
 	// Append the check condition to transaction.
-	txn.mu.Lock()
-	defer txn.mu.Unlock()
 	txn.conditions = append(txn.conditions, condition)
 	return value, nil
 }
@@ -276,8 +267,6 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 		return keys, values, err
 	}
 	// If LoadRange successful, must make sure values stay the same before commit.
-	txn.mu.Lock()
-	defer txn.mu.Unlock()
 	for i := range keys {
 		fullKey := path.Join(txn.kv.rootPath, keys[i])
 		condition := clientv3.Compare(clientv3.Value(fullKey), "=", values[i])
@@ -286,12 +275,13 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 	return keys, values, err
 }
 
-// commit perform the operations on etcd, with pre-condition that values observed by user has not been changed.
+// commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
-	baseTxn := txn.kv.client.Txn(txn.ctx)
-	baseTxn.If(txn.conditions...)
-	baseTxn.Then(txn.operations...)
-	resp, err := baseTxn.Commit()
+	// Using slowLogTxn to commit transaction.
+	slowLogTxn := NewSlowLogTxn(txn.kv.client)
+	slowLogTxn.If(txn.conditions...)
+	slowLogTxn.Then(txn.operations...)
+	resp, err := slowLogTxn.Commit()
 	if err != nil {
 		return err
 	}

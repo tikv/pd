@@ -30,7 +30,7 @@ import (
 // Redirector is a middleware to redirect the request to the right place.
 func Redirector() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		svr := c.MustGet("server").(*server.Server)
+		svr := c.MustGet(ServerContextKey).(*server.Server)
 		allowFollowerHandle := len(c.Request.Header.Get(serverapi.PDAllowFollowerHandle)) > 0
 		isLeader := svr.GetMember().IsLeader()
 		if !svr.IsClosed() && (allowFollowerHandle || isLeader) {

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )
@@ -32,13 +33,13 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestTsLessEqual(t *testing.T) {
+func TestTSLessEqual(t *testing.T) {
 	re := require.New(t)
-	re.True(tsLessEqual(9, 9, 9, 9))
-	re.True(tsLessEqual(8, 9, 9, 8))
-	re.False(tsLessEqual(9, 8, 8, 9))
-	re.False(tsLessEqual(9, 8, 9, 6))
-	re.True(tsLessEqual(9, 6, 9, 8))
+	re.True(tsoutil.TSLessEqual(9, 9, 9, 9))
+	re.True(tsoutil.TSLessEqual(8, 9, 9, 8))
+	re.False(tsoutil.TSLessEqual(9, 8, 8, 9))
+	re.False(tsoutil.TSLessEqual(9, 8, 9, 6))
+	re.True(tsoutil.TSLessEqual(9, 6, 9, 8))
 }
 
 func TestUpdateURLs(t *testing.T) {
@@ -58,11 +59,11 @@ func TestUpdateURLs(t *testing.T) {
 	cli := &pdServiceDiscovery{option: newOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
-	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs())
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
 	cli.updateURLs(members[1:])
-	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetURLs())
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
 	cli.updateURLs(members)
-	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetURLs())
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetServiceURLs())
 }
 
 const testClientURL = "tmp://test.url:5255"

@@ -566,7 +566,7 @@ func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.Peers}, testCase.Peers[0])
 		suite.Equal(testCase.ConfVerChanged, step.ConfVerChanged(region))
 		suite.Equal(testCase.IsFinish, step.IsFinish(region))
-		err := step.CheckInProgress(suite.cluster, region)
+		err := step.CheckInProgress(suite.cluster.GetBasicCluster(), suite.cluster.GetSharedConfig(), region)
 		testCase.CheckInProgress(err)
 		_ = step.GetCmd(region, true)
 

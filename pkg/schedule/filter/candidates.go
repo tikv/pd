@@ -17,6 +17,7 @@ package filter
 import (
 	"math/rand"
 	"sort"
+	"time"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -26,22 +27,23 @@ import (
 // StoreCandidates wraps store list and provide utilities to select source or
 // target store to schedule.
 type StoreCandidates struct {
+	r      *rand.Rand
 	Stores []*core.StoreInfo
 }
 
 // NewCandidates creates StoreCandidates with store list.
 func NewCandidates(stores []*core.StoreInfo) *StoreCandidates {
-	return &StoreCandidates{Stores: stores}
+	return &StoreCandidates{r: rand.New(rand.NewSource(time.Now().UnixNano())), Stores: stores}
 }
 
 // FilterSource keeps stores that can pass all source filters.
-func (c *StoreCandidates) FilterSource(conf config.Config, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
+func (c *StoreCandidates) FilterSource(conf config.SharedConfigProvider, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectSourceStores(c.Stores, filters, conf, collector, counter)
 	return c
 }
 
 // FilterTarget keeps stores that can pass all target filters.
-func (c *StoreCandidates) FilterTarget(conf config.Config, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
+func (c *StoreCandidates) FilterTarget(conf config.SharedConfigProvider, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectTargetStores(c.Stores, filters, conf, collector, counter)
 	return c
 }
@@ -54,7 +56,7 @@ func (c *StoreCandidates) Sort(less StoreComparer) *StoreCandidates {
 
 // Shuffle reorders all candidates randomly.
 func (c *StoreCandidates) Shuffle() *StoreCandidates {
-	rand.Shuffle(len(c.Stores), func(i, j int) { c.Stores[i], c.Stores[j] = c.Stores[j], c.Stores[i] })
+	c.r.Shuffle(len(c.Stores), func(i, j int) { c.Stores[i], c.Stores[j] = c.Stores[j], c.Stores[i] })
 	return c
 }
 
@@ -108,7 +110,7 @@ func (c *StoreCandidates) RandomPick() *core.StoreInfo {
 	if len(c.Stores) == 0 {
 		return nil
 	}
-	return c.Stores[rand.Intn(len(c.Stores))]
+	return c.Stores[c.r.Intn(len(c.Stores))]
 }
 
 // PickAll return all stores in candidate list.

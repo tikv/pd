@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -37,14 +37,14 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 
-	c.coordinator.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
+	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
 	return nil
 }
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
-	if c.GetUnsafeRecoveryController().IsRunning() {
-		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	if c.isSchedulingHalted() {
+		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
@@ -86,6 +86,10 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	return split, nil
 }
 
+func (c *RaftCluster) isSchedulingHalted() bool {
+	return c.opt.IsSchedulingHalted()
+}
+
 // ValidRequestRegion is used to decide if the region is valid.
 func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
@@ -105,8 +109,8 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 
 // HandleAskBatchSplit handles the batch split request.
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
-	if c.GetUnsafeRecoveryController().IsRunning() {
-		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+	if c.isSchedulingHalted() {
+		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()

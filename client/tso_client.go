@@ -29,11 +29,19 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// TSOClient defines basic interface of the TSO client
-// For test only
+// TSOClient is the client used to get timestamps.
 type TSOClient interface {
-	// GetTSOAllocators returns {dc-location -> TSO allocator serving URL} connection map
-	GetTSOAllocators() *sync.Map
+	// GetTS gets a timestamp from PD or TSO microservice.
+	GetTS(ctx context.Context) (int64, int64, error)
+	// GetTSAsync gets a timestamp from PD or TSO microservice, without block the caller.
+	GetTSAsync(ctx context.Context) TSFuture
+	// GetLocalTS gets a local timestamp from PD or TSO microservice.
+	GetLocalTS(ctx context.Context, dcLocation string) (int64, int64, error)
+	// GetLocalTSAsync gets a local timestamp from PD or TSO microservice, without block the caller.
+	GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture
+	// GetMinTS gets a timestamp from PD or the minimal timestamp across all keyspace groups from
+	// the TSO microservice.
+	GetMinTS(ctx context.Context) (int64, int64, error)
 }
 
 type tsoRequest struct {
@@ -43,7 +51,6 @@ type tsoRequest struct {
 	done       chan error
 	physical   int64
 	logical    int64
-	keyspaceID uint32
 	dcLocation string
 }
 
@@ -60,10 +67,9 @@ var tsoReqPool = sync.Pool{
 type tsoClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     *sync.WaitGroup
+	wg     sync.WaitGroup
 	option *option
 
-	keyspaceID   uint32
 	svcDiscovery ServiceDiscovery
 	tsoStreamBuilderFactory
 	// tsoAllocators defines the mapping {dc-location -> TSO allocator leader URL}
@@ -77,8 +83,8 @@ type tsoClient struct {
 	tsoDispatcher sync.Map // Same as map[string]chan *tsoRequest
 	// dc-location -> deadline
 	tsDeadline sync.Map // Same as map[string]chan deadline
-	// dc-location -> *lastTSO
-	lastTSMap sync.Map // Same as map[string]*lastTSO
+	// dc-location -> *tsoInfo while the tsoInfo is the last TSO info
+	lastTSOInfoMap sync.Map // Same as map[string]*tsoInfo
 
 	checkTSDeadlineCh         chan struct{}
 	checkTSODispatcherCh      chan struct{}
@@ -86,14 +92,15 @@ type tsoClient struct {
 }
 
 // newTSOClient returns a new TSO client.
-func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitGroup, option *option,
-	keyspaceID uint32, svcDiscovery ServiceDiscovery, eventSrc tsoAllocatorEventSource, factory tsoStreamBuilderFactory) *tsoClient {
+func newTSOClient(
+	ctx context.Context, option *option,
+	svcDiscovery ServiceDiscovery, factory tsoStreamBuilderFactory,
+) *tsoClient {
+	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoClient{
 		ctx:                       ctx,
 		cancel:                    cancel,
-		wg:                        wg,
 		option:                    option,
-		keyspaceID:                keyspaceID,
 		svcDiscovery:              svcDiscovery,
 		tsoStreamBuilderFactory:   factory,
 		checkTSDeadlineCh:         make(chan struct{}),
@@ -101,6 +108,7 @@ func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitG
 		updateTSOConnectionCtxsCh: make(chan struct{}, 1),
 	}
 
+	eventSrc := svcDiscovery.(tsoAllocatorEventSource)
 	eventSrc.SetTSOLocalServAddrsUpdatedCallback(c.updateTSOLocalServAddrs)
 	eventSrc.SetTSOGlobalServAddrUpdatedCallback(c.updateTSOGlobalServAddr)
 	c.svcDiscovery.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
@@ -108,31 +116,38 @@ func newTSOClient(ctx context.Context, cancel context.CancelFunc, wg *sync.WaitG
 	return c
 }
 
-func (c *tsoClient) setup() error {
-	if err := c.svcDiscovery.Init(); err != nil {
-		return err
-	}
+func (c *tsoClient) Setup() {
+	c.svcDiscovery.CheckMemberChanged()
+	c.updateTSODispatcher()
 
 	// Start the daemons.
 	c.wg.Add(2)
 	go c.tsoDispatcherCheckLoop()
 	go c.tsCancelLoop()
-	return nil
 }
 
 // Close closes the TSO client
 func (c *tsoClient) Close() {
+	if c == nil {
+		return
+	}
+	log.Info("closing tso client")
+
+	c.cancel()
+	c.wg.Wait()
+
 	log.Info("close tso client")
 	c.tsoDispatcher.Range(func(_, dispatcherInterface interface{}) bool {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
 			tsoErr := errors.WithStack(errClosing)
-			dispatcher.tsoBatchController.revokePendingTSORequest(tsoErr)
+			dispatcher.tsoBatchController.revokePendingRequest(tsoErr)
 			dispatcher.dispatcherCancel()
 		}
 		return true
 	})
-	c.svcDiscovery.Close()
+
+	log.Info("tso client is closed")
 }
 
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
@@ -194,7 +209,7 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 			return err
 		}
 		c.tsoAllocators.Store(dcLocation, addr)
-		log.Info("[tso] switch dc tso allocator serving address",
+		log.Info("[tso] switch dc tso local allocator serving address",
 			zap.String("dc-location", dcLocation),
 			zap.String("new-address", addr),
 			zap.String("old-address", oldAddr))
@@ -212,7 +227,7 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 
 func (c *tsoClient) updateTSOGlobalServAddr(addr string) error {
 	c.tsoAllocators.Store(globalDCLocation, addr)
-	log.Info("[tso] switch dc tso allocator serving address",
+	log.Info("[tso] switch dc tso global allocator serving address",
 		zap.String("dc-location", globalDCLocation),
 		zap.String("new-address", addr))
 	c.scheduleCheckTSODispatcher()

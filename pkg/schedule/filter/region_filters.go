@@ -16,6 +16,9 @@ package filter
 
 import (
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/slice"
@@ -97,12 +100,12 @@ func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 
 // RegionReplicatedFilter filters all unreplicated regions.
 type RegionReplicatedFilter struct {
-	cluster regionHealthCluster
+	cluster sche.SharedCluster
 	fit     *placement.RegionFit
 }
 
 // NewRegionReplicatedFilter creates a RegionFilter that filters all unreplicated regions.
-func NewRegionReplicatedFilter(cluster regionHealthCluster) RegionFilter {
+func NewRegionReplicatedFilter(cluster sche.SharedCluster) RegionFilter {
 	return &RegionReplicatedFilter{cluster: cluster}
 }
 
@@ -114,7 +117,7 @@ func (f *RegionReplicatedFilter) GetFit() *placement.RegionFit {
 // Select returns Ok if the given region satisfy the replication.
 // it will cache the lasted region fit if the region satisfy the replication.
 func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
-	if f.cluster.GetOpts().IsPlacementRulesEnabled() {
+	if f.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
 		fit := f.cluster.GetRuleManager().FitRegion(f.cluster, region)
 		if !fit.IsSatisfied() {
 			return statusRegionNotMatchRule
@@ -129,11 +132,11 @@ func (f *RegionReplicatedFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 type regionEmptyFilter struct {
-	cluster regionHealthCluster
+	cluster sche.SharedCluster
 }
 
 // NewRegionEmptyFilter returns creates a RegionFilter that filters all empty regions.
-func NewRegionEmptyFilter(cluster regionHealthCluster) RegionFilter {
+func NewRegionEmptyFilter(cluster sche.SharedCluster) RegionFilter {
 	return &regionEmptyFilter{cluster: cluster}
 }
 
@@ -145,8 +148,8 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 }
 
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
-func isEmptyRegionAllowBalance(cluster regionHealthCluster, region *core.RegionInfo) bool {
-	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetRegionCount() < core.InitClusterRegionThreshold
+func isEmptyRegionAllowBalance(cluster sche.SharedCluster, region *core.RegionInfo) bool {
+	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetTotalRegionCount() < core.InitClusterRegionThreshold
 }
 
 type regionWitnessFilter struct {
@@ -163,4 +166,30 @@ func (f *regionWitnessFilter) Select(region *core.RegionInfo) *plan.Status {
 		return statusRegionWitnessPeer
 	}
 	return statusOK
+}
+
+// SnapshotSenderFilter filer the region who's leader store reaches the limit.
+type SnapshotSenderFilter struct {
+	senders map[uint64]struct{}
+}
+
+// NewSnapshotSendFilter returns creates a RegionFilter that filters regions with witness peer on the specific store.
+// level should be set as same with the operator priority level.
+func NewSnapshotSendFilter(stores []*core.StoreInfo, level constant.PriorityLevel) RegionFilter {
+	senders := make(map[uint64]struct{})
+	for _, store := range stores {
+		if store.IsAvailable(storelimit.SendSnapshot, level) && !store.IsBusy() {
+			senders[store.GetID()] = struct{}{}
+		}
+	}
+	return &SnapshotSenderFilter{senders: senders}
+}
+
+// Select returns ok if the region leader in the senders.
+func (f *SnapshotSenderFilter) Select(region *core.RegionInfo) *plan.Status {
+	leaderStoreID := region.GetLeader().GetStoreId()
+	if _, ok := f.senders[leaderStoreID]; ok {
+		return statusOK
+	}
+	return statusRegionLeaderSendSnapshotThrottled
 }

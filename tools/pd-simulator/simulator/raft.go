@@ -291,7 +291,7 @@ func (r *RaftEngine) GetRegionByKey(regionKey []byte) *core.RegionInfo {
 func (r *RaftEngine) BootstrapRegion() *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
-	regions := r.regionsInfo.ScanRange(nil, nil, 1)
+	regions := r.regionsInfo.ScanRegions(nil, nil, 1)
 	if len(regions) > 0 {
 		return regions[0]
 	}

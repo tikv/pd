@@ -257,6 +257,39 @@ func TestHotWithStoreID(t *testing.T) {
 	re.Equal(1, hotRegion.AsLeader[2].Count)
 	re.Equal(float64(200000000), hotRegion.AsLeader[1].TotalBytesRate)
 	re.Equal(float64(100000000), hotRegion.AsLeader[2].TotalBytesRate)
+
+	stats := &metapb.BucketStats{
+		ReadBytes:  []uint64{10 * units.MiB},
+		ReadKeys:   []uint64{11 * units.MiB},
+		ReadQps:    []uint64{0},
+		WriteKeys:  []uint64{12 * units.MiB},
+		WriteBytes: []uint64{13 * units.MiB},
+		WriteQps:   []uint64{0},
+	}
+	buckets := pdctl.MustReportBuckets(re, cluster, 1, []byte("a"), []byte("b"), stats)
+	args = []string{"-u", pdAddr, "hot", "buckets", "1"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	hotBuckets := api.HotBucketsResponse{}
+	re.NoError(json.Unmarshal(output, &hotBuckets))
+	re.Len(hotBuckets, 1)
+	re.Len(hotBuckets[1], 1)
+	item := hotBuckets[1][0]
+	re.Equal(core.HexRegionKeyStr(buckets.GetKeys()[0]), item.StartKey)
+	re.Equal(core.HexRegionKeyStr(buckets.GetKeys()[1]), item.EndKey)
+	re.Equal(1, item.HotDegree)
+	interval := buckets.GetPeriodInMs() / 1000
+	re.Equal(buckets.GetStats().ReadBytes[0]/interval, item.ReadBytes)
+	re.Equal(buckets.GetStats().ReadKeys[0]/interval, item.ReadKeys)
+	re.Equal(buckets.GetStats().WriteBytes[0]/interval, item.WriteBytes)
+	re.Equal(buckets.GetStats().WriteKeys[0]/interval, item.WriteKeys)
+
+	args = []string{"-u", pdAddr, "hot", "buckets", "2"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	hotBuckets = api.HotBucketsResponse{}
+	re.NoError(json.Unmarshal(output, &hotBuckets))
+	re.Nil(hotBuckets[2])
 }
 
 func TestHistoryHotRegions(t *testing.T) {

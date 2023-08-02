@@ -27,7 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -76,12 +76,13 @@ var (
 	ruleCheckerMoveToBetterLocationCounter        = checkerCounter.WithLabelValues(ruleChecker, "move-to-better-location")
 	ruleCheckerSkipRemoveOrphanPeerCounter        = checkerCounter.WithLabelValues(ruleChecker, "skip-remove-orphan-peer")
 	ruleCheckerRemoveOrphanPeerCounter            = checkerCounter.WithLabelValues(ruleChecker, "remove-orphan-peer")
+	ruleCheckerReplaceOrphanPeerCounter           = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer")
 )
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
-	cluster            schedule.Cluster
+	cluster            sche.CheckerCluster
 	ruleManager        *placement.RuleManager
 	name               string
 	regionWaitingList  cache.Cache
@@ -91,14 +92,14 @@ type RuleChecker struct {
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
+func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
 	return &RuleChecker{
 		cluster:            cluster,
 		ruleManager:        ruleManager,
 		name:               ruleCheckerName,
 		regionWaitingList:  regionWaitingList,
 		pendingList:        cache.NewDefaultCache(maxPendingListLen),
-		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetOpts().GetSwitchWitnessInterval()),
+		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
 		record:             newRecord(),
 	}
 }
@@ -160,7 +161,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 			return op
 		}
 	}
-	if c.cluster.GetOpts().IsPlacementRulesCacheEnabled() {
+	if c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() {
 		if placement.ValidateFit(fit) && placement.ValidateRegion(region) && placement.ValidateStores(fit.GetRegionStores()) {
 			// If there is no need to fix, we will cache the fit
 			c.ruleManager.SetRegionFitCache(region, fit)
@@ -173,12 +174,12 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 // RecordRegionPromoteToNonWitness put the recently switch non-witness region into cache. RuleChecker
 // will skip switch it back to witness for a while.
 func (c *RuleChecker) RecordRegionPromoteToNonWitness(regionID uint64) {
-	c.switchWitnessCache.PutWithTTL(regionID, nil, c.cluster.GetOpts().GetSwitchWitnessInterval())
+	c.switchWitnessCache.PutWithTTL(regionID, nil, c.cluster.GetCheckerConfig().GetSwitchWitnessInterval())
 }
 
 func (c *RuleChecker) isWitnessEnabled() bool {
-	return versioninfo.IsFeatureSupported(c.cluster.GetOpts().GetClusterVersion(), versioninfo.SwitchWitness) &&
-		c.cluster.GetOpts().IsWitnessAllowed()
+	return versioninfo.IsFeatureSupported(c.cluster.GetCheckerConfig().GetClusterVersion(), versioninfo.SwitchWitness) &&
+		c.cluster.GetCheckerConfig().IsWitnessAllowed()
 }
 
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
@@ -204,13 +205,6 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 		if c.isOfflinePeer(peer) {
 			ruleCheckerReplaceOfflineCounter.Inc()
 			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
-		}
-
-		if c.isWitnessEnabled() && c.isPendingVoter(region, peer) {
-			if witness, ok := c.hasAvailableWitness(region, peer); ok {
-				ruleCheckerPromoteWitnessCounter.Inc()
-				return operator.CreateNonWitnessPeerOperator("promote-witness-for-pending", c.cluster, region, witness)
-			}
 		}
 	}
 	// fix loose matched peers.
@@ -350,7 +344,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		return nil, errPeerCannotBeWitness
 	}
 	if !core.IsWitness(peer) && rf.Rule.IsWitness && c.isWitnessEnabled() {
-		c.switchWitnessCache.UpdateTTL(c.cluster.GetOpts().GetSwitchWitnessInterval())
+		c.switchWitnessCache.UpdateTTL(c.cluster.GetCheckerConfig().GetSwitchWitnessInterval())
 		if c.switchWitnessCache.Exists(region.GetID()) {
 			ruleCheckerRecentlyPromoteToNonWitnessCounter.Inc()
 			return nil, nil
@@ -385,7 +379,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 		return false
 	}
 	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
-	if !stateFilter.Target(c.cluster.GetOpts(), s).IsOK() {
+	if !stateFilter.Target(c.cluster.GetCheckerConfig(), s).IsOK() {
 		return false
 	}
 	for _, rf := range fit.RuleFits {
@@ -398,7 +392,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 }
 
 func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
-	if len(rf.Rule.LocationLabels) == 0 || rf.Rule.Count <= 1 {
+	if len(rf.Rule.LocationLabels) == 0 {
 		return nil, nil
 	}
 
@@ -410,7 +404,15 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 	if oldStore == 0 {
 		return nil, nil
 	}
-	newStore, filterByTempState := strategy.SelectStoreToImprove(ruleStores, oldStore)
+	var coLocationStores []*core.StoreInfo
+	regionStores := c.cluster.GetRegionStores(region)
+	for _, s := range regionStores {
+		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
+			coLocationStores = append(coLocationStores, s)
+		}
+	}
+
+	newStore, filterByTempState := strategy.SelectStoreToImprove(coLocationStores, oldStore)
 	if newStore == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		c.handleFilterState(region, filterByTempState)
@@ -425,14 +427,15 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
 	}
+	var pinDownPeer *metapb.Peer
 	isUnhealthyPeer := func(id uint64) bool {
-		for _, pendingPeer := range region.GetPendingPeers() {
-			if pendingPeer.GetId() == id {
+		for _, downPeer := range region.GetDownPeers() {
+			if downPeer.Peer.GetId() == id {
 				return true
 			}
 		}
-		for _, downPeer := range region.GetDownPeers() {
-			if downPeer.Peer.GetId() == id {
+		for _, pendingPeer := range region.GetPendingPeers() {
+			if pendingPeer.GetId() == id {
 				return true
 			}
 		}
@@ -449,24 +452,71 @@ loopFits:
 		}
 		for _, p := range rf.Peers {
 			if isUnhealthyPeer(p.GetId()) {
+				// make sure is down peer.
+				if region.GetDownPeer(p.GetId()) != nil {
+					pinDownPeer = p
+				}
 				hasUnhealthyFit = true
 				break loopFits
 			}
 		}
 	}
+
 	// If hasUnhealthyFit is false, it is safe to delete the OrphanPeer.
 	if !hasUnhealthyFit {
 		ruleCheckerRemoveOrphanPeerCounter.Inc()
 		return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, fit.OrphanPeers[0].StoreId)
 	}
+
+	// try to use orphan peers to replace unhealthy down peers.
+	for _, orphanPeer := range fit.OrphanPeers {
+		if pinDownPeer != nil {
+			// make sure the orphan peer is healthy.
+			if isUnhealthyPeer(orphanPeer.GetId()) {
+				continue
+			}
+			// no consider witness in this path.
+			if pinDownPeer.GetIsWitness() || orphanPeer.GetIsWitness() {
+				continue
+			}
+			// down peer's store should be down.
+			if !c.isStoreDownTimeHitMaxDownTime(pinDownPeer.GetStoreId()) {
+				continue
+			}
+			// check if down peer can replace with orphan peer.
+			dstStore := c.cluster.GetStore(orphanPeer.GetStoreId())
+			if fit.Replace(pinDownPeer.GetStoreId(), dstStore) {
+				destRole := pinDownPeer.GetRole()
+				orphanPeerRole := orphanPeer.GetRole()
+				ruleCheckerReplaceOrphanPeerCounter.Inc()
+				switch {
+				case orphanPeerRole == metapb.PeerRole_Learner && destRole == metapb.PeerRole_Voter:
+					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
+				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
+					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
+				default:
+					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
+					// destRole never be leader, so we not consider it.
+				}
+			}
+		}
+	}
+
 	// If hasUnhealthyFit is true, try to remove unhealthy orphan peers only if number of OrphanPeers is >= 2.
 	// Ref https://github.com/tikv/pd/issues/4045
 	if len(fit.OrphanPeers) >= 2 {
+		hasHealthPeer := false
 		for _, orphanPeer := range fit.OrphanPeers {
 			if isUnhealthyPeer(orphanPeer.GetId()) {
 				ruleCheckerRemoveOrphanPeerCounter.Inc()
 				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
+			if hasHealthPeer {
+				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
+				ruleCheckerRemoveOrphanPeerCounter.Inc()
+				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
+			}
+			hasHealthPeer = true
 		}
 	}
 	ruleCheckerSkipRemoveOrphanPeerCounter.Inc()
@@ -490,7 +540,11 @@ func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) boo
 
 func (c *RuleChecker) isStoreDownTimeHitMaxDownTime(storeID uint64) bool {
 	store := c.cluster.GetStore(storeID)
-	return store.DownTime() >= c.cluster.GetOpts().GetMaxStoreDownTime()
+	if store == nil {
+		log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
+		return false
+	}
+	return store.DownTime() >= c.cluster.GetCheckerConfig().GetMaxStoreDownTime()
 }
 
 func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
@@ -500,10 +554,6 @@ func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {
 		return false
 	}
 	return !store.IsPreparing() && !store.IsServing()
-}
-
-func (c *RuleChecker) isPendingVoter(region *core.RegionInfo, peer *metapb.Peer) bool {
-	return region.GetPendingVoter(peer.Id) != nil
 }
 
 func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.Peer) (*metapb.Peer, bool) {
@@ -583,7 +633,7 @@ func (o *recorder) incOfflineLeaderCount(storeID uint64) {
 // Offline is triggered manually and only appears when the node makes some adjustments. here is an operator timeout / 2.
 var offlineCounterTTL = 5 * time.Minute
 
-func (o *recorder) refresh(cluster schedule.Cluster) {
+func (o *recorder) refresh(cluster sche.CheckerCluster) {
 	// re-count the offlineLeaderCounter if the store is already tombstone or store is gone.
 	if len(o.offlineLeaderCounter) > 0 && time.Since(o.lastUpdateTime) > offlineCounterTTL {
 		needClean := false

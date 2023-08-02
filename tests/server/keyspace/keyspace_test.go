@@ -27,16 +27,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/tests"
 )
 
 type keyspaceTestSuite struct {
 	suite.Suite
-	cleanup func()
+	cancel  context.CancelFunc
 	cluster *tests.TestCluster
 	server  *tests.TestServer
 	manager *keyspace.Manager
@@ -51,7 +51,7 @@ func TestKeyspaceTestSuite(t *testing.T) {
 
 func (suite *keyspaceTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
-	suite.cleanup = cancel
+	suite.cancel = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
 		conf.Keyspace.PreAlloc = preAllocKeyspace
 	})
@@ -65,7 +65,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
-	suite.cleanup()
+	suite.cancel()
 	suite.cluster.Destroy()
 }
 
@@ -81,8 +81,9 @@ func (suite *keyspaceTestSuite) TestRegionLabeler() {
 	var err error
 	for i := 0; i < count; i++ {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name: fmt.Sprintf("test_keyspace%d", i),
-			Now:  now,
+			Name:       fmt.Sprintf("test_keyspace_%d", i),
+			CreateTime: now,
+			IsPreAlloc: true, // skip wait region split
 		})
 		re.NoError(err)
 	}

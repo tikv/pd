@@ -40,10 +40,11 @@ type Storage interface {
 	endpoint.GCSafePointStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
-	endpoint.KeyspaceGCSafePointStorage
+	endpoint.SafePointV2Storage
 	endpoint.KeyspaceStorage
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
+	endpoint.KeyspaceGroupStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.

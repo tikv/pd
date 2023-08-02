@@ -17,62 +17,57 @@ package member
 import (
 	"context"
 	"fmt"
-	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
+type leadershipCheckFunc func(*election.Leadership) bool
+
 // Participant is used for the election related logic. Compared to its counterpart
 // EmbeddedEtcdMember, Participant relies on etcd for election, but it's decoupled
-// with the embedded etcd. It implements Member interface.
+// from the embedded etcd. It implements Member interface.
 type Participant struct {
 	leadership *election.Leadership
 	// stored as member type
-	leader atomic.Value
-	client *clientv3.Client
-	// id is unique among all participants
-	id uint64
-	// member is the current participant's info.
-	// TODO: use a more general instead of pdpb.Member. The latter is tightly
-	// coupled with the embedded etcd. For now, we can reuse it and ignore the
-	// fields which are related to embedded etcd, such as PeerUrls and ClientUrls.
-	member     *pdpb.Member
+	leader     atomic.Value
+	client     *clientv3.Client
 	rootPath   string
 	leaderPath string
+	member     *tsopb.Participant
 	// memberValue is the serialized string of `member`. It will be saved in the
-	// eader key when this participant is successfully elected as the leader of
+	// leader key when this participant is successfully elected as the leader of
 	// the group. Every write will use it to check the leadership.
 	memberValue string
+	// campaignChecker is used to check whether the additional constraints for a
+	// campaign are satisfied. If it returns false, the campaign will fail.
+	campaignChecker atomic.Value // Store as leadershipCheckFunc
+	// lastLeaderUpdatedTime is the last time when the leader is updated.
+	lastLeaderUpdatedTime atomic.Value
 }
 
 // NewParticipant create a new Participant.
-func NewParticipant(client *clientv3.Client, id uint64) *Participant {
+func NewParticipant(client *clientv3.Client) *Participant {
 	return &Participant{
 		client: client,
-		id:     id,
 	}
 }
 
 // InitInfo initializes the member info. The leader key is path.Join(rootPath, leaderName)
-func (m *Participant) InitInfo(name string, rootPath string, leaderName string, purpose string, listenURL string) {
-	leader := &pdpb.Member{
-		Name:     name,
-		MemberId: m.ID(),
-		// TODO: need refactor
-		ClientUrls: []string{listenURL},
+func (m *Participant) InitInfo(name string, id uint64, rootPath string, leaderName string, purpose string, advertiseListenAddr string) {
+	leader := &tsopb.Participant{
+		Name:       name,
+		Id:         id, // id is unique among all participants
+		ListenUrls: []string{advertiseListenAddr},
 	}
 
 	data, err := leader.Marshal()
@@ -85,23 +80,28 @@ func (m *Participant) InitInfo(name string, rootPath string, leaderName string, 
 	m.rootPath = rootPath
 	m.leaderPath = path.Join(rootPath, leaderName)
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
+	m.lastLeaderUpdatedTime.Store(time.Now())
+	log.Info("participant joining election", zap.Stringer("participant-info", m.member), zap.String("leader-path", m.leaderPath))
 }
 
-// ID returns the unique ID for this participant in the group. For example, it can be
-// unique server id of a cluster or the unique keyspace group replica id of the election
-// group comprised of the replicas of a keyspace group.
+// ID returns the unique ID for this participant in the election group
 func (m *Participant) ID() uint64 {
-	return m.id
+	return m.member.Id
+}
+
+// Name returns the unique name in the election group.
+func (m *Participant) Name() string {
+	return m.member.Name
+}
+
+// GetMember returns the member.
+func (m *Participant) GetMember() interface{} {
+	return m.member
 }
 
 // MemberValue returns the member value.
 func (m *Participant) MemberValue() string {
 	return m.memberValue
-}
-
-// Member returns the member.
-func (m *Participant) Member() *pdpb.Member {
-	return m.member
 }
 
 // Client returns the etcd client.
@@ -112,35 +112,47 @@ func (m *Participant) Client() *clientv3.Client {
 // IsLeader returns whether the participant is the leader or not by checking its leadership's
 // lease and leader info.
 func (m *Participant) IsLeader() bool {
-	return m.leadership.Check() && m.GetLeader().GetMemberId() == m.member.GetMemberId()
+	return m.leadership.Check() && m.GetLeader().GetId() == m.member.GetId() && m.campaignCheck()
+}
+
+// IsLeaderElected returns true if the leader exists; otherwise false
+func (m *Participant) IsLeaderElected() bool {
+	return m.GetLeader() != nil
+}
+
+// GetLeaderListenUrls returns current leader's listen urls
+func (m *Participant) GetLeaderListenUrls() []string {
+	return m.GetLeader().GetListenUrls()
 }
 
 // GetLeaderID returns current leader's member ID.
 func (m *Participant) GetLeaderID() uint64 {
-	return m.GetLeader().GetMemberId()
+	return m.GetLeader().GetId()
 }
 
 // GetLeader returns current leader of the election group.
-func (m *Participant) GetLeader() *pdpb.Member {
+func (m *Participant) GetLeader() *tsopb.Participant {
 	leader := m.leader.Load()
 	if leader == nil {
 		return nil
 	}
-	member := leader.(*pdpb.Member)
-	if member.GetMemberId() == 0 {
+	member := leader.(*tsopb.Participant)
+	if member.GetId() == 0 {
 		return nil
 	}
 	return member
 }
 
 // setLeader sets the member's leader.
-func (m *Participant) setLeader(member *pdpb.Member) {
+func (m *Participant) setLeader(member *tsopb.Participant) {
 	m.leader.Store(member)
+	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
 // unsetLeader unsets the member's leader.
 func (m *Participant) unsetLeader() {
-	m.leader.Store(&pdpb.Member{})
+	m.leader.Store(&tsopb.Participant{})
+	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
 // EnableLeader declares the member itself to be the leader.
@@ -153,13 +165,25 @@ func (m *Participant) GetLeaderPath() string {
 	return m.leaderPath
 }
 
+// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
+func (m *Participant) GetLastLeaderUpdatedTime() time.Time {
+	lastLeaderUpdatedTime := m.lastLeaderUpdatedTime.Load()
+	if lastLeaderUpdatedTime == nil {
+		return time.Time{}
+	}
+	return lastLeaderUpdatedTime.(time.Time)
+}
+
 // GetLeadership returns the leadership of the member.
 func (m *Participant) GetLeadership() *election.Leadership {
 	return m.leadership
 }
 
-// CampaignLeader is used to campaign a member's leadership and make it become a leader.
+// CampaignLeader is used to campaign the leadership and make it become a leader.
 func (m *Participant) CampaignLeader(leaseTimeout int64) error {
+	if !m.campaignCheck() {
+		return errs.ErrCheckCampaign
+	}
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
@@ -168,49 +192,72 @@ func (m *Participant) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// PrecheckLeader does some pre-check before checking whether or not it's the leader.
+// PreCheckLeader does some pre-check before checking whether or not it's the leader.
 // It returns true if it passes the pre-check, false otherwise.
-func (m *Participant) PrecheckLeader() error {
+func (m *Participant) PreCheckLeader() error {
 	// No specific thing to check. Returns no error.
 	return nil
 }
 
-// CheckLeader checks returns true if it is needed to check later.
-func (m *Participant) CheckLeader() (*pdpb.Member, int64, bool) {
-	if err := m.PrecheckLeader(); err != nil {
-		log.Error("failed to pass pre-check, check the leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
-		time.Sleep(200 * time.Millisecond)
-		return nil, 0, true
+// getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
+func (m *Participant) getPersistentLeader() (*tsopb.Participant, int64, error) {
+	leader := &tsopb.Participant{}
+	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
+	if err != nil {
+		return nil, 0, err
+	}
+	if !ok {
+		return nil, 0, nil
 	}
 
-	leader, rev, err := election.GetLeader(m.client, m.GetLeaderPath())
+	return leader, rev, nil
+}
+
+// CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
+// otherwise returns a bool which indicates if it is needed to check later.
+func (m *Participant) CheckLeader() (ElectionLeader, bool) {
+	if err := m.PreCheckLeader(); err != nil {
+		log.Error("failed to pass pre-check, check the leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
+		time.Sleep(200 * time.Millisecond)
+		return nil, true
+	}
+
+	leader, revision, err := m.getPersistentLeader()
 	if err != nil {
 		log.Error("getting the leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
-		return nil, 0, true
+		return nil, true
 	}
-	if leader != nil {
-		if m.IsSameLeader(leader) {
-			// oh, we are already the leader, which indicates we may meet something wrong
-			// in previous CampaignLeader. We should delete the leadership and campaign again.
-			log.Warn("the leader has not changed, delete and campaign again", zap.Stringer("old-leader", leader))
-			// Delete the leader itself and let others start a new election again.
-			if err = m.leadership.DeleteLeaderKey(); err != nil {
-				log.Error("deleting the leader key meets error", errs.ZapError(err))
-				time.Sleep(200 * time.Millisecond)
-				return nil, 0, true
-			}
-			// Return nil and false to make sure the campaign will start immediately.
-			return nil, 0, false
+	if leader == nil {
+		// no leader yet
+		return nil, false
+	}
+
+	if m.IsSameLeader(leader) {
+		// oh, we are already the leader, which indicates we may meet something wrong
+		// in previous CampaignLeader. We should delete the leadership and campaign again.
+		log.Warn("the leader has not changed, delete and campaign again", zap.Stringer("old-leader", leader))
+		// Delete the leader itself and let others start a new election again.
+		if err = m.leadership.DeleteLeaderKey(); err != nil {
+			log.Error("deleting the leader key meets error", errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			return nil, true
 		}
+		// Return nil and false to make sure the campaign will start immediately.
+		return nil, false
 	}
-	return leader, rev, false
+
+	return &EtcdLeader{
+		wrapper:      m,
+		pariticipant: leader,
+		revision:     revision,
+	}, false
 }
 
 // WatchLeader is used to watch the changes of the leader.
-func (m *Participant) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
+func (m *Participant) WatchLeader(ctx context.Context, leader *tsopb.Participant, revision int64) {
 	m.setLeader(leader)
-	m.leadership.Watch(serverCtx, revision)
+	m.leadership.Watch(ctx, revision)
 	m.unsetLeader()
 }
 
@@ -222,8 +269,8 @@ func (m *Participant) ResetLeader() {
 }
 
 // IsSameLeader checks whether a server is the leader itself.
-func (m *Participant) IsSameLeader(leader *pdpb.Member) bool {
-	return leader.GetMemberId() == m.ID()
+func (m *Participant) IsSameLeader(leader *tsopb.Participant) bool {
+	return leader.GetId() == m.ID()
 }
 
 // CheckPriority checks whether there is another participant has higher priority and resign it as the leader if so.
@@ -231,8 +278,8 @@ func (m *Participant) CheckPriority(ctx context.Context) {
 	// TODO: implement weighted-election when it's in need
 }
 
-func (m *Participant) getMemberLeaderPriorityPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
+func (m *Participant) getLeaderPriorityPath(id uint64) string {
+	return path.Join(m.rootPath, fmt.Sprintf("participant/%d/leader_priority", id))
 }
 
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
@@ -245,9 +292,9 @@ func (m *Participant) GetDCLocationPath(id uint64) string {
 	return path.Join(m.GetDCLocationPathPrefix(), fmt.Sprint(id))
 }
 
-// SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
-func (m *Participant) SetMemberLeaderPriority(id uint64, priority int) error {
-	key := m.getMemberLeaderPriorityPath(id)
+// SetLeaderPriority saves the priority to be elected as the etcd leader.
+func (m *Participant) SetLeaderPriority(id uint64, priority int) error {
+	key := m.getLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
@@ -259,9 +306,9 @@ func (m *Participant) SetMemberLeaderPriority(id uint64, priority int) error {
 	return nil
 }
 
-// DeleteMemberLeaderPriority removes a member's etcd leader priority config.
-func (m *Participant) DeleteMemberLeaderPriority(id uint64) error {
-	key := m.getMemberLeaderPriorityPath(id)
+// DeleteLeaderPriority removes the etcd leader priority config.
+func (m *Participant) DeleteLeaderPriority(id uint64) error {
+	key := m.getLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
@@ -273,8 +320,8 @@ func (m *Participant) DeleteMemberLeaderPriority(id uint64) error {
 	return nil
 }
 
-// DeleteMemberDCLocationInfo removes a member's dc-location info.
-func (m *Participant) DeleteMemberDCLocationInfo(id uint64) error {
+// DeleteDCLocationInfo removes the dc-location info.
+func (m *Participant) DeleteDCLocationInfo(id uint64) error {
 	key := m.GetDCLocationPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
@@ -287,9 +334,9 @@ func (m *Participant) DeleteMemberDCLocationInfo(id uint64) error {
 	return nil
 }
 
-// GetMemberLeaderPriority loads a member's priority to be elected as the etcd leader.
-func (m *Participant) GetMemberLeaderPriority(id uint64) (int, error) {
-	key := m.getMemberLeaderPriorityPath(id)
+// GetLeaderPriority loads the priority to be elected as the etcd leader.
+func (m *Participant) GetLeaderPriority(id uint64) (int, error) {
+	key := m.getLeaderPriorityPath(id)
 	res, err := etcdutil.EtcdKVGet(m.client, key)
 	if err != nil {
 		return 0, err
@@ -304,100 +351,19 @@ func (m *Participant) GetMemberLeaderPriority(id uint64) (int, error) {
 	return int(priority), nil
 }
 
-func (m *Participant) getMemberBinaryDeployPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("member/%d/deploy_path", id))
+func (m *Participant) campaignCheck() bool {
+	checker := m.campaignChecker.Load()
+	if checker == nil {
+		return true
+	}
+	checkerFunc, ok := checker.(leadershipCheckFunc)
+	if !ok || checkerFunc == nil {
+		return true
+	}
+	return checkerFunc(m.leadership)
 }
 
-// GetMemberDeployPath loads a member's binary deploy path.
-func (m *Participant) GetMemberDeployPath(id uint64) (string, error) {
-	key := m.getMemberBinaryDeployPath(id)
-	res, err := etcdutil.EtcdKVGet(m.client, key)
-	if err != nil {
-		return "", err
-	}
-	if len(res.Kvs) == 0 {
-		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
-	}
-	return string(res.Kvs[0].Value), nil
-}
-
-// SetMemberDeployPath saves a member's binary deploy path.
-func (m *Participant) SetMemberDeployPath(id uint64) error {
-	key := m.getMemberBinaryDeployPath(id)
-	txn := kv.NewSlowLogTxn(m.client)
-	execPath, err := os.Executable()
-	deployPath := filepath.Dir(execPath)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	res, err := txn.Then(clientv3.OpPut(key, deployPath)).Commit()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !res.Succeeded {
-		return errors.New("failed to save deploy path")
-	}
-	return nil
-}
-
-func (m *Participant) getMemberGitHashPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("member/%d/git_hash", id))
-}
-
-func (m *Participant) getMemberBinaryVersionPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("member/%d/binary_version", id))
-}
-
-// GetMemberBinaryVersion loads a member's binary version.
-func (m *Participant) GetMemberBinaryVersion(id uint64) (string, error) {
-	key := m.getMemberBinaryVersionPath(id)
-	res, err := etcdutil.EtcdKVGet(m.client, key)
-	if err != nil {
-		return "", err
-	}
-	if len(res.Kvs) == 0 {
-		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
-	}
-	return string(res.Kvs[0].Value), nil
-}
-
-// GetMemberGitHash loads a member's git hash.
-func (m *Participant) GetMemberGitHash(id uint64) (string, error) {
-	key := m.getMemberGitHashPath(id)
-	res, err := etcdutil.EtcdKVGet(m.client, key)
-	if err != nil {
-		return "", err
-	}
-	if len(res.Kvs) == 0 {
-		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
-	}
-	return string(res.Kvs[0].Value), nil
-}
-
-// SetMemberBinaryVersion saves a member's binary version.
-func (m *Participant) SetMemberBinaryVersion(id uint64, releaseVersion string) error {
-	key := m.getMemberBinaryVersionPath(id)
-	txn := kv.NewSlowLogTxn(m.client)
-	res, err := txn.Then(clientv3.OpPut(key, releaseVersion)).Commit()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !res.Succeeded {
-		return errors.New("failed to save binary version")
-	}
-	return nil
-}
-
-// SetMemberGitHash saves a member's git hash.
-func (m *Participant) SetMemberGitHash(id uint64, gitHash string) error {
-	key := m.getMemberGitHashPath(id)
-	txn := kv.NewSlowLogTxn(m.client)
-	res, err := txn.Then(clientv3.OpPut(key, gitHash)).Commit()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !res.Succeeded {
-		return errors.New("failed to save git hash")
-	}
-	return nil
+// SetCampaignChecker sets the pre-campaign checker.
+func (m *Participant) SetCampaignChecker(checker leadershipCheckFunc) {
+	m.campaignChecker.Store(checker)
 }

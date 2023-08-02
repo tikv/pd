@@ -24,19 +24,18 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 )
 
 type evictSlowTrendTestSuite struct {
 	suite.Suite
 	cancel context.CancelFunc
 	tc     *mockcluster.Cluster
-	es     schedule.Scheduler
-	bs     schedule.Scheduler
-	oc     *schedule.OperatorController
+	es     Scheduler
+	bs     Scheduler
+	oc     *operator.Controller
 }
 
 func TestEvictSlowTrendTestSuite(t *testing.T) {
@@ -69,9 +68,9 @@ func (suite *evictSlowTrendTestSuite) SetupTest() {
 
 	storage := storage.NewStorageWithMemoryBackend()
 	var err error
-	suite.es, err = schedule.CreateScheduler(EvictSlowTrendType, suite.oc, storage, schedule.ConfigSliceDecoder(EvictSlowTrendType, []string{}))
+	suite.es, err = CreateScheduler(EvictSlowTrendType, suite.oc, storage, ConfigSliceDecoder(EvictSlowTrendType, []string{}))
 	suite.NoError(err)
-	suite.bs, err = schedule.CreateScheduler(BalanceLeaderType, suite.oc, storage, schedule.ConfigSliceDecoder(BalanceLeaderType, []string{}))
+	suite.bs, err = CreateScheduler(BalanceLeaderType, suite.oc, storage, ConfigSliceDecoder(BalanceLeaderType, []string{}))
 	suite.NoError(err)
 }
 
@@ -111,7 +110,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 		suite.tc.PutStore(newStoreInfo)
 	}
 	ops, _ = suite.es.Schedule(suite.tc, false)
-	testutil.CheckMultiTargetTransferLeader(suite.Require(), ops[0], operator.OpLeader, 1, []uint64{2, 3})
+	operatorutil.CheckMultiTargetTransferLeader(suite.Require(), ops[0], operator.OpLeader, 1, []uint64{2, 3})
 	suite.Equal(EvictSlowTrendType, ops[0].Desc())
 	suite.Equal(es2.conf.candidate(), uint64(0))
 	suite.Equal(es2.conf.evictedStore(), uint64(1))
@@ -134,7 +133,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	suite.Empty(ops)
 	suite.Zero(es2.conf.evictedStore())
 	ops, _ = suite.bs.Schedule(suite.tc, false)
-	testutil.CheckTransferLeader(suite.Require(), ops[0], operator.OpLeader, 3, 1)
+	operatorutil.CheckTransferLeader(suite.Require(), ops[0], operator.OpLeader, 3, 1)
 
 	// no slow store need to evict.
 	ops, _ = suite.es.Schedule(suite.tc, false)

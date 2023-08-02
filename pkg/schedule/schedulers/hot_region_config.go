@@ -24,7 +24,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -75,6 +75,7 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		EnableForTiFlash:       true,
 		RankFormulaVersion:     "v2",
 		ForbidRWType:           "none",
+		SplitThresholds:        0.2,
 	}
 	cfg.applyPrioritiesConfig(defaultPrioritiesConfig)
 	return cfg
@@ -102,6 +103,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 		EnableForTiFlash:       conf.EnableForTiFlash,
 		RankFormulaVersion:     conf.getRankFormulaVersionLocked(),
 		ForbidRWType:           conf.getForbidRWTypeLocked(),
+		SplitThresholds:        conf.SplitThresholds,
 	}
 }
 
@@ -143,12 +145,14 @@ type hotRegionSchedulerConfig struct {
 	RankFormulaVersion string `json:"rank-formula-version"`
 	// forbid read or write scheduler, only for test
 	ForbidRWType string `json:"forbid-rw-type,omitempty"`
+	// SplitThresholds is the threshold to split hot region if the first priority flow of on hot region exceeds it.
+	SplitThresholds float64 `json:"split-thresholds"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
 	conf.RLock()
 	defer conf.RUnlock()
-	return schedule.EncodeConfig(conf)
+	return EncodeConfig(conf)
 }
 
 func (conf *hotRegionSchedulerConfig) GetStoreStatZombieDuration() time.Duration {
@@ -316,6 +320,12 @@ func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw statistics.RWType) bool 
 	return rw.String() == conf.ForbidRWType
 }
 
+func (conf *hotRegionSchedulerConfig) getSplitThresholds() float64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.SplitThresholds
+}
+
 func (conf *hotRegionSchedulerConfig) getForbidRWTypeLocked() string {
 	switch conf.ForbidRWType {
 	case statistics.Read.String(), statistics.Write.String():
@@ -377,6 +387,9 @@ func (conf *hotRegionSchedulerConfig) valid() error {
 		conf.ForbidRWType != "none" && conf.ForbidRWType != "" {
 		return errs.ErrSchedulerConfig.FastGenByArgs("invalid forbid-rw-type")
 	}
+	if conf.SplitThresholds < 0.01 || conf.SplitThresholds > 1.0 {
+		return errs.ErrSchedulerConfig.FastGenByArgs("invalid split-thresholds, should be in range [0.01, 1.0]")
+	}
 	return nil
 }
 
@@ -426,21 +439,22 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 }
 
 func (conf *hotRegionSchedulerConfig) persistLocked() error {
-	data, err := schedule.EncodeConfig(conf)
+	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
 	return conf.storage.SaveScheduleConfig(HotRegionName, data)
 }
 
-func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster schedule.Cluster) bool {
-	querySupport := versioninfo.IsFeatureSupported(cluster.GetOpts().GetClusterVersion(), versioninfo.HotScheduleWithQuery)
+func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.SchedulerCluster) bool {
+	version := cluster.GetSchedulerConfig().GetClusterVersion()
+	querySupport := versioninfo.IsFeatureSupported(version, versioninfo.HotScheduleWithQuery)
 	conf.Lock()
 	defer conf.Unlock()
 	if querySupport != conf.lastQuerySupported {
 		log.Info("query supported changed",
 			zap.Bool("last-query-support", conf.lastQuerySupported),
-			zap.String("cluster-version", cluster.GetOpts().GetClusterVersion().String()),
+			zap.String("cluster-version", version.String()),
 			zap.Reflect("config", conf),
 			zap.Reflect("valid-config", conf.getValidConf()))
 		conf.lastQuerySupported = querySupport

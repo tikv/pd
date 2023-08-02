@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
@@ -42,7 +43,7 @@ import (
 )
 
 var (
-	pdAddr                      = flag.String("pd", "", "pd address")
+	pdAddr                      = flag.String("pd-endpoints", "", "pd address")
 	configFile                  = flag.String("config", "conf/simconfig.toml", "config file")
 	caseName                    = flag.String("case", "", "case name")
 	serverLogLevel              = flag.String("serverLog", "info", "pd server log level")
@@ -132,7 +133,7 @@ func runHTTPServer() {
 }
 
 // NewSingleServer creates a pd server for simulator.
-func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*server.Server, server.CleanupFunc) {
+func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*server.Server, testutil.CleanupFunc) {
 	err := logutil.SetupLogger(simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps)
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.Logger, simConfig.ServerConfig.LogProps)
@@ -157,7 +158,7 @@ func cleanServer(cfg *config.Config) {
 	os.RemoveAll(cfg.DataDir)
 }
 
-func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, clean ...server.CleanupFunc) {
+func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, clean ...testutil.CleanupFunc) {
 	start := time.Now()
 	driver, err := simulator.NewDriver(pdAddr, simCase, simConfig)
 	if err != nil {
@@ -196,7 +197,7 @@ EXIT:
 	}
 
 	driver.Stop()
-	if len(clean) != 0 {
+	if len(clean) != 0 && clean[0] != nil {
 		clean[0]()
 	}
 

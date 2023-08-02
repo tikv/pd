@@ -20,9 +20,9 @@ import (
 )
 
 // Discover is used to get all the service instances of the specified service name.
-func Discover(cli *clientv3.Client, serviceName string) ([]string, error) {
-	key := discoveryPath(serviceName) + "/"
-	endKey := clientv3.GetPrefixRangeEnd(key) + "/"
+func Discover(cli *clientv3.Client, clusterID, serviceName string) ([]string, error) {
+	key := ServicePath(clusterID, serviceName)
+	endKey := clientv3.GetPrefixRangeEnd(key)
 
 	withRange := clientv3.WithRange(endKey)
 	resp, err := etcdutil.EtcdKVGet(cli, key, withRange)

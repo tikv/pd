@@ -50,7 +50,7 @@ type idFilter func(uint64) bool
 
 func (f idFilter) Scope() string    { return "idFilter" }
 func (f idFilter) Type() filterType { return filterType(0) }
-func (f idFilter) Source(conf config.Config, store *core.StoreInfo) *plan.Status {
+func (f idFilter) Source(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if f(store.GetID()) {
 		return statusOK
 	}
@@ -58,7 +58,7 @@ func (f idFilter) Source(conf config.Config, store *core.StoreInfo) *plan.Status
 	return statusStoreScoreDisallowed
 }
 
-func (f idFilter) Target(conf config.Config, store *core.StoreInfo) *plan.Status {
+func (f idFilter) Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if f(store.GetID()) {
 		return statusOK
 	}

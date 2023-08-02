@@ -37,15 +37,30 @@ type RegionFit struct {
 
 // Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.
 func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
-	fit := f.getRuleFitByStoreID(srcStoreID)
-	// check the target store is fit all constraints.
-	if fit == nil || !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
+	if dstStore == nil {
 		return false
 	}
-
+	fit := f.getRuleFitByStoreID(srcStoreID)
+	// check the target store is fit all constraints.
+	if fit == nil {
+		return false
+	}
 	// the members of the rule are same, it shouldn't check the score.
+	// it is used to transfer role like transfer leader.
 	if fit.contain(dstStore.GetID()) {
 		return true
+	}
+
+	// it should be allowed to exchange role if both the source and target's rule role is same.
+	// e.g. transfer leader from store 1 to store 2, and store-1 and store-2 are both voter.
+	targetFit := f.getRuleFitByStoreID(dstStore.GetID())
+	if targetFit != nil && targetFit.Rule.Role == fit.Rule.Role {
+		return true
+	}
+
+	// the target store should be fit all constraints.
+	if !MatchLabelConstraints(dstStore, fit.Rule.LabelConstraints) {
+		return false
 	}
 
 	score := isolationStoreScore(srcStoreID, dstStore, fit.stores, fit.Rule.LocationLabels)
@@ -107,6 +122,7 @@ type RuleFit struct {
 	// IsolationScore indicates at which level of labeling these Peers are
 	// isolated. A larger value is better.
 	IsolationScore float64 `json:"isolation-score"`
+	WitnessScore   int     `json:"witness-score"`
 	// stores is the stores that the peers are placed in.
 	stores []*core.StoreInfo
 }
@@ -138,6 +154,10 @@ func compareRuleFit(a, b *RuleFit) int {
 	case a.IsolationScore < b.IsolationScore:
 		return -1
 	case a.IsolationScore > b.IsolationScore:
+		return 1
+	case a.WitnessScore > b.WitnessScore:
+		return -1
+	case a.WitnessScore < b.WitnessScore:
 		return 1
 	default:
 		return 0
@@ -333,7 +353,7 @@ func (w *fitWorker) updateOrphanPeers(index int) {
 }
 
 func newRuleFit(rule *Rule, peers []*fitPeer, supportWitness bool) *RuleFit {
-	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels)}
+	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels), WitnessScore: witnessScore(peers, supportWitness && rule.IsWitness)}
 	for _, p := range peers {
 		rf.Peers = append(rf.Peers, p.Peer)
 		rf.stores = append(rf.stores, p.store)
@@ -428,4 +448,15 @@ func stateScore(region *core.RegionInfo, peerID uint64) int {
 	default:
 		return 2
 	}
+}
+
+func witnessScore(peers []*fitPeer, fitWitness bool) int {
+	var score int
+	if !fitWitness || len(peers) == 0 {
+		return 0
+	}
+	for _, p := range peers {
+		score += p.store.GetWitnessCount()
+	}
+	return score
 }

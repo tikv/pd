@@ -796,13 +796,6 @@
           "intervalFactor": 2,
           "legendFormat": "{{type}}",
           "refId": "B"
-        },
-        {
-          "expr": "pd_regions_offline_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"offline-peer-region-count\", instance=\"$instance\"}",
-          "format": "time_series",
-          "intervalFactor": 1,
-          "legendFormat": "{{type}}",
-          "refId": "C"
         }
       ],
       "thresholds": [
@@ -2341,6 +2334,113 @@
           }
         },
         {
+          "aliasColors": {},
+          "bars": true,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "The allowance status of the scheduling.",
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": []
+          },
+          "fill": 0,
+          "fillGradient": 0,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 41
+          },
+          "hiddenSeries": false,
+          "id": 1464,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": false,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "options": {
+            "alertThreshold": true
+          },
+          "paceLength": 10,
+          "percentage": false,
+          "pluginVersion": "7.5.10",
+          "pointradius": 1,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": true,
+          "steppedLine": false,
+          "targets": [
+            {
+              "exemplar": true,
+              "expr": "pd_scheduling_allowance_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
+              "format": "time_series",
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "{{kind}}",
+              "metric": "pd_scheduling_allowance_status",
+              "refId": "A",
+              "step": 2
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Scheduling Allowance Status",
+          "tooltip": {
+            "shared": true,
+            "sort": 1,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "$$hashKey": "object:533",
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": "0",
+              "show": true
+            },
+            {
+              "$$hashKey": "object:534",
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
           "cacheTimeout": null,
           "colorBackground": false,
           "colorValue": false,
@@ -2967,7 +3067,7 @@
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{event}}",
-              "metric": "pd_scheduler_status",
+              "metric": "pd_schedule_operators_count",
               "refId": "A",
               "step": 4
             }
@@ -5035,6 +5135,111 @@
           "dashLength": 10,
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 2,
+          "description": "The total keys of hot write on leader Regions for each TiKV instance",
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 31
+          },
+          "id": 1465,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 2,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"total_write_bytes_as_leader\"}",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{address}}-store-{{store}}",
+              "metric": "pd_hotspot_status",
+              "refId": "A",
+              "step": 4
+            },
+            {
+              "exemplar": true,
+              "expr": "pd_scheduler_hot_peers_summary{type=\"exp-byte-rate-write-leader\"}",
+              "hide": true,
+              "interval": "",
+              "legendFormat": "exp-byte-rate-write-leader-{{store}}",
+              "refId": "B"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Total written bytes on hot leader Regions",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "decimals": null,
+              "format": "ops",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 0,
           "fill": 0,
           "gridPos": {
@@ -5153,7 +5358,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 31
+            "y": 38
           },
           "id": 1445,
           "legend": {
@@ -5347,12 +5552,13 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": 0,
+          "description": "The select events of hot read scheduler",
           "fill": 0,
           "gridPos": {
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 38
+            "y": 45
           },
           "id": 106,
           "legend": {
@@ -5385,7 +5591,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "rate(pd_scheduler_hot_region{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=~\".*store.*\"}[1m])",
+              "expr": "rate(pd_scheduler_hot_region{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=~\".*write.*\"}[1m])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}-{{store}}",
@@ -5397,7 +5603,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Selector events",
+          "title": "Selector write events",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -5549,7 +5755,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 45
+            "y": 52
           },
           "id": 148,
           "legend": {
@@ -6594,6 +6800,102 @@
           "timeRegions": [],
           "timeShift": null,
           "title": "Remaining items in Queue",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "decimals": null,
+              "format": "none",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": 0,
+          "description": "The select events of hot read scheduler",
+          "fill": 0,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 81
+          },
+          "id": 1466,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": false,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "rate(pd_scheduler_hot_region{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=~\".*read.*\"}[1m])",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{type}}-{{store}}",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Selector read events",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -8718,12 +9020,20 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "etcd_debugging_mvcc_db_total_size_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
+              "expr": "etcd_mvcc_db_total_size_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 1,
-              "legendFormat": "{{instance}}",
+              "legendFormat": "{{instance}}-physically-allocated",
               "refId": "A"
+            },
+            {
+              "expr": "etcd_mvcc_db_total_size_in_use_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 1,
+              "legendFormat": "{{instance}}-logically-in-use",
+              "refId": "B"        
             }
           ],
           "thresholds": [],
@@ -10050,6 +10360,16 @@
               "intervalFactor": 2,
               "legendFormat": "tso request/secs",
               "refId": "A",
+              "step": 2
+            },
+            {
+              "expr": "sum(rate(pd_tso_events{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (type,dc)",
+              "format": "time_series",
+              "interval": "",
+              "intervalFactor": 2,
+              "legendFormat": "{{type}}-{{dc}}",
+              "hide": true,
+              "refId": "B",
               "step": 2
             }
           ],
@@ -11839,7 +12159,7 @@
             "x": 12,
             "y": 48
           },
-          "id": 1455,
+          "id": 1467,
           "interval": "",
           "options": {
             "displayMode": "lcd",

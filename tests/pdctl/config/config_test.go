@@ -25,6 +25,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -36,10 +37,10 @@ import (
 type testCase struct {
 	name  string
 	value interface{}
-	read  func(scheduleConfig *config.ScheduleConfig) interface{}
+	read  func(scheduleConfig *sc.ScheduleConfig) interface{}
 }
 
-func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*config.ScheduleConfig) {
+func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*sc.ScheduleConfig) {
 	value := t.value
 	for _, scheduleConfig := range scheduleConfigs {
 		re.NotNil(scheduleConfig)
@@ -87,7 +88,6 @@ func TestConfig(t *testing.T) {
 	scheduleConfig.EnableMakeUpReplica = false
 	scheduleConfig.EnableRemoveExtraReplica = false
 	scheduleConfig.EnableLocationReplacement = false
-	scheduleConfig.StoreLimitMode = ""
 	re.Equal(uint64(0), scheduleConfig.MaxMergeRegionKeys)
 	// The result of config show doesn't be 0.
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
@@ -113,7 +113,7 @@ func TestConfig(t *testing.T) {
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	scheduleCfg := config.ScheduleConfig{}
+	scheduleCfg := sc.ScheduleConfig{}
 	re.NoError(json.Unmarshal(output, &scheduleCfg))
 	scheduleConfig = svr.GetScheduleConfig()
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
@@ -136,11 +136,21 @@ func TestConfig(t *testing.T) {
 	re.Equal(20*10000, int(svr.GetScheduleConfig().MaxMergeRegionKeys))
 	re.Equal(20*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
 
+	// set store limit v2
+	args = []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal("v2", svr.GetScheduleConfig().StoreLimitVersion)
+	args = []string{"-u", pdAddr, "config", "set", "store-limit-version", "v1"}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal("v1", svr.GetScheduleConfig().StoreLimitVersion)
+
 	// config show replication
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	replicationCfg := config.ReplicationConfig{}
+	replicationCfg := sc.ReplicationConfig{}
 	re.NoError(json.Unmarshal(output, &replicationCfg))
 	re.Equal(svr.GetReplicationConfig(), &replicationCfg)
 
@@ -212,20 +222,20 @@ func TestConfig(t *testing.T) {
 
 	// test config read and write
 	testCases := []testCase{
-		{"leader-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"leader-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.LeaderScheduleLimit
-		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.HotRegionScheduleLimit
-		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.HotRegionCacheHitsThreshold
-		}}, {"enable-remove-down-replica", false, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"enable-remove-down-replica", false, func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableRemoveDownReplica
 		}},
-		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 		// set again
-		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 	}
@@ -411,6 +421,9 @@ func TestPlacementRuleGroups(t *testing.T) {
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "group2", "100", "false")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "group3", "200", "false")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 
 	// show all
 	var groups []placement.RuleGroup
@@ -420,15 +433,24 @@ func TestPlacementRuleGroups(t *testing.T) {
 	re.Equal([]placement.RuleGroup{
 		{ID: "pd", Index: 42, Override: true},
 		{ID: "group2", Index: 100, Override: false},
+		{ID: "group3", Index: 200, Override: false},
 	}, groups)
 
 	// delete
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "delete", "group2")
 	re.NoError(err)
-	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "Delete group and rules successfully.")
 
 	// show again
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group2")
+	re.NoError(err)
+	re.Contains(string(output), "404")
+
+	// delete using regex
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "delete", "--regexp", ".*3")
+	re.NoError(err)
+
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group3")
 	re.NoError(err)
 	re.Contains(string(output), "404")
 }
@@ -657,7 +679,7 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		replicationCfg := config.ReplicationConfig{}
+		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
 		re.Equal(expect, replicationCfg.MaxReplicas)
 	}
@@ -666,7 +688,7 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		replicationCfg := config.ReplicationConfig{}
+		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
 		re.Len(replicationCfg.LocationLabels, expect)
 	}

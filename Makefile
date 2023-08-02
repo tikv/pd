@@ -149,7 +149,7 @@ static: install-tools
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
-	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES)
+	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
 	@ echo "revive ..."
 	@ revive -formatter friendly -config revive.toml $(PACKAGES)
 
@@ -215,13 +215,11 @@ basic-test: install-tools
 
 ci-test-job: install-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
-	CGO_ENABLED=1 go test -timeout=15m -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX))
-	@$(FAILPOINT_DISABLE)
-
-ci-test-job-submod: install-tools dashboard-ui
-	@$(FAILPOINT_ENABLE)
-	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) ci-test-job && cd $(ROOT_PATH) > /dev/null && cat $$mod/covprofile >> covprofile; done
-	@$(FAILPOINT_DISABLE)
+	if [[ $(JOB_INDEX) -le 10 ]]; then \
+	CGO_ENABLED=1 go test -timeout=15m -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)); \
+	else \
+	for mod in $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)); do cd $$mod && $(MAKE) ci-test-job && cd $(ROOT_PATH) > /dev/null && cat $$mod/covprofile >> covprofile; done; \
+	fi
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 
@@ -244,7 +242,7 @@ test-tso-consistency: install-tools
 TASK_COUNT=1
 TASK_ID=1
 
-# The command should be used in daily CI，it will split some tasks to run parallel.
+# The command should be used in daily CI, it will split some tasks to run parallel.
 # It should retain report.xml,coverage,coverage.xml and package.list to analyze.
 test-with-cover-parallel: install-tools dashboard-ui split
 	@$(FAILPOINT_ENABLE)

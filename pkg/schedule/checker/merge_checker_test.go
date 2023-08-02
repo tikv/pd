@@ -26,12 +26,12 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/goleak"
@@ -80,7 +80,7 @@ func (suite *mergeCheckerTestSuite) SetupTest() {
 	for _, region := range suite.regions {
 		suite.cluster.PutRegion(region)
 	}
-	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetOpts())
+	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetCheckerConfig())
 }
 
 func (suite *mergeCheckerTestSuite) TearDownTest() {
@@ -251,7 +251,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	// partial store overlap not including leader
 	ops := suite.mc.Check(suite.regions[2])
 	suite.NotNil(ops)
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 2},
@@ -265,7 +265,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -285,7 +285,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	suite.regions[2] = newRegion
 	suite.cluster.PutRegion(suite.regions[2])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 4},
 		operator.PromoteLearner{ToStore: 4},
 		operator.RemovePeer{FromStore: 6},
@@ -295,7 +295,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -311,14 +311,14 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	}))
 	suite.cluster.PutRegion(suite.regions[2])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -334,7 +334,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	}), core.WithLeader(&metapb.Peer{Id: 109, StoreId: 2}))
 	suite.cluster.PutRegion(suite.regions[2])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 3},
@@ -351,7 +351,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -370,7 +370,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	)
 	suite.cluster.PutRegion(suite.regions[1])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 3},
@@ -390,7 +390,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -417,7 +417,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 	)
 	suite.cluster.PutRegion(suite.regions[1])
 	ops = suite.mc.Check(suite.regions[2])
-	testutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[0], []operator.OpStep{
 		operator.AddLearner{ToStore: 1},
 		operator.PromoteLearner{ToStore: 1},
 		operator.RemovePeer{FromStore: 3},
@@ -431,7 +431,7 @@ func (suite *mergeCheckerTestSuite) TestMatchPeers() {
 			IsPassive:  false,
 		},
 	})
-	testutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
+	operatorutil.CheckSteps(suite.Require(), ops[1], []operator.OpStep{
 		operator.MergeRegion{
 			FromRegion: suite.regions[2].GetMeta(),
 			ToRegion:   suite.regions[1].GetMeta(),
@@ -461,9 +461,9 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 		tc.PutRegion(region)
 	}
 
-	mc := NewMergeChecker(suite.ctx, tc, tc.GetOpts())
+	mc := NewMergeChecker(suite.ctx, tc, tc.GetCheckerConfig())
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
-	oc := schedule.NewOperatorController(suite.ctx, tc, stream)
+	oc := operator.NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	regions[2] = regions[2].Clone(
 		core.SetPeers([]*metapb.Peer{
@@ -484,7 +484,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 		suite.NotNil(ops)
 		suite.True(oc.AddOperator(ops...))
 		for _, op := range ops {
-			oc.RemoveOperator(op)
+			oc.RemoveOperator(op, operator.ExceedStoreLimit)
 		}
 	}
 	regions[2] = regions[2].Clone(
@@ -498,7 +498,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 		suite.NotNil(ops)
 		suite.True(oc.AddOperator(ops...))
 		for _, op := range ops {
-			oc.RemoveOperator(op)
+			oc.RemoveOperator(op, operator.ExceedStoreLimit)
 		}
 	}
 	{
@@ -530,7 +530,7 @@ func (suite *mergeCheckerTestSuite) TestCache() {
 		suite.cluster.PutRegion(region)
 	}
 
-	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetOpts())
+	suite.mc = NewMergeChecker(suite.ctx, suite.cluster, suite.cluster.GetCheckerConfig())
 
 	ops := suite.mc.Check(suite.regions[1])
 	suite.Nil(ops)

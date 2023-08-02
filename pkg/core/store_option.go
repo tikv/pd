@@ -165,6 +165,13 @@ func SetRegionCount(regionCount int) StoreCreateOption {
 	}
 }
 
+// SetLearnerCount sets the learner count for the store.
+func SetLearnerCount(learnerCount int) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.learnerCount = learnerCount
+	}
+}
+
 // SetWitnessCount sets the witness count for the store.
 func SetWitnessCount(witnessCount int) StoreCreateOption {
 	return func(store *StoreInfo) {
@@ -256,6 +263,15 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 			rate = ratePerSec[0]
 		}
 		store.limiter.Reset(rate, limitType)
+	}
+}
+
+// SetStoreLimit set the store for a store, it may switch the store limit mode.
+func SetStoreLimit(limit storelimit.StoreLimit) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		store.limiter = limit
 	}
 }
 

@@ -19,7 +19,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -28,7 +28,7 @@ import (
 // SplitChecker splits regions when the key range spans across rule/label boundary.
 type SplitChecker struct {
 	PauseController
-	cluster     schedule.Cluster
+	cluster     sche.CheckerCluster
 	ruleManager *placement.RuleManager
 	labeler     *labeler.RegionLabeler
 }
@@ -42,7 +42,7 @@ var (
 )
 
 // NewSplitChecker creates a new SplitChecker.
-func NewSplitChecker(cluster schedule.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler) *SplitChecker {
+func NewSplitChecker(cluster sche.CheckerCluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler) *SplitChecker {
 	return &SplitChecker{
 		cluster:     cluster,
 		ruleManager: ruleManager,
@@ -71,7 +71,7 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	desc := "labeler-split-region"
 	keys := c.labeler.GetSplitKeys(start, end)
 
-	if len(keys) == 0 && c.cluster.GetOpts().IsPlacementRulesEnabled() {
+	if len(keys) == 0 && c.cluster.GetCheckerConfig().IsPlacementRulesEnabled() {
 		desc = "rule-split-region"
 		keys = c.ruleManager.GetSplitKeys(start, end)
 	}

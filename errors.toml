@@ -63,12 +63,17 @@ create TSO stream failed, %s
 
 ["PD:client:ErrClientGetLeader"]
 error = '''
-get leader from %v error
+get leader failed, %v
 '''
 
 ["PD:client:ErrClientGetMember"]
 error = '''
 get member failed
+'''
+
+["PD:client:ErrClientGetMinTSO"]
+error = '''
+get min TSO failed, %v
 '''
 
 ["PD:client:ErrClientGetTSO"]
@@ -89,6 +94,11 @@ invalid store id %d, not found
 ["PD:cluster:ErrNotBootstrapped"]
 error = '''
 TiKV cluster not bootstrapped, please start TiKV first
+'''
+
+["PD:cluster:ErrSchedulingIsHalted"]
+error = '''
+scheduling is halted
 '''
 
 ["PD:cluster:ErrStoreIsUp"]
@@ -481,6 +491,11 @@ error = '''
 init file log error, %s
 '''
 
+["PD:member:ErrCheckCampaign"]
+error = '''
+check campaign failed
+'''
+
 ["PD:member:ErrEtcdLeaderNotFound"]
 error = '''
 etcd leader not found
@@ -574,6 +589,21 @@ invalid region rule content, %s
 ["PD:region:ErrRegionRuleNotFound"]
 error = '''
 region label rule not found for id %s
+'''
+
+["PD:resourcemanager:ErrDeleteReservedGroup"]
+error = '''
+cannot delete reserved group
+'''
+
+["PD:resourcemanager:ErrGroupNotExists"]
+error = '''
+the %s resource group does not exist
+'''
+
+["PD:resourcemanager:ErrInvalidGroup"]
+error = '''
+invalid group settings, please check the group name, priority and the number of resources
 '''
 
 ["PD:schedule:ErrCreateOperator"]
@@ -711,9 +741,54 @@ error = '''
 get allocator failed, %s
 '''
 
+["PD:tso:ErrGetAllocatorManager"]
+error = '''
+get allocator manager failed, %s
+'''
+
 ["PD:tso:ErrGetLocalAllocator"]
 error = '''
 get local allocator failed, %s
+'''
+
+["PD:tso:ErrGetMinTS"]
+error = '''
+get min ts failed, %s
+'''
+
+["PD:tso:ErrKeyspaceGroupIDInvalid"]
+error = '''
+the keyspace group id is invalid, %s
+'''
+
+["PD:tso:ErrKeyspaceGroupIsMerging"]
+error = '''
+the keyspace group %d is merging
+'''
+
+["PD:tso:ErrKeyspaceGroupNotInitialized"]
+error = '''
+the keyspace group %d isn't initialized
+'''
+
+["PD:tso:ErrKeyspaceNotAssigned"]
+error = '''
+the keyspace %d isn't assigned to any keyspace group
+'''
+
+["PD:tso:ErrLoadKeyspaceGroupsRetryExhausted"]
+error = '''
+load keyspace groups retry exhausted, %s
+'''
+
+["PD:tso:ErrLoadKeyspaceGroupsTerminated"]
+error = '''
+load keyspace groups terminated
+'''
+
+["PD:tso:ErrLoadKeyspaceGroupsTimeout"]
+error = '''
+load keyspace groups timeout
 '''
 
 ["PD:tso:ErrLogicOverflow"]

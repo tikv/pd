@@ -17,9 +17,10 @@ package schedulers
 import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -55,7 +56,7 @@ type labelScheduler struct {
 // LabelScheduler is mainly based on the store's label information for scheduling.
 // Now only used for reject leader schedule, that will move the leader out of
 // the store with the specific label.
-func newLabelScheduler(opController *schedule.OperatorController, conf *labelSchedulerConfig) schedule.Scheduler {
+func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerConfig) Scheduler {
 	return &labelScheduler{
 		BaseScheduler: NewBaseScheduler(opController),
 		conf:          conf,
@@ -71,23 +72,23 @@ func (s *labelScheduler) GetType() string {
 }
 
 func (s *labelScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
-func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (s *labelScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	labelCounter.Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
 	for _, s := range stores {
-		if cluster.GetOpts().CheckLabelProperty(config.RejectLeader, s.GetLabels()) {
+		if cluster.GetSchedulerConfig().CheckLabelProperty(config.RejectLeader, s.GetLabels()) {
 			rejectLeaderStores[s.GetID()] = struct{}{}
 		}
 	}
@@ -109,7 +110,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*ope
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
 			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-				FilterTarget(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true}, f).
+				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true, OperatorLevel: constant.Medium}, f).
 				RandomPick()
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))

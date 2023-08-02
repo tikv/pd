@@ -86,8 +86,10 @@ func (bs *balanceSolver) pickCheckPolicyV2() {
 	switch {
 	case bs.resourceTy == writeLeader:
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
+		bs.checkHistoryLoadsByPriority = bs.checkHistoryLoadsByPriorityAndToleranceFirstOnly
 	default:
 		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAnyOf
+		bs.checkHistoryLoadsByPriority = bs.checkHistoryByPriorityAndToleranceAnyOf
 	}
 }
 
@@ -204,11 +206,17 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 	srcPendingRate, dstPendingRate := bs.cur.getPendingLoad(dim)
 	peersRate := bs.cur.getPeersRateFromCache(dim)
 	highRate, lowRate := srcRate, dstRate
+	topnHotPeer := bs.nthHotPeer[bs.cur.srcStore.GetID()][dim]
 	reverse := false
 	if srcRate < dstRate {
 		highRate, lowRate = dstRate, srcRate
 		peersRate = -peersRate
 		reverse = true
+		topnHotPeer = bs.nthHotPeer[bs.cur.dstStore.GetID()][dim]
+	}
+	topnRate := math.MaxFloat64
+	if topnHotPeer != nil {
+		topnRate = topnHotPeer.GetLoad(dim)
 	}
 
 	if highRate*rs.balancedCheckRatio <= lowRate {
@@ -260,6 +268,7 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		// maxBetterRate may be less than minBetterRate, in which case a positive fraction cannot be produced.
 		minNotWorsenedRate = -bs.getMinRate(dim)
 		minBetterRate = math.Min(minBalancedRate*rs.perceivedRatio, lowRate*rs.minHotRatio)
+		minBetterRate = math.Min(minBetterRate, topnRate)
 		maxBetterRate = maxBalancedRate + (highRate-lowRate-minBetterRate-maxBalancedRate)*rs.perceivedRatio
 		maxNotWorsenedRate = maxBalancedRate + (highRate-lowRate-minNotWorsenedRate-maxBalancedRate)*rs.perceivedRatio
 	}
@@ -290,7 +299,7 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
 func (bs *balanceSolver) betterThanV2(old *solution) bool {
-	if old == nil {
+	if old == nil || bs.cur.progressiveRank <= splitProgressiveRank {
 		return true
 	}
 	if bs.cur.progressiveRank != old.progressiveRank {

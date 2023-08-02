@@ -108,13 +108,13 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 		3: {StoreId: 3, Role: metapb.PeerRole_Learner},
 		4: {StoreId: 4},
 	}
-	builder := suite.newBuilder().SetPeers(m).EnableLightWeight()
+	builder := suite.newBuilder().SetPeers(m).SetAddLightPeer()
 	suite.Len(builder.targetPeers, 3)
 	suite.Equal(m[2], builder.targetPeers[2])
 	suite.Equal(m[3], builder.targetPeers[3])
 	suite.Equal(m[4], builder.targetPeers[4])
 	suite.Equal(uint64(0), builder.targetLeaderStoreID)
-	suite.True(builder.lightWeight)
+	suite.True(builder.addLightPeer)
 }
 
 func (suite *operatorBuilderTestSuite) TestPrepareBuild() {
