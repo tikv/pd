@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 )
@@ -63,14 +64,19 @@ func TestRegister(t *testing.T) {
 	sr = NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	err = sr.Register()
 	re.NoError(err)
-	re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(re, client, sr.key))
-	etcd.Close()                // close the etcd to make the keepalive failed
-	time.Sleep(3 * time.Second) // ensure that the lease is expired
-	etcd, err = embed.StartEtcd(cfg)
-	re.NoError(err)
-	<-etcd.Server.ReadyNotify()
-	defer etcd.Close()
-	re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(re, client, sr.key))
+	for i := 0; i < 3; i++ {
+		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(re, client, sr.key))
+		etcd.Server.HardStop()                  // close the etcd to make the keepalive failed
+		time.Sleep(etcdutil.DefaultDialTimeout) // ensure that the request is timeout
+		etcd.Close()
+		etcd, err = embed.StartEtcd(cfg)
+		re.NoError(err)
+		<-etcd.Server.ReadyNotify()
+		testutil.Eventually(re, func() bool {
+			return getKeyAfterLeaseExpired(re, client, sr.key) == "127.0.0.1:2"
+		})
+	}
+	etcd.Close()
 }
 
 func getKeyAfterLeaseExpired(re *require.Assertions, client *clientv3.Client, key string) string {
