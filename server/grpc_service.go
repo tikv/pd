@@ -1268,17 +1268,16 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	}
 	var region *core.RegionInfo
 	// allow region miss temporarily if this key can't be found in the region tree.
+retryLoop:
 	for retry := 0; retry <= 10; retry++ {
 		region = rc.GetRegionByKey(request.GetRegionKey())
 		if region != nil {
-			break
+			break retryLoop
 		}
 		select {
 		case <-ctx.Done():
-			break
-
+			break retryLoop
 		case <-time.After(10 * time.Millisecond):
-			continue
 		}
 	}
 	if region == nil {
@@ -1317,17 +1316,17 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 
 	var region *core.RegionInfo
 	// allow region miss temporarily if this key can't be found in the region tree.
+retryLoop:
 	for retry := 0; retry <= 10; retry++ {
 		region = rc.GetPrevRegionByKey(request.GetRegionKey())
 		if region != nil {
-			break
+			break retryLoop
 		}
 		select {
 		case <-ctx.Done():
-			break
+			break retryLoop
 
 		case <-time.After(10 * time.Millisecond):
-			continue
 		}
 	}
 

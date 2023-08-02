@@ -194,7 +194,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
 					}
-					_, saveKV, _, _ := regionGuide(region, origin)
+					changed := regionGuide(region, origin)
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {
@@ -202,7 +202,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 							region.UpdateBuckets(buckets[i], old)
 						}
 					}
-					if saveKV {
+					if changed.SaveCache {
 						err = regionStorage.SaveRegion(r)
 					}
 					if err == nil {
