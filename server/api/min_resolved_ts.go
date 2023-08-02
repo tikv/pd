@@ -40,10 +40,10 @@ func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolved
 
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type minResolvedTS struct {
-	IsRealTime         bool              `json:"is_real_time,omitempty"`
-	MinResolvedTS      uint64            `json:"min_resolved_ts"`
-	PersistInterval    typeutil.Duration `json:"persist_interval,omitempty"`
-	StoreMinResolvedTS map[uint64]uint64 `json:"store_min_resolved_ts"`
+	IsRealTime          bool              `json:"is_real_time,omitempty"`
+	MinResolvedTS       uint64            `json:"min_resolved_ts"`
+	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
+	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 }
 
 // @Tags     min_store_resolved_ts
@@ -80,10 +80,10 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 // @Router       /min-resolved-ts [get]
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := h.svr.GetRaftCluster()
-	value := c.GetMinResolvedTS()
+	scopeMinResolvedTS := c.GetMinResolvedTS()
 	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
 
-	var storeMinResolvedTS map[uint64]uint64
+	var storesMinResolvedTS map[uint64]uint64
 	if b, err := io.ReadAll(r.Body); err == nil && len(b) != 0 {
 		// stores ids is an optional parameter.
 		// if it is not empty, return the min resolved ts of the specified stores into map.
@@ -93,14 +93,13 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		c := h.svr.GetRaftCluster()
-		value, storeMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
+		scopeMinResolvedTS, storesMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
 	}
 
 	h.rd.JSON(w, http.StatusOK, minResolvedTS{
-		MinResolvedTS:      value,
-		PersistInterval:    persistInterval,
-		IsRealTime:         persistInterval.Duration != 0,
-		StoreMinResolvedTS: storeMinResolvedTS,
+		MinResolvedTS:       scopeMinResolvedTS,
+		PersistInterval:     persistInterval,
+		IsRealTime:          persistInterval.Duration != 0,
+		StoresMinResolvedTS: storesMinResolvedTS,
 	})
 }

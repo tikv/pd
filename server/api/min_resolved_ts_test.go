@@ -135,7 +135,7 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTSByStores() {
 		MinResolvedTS:   233,
 		IsRealTime:      true,
 		PersistInterval: interval,
-		StoreMinResolvedTS: map[uint64]uint64{
+		StoresMinResolvedTS: map[uint64]uint64{
 			1: ts,
 		},
 	}, storeIDs)
