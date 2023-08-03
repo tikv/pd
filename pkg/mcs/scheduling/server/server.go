@@ -44,6 +44,8 @@ import (
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -107,8 +109,11 @@ type Server struct {
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 
-	cluster *Cluster
-	storage *endpoint.StorageEndpoint
+	cluster   *Cluster
+	hbStreams *hbstream.HeartbeatStreams
+	storage   *endpoint.StorageEndpoint
+
+	coordinator *schedule.Coordinator
 
 	// for watching the PD API server meta info updates that are related to the scheduling.
 	configWatcher *config.Watcher
@@ -487,6 +492,8 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.ctx, s.clusterID, s.cluster.GetBasicCluster())
+	s.coordinator = schedule.NewCoordinator(s.ctx, s.cluster, s.hbStreams)
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err

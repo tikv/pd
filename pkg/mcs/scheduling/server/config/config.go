@@ -33,10 +33,11 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -205,7 +206,7 @@ func NewPersistConfig(cfg *Config) *PersistConfig {
 	o.replication.Store(&cfg.Replication)
 	// storeConfig will be fetched from TiKV by PD API server,
 	// so we just set an empty value here first.
-	o.storeConfig.Store(&config.StoreConfig{})
+	o.storeConfig.Store(&sc.StoreConfig{})
 	return o
 }
 
@@ -240,7 +241,7 @@ func (o *PersistConfig) SetReplicationConfig(cfg *sc.ReplicationConfig) {
 }
 
 // SetStoreConfig sets the TiKV store configuration.
-func (o *PersistConfig) SetStoreConfig(cfg *config.StoreConfig) {
+func (o *PersistConfig) SetStoreConfig(cfg *sc.StoreConfig) {
 	// Some of the fields won't be persisted and watched,
 	// so we need to adjust it here before storing it.
 	cfg.Adjust()
@@ -248,8 +249,8 @@ func (o *PersistConfig) SetStoreConfig(cfg *config.StoreConfig) {
 }
 
 // GetStoreConfig returns the TiKV store configuration.
-func (o *PersistConfig) GetStoreConfig() *config.StoreConfig {
-	return o.storeConfig.Load().(*config.StoreConfig)
+func (o *PersistConfig) GetStoreConfig() *sc.StoreConfig {
+	return o.storeConfig.Load().(*sc.StoreConfig)
 }
 
 // GetMaxReplicas returns the max replicas.
@@ -282,9 +283,44 @@ func (o *PersistConfig) GetHighSpaceRatio() float64 {
 	return o.GetScheduleConfig().HighSpaceRatio
 }
 
+// GetHotRegionScheduleLimit returns the limit for hot region schedule.
+func (o *PersistConfig) GetHotRegionScheduleLimit() uint64 {
+	return o.GetScheduleConfig().HotRegionScheduleLimit
+}
+
+// GetRegionScheduleLimit returns the limit for region schedule.
+func (o *PersistConfig) GetRegionScheduleLimit() uint64 {
+	return o.GetScheduleConfig().RegionScheduleLimit
+}
+
+// GetLeaderScheduleLimit returns the limit for leader schedule.
+func (o *PersistConfig) GetLeaderScheduleLimit() uint64 {
+	return o.GetScheduleConfig().LeaderScheduleLimit
+}
+
+// GetReplicaScheduleLimit returns the limit for replica schedule.
+func (o *PersistConfig) GetReplicaScheduleLimit() uint64 {
+	return o.GetScheduleConfig().ReplicaScheduleLimit
+}
+
+// GetMergeScheduleLimit returns the limit for merge schedule.
+func (o *PersistConfig) GetMergeScheduleLimit() uint64 {
+	return o.GetScheduleConfig().MergeScheduleLimit
+}
+
+// GetLeaderSchedulePolicy is to get leader schedule policy.
+func (o *PersistConfig) GetLeaderSchedulePolicy() constant.SchedulePolicy {
+	return constant.StringToSchedulePolicy(o.GetScheduleConfig().LeaderSchedulePolicy)
+}
+
 // GetMaxStoreDownTime returns the max store downtime.
 func (o *PersistConfig) GetMaxStoreDownTime() time.Duration {
 	return o.GetScheduleConfig().MaxStoreDownTime.Duration
+}
+
+// GetIsolationLevel returns the isolation label for each region.
+func (o *PersistConfig) GetIsolationLevel() string {
+	return o.GetReplicationConfig().IsolationLevel
 }
 
 // GetLocationLabels returns the location labels.
@@ -292,14 +328,9 @@ func (o *PersistConfig) GetLocationLabels() []string {
 	return o.GetReplicationConfig().LocationLabels
 }
 
-// CheckLabelProperty checks if the label property is satisfied.
-func (o *PersistConfig) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
-	return false
-}
-
 // IsUseJointConsensus returns if the joint consensus is enabled.
 func (o *PersistConfig) IsUseJointConsensus() bool {
-	return true
+	return o.GetScheduleConfig().EnableJointConsensus
 }
 
 // GetKeyType returns the key type.
@@ -317,9 +348,14 @@ func (o *PersistConfig) IsOneWayMergeEnabled() bool {
 	return o.GetScheduleConfig().EnableOneWayMerge
 }
 
-// GetMergeScheduleLimit returns the merge schedule limit.
-func (o *PersistConfig) GetMergeScheduleLimit() uint64 {
-	return o.GetScheduleConfig().MergeScheduleLimit
+// GetMaxMergeRegionSize returns the max region size.
+func (o *PersistConfig) GetMaxMergeRegionSize() uint64 {
+	return o.GetScheduleConfig().MaxMergeRegionSize
+}
+
+// GetMaxMergeRegionKeys returns the max region keys.
+func (o *PersistConfig) GetMaxMergeRegionKeys() uint64 {
+	return o.GetScheduleConfig().MaxMergeRegionKeys
 }
 
 // GetRegionScoreFormulaVersion returns the region score formula version.
@@ -330,6 +366,96 @@ func (o *PersistConfig) GetRegionScoreFormulaVersion() string {
 // GetSchedulerMaxWaitingOperator returns the scheduler max waiting operator.
 func (o *PersistConfig) GetSchedulerMaxWaitingOperator() uint64 {
 	return o.GetScheduleConfig().SchedulerMaxWaitingOperator
+}
+
+// GetHotRegionCacheHitsThreshold returns the hot region cache hits threshold.
+func (o *PersistConfig) GetHotRegionCacheHitsThreshold() int {
+	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
+}
+
+// GetMaxMovableHotPeerSize returns the max movable hot peer size.
+func (o *PersistConfig) GetMaxMovableHotPeerSize() int64 {
+	return o.GetScheduleConfig().MaxMovableHotPeerSize
+}
+
+// GetSwitchWitnessInterval returns the interval between promote to non-witness and starting to switch to witness.
+func (o *PersistConfig) GetSwitchWitnessInterval() time.Duration {
+	return o.GetScheduleConfig().SwitchWitnessInterval.Duration
+}
+
+// GetSplitMergeInterval returns the interval between finishing split and starting to merge.
+func (o *PersistConfig) GetSplitMergeInterval() time.Duration {
+	return o.GetScheduleConfig().SplitMergeInterval.Duration
+}
+
+// GetSlowStoreEvictingAffectedStoreRatioThreshold returns the affected ratio threshold when judging a store is slow.
+func (o *PersistConfig) GetSlowStoreEvictingAffectedStoreRatioThreshold() float64 {
+	return o.GetScheduleConfig().SlowStoreEvictingAffectedStoreRatioThreshold
+}
+
+// GetPatrolRegionInterval returns the interval of patrolling region.
+func (o *PersistConfig) GetPatrolRegionInterval() time.Duration {
+	return o.GetScheduleConfig().PatrolRegionInterval.Duration
+}
+
+// GetTolerantSizeRatio gets the tolerant size ratio.
+func (o *PersistConfig) GetTolerantSizeRatio() float64 {
+	return o.GetScheduleConfig().TolerantSizeRatio
+}
+
+// GetWitnessScheduleLimit returns the limit for region schedule.
+func (o *PersistConfig) GetWitnessScheduleLimit() uint64 {
+	return o.GetScheduleConfig().WitnessScheduleLimit
+}
+
+// IsDebugMetricsEnabled returns if debug metrics is enabled.
+func (o *PersistConfig) IsDebugMetricsEnabled() bool {
+	return o.GetScheduleConfig().EnableDebugMetrics
+}
+
+// IsDiagnosticAllowed returns whether is enable to use diagnostic.
+func (o *PersistConfig) IsDiagnosticAllowed() bool {
+	return o.GetScheduleConfig().EnableDiagnostic
+}
+
+// IsRemoveDownReplicaEnabled returns if remove down replica is enabled.
+func (o *PersistConfig) IsRemoveDownReplicaEnabled() bool {
+	return o.GetScheduleConfig().EnableRemoveDownReplica
+}
+
+// IsReplaceOfflineReplicaEnabled returns if replace offline replica is enabled.
+func (o *PersistConfig) IsReplaceOfflineReplicaEnabled() bool {
+	return o.GetScheduleConfig().EnableReplaceOfflineReplica
+}
+
+// IsMakeUpReplicaEnabled returns if make up replica is enabled.
+func (o *PersistConfig) IsMakeUpReplicaEnabled() bool {
+	return o.GetScheduleConfig().EnableMakeUpReplica
+}
+
+// IsRemoveExtraReplicaEnabled returns if remove extra replica is enabled.
+func (o *PersistConfig) IsRemoveExtraReplicaEnabled() bool {
+	return o.GetScheduleConfig().EnableRemoveExtraReplica
+}
+
+// IsLocationReplacementEnabled returns if location replace is enabled.
+func (o *PersistConfig) IsLocationReplacementEnabled() bool {
+	return o.GetScheduleConfig().EnableLocationReplacement
+}
+
+// IsWitnessAllowed returns if the witness is allowed.
+func (o *PersistConfig) IsWitnessAllowed() bool {
+	return o.GetScheduleConfig().EnableWitness
+}
+
+// IsPlacementRulesCacheEnabled returns if the placement rules cache is enabled.
+func (o *PersistConfig) IsPlacementRulesCacheEnabled() bool {
+	return o.GetReplicationConfig().EnablePlacementRulesCache
+}
+
+// IsSchedulingHalted returns if PD scheduling is halted.
+func (o *PersistConfig) IsSchedulingHalted() bool {
+	return o.GetScheduleConfig().HaltScheduling
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
@@ -364,18 +490,103 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	return o.GetScheduleConfig().StoreLimit[storeID]
 }
 
-// IsWitnessAllowed returns if the witness is allowed.
-func (o *PersistConfig) IsWitnessAllowed() bool {
-	return false
+// SetAllStoresLimit sets all store limit for a given type and rate.
+func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) {
+	v := o.GetScheduleConfig().Clone()
+	switch typ {
+	case storelimit.AddPeer:
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
+		for storeID := range v.StoreLimit {
+			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
+			v.StoreLimit[storeID] = sc
+		}
+	case storelimit.RemovePeer:
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
+		for storeID := range v.StoreLimit {
+			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
+			v.StoreLimit[storeID] = sc
+		}
+	}
+
+	o.SetScheduleConfig(v)
 }
 
-// IsPlacementRulesCacheEnabled returns if the placement rules cache is enabled.
-func (o *PersistConfig) IsPlacementRulesCacheEnabled() bool {
+// SetMaxReplicas sets the number of replicas for each region.
+func (o *PersistConfig) SetMaxReplicas(replicas int) {
+	v := o.GetReplicationConfig().Clone()
+	v.MaxReplicas = uint64(replicas)
+	o.SetReplicationConfig(v)
+}
+
+// IsSchedulerDisabled returns if the scheduler is disabled.
+func (o *PersistConfig) IsSchedulerDisabled(t string) bool {
+	schedulers := o.GetScheduleConfig().Schedulers
+	for _, s := range schedulers {
+		if t == s.Type {
+			return s.Disable
+		}
+	}
 	return false
 }
 
 // SetPlacementRulesCacheEnabled sets if the placement rules cache is enabled.
-func (o *PersistConfig) SetPlacementRulesCacheEnabled(b bool) {}
+func (o *PersistConfig) SetPlacementRulesCacheEnabled(enabled bool) {
+	v := o.GetReplicationConfig().Clone()
+	v.EnablePlacementRulesCache = enabled
+	o.SetReplicationConfig(v)
+}
 
 // SetEnableWitness sets if the witness is enabled.
-func (o *PersistConfig) SetEnableWitness(b bool) {}
+func (o *PersistConfig) SetEnableWitness(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableWitness = enable
+	o.SetScheduleConfig(v)
+}
+
+// SetPlacementRuleEnabled set PlacementRuleEnabled
+func (o *PersistConfig) SetPlacementRuleEnabled(enabled bool) {
+	v := o.GetReplicationConfig().Clone()
+	v.EnablePlacementRules = enabled
+	o.SetReplicationConfig(v)
+}
+
+// SetSplitMergeInterval to set the interval between finishing split and starting to merge. It's only used to test.
+func (o *PersistConfig) SetSplitMergeInterval(splitMergeInterval time.Duration) {
+	v := o.GetScheduleConfig().Clone()
+	v.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
+	o.SetScheduleConfig(v)
+}
+
+// SetHaltScheduling set HaltScheduling.
+func (o *PersistConfig) SetHaltScheduling(halt bool, source string) {
+	v := o.GetScheduleConfig().Clone()
+	v.HaltScheduling = halt
+	o.SetScheduleConfig(v)
+}
+
+// TODO: implement the following methods
+
+// AddSchedulerCfg adds the scheduler configurations.
+func (o *PersistConfig) AddSchedulerCfg(string, []string) {}
+
+// CheckLabelProperty checks if the label property is satisfied.
+func (o *PersistConfig) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+	return false
+}
+
+// IsTraceRegionFlow returns if the region flow is tracing.
+// If the accuracy cannot reach 0.1 MB, it is considered not.
+func (o *PersistConfig) IsTraceRegionFlow() bool {
+	return false
+}
+
+// Persist saves the configuration to the storage.
+func (o *PersistConfig) Persist(storage endpoint.ConfigStorage) error {
+	return nil
+}
+
+// RemoveSchedulerCfg removes the scheduler configurations.
+func (o *PersistConfig) RemoveSchedulerCfg(tp string) {}
+
+// UseRaftV2 set some config for raft store v2 by default temporary.
+func (o *PersistConfig) UseRaftV2() {}

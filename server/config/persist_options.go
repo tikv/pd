@@ -67,7 +67,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.keyspace.Store(&cfg.Keyspace)
 	// storeConfig will be fetched from TiKV later,
 	// set it to an empty config here first.
-	o.storeConfig.Store(&StoreConfig{})
+	o.storeConfig.Store(&sc.StoreConfig{})
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.ttl = nil
 	return o
@@ -134,12 +134,12 @@ func (o *PersistOptions) SetKeyspaceConfig(cfg *KeyspaceConfig) {
 }
 
 // GetStoreConfig returns the store config.
-func (o *PersistOptions) GetStoreConfig() *StoreConfig {
-	return o.storeConfig.Load().(*StoreConfig)
+func (o *PersistOptions) GetStoreConfig() *sc.StoreConfig {
+	return o.storeConfig.Load().(*sc.StoreConfig)
 }
 
 // SetStoreConfig sets the store configuration.
-func (o *PersistOptions) SetStoreConfig(cfg *StoreConfig) {
+func (o *PersistOptions) SetStoreConfig(cfg *sc.StoreConfig) {
 	o.storeConfig.Store(cfg)
 }
 
@@ -616,14 +616,14 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveExtraReplica
 }
 
-// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
-func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
-	return o.getTTLBoolOr(enableTiKVSplitRegion, o.GetScheduleConfig().EnableTiKVSplitRegion)
-}
-
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	return o.getTTLBoolOr(enableLocationReplacement, o.GetScheduleConfig().EnableLocationReplacement)
+}
+
+// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
+func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
+	return o.getTTLBoolOr(enableTiKVSplitRegion, o.GetScheduleConfig().EnableTiKVSplitRegion)
 }
 
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
@@ -762,7 +762,7 @@ func (o *PersistOptions) DeleteLabelProperty(typ, labelKey, labelValue string) {
 type persistedConfig struct {
 	*Config
 	// StoreConfig is injected into Config to avoid breaking the original API.
-	StoreConfig StoreConfig `json:"store"`
+	StoreConfig sc.StoreConfig `json:"store"`
 }
 
 // Persist saves the configuration to the storage.

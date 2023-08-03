@@ -226,7 +226,7 @@ func (rw RWType) DefaultAntiCount() int {
 	case Write:
 		return HotRegionAntiCount
 	default: // Case Read
-		return HotRegionAntiCount * (WriteReportInterval / ReadReportInterval)
+		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
 }
 

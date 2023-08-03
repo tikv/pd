@@ -113,7 +113,7 @@ func (mc *Cluster) AllocID() (uint64, error) {
 }
 
 // GetPersistOptions returns the persist options.
-func (mc *Cluster) GetPersistOptions() *config.PersistOptions {
+func (mc *Cluster) GetPersistOptions() sc.ConfProvider {
 	return mc.PersistOptions
 }
 

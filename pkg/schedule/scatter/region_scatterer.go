@@ -136,22 +136,24 @@ func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]
 
 // RegionScatterer scatters regions.
 type RegionScatterer struct {
-	ctx            context.Context
-	name           string
-	cluster        sche.ScatterCluster
-	ordinaryEngine engineContext
-	specialEngines sync.Map
-	opController   *operator.Controller
+	ctx               context.Context
+	name              string
+	cluster           sche.SharedCluster
+	ordinaryEngine    engineContext
+	specialEngines    sync.Map
+	opController      *operator.Controller
+	addSuspectRegions func(regionIDs ...uint64)
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(ctx context.Context, cluster sche.ScatterCluster, opController *operator.Controller) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster sche.SharedCluster, opController *operator.Controller, addSuspectRegions func(regionIDs ...uint64)) *RegionScatterer {
 	return &RegionScatterer{
-		ctx:          ctx,
-		name:         regionScatterName,
-		cluster:      cluster,
-		opController: opController,
+		ctx:               ctx,
+		name:              regionScatterName,
+		cluster:           cluster,
+		opController:      opController,
+		addSuspectRegions: addSuspectRegions,
 		ordinaryEngine: newEngineContext(ctx, func() filter.Filter {
 			return filter.NewEngineFilter(regionScatterName, filter.NotSpecialEngines)
 		}),
@@ -283,7 +285,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 // in a group level instead of cluster level.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipStoreLimit bool) (*operator.Operator, error) {
 	if !filter.IsRegionReplicated(r.cluster, region) {
-		r.cluster.AddSuspectRegions(region.GetID())
+		r.addSuspectRegions(region.GetID())
 		scatterSkipNotReplicatedCounter.Inc()
 		log.Warn("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
