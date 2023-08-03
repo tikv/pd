@@ -92,7 +92,7 @@ func TestGRPCDialOption(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
 	cli := &pdServiceDiscovery{
-		checkMembershipCh: make(chan struct{}, 1),
+		checkMembershipCh: make(chan error, 1),
 		ctx:               ctx,
 		cancel:            cancel,
 		tlsCfg:            &tlsutil.TLSConfig{},

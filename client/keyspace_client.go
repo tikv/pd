@@ -63,7 +63,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 
 	if err != nil {
 		cmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged(err)
 		return nil, err
 	}
 
@@ -104,7 +104,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 
 	if err != nil {
 		cmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged(err)
 		return nil, err
 	}
 
@@ -144,7 +144,7 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 
 	if err != nil {
 		cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged(err)
 		return nil, err
 	}
 
