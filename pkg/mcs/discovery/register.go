@@ -55,9 +55,7 @@ func NewServiceRegister(ctx context.Context, cli *clientv3.Client, clusterID, se
 
 // Register registers the service to etcd.
 func (sr *ServiceRegister) Register() error {
-	ctx, cancel := context.WithTimeout(sr.ctx, etcdutil.DefaultRequestTimeout)
-	defer cancel()
-	id, err := etcdutil.EtcdKVPutWithTTL(ctx, sr.cli, sr.key, sr.value, sr.ttl)
+	id, err := sr.putWithTTL()
 	if err != nil {
 		sr.cancel()
 		return fmt.Errorf("put the key with lease %s failed: %v", sr.key, err)
@@ -95,9 +93,7 @@ func (sr *ServiceRegister) renewKeepalive() <-chan *clientv3.LeaseKeepAliveRespo
 			log.Info("exit register process", zap.String("key", sr.key))
 			return nil
 		case <-t.C:
-			ctx, cancel := context.WithTimeout(sr.ctx, etcdutil.DefaultRequestTimeout)
-			defer cancel()
-			id, err := etcdutil.EtcdKVPutWithTTL(ctx, sr.cli, sr.key, sr.value, sr.ttl)
+			id, err := sr.putWithTTL()
 			if err != nil {
 				log.Error("put the key with lease failed", zap.String("key", sr.key), zap.Error(err))
 				continue
@@ -110,6 +106,12 @@ func (sr *ServiceRegister) renewKeepalive() <-chan *clientv3.LeaseKeepAliveRespo
 			return kresp
 		}
 	}
+}
+
+func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
+	ctx, cancel := context.WithTimeout(sr.ctx, etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	return etcdutil.EtcdKVPutWithTTL(ctx, sr.cli, sr.key, sr.value, sr.ttl)
 }
 
 // Deregister deregisters the service from etcd.
