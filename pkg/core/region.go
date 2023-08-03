@@ -674,6 +674,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark IsNew if the region in cache does not have leader.
 	return func(region, origin *RegionInfo) (changed *RegionChanged) {
+		changed = &RegionChanged{}
 		if origin == nil {
 			if log.GetLevel() <= zap.DebugLevel {
 				debug("insert new region",
