@@ -47,7 +47,7 @@ func (se *StorageEndpoint) DeleteRule(ruleKey string) error {
 
 // LoadRuleGroups loads all rule groups from storage.
 func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
-	return se.loadRangeByPrefix(RuleGroupPath+"/", f)
+	return se.loadRangeByPrefix(ruleGroupPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
@@ -62,7 +62,7 @@ func (se *StorageEndpoint) DeleteRuleGroup(groupID string) error {
 
 // LoadRegionRules loads region rules from storage.
 func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
-	return se.loadRangeByPrefix(RegionLabelPath+"/", f)
+	return se.loadRangeByPrefix(regionLabelPath+"/", f)
 }
 
 // SaveRegionRule saves a region rule to the storage.
@@ -77,7 +77,7 @@ func (se *StorageEndpoint) DeleteRegionRule(ruleKey string) error {
 
 // LoadRules loads placement rules from storage.
 func (se *StorageEndpoint) LoadRules(f func(k, v string)) error {
-	return se.loadRangeByPrefix(RulesPath+"/", f)
+	return se.loadRangeByPrefix(rulesPath+"/", f)
 }
 
 // loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.

@@ -25,18 +25,15 @@ import (
 )
 
 const (
-	pdRootPath            = "/pd"
-	clusterPath           = "raft"
-	configPath            = "config"
-	serviceMiddlewarePath = "service_middleware"
-	schedulePath          = "schedule"
-	gcPath                = "gc"
-	// RulesPath is the prefix of the Placement Rules storage endpoint.
-	RulesPath = "rules"
-	// RuleGroupPath is the prefix of the Placement Rule Groups storage endpoint.
-	RuleGroupPath = "rule_group"
-	// RegionLabelPath is the prefix of the Region Label storage endpoint.
-	RegionLabelPath          = "region_label"
+	pdRootPath               = "/pd"
+	clusterPath              = "raft"
+	configPath               = "config"
+	serviceMiddlewarePath    = "service_middleware"
+	schedulePath             = "schedule"
+	gcPath                   = "gc"
+	rulesPath                = "rules"
+	ruleGroupPath            = "rule_group"
+	regionLabelPath          = "region_label"
 	replicationPath          = "replication_mode"
 	customScheduleConfigPath = "scheduler_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
@@ -95,6 +92,21 @@ func ConfigPath(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), configPath)
 }
 
+// RulesPath returns the path to save the placement rules.
+func RulesPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), rulesPath)
+}
+
+// RuleGroupPath returns the path to save the placement rule groups.
+func RuleGroupPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), ruleGroupPath)
+}
+
+// RegionLabelPath returns the path to save the region label.
+func RegionLabelPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), regionLabelPath)
+}
+
 func scheduleConfigPath(scheduleName string) string {
 	return path.Join(customScheduleConfigPath, scheduleName)
 }
@@ -146,15 +158,15 @@ func resourceGroupStateKeyPath(groupName string) string {
 }
 
 func ruleKeyPath(ruleKey string) string {
-	return path.Join(RulesPath, ruleKey)
+	return path.Join(rulesPath, ruleKey)
 }
 
 func ruleGroupIDPath(groupID string) string {
-	return path.Join(RuleGroupPath, groupID)
+	return path.Join(ruleGroupPath, groupID)
 }
 
 func regionLabelKeyPath(ruleKey string) string {
-	return path.Join(RegionLabelPath, ruleKey)
+	return path.Join(regionLabelPath, ruleKey)
 }
 
 func replicationModePath(mode string) string {
