@@ -36,27 +36,20 @@ import (
 var (
 	pdAddr = flag.String("pd", "127.0.0.1:2379", "pd address")
 
-	// // tso client number
-	// tsoClientNumber = flag.Int("tso-client-num", 1, "tso client number")
-	// // tso qps
-	// tsoQPS = flag.Int("tso-qps", 1, "tso qps")
-	// // tso concurrency
-	// tsoConcurrency = flag.Int("tso-concurrency", 1, "tso concurrency")
-	// // tso option
-
 	// GetRegion qps
-	region = flag.Int("region", 0, "GetRegion qps")
+	regionQps = flag.Int("qps-get-region", 0, "GetRegion qps")
 	// ScanRegions qps
-	regions     = flag.Int("regions", 0, "ScanRegions qps")
-	regionStats = flag.Int("region-stats", 0, "/stats/region qps")
+	regionsQps = flag.Int("qps-scan-regions", 0, "ScanRegions qps")
+	// /stats/region qps
+	regionStatsQps = flag.Int("qps-region-stats", 0, "/stats/region qps")
 	// ScanRegions the number of region
 	regionsSample = flag.Int("regions-sample", 10000, "ScanRegions the number of region")
 	// the number of regions
 	regionNum = flag.Int("region-num", 1000000, "the number of regions")
 	// GetStore qps
-	store = flag.Int("store", 0, "GetStore qps")
+	storeQps = flag.Int("qps-store", 0, "GetStore qps")
 	// GetStores qps
-	stores = flag.Int("stores", 0, "GetStores qps")
+	storesQps = flag.Int("qps-stores", 0, "GetStores qps")
 	// store max id
 	maxStoreID = flag.Int("max-store", 100, "store max id")
 	// concurrency
@@ -126,11 +119,11 @@ func handleGetRegion(ctx context.Context, pdClis []pdpb.PDClient) {
 		copy(k, fmt.Sprintf("%010d", id))
 		return k
 	}
-	if *region == 0 {
+	if *regionQps == 0 {
 		log.Println("handleGetRegion qps = 0, exit")
 		return
 	}
-	tt := base / *region * *concurrency * *brust
+	tt := base / *regionQps * *concurrency * *brust
 	for _, pdCli := range pdClis {
 		go func(pdCli pdpb.PDClient) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -166,11 +159,11 @@ func handleScanRegions(ctx context.Context, pdClis []pdpb.PDClient) {
 		copy(k, fmt.Sprintf("%010d", id))
 		return k
 	}
-	if *regions == 0 {
+	if *regionsQps == 0 {
 		log.Println("handleScanRegions qps = 0, exit")
 		return
 	}
-	tt := base / *regions * *concurrency * *brust
+	tt := base / *regionsQps * *concurrency * *brust
 	for _, pdCli := range pdClis {
 		go func(pdCli pdpb.PDClient) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -211,11 +204,11 @@ func handleRegionsStats(ctx context.Context, httpClis []*http.Client) {
 		copy(k, fmt.Sprintf("%010d", id))
 		return k
 	}
-	if *regionStats == 0 {
+	if *regionStatsQps == 0 {
 		log.Println("handleRegionsStats qps = 0, exit")
 		return
 	}
-	tt := base / *regionStats * *concurrency * *brust
+	tt := base / *regionStatsQps * *concurrency * *brust
 	for _, pdCli := range httpClis {
 		go func(pdCli *http.Client) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -249,11 +242,11 @@ func handleRegionsStats(ctx context.Context, httpClis []*http.Client) {
 }
 
 func handleGetStore(ctx context.Context, pdClis []pdpb.PDClient) {
-	if *store == 0 {
+	if *storeQps == 0 {
 		log.Println("handleGetStore qps = 0, exit")
 		return
 	}
-	tt := base / *store * *concurrency * *brust
+	tt := base / *storeQps * *concurrency * *brust
 	for _, pdCli := range pdClis {
 		go func(pdCli pdpb.PDClient) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -284,11 +277,11 @@ func handleGetStore(ctx context.Context, pdClis []pdpb.PDClient) {
 }
 
 func handleGetStores(ctx context.Context, pdClis []pdpb.PDClient) {
-	if *stores == 0 {
+	if *storesQps == 0 {
 		log.Println("handleGetStores qps = 0, exit")
 		return
 	}
-	tt := base / *stores * *concurrency * *brust
+	tt := base / *storesQps * *concurrency * *brust
 	for _, pdCli := range pdClis {
 		go func(pdCli pdpb.PDClient) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
