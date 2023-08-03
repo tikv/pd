@@ -58,7 +58,7 @@ var (
 	// GetStores qps
 	stores = flag.Int("stores", 0, "GetStores qps")
 	// store max id
-	maxStoreId = flag.Int("max-store", 100, "store max id")
+	maxStoreID = flag.Int("max-store", 100, "store max id")
 	// concurrency
 	concurrency = flag.Int("concurrency", 1, "client number")
 	// brust
@@ -180,15 +180,15 @@ func handleScanRegions(ctx context.Context, pdClis []pdpb.PDClient) {
 				case <-ticker.C:
 					upperBound := *regionNum / *regionsSample
 					random := rand.Intn(upperBound)
-					startId := *regionsSample*random*4 + 1
-					endId := *regionsSample*(random+1)*4 + 1
+					startID := *regionsSample*random*4 + 1
+					endID := *regionsSample*(random+1)*4 + 1
 					req := &pdpb.ScanRegionsRequest{
 						Header: &pdpb.RequestHeader{
 							ClusterId: clusterID,
 						},
 						Limit:    int32(*regionsSample),
-						StartKey: g(startId, 56),
-						EndKey:   g(endId, 56),
+						StartKey: g(startID, 56),
+						EndKey:   g(endID, 56),
 					}
 					for i := 0; i < *brust; i++ {
 						_, err := pdCli.ScanRegions(ctx, req)
@@ -225,12 +225,12 @@ func handleRegionsStats(ctx context.Context, httpClis []*http.Client) {
 				case <-ticker.C:
 					upperBound := *regionNum / *regionsSample
 					random := rand.Intn(upperBound)
-					startId := *regionsSample*random*4 + 1
-					endId := *regionsSample*(random+1)*4 + 1
+					startID := *regionsSample*random*4 + 1
+					endID := *regionsSample*(random+1)*4 + 1
 					for i := 0; i < *brust; i++ {
 						req, _ := http.NewRequest(http.MethodGet, "http://"+*pdAddr+fmt.Sprintf("/pd/api/v1/stats/region?start_key=%s&end_key=%s&%s",
-							url.QueryEscape(string(g(startId, 56))),
-							url.QueryEscape(string(g(endId, 56))),
+							url.QueryEscape(string(g(startID, 56))),
+							url.QueryEscape(string(g(endID, 56))),
 							"",
 						), nil)
 						res, err := pdCli.Do(req)
@@ -266,8 +266,8 @@ func handleGetStore(ctx context.Context, pdClis []pdpb.PDClient) {
 							ClusterId: clusterID,
 						},
 					}
-					storeId := rand.Intn(*maxStoreId) + 1
-					req.StoreId = uint64(storeId)
+					storeID := rand.Intn(*maxStoreID) + 1
+					req.StoreId = uint64(storeID)
 					for i := 0; i < *brust; i++ {
 						_, err := pdCli.GetStore(ctx, req)
 						if err != nil {
