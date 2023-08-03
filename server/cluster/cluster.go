@@ -1006,6 +1006,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	return c.SaveRegion(region, changed)
 }
 
+// SaveRegion saves region info into cache and PD storage.
 func (c *RaftCluster) SaveRegion(region *core.RegionInfo, changed *core.RegionChanged) (err error) {
 	hasRegionStats := c.regionStats != nil
 	if !changed.SaveKV && !changed.SaveCache && !changed.IsNew {

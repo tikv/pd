@@ -653,6 +653,7 @@ func (r *RegionInfo) isRegionRecreated() bool {
 	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
+// RegionChanged is a struct that records the changes of the region.
 type RegionChanged struct {
 	IsNew, SaveKV, SaveCache, NeedSync bool
 }
@@ -674,6 +675,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark IsNew if the region in cache does not have leader.
 	return func(region, origin *RegionInfo) (changed *RegionChanged) {
+		changed = &RegionChanged{}
 		if origin == nil {
 			if log.GetLevel() <= zap.DebugLevel {
 				debug("insert new region",
