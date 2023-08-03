@@ -204,4 +204,4 @@ replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
-// replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
+replace github.com/pingcap/kvproto => github.com/HuSharp/kvproto v0.0.0-20230803025623-dfd11f435356

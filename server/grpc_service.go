@@ -2527,3 +2527,26 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 		Timestamp: timestamp,
 	}, nil
 }
+
+// GetMinResolvedTimestamp implements gRPC PDServer.
+func (s *GrpcServer) GetMinResolvedTimestamp(ctx context.Context, request *pdpb.GetMinResolvedTimestampRequest) (*pdpb.GetMinResolvedTimestampResponse, error) {
+	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
+		return pdpb.NewPDClient(client).GetMinResolvedTimestamp(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.GetMinResolvedTimestampResponse), nil
+	}
+
+	minResolvedTS := s.GetMinResolvedTS()
+	var stores []*pdpb.StoreMinResolvedTS
+	if len(request.GetStoresId()) != 0 {
+		minResolvedTS, stores = s.GetMinResolvedTSByStoreIDs(request.GetStoresId())
+	}
+	return &pdpb.GetMinResolvedTimestampResponse{
+		Header:              s.header(),
+		Timestamp:           minResolvedTS,
+		StoresMinResolvedTs: stores,
+	}, nil
+}

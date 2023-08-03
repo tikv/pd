@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -1884,6 +1885,28 @@ func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
 // GetExternalTS returns external timestamp.
 func (s *Server) GetExternalTS() uint64 {
 	return s.GetRaftCluster().GetExternalTS()
+}
+
+// GetMinResolvedTS returns min resolved ts.
+func (s *Server) GetMinResolvedTS() uint64 {
+	return s.GetRaftCluster().GetMinResolvedTS()
+}
+
+// GetMinResolvedTSByStoreIDs returns the min resolved ts of the stores.
+func (s *Server) GetMinResolvedTSByStoreIDs(ids []uint64) (uint64, []*pdpb.StoreMinResolvedTS) {
+	minResolvedTS := uint64(math.MaxUint64)
+	stores := make([]*pdpb.StoreMinResolvedTS, len(ids))
+	for i, storeID := range ids {
+		storeTS := s.GetRaftCluster().GetStoreMinResolvedTS(storeID)
+		stores[i] = &pdpb.StoreMinResolvedTS{
+			StoreId:       storeID,
+			MinResolvedTs: storeTS,
+		}
+		if minResolvedTS > storeTS {
+			minResolvedTS = storeTS
+		}
+	}
+	return minResolvedTS, stores
 }
 
 // SetExternalTS returns external timestamp.
