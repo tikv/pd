@@ -16,7 +16,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20230727073445-53e1f8730c30
 	github.com/stretchr/testify v1.8.4
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/client v0.0.0-20230802082039-d65d309b131f
 	github.com/tikv/pd/tests/integrations/mcs v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.54.0
 )

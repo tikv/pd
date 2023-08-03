@@ -96,7 +96,7 @@ type Client interface {
 	GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error)
-	// ScanRegion gets a list of regions, starts from the region that contains key.
+	// ScanRegions gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
 	// with empty value (PeerID is 0).
@@ -109,7 +109,7 @@ type Client interface {
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
 	GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*metapb.Store, error)
-	// Update GC safe point. TiKV will check it and do GC themselves if necessary.
+	// UpdateGCSafePoint TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
@@ -145,6 +145,9 @@ type Client interface {
 	GetExternalTimestamp(ctx context.Context) (uint64, error)
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
+
+	// GetMinResolvedTimestamp returns min resolved timestamp
+	GetMinResolvedTimestamp(ctx context.Context, storesID []uint64) (uint64, []*pdpb.StoreMinResolvedTS, error)
 
 	// TSOClient is the TSO client.
 	TSOClient
@@ -1581,6 +1584,25 @@ func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) err
 		return errors.Errorf("[pd]" + resErr.Message)
 	}
 	return nil
+}
+
+func (c *client) GetMinResolvedTimestamp(ctx context.Context, storesID []uint64) (uint64, []*pdpb.StoreMinResolvedTS, error) {
+	protoClient := c.getClient()
+	if protoClient == nil {
+		return 0, nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetMinResolvedTimestamp(ctx, &pdpb.GetMinResolvedTimestampRequest{
+		Header:   c.requestHeader(),
+		StoresId: storesID,
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	resErr := resp.GetHeader().GetError()
+	if resErr != nil {
+		return 0, nil, errors.Errorf("[pd]" + resErr.Message)
+	}
+	return resp.GetTimestamp(), resp.GetStoresMinResolvedTs(), nil
 }
 
 func (c *client) respForErr(observer prometheus.Observer, start time.Time, err error, header *pdpb.ResponseHeader) error {

@@ -18,92 +18,46 @@ import (
 	"context"
 	"flag"
 	"log"
-	"math/rand"
-	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
+	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 var (
 	pdAddr = flag.String("pd", "127.0.0.1:2379", "pd address")
-
-	// // tso client number
-	// tsoClientNumber = flag.Int("tso-client-num", 1, "tso client number")
-	// // tso qps
-	// tsoQPS = flag.Int("tso-qps", 1, "tso qps")
-	// // tso concurrency
-	// tsoConcurrency = flag.Int("tso-concurrency", 1, "tso concurrency")
-	// // tso option
-
-	// GetRegion qps
-	region = flag.Int("region", 0, "GetRegion qps")
-	// ScanRegions qps
-	regions     = flag.Int("regions", 0, "ScanRegions qps")
-	regionStats = flag.Int("region-stats", 0, "/stats/region qps")
-	// ScanRegions the number of region
-	regionsSample = flag.Int("regions-sample", 10000, "ScanRegions the number of region")
-	// the number of regions
-	regionNum = flag.Int("region-num", 1000000, "the number of regions")
-	// GetStore qps
-	store = flag.Int("store", 0, "GetStore qps")
-	// GetStores qps
-	stores = flag.Int("stores", 0, "GetStores qps")
+	// min-resolved-ts
+	minResolvedTSQPS = flag.Int("min-resolved-ts", 0, "min-resolved-ts qps")
 	// store max id
 	maxStoreID = flag.Int("max-store", 100, "store max id")
 	// concurrency
 	concurrency = flag.Int("concurrency", 1, "client number")
-	// brust
-	brust = flag.Int("brust", 1, "brust request")
+	// burst
+	burst = flag.Int("burst", 1, "burst request")
 )
-
-var base = int(time.Second) / int(time.Microsecond)
-
-var clusterID uint64
 
 func main() {
 	log.SetFlags(0)
 	flag.Parse()
 	ctx, cancel := context.WithCancel(context.Background())
-
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGQUIT)
-
 	var sig os.Signal
 	go func() {
 		sig = <-sc
 		cancel()
 	}()
-	if *concurrency == 0 {
-		log.Println("concurrency == 0, exit")
-		return
-	}
-	if *brust == 0 {
-		log.Println("brust == 0, exit")
-		return
-	}
-	pdClis := make([]pdpb.PDClient, 0)
-	for i := 0; i < *concurrency; i++ {
-		pdClis = append(pdClis, newClient())
-	}
-	httpClis := make([]*http.Client, 0)
-	for i := 0; i < *concurrency; i++ {
-		httpClis = append(httpClis, &http.Client{})
-	}
-	initClusterID(ctx, pdClis[0])
 
-	go handleGetRegion(ctx, pdClis)
-
+	go handleMinResolvedTS(ctx)
 	<-ctx.Done()
 	log.Println("Exit")
 	switch sig {
@@ -114,37 +68,48 @@ func main() {
 	}
 }
 
-func handleGetRegion(ctx context.Context, pdClis []pdpb.PDClient) {
-	if *region == 0 {
-		log.Println("handleGetRegion qps = 0, exit")
+func loadTLSContent(caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
+	var err error
+	caData, err = os.ReadFile(caPath)
+	if err != nil {
+		log.Fatal("fail to read ca file", zap.Error(err))
+	}
+	certData, err = os.ReadFile(certPath)
+	if err != nil {
+		log.Fatal("fail to read cert file", zap.Error(err))
+	}
+	keyData, err = os.ReadFile(keyPath)
+	if err != nil {
+		log.Fatal("fail to read key file", zap.Error(err))
+	}
+	return
+}
+func handleMinResolvedTS(ctx context.Context) {
+	if *minResolvedTSQPS == 0 {
+		log.Println("handleMinResolvedTS qps = 0, exit")
 		return
 	}
-	tt := base / *region * *concurrency * *brust
-	for _, pdCli := range pdClis {
-		go func(pdCli pdpb.PDClient) {
-			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
+	for i := 0; i < 10; i++ {
+		go func() {
+			var ticker = time.NewTicker(time.Millisecond * 200)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
-					id := rand.Intn(*regionNum)*4 + 1
-					req := &pdpb.GetMinResolvedTimestampRequest{
-						Header: &pdpb.RequestHeader{
-							ClusterId: clusterID,
-						},
+					pdCli := newClient()
+					resolvedTS, storesMap, err := pdCli.GetMinResolvedTimestamp(ctx, []uint64{1, 2, 3})
+					if err != nil {
+						log.Println(err)
+						continue
 					}
-					for i := 0; i < *brust; i++ {
-						_, err := pdCli.GetMinResolvedTimestamp(ctx, req)
-						if err != nil {
-							log.Println(err)
-						}
-					}
+					println("resolvedTS", resolvedTS)
+					println("storesMap", storesMap)
 				case <-ctx.Done():
-					log.Println("Got signal to exit handleGetRegion")
+					log.Println("Got signal to exit handleScanRegions")
 					return
 				}
 			}
-		}(pdCli)
+		}()
 	}
 }
 
@@ -152,30 +117,38 @@ func exit(code int) {
 	os.Exit(code)
 }
 
-func newClient() pdpb.PDClient {
-	addr := trimHTTPPrefix(*pdAddr)
-	cc, err := grpc.Dial(addr, grpc.WithInsecure())
+const (
+	keepaliveTime    = 10 * time.Second
+	keepaliveTimeout = 3 * time.Second
+)
+
+func newClient() pd.Client {
+	pdcli, err := pd.NewClient([]string{*pdAddr}, pd.SecurityOption{})
 	if err != nil {
-		log.Fatal("failed to create gRPC connection", zap.Error(err))
+		println("fail to create pd client", err)
 	}
-	return pdpb.NewPDClient(cc)
+	return pdcli
 }
 
-func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
-	return str
-}
-
-func initClusterID(ctx context.Context, cli pdpb.PDClient) {
-	cctx, cancel := context.WithCancel(ctx)
-	res, err := cli.GetMembers(cctx, &pdpb.GetMembersRequest{})
-	cancel()
+func newClientWithCLS() pd.Client {
+	println("newClient")
+	caData, certData, keyData := loadTLSContent(
+		"./cert/ca.pem",
+		"./cert/client.csr",
+		"./cert/client-key.pem")
+	pdCli, err := pd.NewClient([]string{}, pd.SecurityOption{
+		SSLKEYBytes:  keyData,
+		SSLCertBytes: certData,
+		SSLCABytes:   caData,
+	},
+		pd.WithGRPCDialOptions(
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:    keepaliveTime,
+				Timeout: keepaliveTimeout,
+			}),
+		))
 	if err != nil {
-		log.Fatal("failed to get members", zap.Error(err))
+		println("fail to create pd client", err)
 	}
-	if res.GetHeader().GetError() != nil {
-		log.Fatal("failed to get members", zap.String("err", res.GetHeader().GetError().String()))
-	}
-	clusterID = res.GetHeader().GetClusterId()
+	return pdCli
 }

@@ -2541,6 +2541,7 @@ func (s *GrpcServer) GetMinResolvedTimestamp(ctx context.Context, request *pdpb.
 
 	minResolvedTS := s.GetMinResolvedTS()
 	var stores []*pdpb.StoreMinResolvedTS
+	println(len(request.GetStoresId()))
 	if len(request.GetStoresId()) != 0 {
 		minResolvedTS, stores = s.GetMinResolvedTSByStoreIDs(request.GetStoresId())
 	}
