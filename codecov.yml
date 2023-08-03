@@ -23,7 +23,10 @@ flag_management:
       - type: project
         target: 74% # increase it if you want to enforce higher coverage for project, current setting as 74% is for do not let the error be reported and lose the meaning of warning.
       - type: patch
-        target: 74%  # increase it if you want to enforce higher coverage for project, current setting as 74% is for do not let the error be reported and lose the meaning of warning.
+        target: 74% # increase it if you want to enforce higher coverage for project, current setting as 74% is for do not let the error be reported and lose the meaning of warning.
 
 ignore:
-  - tests/** # integration test cases or tools.
+  # Ignore the tool tests
+  - tests/dashboard
+  - tests/pdbackup
+  - tests/pdctl
