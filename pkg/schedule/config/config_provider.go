@@ -131,8 +131,6 @@ type ConfProvider interface {
 	SetSplitMergeInterval(time.Duration)
 	SetMaxReplicas(int)
 	SetAllStoresLimit(storelimit.Type, float64)
-	// only for store configuration
-	UseRaftV2()
 }
 
 // StoreConfigProvider is the interface that wraps the StoreConfigProvider related methods.
@@ -142,6 +140,4 @@ type StoreConfigProvider interface {
 	CheckRegionSize(uint64, uint64) error
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool
-	// for test purpose
-	SetRegionBucketEnabled(bool)
 }

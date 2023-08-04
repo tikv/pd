@@ -87,6 +87,16 @@ func (mc *Cluster) GetStoreConfig() sc.StoreConfigProvider {
 	return mc
 }
 
+// SetRegionBucketEnabled sets the region bucket enabled.
+func (mc *Cluster) SetRegionBucketEnabled(enabled bool) {
+	cfg, ok := mc.GetStoreConfig().(*config.StoreConfig)
+	if !ok || cfg == nil {
+		return
+	}
+	cfg.Coprocessor.EnableRegionBucket = enabled
+	mc.SetStoreConfig(cfg)
+}
+
 // GetCheckerConfig returns the checker config.
 func (mc *Cluster) GetCheckerConfig() sc.CheckerConfigProvider {
 	return mc

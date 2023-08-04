@@ -587,6 +587,3 @@ func (o *PersistConfig) Persist(storage endpoint.ConfigStorage) error {
 
 // RemoveSchedulerCfg removes the scheduler configurations.
 func (o *PersistConfig) RemoveSchedulerCfg(tp string) {}
-
-// UseRaftV2 set some config for raft store v2 by default temporary.
-func (o *PersistConfig) UseRaftV2() {}

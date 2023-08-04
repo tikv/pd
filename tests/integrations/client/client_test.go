@@ -804,7 +804,7 @@ func (suite *clientTestSuite) SetupSuite() {
 		}))
 		suite.grpcSvr.GetRaftCluster().GetBasicCluster().PutStore(newStore)
 	}
-	cluster.GetStoreConfig().SetRegionBucketEnabled(true)
+	cluster.GetStoreConfig().(*config.StoreConfig).SetRegionBucketEnabled(true)
 }
 
 func (suite *clientTestSuite) TearDownSuite() {
@@ -893,7 +893,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 		}
 		return r.Buckets != nil
 	})
-	suite.srv.GetRaftCluster().GetStoreConfig().SetRegionBucketEnabled(false)
+	suite.srv.GetRaftCluster().GetStoreConfig().(*config.StoreConfig).SetRegionBucketEnabled(false)
 
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
@@ -903,7 +903,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 		}
 		return r.Buckets == nil
 	})
-	suite.srv.GetRaftCluster().GetStoreConfig().SetRegionBucketEnabled(true)
+	suite.srv.GetRaftCluster().GetStoreConfig().(*config.StoreConfig).SetRegionBucketEnabled(true)
 
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`))
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`))

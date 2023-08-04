@@ -426,7 +426,6 @@ func (c *RaftCluster) runStoreConfigSync() {
 	for {
 		synced, switchRaftV2Config = c.syncStoreConfig(stores)
 		if switchRaftV2Config {
-			c.GetOpts().UseRaftV2()
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
