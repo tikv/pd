@@ -41,6 +41,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -71,11 +72,12 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg         *config.Config
-	name        string
-	clusterID   uint64
-	listenURL   *url.URL
-	backendUrls []url.URL
+	cfg           *config.Config
+	name          string
+	clusterID     uint64
+	listenURL     *url.URL
+	backendUrls   []url.URL
+	persistConfig *config.PersistConfig
 
 	// etcd client
 	etcdClient *clientv3.Client
@@ -107,6 +109,10 @@ type Server struct {
 
 	cluster *Cluster
 	storage *endpoint.StorageEndpoint
+
+	// for watching the PD API server meta info updates that are related to the scheduling.
+	configWatcher *config.Watcher
+	ruleWatcher   *rule.Watcher
 }
 
 // Name returns the unique etcd name for this server in etcd cluster.
@@ -494,6 +500,10 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
+	err = s.startWatcher()
+	if err != nil {
+		return err
+	}
 
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
@@ -524,12 +534,31 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
+func (s *Server) startWatcher() (err error) {
+	s.configWatcher, err = config.NewWatcher(
+		s.ctx, s.etcdClient,
+		endpoint.ConfigPath(s.clusterID),
+		s.persistConfig,
+	)
+	if err != nil {
+		return err
+	}
+	s.ruleWatcher, err = rule.NewWatcher(
+		s.ctx, s.etcdClient,
+		endpoint.RulesPath(s.clusterID),
+		endpoint.RuleGroupPath(s.clusterID),
+		endpoint.RegionLabelPath(s.clusterID),
+	)
+	return err
+}
+
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		startTimestamp:    time.Now().Unix(),
 		cfg:               cfg,
+		persistConfig:     config.NewPersistConfig(cfg),
 		ctx:               ctx,
 	}
 	return svr
