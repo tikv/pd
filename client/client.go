@@ -1591,6 +1591,9 @@ func (c *client) GetMinResolvedTimestamp(ctx context.Context, storesID []uint64)
 	if protoClient == nil {
 		return 0, nil, errs.ErrClientGetProtoClient
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := protoClient.GetMinResolvedTimestamp(ctx, &pdpb.GetMinResolvedTimestampRequest{
 		Header:   c.requestHeader(),
 		StoresId: storesID,

@@ -80,6 +80,7 @@ func handleMinResolvedTSByGRPC(ctx context.Context) {
 		log.Println("handleMinResolvedTSByGRPC qps = 0, exit")
 		return
 	}
+	pdCli := newPDClient()
 	for i := 0; i < *concurrency; i++ {
 		go func() {
 			var ticker = time.NewTicker(time.Millisecond * 200)
@@ -87,7 +88,6 @@ func handleMinResolvedTSByGRPC(ctx context.Context) {
 			for {
 				select {
 				case <-ticker.C:
-					pdCli := newPDClient()
 					_, _, err := pdCli.GetMinResolvedTimestamp(ctx, []uint64{1, 2, 3})
 					if err != nil {
 						log.Println(err)
@@ -114,6 +114,7 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 	}
 	url := fmt.Sprintf("%s://%s/pd/api/v1/min-resolved-ts", protocol, *pdAddr)
 
+	httpsCli := newHttpClient()
 	for i := 0; i < *concurrency; i++ {
 		go func() {
 			// Mock client-go's request frequency.
@@ -124,7 +125,6 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 				case <-ticker.C:
 					storeID := 1
 					req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%d", url, storeID), nil)
-					httpsCli := newHttpClient()
 					res, err := httpsCli.Do(req)
 					if err != nil {
 						log.Println("error: ", err)
