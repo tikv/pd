@@ -430,12 +430,12 @@ func (c *RaftCluster) runSyncConfig() {
 			// If the cluster was set up with `raft-kv-2` engine, this cluster should
 			// open `evict-slow-trend` scheduler as default.
 			{
-				name := schedulers.EvictSlowTrendName
+				name := schedulers.EvictSlowTrendType
 				args := []string{}
 
 				s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), c.GetStorage(), schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().GetSchedulersController().RemoveScheduler)
 				if err != nil {
-					log.Warn("bootstrapping evict-slow-trend scheduler failed", zap.Uint64("cluster-id", c.clusterID))
+					log.Warn("bootstrapping evict-slow-trend scheduler failed", zap.Uint64("cluster-id", c.clusterID), errs.ZapError(err))
 				} else {
 					log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 					if err = c.AddScheduler(s, args...); err != nil {
