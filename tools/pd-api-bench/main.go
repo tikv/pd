@@ -19,9 +19,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"github.com/tikv/pd/client/tlsutil"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"log"
 	"net/http"
 	"os"
@@ -30,6 +27,12 @@ import (
 	"time"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 var (
@@ -46,7 +49,6 @@ var (
 )
 
 func main() {
-	log.SetFlags(0)
 	flag.Parse()
 	ctx, cancel := context.WithCancel(context.Background())
 	sc := make(chan os.Signal, 1)
@@ -65,7 +67,6 @@ func main() {
 	go handleMinResolvedTSByHTTP(ctx)
 
 	<-ctx.Done()
-	log.Println("Exit")
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)
@@ -86,14 +87,14 @@ func handleMinResolvedTSByGRPC(ctx context.Context) {
 			for {
 				select {
 				case <-ticker.C:
-					pdCli := newClient()
+					pdCli := newPDClient()
 					_, _, err := pdCli.GetMinResolvedTimestamp(ctx, []uint64{1, 2, 3})
 					if err != nil {
 						log.Println(err)
 						continue
 					}
 				case <-ctx.Done():
-					log.Println("Got signal to exit handleScanRegions")
+					log.Println("Got signal to exit handleMinResolvedTSByGRPC")
 					return
 				}
 			}
@@ -106,7 +107,13 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 		log.Println("handleMinResolvedTSByHTTP qps = 0, exit")
 		return
 	}
-	url := "https://" + *pdAddr + "/pd/api/v1/min-resolved-ts"
+	// Judge whether with tls.
+	protocol := "http"
+	if len(*caPath) != 0 {
+		protocol = "https"
+	}
+	url := fmt.Sprintf("%s://%s/pd/api/v1/min-resolved-ts", protocol, *pdAddr)
+
 	for i := 0; i < *concurrency; i++ {
 		go func() {
 			// Mock client-go's request frequency.
@@ -117,7 +124,7 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 				case <-ticker.C:
 					storeID := 1
 					req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%d", url, storeID), nil)
-					httpsCli := httpClient()
+					httpsCli := newHttpClient()
 					res, err := httpsCli.Do(req)
 					if err != nil {
 						log.Println("error: ", err)
@@ -128,7 +135,7 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 					res.Body.Close()
 					httpsCli.CloseIdleConnections()
 				case <-ctx.Done():
-					log.Println("Got signal to exit handleScanRegions")
+					log.Println("Got signal to exit handleMinResolvedTSByHTTP")
 					return
 				}
 			}
@@ -143,12 +150,12 @@ type minResolvedTS struct {
 	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 }
 
-// httpClient returns an HTTP(s) client.
-func httpClient() *http.Client {
-	tlsConf := loadTLSConfig()
+// newHttpClient returns an HTTP(s) client.
+func newHttpClient() *http.Client {
 	// defaultTimeout for non-context requests.
 	const defaultTimeout = 30 * time.Second
 	cli := &http.Client{Timeout: defaultTimeout}
+	tlsConf := loadTLSConfig()
 	if tlsConf != nil {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.TLSClientConfig = tlsConf
@@ -157,18 +164,45 @@ func httpClient() *http.Client {
 	return cli
 }
 
+// newPDClient returns a pd client.
+func newPDClient() pd.Client {
+	const (
+		keepaliveTime    = 10 * time.Second
+		keepaliveTimeout = 3 * time.Second
+	)
+
+	pdCli, err := pd.NewClient([]string{*pdAddr}, pd.SecurityOption{
+		CAPath:   *caPath,
+		CertPath: *certPath,
+		KeyPath:  *keyPath,
+	},
+		pd.WithGRPCDialOptions(
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:    keepaliveTime,
+				Timeout: keepaliveTimeout,
+			}),
+		))
+	if err != nil {
+		log.Fatal("fail to create pd client", zap.Error(err))
+	}
+	return pdCli
+}
+
 func loadTLSConfig() *tls.Config {
+	if len(*caPath) == 0 {
+		return nil
+	}
 	caData, err := os.ReadFile(*caPath)
 	if err != nil {
-		println("fail to read ca file", err)
+		log.Println("fail to read ca file", zap.Error(err))
 	}
 	certData, err := os.ReadFile(*certPath)
 	if err != nil {
-		println("fail to read cert file", err)
+		log.Println("fail to read cert file", zap.Error(err))
 	}
 	keyData, err := os.ReadFile(*keyPath)
 	if err != nil {
-		println("fail to read key file", err)
+		log.Println("fail to read key file", zap.Error(err))
 	}
 
 	tlsConf, err := tlsutil.TLSConfig{
@@ -177,43 +211,11 @@ func loadTLSConfig() *tls.Config {
 		SSLKEYBytes:  keyData,
 	}.ToTLSConfig()
 	if err != nil {
-		println("fail to load tls config", err)
+		log.Fatal("failed to load tlc config", zap.Error(err))
 	}
+
 	return tlsConf
 }
-
-const (
-	keepaliveTime    = 10 * time.Second
-	keepaliveTimeout = 3 * time.Second
-)
-
-// newClient returns a pd client.
-func newClient() pd.Client {
-	pdcli, err := pd.NewClient([]string{*pdAddr}, pd.SecurityOption{})
-	if err != nil {
-		println("fail to create pd client", err)
-	}
-	return pdcli
-}
-
-//func newClientWithCLS() pd.Client {
-//	tlsConf := loadTLSConfig()
-//	pdCli, err := pd.NewClient([]string{}, pd.SecurityOption{
-//		SSLKEYBytes:  tlsConf.,
-//		SSLCertBytes: certData,
-//		SSLCABytes:   caData,
-//	},
-//		pd.WithGRPCDialOptions(
-//			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-//				Time:    keepaliveTime,
-//				Timeout: keepaliveTimeout,
-//			}),
-//		))
-//	if err != nil {
-//		println("fail to create pd client", err)
-//	}
-//	return pdCli
-//}
 
 func exit(code int) {
 	os.Exit(code)

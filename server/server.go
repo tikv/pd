@@ -1894,7 +1894,6 @@ func (s *Server) GetMinResolvedTS() uint64 {
 
 // GetMinResolvedTSByStoreIDs returns the min resolved ts of the stores.
 func (s *Server) GetMinResolvedTSByStoreIDs(ids []uint64) (uint64, []*pdpb.StoreMinResolvedTS) {
-	println("GetMinResolvedTSByStoreIDs", ids)
 	minResolvedTS := uint64(math.MaxUint64)
 	stores := make([]*pdpb.StoreMinResolvedTS, len(ids))
 	for i, storeID := range ids {
