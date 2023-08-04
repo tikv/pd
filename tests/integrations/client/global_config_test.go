@@ -316,14 +316,17 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 	}
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
+	runTest := false
 	for {
 		select {
 		case <-timer.C:
+			suite.True(runTest)
 			return
 		case res := <-configChan:
 			for _, r := range res {
 				suite.Equal(suite.GetEtcdPath(r.Value), r.Name)
 			}
+			runTest = true
 		}
 	}
 }
