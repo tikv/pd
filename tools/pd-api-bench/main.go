@@ -38,15 +38,19 @@ import (
 var (
 	pdAddr = flag.String("pd", "127.0.0.1:2379", "pd address")
 	// min-resolved-ts
-	minResolvedTSByGRPC = flag.Int("min-resolved-ts-grpc", 0, "min-resolved-ts by grpc qps")
-	minResolvedTSByHTTP = flag.Int("min-resolved-ts-http", 0, "min-resolved-ts by http qps")
+	minResolvedTSByGRPC = flag.Bool("min-resolved-ts-grpc", false, "min-resolved-ts by grpc qps")
+	minResolvedTSByHTTP = flag.Bool("min-resolved-ts-http", false, "min-resolved-ts by http qps")
 	// concurrency
-	concurrency = flag.Int("concurrency", 1, "client number")
+	client = flag.Int("client", 1, "client number")
+	// qps
+	qps = flag.Int("qps", 1000, "qps")
 	// tls
 	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
 	certPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
 	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format")
 )
+
+var base = int(time.Second) / int(time.Millisecond)
 
 func main() {
 	flag.Parse()
@@ -63,8 +67,12 @@ func main() {
 		cancel()
 	}()
 
-	go handleMinResolvedTSByGRPC(ctx)
-	go handleMinResolvedTSByHTTP(ctx)
+	if *minResolvedTSByGRPC {
+		go handleMinResolvedTSByGRPC(ctx)
+	}
+	if *minResolvedTSByHTTP {
+		go handleMinResolvedTSByHTTP(ctx)
+	}
 
 	<-ctx.Done()
 	switch sig {
@@ -76,14 +84,12 @@ func main() {
 }
 
 func handleMinResolvedTSByGRPC(ctx context.Context) {
-	if *minResolvedTSByGRPC == 0 {
-		log.Println("handleMinResolvedTSByGRPC qps = 0, exit")
-		return
-	}
-	pdCli := newPDClient()
-	for i := 0; i < *concurrency; i++ {
+	log.Println("handleMinResolvedTSByGRPC start...")
+	tt := base / *qps
+	for i := 0; i < *client; i++ {
+		pdCli := newPDClient()
 		go func() {
-			var ticker = time.NewTicker(time.Millisecond * 200)
+			var ticker = time.NewTicker(time.Millisecond * time.Duration(tt))
 			defer ticker.Stop()
 			for {
 				select {
@@ -103,10 +109,7 @@ func handleMinResolvedTSByGRPC(ctx context.Context) {
 }
 
 func handleMinResolvedTSByHTTP(ctx context.Context) {
-	if *minResolvedTSByHTTP == 0 {
-		log.Println("handleMinResolvedTSByHTTP qps = 0, exit")
-		return
-	}
+	log.Println("handleMinResolvedTSByHTTP start...")
 	// Judge whether with tls.
 	protocol := "http"
 	if len(*caPath) != 0 {
@@ -114,11 +117,12 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 	}
 	url := fmt.Sprintf("%s://%s/pd/api/v1/min-resolved-ts", protocol, *pdAddr)
 
-	httpsCli := newHttpClient()
-	for i := 0; i < *concurrency; i++ {
+	tt := base / *qps
+	for i := 0; i < *client; i++ {
+		httpsCli := newHttpClient()
 		go func() {
 			// Mock client-go's request frequency.
-			var ticker = time.NewTicker(time.Millisecond * 2000)
+			var ticker = time.NewTicker(time.Millisecond * time.Duration(tt))
 			defer ticker.Stop()
 			for {
 				select {
@@ -133,7 +137,6 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 					listResp := &minResolvedTS{}
 					apiutil.ReadJSON(res.Body, listResp)
 					res.Body.Close()
-					httpsCli.CloseIdleConnections()
 				case <-ctx.Done():
 					log.Println("Got signal to exit handleMinResolvedTSByHTTP")
 					return

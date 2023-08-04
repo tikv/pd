@@ -1,6 +1,6 @@
 module github.com/tools/pd-api-bench
 
-go 1.19
+go 1.20
 
 require (
 	github.com/tikv/pd v1.1.0-beta.0.20230803041908-c8c5e1e215a1
