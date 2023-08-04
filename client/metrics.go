@@ -144,6 +144,7 @@ var (
 	cmdDurationPut                      prometheus.Observer
 	cmdDurationUpdateGCSafePointV2      prometheus.Observer
 	cmdDurationUpdateServiceSafePointV2 prometheus.Observer
+	cmdDurationGetMinResolvedTimestamp  prometheus.Observer
 
 	cmdFailDurationGetRegion                  prometheus.Observer
 	cmdFailDurationTSO                        prometheus.Observer
@@ -162,6 +163,7 @@ var (
 	cmdFailedDurationPut                      prometheus.Observer
 	cmdFailedDurationUpdateGCSafePointV2      prometheus.Observer
 	cmdFailedDurationUpdateServiceSafePointV2 prometheus.Observer
+	cmdFailedDurationGetMinResolvedTimestamp  prometheus.Observer
 )
 
 func initCmdDurations() {
@@ -190,6 +192,7 @@ func initCmdDurations() {
 	cmdDurationPut = cmdDuration.WithLabelValues("put")
 	cmdDurationUpdateGCSafePointV2 = cmdDuration.WithLabelValues("update_gc_safe_point_v2")
 	cmdDurationUpdateServiceSafePointV2 = cmdDuration.WithLabelValues("update_service_safe_point_v2")
+	cmdDurationGetMinResolvedTimestamp = cmdDuration.WithLabelValues("get_min_resolved_ts")
 
 	cmdFailDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
 	cmdFailDurationTSO = cmdFailedDuration.WithLabelValues("tso")
@@ -208,6 +211,7 @@ func initCmdDurations() {
 	cmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")
 	cmdFailedDurationUpdateGCSafePointV2 = cmdFailedDuration.WithLabelValues("update_gc_safe_point_v2")
 	cmdFailedDurationUpdateServiceSafePointV2 = cmdFailedDuration.WithLabelValues("update_service_safe_point_v2")
+	cmdFailedDurationGetMinResolvedTimestamp = cmdFailedDuration.WithLabelValues("get_min_resolved_ts")
 }
 
 func registerMetrics() {

@@ -1587,6 +1587,14 @@ func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) err
 }
 
 func (c *client) GetMinResolvedTimestamp(ctx context.Context, storesID []uint64) (uint64, []*pdpb.StoreMinResolvedTS, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetMinResolvedTimestamp", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+
+	start := time.Now()
+	defer func() { cmdDurationGetMinResolvedTimestamp.Observe(time.Since(start).Seconds()) }()
+
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return 0, nil, errs.ErrClientGetProtoClient
@@ -1598,12 +1606,9 @@ func (c *client) GetMinResolvedTimestamp(ctx context.Context, storesID []uint64)
 		Header:   c.requestHeader(),
 		StoresId: storesID,
 	})
-	if err != nil {
+
+	if err = c.respForErr(cmdFailedDurationGetMinResolvedTimestamp, start, err, resp.GetHeader()); err != nil {
 		return 0, nil, err
-	}
-	resErr := resp.GetHeader().GetError()
-	if resErr != nil {
-		return 0, nil, errors.Errorf("[pd]" + resErr.Message)
 	}
 	return resp.GetTimestamp(), resp.GetStoresMinResolvedTs(), nil
 }
