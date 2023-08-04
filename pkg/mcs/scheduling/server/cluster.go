@@ -42,6 +42,7 @@ func NewCluster(ctx context.Context, storage storage.Storage, cfg *config.Config
 		labelerManager: labelerManager,
 		persistConfig:  persistConfig,
 		hotStat:        statistics.NewHotStat(ctx),
+		storage:        storage,
 	}, nil
 }
 
