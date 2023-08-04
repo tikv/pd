@@ -427,6 +427,26 @@ func (c *RaftCluster) runSyncConfig() {
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
+			// If the cluster was set up with `raft-kv-2` engine, this cluster should
+			// open `evict-slow-trend` scheduler as default.
+			{
+				name := schedulers.EvictSlowTrendName
+				args := []string{}
+
+				s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), c.GetStorage(), schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().GetSchedulersController().RemoveScheduler)
+				if err != nil {
+					log.Warn("bootstrapping evict-slow-trend scheduler failed", zap.Uint64("cluster-id", c.clusterID))
+				} else {
+					log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
+					if err = c.AddScheduler(s, args...); err != nil {
+						log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
+					} else if err = c.GetPersistOptions().Persist(c.GetStorage()); err != nil {
+						log.Error("can not persist scheduler config", errs.ZapError(err))
+					} else {
+						log.Info("add scheduler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+					}
+				}
+			}
 		}
 		if !synced {
 			stores = c.GetStores()
