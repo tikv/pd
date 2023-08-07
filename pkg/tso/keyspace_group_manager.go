@@ -994,7 +994,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	ts, err = am.HandleRequest(dcLocation, count)
+	ts, err = am.HandleRequest(context.Background(), dcLocation, count)
 	return ts, curKeyspaceGroupID, err
 }
 
@@ -1033,7 +1033,7 @@ func (kgm *KeyspaceGroupManager) GetMinTS(
 		if kgm.kgs[i] != nil && kgm.kgs[i].IsSplitTarget() {
 			continue
 		}
-		ts, err := am.HandleRequest(dcLocation, 1)
+		ts, err := am.HandleRequest(context.Background(), dcLocation, 1)
 		if err != nil {
 			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, err
 		}
@@ -1077,11 +1077,11 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	if err != nil {
 		return err
 	}
-	splitTargetTSO, err := splitTargetAllocator.GenerateTSO(1)
+	splitTargetTSO, err := splitTargetAllocator.GenerateTSO(context.Background(), 1)
 	if err != nil {
 		return err
 	}
-	splitSourceTSO, err := splitSourceAllocator.GenerateTSO(1)
+	splitSourceTSO, err := splitSourceAllocator.GenerateTSO(context.Background(), 1)
 	if err != nil {
 		return err
 	}
