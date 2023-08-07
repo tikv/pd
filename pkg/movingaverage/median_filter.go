@@ -27,11 +27,11 @@ type MedianFilter struct {
 	records []float64
 	size    uint64
 	count   uint64
-	// g is used to count the number of values which are greater than median
-	g uint64
-	// l is used to count the number of values which are less than median
-	l      uint64
-	result float64
+	// countGreaterThanMedian is used to count the number of values which are greater than median
+	countGreaterThanMedian uint64
+	// countLessThanMedian is used to count the number of values which are less than median
+	countLessThanMedian uint64
+	result              float64
 }
 
 // NewMedianFilter returns a MedianFilter.
@@ -50,8 +50,8 @@ func (r *MedianFilter) getLength() uint64 {
 	return len
 }
 
-// findMin returns the minimum item which is larger number than the median, and its index.
-func (r *MedianFilter) findMin(len uint64) (min float64, pos uint64) {
+// findMinValueGreaterThanMedain returns the minimum item which is larger number than the median, and its index.
+func (r *MedianFilter) findMinValueGreaterThanMedain(len uint64) (min float64, pos uint64) {
 	min = math.MaxFloat64
 	for i := uint64(0); i < len; i++ {
 		if r.records[i] > r.result && r.records[i] < min {
@@ -62,18 +62,18 @@ func (r *MedianFilter) findMin(len uint64) (min float64, pos uint64) {
 	return
 }
 
-// findMinNumber returns the minimum item which is larger number than the median.
-func (r *MedianFilter) findMinNumber() float64 {
+// findMinGreaterThanMedian returns the minimum item which is larger number than the median.
+func (r *MedianFilter) findMinGreaterThanMedian() float64 {
 	len := r.getLength()
-	min, _ := r.findMin(len)
+	min, _ := r.findMinValueGreaterThanMedain(len)
 	return min
 }
 
-// findTwoMinNumber returns the two minimum items which is larger than the median.
-func (r *MedianFilter) findTwoMinNumber() (first, second float64) {
+// findTwoMinValuesGreaterThanMedian returns the two minimum items which is larger than the median.
+func (r *MedianFilter) findTwoMinValuesGreaterThanMedian() (first, second float64) {
 	len := r.getLength()
 	second = math.MaxFloat64
-	first, pos := r.findMin(len)
+	first, pos := r.findMinValueGreaterThanMedain(len)
 	for i := uint64(0); i < len; i++ {
 		if i != pos && r.records[i] > r.result && r.records[i] < second {
 			second = r.records[i]
@@ -82,8 +82,8 @@ func (r *MedianFilter) findTwoMinNumber() (first, second float64) {
 	return
 }
 
-// findMax returns the maximal item which is less than the median, and its index.
-func (r *MedianFilter) findMax(len uint64) (max float64, pos uint64) {
+// findMaxLessThanMedian returns the maximal item which is less than the median, and its index.
+func (r *MedianFilter) findMaxLessThanMedian(len uint64) (max float64, pos uint64) {
 	max = -math.MaxFloat64
 	for i := uint64(0); i < len; i++ {
 		if r.records[i] < r.result && r.records[i] > max {
@@ -94,18 +94,18 @@ func (r *MedianFilter) findMax(len uint64) (max float64, pos uint64) {
 	return
 }
 
-// findMaxNumber returns the maximal item which is less than the median.
-func (r *MedianFilter) findMaxNumber() float64 {
+// findMaxValueLessThanMedian returns the maximal item which is less than the median.
+func (r *MedianFilter) findMaxValueLessThanMedian() float64 {
 	len := r.getLength()
-	max, _ := r.findMax(len)
+	max, _ := r.findMaxLessThanMedian(len)
 	return max
 }
 
-// findTwoMaxNumber returns the two maximal items which is less than the median.
-func (r *MedianFilter) findTwoMaxNumber() (first, second float64) {
+// findTwoMaxLessThanMedian returns the two maximal items which is less than the median.
+func (r *MedianFilter) findTwoMaxLessThanMedian() (first, second float64) {
 	len := r.getLength()
 	second = -math.MaxFloat64
-	first, pos := r.findMax(len)
+	first, pos := r.findMaxLessThanMedian(len)
 	for i := uint64(0); i < len; i++ {
 		if i != pos && r.records[i] < r.result && r.records[i] > second {
 			second = r.records[i]
@@ -115,13 +115,13 @@ func (r *MedianFilter) findTwoMaxNumber() (first, second float64) {
 }
 
 func (r *MedianFilter) updateStatus(len uint64) {
-	r.g = 0
-	r.l = 0
+	r.countGreaterThanMedian = 0
+	r.countLessThanMedian = 0
 	for i := uint64(0); i < len; i++ {
 		if r.records[i] > r.result {
-			r.g++
+			r.countGreaterThanMedian++
 		} else if r.records[i] < r.result {
-			r.l++
+			r.countLessThanMedian++
 		}
 	}
 }
@@ -133,55 +133,55 @@ func (r *MedianFilter) Add(n float64) {
 		len = r.size
 		posValue := r.records[r.count%r.size]
 		if posValue > r.result {
-			r.g--
+			r.countGreaterThanMedian--
 		} else if posValue < r.result {
-			r.l--
+			r.countLessThanMedian--
 		}
 	}
 	if n > r.result {
-		r.g++
+		r.countGreaterThanMedian++
 	} else if n < r.result {
-		r.l++
+		r.countLessThanMedian++
 	}
 	r.records[r.count%r.size] = n
 	r.count++
 
 	// When the length is even
 	if len%2 == 0 {
-		if r.g > len/2 { // the example for this case is [1 3 5 6] -> [1 5 6 7]
-			g1, g2 := r.findTwoMinNumber()
+		if r.countGreaterThanMedian > len/2 { // the example for this case is [1 3 5 6] -> [1 5 6 7]
+			g1, g2 := r.findTwoMinValuesGreaterThanMedian()
 			r.result = (g1 + g2) / 2
 			r.updateStatus(len)
-		} else if r.g == len/2 {
-			g1 := r.findMinNumber()
-			if r.l < len/2 { // the example for this case is [1 3 5] -> [1 3 5 6]
+		} else if r.countGreaterThanMedian == len/2 {
+			g1 := r.findMinGreaterThanMedian()
+			if r.countLessThanMedian < len/2 { // the example for this case is [1 3 5] -> [1 3 5 6]
 				r.result = (r.result + g1) / 2
 			} else { // the example for this case is [1 3 5 6] -> [1 3 6 6]
-				l1 := r.findMaxNumber()
+				l1 := r.findMaxValueLessThanMedian()
 				r.result = (l1 + g1) / 2
 			}
 			r.updateStatus(len)
-		} else if r.l == len/2 { // the example for this case is [1 3 5 6] -> [1 1 3 5]
-			l1 := r.findMaxNumber()
-			if r.g < len/2 { // the example for this case is [1 3 5] -> [1 2 3 5]
+		} else if r.countLessThanMedian == len/2 { // the example for this case is [1 3 5 6] -> [1 1 3 5]
+			l1 := r.findMaxValueLessThanMedian()
+			if r.countGreaterThanMedian < len/2 { // the example for this case is [1 3 5] -> [1 2 3 5]
 				r.result = (r.result + l1) / 2
 			} else { // the example for this case is [1 3 5 6] -> [1 2 5 6]
-				g1 := r.findMinNumber()
+				g1 := r.findMinGreaterThanMedian()
 				r.result = (l1 + g1) / 2
 			}
 			r.updateStatus(len)
-		} else if r.l == len/2+1 { // the example for this case is [1 3 5 6] -> [1 2 3 5]
-			l1, l2 := r.findTwoMaxNumber()
+		} else if r.countLessThanMedian == len/2+1 { // the example for this case is [1 3 5 6] -> [1 2 3 5]
+			l1, l2 := r.findTwoMaxLessThanMedian()
 			r.result = (l1 + l2) / 2
 			r.updateStatus(len)
 		} // In the other case, the median didn't change
 	} else {
-		if r.l == len/2+1 { // the example for this case is [1 2 3 4 5] -> [1 1 2 3 4]
-			l1 := r.findMaxNumber()
+		if r.countLessThanMedian == len/2+1 { // the example for this case is [1 2 3 4 5] -> [1 1 2 3 4]
+			l1 := r.findMaxValueLessThanMedian()
 			r.result = l1
 			r.updateStatus(len)
-		} else if r.g == len/2+1 { // the example for this case is [1 2 3 4 5] -> [2 3 4 5 6]
-			g1 := r.findMinNumber()
+		} else if r.countGreaterThanMedian == len/2+1 { // the example for this case is [1 2 3 4 5] -> [2 3 4 5 6]
+			g1 := r.findMinGreaterThanMedian()
 			r.result = g1
 			r.updateStatus(len)
 		} // In the other case, the median didn't change
@@ -197,8 +197,8 @@ func (r *MedianFilter) Get() float64 {
 func (r *MedianFilter) Reset() {
 	r.count = 0
 	r.result = 0
-	r.g = 0
-	r.l = 0
+	r.countGreaterThanMedian = 0
+	r.countLessThanMedian = 0
 }
 
 // Set = Reset + Add.
@@ -206,8 +206,8 @@ func (r *MedianFilter) Set(n float64) {
 	r.records[0] = n
 	r.count = 1
 	r.result = n
-	r.g = 0
-	r.l = 0
+	r.countGreaterThanMedian = 0
+	r.countLessThanMedian = 0
 }
 
 // GetInstantaneous returns the value just added.
