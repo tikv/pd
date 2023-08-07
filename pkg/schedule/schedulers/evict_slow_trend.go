@@ -299,6 +299,15 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster) (slowStore *core.StoreI
 		if slowTrend != nil && slowTrend.ResultRate < -alterEpsilon {
 			affectedStoreCount += 1
 		}
+		// TODO: debugging
+		if cluster.GetStoreConfig().IsRaftKV2() && slowTrend != nil && slowTrend.CauseRate > alterEpsilon {
+			log.Info("[Debugging] evict-slow-trend-scheduler pre-captured candidate for raft-kv-2",
+				zap.Uint64("store-id", store.GetID()),
+				zap.Float64("cause-rate", slowTrend.CauseRate),
+				zap.Float64("result-rate", slowTrend.ResultRate),
+				zap.Float64("cause-value", slowTrend.CauseValue),
+				zap.Float64("result-value", slowTrend.ResultValue))
+		}
 	}
 	if len(candidates) == 0 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:no-fit").Inc()
