@@ -39,7 +39,7 @@ import (
 )
 
 var (
-	topnPosition       = 10
+	topnPosition = 10
 )
 
 type baseHotScheduler struct {
@@ -111,6 +111,9 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sched
 // It makes each dim rate or count become `weight` times to the origin value.
 func (h *baseHotScheduler) summaryPendingInfluence(cluster schedule.Cluster) {
 	for id, p := range h.regionPendings {
+		if p.op == nil {
+			continue
+		}
 		from := h.stInfos[p.from]
 		to := h.stInfos[p.to]
 		maxZombieDur := p.maxZombieDuration
@@ -421,13 +424,13 @@ func isAvailableV1(s *solution) bool {
 
 type balanceSolver struct {
 	schedule.Cluster
-	sche         *hotScheduler
-	stLoadDetail map[uint64]*statistics.StoreLoadDetail
+	sche             *hotScheduler
+	stLoadDetail     map[uint64]*statistics.StoreLoadDetail
 	filteredHotPeers map[uint64][]*statistics.HotPeerStat // storeID -> hotPeers(filtered)
 	nthHotPeer       map[uint64][]*statistics.HotPeerStat // storeID -> [dimLen]hotPeers
-	rwTy         statistics.RWType
-	opTy         opType
-	resourceTy   resourceType
+	rwTy             statistics.RWType
+	opTy             opType
+	resourceTy       resourceType
 
 	cur *solution
 

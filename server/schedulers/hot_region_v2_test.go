@@ -436,16 +436,17 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 
 func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLoad, lowLoad uint64,
 	addOtherRegions func(*mockcluster.Cluster, *hotScheduler)) []*operator.Operator {
-	cancel, _, tc, oc := prepareSchedulersTest()
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
-	sche, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	hb, err := schedule.CreateScheduler(statistics.Read.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	hb := sche.(*hotScheduler)
-	hb.conf.SetSrcToleranceRatio(1)
-	hb.conf.SetDstToleranceRatio(1)
-	hb.conf.SetRankFormulaVersion("v2")
-	hb.conf.ReadPriorities = []string{statistics.QueryPriority, statistics.BytePriority}
+	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.SetRankFormulaVersion("v2")
+	hb.(*hotScheduler).conf.ReadPriorities = []string{statistics.QueryPriority, statistics.BytePriority}
+	opt := config.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 40)
 	tc.AddRegionStore(2, 10)
@@ -470,7 +471,7 @@ func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLo
 	}
 	addRegionInfo(tc, statistics.Read, regions)
 	tc.SetHotRegionCacheHitsThreshold(1)
-	addOtherRegions(tc, hb)
+	addOtherRegions(tc, hb.(*hotScheduler))
 	ops, _ := hb.Schedule(tc, false)
 	return ops
 }
