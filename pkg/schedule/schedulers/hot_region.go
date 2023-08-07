@@ -439,23 +439,14 @@ func isAvailableV1(s *solution) bool {
 }
 
 type balanceSolver struct {
-<<<<<<< HEAD
 	schedule.Cluster
 	sche         *hotScheduler
 	stLoadDetail map[uint64]*statistics.StoreLoadDetail
+	filteredHotPeers map[uint64][]*statistics.HotPeerStat // storeID -> hotPeers(filtered)
+	nthHotPeer       map[uint64][]*statistics.HotPeerStat // storeID -> [dimLen]hotPeers
 	rwTy         statistics.RWType
 	opTy         opType
 	resourceTy   resourceType
-=======
-	sche.SchedulerCluster
-	sche             *hotScheduler
-	stLoadDetail     map[uint64]*statistics.StoreLoadDetail
-	filteredHotPeers map[uint64][]*statistics.HotPeerStat // storeID -> hotPeers(filtered)
-	nthHotPeer       map[uint64][]*statistics.HotPeerStat // storeID -> [dimLen]hotPeers
-	rwTy             statistics.RWType
-	opTy             opType
-	resourceTy       resourceType
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827))
 
 	cur *solution
 
@@ -497,7 +488,7 @@ func (bs *balanceSolver) init() {
 	// Load the configuration items of the scheduler.
 	bs.resourceTy = toResourceType(bs.rwTy, bs.opTy)
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
-	bs.minHotDegree = bs.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()
+	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
 	bs.isRaftKV2 = bs.GetStoreConfig().IsRaftKV2()
@@ -543,22 +534,6 @@ func (bs *balanceSolver) init() {
 		Loads: stepLoads,
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
-<<<<<<< HEAD
-
-	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
-	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
-	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
-	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
-	bs.isRaftKV2 = bs.GetStoreConfig().IsRaftKV2()
-
-	switch bs.sche.conf.GetRankFormulaVersion() {
-	case "v1":
-		bs.initRankV1()
-	default:
-		bs.initRankV2()
-	}
-=======
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827))
 }
 
 func (bs *balanceSolver) initRankV1() {

@@ -19,11 +19,8 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
-<<<<<<< HEAD
-	"github.com/tikv/pd/pkg/schedule"
-=======
 	"github.com/tikv/pd/pkg/mock/mockcluster"
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827))
+	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
@@ -439,7 +436,7 @@ func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLo
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	statistics.Denoising = false
-	sche, err := CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	hb.conf.SetSrcToleranceRatio(1)
