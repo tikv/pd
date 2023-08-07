@@ -26,7 +26,10 @@ import (
 	"github.com/urfave/negroni"
 )
 
-const apiPrefix = "/pd"
+const (
+	apiPrefix     = "/pd"
+	pdAPIV1Prefix = "/pd/api/v1"
+)
 
 // NewHandler creates a HTTP handler for API.
 func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
@@ -38,8 +41,11 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	r := createRouter(apiPrefix, svr)
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
-		serverapi.NewRedirector(svr, serverapi.MicroserviceRedirectRule(
-			apiPrefix+"/api/v1"+"/admin/reset-ts", tsoapi.APIPathPrefix+"/admin/reset-ts", "tso")),
+		serverapi.NewRedirector(
+			svr,
+			// microservice redirect rules
+			serverapi.MicroserviceRedirectRule("tso", pdAPIV1Prefix+"/admin/reset-ts", tsoapi.APIPathPrefix+"/admin/reset-ts"),
+		),
 		negroni.Wrap(r)),
 	)
 

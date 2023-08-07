@@ -28,9 +28,10 @@ import (
 
 // HTTP headers.
 const (
-	PDRedirectorHeader    = "PD-Redirector"
-	PDAllowFollowerHandle = "PD-Allow-follower-handle"
-	ForwardedForHeader    = "X-Forwarded-For"
+	PDRedirectorHeader     = "PD-Redirector"
+	PDAllowFollowerHandle  = "PD-Allow-follower-handle"
+	PDPreferFollowerHandle = "PD-Prefer-Follower-Handle"
+	ForwardedForHeader     = "X-Forwarded-For"
 )
 
 type runtimeServiceValidator struct {
@@ -72,6 +73,7 @@ func IsServiceAllowed(s *server.Server, group apiutil.APIServiceGroup) bool {
 	return false
 }
 
+// TODO: replace with http proxy.
 type redirector struct {
 	s *server.Server
 
@@ -97,7 +99,7 @@ func NewRedirector(s *server.Server, opts ...RedirectorOption) negroni.Handler {
 type RedirectorOption func(*redirector)
 
 // MicroserviceRedirectRule new a microservice redirect rule option
-func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string) RedirectorOption {
+func MicroserviceRedirectRule(targetServiceName, matchPath, targetPath string) RedirectorOption {
 	return func(s *redirector) {
 		s.microserviceRedirectRules = append(s.microserviceRedirectRules, &microserviceRedirectRule{
 			matchPath,
@@ -128,32 +130,63 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	return false, ""
 }
 
+func (h *redirector) tryRedirectToFollowerHandler(r *http.Request) (bool, []string) {
+	if len(r.Header.Get(PDPreferFollowerHandle)) <= 0 {
+		return false, nil
+	}
+	if !h.s.GetMember().IsLeader() {
+		return false, nil
+	}
+	members, err := h.s.GetMembers()
+	if err != nil {
+		log.Error("failed to get members", errs.ZapError(err))
+		return false, nil
+	}
+	leader := h.s.GetLeader()
+	urls := make([]string, 0, len(members))
+	// TODO, maintain member health status.
+	for _, m := range members {
+		if m.GetMemberId() == leader.GetMemberId() && leader.GetMemberId() != 0 {
+			continue
+		}
+		urls = append(urls, m.GetClientUrls()[0])
+	}
+	if len(urls) == 0 {
+		return false, nil
+	}
+	return true, urls
+}
+
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	matchedFlag, targetAddr := h.matchMicroServiceRedirectRules(r)
-	allowFollowerHandle := len(r.Header.Get(PDAllowFollowerHandle)) > 0
+	allowFollowerHandle := len(r.Header.Get(PDAllowFollowerHandle)) > 0 || len(r.Header.Get(PDPreferFollowerHandle)) > 0
+	needRedirectToFollower, followerAddrs := h.tryRedirectToFollowerHandler(r)
+	needRedirectToService, targetAddr := h.matchMicroServiceRedirectRules(r)
 	isLeader := h.s.GetMember().IsLeader()
-	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !matchedFlag {
+	allowHandle := !h.s.IsClosed() && (allowFollowerHandle || isLeader)
+	if allowHandle && !needRedirectToService && !needRedirectToFollower {
 		next(w, r)
 		return
 	}
 
 	// Prevent more than one redirection.
-	if name := r.Header.Get(PDRedirectorHeader); len(name) != 0 {
-		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
-		http.Error(w, apiutil.ErrRedirectToNotLeader, http.StatusInternalServerError)
+	if names := r.Header.Values(PDRedirectorHeader); len(names) > 1 {
+		log.Error("redirect is more than one times", zap.Strings("from", names), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
+		http.Error(w, apiutil.ErrRedirectFailed, http.StatusInternalServerError)
 		return
 	}
 
-	r.Header.Set(PDRedirectorHeader, h.s.Name())
+	r.Header.Add(PDRedirectorHeader, h.s.Name())
 	r.Header.Add(ForwardedForHeader, r.RemoteAddr)
 
 	var clientUrls []string
-	if matchedFlag {
+	if needRedirectToService {
 		if len(targetAddr) == 0 {
 			http.Error(w, apiutil.ErrRedirectFailed, http.StatusInternalServerError)
 			return
 		}
 		clientUrls = append(clientUrls, targetAddr)
+	} else if needRedirectToFollower {
+		clientUrls = followerAddrs
 	} else {
 		leader := h.s.GetMember().GetLeader()
 		if leader == nil {
@@ -169,7 +202,6 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 			http.Error(w, errs.ErrURLParse.Wrap(err).GenWithStackByCause().Error(), http.StatusInternalServerError)
 			return
 		}
-
 		urls = append(urls, *u)
 	}
 	client := h.s.GetHTTPClient()

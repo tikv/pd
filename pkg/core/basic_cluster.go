@@ -20,6 +20,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
+var _ RegionSetInformer = &BasicCluster{}
+
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
 	Stores struct {
@@ -256,7 +258,9 @@ type RegionSetInformer interface {
 	RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo
 	GetAverageRegionSize() int64
 	GetStoreRegionCount(storeID uint64) int
+	GetStoreRegions(storeID uint64) []*RegionInfo
 	GetRegion(id uint64) *RegionInfo
+	GetRegions() []*RegionInfo
 	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)
 	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 	GetRegionByKey(regionKey []byte) *RegionInfo

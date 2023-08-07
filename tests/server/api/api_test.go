@@ -631,6 +631,79 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	suite.NoError(err)
 }
 
+func (suite *redirectorTestSuite) TestRedirectToFollowerHandle() {
+	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NoError(leader.BootstrapCluster())
+	cases := []struct {
+		name               string
+		expectStatus       int
+		expectedRedirector string
+		addr               string
+	}{
+		{
+			name:               "Case 1",
+			expectStatus:       http.StatusOK,
+			expectedRedirector: leader.GetLeader().GetName(),
+			addr:               leader.GetAddr() + "/pd/api/v1/regions",
+		},
+		{
+			name:               "Case 2",
+			expectStatus:       http.StatusOK,
+			expectedRedirector: leader.GetLeader().GetName(),
+			addr:               leader.GetAddr() + "/pd/api/v1/region/id/2",
+		},
+		{
+			name:               "Case 3",
+			expectStatus:       http.StatusOK,
+			expectedRedirector: leader.GetLeader().GetName(),
+			addr:               leader.GetAddr() + "/pd/api/v1/region/key/abc",
+		},
+		{
+			name:               "Case 4",
+			expectStatus:       http.StatusOK,
+			expectedRedirector: leader.GetLeader().GetName(),
+			addr:               leader.GetAddr() + "/pd/api/v1/regions/key?key=abc",
+		},
+		{
+			name:               "Case 5",
+			expectStatus:       http.StatusOK,
+			expectedRedirector: leader.GetLeader().GetName(),
+			addr:               leader.GetAddr() + "/pd/api/v1/regions/count",
+		},
+		{
+			name:               "Case 6",
+			expectStatus:       http.StatusOK,
+			expectedRedirector: leader.GetLeader().GetName(),
+			addr:               leader.GetAddr() + "/pd/api/v1/regions/store/1",
+		},
+		{
+			name:               "Case 7",
+			expectStatus:       http.StatusOK,
+			expectedRedirector: leader.GetLeader().GetName(),
+			addr:               leader.GetAddr() + "/pd/api/v1/regions/size",
+		},
+		{
+			name:               "Case 8",
+			expectStatus:       http.StatusInternalServerError,
+			expectedRedirector: leader.GetLeader().GetName(),
+			addr:               leader.GetAddr() + "/pd/api/v1/config/rules", // not supports
+		},
+	}
+
+	for _, tc := range cases {
+		request, err := http.NewRequest(http.MethodGet, tc.addr, nil)
+		suite.NoError(err)
+		request.Header.Add(serverapi.PDPreferFollowerHandle, "true")
+
+		resp, err := dialClient.Do(request)
+		suite.NoError(err)
+		defer resp.Body.Close()
+		redirector := resp.Header.Get(serverapi.PDRedirectorHeader)
+		suite.Equal(tc.expectedRedirector, redirector, "Redirector mismatch for "+tc.name)
+		suite.Equal(tc.expectStatus, resp.StatusCode, "Status code mismatch for "+tc.name)
+	}
+}
+
 func (suite *redirectorTestSuite) TestNotLeader() {
 	// Find a follower.
 	var follower *server.Server

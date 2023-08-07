@@ -44,6 +44,8 @@ var (
 	componentSignatureKey = "component"
 	// componentAnonymousValue identifies anonymous request source
 	componentAnonymousValue = "anonymous"
+	// PDRedirectHeader is the header key for redirect
+	PDRedirectHeader = "PD-Redirector"
 )
 
 const (
@@ -400,7 +402,6 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		r.RequestURI = ""
 		r.URL.Host = url.Host
 		r.URL.Scheme = url.Scheme
-
 		resp, err := p.client.Do(r)
 		if err != nil {
 			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
@@ -421,6 +422,8 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		}
 
 		copyHeader(w.Header(), resp.Header)
+		// record the redirect address
+		w.Header().Add(PDRedirectHeader, r.Header.Get(PDRedirectHeader))
 		w.WriteHeader(resp.StatusCode)
 		for {
 			if _, err = io.CopyN(w, reader, chunkSize); err != nil {

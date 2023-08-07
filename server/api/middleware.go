@@ -21,7 +21,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/audit"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -100,10 +102,50 @@ func (m clusterMiddleware) Middleware(h http.Handler) http.Handler {
 	})
 }
 
+type RegionSetInformerMiddleware struct {
+	s  *server.Server
+	rd *render.Render
+}
+
+func newRegionSetInformerMiddleware(s *server.Server) RegionSetInformerMiddleware {
+	return RegionSetInformerMiddleware{
+		s:  s,
+		rd: render.New(render.Options{IndentJSON: true}),
+	}
+}
+
+func (m RegionSetInformerMiddleware) Middleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var ctx context.Context
+		if len(r.Header.Get(serverapi.PDAllowFollowerHandle)) > 0 || len(r.Header.Get(serverapi.PDPreferFollowerHandle)) > 0 {
+			informer := m.s.GetBasicCluster()
+			ctx = context.WithValue(r.Context(), regionSetInformerCtxKey{}, informer)
+		} else {
+			rc := m.s.GetRaftCluster()
+			if rc == nil {
+				m.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+				return
+			}
+			ctx = context.WithValue(r.Context(), clusterCtxKey{}, rc)
+		}
+		h.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 type clusterCtxKey struct{}
+type regionSetInformerCtxKey struct{}
 
 func getCluster(r *http.Request) *cluster.RaftCluster {
 	return r.Context().Value(clusterCtxKey{}).(*cluster.RaftCluster)
+}
+
+func getRegionSetInformer(r *http.Request) (informer core.RegionSetInformer) {
+	if v, ok := r.Context().Value(regionSetInformerCtxKey{}).(core.RegionSetInformer); !ok {
+		informer = getCluster(r)
+	} else {
+		informer = v
+	}
+	return informer
 }
 
 type auditMiddleware struct {
