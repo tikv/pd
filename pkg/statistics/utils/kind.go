@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package utils
 
 import (
 	"github.com/tikv/pd/pkg/core"
@@ -145,19 +145,20 @@ func (k StoreStatKind) String() string {
 	return "unknown StoreStatKind"
 }
 
-// sourceKind represents the statistics item source.
-type sourceKind int
+// SourceKind represents the statistics item source.
+type SourceKind int
 
+// Different statistics item sources.
 const (
-	direct  sourceKind = iota // there is a corresponding peer in this store.
-	inherit                   // there is no corresponding peer in this store and we need to copy from other stores.
+	Direct  SourceKind = iota // there is a corresponding peer in this store.
+	Inherit                   // there is no corresponding peer in this store and we need to copy from other stores.
 )
 
-func (k sourceKind) String() string {
+func (k SourceKind) String() string {
 	switch k {
-	case direct:
+	case Direct:
 		return "direct"
-	case inherit:
+	case Inherit:
 		return "inherit"
 	}
 	return "unknown"
@@ -213,9 +214,9 @@ func (rw RWType) Inverse() RWType {
 func (rw RWType) ReportInterval() int {
 	switch rw {
 	case Write:
-		return WriteReportInterval
+		return RegionHeartBeatReportInterval
 	default: // Case Read
-		return ReadReportInterval
+		return StoreHeartBeatReportInterval
 	}
 }
 

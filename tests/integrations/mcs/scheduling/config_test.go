@@ -20,14 +20,15 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
 )
 
-type schedulingMetaTestSuite struct {
+type configTestSuite struct {
 	suite.Suite
 
 	ctx    context.Context
@@ -39,11 +40,11 @@ type schedulingMetaTestSuite struct {
 	pdLeaderServer *tests.TestServer
 }
 
-func TestSchedulingMeta(t *testing.T) {
-	suite.Run(t, &schedulingMetaTestSuite{})
+func TestConfig(t *testing.T) {
+	suite.Run(t, &configTestSuite{})
 }
 
-func (suite *schedulingMetaTestSuite) SetupSuite() {
+func (suite *configTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	var err error
@@ -57,26 +58,28 @@ func (suite *schedulingMetaTestSuite) SetupSuite() {
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())
 }
 
-func (suite *schedulingMetaTestSuite) TearDownSuite() {
+func (suite *configTestSuite) TearDownSuite() {
 	suite.cancel()
 	suite.cluster.Destroy()
 }
 
-func (suite *schedulingMetaTestSuite) TestConfigWatch() {
+func (suite *configTestSuite) TestConfigWatch() {
 	re := suite.Require()
 
 	// Make sure the config is persisted before the watcher is created.
 	persistConfig(re, suite.pdLeaderServer)
 	// Create a config watcher.
-	watcher, err := meta.NewConfigWatcher(
+	watcher, err := config.NewWatcher(
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		endpoint.ConfigPath(suite.cluster.GetCluster().GetId()),
+		config.NewPersistConfig(config.NewConfig()),
 	)
 	re.NoError(err)
 	// Check the initial config value.
 	re.Equal(uint64(sc.DefaultMaxReplicas), watcher.GetReplicationConfig().MaxReplicas)
 	re.Equal(sc.DefaultSplitMergeInterval, watcher.GetScheduleConfig().SplitMergeInterval.Duration)
+	re.Equal("0.0.0", watcher.GetClusterVersion().String())
 	// Update the config and check if the scheduling config watcher can get the latest value.
 	suite.pdLeaderServer.GetPersistOptions().SetMaxReplicas(5)
 	persistConfig(re, suite.pdLeaderServer)
@@ -87,6 +90,11 @@ func (suite *schedulingMetaTestSuite) TestConfigWatch() {
 	persistConfig(re, suite.pdLeaderServer)
 	testutil.Eventually(re, func() bool {
 		return watcher.GetScheduleConfig().SplitMergeInterval.Duration == 2*sc.DefaultSplitMergeInterval
+	})
+	suite.pdLeaderServer.GetPersistOptions().SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return watcher.GetClusterVersion().String() == "4.0.0"
 	})
 	watcher.Close()
 }

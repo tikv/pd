@@ -1861,6 +1861,12 @@ func (s *Server) initTSOPrimaryWatcher() {
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		var oldPrimary string
+		v, ok := s.servicePrimaryMap.Load(serviceName)
+		if ok {
+			oldPrimary = v.(string)
+		}
+		log.Info("delete tso primary", zap.String("old-primary", oldPrimary))
 		s.servicePrimaryMap.Delete(serviceName)
 		return nil
 	}
@@ -1937,4 +1943,10 @@ func (s *Server) GetTSOUpdatePhysicalInterval() time.Duration {
 // GetMaxResetTSGap gets the max gap to reset the tso.
 func (s *Server) GetMaxResetTSGap() time.Duration {
 	return s.persistOptions.GetMaxResetTSGap()
+}
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
 }

@@ -16,14 +16,22 @@ package utils
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -60,4 +68,64 @@ func PromHandler() gin.HandlerFunc {
 			DisableCompression: true,
 		})).ServeHTTP(c.Writer, c.Request)
 	}
+}
+
+type server interface {
+	GetBackendEndpoints() string
+	Context() context.Context
+	GetTLSConfig() *grpcutil.TLSConfig
+	GetClientConns() *sync.Map
+	GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error)
+}
+
+// WaitAPIServiceReady waits for the api service ready.
+func WaitAPIServiceReady(s server) error {
+	var (
+		ready bool
+		err   error
+	)
+	ticker := time.NewTicker(RetryIntervalWaitAPIService)
+	defer ticker.Stop()
+	for i := 0; i < MaxRetryTimesWaitAPIService; i++ {
+		ready, err = isAPIServiceReady(s)
+		if err == nil && ready {
+			return nil
+		}
+		log.Debug("api server is not ready, retrying", errs.ZapError(err), zap.Bool("ready", ready))
+		select {
+		case <-s.Context().Done():
+			return errors.New("context canceled while waiting api server ready")
+		case <-ticker.C:
+		}
+	}
+	if err != nil {
+		log.Warn("failed to check api server ready", errs.ZapError(err))
+	}
+	return errors.Errorf("failed to wait api server ready after retrying %d times", MaxRetryTimesWaitAPIService)
+}
+
+func isAPIServiceReady(s server) (bool, error) {
+	urls := strings.Split(s.GetBackendEndpoints(), ",")
+	if len(urls) == 0 {
+		return false, errors.New("no backend endpoints")
+	}
+	cc, err := s.GetDelegateClient(s.Context(), urls[0])
+	if err != nil {
+		return false, err
+	}
+	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(s.Context(), &pdpb.GetClusterInfoRequest{})
+	if err != nil {
+		return false, err
+	}
+	if clusterInfo.GetHeader().GetError() != nil {
+		return false, errors.Errorf(clusterInfo.GetHeader().GetError().String())
+	}
+	modes := clusterInfo.ServiceModes
+	if len(modes) == 0 {
+		return false, errors.New("no service mode")
+	}
+	if modes[0] == pdpb.ServiceMode_API_SVC_MODE {
+		return true, nil
+	}
+	return false, nil
 }
