@@ -1834,20 +1834,23 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 		},
 	}}
 
+	st := &statistics.StoreLoadDetail{
+		HotPeers: hotPeers,
+	}
 	leaderSolver.maxPeerNum = 1
-	u := leaderSolver.sortHotPeers(hotPeers)
+	u := leaderSolver.filterHotPeers(st)
 	checkSortResult(re, []uint64{1}, u)
 
 	leaderSolver.maxPeerNum = 2
-	u = leaderSolver.sortHotPeers(hotPeers)
+	u = leaderSolver.filterHotPeers(st)
 	checkSortResult(re, []uint64{1, 2}, u)
 }
 
-func checkSortResult(re *require.Assertions, regions []uint64, hotPeers map[*statistics.HotPeerStat]struct{}) {
+func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {
 	re.Equal(len(hotPeers), len(regions))
 	for _, region := range regions {
 		in := false
-		for hotPeer := range hotPeers {
+		for _, hotPeer := range hotPeers {
 			if hotPeer.RegionID == region {
 				in = true
 				break
