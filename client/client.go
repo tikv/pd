@@ -146,8 +146,8 @@ type Client interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// GetMinResolvedTimestamp returns min resolved timestamp
-	GetMinResolvedTimestamp(ctx context.Context, storesID []uint64) (uint64, []*pdpb.StoreMinResolvedTS, error)
+	// GetMinResolvedTS returns min resolved timestamp
+	GetMinResolvedTS(ctx context.Context, storesID []uint64) (uint64, []*pdpb.StoreMinResolvedTS, error)
 
 	// TSOClient is the TSO client.
 	TSOClient
@@ -1586,9 +1586,9 @@ func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) err
 	return nil
 }
 
-func (c *client) GetMinResolvedTimestamp(ctx context.Context, storesID []uint64) (uint64, []*pdpb.StoreMinResolvedTS, error) {
+func (c *client) GetMinResolvedTS(ctx context.Context, storesID []uint64) (uint64, []*pdpb.StoreMinResolvedTS, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetMinResolvedTimestamp", opentracing.ChildOf(span.Context()))
+		span = opentracing.StartSpan("pdclient.GetMinResolvedTS", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 
@@ -1602,7 +1602,7 @@ func (c *client) GetMinResolvedTimestamp(ctx context.Context, storesID []uint64)
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := protoClient.GetMinResolvedTimestamp(ctx, &pdpb.GetMinResolvedTimestampRequest{
+	resp, err := protoClient.GetMinResolvedTS(ctx, &pdpb.GetMinResolvedTSRequest{
 		Header:   c.requestHeader(),
 		StoresId: storesID,
 	})

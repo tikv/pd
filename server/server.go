@@ -1893,8 +1893,8 @@ func (s *Server) GetExternalTS() uint64 {
 	return s.GetRaftCluster().GetExternalTS()
 }
 
-// GetMinResolvedTS returns min resolved ts.
-func (s *Server) GetMinResolvedTS() uint64 {
+// GetClusterMinResolvedTS returns min resolved ts.
+func (s *Server) GetClusterMinResolvedTS() uint64 {
 	return s.GetRaftCluster().GetMinResolvedTS()
 }
 
@@ -1905,8 +1905,8 @@ func (s *Server) GetMinResolvedTSByStoreIDs(ids []uint64) (uint64, []*pdpb.Store
 	for i, storeID := range ids {
 		storeTS := s.GetRaftCluster().GetStoreMinResolvedTS(storeID)
 		stores[i] = &pdpb.StoreMinResolvedTS{
-			StoreId:       storeID,
-			MinResolvedTs: storeTS,
+			StoreId:   storeID,
+			Timestamp: storeTS,
 		}
 		if minResolvedTS > storeTS {
 			minResolvedTS = storeTS

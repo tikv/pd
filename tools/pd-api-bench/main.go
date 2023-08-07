@@ -94,7 +94,7 @@ func handleMinResolvedTSByGRPC(ctx context.Context) {
 			for {
 				select {
 				case <-ticker.C:
-					_, _, err := pdCli.GetMinResolvedTimestamp(ctx, []uint64{1, 2, 3})
+					_, _, err := pdCli.GetMinResolvedTS(ctx, []uint64{1, 2, 3})
 					if err != nil {
 						log.Println(err)
 						continue
