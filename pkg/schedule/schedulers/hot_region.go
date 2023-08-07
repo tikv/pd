@@ -922,7 +922,7 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 		bs.nthHotPeer[storeID][bs.secondPriority] = secondSort[topnPosition-1]
 	}
 	if len(hotPeers) > bs.maxPeerNum {
-		union := bs.sortHotPeers(firstSort, secondSort)
+		union := bs.unionHotPeers(firstSort, secondSort)
 		ret = make([]*statistics.HotPeerStat, 0, len(union))
 		for peer := range union {
 			appendItem(peer)
@@ -936,7 +936,7 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 	return ret
 }
 
-func (bs *balanceSolver) sortHotPeers(firstSort, secondSort []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
+func (bs *balanceSolver) unionHotPeers(firstSort, secondSort []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
 	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
 	// At most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
 	for len(union) < bs.maxPeerNum {
