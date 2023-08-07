@@ -1325,7 +1325,6 @@ retryLoop:
 		select {
 		case <-ctx.Done():
 			break retryLoop
-
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

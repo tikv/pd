@@ -16,6 +16,7 @@ package cluster
 
 import (
 	"context"
+	"github.com/tikv/pd/pkg/schedule"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -47,6 +48,7 @@ func TestReportSplit(t *testing.T) {
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
 	right := &metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("c"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3}),
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}
 	region := core.NewRegionInfo(right, right.Peers[0])
@@ -104,11 +106,26 @@ func TestReportBatchSplit(t *testing.T) {
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	regions := []*metapb.Region{
 		{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3})},
 		{Id: 2, StartKey: []byte("a"), EndKey: []byte("b"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3})},
 		{Id: 3, StartKey: []byte("b"), EndKey: []byte("c"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3})},
 		{Id: 3, StartKey: []byte("c"), EndKey: []byte(""), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3})},
+	}
+	_, err = cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
+	re.Error(err)
+
+	meta := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte(""), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3}),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}
+	region := core.NewRegionInfo(meta, meta.Peers[0])
+	cluster.putRegion(region)
+
+	regions = []*metapb.Region{
+		{Id: 2, StartKey: []byte(""), EndKey: []byte("a"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3}), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 2}},
+		{Id: 3, StartKey: []byte("a"), EndKey: []byte("b"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3}), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 2}},
+		{Id: 4, StartKey: []byte("b"), EndKey: []byte("c"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3}), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 2}},
+		{Id: 1, StartKey: []byte("c"), EndKey: []byte(""), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3}), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 2}},
 	}
 	_, err = cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
 	re.NoError(err)
