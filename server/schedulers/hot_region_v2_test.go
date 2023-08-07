@@ -21,7 +21,6 @@ import (
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-<<<<<<< HEAD:server/schedulers/hot_region_v2_test.go
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/schedule"
@@ -29,13 +28,6 @@ import (
 	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/versioninfo"
-=======
-	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/operatorutil"
-	"github.com/tikv/pd/pkg/versioninfo"
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827)):pkg/schedule/schedulers/hot_region_v2_test.go
 )
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
@@ -44,14 +36,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	statistics.Denoising = false
-<<<<<<< HEAD:server/schedulers/hot_region_v2_test.go
 	opt := config.NewTestOptions()
 	sche, err := schedule.CreateScheduler(statistics.Write.String(), schedule.NewOperatorController(ctx, nil, nil), storage.NewStorageWithMemoryBackend(), nil)
-=======
-	statisticsInterval = 0
-
-	sche, err := CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827)):pkg/schedule/schedulers/hot_region_v2_test.go
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	hb.conf.SetDstToleranceRatio(0.0)
@@ -164,14 +150,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -2.
 	re := require.New(t)
-<<<<<<< HEAD:server/schedulers/hot_region_v2_test.go
 	ctx, cancel := context.WithCancel(context.Background())
-=======
-	statistics.Denoising = false
-	statisticsInterval = 0
-
-	cancel, _, tc, oc := prepareSchedulersTest()
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827)):pkg/schedule/schedulers/hot_region_v2_test.go
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
@@ -234,14 +213,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -1.
 	re := require.New(t)
-<<<<<<< HEAD:server/schedulers/hot_region_v2_test.go
 	ctx, cancel := context.WithCancel(context.Background())
-=======
-	statistics.Denoising = false
-	statisticsInterval = 0
-
-	cancel, _, tc, oc := prepareSchedulersTest()
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827)):pkg/schedule/schedulers/hot_region_v2_test.go
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()
@@ -303,14 +275,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 
 func TestSkipUniformStore(t *testing.T) {
 	re := require.New(t)
-<<<<<<< HEAD:server/schedulers/hot_region_v2_test.go
 	ctx, cancel := context.WithCancel(context.Background())
-=======
-	statistics.Denoising = false
-	statisticsInterval = 0
-
-	cancel, _, tc, oc := prepareSchedulersTest()
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827)):pkg/schedule/schedulers/hot_region_v2_test.go
 	defer cancel()
 	statistics.Denoising = false
 	opt := config.NewTestOptions()

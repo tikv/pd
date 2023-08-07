@@ -38,48 +38,10 @@ import (
 	"go.uber.org/zap"
 )
 
-<<<<<<< HEAD:server/schedulers/hot_region.go
-=======
 var (
 	topnPosition       = 10
-	statisticsInterval = time.Second
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	hotSchedulerCounter                     = schedulerCounter.WithLabelValues(HotRegionName, "schedule")
-	hotSchedulerSkipCounter                 = schedulerCounter.WithLabelValues(HotRegionName, "skip")
-	hotSchedulerSearchRevertRegionsCounter  = schedulerCounter.WithLabelValues(HotRegionName, "search_revert_regions")
-	hotSchedulerNotSameEngineCounter        = schedulerCounter.WithLabelValues(HotRegionName, "not_same_engine")
-	hotSchedulerNoRegionCounter             = schedulerCounter.WithLabelValues(HotRegionName, "no_region")
-	hotSchedulerUnhealthyReplicaCounter     = schedulerCounter.WithLabelValues(HotRegionName, "unhealthy_replica")
-	hotSchedulerAbnormalReplicaCounter      = schedulerCounter.WithLabelValues(HotRegionName, "abnormal_replica")
-	hotSchedulerCreateOperatorFailedCounter = schedulerCounter.WithLabelValues(HotRegionName, "create_operator_failed")
-	hotSchedulerNewOperatorCounter          = schedulerCounter.WithLabelValues(HotRegionName, "new_operator")
-	hotSchedulerSnapshotSenderLimitCounter  = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
-
-	// counter related with the split region
-	hotSchedulerNotFoundSplitKeysCounter          = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
-	hotSchedulerRegionBucketsNotHotCounter        = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
-	hotSchedulerRegionBucketsSingleHotSpotCounter = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_single_hot_spot")
-	hotSchedulerSplitSuccessCounter               = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
-	hotSchedulerNeedSplitBeforeScheduleCounter    = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
-	hotSchedulerRegionTooHotNeedSplitCounter      = schedulerCounter.WithLabelValues(HotRegionName, "region_is_too_hot_need_split")
-
-	hotSchedulerMoveLeaderCounter     = schedulerCounter.WithLabelValues(HotRegionName, moveLeader.String())
-	hotSchedulerMovePeerCounter       = schedulerCounter.WithLabelValues(HotRegionName, movePeer.String())
-	hotSchedulerTransferLeaderCounter = schedulerCounter.WithLabelValues(HotRegionName, transferLeader.String())
-
-	readSkipAllDimUniformStoreCounter    = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-all-dim-uniform-store")
-	writeSkipAllDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-all-dim-uniform-store")
-	readSkipByteDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-byte-uniform-store")
-	writeSkipByteDimUniformStoreCounter  = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-byte-uniform-store")
-	readSkipKeyDimUniformStoreCounter    = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-key-uniform-store")
-	writeSkipKeyDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-key-uniform-store")
-	readSkipQueryDimUniformStoreCounter  = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-query-uniform-store")
-	writeSkipQueryDimUniformStoreCounter = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-query-uniform-store")
-
-	pendingOpFails = schedulerStatus.WithLabelValues(HotRegionName, "pending_op_fails")
 )
 
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827)):pkg/schedule/schedulers/hot_region.go
 type baseHotScheduler struct {
 	*BaseScheduler
 	// store information, including pending Influence by resource type
@@ -458,23 +420,14 @@ func isAvailableV1(s *solution) bool {
 }
 
 type balanceSolver struct {
-<<<<<<< HEAD:server/schedulers/hot_region.go
 	schedule.Cluster
 	sche         *hotScheduler
 	stLoadDetail map[uint64]*statistics.StoreLoadDetail
+	filteredHotPeers map[uint64][]*statistics.HotPeerStat // storeID -> hotPeers(filtered)
+	nthHotPeer       map[uint64][]*statistics.HotPeerStat // storeID -> [dimLen]hotPeers
 	rwTy         statistics.RWType
 	opTy         opType
 	resourceTy   resourceType
-=======
-	sche.SchedulerCluster
-	sche             *hotScheduler
-	stLoadDetail     map[uint64]*statistics.StoreLoadDetail
-	filteredHotPeers map[uint64][]*statistics.HotPeerStat // storeID -> hotPeers(filtered)
-	nthHotPeer       map[uint64][]*statistics.HotPeerStat // storeID -> [dimLen]hotPeers
-	rwTy             statistics.RWType
-	opTy             opType
-	resourceTy       resourceType
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827)):pkg/schedule/schedulers/hot_region.go
 
 	cur *solution
 
@@ -513,10 +466,9 @@ func (bs *balanceSolver) init() {
 	// Load the configuration items of the scheduler.
 	bs.resourceTy = toResourceType(bs.rwTy, bs.opTy)
 	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
-	bs.minHotDegree = bs.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()
+	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
-	bs.isRaftKV2 = bs.GetStoreConfig().IsRaftKV2()
 	switch bs.sche.conf.GetRankFormulaVersion() {
 	case "v1":
 		bs.initRankV1()
@@ -559,21 +511,6 @@ func (bs *balanceSolver) init() {
 		Loads: stepLoads,
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
 	}
-<<<<<<< HEAD:server/schedulers/hot_region.go
-
-	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
-	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
-	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
-	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
-
-	switch bs.sche.conf.GetRankFormulaVersion() {
-	case "v1":
-		bs.initRankV1()
-	default:
-		bs.initRankV2()
-	}
-=======
->>>>>>> 16926ad89 (scheduler: make hot v2 more suitable small hot region (#6827)):pkg/schedule/schedulers/hot_region.go
 }
 
 func (bs *balanceSolver) initRankV1() {
