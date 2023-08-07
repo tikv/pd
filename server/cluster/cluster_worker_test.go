@@ -89,7 +89,7 @@ func TestReportSplit(t *testing.T) {
 	for _, data := range testdata {
 		r := metapb.Region{}
 		ok, err := cluster.storage.LoadRegion(data.regionID, &r)
-		re.Nil(err)
+		re.NoError(err)
 		re.True(ok)
 		re.Equal(data.startKey, r.GetStartKey())
 		re.Equal(data.endKey, r.GetEndKey())
