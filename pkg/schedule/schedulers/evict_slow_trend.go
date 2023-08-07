@@ -36,6 +36,11 @@ const (
 	EvictSlowTrendType = "evict-slow-trend"
 )
 
+const (
+	alterEpsilon               = 1e-9
+	defaultRecoveryDurationGap = 10 * time.Minute // default gap for recovery
+)
+
 type evictSlowTrendSchedulerConfig struct {
 	storage              endpoint.ConfigStorage
 	evictCandidate       uint64
@@ -203,7 +208,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			log.Info("store evicted by slow trend has been removed",
 				zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:removed").Inc()
-		} else if checkStoreCanRecover(cluster, store) {
+		} else if checkStoreCanRecover(cluster, store, s.conf.captureTS()) {
 			log.Info("store evicted by slow trend has been recovered",
 				zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:recovered").Inc()
@@ -359,7 +364,7 @@ func checkStoresAreUpdated(cluster sche.SchedulerCluster, slowStoreID uint64, sl
 			updatedStores += 1
 			continue
 		}
-		if slowStoreRecordTS.Before(store.GetLastHeartbeatTS()) {
+		if slowStoreRecordTS.Compare(store.GetLastHeartbeatTS()) <= 0 {
 			updatedStores += 1
 		}
 	}
@@ -399,7 +404,7 @@ func checkStoreSlowerThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 	return slowerThanStoresNum >= expected
 }
 
-func checkStoreCanRecover(cluster sche.SchedulerCluster, target *core.StoreInfo) bool {
+func checkStoreCanRecover(cluster sche.SchedulerCluster, target *core.StoreInfo, captureTS time.Time) bool {
 	/*
 		//
 		// This might not be necessary,
@@ -419,7 +424,7 @@ func checkStoreCanRecover(cluster sche.SchedulerCluster, target *core.StoreInfo)
 			storeSlowTrendActionStatusGauge.WithLabelValues("recover.judging:got-event").Inc()
 		}
 	*/
-	return checkStoreFasterThanOthers(cluster, target)
+	return checkStoreFasterThanOthers(cluster, target) && checkStoreReadyForRecover(cluster, target, captureTS)
 }
 
 func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.StoreInfo) bool {
@@ -453,4 +458,20 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 	return fasterThanStores >= expected
 }
 
-const alterEpsilon = 1e-9
+func checkStoreReadyForRecover(cluster sche.SchedulerCluster, target *core.StoreInfo, captureTS time.Time) bool {
+	targetSlowTrend := target.GetSlowTrend()
+	if targetSlowTrend.CauseRate < alterEpsilon && targetSlowTrend.ResultRate < alterEpsilon {
+		leaderCount := target.GetLeaderCount()
+		learnerCount := target.GetLearnerCount()
+		witnessCount := target.GetWitnessCount()
+		regionCount := target.GetRegionCount()
+		// If the store still has no leaders, it means that the all leaders on the target store
+		// have been evicted. And it can be select as the candidate to make judgement whether
+		// it can be recovered.
+		noLeaders := regionCount > 0 && leaderCount == 0 && learnerCount == 0 && witnessCount == 0
+		// @TODO: setting the recovery time in SlowTrend
+		recoveryGap := time.Since(captureTS)
+		return noLeaders && recoveryGap >= defaultRecoveryDurationGap
+	}
+	return true
+}
