@@ -317,7 +317,7 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient)
+	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient, c.storage)
 	c.coordinator = schedule.NewCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.core, c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
@@ -415,31 +415,32 @@ func (c *RaftCluster) startGCTuner() {
 func (c *RaftCluster) runSyncConfig() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
+
+	var (
+		synced, switchRaftV2Config bool
+		stores                     = c.GetStores()
+	)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-
-	stores := c.GetStores()
-	syncFunc := func() {
-		synced, switchRaftV2Config := syncConfig(c.storeConfigManager, stores)
+	for {
+		synced, switchRaftV2Config = syncConfig(c.storeConfigManager, stores)
 		if switchRaftV2Config {
 			c.GetOpts().UseRaftV2()
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
 		}
+		// Update the stores if the synchronization is not completed.
 		if !synced {
 			stores = c.GetStores()
+		} else if err := c.storeConfigManager.Persist(); err != nil {
+			log.Warn("persist store config failed", zap.Error(err))
 		}
-	}
-
-	syncFunc()
-	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("sync store config job is stopped")
 			return
 		case <-ticker.C:
-			syncFunc()
 		}
 	}
 }

@@ -22,11 +22,12 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/storage"
 )
 
 func TestTiKVConfig(t *testing.T) {
 	re := require.New(t)
-	m := NewStoreConfigManager(nil)
+	m := NewStoreConfigManager(nil, nil)
 	// case1: big region.
 	{
 		body := `{ "coprocessor": {
@@ -81,13 +82,13 @@ func TestUpdateConfig(t *testing.T) {
 			TLSClientConfig:   &tls.Config{},
 		},
 	}
-	manager = NewStoreConfigManager(client)
+	manager = NewStoreConfigManager(client, nil)
 	re.Equal("http", manager.source.(*TiKVConfigSource).schema)
 }
 
 func TestParseConfig(t *testing.T) {
 	re := require.New(t)
-	m := NewStoreConfigManager(nil)
+	m := NewStoreConfigManager(nil, nil)
 	body := `
 {
 "coprocessor":{
@@ -164,4 +165,37 @@ func TestMergeCheck(t *testing.T) {
 			re.Error(config.CheckRegionKeys(v.keys, v.mergeKeys))
 		}
 	}
+}
+
+func TestPersistConfig(t *testing.T) {
+	re := require.New(t)
+
+	storageBackend := storage.NewStorageWithMemoryBackend()
+	m := NewStoreConfigManager(nil, storageBackend)
+	body := `{ "coprocessor": {
+        "split-region-on-table": false,
+        "batch-split-limit": 2,
+        "region-max-size": "15GiB",
+        "region-split-size": "10GiB",
+        "region-max-keys": 144000000,
+        "region-split-keys": 96000000,
+        "consistency-check-method": "mvcc",
+        "perf-level": 2
+    	}}`
+	config := &StoreConfig{}
+	err := json.Unmarshal([]byte(body), config)
+	re.NoError(err)
+	switchRaftV2 := m.update(config)
+	re.False(switchRaftV2)
+	// Get the config before persist.
+	config = m.GetStoreConfig()
+	err = m.Persist()
+	re.NoError(err)
+	switchRaftV2, err = m.Load()
+	re.NoError(err)
+	re.False(switchRaftV2)
+	// Get the config after persist.
+	persistedConfig := m.GetStoreConfig()
+	// The config should be the same.
+	re.Equal(config, persistedConfig)
 }

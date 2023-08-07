@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
@@ -194,17 +195,19 @@ func (c *StoreConfig) Clone() *StoreConfig {
 type StoreConfigManager struct {
 	config atomic.Value
 	source Source
+	// storage is used to store the config to the backend storage.
+	storage endpoint.ConfigStorage
 }
 
 // NewStoreConfigManager creates a new StoreConfigManager.
-func NewStoreConfigManager(client *http.Client) *StoreConfigManager {
+func NewStoreConfigManager(client *http.Client, storage endpoint.ConfigStorage) *StoreConfigManager {
 	schema := "http"
 	if netutil.IsEnableHTTPS(client) {
 		schema = "https"
 	}
-
 	manager := &StoreConfigManager{
-		source: newTiKVConfigSource(schema, client),
+		source:  newTiKVConfigSource(schema, client),
+		storage: storage,
 	}
 	manager.config.Store(&StoreConfig{})
 	return manager
@@ -224,14 +227,17 @@ func NewTestStoreConfigManager(whiteList []string) *StoreConfigManager {
 func (m *StoreConfigManager) ObserveConfig(address string) (switchRaftV2 bool, err error) {
 	cfg, err := m.source.GetConfig(address)
 	if err != nil {
-		return switchRaftV2, err
+		return false, err
 	}
 	old := m.GetStoreConfig()
-	if cfg != nil && !old.Equal(cfg) {
-		log.Info("sync the store config successful", zap.String("store-address", address), zap.String("store-config", cfg.String()), zap.String("old-config", old.String()))
-		switchRaftV2 = m.update(cfg)
+	if cfg == nil || old.Equal(cfg) {
+		return false, nil
 	}
-	return switchRaftV2, nil
+	log.Info("sync the store config successful",
+		zap.String("store-address", address),
+		zap.String("store-config", cfg.String()),
+		zap.String("old-config", old.String()))
+	return m.update(cfg), nil
 }
 
 // update returns true if the new config's raft engine is v2 and the old is v1
@@ -261,6 +267,32 @@ func (m *StoreConfigManager) SetStoreConfig(cfg *StoreConfig) {
 		return
 	}
 	m.config.Store(cfg)
+}
+
+// Persist saves the store config to the backend storage.
+func (m *StoreConfigManager) Persist() error {
+	if m.storage == nil {
+		return nil
+	}
+	return m.storage.SaveStoreConfig(m.GetStoreConfig())
+}
+
+// Load loads the store config from the backend storage.
+// switchRaftV2 is true if the new config's raft engine is v2 and the old is v1.
+// Currently, this function is exported for test purpose.
+func (m *StoreConfigManager) Load() (switchRaftV2 bool, err error) {
+	if m.storage == nil {
+		return false, nil
+	}
+	cfg := &StoreConfig{}
+	loaded, err := m.storage.LoadStoreConfig(cfg)
+	if err != nil {
+		return false, err
+	}
+	if !loaded {
+		return false, nil
+	}
+	return m.update(cfg), nil
 }
 
 // Source is used to get the store config.

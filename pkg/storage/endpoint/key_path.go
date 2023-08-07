@@ -36,6 +36,7 @@ const (
 	regionLabelPath          = "region_label"
 	replicationPath          = "replication_mode"
 	customScheduleConfigPath = "scheduler_config"
+	storeConfigPath          = "store_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"

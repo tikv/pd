@@ -29,6 +29,8 @@ type ConfigStorage interface {
 	LoadAllScheduleConfig() ([]string, []string, error)
 	SaveScheduleConfig(scheduleName string, data []byte) error
 	RemoveScheduleConfig(scheduleName string) error
+	LoadStoreConfig(cfg interface{}) (bool, error)
+	SaveStoreConfig(cfg interface{}) error
 }
 
 var _ ConfigStorage = (*StorageEndpoint)(nil)
@@ -73,4 +75,26 @@ func (se *StorageEndpoint) SaveScheduleConfig(scheduleName string, data []byte) 
 // RemoveScheduleConfig removes the config of scheduler.
 func (se *StorageEndpoint) RemoveScheduleConfig(scheduleName string) error {
 	return se.Remove(scheduleConfigPath(scheduleName))
+}
+
+// LoadStoreConfig loads the config of store.
+func (se *StorageEndpoint) LoadStoreConfig(cfg interface{}) (bool, error) {
+	value, err := se.Load(storeConfigPath)
+	if err != nil || value == "" {
+		return false, err
+	}
+	err = json.Unmarshal([]byte(value), cfg)
+	if err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return true, nil
+}
+
+// SaveStoreConfig saves the config of store.
+func (se *StorageEndpoint) SaveStoreConfig(cfg interface{}) error {
+	value, err := json.Marshal(cfg)
+	if err != nil {
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
+	}
+	return se.Save(storeConfigPath, string(value))
 }
