@@ -566,8 +566,13 @@ type LoopWatcher struct {
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
-func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string,
-	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error, opts ...clientv3.OpOption) *LoopWatcher {
+func NewLoopWatcher(
+	ctx context.Context, wg *sync.WaitGroup,
+	client *clientv3.Client,
+	name, key string,
+	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error,
+	opts ...clientv3.OpOption,
+) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:                      ctx,
 		client:                   client,

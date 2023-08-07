@@ -92,6 +92,21 @@ func ConfigPath(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), configPath)
 }
 
+// RulesPath returns the path to save the placement rules.
+func RulesPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), rulesPath)
+}
+
+// RuleGroupPath returns the path to save the placement rule groups.
+func RuleGroupPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), ruleGroupPath)
+}
+
+// RegionLabelPath returns the path to save the region label.
+func RegionLabelPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), regionLabelPath)
+}
+
 func scheduleConfigPath(scheduleName string) string {
 	return path.Join(customScheduleConfigPath, scheduleName)
 }

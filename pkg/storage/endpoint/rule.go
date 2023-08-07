@@ -15,7 +15,6 @@
 package endpoint
 
 import (
-	"path"
 	"strings"
 
 	"go.etcd.io/etcd/clientv3"
@@ -38,7 +37,7 @@ var _ RuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
 func (se *StorageEndpoint) SaveRule(ruleKey string, rule interface{}) error {
-	return se.saveJSON(path.Join(rulesPath, ruleKey), rule)
+	return se.saveJSON(ruleKeyPath(ruleKey), rule)
 }
 
 // DeleteRule removes a rule from storage.
@@ -53,7 +52,7 @@ func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
 
 // SaveRuleGroup stores a rule group config to storage.
 func (se *StorageEndpoint) SaveRuleGroup(groupID string, group interface{}) error {
-	return se.saveJSON(path.Join(ruleGroupPath, groupID), group)
+	return se.saveJSON(ruleGroupIDPath(groupID), group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
@@ -68,7 +67,7 @@ func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
 
 // SaveRegionRule saves a region rule to the storage.
 func (se *StorageEndpoint) SaveRegionRule(ruleKey string, rule interface{}) error {
-	return se.saveJSON(path.Join(regionLabelPath, ruleKey), rule)
+	return se.saveJSON(regionLabelKeyPath(ruleKey), rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.

@@ -102,6 +102,9 @@ func (c *client) WatchGCSafePointV2(ctx context.Context, revision int64) (chan [
 		Revision: revision,
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return nil, errs.ErrClientGetProtoClient
