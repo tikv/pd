@@ -214,9 +214,9 @@ func (rw RWType) Inverse() RWType {
 func (rw RWType) ReportInterval() int {
 	switch rw {
 	case Write:
-		return WriteReportInterval
+		return RegionHeartBeatReportInterval
 	default: // Case Read
-		return ReadReportInterval
+		return StoreHeartBeatReportInterval
 	}
 }
 
@@ -226,7 +226,7 @@ func (rw RWType) DefaultAntiCount() int {
 	case Write:
 		return HotRegionAntiCount
 	default: // Case Read
-		return HotRegionAntiCount * (WriteReportInterval / ReadReportInterval)
+		return HotRegionAntiCount * (RegionHeartBeatReportInterval / StoreHeartBeatReportInterval)
 	}
 }
 

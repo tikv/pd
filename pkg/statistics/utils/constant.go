@@ -19,10 +19,10 @@ import (
 )
 
 const (
-	// WriteReportInterval indicates the interval between write interval, the value is the heartbeat report interval of a region.
-	WriteReportInterval = 60
-	// ReadReportInterval indicates the interval between read stats report, the value is the heartbeat report interval of a store.
-	ReadReportInterval = 10
+	// RegionHeartBeatReportInterval indicates the interval between write interval, the value is the heartbeat report interval of a region.
+	RegionHeartBeatReportInterval = 60
+	// StoreHeartBeatReportInterval indicates the interval between read stats report, the value is the heartbeat report interval of a store.
+	StoreHeartBeatReportInterval = 10
 
 	// HotRegionAntiCount is default value for antiCount
 	HotRegionAntiCount = 2

@@ -145,7 +145,7 @@ func newRollingStoreStats() *RollingStoreStats {
 	movingAvgs := make([]movingaverage.MovingAvg, utils.StoreStatCount)
 
 	// from StoreHeartbeat
-	interval := utils.ReadReportInterval * time.Second
+	interval := utils.StoreHeartBeatReportInterval * time.Second
 	timeMedians[utils.StoreReadBytes] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultReadMfSize, interval)
 	timeMedians[utils.StoreReadKeys] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultReadMfSize, interval)
 	timeMedians[utils.StoreReadQuery] = movingaverage.NewTimeMedian(utils.DefaultAotSize, utils.DefaultReadMfSize, interval)

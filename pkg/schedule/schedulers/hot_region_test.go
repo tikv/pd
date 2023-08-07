@@ -141,8 +141,8 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		re.NoError(err)
 		re.NotNil(op)
 		op.Start()
-		op.SetStatusReachTime(operator.CREATED, time.Now().Add(-5*utils.ReadReportInterval*time.Second))
-		op.SetStatusReachTime(operator.STARTED, time.Now().Add((-5*utils.ReadReportInterval+1)*time.Second))
+		op.SetStatusReachTime(operator.CREATED, time.Now().Add(-5*utils.StoreHeartBeatReportInterval*time.Second))
+		op.SetStatusReachTime(operator.STARTED, time.Now().Add((-5*utils.StoreHeartBeatReportInterval+1)*time.Second))
 		return newPendingInfluence(op, []uint64{2}, 4, statistics.Influence{}, hb.conf.GetStoreStatZombieDuration())
 	}
 	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
@@ -152,7 +152,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 	}
 	shouldRemoveOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		infl := justDoneOpInfluence(region, ty)
-		infl.op.SetStatusReachTime(operator.CANCELED, time.Now().Add(-3*utils.ReadReportInterval*time.Second))
+		infl.op.SetStatusReachTime(operator.CANCELED, time.Now().Add(-3*utils.StoreHeartBeatReportInterval*time.Second))
 		return infl
 	}
 	opInfluenceCreators := [3]func(region *core.RegionInfo, ty opType) *pendingInfluence{shouldRemoveOpInfluence, notDoneOpInfluence, justDoneOpInfluence}
@@ -240,9 +240,9 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	tc.AddRegionStore(2, 2)
 	tc.AddRegionStore(3, 2)
 
-	tc.UpdateStorageReadBytes(1, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadBytes(2, 1*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadBytes(3, 1*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageReadBytes(1, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 1*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	// Region 1, 2 and 3 are hot regions.
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
@@ -258,9 +258,9 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 0)
 
-	tc.UpdateStorageWrittenBytes(1, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 1*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 1*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenBytes(1, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 1*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	// Region 1, 2 and 3 are hot regions.
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
@@ -421,10 +421,10 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	// |    4     |        6MB       |
 	// |    5     |        0MB       |
 	// |    6     |        0MB       |
-	tc.UpdateStorageWrittenBytes(1, 7.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 4.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 4.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 6*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenBytes(1, 7.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 4.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 4.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(4, 6*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(5, 0)
 	tc.UpdateStorageWrittenBytes(6, 0)
 
@@ -508,12 +508,12 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	// |    4     |        3.1MB     |
 	// |    5     |        0MB       |
 	// |    6     |        3MB       |
-	tc.UpdateStorageWrittenBytes(1, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 3.1*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenBytes(1, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(4, 3.1*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(5, 0)
-	tc.UpdateStorageWrittenBytes(6, 3*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenBytes(6, 3*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	// | region_id | leader_store | follower_store | follower_store | written_bytes |
 	// |-----------|--------------|----------------|----------------|---------------|
@@ -700,10 +700,10 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	// |   10     |        n/a       |
 	// |   11     |        n/a       |
 	storesBytes := map[uint64]uint64{
-		1: 7.5 * units.MiB * utils.ReadReportInterval,
-		2: 4.5 * units.MiB * utils.ReadReportInterval,
-		3: 4.5 * units.MiB * utils.ReadReportInterval,
-		4: 6 * units.MiB * utils.ReadReportInterval,
+		1: 7.5 * units.MiB * utils.StoreHeartBeatReportInterval,
+		2: 4.5 * units.MiB * utils.StoreHeartBeatReportInterval,
+		3: 4.5 * units.MiB * utils.StoreHeartBeatReportInterval,
+		4: 6 * units.MiB * utils.StoreHeartBeatReportInterval,
 	}
 	tc.SetStoreEvictLeader(5, true)
 	tikvBytesSum, tikvKeysSum, tikvQuerySum := 0.0, 0.0, 0.0
@@ -802,9 +802,9 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
 
-	tc.UpdateStorageWriteQuery(1, 11000*utils.ReadReportInterval)
-	tc.UpdateStorageWriteQuery(2, 10000*utils.ReadReportInterval)
-	tc.UpdateStorageWriteQuery(3, 9000*utils.ReadReportInterval)
+	tc.UpdateStorageWriteQuery(1, 11000*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWriteQuery(2, 10000*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWriteQuery(3, 9000*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 500, 0, 500},
@@ -842,11 +842,11 @@ func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
 
-	tc.UpdateStorageWrittenStats(1, 10.5*units.MiB*utils.ReadReportInterval, 10.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(2, 9.5*units.MiB*utils.ReadReportInterval, 9.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 9.5*units.MiB*utils.ReadReportInterval, 9.8*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(4, 9*units.MiB*utils.ReadReportInterval, 9*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(5, 8.9*units.MiB*utils.ReadReportInterval, 9.2*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 10.5*units.MiB*utils.StoreHeartBeatReportInterval, 10.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 9.5*units.MiB*utils.StoreHeartBeatReportInterval, 9.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 9.5*units.MiB*utils.StoreHeartBeatReportInterval, 9.8*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 9*units.MiB*utils.StoreHeartBeatReportInterval, 9*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 8.9*units.MiB*utils.StoreHeartBeatReportInterval, 9.2*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{2, 1, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
@@ -898,10 +898,10 @@ func TestHotWriteRegionScheduleUnhealthyStore(t *testing.T) {
 	tc.AddRegionStore(3, 20)
 	tc.AddRegionStore(4, 20)
 
-	tc.UpdateStorageWrittenStats(1, 10.5*units.MiB*utils.ReadReportInterval, 10.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(2, 10*units.MiB*utils.ReadReportInterval, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 9.5*units.MiB*utils.ReadReportInterval, 9.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(4, 0*units.MiB*utils.ReadReportInterval, 0*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 10.5*units.MiB*utils.StoreHeartBeatReportInterval, 10.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 10*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 9.5*units.MiB*utils.StoreHeartBeatReportInterval, 9.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 0*units.MiB*utils.StoreHeartBeatReportInterval, 0*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
 		{2, []uint64{2, 1, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
@@ -947,10 +947,10 @@ func TestHotWriteRegionScheduleCheckHot(t *testing.T) {
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
 
-	tc.UpdateStorageWrittenStats(1, 10.5*units.MiB*utils.ReadReportInterval, 10.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(2, 10.5*units.MiB*utils.ReadReportInterval, 10.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 10.5*units.MiB*utils.ReadReportInterval, 10.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(4, 9.5*units.MiB*utils.ReadReportInterval, 10*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 10.5*units.MiB*utils.StoreHeartBeatReportInterval, 10.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 10.5*units.MiB*utils.StoreHeartBeatReportInterval, 10.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 10.5*units.MiB*utils.StoreHeartBeatReportInterval, 10.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 9.5*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 90, 0.5 * units.MiB, 0},              // no hot
@@ -978,13 +978,13 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
 
-	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 10*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 
-	tc.UpdateStorageWrittenKeys(1, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenKeys(2, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenKeys(3, 10*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenKeys(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(2, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(3, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	// store1 has 2 peer as leader
 	// store2 has 3 peer as leader
@@ -1056,10 +1056,10 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 	if dim == 1 {                               // key rate
 		updateStore = tc.UpdateStorageWrittenKeys
 	}
-	updateStore(1, 8*units.MiB*utils.ReadReportInterval)
-	updateStore(2, 6*units.MiB*utils.ReadReportInterval)
-	updateStore(3, 6*units.MiB*utils.ReadReportInterval)
-	updateStore(4, 4*units.MiB*utils.ReadReportInterval)
+	updateStore(1, 8*units.MiB*utils.StoreHeartBeatReportInterval)
+	updateStore(2, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	updateStore(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	updateStore(4, 4*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	if dim == 0 { // byte rate
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
@@ -1171,13 +1171,13 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	})
 	re.NoError(err)
 
-	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenBytes(3, 10*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 
-	tc.UpdateStorageWrittenKeys(1, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenKeys(2, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenKeys(3, 10*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenKeys(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(2, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(3, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
@@ -1225,10 +1225,10 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	// |    3     |     3.7MB       |
 	// |    4     |       6MB       |
 	// |    5     |       0MB       |
-	tc.UpdateStorageReadBytes(1, 7.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadBytes(2, 4.9*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadBytes(3, 3.7*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadBytes(4, 6*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageReadBytes(1, 7.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 4.9*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 3.7*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(4, 6*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadBytes(5, 0)
 
 	// | region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
@@ -1270,7 +1270,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	clearPendingInfluence(hb)
 
 	// assume handle the transfer leader operator rather than move leader
-	tc.AddRegionWithReadInfo(3, 3, 512*units.KiB*utils.ReadReportInterval, 0, 0, utils.ReadReportInterval, []uint64{1, 2})
+	tc.AddRegionWithReadInfo(3, 3, 512*units.KiB*utils.StoreHeartBeatReportInterval, 0, 0, utils.StoreHeartBeatReportInterval, []uint64{1, 2})
 	// After transfer a hot region leader from store 1 to store 3
 	// the three region leader will be evenly distributed in three stores
 
@@ -1281,11 +1281,11 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	// |    3     |       5.5MB     |
 	// |    4     |       3.4MB     |
 	// |    5     |       3MB       |
-	tc.UpdateStorageReadBytes(1, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadBytes(2, 5.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadBytes(3, 5.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadBytes(4, 3.4*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadBytes(5, 3*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageReadBytes(1, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(2, 5.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(3, 5.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(4, 3.4*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadBytes(5, 3*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	// | region_id | leader_store | follower_store | follower_store |   read_bytes_rate  |
 	// |-----------|--------------|----------------|----------------|--------------------|
@@ -1339,9 +1339,9 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
 
-	tc.UpdateStorageReadQuery(1, 10500*utils.ReadReportInterval)
-	tc.UpdateStorageReadQuery(2, 10000*utils.ReadReportInterval)
-	tc.UpdateStorageReadQuery(3, 9000*utils.ReadReportInterval)
+	tc.UpdateStorageReadQuery(1, 10500*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadQuery(2, 10000*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadQuery(3, 9000*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 0, 0, 500},
@@ -1377,11 +1377,11 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
 
-	tc.UpdateStorageReadStats(1, 10.5*units.MiB*utils.ReadReportInterval, 10.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(2, 9.5*units.MiB*utils.ReadReportInterval, 9.5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(3, 9.5*units.MiB*utils.ReadReportInterval, 9.8*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(4, 9*units.MiB*utils.ReadReportInterval, 9*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(5, 8.9*units.MiB*utils.ReadReportInterval, 9.2*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageReadStats(1, 10.5*units.MiB*utils.StoreHeartBeatReportInterval, 10.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 9.5*units.MiB*utils.StoreHeartBeatReportInterval, 9.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 9.5*units.MiB*utils.StoreHeartBeatReportInterval, 9.8*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(4, 9*units.MiB*utils.StoreHeartBeatReportInterval, 9*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(5, 8.9*units.MiB*utils.StoreHeartBeatReportInterval, 9.2*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
 		{1, []uint64{1, 2, 4}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
@@ -1450,10 +1450,10 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 	if dim == 1 {                            // key rate
 		updateStore = tc.UpdateStorageReadKeys
 	}
-	updateStore(1, 7.1*units.MiB*utils.ReadReportInterval)
-	updateStore(2, 6.1*units.MiB*utils.ReadReportInterval)
-	updateStore(3, 6*units.MiB*utils.ReadReportInterval)
-	updateStore(4, 5*units.MiB*utils.ReadReportInterval)
+	updateStore(1, 7.1*units.MiB*utils.StoreHeartBeatReportInterval)
+	updateStore(2, 6.1*units.MiB*utils.StoreHeartBeatReportInterval)
+	updateStore(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	updateStore(4, 5*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	if dim == 0 { // byte rate
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
@@ -1559,10 +1559,10 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	tc.AddRegionStore(6, 20)
 
 	// no uniform among four stores
-	tc.UpdateStorageReadStats(1, 10.05*units.MB*utils.ReadReportInterval, 10.05*units.MB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(2, 10.05*units.MB*utils.ReadReportInterval, 10.05*units.MB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(3, 10.05*units.MB*utils.ReadReportInterval, 10.05*units.MB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(4, 0.0*units.MB*utils.ReadReportInterval, 0.0*units.MB*utils.ReadReportInterval)
+	tc.UpdateStorageReadStats(1, 10.05*units.MB*utils.StoreHeartBeatReportInterval, 10.05*units.MB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 10.05*units.MB*utils.StoreHeartBeatReportInterval, 10.05*units.MB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 10.05*units.MB*utils.StoreHeartBeatReportInterval, 10.05*units.MB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(4, 0.0*units.MB*utils.StoreHeartBeatReportInterval, 0.0*units.MB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
 		{1, []uint64{1, 5, 6}, 0.05 * units.MB, 0.05 * units.MB, 0},
 	})
@@ -1781,9 +1781,9 @@ func addRegionInfo(tc *mockcluster.Cluster, rwTy utils.RWType, regions []testReg
 	if rwTy == utils.Write {
 		addFunc = tc.AddLeaderRegionWithWriteInfo
 	}
-	reportIntervalSecs := utils.WriteReportInterval
+	reportIntervalSecs := utils.RegionHeartBeatReportInterval
 	if rwTy == utils.Read {
-		reportIntervalSecs = utils.ReadReportInterval
+		reportIntervalSecs = utils.StoreHeartBeatReportInterval
 	}
 	for _, r := range regions {
 		addFunc(
@@ -1799,7 +1799,7 @@ func addRegionInfo(tc *mockcluster.Cluster, rwTy utils.RWType, regions []testReg
 
 func addRegionLeaderReadInfo(tc *mockcluster.Cluster, regions []testRegionInfo) {
 	addFunc := tc.AddRegionLeaderWithReadInfo
-	reportIntervalSecs := utils.ReadReportInterval
+	reportIntervalSecs := utils.StoreHeartBeatReportInterval
 	for _, r := range regions {
 		addFunc(
 			r.id, r.peers[0],
@@ -1863,10 +1863,10 @@ func checkHotCacheCheckRegionFlow(re *require.Assertions, testCase testHotCacheC
 		}
 	}
 	tc.AddRegionStore(2, 20)
-	tc.UpdateStorageReadStats(2, 9.5*units.MiB*utils.ReadReportInterval, 9.5*units.MiB*utils.ReadReportInterval)
-	reportInterval := uint64(utils.WriteReportInterval)
+	tc.UpdateStorageReadStats(2, 9.5*units.MiB*utils.StoreHeartBeatReportInterval, 9.5*units.MiB*utils.StoreHeartBeatReportInterval)
+	reportInterval := uint64(utils.RegionHeartBeatReportInterval)
 	if testCase.kind == utils.Read {
-		reportInterval = uint64(utils.ReadReportInterval)
+		reportInterval = uint64(utils.StoreHeartBeatReportInterval)
 	}
 	// hot degree increase
 	heartbeat(1, 1, 512*units.KiB*reportInterval, 0, 0, reportInterval, []uint64{2, 3}, 1)
@@ -1928,23 +1928,23 @@ func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, 
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
 	statistics.ThresholdsUpdateInterval = 0
 	defer func() {
-		statistics.ThresholdsUpdateInterval = utils.ReadReportInterval
+		statistics.ThresholdsUpdateInterval = utils.StoreHeartBeatReportInterval
 	}()
 	// some peers are hot, and some are cold #3198
 
 	rate := uint64(512 * units.KiB)
 	for i := 0; i < statistics.TopNN; i++ {
 		for j := 0; j < utils.DefaultAotSize; j++ {
-			tc.AddLeaderRegionWithWriteInfo(uint64(i+100), 1, rate*utils.WriteReportInterval, 0, 0, utils.WriteReportInterval, []uint64{2, 3}, 1)
+			tc.AddLeaderRegionWithWriteInfo(uint64(i+100), 1, rate*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
 		}
 	}
-	items := tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.WriteReportInterval, 0, 0, utils.WriteReportInterval, []uint64{2, 3}, 1)
+	items := tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
 	re.Equal(float64(rate)*statistics.HotThresholdRatio, tc.HotCache.GetThresholds(utils.Write, items[0].StoreID)[0])
 	// Threshold of store 1,2,3 is 409.6 units.KiB and others are 1 units.KiB
 	// Make the hot threshold of some store is high and the others are low
 	rate = 10 * units.KiB
-	tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.WriteReportInterval, 0, 0, utils.WriteReportInterval, []uint64{2, 3, 4}, 1)
-	items = tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.WriteReportInterval, 0, 0, utils.WriteReportInterval, []uint64{3, 4}, 1)
+	tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3, 4}, 1)
+	items = tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{3, 4}, 1)
 	for _, item := range items {
 		if item.StoreID < 4 {
 			re.Equal(utils.Remove, item.GetActionType())
@@ -2030,10 +2030,10 @@ func TestInfluenceByRWType(t *testing.T) {
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
 	tc.AddRegionStore(4, 20)
-	tc.UpdateStorageWrittenStats(1, 99*units.MiB*utils.ReadReportInterval, 99*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(2, 50*units.MiB*utils.ReadReportInterval, 98*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 2*units.MiB*utils.ReadReportInterval, 2*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(4, 1*units.MiB*utils.ReadReportInterval, 1*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 99*units.MiB*utils.StoreHeartBeatReportInterval, 99*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 50*units.MiB*utils.StoreHeartBeatReportInterval, 98*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 2*units.MiB*utils.StoreHeartBeatReportInterval, 2*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 1*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{2, 1, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
 	})
@@ -2162,11 +2162,11 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
 
-	tc.UpdateStorageWrittenStats(1, 10*units.MiB*utils.ReadReportInterval, 9*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(2, 6*units.MiB*utils.ReadReportInterval, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 6*units.MiB*utils.ReadReportInterval, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(4, 9*units.MiB*utils.ReadReportInterval, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(5, 1*units.MiB*utils.ReadReportInterval, 1*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 10*units.MiB*utils.StoreHeartBeatReportInterval, 9*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 6*units.MiB*utils.StoreHeartBeatReportInterval, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 6*units.MiB*utils.StoreHeartBeatReportInterval, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 9*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 1*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	// must transfer peer
 	schedulePeerPr = 1.0
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
@@ -2187,11 +2187,11 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	// assert read priority schedule
 	hb, err = CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	tc.UpdateStorageReadStats(5, 10*units.MiB*utils.ReadReportInterval, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(4, 10*units.MiB*utils.ReadReportInterval, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(1, 10*units.MiB*utils.ReadReportInterval, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(2, 1*units.MiB*utils.ReadReportInterval, 7*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageReadStats(3, 7*units.MiB*utils.ReadReportInterval, 1*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageReadStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(4, 10*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(1, 10*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(2, 1*units.MiB*utils.StoreHeartBeatReportInterval, 7*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageReadStats(3, 7*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 2 * units.MiB, 2 * units.MiB, 0},
 	})
@@ -2211,11 +2211,11 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	re.NoError(err)
 
 	// assert loose store picking
-	tc.UpdateStorageWrittenStats(1, 10*units.MiB*utils.ReadReportInterval, 1*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(2, 6.1*units.MiB*utils.ReadReportInterval, 6.1*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 6*units.MiB*utils.ReadReportInterval, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(4, 6*units.MiB*utils.ReadReportInterval, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(5, 1*units.MiB*utils.ReadReportInterval, 1*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 10*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 6.1*units.MiB*utils.StoreHeartBeatReportInterval, 6.1*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 6*units.MiB*utils.StoreHeartBeatReportInterval, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 6*units.MiB*utils.StoreHeartBeatReportInterval, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 1*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	hb.(*hotScheduler).conf.StrictPickingStore = true
 	ops, _ = hb.Schedule(tc, false)
@@ -2226,11 +2226,11 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 5)
 	clearPendingInfluence(hb.(*hotScheduler))
 
-	tc.UpdateStorageWrittenStats(1, 6*units.MiB*utils.ReadReportInterval, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(2, 6.1*units.MiB*utils.ReadReportInterval, 6.1*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 6*units.MiB*utils.ReadReportInterval, 6*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(4, 1*units.MiB*utils.ReadReportInterval, 10*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(5, 1*units.MiB*utils.ReadReportInterval, 1*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 6*units.MiB*utils.StoreHeartBeatReportInterval, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 6.1*units.MiB*utils.StoreHeartBeatReportInterval, 6.1*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 6*units.MiB*utils.StoreHeartBeatReportInterval, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 1*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 1*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{utils.KeyPriority, utils.BytePriority}
 	hb.(*hotScheduler).conf.StrictPickingStore = true
 	ops, _ = hb.Schedule(tc, false)
@@ -2264,11 +2264,11 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	hb.(*hotScheduler).conf.StrictPickingStore = false
 
 	// skip uniform cluster
-	tc.UpdateStorageWrittenStats(1, 5*units.MiB*utils.ReadReportInterval, 5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(2, 5.3*units.MiB*utils.ReadReportInterval, 5.3*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 5*units.MiB*utils.ReadReportInterval, 5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(4, 5*units.MiB*utils.ReadReportInterval, 5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*utils.ReadReportInterval, 4.8*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 5*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 5.3*units.MiB*utils.StoreHeartBeatReportInterval, 5.3*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 5*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 5*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*utils.StoreHeartBeatReportInterval, 4.8*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
 	})
@@ -2283,11 +2283,11 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	// skip -1 case (uniform cluster)
-	tc.UpdateStorageWrittenStats(1, 5*units.MiB*utils.ReadReportInterval, 100*units.MiB*utils.ReadReportInterval) // two dims are not uniform.
-	tc.UpdateStorageWrittenStats(2, 5.3*units.MiB*utils.ReadReportInterval, 4.8*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 5*units.MiB*utils.ReadReportInterval, 5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(4, 5*units.MiB*utils.ReadReportInterval, 5*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*utils.ReadReportInterval, 5*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 5*units.MiB*utils.StoreHeartBeatReportInterval, 100*units.MiB*utils.StoreHeartBeatReportInterval) // two dims are not uniform.
+	tc.UpdateStorageWrittenStats(2, 5.3*units.MiB*utils.StoreHeartBeatReportInterval, 4.8*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 5*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(4, 5*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
 	})
@@ -2319,9 +2319,9 @@ func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
-	tc.UpdateStorageWrittenStats(1, 31*units.MiB*utils.ReadReportInterval, 31*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(2, 10*units.MiB*utils.ReadReportInterval, 1*units.MiB*utils.ReadReportInterval)
-	tc.UpdateStorageWrittenStats(3, 1*units.MiB*utils.ReadReportInterval, 10*units.MiB*utils.ReadReportInterval)
+	tc.UpdateStorageWrittenStats(1, 31*units.MiB*utils.StoreHeartBeatReportInterval, 31*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(2, 10*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenStats(3, 1*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 10 * units.MiB, 10 * units.MiB, 0},
@@ -2593,30 +2593,30 @@ func TestMaxZombieDuration(t *testing.T) {
 	testCases := []maxZombieDurTestCase{
 		{
 			typ:          readPeer,
-			maxZombieDur: maxZombieDur * utils.ReadReportInterval,
+			maxZombieDur: maxZombieDur * utils.StoreHeartBeatReportInterval,
 		},
 		{
 			typ:          readLeader,
-			maxZombieDur: maxZombieDur * utils.ReadReportInterval,
+			maxZombieDur: maxZombieDur * utils.StoreHeartBeatReportInterval,
 		},
 		{
 			typ:          writePeer,
-			maxZombieDur: maxZombieDur * utils.ReadReportInterval,
+			maxZombieDur: maxZombieDur * utils.StoreHeartBeatReportInterval,
 		},
 		{
 			typ:          writePeer,
 			isTiFlash:    true,
-			maxZombieDur: maxZombieDur * utils.WriteReportInterval,
+			maxZombieDur: maxZombieDur * utils.RegionHeartBeatReportInterval,
 		},
 		{
 			typ:           writeLeader,
 			firstPriority: utils.KeyDim,
-			maxZombieDur:  maxZombieDur * utils.WriteReportInterval,
+			maxZombieDur:  maxZombieDur * utils.RegionHeartBeatReportInterval,
 		},
 		{
 			typ:           writeLeader,
 			firstPriority: utils.QueryDim,
-			maxZombieDur:  maxZombieDur * utils.ReadReportInterval,
+			maxZombieDur:  maxZombieDur * utils.StoreHeartBeatReportInterval,
 		},
 	}
 	for _, testCase := range testCases {

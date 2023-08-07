@@ -199,7 +199,7 @@ func checkIntervalSumContinuous(re *require.Assertions, intervalSums map[uint64]
 		}
 		new := int(ret.getIntervalSum() / 1000000000)
 		if old, ok := intervalSums[ret.StoreID]; ok {
-			re.Equal((old+int(interval))%utils.WriteReportInterval, new)
+			re.Equal((old+int(interval))%utils.RegionHeartBeatReportInterval, new)
 		}
 		intervalSums[ret.StoreID] = new
 	}
@@ -311,7 +311,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	peer := &metapb.Peer{StoreId: storeID}
 	region := core.NewRegionInfo(&metapb.Region{Id: regionID, Peers: []*metapb.Peer{peer}}, peer)
 	// we statistic read peer info from store heartbeat rather than region heartbeat
-	m := utils.WriteReportInterval / utils.ReadReportInterval
+	m := utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval
 	ThresholdsUpdateInterval = 0
 	defer func() {
 		ThresholdsUpdateInterval = 8 * time.Second
@@ -507,7 +507,7 @@ func TestRemoveFromCacheRandom(t *testing.T) {
 						break
 					}
 				}
-				if interval < utils.WriteReportInterval {
+				if interval < utils.RegionHeartBeatReportInterval {
 					re.True(checkIntervalSum(cache, region))
 				}
 				re.Len(cache.storesOfRegion[region.GetID()], peerCount)
@@ -597,7 +597,7 @@ func TestCacheInherit(t *testing.T) {
 	for _, ret := range rets {
 		if ret.actionType != utils.Remove {
 			flow := ret.Loads[utils.ByteDim]
-			re.Equal(float64(region.GetBytesRead()/utils.ReadReportInterval), flow)
+			re.Equal(float64(region.GetBytesRead()/utils.StoreHeartBeatReportInterval), flow)
 		}
 	}
 	// new flow
@@ -614,7 +614,7 @@ func TestCacheInherit(t *testing.T) {
 	for _, ret := range rets {
 		if ret.actionType != utils.Remove {
 			flow := ret.Loads[utils.ByteDim]
-			re.Equal(float64(newFlow/utils.ReadReportInterval), flow)
+			re.Equal(float64(newFlow/utils.StoreHeartBeatReportInterval), flow)
 		}
 	}
 }

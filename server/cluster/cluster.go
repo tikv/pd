@@ -2252,7 +2252,7 @@ func (c *RaftCluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) 
 func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
 	threshold := c.GetOpts().GetHotRegionCacheHitsThreshold() *
-		(utils.WriteReportInterval / utils.ReadReportInterval)
+		(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
 	return c.hotStat.RegionStats(utils.Read, threshold)
 }
 
