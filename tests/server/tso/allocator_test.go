@@ -215,7 +215,7 @@ func testTSOSuffix(re *require.Assertions, cluster *tests.TestCluster, am *tso.A
 	re.NoError(err)
 	var tso pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
-		tso, err = allocator.GenerateTSO(1)
+		tso, err = allocator.GenerateTSO(context.Background(), 1)
 		re.NoError(err)
 		return tso.GetPhysical() != 0
 	})

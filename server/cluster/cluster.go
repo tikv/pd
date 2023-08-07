@@ -53,6 +53,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/syncer"
@@ -159,7 +160,6 @@ type RaftCluster struct {
 	labelLevelStats          *statistics.LabelStatistics
 	regionStats              *statistics.RegionStatistics
 	hotStat                  *statistics.HotStat
-	hotBuckets               *buckets.HotBucketCache
 	slowStat                 *statistics.SlowStat
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
@@ -267,7 +267,6 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
-	c.hotBuckets = buckets.NewBucketsCache(c.ctx)
 	c.slowStat = statistics.NewSlowStat(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
@@ -912,12 +911,12 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		}
 		readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
 		loads := []float64{
-			statistics.RegionReadBytes:     float64(peerStat.GetReadBytes()),
-			statistics.RegionReadKeys:      float64(peerStat.GetReadKeys()),
-			statistics.RegionReadQueryNum:  float64(readQueryNum),
-			statistics.RegionWriteBytes:    0,
-			statistics.RegionWriteKeys:     0,
-			statistics.RegionWriteQueryNum: 0,
+			utils.RegionReadBytes:     float64(peerStat.GetReadBytes()),
+			utils.RegionReadKeys:      float64(peerStat.GetReadKeys()),
+			utils.RegionReadQueryNum:  float64(readQueryNum),
+			utils.RegionWriteBytes:    0,
+			utils.RegionWriteKeys:     0,
+			utils.RegionWriteQueryNum: 0,
 		}
 		peerInfo := core.NewPeerInfo(peer, loads, interval)
 		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
@@ -2243,7 +2242,7 @@ func (c *RaftCluster) IsRegionHot(region *core.RegionInfo) bool {
 }
 
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.
-func (c *RaftCluster) GetHotPeerStat(rw statistics.RWType, regionID, storeID uint64) *statistics.HotPeerStat {
+func (c *RaftCluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *statistics.HotPeerStat {
 	return c.hotStat.GetHotPeerStat(rw, regionID, storeID)
 }
 
@@ -2253,24 +2252,20 @@ func (c *RaftCluster) GetHotPeerStat(rw statistics.RWType, regionID, storeID uin
 func (c *RaftCluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
 	threshold := c.GetOpts().GetHotRegionCacheHitsThreshold() *
-		(statistics.RegionHeartBeatReportInterval / statistics.StoreHeartBeatReportInterval)
-	return c.hotStat.RegionStats(statistics.Read, threshold)
-}
-
-// BucketsStats returns hot region's buckets stats.
-func (c *RaftCluster) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*buckets.BucketStat {
-	task := buckets.NewCollectBucketStatsTask(degree, regionIDs...)
-	if !c.hotBuckets.CheckAsync(task) {
-		return nil
-	}
-	return task.WaitRet(c.ctx)
+		(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
+	return c.hotStat.RegionStats(utils.Read, threshold)
 }
 
 // RegionWriteStats returns hot region's write stats.
 // The result only includes peers that are hot enough.
 func (c *RaftCluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
 	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(statistics.Write, c.GetOpts().GetHotRegionCacheHitsThreshold())
+	return c.hotStat.RegionStats(utils.Write, c.GetOpts().GetHotRegionCacheHitsThreshold())
+}
+
+// BucketsStats returns hot region's buckets stats.
+func (c *RaftCluster) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*buckets.BucketStat {
+	return c.hotStat.BucketsStats(degree, regionIDs...)
 }
 
 // TODO: remove me.
@@ -2287,7 +2282,7 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 
 // GetHotWriteRegions gets hot write regions' info.
 func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	hotWriteRegions := c.coordinator.GetHotRegionsByType(statistics.Write)
+	hotWriteRegions := c.coordinator.GetHotRegionsByType(utils.Write)
 	if len(storeIDs) > 0 && hotWriteRegions != nil {
 		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
 	}
@@ -2296,7 +2291,7 @@ func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHo
 
 // GetHotReadRegions gets hot read regions' info.
 func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	hotReadRegions := c.coordinator.GetHotRegionsByType(statistics.Read)
+	hotReadRegions := c.coordinator.GetHotRegionsByType(utils.Read)
 	if len(storeIDs) > 0 && hotReadRegions != nil {
 		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
 	}

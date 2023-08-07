@@ -278,19 +278,20 @@ func (suite *globalConfigTestSuite) TestClientStore() {
 }
 
 func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
+	ctx := suite.server.Context()
 	defer func() {
-		_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath("test"))
+		_, err := suite.server.GetClient().Delete(ctx, suite.GetEtcdPath("test"))
 		suite.NoError(err)
 
 		for i := 3; i < 9; i++ {
-			_, err := suite.server.GetClient().Delete(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)))
+			_, err := suite.server.GetClient().Delete(ctx, suite.GetEtcdPath(strconv.Itoa(i)))
 			suite.NoError(err)
 		}
 	}()
 	// Mock get revision by loading
-	r, err := suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath("test"), "test")
+	r, err := suite.server.GetClient().Put(ctx, suite.GetEtcdPath("test"), "test")
 	suite.NoError(err)
-	res, revision, err := suite.client.LoadGlobalConfig(suite.server.Context(), nil, globalConfigPath)
+	res, revision, err := suite.client.LoadGlobalConfig(ctx, nil, globalConfigPath)
 	suite.NoError(err)
 	suite.Len(res, 1)
 	suite.LessOrEqual(r.Header.GetRevision(), revision)
@@ -313,14 +314,19 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 		_, err = suite.server.GetClient().Put(suite.server.Context(), suite.GetEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		suite.NoError(err)
 	}
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	runTest := false
 	for {
 		select {
-		case <-time.After(time.Second):
+		case <-timer.C:
+			suite.True(runTest)
 			return
 		case res := <-configChan:
 			for _, r := range res {
 				suite.Equal(suite.GetEtcdPath(r.Value), r.Name)
 			}
+			runTest = true
 		}
 	}
 }

@@ -1,4 +1,4 @@
-// Copyright 2018 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package utils
 
 import (
-	"fmt"
+	"github.com/docker/go-units"
 )
 
 const (
-	// StoreHeartBeatReportInterval is the heartbeat report interval of a store.
-	StoreHeartBeatReportInterval = 10
-	// RegionHeartBeatReportInterval is the heartbeat report interval of a region.
+	// RegionHeartBeatReportInterval indicates the interval between write interval, the value is the heartbeat report interval of a region.
 	RegionHeartBeatReportInterval = 60
+	// StoreHeartBeatReportInterval indicates the interval between read stats report, the value is the heartbeat report interval of a store.
+	StoreHeartBeatReportInterval = 10
+
+	// HotRegionAntiCount is default value for antiCount
+	HotRegionAntiCount = 2
+
 	// DefaultAotSize is default size of average over time.
 	DefaultAotSize = 1
 	// DefaultWriteMfSize is default size of write median filter.
@@ -31,6 +35,12 @@ const (
 	DefaultReadMfSize = 5
 )
 
-func storeTag(id uint64) string {
-	return fmt.Sprintf("store-%d", id)
+// MinHotThresholds is the threshold at which this dimension is recorded as a hot spot.
+var MinHotThresholds = [RegionStatCount]float64{
+	RegionReadBytes:     8 * units.KiB,
+	RegionReadKeys:      128,
+	RegionReadQueryNum:  128,
+	RegionWriteBytes:    1 * units.KiB,
+	RegionWriteKeys:     32,
+	RegionWriteQueryNum: 32,
 }
