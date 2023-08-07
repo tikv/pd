@@ -32,7 +32,8 @@ const (
 	// NotServedErr indicates an tso node/pod received the requests for the keyspace groups which are not served by it.
 	// Note: keep the same as the ones defined on the server side, because the client side checks if an error message
 	// contains this string to judge whether the leader is changed.
-	NotServedErr    = "is not served"
+	NotServedErr = "is not served"
+	// RetryTimeoutErr indicates the request is timeout.
 	RetryTimeoutErr = "retry timeout"
 )
 
@@ -87,6 +88,7 @@ var (
 	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
 )
 
+// ErrClientGetResourceGroup is the error type for getting resource group.
 type ErrClientGetResourceGroup struct {
 	ResourceGroupName string
 	Cause             string

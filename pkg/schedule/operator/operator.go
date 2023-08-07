@@ -89,7 +89,7 @@ func (o *Operator) Sync(other *Operator) {
 func (o *Operator) String() string {
 	stepStrs := make([]string, len(o.steps))
 	for i := range o.steps {
-		stepStrs[i] = o.steps[i].String()
+		stepStrs[i] = fmt.Sprintf("%d:{%s}", i, o.steps[i].String())
 	}
 	s := fmt.Sprintf("%s {%s} (kind:%s, region:%v(%v, %v), createAt:%s, startAt:%s, currentStep:%v, size:%d, steps:[%s]，timeout:[%s])",
 		o.desc, o.brief, o.kind, o.regionID, o.regionEpoch.GetVersion(), o.regionEpoch.GetConfVer(), o.GetCreateTime(),
