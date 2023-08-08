@@ -22,8 +22,8 @@ import (
 	"strconv"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -53,10 +53,10 @@ func convert(buckets *buckets.BucketStat) *HotBucketsItem {
 		StartKey:   core.HexRegionKeyStr(buckets.StartKey),
 		EndKey:     core.HexRegionKeyStr(buckets.EndKey),
 		HotDegree:  buckets.HotDegree,
-		ReadBytes:  buckets.Loads[statistics.RegionReadBytes],
-		ReadKeys:   buckets.Loads[statistics.RegionReadKeys],
-		WriteBytes: buckets.Loads[statistics.RegionWriteBytes],
-		WriteKeys:  buckets.Loads[statistics.RegionWriteKeys],
+		ReadBytes:  buckets.Loads[utils.RegionReadBytes],
+		ReadKeys:   buckets.Loads[utils.RegionReadKeys],
+		WriteBytes: buckets.Loads[utils.RegionWriteBytes],
+		WriteKeys:  buckets.Loads[utils.RegionWriteKeys],
 	}
 }
 
@@ -182,16 +182,16 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 		id := store.GetID()
 		if loads, ok := storesLoads[id]; ok {
 			if store.IsTiFlash() {
-				stats.BytesWriteStats[id] = loads[statistics.StoreRegionsWriteBytes]
-				stats.KeysWriteStats[id] = loads[statistics.StoreRegionsWriteKeys]
+				stats.BytesWriteStats[id] = loads[utils.StoreRegionsWriteBytes]
+				stats.KeysWriteStats[id] = loads[utils.StoreRegionsWriteKeys]
 			} else {
-				stats.BytesWriteStats[id] = loads[statistics.StoreWriteBytes]
-				stats.KeysWriteStats[id] = loads[statistics.StoreWriteKeys]
+				stats.BytesWriteStats[id] = loads[utils.StoreWriteBytes]
+				stats.KeysWriteStats[id] = loads[utils.StoreWriteKeys]
 			}
-			stats.BytesReadStats[id] = loads[statistics.StoreReadBytes]
-			stats.KeysReadStats[id] = loads[statistics.StoreReadKeys]
-			stats.QueryWriteStats[id] = loads[statistics.StoreWriteQuery]
-			stats.QueryReadStats[id] = loads[statistics.StoreReadQuery]
+			stats.BytesReadStats[id] = loads[utils.StoreReadBytes]
+			stats.KeysReadStats[id] = loads[utils.StoreReadKeys]
+			stats.QueryWriteStats[id] = loads[utils.StoreWriteQuery]
+			stats.QueryReadStats[id] = loads[utils.StoreReadQuery]
 		}
 	}
 	h.rd.JSON(w, http.StatusOK, stats)

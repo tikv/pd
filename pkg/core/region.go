@@ -64,6 +64,7 @@ type RegionInfo struct {
 	readBytes         uint64
 	readKeys          uint64
 	approximateSize   int64
+	approximateKvSize int64
 	approximateKeys   int64
 	interval          *pdpb.TimeInterval
 	replicationStatus *replication_modepb.RegionReplicationStatus
@@ -151,6 +152,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
+	regionKvSize := heartbeat.GetApproximateKvSize() / units.MiB
 
 	region := &RegionInfo{
 		term:              heartbeat.GetTerm(),
@@ -164,6 +166,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		readBytes:         heartbeat.GetBytesRead(),
 		readKeys:          heartbeat.GetKeysRead(),
 		approximateSize:   int64(regionSize),
+		approximateKvSize: int64(regionKvSize),
 		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
@@ -230,6 +233,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		readBytes:         r.readBytes,
 		readKeys:          r.readKeys,
 		approximateSize:   r.approximateSize,
+		approximateKvSize: r.approximateKvSize,
 		approximateKeys:   r.approximateKeys,
 		interval:          typeutil.DeepClone(r.interval, TimeIntervalFactory),
 		replicationStatus: r.replicationStatus,
@@ -518,6 +522,11 @@ func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
 		return 0
 	}
 	return r.approximateKeys
+}
+
+// GetApproximateKvSize returns the approximate kv size of the region.
+func (r *RegionInfo) GetApproximateKvSize() int64 {
+	return r.approximateKvSize
 }
 
 // GetApproximateKeys returns the approximate keys of the region.

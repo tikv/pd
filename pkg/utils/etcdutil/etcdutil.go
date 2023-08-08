@@ -202,13 +202,14 @@ func GetProtoMsgWithModRev(c *clientv3.Client, key string, msg proto.Message, op
 }
 
 // EtcdKVPutWithTTL put (key, value) into etcd with a ttl of ttlSeconds
-func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value string, ttlSeconds int64) (*clientv3.PutResponse, error) {
+func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value string, ttlSeconds int64) (clientv3.LeaseID, error) {
 	kv := clientv3.NewKV(c)
 	grantResp, err := c.Grant(ctx, ttlSeconds)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
+	_, err = kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
+	return grantResp.ID, err
 }
 
 const (
@@ -565,8 +566,13 @@ type LoopWatcher struct {
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
-func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string,
-	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error, opts ...clientv3.OpOption) *LoopWatcher {
+func NewLoopWatcher(
+	ctx context.Context, wg *sync.WaitGroup,
+	client *clientv3.Client,
+	name, key string,
+	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error,
+	opts ...clientv3.OpOption,
+) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:                      ctx,
 		client:                   client,
@@ -590,36 +596,39 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 
 // StartWatchLoop starts a loop to watch the key.
 func (lw *LoopWatcher) StartWatchLoop() {
-	defer logutil.LogPanic()
-	defer lw.wg.Done()
+	lw.wg.Add(1)
+	go func() {
+		defer logutil.LogPanic()
+		defer lw.wg.Done()
 
-	ctx, cancel := context.WithCancel(lw.ctx)
-	defer cancel()
-	watchStartRevision := lw.initFromEtcd(ctx)
+		ctx, cancel := context.WithCancel(lw.ctx)
+		defer cancel()
+		watchStartRevision := lw.initFromEtcd(ctx)
 
-	log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
-			return
-		default:
+		log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+				return
+			default:
+			}
+			nextRevision, err := lw.watch(ctx, watchStartRevision)
+			if err != nil {
+				log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
+					zap.String("name", lw.name),
+					zap.String("key", lw.key),
+					zap.Int64("next-revision", nextRevision),
+					zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
+					zap.Error(err))
+				watchStartRevision = nextRevision
+				time.Sleep(lw.watchChangeRetryInterval)
+				failpoint.Inject("updateClient", func() {
+					lw.client = <-lw.updateClientCh
+				})
+			}
 		}
-		nextRevision, err := lw.watch(ctx, watchStartRevision)
-		if err != nil {
-			log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
-				zap.String("name", lw.name),
-				zap.String("key", lw.key),
-				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
-				zap.Error(err))
-			watchStartRevision = nextRevision
-			time.Sleep(lw.watchChangeRetryInterval)
-			failpoint.Inject("updateClient", func() {
-				lw.client = <-lw.updateClientCh
-			})
-		}
-	}
+	}()
 }
 
 func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {

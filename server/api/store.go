@@ -30,10 +30,10 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/config"
 	"github.com/unrolled/render"
 )
 
@@ -98,7 +98,7 @@ const (
 	downStateName    = "Down"
 )
 
-func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
+func newStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 	var slowTrend *SlowTrend
 	coreSlowTrend := store.GetSlowTrend()
 	if coreSlowTrend != nil {
@@ -314,7 +314,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if err := config.ValidateLabels(labels); err != nil {
+	if err := sc.ValidateLabels(labels); err != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
@@ -350,7 +350,7 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &labelKey); err != nil {
 		return
 	}
-	if err := config.ValidateLabelKey(labelKey); err != nil {
+	if err := sc.ValidateLabelKey(labelKey); err != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
@@ -584,7 +584,7 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 			})
 		}
 
-		if err := config.ValidateLabels(labels); err != nil {
+		if err := sc.ValidateLabels(labels); err != nil {
 			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 			return
 		}
@@ -619,7 +619,7 @@ func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if !includeTombstone {
-		returned := make(map[uint64]config.StoreLimitConfig, len(limits))
+		returned := make(map[uint64]sc.StoreLimitConfig, len(limits))
 		rc := getCluster(r)
 		for storeID, v := range limits {
 			store := rc.GetStore(storeID)

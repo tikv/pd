@@ -67,6 +67,11 @@ const (
 	keyLen = 20
 )
 
+// PDRootPath returns the PD root path.
+func PDRootPath(clusterID uint64) string {
+	return path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
+}
+
 // AppendToRootPath appends the given key to the rootPath.
 func AppendToRootPath(rootPath string, key string) string {
 	return path.Join(rootPath, key)
@@ -80,6 +85,26 @@ func ClusterRootPath(rootPath string) string {
 // ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
 func ClusterBootstrapTimeKey() string {
 	return path.Join(clusterPath, "status", "raft_bootstrap_time")
+}
+
+// ConfigPath returns the path to save the PD config.
+func ConfigPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), configPath)
+}
+
+// RulesPath returns the path to save the placement rules.
+func RulesPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), rulesPath)
+}
+
+// RuleGroupPath returns the path to save the placement rule groups.
+func RuleGroupPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), ruleGroupPath)
+}
+
+// RegionLabelPath returns the path to save the region label.
+func RegionLabelPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), regionLabelPath)
 }
 
 func scheduleConfigPath(scheduleName string) string {
@@ -281,7 +306,7 @@ func LegacyRootPath(clusterID uint64) string {
 // non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
 func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
 	electionPath := KeyspaceGroupsElectionPath(rootPath, keyspaceGroupID)
-	return path.Join(electionPath, utils.KeyspaceGroupsPrimaryKey)
+	return path.Join(electionPath, utils.PrimaryKey)
 }
 
 // KeyspaceGroupsElectionPath returns the path of keyspace groups election.
@@ -297,7 +322,7 @@ func KeyspaceGroupsElectionPath(rootPath string, keyspaceGroupID uint32) string 
 // GetCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
 func GetCompiledNonDefaultIDRegexp(clusterID uint64) *regexp.Regexp {
 	rootPath := TSOSvcRootPath(clusterID)
-	pattern := strings.Join([]string{rootPath, utils.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, utils.KeyspaceGroupsPrimaryKey + `$`}, "/")
+	pattern := strings.Join([]string{rootPath, utils.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, utils.PrimaryKey + `$`}, "/")
 	return regexp.MustCompile(pattern)
 }
 

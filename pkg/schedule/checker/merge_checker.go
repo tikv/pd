@@ -77,13 +77,13 @@ var (
 type MergeChecker struct {
 	PauseController
 	cluster    sche.CheckerCluster
-	conf       config.CheckerConfig
+	conf       config.CheckerConfigProvider
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfig) *MergeChecker {
+func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *MergeChecker {
 	splitCache := cache.NewIDTTL(ctx, time.Minute, conf.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,

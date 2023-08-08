@@ -121,6 +121,6 @@ func TestMakeLabelRule(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		re.Equal(testCase.expectedLabelRule, makeLabelRule(testCase.id))
+		re.Equal(testCase.expectedLabelRule, MakeLabelRule(testCase.id))
 	}
 }
