@@ -561,8 +561,13 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		args := []string{"-u", pdAddr, "keyspace-group"}
 		output, err := pdctl.ExecuteCommand(cmd, append(args, "1")...)
 		re.NoError(err)
+		if strings.Contains(string(output), "Failed") {
+			// It may be failed when meets error, such as [PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back
+			fmt.Println(string(output))
+			return false
+		}
 		err = json.Unmarshal(output, &keyspaceGroup)
-		re.NoErrorf(err, "output: %s", string(output))
+		re.NoError(err)
 		return len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {
