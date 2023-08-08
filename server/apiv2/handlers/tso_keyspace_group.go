@@ -243,12 +243,19 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 	}
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	groupManager := svr.GetKeyspaceGroupManager()
+	if groupManager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
+
 	patrolKeyspaceAssignmentState.Lock()
 	if !patrolKeyspaceAssignmentState.patrolled {
 		// Patrol keyspace assignment before splitting keyspace group.
 		manager := svr.GetKeyspaceManager()
 		if manager == nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+			patrolKeyspaceAssignmentState.Unlock()
 			return
 		}
 		err = manager.PatrolKeyspaceAssignment(splitParams.StartKeyspaceID, splitParams.EndKeyspaceID)
@@ -260,11 +267,7 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		patrolKeyspaceAssignmentState.patrolled = true
 	}
 	patrolKeyspaceAssignmentState.Unlock()
-	groupManager := svr.GetKeyspaceGroupManager()
-	if groupManager == nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
-		return
-	}
+
 	// Split keyspace group.
 	err = groupManager.SplitKeyspaceGroupByID(
 		id, splitParams.NewID,
