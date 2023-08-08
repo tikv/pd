@@ -289,6 +289,10 @@ func FinishSplitKeyspaceByID(c *gin.Context) {
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
 	err = manager.FinishSplitKeyspaceByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -360,6 +364,10 @@ func FinishMergeKeyspaceByID(c *gin.Context) {
 
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceGroupManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, groupManagerUninitializedErr)
+		return
+	}
 	err = manager.FinishMergeKeyspaceByID(id)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
