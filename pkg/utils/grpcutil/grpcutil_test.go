@@ -1,13 +1,18 @@
 package grpcutil
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
+	"path"
 	"testing"
 
 	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/errs"
 )
+
+var certPath = "../../../tests/integrations/client/cert"
 
 func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
 	var err error
@@ -20,13 +25,36 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 	return
 }
 
+func cmdCert(certsDir, scriptPath string) error {
+	currentDir, _ := os.Getwd()
+	// Change working directory
+	os.Chdir(certsDir)
+	defer os.Chdir(currentDir)
+
+	// Run the script
+	if err := exec.Command(scriptPath).Run(); err != nil {
+		fmt.Println("Error running script:", err)
+		return err
+	}
+	return nil
+}
+
 func TestToTLSConfig(t *testing.T) {
+	if err := cmdCert(certPath, "./gencerts.sh"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cmdCert(certPath, "./cleanup.sh"); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
 	t.Parallel()
 	re := require.New(t)
 	tlsConfig := TLSConfig{
-		KeyPath:  "../../../tests/integrations/client/cert/pd-server-key.pem",
-		CertPath: "../../../tests/integrations/client/cert/pd-server.pem",
-		CAPath:   "../../../tests/integrations/client/cert/ca.pem",
+		KeyPath:  path.Join(certPath, "pd-server-key.pem"),
+		CertPath: path.Join(certPath, "pd-server.pem"),
+		CAPath:   path.Join(certPath, "ca.pem"),
 	}
 	// test without bytes
 	_, err := tlsConfig.ToTLSConfig()
