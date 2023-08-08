@@ -38,7 +38,7 @@ const (
 
 const (
 	alterEpsilon               = 1e-9
-	defaultRecoveryDurationGap = 10 * time.Minute // default gap for recovery
+	defaultRecoveryDurationGap = 600 * time.Second // default gap for recovery
 )
 
 type evictSlowTrendSchedulerConfig struct {
@@ -459,8 +459,7 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 }
 
 func checkStoreReadyForRecover(cluster sche.SchedulerCluster, target *core.StoreInfo, captureTS time.Time) bool {
-	targetSlowTrend := target.GetSlowTrend()
-	if targetSlowTrend.CauseRate < alterEpsilon && targetSlowTrend.ResultRate < alterEpsilon {
+	if targetSlowTrend := target.GetSlowTrend(); targetSlowTrend != nil {
 		leaderCount := target.GetLeaderCount()
 		learnerCount := target.GetLearnerCount()
 		witnessCount := target.GetWitnessCount()
