@@ -1718,6 +1718,9 @@ func (s *Server) reloadConfigFromKV() error {
 }
 
 func (s *Server) loadKeyspaceConfig() {
+	if s.keyspaceManager == nil {
+		return
+	}
 	cfg := s.persistOptions.GetKeyspaceConfig()
 	s.keyspaceManager.UpdateConfig(cfg)
 }
