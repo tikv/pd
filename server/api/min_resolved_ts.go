@@ -86,7 +86,9 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 	var storesMinResolvedTS map[uint64]uint64
 	if b, err := io.ReadAll(r.Body); err == nil && len(b) != 0 {
 		// stores ids is an optional parameter.
-		// if it is not empty, return the min resolved ts of the specified stores into map.
+		// - When no store is given, cluster-level's min_resolved_ts will be returned.
+		// - When given a list of stores, min_resolved_ts will be provided for each store
+		//      and the scope-specific min_resolved_ts will be returned.
 		var ids []string
 		err = json.Unmarshal(b, &ids)
 		if err != nil {
