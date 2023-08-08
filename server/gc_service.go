@@ -114,7 +114,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 	if s.IsAPIServiceMode() {
 		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
 	} else {
-		nowTSO, err = s.tsoAllocatorManager.HandleRequest(tso.GlobalDCLocation, 1)
+		nowTSO, err = s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
 	}
 	if err != nil {
 		return nil, err
