@@ -131,7 +131,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 }
 
 func (h *redirector) tryRedirectToFollowerHandler(r *http.Request) (bool, []string) {
-	if len(r.Header.Get(PDPreferFollowerHandle)) <= 0 {
+	if len(r.Header.Get(PDPreferFollowerHandle)) == 0 {
 		return false, nil
 	}
 	if !h.s.GetMember().IsLeader() {

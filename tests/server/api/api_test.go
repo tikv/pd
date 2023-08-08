@@ -585,6 +585,8 @@ func (suite *redirectorTestSuite) SetupSuite() {
 	suite.NoError(cluster.RunInitialServers())
 	suite.NotEmpty(cluster.WaitLeader(), 0)
 	suite.cluster = cluster
+	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NoError(leader.BootstrapCluster())
 }
 
 func (suite *redirectorTestSuite) TearDownSuite() {
@@ -602,6 +604,7 @@ func (suite *redirectorTestSuite) TestRedirect() {
 		if svr != leader {
 			h := mustRequestSuccess(re, svr.GetServer())
 			h.Del("Date")
+			h.Del(serverapi.PDRedirectorHeader)
 			suite.Equal(h, header)
 		}
 	}
@@ -633,7 +636,6 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 
 func (suite *redirectorTestSuite) TestRedirectToFollowerHandle() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
-	suite.NoError(leader.BootstrapCluster())
 	cases := []struct {
 		name               string
 		expectStatus       int
@@ -726,20 +728,18 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 	_, err = io.ReadAll(resp.Body)
 	suite.NoError(err)
 
-	// Request to follower with redirectorHeader will fail.
+	// Request to follower with redirectorHeader will not fail.
 	request.RequestURI = ""
 	request.Header.Set(serverapi.PDRedirectorHeader, "pd")
 	resp1, err := dialClient.Do(request)
 	suite.NoError(err)
 	defer resp1.Body.Close()
-	suite.NotEqual(http.StatusOK, resp1.StatusCode)
+	suite.Equal(http.StatusOK, resp1.StatusCode)
 	_, err = io.ReadAll(resp1.Body)
 	suite.NoError(err)
 }
 
 func (suite *redirectorTestSuite) TestXForwardedFor() {
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
-	suite.NoError(leader.BootstrapCluster())
 	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
 	defer os.Remove(tempStdoutFile.Name())
 	cfg := &log.Config{}

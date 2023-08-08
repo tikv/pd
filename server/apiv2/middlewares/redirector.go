@@ -39,13 +39,13 @@ func Redirector() gin.HandlerFunc {
 		}
 
 		// Prevent more than one redirection.
-		if name := c.Request.Header.Get(serverapi.PDRedirectorHeader); len(name) != 0 {
-			log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirect))
+		if names := c.Request.Header.Values(serverapi.PDRedirectorHeader); len(names) > 1 {
+			log.Error("redirect but server is more than one times", zap.Strings("from", names), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirect))
 			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrRedirect.FastGenByArgs().Error())
 			return
 		}
 
-		c.Request.Header.Set(serverapi.PDRedirectorHeader, svr.Name())
+		c.Request.Header.Add(serverapi.PDRedirectorHeader, svr.Name())
 
 		leader := svr.GetMember().GetLeader()
 		if leader == nil {
