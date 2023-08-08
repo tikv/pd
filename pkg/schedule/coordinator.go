@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
@@ -503,18 +504,18 @@ func (c *Coordinator) Stop() {
 }
 
 // GetHotRegionsByType gets hot regions' statistics by RWType.
-func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.StoreHotPeersInfos {
+func (c *Coordinator) GetHotRegionsByType(typ utils.RWType) *statistics.StoreHotPeersInfos {
 	isTraceFlow := c.cluster.GetSchedulerConfig().IsTraceRegionFlow()
 	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
 	var infos *statistics.StoreHotPeersInfos
 	switch typ {
-	case statistics.Write:
+	case utils.Write:
 		regionStats := c.cluster.RegionWriteStats()
-		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
-	case statistics.Read:
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, utils.Write, isTraceFlow)
+	case utils.Read:
 		regionStats := c.cluster.RegionReadStats()
-		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, utils.Read, isTraceFlow)
 	default:
 	}
 	// update params `IsLearner` and `LastUpdateTime`
@@ -528,11 +529,11 @@ func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.Sto
 					h.IsLearner = core.IsLearner(region.GetPeer(h.StoreID))
 				}
 				switch typ {
-				case statistics.Write:
+				case utils.Write:
 					if region != nil {
 						h.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
 					}
-				case statistics.Read:
+				case utils.Read:
 					store := c.cluster.GetStore(h.StoreID)
 					if store != nil {
 						ts := store.GetMeta().GetLastHeartbeat()
@@ -555,24 +556,24 @@ func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 func (c *Coordinator) CollectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
 	// Collects hot write region metrics.
-	collectHotMetrics(c.cluster, stores, statistics.Write)
+	collectHotMetrics(c.cluster, stores, utils.Write)
 	// Collects hot read region metrics.
-	collectHotMetrics(c.cluster, stores, statistics.Read)
+	collectHotMetrics(c.cluster, stores, utils.Read)
 }
 
-func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ statistics.RWType) {
+func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) {
 	var (
 		kind        string
 		regionStats map[uint64][]*statistics.HotPeerStat
 	)
 
 	switch typ {
-	case statistics.Read:
+	case utils.Read:
 		regionStats = cluster.RegionReadStats()
-		kind = statistics.Read.String()
-	case statistics.Write:
+		kind = utils.Read.String()
+	case utils.Write:
 		regionStats = cluster.RegionWriteStats()
-		kind = statistics.Write.String()
+		kind = utils.Write.String()
 	}
 	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
@@ -608,8 +609,8 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		}
 
 		if !hasHotLeader && !hasHotPeer {
-			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, _ statistics.RegionStatKind) {
-				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), statistics.DimToString(dim))
+			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, _ utils.RegionStatKind) {
+				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim))
 			})
 		}
 	}

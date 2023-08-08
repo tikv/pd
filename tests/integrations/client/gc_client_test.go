@@ -153,12 +153,14 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(fromNewRevision bool
 	watchChan, err := suite.client.WatchGCSafePointV2(suite.server.Context(), startRevision)
 	suite.NoError(err)
 
-	timeout := time.After(time.Second)
-
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
 	isFirstUpdate := true
+	runTest := false
 	for {
 		select {
-		case <-timeout:
+		case <-timer.C:
+			suite.True(runTest)
 			return
 		case res := <-watchChan:
 			for _, r := range res {
@@ -174,6 +176,7 @@ func (suite *gcClientTestSuite) testClientWatchWithRevision(fromNewRevision bool
 					continue
 				}
 			}
+			runTest = true
 		}
 	}
 }

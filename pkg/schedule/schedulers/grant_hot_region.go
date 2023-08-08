@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -234,7 +235,7 @@ func (s *grantHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 	return s.dispatch(rw, cluster), nil
 }
 
-func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster sche.SchedulerCluster) []*operator.Operator {
+func (s *grantHotRegionScheduler) dispatch(typ utils.RWType, cluster sche.SchedulerCluster) []*operator.Operator {
 	stLoadInfos := s.stLoadInfos[buildResourceType(typ, constant.RegionKind)]
 	infos := make([]*statistics.StoreLoadDetail, len(stLoadInfos))
 	index := 0
@@ -243,7 +244,7 @@ func (s *grantHotRegionScheduler) dispatch(typ statistics.RWType, cluster sche.S
 		index++
 	}
 	sort.Slice(infos, func(i, j int) bool {
-		return infos[i].LoadPred.Current.Loads[statistics.ByteDim] > infos[j].LoadPred.Current.Loads[statistics.ByteDim]
+		return infos[i].LoadPred.Current.Loads[utils.ByteDim] > infos[j].LoadPred.Current.Loads[utils.ByteDim]
 	})
 	return s.randomSchedule(cluster, infos)
 }
