@@ -1599,9 +1599,12 @@ func (c *client) GetMinResolvedTS(ctx context.Context, storesID []uint64) (uint6
 	if protoClient == nil {
 		return 0, nil, errs.ErrClientGetProtoClient
 	}
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	// - When no store is given, cluster-level's min_resolved_ts will be returned.
+	// - When given a list of stores, min_resolved_ts will be provided for each store
+	//      and the scope-specific min_resolved_ts will be returned.
 	resp, err := protoClient.GetMinResolvedTS(ctx, &pdpb.GetMinResolvedTSRequest{
 		Header:   c.requestHeader(),
 		StoresId: storesID,

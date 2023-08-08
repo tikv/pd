@@ -89,7 +89,7 @@ func handleMinResolvedTSByGRPC(ctx context.Context) {
 	for i := 0; i < *client; i++ {
 		pdCli := newPDClient()
 		go func() {
-			var ticker = time.NewTicker(time.Millisecond * time.Duration(tt))
+			ticker := time.NewTicker(time.Millisecond * time.Duration(tt))
 			defer ticker.Stop()
 			for {
 				select {
@@ -118,11 +118,11 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 	url := fmt.Sprintf("%s://%s/pd/api/v1/min-resolved-ts", protocol, *pdAddr)
 
 	tt := base / *qps
+	httpsCli := newHttpClient()
 	for i := 0; i < *client; i++ {
-		httpsCli := newHttpClient()
 		go func() {
 			// Mock client-go's request frequency.
-			var ticker = time.NewTicker(time.Millisecond * time.Duration(tt))
+			ticker := time.NewTicker(time.Millisecond * time.Duration(tt))
 			defer ticker.Stop()
 			for {
 				select {

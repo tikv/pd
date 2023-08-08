@@ -1898,7 +1898,8 @@ func (s *Server) GetClusterMinResolvedTS() uint64 {
 	return s.GetRaftCluster().GetMinResolvedTS()
 }
 
-// GetMinResolvedTSByStoreIDs returns the min resolved ts of the stores.
+// GetMinResolvedTSByStoreIDs returns the min_resolved_ts for each store
+// and returns the min_resolved_ts for all given store lists.
 func (s *Server) GetMinResolvedTSByStoreIDs(ids []uint64) (uint64, []*pdpb.StoreMinResolvedTS) {
 	minResolvedTS := uint64(math.MaxUint64)
 	stores := make([]*pdpb.StoreMinResolvedTS, len(ids))

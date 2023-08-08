@@ -2491,6 +2491,9 @@ func (s *GrpcServer) GetMinResolvedTS(ctx context.Context, request *pdpb.GetMinR
 
 	minResolvedTS := s.GetClusterMinResolvedTS()
 	var stores []*pdpb.StoreMinResolvedTS
+	// - When no store is given, cluster-level's min_resolved_ts will be returned.
+	// - When given a list of stores, min_resolved_ts will be provided for each store
+	//      and the scope-specific min_resolved_ts will be returned.
 	if len(request.GetStoresId()) != 0 {
 		minResolvedTS, stores = s.GetMinResolvedTSByStoreIDs(request.GetStoresId())
 	}
