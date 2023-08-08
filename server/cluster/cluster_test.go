@@ -697,14 +697,12 @@ func TestBucketHeartbeat(t *testing.T) {
 
 	// case5: region update should inherit buckets.
 	newRegion := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
-	cluster.storeConfigManager = config.NewTestStoreConfigManager(nil)
-	config := cluster.storeConfigManager.GetStoreConfig()
-	config.Coprocessor.EnableRegionBucket = true
+	opt.SetRegionBucketEnabled(true)
 	re.NoError(cluster.processRegionHeartbeat(newRegion))
 	re.Len(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), 2)
 
 	// case6: disable region bucket in
-	config.Coprocessor.EnableRegionBucket = false
+	opt.SetRegionBucketEnabled(false)
 	newRegion2 := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
 	re.NoError(cluster.processRegionHeartbeat(newRegion2))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
@@ -1334,37 +1332,21 @@ func TestSyncConfig(t *testing.T) {
 	}
 	re.Len(tc.getUpStores(), 5)
 
-	testdata := []struct {
-		whiteList     []string
-		maxRegionSize uint64
-		updated       bool
-	}{
-		{
-			whiteList:     []string{},
-			maxRegionSize: uint64(144),
-			updated:       false,
-		}, {
-			whiteList:     []string{"127.0.0.1:5"},
-			maxRegionSize: uint64(10),
-			updated:       true,
-		},
-	}
-
-	for _, v := range testdata {
-		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
-		re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
-		success, switchRaftV2 := syncConfig(tc.storeConfigManager, tc.GetStores())
-		re.Equal(v.updated, success)
-		if v.updated {
-			re.True(switchRaftV2)
-			tc.opt.UseRaftV2()
-			re.EqualValues(512, tc.opt.GetMaxMovableHotPeerSize())
-			success, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
-			re.True(success)
-			re.False(switchRaftV2)
-		}
-		re.Equal(v.maxRegionSize, tc.GetStoreConfig().GetRegionMaxSize())
-	}
+	tc.storeConfigManager = config.NewStoreConfigManager(nil, opt)
+	re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/mockGetStoreConfig", `return("10MiB")`))
+	// switchRaftV2 will be true.
+	synced, switchRaftV2 := syncConfig(tc.storeConfigManager, tc.GetStores())
+	re.True(synced)
+	re.True(switchRaftV2)
+	re.EqualValues(512, tc.opt.GetMaxMovableHotPeerSize())
+	re.Equal(uint64(10), tc.GetStoreConfig().GetRegionMaxSize())
+	// switchRaftV2 will be false this time.
+	synced, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
+	re.True(synced)
+	re.False(switchRaftV2)
+	re.Equal(uint64(10), tc.GetStoreConfig().GetRegionMaxSize())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/mockGetStoreConfig"))
 }
 
 func TestUpdateStorePendingPeerCount(t *testing.T) {

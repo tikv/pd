@@ -182,7 +182,7 @@ func (mc *Cluster) SetRegionSizeMB(v uint64) {
 }
 
 func (mc *Cluster) updateStoreConfig(f func(*config.StoreConfig)) {
-	r := mc.StoreConfigManager.GetStoreConfig().Clone()
+	r := mc.PersistOptions.GetStoreConfig().Clone()
 	f(r)
 	mc.SetStoreConfig(r)
 }

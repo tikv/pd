@@ -20,12 +20,10 @@ import (
 	"io"
 	"net/http"
 	"reflect"
-	"sync/atomic"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
@@ -73,6 +71,15 @@ type Coprocessor struct {
 	RegionSplitKeys    int    `json:"region-split-keys"`
 	EnableRegionBucket bool   `json:"enable-region-bucket"`
 	RegionBucketSize   string `json:"region-bucket-size"`
+}
+
+func (c *StoreConfig) adjust() {
+	if c == nil {
+		return
+	}
+	c.RegionMaxSizeMB = typeutil.ParseMBFromText(c.RegionMaxSize, defaultRegionMaxSize)
+	c.RegionSplitSizeMB = typeutil.ParseMBFromText(c.RegionSplitSize, defaultRegionSplitSize)
+	c.RegionBucketSizeMB = typeutil.ParseMBFromText(c.RegionBucketSize, defaultBucketSize)
 }
 
 // Equal returns true if the two configs are equal.
@@ -193,130 +200,64 @@ func (c *StoreConfig) Clone() *StoreConfig {
 
 // StoreConfigManager is used to manage the store config.
 type StoreConfigManager struct {
-	config atomic.Value
-	source Source
-	// storage is used to store the config to the backend storage.
-	storage endpoint.ConfigStorage
+	client      *http.Client
+	persistOpts *PersistOptions
 }
 
 // NewStoreConfigManager creates a new StoreConfigManager.
-func NewStoreConfigManager(client *http.Client, storage endpoint.ConfigStorage) *StoreConfigManager {
-	schema := "http"
-	if netutil.IsEnableHTTPS(client) {
-		schema = "https"
-	}
+func NewStoreConfigManager(client *http.Client, persistOpts *PersistOptions) *StoreConfigManager {
 	manager := &StoreConfigManager{
-		source:  newTiKVConfigSource(schema, client),
-		storage: storage,
+		client:      client,
+		persistOpts: persistOpts,
 	}
-	manager.config.Store(&StoreConfig{})
 	return manager
 }
 
-// NewTestStoreConfigManager creates a new StoreConfigManager for test.
-func NewTestStoreConfigManager(whiteList []string) *StoreConfigManager {
-	manager := &StoreConfigManager{
-		source: newFakeSource(whiteList),
-	}
-	manager.config.Store(&StoreConfig{})
-	return manager
-}
-
-// ObserveConfig is used to observe the config change.
-// switchRaftV2 is true if the new config's raft engine is v2 and the old is v1.
-func (m *StoreConfigManager) ObserveConfig(address string) (switchRaftV2 bool, err error) {
-	cfg, err := m.source.GetConfig(address)
+// ObserveConfig is used to observe the config change and return whether if the new config's
+// raft engine is v2 and the old is v1.
+func (m *StoreConfigManager) ObserveConfig(address string) (bool, error) {
+	cfg, err := m.GetConfig(address)
 	if err != nil {
 		return false, err
 	}
-	old := m.GetStoreConfig()
-	if cfg == nil || old.Equal(cfg) {
+	oldCfg := m.persistOpts.GetStoreConfig()
+	if cfg == nil || oldCfg.Equal(cfg) {
 		return false, nil
 	}
 	log.Info("sync the store config successful",
 		zap.String("store-address", address),
 		zap.String("store-config", cfg.String()),
-		zap.String("old-config", old.String()))
-	return m.update(cfg), nil
+		zap.String("old-config", oldCfg.String()))
+	return m.updateConfig(oldCfg, cfg)
 }
 
-// update returns true if the new config's raft engine is v2 and the old is v1
-func (m *StoreConfigManager) update(cfg *StoreConfig) (switchRaftV2 bool) {
-	cfg.RegionMaxSizeMB = typeutil.ParseMBFromText(cfg.RegionMaxSize, defaultRegionMaxSize)
-	cfg.RegionSplitSizeMB = typeutil.ParseMBFromText(cfg.RegionSplitSize, defaultRegionSplitSize)
-	cfg.RegionBucketSizeMB = typeutil.ParseMBFromText(cfg.RegionBucketSize, defaultBucketSize)
-
-	config := m.config.Load().(*StoreConfig)
-	switchRaftV2 = config.Storage.Engine != raftStoreV2 && cfg.Storage.Engine == raftStoreV2
-	m.config.Store(cfg)
-	return
+// updateConfig updates the config. This is extracted for testing.
+func (m *StoreConfigManager) updateConfig(oldCfg, cfg *StoreConfig) (bool, error) {
+	cfg.adjust()
+	m.persistOpts.SetStoreConfig(cfg)
+	return oldCfg.Storage.Engine != raftStoreV2 && cfg.Storage.Engine == raftStoreV2, nil
 }
 
-// GetStoreConfig returns the current store configuration.
-func (m *StoreConfigManager) GetStoreConfig() *StoreConfig {
-	if m == nil {
-		return nil
-	}
-	config := m.config.Load()
-	return config.(*StoreConfig)
-}
-
-// SetStoreConfig sets the store configuration.
-func (m *StoreConfigManager) SetStoreConfig(cfg *StoreConfig) {
-	if m == nil {
-		return
-	}
-	m.config.Store(cfg)
-}
-
-// Persist saves the store config to the backend storage.
-func (m *StoreConfigManager) Persist() error {
-	if m.storage == nil {
-		return nil
-	}
-	return m.storage.SaveStoreConfig(m.GetStoreConfig())
-}
-
-// Load loads the store config from the backend storage.
-// switchRaftV2 is true if the new config's raft engine is v2 and the old is v1.
-// Currently, this function is exported for test purpose.
-func (m *StoreConfigManager) Load() (switchRaftV2 bool, err error) {
-	if m.storage == nil {
-		return false, nil
-	}
+// GetConfig tries to get the config from the store URL.
+func (m *StoreConfigManager) GetConfig(statusAddress string) (*StoreConfig, error) {
 	cfg := &StoreConfig{}
-	loaded, err := m.storage.LoadStoreConfig(cfg)
-	if err != nil {
-		return false, err
+	failpoint.Inject("mockGetStoreConfig", func(val failpoint.Value) {
+		if regionMaxSize, ok := val.(string); ok {
+			cfg.RegionMaxSize = regionMaxSize
+			cfg.Storage.Engine = raftStoreV2
+		}
+		failpoint.Return(cfg, nil)
+	})
+	if m.client == nil {
+		return nil, fmt.Errorf("failed to get store config due to nil client")
 	}
-	if !loaded {
-		return false, nil
+	var url string
+	if netutil.IsEnableHTTPS(m.client) {
+		url = fmt.Sprintf("%s://%s/config", "https", statusAddress)
+	} else {
+		url = fmt.Sprintf("%s://%s/config", "http", statusAddress)
 	}
-	return m.update(cfg), nil
-}
-
-// Source is used to get the store config.
-type Source interface {
-	GetConfig(statusAddress string) (*StoreConfig, error)
-}
-
-// TiKVConfigSource is used to get the store config from TiKV.
-type TiKVConfigSource struct {
-	schema string
-	client *http.Client
-}
-
-func newTiKVConfigSource(schema string, client *http.Client) *TiKVConfigSource {
-	return &TiKVConfigSource{
-		schema: schema,
-		client: client,
-	}
-}
-
-// GetConfig returns the store config from TiKV.
-func (s TiKVConfigSource) GetConfig(statusAddress string) (*StoreConfig, error) {
-	url := fmt.Sprintf("%s://%s/config", s.schema, statusAddress)
-	resp, err := s.client.Get(url)
+	resp, err := m.client.Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -325,31 +266,8 @@ func (s TiKVConfigSource) GetConfig(statusAddress string) (*StoreConfig, error) 
 	if err != nil {
 		return nil, err
 	}
-	var cfg StoreConfig
-	if err := json.Unmarshal(body, &cfg); err != nil {
+	if err := json.Unmarshal(body, cfg); err != nil {
 		return nil, err
 	}
-	return &cfg, nil
-}
-
-// FakeSource is used to test.
-type FakeSource struct {
-	whiteList []string
-}
-
-func newFakeSource(whiteList []string) *FakeSource {
-	return &FakeSource{
-		whiteList: whiteList,
-	}
-}
-
-// GetConfig returns the config.
-func (f *FakeSource) GetConfig(url string) (*StoreConfig, error) {
-	if !slice.Contains(f.whiteList, url) {
-		return nil, fmt.Errorf("[url:%s] is not in white list", url)
-	}
-	config := &StoreConfig{}
-	config.RegionMaxSize = "10MiB"
-	config.Storage.Engine = raftStoreV2
-	return config, nil
+	return cfg, nil
 }

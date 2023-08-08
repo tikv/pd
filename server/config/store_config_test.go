@@ -15,19 +15,17 @@
 package config
 
 import (
-	"crypto/tls"
 	"encoding/json"
-	"net/http"
 	"testing"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/storage"
 )
 
 func TestTiKVConfig(t *testing.T) {
 	re := require.New(t)
-	m := NewStoreConfigManager(nil, nil)
+	opt := NewPersistOptions(&Config{})
+	m := NewStoreConfigManager(nil, opt)
 	// case1: big region.
 	{
 		body := `{ "coprocessor": {
@@ -42,53 +40,29 @@ func TestTiKVConfig(t *testing.T) {
     	}}`
 		var config StoreConfig
 		re.NoError(json.Unmarshal([]byte(body), &config))
-		m.update(&config)
-		re.Equal(uint64(144000000), config.GetRegionMaxKeys())
-		re.Equal(uint64(96000000), config.GetRegionSplitKeys())
-		re.Equal(15*units.GiB/units.MiB, int(config.GetRegionMaxSize()))
-		re.Equal(uint64(10*units.GiB/units.MiB), config.GetRegionSplitSize())
+		m.updateConfig(&StoreConfig{}, &config)
+		re.Equal(uint64(144000000), opt.GetRegionMaxKeys())
+		re.Equal(uint64(96000000), opt.GetRegionSplitKeys())
+		re.Equal(uint64(15*units.GiB/units.MiB), opt.GetRegionMaxSize())
+		re.Equal(uint64(10*units.GiB/units.MiB), opt.GetRegionSplitSize())
 	}
 	//case2: empty config.
 	{
 		body := `{}`
 		var config StoreConfig
 		re.NoError(json.Unmarshal([]byte(body), &config))
-
-		re.Equal(uint64(1440000), config.GetRegionMaxKeys())
-		re.Equal(uint64(960000), config.GetRegionSplitKeys())
-		re.Equal(144, int(config.GetRegionMaxSize()))
-		re.Equal(uint64(96), config.GetRegionSplitSize())
+		m.updateConfig(&StoreConfig{}, &config)
+		re.Equal(uint64(1440000), opt.GetRegionMaxKeys())
+		re.Equal(uint64(960000), opt.GetRegionSplitKeys())
+		re.Equal(uint64(144), opt.GetRegionMaxSize())
+		re.Equal(uint64(96), opt.GetRegionSplitSize())
 	}
-}
-
-func TestUpdateConfig(t *testing.T) {
-	re := require.New(t)
-	manager := NewTestStoreConfigManager([]string{"tidb.com"})
-	manager.ObserveConfig("tikv.com")
-	re.Equal(uint64(144), manager.GetStoreConfig().GetRegionMaxSize())
-	re.NotEqual(raftStoreV2, manager.GetStoreConfig().GetRegionMaxSize())
-	manager.ObserveConfig("tidb.com")
-	re.Equal(uint64(10), manager.GetStoreConfig().GetRegionMaxSize())
-	re.Equal(raftStoreV2, manager.GetStoreConfig().Engine)
-
-	// case2: the config should not update if config is same expect some ignore field.
-	c, err := manager.source.GetConfig("tidb.com")
-	re.NoError(err)
-	re.True(manager.GetStoreConfig().Equal(c))
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   &tls.Config{},
-		},
-	}
-	manager = NewStoreConfigManager(client, nil)
-	re.Equal("http", manager.source.(*TiKVConfigSource).schema)
 }
 
 func TestParseConfig(t *testing.T) {
 	re := require.New(t)
-	m := NewStoreConfigManager(nil, nil)
+	opt := NewPersistOptions(&Config{})
+	m := NewStoreConfigManager(nil, opt)
 	body := `
 {
 "coprocessor":{
@@ -109,13 +83,11 @@ func TestParseConfig(t *testing.T) {
 }
 }
 `
-
 	var config StoreConfig
 	re.NoError(json.Unmarshal([]byte(body), &config))
-	m.update(&config)
-	re.Equal(uint64(96), config.GetRegionBucketSize())
-	re.True(config.IsRaftKV2())
-	re.Equal(raftStoreV2, config.Storage.Engine)
+	m.updateConfig(&StoreConfig{}, &config)
+	re.Equal(uint64(96), opt.GetRegionBucketSize())
+	re.True(opt.IsRaftKV2())
 }
 
 func TestMergeCheck(t *testing.T) {
@@ -165,37 +137,4 @@ func TestMergeCheck(t *testing.T) {
 			re.Error(config.CheckRegionKeys(v.keys, v.mergeKeys))
 		}
 	}
-}
-
-func TestPersistConfig(t *testing.T) {
-	re := require.New(t)
-
-	storageBackend := storage.NewStorageWithMemoryBackend()
-	m := NewStoreConfigManager(nil, storageBackend)
-	body := `{ "coprocessor": {
-        "split-region-on-table": false,
-        "batch-split-limit": 2,
-        "region-max-size": "15GiB",
-        "region-split-size": "10GiB",
-        "region-max-keys": 144000000,
-        "region-split-keys": 96000000,
-        "consistency-check-method": "mvcc",
-        "perf-level": 2
-    	}}`
-	config := &StoreConfig{}
-	err := json.Unmarshal([]byte(body), config)
-	re.NoError(err)
-	switchRaftV2 := m.update(config)
-	re.False(switchRaftV2)
-	// Get the config before persist.
-	config = m.GetStoreConfig()
-	err = m.Persist()
-	re.NoError(err)
-	switchRaftV2, err = m.Load()
-	re.NoError(err)
-	re.False(switchRaftV2)
-	// Get the config after persist.
-	persistedConfig := m.GetStoreConfig()
-	// The config should be the same.
-	re.Equal(config, persistedConfig)
 }

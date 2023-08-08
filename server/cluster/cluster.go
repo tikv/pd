@@ -193,7 +193,7 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.
 
 // GetStoreConfig returns the store config.
 func (c *RaftCluster) GetStoreConfig() sc.StoreConfigProvider {
-	return c.storeConfigManager.GetStoreConfig()
+	return c.GetOpts()
 }
 
 // GetCheckerConfig returns the checker config.
@@ -317,7 +317,7 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient, c.storage)
+	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient, s.GetPersistOptions())
 	c.coordinator = schedule.NewCoordinator(c.ctx, cluster, s.GetHBStreams())
 	c.regionStats = statistics.NewRegionStatistics(c.core, c.opt, c.ruleManager, c.storeConfigManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
@@ -433,8 +433,8 @@ func (c *RaftCluster) runSyncConfig() {
 		// Update the stores if the synchronization is not completed.
 		if !synced {
 			stores = c.GetStores()
-		} else if err := c.storeConfigManager.Persist(); err != nil {
-			log.Warn("persist store config failed", zap.Error(err))
+		} else if err := c.opt.Persist(c.storage); err != nil {
+			log.Warn("store config persisted failed", zap.Error(err))
 		}
 		select {
 		case <-c.ctx.Done():
@@ -987,7 +987,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	region.Inherit(origin, c.storeConfigManager.GetStoreConfig().IsEnableRegionBucket())
+	region.Inherit(origin, c.GetPersistOptions().GetStoreConfig().IsEnableRegionBucket())
 
 	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
@@ -2046,7 +2046,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
+	statsMap := statistics.NewStoreStatisticsMap(c.opt)
 	stores := c.GetStores()
 	for _, s := range stores {
 		statsMap.Observe(s, c.hotStat.StoresStats)
@@ -2060,7 +2060,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
+	statsMap := statistics.NewStoreStatisticsMap(c.opt)
 	statsMap.Reset()
 
 	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
