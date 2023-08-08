@@ -15,80 +15,10 @@
 package config
 
 import (
-	"encoding/json"
 	"testing"
 
-	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 )
-
-func TestTiKVConfig(t *testing.T) {
-	re := require.New(t)
-	opt := NewPersistOptions(&Config{})
-	m := NewStoreConfigManager(nil, opt)
-	// case1: big region.
-	{
-		body := `{ "coprocessor": {
-        "split-region-on-table": false,
-        "batch-split-limit": 2,
-        "region-max-size": "15GiB",
-        "region-split-size": "10GiB",
-        "region-max-keys": 144000000,
-        "region-split-keys": 96000000,
-        "consistency-check-method": "mvcc",
-        "perf-level": 2
-    	}}`
-		var config StoreConfig
-		re.NoError(json.Unmarshal([]byte(body), &config))
-		m.updateConfig(&StoreConfig{}, &config)
-		re.Equal(uint64(144000000), opt.GetRegionMaxKeys())
-		re.Equal(uint64(96000000), opt.GetRegionSplitKeys())
-		re.Equal(uint64(15*units.GiB/units.MiB), opt.GetRegionMaxSize())
-		re.Equal(uint64(10*units.GiB/units.MiB), opt.GetRegionSplitSize())
-	}
-	//case2: empty config.
-	{
-		body := `{}`
-		var config StoreConfig
-		re.NoError(json.Unmarshal([]byte(body), &config))
-		m.updateConfig(&StoreConfig{}, &config)
-		re.Equal(uint64(1440000), opt.GetRegionMaxKeys())
-		re.Equal(uint64(960000), opt.GetRegionSplitKeys())
-		re.Equal(uint64(144), opt.GetRegionMaxSize())
-		re.Equal(uint64(96), opt.GetRegionSplitSize())
-	}
-}
-
-func TestParseConfig(t *testing.T) {
-	re := require.New(t)
-	opt := NewPersistOptions(&Config{})
-	m := NewStoreConfigManager(nil, opt)
-	body := `
-{
-"coprocessor":{
-"split-region-on-table":false,
-"batch-split-limit":10,
-"region-max-size":"384MiB",
-"region-split-size":"256MiB",
-"region-max-keys":3840000,
-"region-split-keys":2560000,
-"consistency-check-method":"mvcc",
-"enable-region-bucket":true,
-"region-bucket-size":"96MiB",
-"region-size-threshold-for-approximate":"384MiB",
-"region-bucket-merge-size-ratio":0.33
-},
-"storage":{
-	"engine":"raft-kv2"
-}
-}
-`
-	var config StoreConfig
-	re.NoError(json.Unmarshal([]byte(body), &config))
-	m.updateConfig(&StoreConfig{}, &config)
-	re.Equal(uint64(96), opt.GetRegionBucketSize())
-	re.True(opt.IsRaftKV2())
-}
 
 func TestMergeCheck(t *testing.T) {
 	re := require.New(t)

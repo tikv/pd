@@ -16,15 +16,10 @@ package config
 
 import (
 	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
 	"reflect"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
@@ -40,8 +35,8 @@ var (
 	defaultRegionMaxKey = uint64(1440000)
 	// default region split key is 960000
 	defaultRegionSplitKey = uint64(960000)
-
-	raftStoreV2 = "raft-kv2"
+	// RaftstoreV2 is the v2 raftstore engine mark.
+	RaftstoreV2 = "raft-kv2"
 )
 
 // StoreConfig is the config of store like TiKV.
@@ -73,7 +68,8 @@ type Coprocessor struct {
 	RegionBucketSize   string `json:"region-bucket-size"`
 }
 
-func (c *StoreConfig) adjust() {
+// Adjust adjusts the config to calculate some fields.
+func (c *StoreConfig) Adjust() {
 	if c == nil {
 		return
 	}
@@ -141,7 +137,7 @@ func (c *StoreConfig) IsRaftKV2() bool {
 	if c == nil {
 		return false
 	}
-	return c.Storage.Engine == raftStoreV2
+	return c.Storage.Engine == RaftstoreV2
 }
 
 // SetRegionBucketEnabled sets if the region bucket is enabled.
@@ -196,78 +192,4 @@ func (c *StoreConfig) CheckRegionKeys(keys, mergeKeys uint64) error {
 func (c *StoreConfig) Clone() *StoreConfig {
 	cfg := *c
 	return &cfg
-}
-
-// StoreConfigManager is used to manage the store config.
-type StoreConfigManager struct {
-	client      *http.Client
-	persistOpts *PersistOptions
-}
-
-// NewStoreConfigManager creates a new StoreConfigManager.
-func NewStoreConfigManager(client *http.Client, persistOpts *PersistOptions) *StoreConfigManager {
-	manager := &StoreConfigManager{
-		client:      client,
-		persistOpts: persistOpts,
-	}
-	return manager
-}
-
-// ObserveConfig is used to observe the config change and return whether if the new config's
-// raft engine is v2 and the old is v1.
-func (m *StoreConfigManager) ObserveConfig(address string) (bool, error) {
-	cfg, err := m.GetConfig(address)
-	if err != nil {
-		return false, err
-	}
-	oldCfg := m.persistOpts.GetStoreConfig()
-	if cfg == nil || oldCfg.Equal(cfg) {
-		return false, nil
-	}
-	log.Info("sync the store config successful",
-		zap.String("store-address", address),
-		zap.String("store-config", cfg.String()),
-		zap.String("old-config", oldCfg.String()))
-	return m.updateConfig(oldCfg, cfg)
-}
-
-// updateConfig updates the config. This is extracted for testing.
-func (m *StoreConfigManager) updateConfig(oldCfg, cfg *StoreConfig) (bool, error) {
-	cfg.adjust()
-	m.persistOpts.SetStoreConfig(cfg)
-	return oldCfg.Storage.Engine != raftStoreV2 && cfg.Storage.Engine == raftStoreV2, nil
-}
-
-// GetConfig tries to get the config from the store URL.
-func (m *StoreConfigManager) GetConfig(statusAddress string) (*StoreConfig, error) {
-	cfg := &StoreConfig{}
-	failpoint.Inject("mockGetStoreConfig", func(val failpoint.Value) {
-		if regionMaxSize, ok := val.(string); ok {
-			cfg.RegionMaxSize = regionMaxSize
-			cfg.Storage.Engine = raftStoreV2
-		}
-		failpoint.Return(cfg, nil)
-	})
-	if m.client == nil {
-		return nil, fmt.Errorf("failed to get store config due to nil client")
-	}
-	var url string
-	if netutil.IsEnableHTTPS(m.client) {
-		url = fmt.Sprintf("%s://%s/config", "https", statusAddress)
-	} else {
-		url = fmt.Sprintf("%s://%s/config", "http", statusAddress)
-	}
-	resp, err := m.client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(body, cfg); err != nil {
-		return nil, err
-	}
-	return cfg, nil
 }

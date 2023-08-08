@@ -22,7 +22,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/server/config"
 )
 
 // RegionInfoProvider is an interface to provide the region information.
@@ -99,7 +98,6 @@ func NewRegionStatistics(
 	rip RegionInfoProvider,
 	conf sc.CheckerConfigProvider,
 	ruleManager *placement.RuleManager,
-	storeConfigManager *config.StoreConfigManager,
 ) *RegionStatistics {
 	r := &RegionStatistics{
 		rip:         rip,

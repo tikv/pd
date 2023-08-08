@@ -981,8 +981,7 @@ func TestRegionSizeChanged(t *testing.T) {
 	cluster.regionStats = statistics.NewRegionStatistics(
 		cluster.GetBasicCluster(),
 		cluster.GetOpts(),
-		cluster.ruleManager,
-		cluster.storeConfigManager)
+		cluster.ruleManager)
 	region := newTestRegions(1, 3, 3)[0]
 	cluster.opt.GetMaxMergeRegionKeys()
 	curMaxMergeSize := int64(cluster.opt.GetMaxMergeRegionSize())
@@ -1267,8 +1266,7 @@ func TestOfflineAndMerge(t *testing.T) {
 	cluster.regionStats = statistics.NewRegionStatistics(
 		cluster.GetBasicCluster(),
 		cluster.GetOpts(),
-		cluster.ruleManager,
-		cluster.storeConfigManager)
+		cluster.ruleManager)
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	// Put 4 stores.
@@ -1318,7 +1316,77 @@ func TestOfflineAndMerge(t *testing.T) {
 	}
 }
 
-func TestSyncConfig(t *testing.T) {
+func TestStoreConfigUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(ctx, opt)
+	stores := newTestStores(5, "2.0.0")
+	for _, s := range stores {
+		re.NoError(tc.putStoreLocked(s))
+	}
+	re.Len(tc.getUpStores(), 5)
+	// Case1: big region.
+	{
+		body := `{ "coprocessor": {
+        "split-region-on-table": false,
+        "batch-split-limit": 2,
+        "region-max-size": "15GiB",
+        "region-split-size": "10GiB",
+        "region-max-keys": 144000000,
+        "region-split-keys": 96000000,
+        "consistency-check-method": "mvcc",
+        "perf-level": 2
+    	}}`
+		var config config.StoreConfig
+		re.NoError(json.Unmarshal([]byte(body), &config))
+		tc.updateStoreConfig(opt.GetStoreConfig(), &config)
+		re.Equal(uint64(144000000), opt.GetRegionMaxKeys())
+		re.Equal(uint64(96000000), opt.GetRegionSplitKeys())
+		re.Equal(uint64(15*units.GiB/units.MiB), opt.GetRegionMaxSize())
+		re.Equal(uint64(10*units.GiB/units.MiB), opt.GetRegionSplitSize())
+	}
+	// Case2: empty config.
+	{
+		body := `{}`
+		var config config.StoreConfig
+		re.NoError(json.Unmarshal([]byte(body), &config))
+		tc.updateStoreConfig(opt.GetStoreConfig(), &config)
+		re.Equal(uint64(1440000), opt.GetRegionMaxKeys())
+		re.Equal(uint64(960000), opt.GetRegionSplitKeys())
+		re.Equal(uint64(144), opt.GetRegionMaxSize())
+		re.Equal(uint64(96), opt.GetRegionSplitSize())
+	}
+	// Case3: raft-kv2 config.
+	{
+		body := `{ "coprocessor": {
+		"split-region-on-table":false,
+		"batch-split-limit":10,
+		"region-max-size":"384MiB",
+		"region-split-size":"256MiB",
+		"region-max-keys":3840000,
+		"region-split-keys":2560000,
+		"consistency-check-method":"mvcc",
+		"enable-region-bucket":true,
+		"region-bucket-size":"96MiB",
+		"region-size-threshold-for-approximate":"384MiB",
+		"region-bucket-merge-size-ratio":0.33
+		},
+		"storage":{
+			"engine":"raft-kv2"
+		}}`
+		var config config.StoreConfig
+		re.NoError(json.Unmarshal([]byte(body), &config))
+		tc.updateStoreConfig(opt.GetStoreConfig(), &config)
+		re.Equal(uint64(96), opt.GetRegionBucketSize())
+		re.True(opt.IsRaftKV2())
+	}
+}
+
+func TestStoreConfigSync(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1332,22 +1400,21 @@ func TestSyncConfig(t *testing.T) {
 	}
 	re.Len(tc.getUpStores(), 5)
 
-	tc.storeConfigManager = config.NewStoreConfigManager(nil, opt)
 	re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/mockGetStoreConfig", `return("10MiB")`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/mockFetchStoreConfigFromTiKV", `return("10MiB")`))
 	// switchRaftV2 will be true.
-	synced, switchRaftV2 := syncConfig(tc.storeConfigManager, tc.GetStores())
+	synced, switchRaftV2 := tc.syncStoreConfig(tc.GetStores())
 	re.True(synced)
 	re.True(switchRaftV2)
 	re.EqualValues(512, tc.opt.GetMaxMovableHotPeerSize())
 	re.Equal(uint64(10), tc.GetStoreConfig().GetRegionMaxSize())
 	// switchRaftV2 will be false this time.
-	synced, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
+	synced, switchRaftV2 = tc.syncStoreConfig(tc.GetStores())
 	re.True(synced)
 	re.False(switchRaftV2)
 	re.Equal(uint64(10), tc.GetStoreConfig().GetRegionMaxSize())
 	re.NoError(opt.Persist(tc.GetStorage()))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/mockGetStoreConfig"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/mockFetchStoreConfigFromTiKV"))
 
 	// Check the persistence of the store config.
 	opt = config.NewPersistOptions(&config.Config{})
@@ -1517,8 +1584,7 @@ func TestCalculateStoreSize1(t *testing.T) {
 	cluster.regionStats = statistics.NewRegionStatistics(
 		cluster.GetBasicCluster(),
 		cluster.GetOpts(),
-		cluster.ruleManager,
-		cluster.storeConfigManager)
+		cluster.ruleManager)
 
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
@@ -1604,8 +1670,7 @@ func TestCalculateStoreSize2(t *testing.T) {
 	cluster.regionStats = statistics.NewRegionStatistics(
 		cluster.GetBasicCluster(),
 		cluster.GetOpts(),
-		cluster.ruleManager,
-		cluster.storeConfigManager)
+		cluster.ruleManager)
 
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
@@ -2362,8 +2427,7 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 		tc.regionStats = statistics.NewRegionStatistics(
 			tc.GetBasicCluster(),
 			tc.GetOpts(),
-			nil,
-			tc.storeConfigManager)
+			nil)
 	}, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
 
@@ -2398,8 +2462,7 @@ func TestCollectMetrics(t *testing.T) {
 		tc.regionStats = statistics.NewRegionStatistics(
 			tc.GetBasicCluster(),
 			tc.GetOpts(),
-			nil,
-			tc.storeConfigManager)
+			nil)
 	}, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
 	count := 10
