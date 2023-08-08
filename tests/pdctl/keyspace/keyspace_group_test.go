@@ -563,7 +563,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		re.NoError(err)
 		if strings.Contains(string(output), "Failed") {
 			// It may be failed when meets error, such as [PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back
-			fmt.Println(string(output))
+			re.Contains(string(output), "ErrEtcdTxnConflict", "output: %s", string(output))
 			return false
 		}
 		err = json.Unmarshal(output, &keyspaceGroup)
