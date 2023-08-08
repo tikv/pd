@@ -620,5 +620,12 @@ func TestInPDMode(t *testing.T) {
 			"args: %v, output: %v", args, string(output))
 	}
 
-	leaderServer.GetKeyspaceManager()
+	leaderServer.SetKeyspaceManager(nil)
+	args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Failed",
+		"args: %v, output: %v", args, string(output))
+	re.Contains(string(output), "keyspace manager is not initialized",
+		"args: %v, output: %v", args, string(output))
 }
