@@ -102,11 +102,6 @@ func (c *Cluster) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*bu
 	return c.hotStat.BucketsStats(degree, regionIDs...)
 }
 
-// GetPersistOptions returns the persist options.
-func (c *Cluster) GetPersistOptions() sc.ConfProvider {
-	return c.persistConfig
-}
-
 // TODO: implement the following methods
 
 // GetStorage returns the storage.

@@ -109,7 +109,7 @@ type cluster interface {
 	DropCacheAllRegion()
 	AllocID() (uint64, error)
 	BuryStore(storeID uint64, forceBury bool) error
-	GetPersistOptions() sc.ConfProvider
+	GetSchedulerConfig() sc.SchedulerConfigProvider
 }
 
 // Controller is used to control the unsafe recovery process.
@@ -495,7 +495,7 @@ func (u *Controller) changeStage(stage stage) {
 	u.stage = stage
 	// Halt and resume the scheduling once the running state changed.
 	running := isRunning(stage)
-	if opt := u.cluster.GetPersistOptions(); opt.IsSchedulingHalted() != running {
+	if opt := u.cluster.GetSchedulerConfig(); opt.IsSchedulingHalted() != running {
 		opt.SetHaltScheduling(running, "online-unsafe-recovery")
 	}
 

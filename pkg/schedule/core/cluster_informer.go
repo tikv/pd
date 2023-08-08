@@ -31,7 +31,6 @@ type ClusterInformer interface {
 
 	GetStorage() storage.Storage
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
-	GetPersistOptions() sc.ConfProvider
 }
 
 // SchedulerCluster is an aggregate interface that wraps multiple interfaces

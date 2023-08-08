@@ -836,11 +836,6 @@ func (c *RaftCluster) GetOpts() sc.ConfProvider {
 	return c.opt
 }
 
-// GetPersistOptions returns cluster's configuration.
-func (c *RaftCluster) GetPersistOptions() sc.ConfProvider {
-	return c.opt
-}
-
 // GetScheduleConfig returns scheduling configurations.
 func (c *RaftCluster) GetScheduleConfig() *sc.ScheduleConfig {
 	return c.opt.GetScheduleConfig()

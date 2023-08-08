@@ -169,7 +169,7 @@ func (c *Coordinator) PatrolRegions() {
 }
 
 func (c *Coordinator) isSchedulingHalted() bool {
-	return c.cluster.GetPersistOptions().IsSchedulingHalted()
+	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
@@ -376,7 +376,7 @@ func (c *Coordinator) initSchedulers() {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
 
-	scheduleCfg := c.cluster.GetPersistOptions().GetScheduleConfig().Clone()
+	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
 		data := configs[i]
@@ -435,8 +435,8 @@ func (c *Coordinator) initSchedulers() {
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetPersistOptions().SetScheduleConfig(scheduleCfg)
-	if err := c.cluster.GetPersistOptions().Persist(c.cluster.GetStorage()); err != nil {
+	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
+	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
 }

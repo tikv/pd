@@ -3089,7 +3089,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
 	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	re.Len(controller.GetSchedulerNames(), defaultCount-3)
-	re.NoError(co.GetCluster().GetPersistOptions().Persist(storage))
+	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
 	co.Stop()
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
@@ -3142,12 +3142,12 @@ func TestPersistScheduler(t *testing.T) {
 
 	// the scheduler option should contain 6 items
 	// the `hot scheduler` are disabled
-	re.Len(co.GetCluster().GetPersistOptions().(*config.PersistOptions).GetSchedulers(), defaultCount+3)
+	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount+3)
 	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
 	// the scheduler that is not enable by default will be completely deleted
-	re.Len(co.GetCluster().GetPersistOptions().(*config.PersistOptions).GetSchedulers(), defaultCount+2)
+	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount+2)
 	re.Len(controller.GetSchedulerNames(), 4)
-	re.NoError(co.GetCluster().GetPersistOptions().Persist(co.GetCluster().GetStorage()))
+	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(co.GetCluster().GetStorage()))
 	co.Stop()
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
@@ -3204,7 +3204,7 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(err)
 	re.Empty(sches)
 	re.Empty(controller.GetSchedulerNames())
-	re.NoError(co.GetCluster().GetPersistOptions().Persist(co.GetCluster().GetStorage()))
+	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(co.GetCluster().GetStorage()))
 	co.Stop()
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
@@ -3218,7 +3218,7 @@ func TestRemoveScheduler(t *testing.T) {
 	co.Run()
 	re.Empty(controller.GetSchedulerNames())
 	// the option remains default scheduler
-	re.Len(co.GetCluster().GetPersistOptions().(*config.PersistOptions).GetSchedulers(), defaultCount)
+	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount)
 	co.Stop()
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
