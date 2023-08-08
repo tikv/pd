@@ -1346,7 +1346,15 @@ func TestSyncConfig(t *testing.T) {
 	re.True(synced)
 	re.False(switchRaftV2)
 	re.Equal(uint64(10), tc.GetStoreConfig().GetRegionMaxSize())
+	re.NoError(opt.Persist(tc.GetStorage()))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/mockGetStoreConfig"))
+
+	// Check the persistence of the store config.
+	opt = config.NewPersistOptions(&config.Config{})
+	re.Empty(opt.GetStoreConfig())
+	err = opt.Reload(tc.GetStorage())
+	re.NoError(err)
+	re.Equal(tc.GetPersistOptions().GetStoreConfig(), opt.GetStoreConfig())
 }
 
 func TestUpdateStorePendingPeerCount(t *testing.T) {

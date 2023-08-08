@@ -791,14 +791,14 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	cfg := &persistedConfig{Config: &Config{}}
 	// Pass nil to initialize cfg to default values (all items undefined)
 	cfg.Adjust(nil, true)
-	// Some fields may not be stored in the storage, we need to calculate them manually.
-	cfg.StoreConfig.adjust()
 
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
 		return err
 	}
 	o.adjustScheduleCfg(&cfg.Schedule)
+	// Some fields may not be stored in the storage, we need to calculate them manually.
+	cfg.StoreConfig.adjust()
 	cfg.PDServerCfg.MigrateDeprecatedFlags()
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
