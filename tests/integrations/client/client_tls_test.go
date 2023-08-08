@@ -39,8 +39,7 @@ import (
 var (
 	certPath        = "./cert"
 	certExpiredPath = "./cert-expired"
-	generateScript  = "./gencerts.sh"
-	cleanupScript   = "./cleanup.sh"
+	certScript      = "./cert_opt.sh"
 	testTLSInfo     = transport.TLSInfo{
 		KeyFile:       "./cert/pd-server-key.pem",
 		CertFile:      "./cert/pd-server.pem",
@@ -60,14 +59,14 @@ var (
 	}
 )
 
-func cmdCert(certsDir, scriptPath string) error {
+func cmdCert(certsDir, script, args string) error {
 	currentDir, _ := os.Getwd()
 	// Change working directory
 	os.Chdir(certsDir)
 	defer os.Chdir(currentDir)
 
 	// Run the script
-	if err := exec.Command(scriptPath).Run(); err != nil {
+	if err := exec.Command(script, args).Run(); err != nil {
 		fmt.Println("Error running script:", err)
 		return err
 	}
@@ -80,13 +79,13 @@ func cmdCert(certsDir, scriptPath string) error {
 func TestTLSReloadAtomicReplace(t *testing.T) {
 	// generate certs
 	for _, path := range []string{certPath, certExpiredPath} {
-		if err := cmdCert(path, generateScript); err != nil {
+		if err := cmdCert(path, certScript, "generate"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	defer func() {
 		for _, path := range []string{certPath, certExpiredPath} {
-			if err := cmdCert(path, cleanupScript); err != nil {
+			if err := cmdCert(path, certScript, "cleanup"); err != nil {
 				t.Fatal(err)
 			}
 		}
