@@ -12,7 +12,10 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-var certPath = "../../../tests/integrations/client/cert"
+var (
+	certPath   = "../../../tests/integrations/client/cert"
+	certScript = "./cert_opt.sh"
+)
 
 func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
 	var err error
@@ -40,11 +43,11 @@ func cmdCert(certsDir, script, args string) error {
 }
 
 func TestToTLSConfig(t *testing.T) {
-	if err := cmdCert(certPath, "./cert_opt.sh", "generate"); err != nil {
+	if err := cmdCert(certPath, certScript, "generate"); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := cmdCert(certPath, "./cert_opt.sh", "cleanup"); err != nil {
+		if err := cmdCert(certPath, certScript, "cleanup"); err != nil {
 			t.Fatal(err)
 		}
 	}()
