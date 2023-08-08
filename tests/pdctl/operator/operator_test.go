@@ -83,7 +83,8 @@ func TestOperator(t *testing.T) {
 	for _, store := range stores {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
-
+	// remove pause leader transfer
+	leaderServer.GetRaftCluster().CheckStores()
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},

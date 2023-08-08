@@ -274,7 +274,7 @@ func TestSetOfflineStore(t *testing.T) {
 	re.NoError(cluster.RemoveStore(3, false))
 	re.NoError(cluster.RemoveStore(3, false))
 
-	cluster.checkStores()
+	cluster.CheckStores()
 	// store 1,2,3 should be to tombstone
 	for storeID := uint64(1); storeID <= 3; storeID++ {
 		re.True(cluster.GetStore(storeID).IsRemoved())
@@ -292,7 +292,7 @@ func TestSetOfflineStore(t *testing.T) {
 	toCleanStore := cluster.GetStore(1).Clone().GetMeta()
 	toCleanStore.LastHeartbeat = time.Now().Add(-40 * 24 * time.Hour).UnixNano()
 	cluster.PutStore(toCleanStore)
-	cluster.checkStores()
+	cluster.CheckStores()
 	re.Nil(cluster.GetStore(1))
 }
 
@@ -349,6 +349,8 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	for _, store := range newTestStores(3, "2.0.0") {
 		re.NoError(cluster.PutStore(store.GetMeta()))
 	}
+	// remove pause leader transfer
+	cluster.CheckStores()
 	_, err = addEvictLeaderScheduler(cluster, 1)
 
 	re.NoError(err)
@@ -459,7 +461,7 @@ func TestUpStore(t *testing.T) {
 	re.Error(cluster.UpStore(2))
 
 	// bury store 2
-	cluster.checkStores()
+	cluster.CheckStores()
 	// store is tombstone
 	err = cluster.UpStore(2)
 	re.True(errors.ErrorEqual(err, errs.ErrStoreRemoved.FastGenByArgs(2)))
@@ -500,7 +502,7 @@ func TestRemovingProcess(t *testing.T) {
 	re.Len(regionInStore1, 20)
 	cluster.progressManager = progress.NewManager()
 	cluster.RemoveStore(1, false)
-	cluster.checkStores()
+	cluster.CheckStores()
 	process := "removing-1"
 	// no region moving
 	p, l, cs, err := cluster.progressManager.Status(process)
@@ -517,7 +519,7 @@ func TestRemovingProcess(t *testing.T) {
 		cluster.DropCacheRegion(region.GetID())
 		i++
 	}
-	cluster.checkStores()
+	cluster.CheckStores()
 	p, l, cs, err = cluster.progressManager.Status(process)
 	re.NoError(err)
 	// In above we delete 5 region from store 1, the total count of region in store 1 is 20.
@@ -561,7 +563,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 
 	// Bury the other store.
 	re.NoError(cluster.RemoveStore(3, true))
-	cluster.checkStores()
+	cluster.CheckStores()
 	re.Equal("5.0.0", cluster.GetClusterVersion())
 }
 
@@ -2042,7 +2044,7 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 			State:         metapb.StoreState_Up,
 			Version:       version,
 			DeployPath:    getTestDeployPath(i),
-			NodeState:     metapb.NodeState_Serving,
+			NodeState:     metapb.NodeState_Preparing,
 		}
 		stores = append(stores, core.NewStoreInfo(store))
 	}

@@ -73,10 +73,14 @@ const (
 
 var (
 	defaultLocationLabels = []string{}
-	// DefaultStoreLimit is the default store limit of add peer and remove peer.
-	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
-	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
-	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
+	// DefaultPreparingStoreLimit is the default store limit of add peer and remove peer when preparing.
+	DefaultPreparingStoreLimit = StoreLimit{AddPeer: 100, RemovePeer: 100}
+	// DefaultPreparingTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer when preparing.
+	DefaultPreparingTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
+	// DefaultServingStoreLimit is the default store limit of add peer and remove peer when serving.
+	DefaultServingStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
+	// DefaultServingTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer when serving.
+	DefaultServingTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
 )
 
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.
@@ -378,7 +382,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 
 	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		DefaultServingStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
 	}
 
@@ -442,7 +446,7 @@ func (c *ScheduleConfig) parseDeprecatedFlag(meta *configutil.ConfigMetaData, na
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
 	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		DefaultServingStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
 	}
 	for _, b := range c.migrateConfigurationMap() {

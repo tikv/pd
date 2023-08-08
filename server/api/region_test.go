@@ -378,10 +378,12 @@ func (suite *regionTestSuite) TestScatterRegions() {
 	mustRegionHeartbeat(re, suite.svr, r1)
 	mustRegionHeartbeat(re, suite.svr, r2)
 	mustRegionHeartbeat(re, suite.svr, r3)
-	mustPutStore(re, suite.svr, 13, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
-	mustPutStore(re, suite.svr, 14, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
-	mustPutStore(re, suite.svr, 15, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
-	mustPutStore(re, suite.svr, 16, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
+	mustPutStore(re, suite.svr, 13, metapb.StoreState_Up, metapb.NodeState_Preparing, []*metapb.StoreLabel{})
+	mustPutStore(re, suite.svr, 14, metapb.StoreState_Up, metapb.NodeState_Preparing, []*metapb.StoreLabel{})
+	mustPutStore(re, suite.svr, 15, metapb.StoreState_Up, metapb.NodeState_Preparing, []*metapb.StoreLabel{})
+	mustPutStore(re, suite.svr, 16, metapb.StoreState_Up, metapb.NodeState_Preparing, []*metapb.StoreLabel{})
+	// remove pause leader transfer
+	suite.svr.GetRaftCluster().CheckStores()
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
 
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", suite.urlPrefix), []byte(body), tu.StatusOK(re))

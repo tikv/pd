@@ -68,7 +68,8 @@ func TestHot(t *testing.T) {
 	pdctl.MustPutStore(re, leaderServer.GetServer(), store1)
 	pdctl.MustPutStore(re, leaderServer.GetServer(), store2)
 	defer cluster.Destroy()
-
+	// remove pause leader transfer
+	leaderServer.GetRaftCluster().CheckStores()
 	// test hot store
 	ss := leaderServer.GetStore(1)
 	now := time.Now().Unix()
@@ -234,6 +235,8 @@ func TestHotWithStoreID(t *testing.T) {
 	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	// wait hot scheduler starts
 	rc := leaderServer.GetRaftCluster()
+	// remove pause leader transfer
+	rc.CheckStores()
 	testutil.Eventually(re, func() bool {
 		return rc.GetHotPeerStat(utils.Write, 1, 1) != nil &&
 			rc.GetHotPeerStat(utils.Write, 2, 2) != nil &&
@@ -445,6 +448,8 @@ func TestHotWithoutHotPeer(t *testing.T) {
 	for _, store := range stores {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
+	// remove pause leader transfer
+	leaderServer.GetRaftCluster().CheckStores()
 	timestamp := uint64(time.Now().UnixNano())
 	load := 1024.0
 	for _, store := range stores {
