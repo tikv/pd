@@ -625,6 +625,16 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
+// GetFlashbackStartTs returns the region's FlashbackStartTs.
+func (r *RegionInfo) GetFlashbackStartTs() uint64 {
+	return r.meta.FlashbackStartTs
+}
+
+// GetIsInFlashback returns the region's IsInFlashback.
+func (r *RegionInfo) GetIsInFlashback() bool {
+	return r.meta.IsInFlashback
+}
+
 // IsFromHeartbeat returns whether the region info is from the region heartbeat.
 func (r *RegionInfo) IsFromHeartbeat() bool {
 	return r.fromHeartbeat
@@ -751,6 +761,11 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
+			}
+			if region.GetFlashbackStartTs() != origin.GetFlashbackStartTs() ||
+				region.GetIsInFlashback() != origin.GetIsInFlashback() {
+				saveKV, saveCache = true, true
+				return
 			}
 		}
 		return

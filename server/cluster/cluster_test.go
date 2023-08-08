@@ -838,6 +838,18 @@ func TestRegionHeartbeat(t *testing.T) {
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
 		checkRegions(re, cluster.core, regions[:i+1])
+
+		// Flashback
+		region = region.Clone(core.WithFlashback(true, 1))
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(region))
+		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegionsKV(re, cluster.storage, regions[:i+1])
+		region = region.Clone(core.WithFlashback(false, 0))
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(region))
+		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegionsKV(re, cluster.storage, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
