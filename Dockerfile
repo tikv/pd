@@ -1,4 +1,5 @@
-FROM golang:1.20-alpine as builder
+FROM golang:1.13-alpine as builder
+MAINTAINER siddontang
 
 RUN apk add --no-cache \
     make \
@@ -6,8 +7,7 @@ RUN apk add --no-cache \
     bash \
     curl \
     gcc \
-    g++ \
-    binutils-gold
+    g++
 
 # Install jq for pd-ctl
 RUN cd / && \
@@ -27,15 +27,12 @@ COPY . .
 
 RUN make
 
-FROM alpine:3.17
+FROM alpine:3.5
 
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-server /pd-server
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-ctl /pd-ctl
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-recover /pd-recover
 COPY --from=builder /jq /usr/local/bin/jq
-
-RUN apk add --no-cache \
-    curl
 
 EXPOSE 2379 2380
 

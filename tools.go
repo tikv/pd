@@ -8,22 +8,18 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build tools
 // +build tools
 
 package tools
 
 import (
-	_ "github.com/AlekSi/gocov-xml"
-	_ "github.com/axw/gocov/gocov"
+	_ "github.com/go-playground/overalls"
 	_ "github.com/mgechev/revive"
-	_ "github.com/pingcap/errors/errdoc-gen"
 	_ "github.com/pingcap/failpoint/failpoint-ctl"
+	_ "github.com/sasha-s/go-deadlock"
 	_ "github.com/swaggo/swag/cmd/swag"
 	_ "golang.org/x/tools/cmd/goimports"
-	_ "gotest.tools/gotestsum"
 )
