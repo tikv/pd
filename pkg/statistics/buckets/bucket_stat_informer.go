@@ -21,15 +21,15 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/rangetree"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-var minHotThresholds [statistics.RegionStatCount]uint64
+var minHotThresholds [utils.RegionStatCount]uint64
 
 func init() {
 	for i := range minHotThresholds {
-		minHotThresholds[i] = uint64(statistics.MinHotThresholds[i])
+		minHotThresholds[i] = uint64(utils.MinHotThresholds[i])
 	}
 }
 
@@ -45,7 +45,7 @@ type BucketStat struct {
 	EndKey    []byte
 	HotDegree int
 	Interval  uint64
-	// the order should see statistics.RegionStatKind
+	// the order should see utils.RegionStatKind
 	Loads []uint64
 }
 

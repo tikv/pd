@@ -136,6 +136,7 @@ type Controller struct {
 	// exposed to the outside for testing
 	AffectedTableIDs    map[int64]struct{}
 	affectedMetaRegions map[uint64]struct{}
+	newlyCreatedRegions map[uint64]struct{}
 	err                 error
 }
 
@@ -167,6 +168,7 @@ func (u *Controller) reset() {
 	u.output = make([]StageOutput, 0)
 	u.AffectedTableIDs = make(map[int64]struct{}, 0)
 	u.affectedMetaRegions = make(map[uint64]struct{}, 0)
+	u.newlyCreatedRegions = make(map[uint64]struct{}, 0)
 	u.err = nil
 }
 
@@ -665,6 +667,15 @@ func (u *Controller) getAffectedTableDigest() []string {
 			tables += fmt.Sprintf("%d, ", t)
 		}
 		details = append(details, "affected table ids: "+strings.Trim(tables, ", "))
+	}
+	if len(u.newlyCreatedRegions) != 0 {
+		regions := ""
+		for r := range u.newlyCreatedRegions {
+			regions += fmt.Sprintf("%d, ", r)
+		}
+		details = append(details, "newly created empty regions: "+strings.Trim(regions, ", "))
+	} else {
+		details = append(details, "no newly created empty regions")
 	}
 	return details
 }
@@ -1201,6 +1212,7 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 			storeRecoveryPlan := u.getRecoveryPlan(storeID)
 			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
 			u.recordAffectedRegion(newRegion)
+			u.newlyCreatedRegions[newRegion.GetId()] = struct{}{}
 			hasPlan = true
 		}
 		lastEnd = region.EndKey

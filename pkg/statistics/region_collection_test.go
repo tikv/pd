@@ -65,7 +65,7 @@ func TestRegionStatistics(t *testing.T) {
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
-	regionStats := NewRegionStatistics(nil, opt, manager, nil)
+	regionStats := NewRegionStatistics(nil, opt, manager)
 	regionStats.Observe(region1, stores)
 	re.Len(regionStats.stats[ExtraPeer], 1)
 	re.Len(regionStats.stats[LearnerPeer], 1)
@@ -150,7 +150,7 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 	region3 := core.NewRegionInfo(r3, peers[0])
 	region4 := core.NewRegionInfo(r4, peers[0])
 	region5 := core.NewRegionInfo(r5, peers[4])
-	regionStats := NewRegionStatistics(nil, opt, manager, nil)
+	regionStats := NewRegionStatistics(nil, opt, manager)
 	// r2 didn't match the rules
 	regionStats.Observe(region2, stores)
 	re.Len(regionStats.stats[MissPeer], 1)
