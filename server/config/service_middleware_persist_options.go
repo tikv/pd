@@ -25,9 +25,8 @@ import (
 // ServiceMiddlewarePersistOptions wraps all service middleware configurations that need to persist to storage and
 // allows to access them safely.
 type ServiceMiddlewarePersistOptions struct {
-	audit         atomic.Value
-	rateLimit     atomic.Value
-	grpcRateLimit atomic.Value
+	audit     atomic.Value
+	rateLimit atomic.Value
 }
 
 // NewServiceMiddlewarePersistOptions creates a new ServiceMiddlewarePersistOptions instance.
@@ -35,7 +34,6 @@ func NewServiceMiddlewarePersistOptions(cfg *ServiceMiddlewareConfig) *ServiceMi
 	o := &ServiceMiddlewarePersistOptions{}
 	o.audit.Store(&cfg.AuditConfig)
 	o.rateLimit.Store(&cfg.RateLimitConfig)
-	o.grpcRateLimit.Store(&cfg.GRPCRateLimitConfig)
 	return o
 }
 
@@ -69,27 +67,11 @@ func (o *ServiceMiddlewarePersistOptions) IsRateLimitEnabled() bool {
 	return o.GetRateLimitConfig().EnableRateLimit
 }
 
-// GetGRPCRateLimitConfig returns pd service middleware configurations.
-func (o *ServiceMiddlewarePersistOptions) GetGRPCRateLimitConfig() *GRPCRateLimitConfig {
-	return o.grpcRateLimit.Load().(*GRPCRateLimitConfig)
-}
-
-// SetGRPCRateLimitConfig sets the PD service middleware configuration.
-func (o *ServiceMiddlewarePersistOptions) SetGRPCRateLimitConfig(cfg *GRPCRateLimitConfig) {
-	o.grpcRateLimit.Store(cfg)
-}
-
-// IsGRPCRateLimitEnabled returns whether rate limit middleware is enabled
-func (o *ServiceMiddlewarePersistOptions) IsGRPCRateLimitEnabled() bool {
-	return o.GetGRPCRateLimitConfig().EnableRateLimit
-}
-
 // Persist saves the configuration to the storage.
 func (o *ServiceMiddlewarePersistOptions) Persist(storage endpoint.ServiceMiddlewareStorage) error {
 	cfg := &ServiceMiddlewareConfig{
-		AuditConfig:         *o.GetAuditConfig(),
-		RateLimitConfig:     *o.GetRateLimitConfig(),
-		GRPCRateLimitConfig: *o.GetGRPCRateLimitConfig(),
+		AuditConfig:     *o.GetAuditConfig(),
+		RateLimitConfig: *o.GetRateLimitConfig(),
 	}
 	err := storage.SaveServiceMiddlewareConfig(cfg)
 	failpoint.Inject("persistServiceMiddlewareFail", func() {
@@ -109,7 +91,6 @@ func (o *ServiceMiddlewarePersistOptions) Reload(storage endpoint.ServiceMiddlew
 	if isExist {
 		o.audit.Store(&cfg.AuditConfig)
 		o.rateLimit.Store(&cfg.RateLimitConfig)
-		o.grpcRateLimit.Store(&cfg.GRPCRateLimitConfig)
 	}
 	return nil
 }

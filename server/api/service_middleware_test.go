@@ -62,9 +62,8 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	suite.True(sc.EnableAudit)
 
 	ms := map[string]interface{}{
-		"enable-audit":           "true",
-		"enable-rate-limit":      "true",
-		"enable-grpc-rate-limit": "true",
+		"enable-audit":      "true",
+		"enable-rate-limit": "true",
 	}
 	postData, err := json.Marshal(ms)
 	suite.NoError(err)
@@ -72,12 +71,10 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	sc = &config.ServiceMiddlewareConfig{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
 	suite.True(sc.EnableAudit)
-	suite.True(sc.RateLimitConfig.EnableRateLimit)
-	suite.True(sc.GRPCRateLimitConfig.EnableRateLimit)
+	suite.True(sc.EnableRateLimit)
 	ms = map[string]interface{}{
-		"audit.enable-audit":     "false",
-		"enable-rate-limit":      "false",
-		"enable-grpc-rate-limit": "false",
+		"audit.enable-audit": "false",
+		"enable-rate-limit":  "false",
 	}
 	postData, err = json.Marshal(ms)
 	suite.NoError(err)
@@ -85,8 +82,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	sc = &config.ServiceMiddlewareConfig{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
 	suite.False(sc.EnableAudit)
-	suite.False(sc.RateLimitConfig.EnableRateLimit)
-	suite.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	suite.False(sc.EnableRateLimit)
 
 	// test empty
 	ms = map[string]interface{}{}
@@ -277,12 +273,12 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	suite.NoError(err)
 
 	limiter := suite.svr.GetServiceRateLimiter()
-	limiter.Update("SetRateLimitConfig", ratelimit.AddLabelAllowList())
+	limiter.Update("SetRatelimitConfig", ratelimit.AddLabelAllowList())
 
 	// Allow list
 	input = make(map[string]interface{})
 	input["type"] = "label"
-	input["label"] = "SetRateLimitConfig"
+	input["label"] = "SetRatelimitConfig"
 	input["qps"] = 100
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
@@ -292,128 +288,31 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	suite.NoError(err)
 }
 
-func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config/grpc-rate-limit", suite.svr.GetAddr(), apiPrefix)
-	re := suite.Require()
-
-	// test empty label
-	input := make(map[string]interface{})
-	input["label"] = ""
-	jsonBody, err := json.Marshal(input)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The label is empty.\"\n"))
-	suite.NoError(err)
-	// test no label matched
-	input = make(map[string]interface{})
-	input["label"] = "TestLabel"
-	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"There is no label matched.\"\n"))
-	suite.NoError(err)
-
-	// no change
-	input = make(map[string]interface{})
-	input["label"] = "StoreHeartbeat"
-	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringEqual(re, "\"No changed.\"\n"))
-	suite.NoError(err)
-
-	// change concurrency
-	input = make(map[string]interface{})
-	input["label"] = "StoreHeartbeat"
-	input["concurrency"] = 100
-	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."))
-	suite.NoError(err)
-	input["concurrency"] = 0
-	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is deleted."))
-	suite.NoError(err)
-
-	// change qps
-	input = make(map[string]interface{})
-	input["label"] = "StoreHeartbeat"
-	input["qps"] = 100
-	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
-	suite.NoError(err)
-
-	input = make(map[string]interface{})
-	input["label"] = "StoreHeartbeat"
-	input["qps"] = 0.3
-	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
-	suite.NoError(err)
-	suite.Equal(1, suite.svr.GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].QPSBurst)
-
-	input["qps"] = -1
-	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
-	suite.NoError(err)
-
-	// change both
-	input = make(map[string]interface{})
-	input["label"] = "GetStore"
-	input["qps"] = 100
-	input["concurrency"] = 100
-	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
-	result := rateLimitResult{}
-	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."),
-		tu.StringContain(re, "QPS rate limiter is changed."),
-		tu.ExtractJSON(re, &result),
-	)
-	suite.Equal(100., result.LimiterConfig["GetStore"].QPS)
-	suite.Equal(100, result.LimiterConfig["GetStore"].QPSBurst)
-	suite.Equal(uint64(100), result.LimiterConfig["GetStore"].ConcurrencyLimit)
-	suite.NoError(err)
-}
-
 func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	addr := fmt.Sprintf("%s/service-middleware/config", suite.urlPrefix)
 	sc := &config.ServiceMiddlewareConfig{}
 	re := suite.Require()
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.False(sc.RateLimitConfig.EnableRateLimit)
-	suite.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	suite.False(sc.EnableRateLimit)
 
 	ms := map[string]interface{}{
-		"enable-rate-limit":      "true",
-		"enable-grpc-rate-limit": "true",
+		"enable-rate-limit": "true",
 	}
 	postData, err := json.Marshal(ms)
 	suite.NoError(err)
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.True(sc.RateLimitConfig.EnableRateLimit)
-	suite.True(sc.GRPCRateLimitConfig.EnableRateLimit)
+	suite.True(sc.EnableRateLimit)
 	ms = map[string]interface{}{
-		"enable-rate-limit":      "false",
-		"enable-grpc-rate-limit": "false",
+		"enable-rate-limit": "false",
 	}
 	postData, err = json.Marshal(ms)
 	suite.NoError(err)
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.False(sc.RateLimitConfig.EnableRateLimit)
-	suite.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	suite.False(sc.EnableRateLimit)
 
 	// test empty
 	ms = map[string]interface{}{}
@@ -428,8 +327,7 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item rate-limit not found")))
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
 	ms = map[string]interface{}{
-		"rate-limit.enable-rate-limit":           "true",
-		"grpc-rate-limit.enable-grpc-rate-limit": "true",
+		"rate-limit.enable-rate-limit": "true",
 	}
 	postData, err = json.Marshal(ms)
 	suite.NoError(err)
@@ -443,7 +341,7 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item rate-limit not found")))
 }
 
-func (suite *rateLimitConfigTestSuite) TestConfigLimiterConfigByOriginAPI() {
+func (suite *rateLimitConfigTestSuite) TestConfigLimiterConifgByOriginAPI() {
 	// this test case is used to test updating `limiter-config` by origin API simply
 	addr := fmt.Sprintf("%s/service-middleware/config", suite.urlPrefix)
 	dimensionConfig := ratelimit.DimensionConfig{QPS: 1}
