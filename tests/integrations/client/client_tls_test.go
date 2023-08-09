@@ -37,8 +37,8 @@ import (
 )
 
 var (
-	certPath        = "cert"
-	certExpiredPath = "cert-expired"
+	certPath        = "./cert"
+	certExpiredPath = "./cert-expired"
 	certScript      = "./cert_opt.sh"
 	testTLSInfo     = transport.TLSInfo{
 		KeyFile:       "./cert/pd-server-key.pem",
@@ -59,14 +59,6 @@ var (
 	}
 )
 
-func cmdCert(script, args, certsDir string) error {
-	if err := exec.Command(script, args, certsDir).Run(); err != nil {
-		fmt.Println("Error running script:", err)
-		return err
-	}
-	return nil
-}
-
 // TestTLSReloadAtomicReplace ensures server reloads expired/valid certs
 // when all certs are atomically replaced by directory renaming.
 // And expects server to reject client requests, and vice versa.
@@ -76,13 +68,13 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 		if err := os.Mkdir(path, 0755); err != nil {
 			t.Fatal(err)
 		}
-		if err := cmdCert(certScript, "generate", path); err != nil {
+		if err := exec.Command(certScript, "generate", path).Run(); err != nil {
 			t.Fatal(err)
 		}
 	}
 	defer func() {
 		for _, path := range []string{certPath, certExpiredPath} {
-			if err := cmdCert(certScript, "cleanup", path); err != nil {
+			if err := exec.Command(certScript, "cleanup", path).Run(); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.RemoveAll(path); err != nil {

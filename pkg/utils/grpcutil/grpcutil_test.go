@@ -1,7 +1,6 @@
 package grpcutil
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path"
@@ -28,20 +27,12 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 	return
 }
 
-func cmdCert(script, args, certsDir string) error {
-	if err := exec.Command(script, args, certsDir).Run(); err != nil {
-		fmt.Println("Error running script:", err)
-		return err
-	}
-	return nil
-}
-
 func TestToTLSConfig(t *testing.T) {
-	if err := cmdCert(certPath+certScript, "generate", certPath); err != nil {
+	if err := exec.Command(certPath+certScript, "generate", certPath).Run(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := cmdCert(certPath+certScript, "cleanup", certPath); err != nil {
+		if err := exec.Command(certPath+certScript, "cleanup", certPath).Run(); err != nil {
 			t.Fatal(err)
 		}
 	}()
