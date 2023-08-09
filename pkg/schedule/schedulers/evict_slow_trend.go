@@ -108,7 +108,6 @@ func (conf *evictSlowTrendSchedulerConfig) candidateCapturedSecs() uint64 {
 }
 
 func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
-	conf.lastEvictCandidate = conf.evictCandidate
 	conf.evictCandidate = slowCandidate{
 		storeID:   id,
 		captureTS: time.Now(),
