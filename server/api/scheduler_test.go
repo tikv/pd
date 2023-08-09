@@ -50,8 +50,10 @@ func (suite *scheduleTestSuite) SetupSuite() {
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/schedulers", addr, apiPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Preparing, nil)
+	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Preparing, nil)
+	// remove pause leader transfer
+	suite.svr.GetRaftCluster().CheckStores()
 }
 
 func (suite *scheduleTestSuite) TearDownSuite() {

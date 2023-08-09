@@ -355,8 +355,8 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	}
 	cfg := o.GetScheduleConfig().Clone()
 	sc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		AddPeer:    sc.DefaultServingStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: sc.DefaultServingStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
 
 	cfg.StoreLimit[storeID] = sc

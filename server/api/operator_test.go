@@ -192,10 +192,11 @@ func (suite *transferRegionOperatorTestSuite) TearDownSuite() {
 
 func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRule() {
 	re := suite.Require()
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{{Key: "key", Value: "1"}})
-	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{{Key: "key", Value: "2"}})
-	mustPutStore(re, suite.svr, 3, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{{Key: "key", Value: "3"}})
-
+	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Preparing, []*metapb.StoreLabel{{Key: "key", Value: "1"}})
+	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Preparing, []*metapb.StoreLabel{{Key: "key", Value: "2"}})
+	mustPutStore(re, suite.svr, 3, metapb.StoreState_Up, metapb.NodeState_Preparing, []*metapb.StoreLabel{{Key: "key", Value: "3"}})
+	// remove pause leader transfer
+	suite.svr.GetRaftCluster().CheckStores()
 	hbStream := mockhbstream.NewHeartbeatStream()
 	suite.svr.GetHBStreams().BindStream(1, hbStream)
 	suite.svr.GetHBStreams().BindStream(2, hbStream)

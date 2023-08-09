@@ -355,14 +355,14 @@ func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, rate
 	switch typ {
 	case storelimit.AddPeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+			rate = sc.DefaultServingStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
 		} else {
 			rate = v.StoreLimit[storeID].RemovePeer
 		}
 		slc = sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
 	case storelimit.RemovePeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+			rate = sc.DefaultServingStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
 		} else {
 			rate = v.StoreLimit[storeID].AddPeer
 		}
@@ -377,13 +377,13 @@ func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
 	case storelimit.AddPeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
+		sc.DefaultServingStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
 			v.StoreLimit[storeID] = sc
 		}
 	case storelimit.RemovePeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
+		sc.DefaultServingStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
 			v.StoreLimit[storeID] = sc
@@ -459,8 +459,8 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 	}
 	cfg := o.GetScheduleConfig().Clone()
 	sc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		AddPeer:    sc.DefaultServingStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: sc.DefaultServingStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
 	v, ok1, err := o.getTTLFloat("default-add-peer")
 	if err != nil {

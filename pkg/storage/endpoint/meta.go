@@ -120,7 +120,12 @@ func (se *StorageEndpoint) LoadStores(f func(store *core.StoreInfo)) error {
 			if err != nil {
 				return err
 			}
-			newStoreInfo := core.NewStoreInfo(store, core.SetLeaderWeight(leaderWeight), core.SetRegionWeight(regionWeight))
+			var newStoreInfo *core.StoreInfo
+			if store.NodeState == metapb.NodeState_Preparing {
+				newStoreInfo = core.NewStoreInfo(store, core.SetLeaderWeight(leaderWeight), core.SetRegionWeight(regionWeight), core.PauseLeaderTransfer())
+			} else {
+				newStoreInfo = core.NewStoreInfo(store, core.SetLeaderWeight(leaderWeight), core.SetRegionWeight(regionWeight))
+			}
 
 			nextID = store.GetId() + 1
 			f(newStoreInfo)

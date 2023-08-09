@@ -35,9 +35,10 @@ func TestTrend(t *testing.T) {
 
 	mustBootstrapCluster(re, svr)
 	for i := 1; i <= 3; i++ {
-		mustPutStore(re, svr, uint64(i), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+		mustPutStore(re, svr, uint64(i), metapb.StoreState_Up, metapb.NodeState_Preparing, nil)
 	}
-
+	// remove pause leader transfer
+	svr.GetRaftCluster().CheckStores()
 	// Create 3 regions, all peers on store1 and store2, and the leaders are all on store1.
 	region4 := newRegionInfo(4, "", "a", 2, 2, []uint64{1, 2}, nil, nil, 1)
 	region5 := newRegionInfo(5, "a", "b", 2, 2, []uint64{1, 2}, nil, []uint64{2}, 1)

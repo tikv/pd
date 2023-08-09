@@ -67,6 +67,8 @@ func TestHotRegionStorage(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 	defer cluster.Destroy()
+	// remove pause leader transfer
+	leaderServer.GetRaftCluster().CheckStores()
 	startTime := time.Now().Unix()
 	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
