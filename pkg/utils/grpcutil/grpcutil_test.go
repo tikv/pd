@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	certPath   = "../../../tests/integrations/client/cert"
+	certPath   = "../../../tests/integrations/client"
 	certScript = "./cert_opt.sh"
 )
 
