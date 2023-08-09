@@ -16,54 +16,43 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tools/pd-api-bench/cases"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 var (
 	pdAddr = flag.String("pd", "127.0.0.1:2379", "pd address")
 
-	// GetRegion qps
-	regionQps = flag.Int("qps-get-region", 0, "GetRegion qps")
-	// ScanRegions qps
-	regionsQps = flag.Int("qps-scan-regions", 0, "ScanRegions qps")
-	// /stats/region qps
-	regionStatsQps = flag.Int("qps-region-stats", 0, "/stats/region qps")
-	// ScanRegions the number of region
-	regionsSample = flag.Int("regions-sample", 10000, "ScanRegions the number of region")
-	// the number of regions
-	regionNum = flag.Int("region-num", 1000000, "the number of regions")
-	// GetStore qps
-	storeQps = flag.Int("qps-store", 0, "GetStore qps")
-	// GetStores qps
-	storesQps = flag.Int("qps-stores", 0, "GetStores qps")
-	// store max id
-	maxStoreID = flag.Int("max-store", 100, "store max id")
+	httpCases = flag.String("http-cases", "", "http api cases")
+	gRPCCases = flag.String("grpc-cases", "", "grpc cases")
+
 	// concurrency
 	concurrency = flag.Int("concurrency", 1, "client number")
-	// brust
-	brust = flag.Int("brust", 1, "brust request")
+
+	// tls
+	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
+	certPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
+	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format")
 )
 
 var base int = int(time.Second) / int(time.Microsecond)
 
-var clusterID uint64
-
 func main() {
-	log.SetFlags(0)
 	flag.Parse()
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -79,29 +68,61 @@ func main() {
 		sig = <-sc
 		cancel()
 	}()
+
+	addr := trimHTTPPrefix(*pdAddr)
+	protocol := "http"
+	if len(*caPath) != 0 {
+		protocol = "https"
+	}
+	cases.PDAddress = fmt.Sprintf("%s://%s", protocol, addr)
+
+	hcases := make([]cases.HTTPCase, 0)
+	gcases := make([]cases.GRPCCase, 0)
+	hcaseStr := strings.Split(*httpCases, ",")
+	for _, str := range hcaseStr {
+		if len(str) == 0 {
+			continue
+		}
+		if cas, ok := cases.HTTPCaseMap[str]; ok {
+			hcases = append(hcases, cas)
+		} else {
+			log.Println("no this case", str)
+		}
+	}
+	gcaseStr := strings.Split(*gRPCCases, ",")
+	for _, str := range gcaseStr {
+		if len(str) == 0 {
+			continue
+		}
+		if cas, ok := cases.GRPCCaseMap[str]; ok {
+			gcases = append(gcases, cas)
+		} else {
+			log.Println("no this case", str)
+		}
+	}
 	if *concurrency == 0 {
 		log.Println("concurrency == 0, exit")
 		return
 	}
-	if *brust == 0 {
-		log.Println("brust == 0, exit")
-		return
-	}
-	pdClis := make([]pdpb.PDClient, 0)
+	pdClis := make([]pd.Client, 0)
 	for i := 0; i < *concurrency; i++ {
-		pdClis = append(pdClis, newClient())
+		pdClis = append(pdClis, newPDClient())
 	}
 	httpClis := make([]*http.Client, 0)
 	for i := 0; i < *concurrency; i++ {
-		httpClis = append(httpClis, &http.Client{})
+		httpClis = append(httpClis, newHttpClient())
 	}
-	initClusterID(ctx, pdClis[0])
+	err := cases.InitCluster(ctx, pdClis[0], httpClis[0])
+	if err != nil {
+		log.Fatalf("InitCluster error %v", err)
+	}
 
-	go handleGetRegion(ctx, pdClis)
-	go handleScanRegions(ctx, pdClis)
-	go handleRegionsStats(ctx, httpClis)
-	go handleGetStore(ctx, pdClis)
-	go handleGetStores(ctx, pdClis)
+	for _, hcase := range hcases {
+		handleHTTPCase(ctx, hcase, httpClis)
+	}
+	for _, gcase := range gcases {
+		handleGRPCCase(ctx, gcase, pdClis)
+	}
 
 	<-ctx.Done()
 	log.Println("Exit")
@@ -113,33 +134,20 @@ func main() {
 	}
 }
 
-func handleGetRegion(ctx context.Context, pdClis []pdpb.PDClient) {
-	g := func(id int, keyLen int) []byte {
-		k := make([]byte, keyLen)
-		copy(k, fmt.Sprintf("%010d", id))
-		return k
-	}
-	if *regionQps == 0 {
-		log.Println("handleGetRegion qps = 0, exit")
-		return
-	}
-	tt := base / *regionQps * *concurrency * *brust
-	for _, pdCli := range pdClis {
-		go func(pdCli pdpb.PDClient) {
+func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Client) {
+	log.Printf("begin to run gRPC case %s", gcase.Name())
+	qps := gcase.GetQPS()
+	burst := gcase.GetBurst()
+	tt := base / qps * burst * *concurrency
+	for _, cli := range clients {
+		go func(cli pd.Client) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
-					id := rand.Intn(*regionNum)*4 + 1
-					req := &pdpb.GetRegionRequest{
-						Header: &pdpb.RequestHeader{
-							ClusterId: clusterID,
-						},
-						RegionKey: g(id, 56),
-					}
-					for i := 0; i < *brust; i++ {
-						_, err := pdCli.GetRegion(ctx, req)
+					for i := 0; i < burst; i++ {
+						err := gcase.Unary(ctx, cli)
 						if err != nil {
 							log.Println(err)
 						}
@@ -149,42 +157,24 @@ func handleGetRegion(ctx context.Context, pdClis []pdpb.PDClient) {
 					return
 				}
 			}
-		}(pdCli)
+		}(cli)
 	}
 }
 
-func handleScanRegions(ctx context.Context, pdClis []pdpb.PDClient) {
-	g := func(id int, keyLen int) []byte {
-		k := make([]byte, keyLen)
-		copy(k, fmt.Sprintf("%010d", id))
-		return k
-	}
-	if *regionsQps == 0 {
-		log.Println("handleScanRegions qps = 0, exit")
-		return
-	}
-	tt := base / *regionsQps * *concurrency * *brust
-	for _, pdCli := range pdClis {
-		go func(pdCli pdpb.PDClient) {
+func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []*http.Client) {
+	log.Printf("begin to run http case %s", hcase.Name())
+	qps := hcase.GetQPS()
+	burst := hcase.GetBurst()
+	tt := base / qps * burst * *concurrency
+	for _, hCli := range httpClis {
+		go func(hCli *http.Client) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
 			defer ticker.Stop()
 			for {
 				select {
 				case <-ticker.C:
-					upperBound := *regionNum / *regionsSample
-					random := rand.Intn(upperBound)
-					startID := *regionsSample*random*4 + 1
-					endID := *regionsSample*(random+1)*4 + 1
-					req := &pdpb.ScanRegionsRequest{
-						Header: &pdpb.RequestHeader{
-							ClusterId: clusterID,
-						},
-						Limit:    int32(*regionsSample),
-						StartKey: g(startID, 56),
-						EndKey:   g(endID, 56),
-					}
-					for i := 0; i < *brust; i++ {
-						_, err := pdCli.ScanRegions(ctx, req)
+					for i := 0; i < burst; i++ {
+						err := hcase.Do(ctx, hCli)
 						if err != nil {
 							log.Println(err)
 						}
@@ -194,118 +184,7 @@ func handleScanRegions(ctx context.Context, pdClis []pdpb.PDClient) {
 					return
 				}
 			}
-		}(pdCli)
-	}
-}
-
-func handleRegionsStats(ctx context.Context, httpClis []*http.Client) {
-	g := func(id int, keyLen int) []byte {
-		k := make([]byte, keyLen)
-		copy(k, fmt.Sprintf("%010d", id))
-		return k
-	}
-	if *regionStatsQps == 0 {
-		log.Println("handleRegionsStats qps = 0, exit")
-		return
-	}
-	tt := base / *regionStatsQps * *concurrency * *brust
-	for _, pdCli := range httpClis {
-		go func(pdCli *http.Client) {
-			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					upperBound := *regionNum / *regionsSample
-					random := rand.Intn(upperBound)
-					startID := *regionsSample*random*4 + 1
-					endID := *regionsSample*(random+1)*4 + 1
-					for i := 0; i < *brust; i++ {
-						req, _ := http.NewRequest(http.MethodGet, "http://"+*pdAddr+fmt.Sprintf("/pd/api/v1/stats/region?start_key=%s&end_key=%s&%s",
-							url.QueryEscape(string(g(startID, 56))),
-							url.QueryEscape(string(g(endID, 56))),
-							"",
-						), nil)
-						res, err := pdCli.Do(req)
-						if err != nil {
-							log.Println(err)
-						}
-						res.Body.Close()
-					}
-				case <-ctx.Done():
-					log.Println("Got signal to exit handleScanRegions")
-					return
-				}
-			}
-		}(pdCli)
-	}
-}
-
-func handleGetStore(ctx context.Context, pdClis []pdpb.PDClient) {
-	if *storeQps == 0 {
-		log.Println("handleGetStore qps = 0, exit")
-		return
-	}
-	tt := base / *storeQps * *concurrency * *brust
-	for _, pdCli := range pdClis {
-		go func(pdCli pdpb.PDClient) {
-			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					req := &pdpb.GetStoreRequest{
-						Header: &pdpb.RequestHeader{
-							ClusterId: clusterID,
-						},
-					}
-					storeID := rand.Intn(*maxStoreID) + 1
-					req.StoreId = uint64(storeID)
-					for i := 0; i < *brust; i++ {
-						_, err := pdCli.GetStore(ctx, req)
-						if err != nil {
-							log.Println(err)
-						}
-					}
-				case <-ctx.Done():
-					log.Println("Got signal to exit handleGetStore")
-					return
-				}
-			}
-		}(pdCli)
-	}
-}
-
-func handleGetStores(ctx context.Context, pdClis []pdpb.PDClient) {
-	if *storesQps == 0 {
-		log.Println("handleGetStores qps = 0, exit")
-		return
-	}
-	tt := base / *storesQps * *concurrency * *brust
-	for _, pdCli := range pdClis {
-		go func(pdCli pdpb.PDClient) {
-			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					req := &pdpb.GetAllStoresRequest{
-						Header: &pdpb.RequestHeader{
-							ClusterId: clusterID,
-						},
-					}
-					for i := 0; i < *brust; i++ {
-						_, err := pdCli.GetAllStores(ctx, req)
-						if err != nil {
-							log.Println(err)
-						}
-					}
-				case <-ctx.Done():
-					log.Println("Got signal to exit handleGetStores")
-					return
-				}
-			}
-		}(pdCli)
+		}(hCli)
 	}
 }
 
@@ -313,13 +192,18 @@ func exit(code int) {
 	os.Exit(code)
 }
 
-func newClient() pdpb.PDClient {
-	addr := trimHTTPPrefix(*pdAddr)
-	cc, err := grpc.Dial(addr, grpc.WithInsecure())
-	if err != nil {
-		log.Fatal("failed to create gRPC connection", zap.Error(err))
+// newHttpClient returns an HTTP(s) client.
+func newHttpClient() *http.Client {
+	// defaultTimeout for non-context requests.
+	const defaultTimeout = 30 * time.Second
+	cli := &http.Client{Timeout: defaultTimeout}
+	tlsConf := loadTLSConfig()
+	if tlsConf != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = tlsConf
+		cli.Transport = transport
 	}
-	return pdpb.NewPDClient(cc)
+	return cli
 }
 
 func trimHTTPPrefix(str string) string {
@@ -328,15 +212,56 @@ func trimHTTPPrefix(str string) string {
 	return str
 }
 
-func initClusterID(ctx context.Context, cli pdpb.PDClient) {
-	cctx, cancel := context.WithCancel(ctx)
-	res, err := cli.GetMembers(cctx, &pdpb.GetMembersRequest{})
-	cancel()
+// newPDClient returns a pd client.
+func newPDClient() pd.Client {
+	const (
+		keepaliveTime    = 10 * time.Second
+		keepaliveTimeout = 3 * time.Second
+	)
+
+	addrs := []string{trimHTTPPrefix(*pdAddr)}
+	pdCli, err := pd.NewClient(addrs, pd.SecurityOption{
+		CAPath:   *caPath,
+		CertPath: *certPath,
+		KeyPath:  *keyPath,
+	},
+		pd.WithGRPCDialOptions(
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{
+				Time:    keepaliveTime,
+				Timeout: keepaliveTimeout,
+			}),
+		))
 	if err != nil {
-		log.Fatal("failed to get members", zap.Error(err))
+		log.Fatal("fail to create pd client", zap.Error(err))
 	}
-	if res.GetHeader().GetError() != nil {
-		log.Fatal("failed to get members", zap.String("err", res.GetHeader().GetError().String()))
+	return pdCli
+}
+
+func loadTLSConfig() *tls.Config {
+	if len(*caPath) == 0 {
+		return nil
 	}
-	clusterID = res.GetHeader().GetClusterId()
+	caData, err := os.ReadFile(*caPath)
+	if err != nil {
+		log.Println("fail to read ca file", zap.Error(err))
+	}
+	certData, err := os.ReadFile(*certPath)
+	if err != nil {
+		log.Println("fail to read cert file", zap.Error(err))
+	}
+	keyData, err := os.ReadFile(*keyPath)
+	if err != nil {
+		log.Println("fail to read key file", zap.Error(err))
+	}
+
+	tlsConf, err := tlsutil.TLSConfig{
+		SSLCABytes:   caData,
+		SSLCertBytes: certData,
+		SSLKEYBytes:  keyData,
+	}.ToTLSConfig()
+	if err != nil {
+		log.Fatal("failed to load tlc config", zap.Error(err))
+	}
+
+	return tlsConf
 }
