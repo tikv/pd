@@ -78,6 +78,21 @@ func (suite *evictSlowTrendTestSuite) TearDownTest() {
 	suite.cancel()
 }
 
+func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendBasicFuncs() {
+	es2, ok := suite.es.(*evictSlowTrendScheduler)
+	suite.True(ok)
+
+	suite.Equal(es2.conf.evictedStore(), uint64(0))
+	suite.Equal(es2.conf.candidate(), uint64(0))
+
+	// Test capture store 1
+	store := suite.tc.GetStore(1)
+	es2.conf.captureCandidate(store.GetID())
+	suite.Equal(es2.conf.lastEvictCandidate, es2.conf.evictCandidate)
+	suite.Equal(es2.conf.candidateCapturedSecs(), uint64(0))
+	suite.False(checkStoreReadyForRecover(suite.tc, store, es2.conf.candidateCapturedSecs()))
+}
+
 func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	es2, ok := suite.es.(*evictSlowTrendScheduler)
 	suite.True(ok)
