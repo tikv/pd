@@ -48,8 +48,10 @@ type slowCandidate struct {
 }
 
 type evictSlowTrendSchedulerConfig struct {
-	storage            endpoint.ConfigStorage
-	evictCandidate     slowCandidate
+	storage endpoint.ConfigStorage
+	// Candidate for eviction in current tick.
+	evictCandidate slowCandidate
+	// Last chosen candidate for eviction.
 	lastEvictCandidate slowCandidate
 
 	// Only evict one store for now
@@ -92,6 +94,9 @@ func (conf *evictSlowTrendSchedulerConfig) evictedStore() uint64 {
 	if len(conf.EvictedStores) == 0 {
 		return 0
 	}
+	// If a candidate passes all checks and proved to be slow, it will be
+	// recorded in `conf.EvictStores`, and `conf.lastEvictCandidate` will record
+	// the captured timestamp of this store.
 	return conf.EvictedStores[0]
 }
 
@@ -117,9 +122,11 @@ func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
 	}
 }
 
-func (conf *evictSlowTrendSchedulerConfig) popCandidate() uint64 {
+func (conf *evictSlowTrendSchedulerConfig) popCandidate(updLast bool) uint64 {
 	id := conf.evictCandidate.storeID
-	conf.lastEvictCandidate = conf.evictCandidate
+	if updLast {
+		conf.lastEvictCandidate = conf.evictCandidate
+	}
 	conf.evictCandidate = slowCandidate{}
 	return id
 }
@@ -224,7 +231,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			// slow node next time.
 			log.Info("store evicted by slow trend has been removed", zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:removed").Inc()
-		} else if checkStoreCanRecover(cluster, store, s.conf.candidateCapturedSecs()) {
+		} else if checkStoreCanRecover(cluster, store, DurationSinceAsSecs(s.conf.lastEvictCandidate.captureTS)) {
 			log.Info("store evicted by slow trend has been recovered", zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:recovered").Inc()
 		} else {
@@ -255,7 +262,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 
 	slowStore := cluster.GetStore(slowStoreID)
 	if !candFreshCaptured && checkStoreFasterThanOthers(cluster, slowStore) {
-		s.conf.popCandidate()
+		s.conf.popCandidate(false)
 		log.Info("slow store candidate by trend has been cancel", zap.Uint64("store-id", slowStoreID))
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.cancel:too-faster").Inc()
 		return ops, nil
@@ -271,7 +278,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 		zap.Uint64("store-id", slowStoreID),
 		zap.Uint64("candidate-captured-secs", candCapturedSecs))
 	storeSlowTrendMiscGauge.WithLabelValues("cand.captured.secs").Set(float64(candCapturedSecs))
-	if err := s.prepareEvictLeader(cluster, s.conf.popCandidate()); err != nil {
+	if err := s.prepareEvictLeader(cluster, s.conf.popCandidate(true)); err != nil {
 		log.Info("prepare for evicting leader by slow trend failed", zap.Error(err), zap.Uint64("store-id", slowStoreID))
 		storeSlowTrendActionStatusGauge.WithLabelValues("evict.prepare.err").Inc()
 		return ops, nil
