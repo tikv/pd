@@ -33,10 +33,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/apiutil"
+	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -475,7 +473,7 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	mustBootstrapCluster(re, svr)
 	regionCount := 100000
 	for i := 0; i < regionCount; i++ {
-		r := core.NewTestRegionInfo(uint64(i+2), 1,
+		r := core.NewTestRegionInfoWithID(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
 			[]byte(fmt.Sprintf("%09d", i+1)),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
@@ -864,7 +862,7 @@ func BenchmarkGetRegions(b *testing.B) {
 	mustBootstrapCluster(re, svr)
 	regionCount := 1000000
 	for i := 0; i < regionCount; i++ {
-		r := core.NewTestRegionInfo(uint64(i+2), 1,
+		r := core.NewTestRegionInfoWithID(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
 			[]byte(fmt.Sprintf("%09d", i+1)),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
