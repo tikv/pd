@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	severcfg "github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -81,17 +82,31 @@ func (suite *configTestSuite) TestConfigWatch() {
 	re.Equal(sc.DefaultSplitMergeInterval, watcher.GetScheduleConfig().SplitMergeInterval.Duration)
 	re.Equal("0.0.0", watcher.GetClusterVersion().String())
 	// Update the config and check if the scheduling config watcher can get the latest value.
-	suite.pdLeaderServer.GetPersistOptions().SetMaxReplicas(5)
+	persistOpts := suite.pdLeaderServer.GetPersistOptions()
+	persistOpts.SetMaxReplicas(5)
 	persistConfig(re, suite.pdLeaderServer)
 	testutil.Eventually(re, func() bool {
 		return watcher.GetReplicationConfig().MaxReplicas == 5
 	})
-	suite.pdLeaderServer.GetPersistOptions().SetSplitMergeInterval(2 * sc.DefaultSplitMergeInterval)
+	persistOpts.SetSplitMergeInterval(2 * sc.DefaultSplitMergeInterval)
 	persistConfig(re, suite.pdLeaderServer)
 	testutil.Eventually(re, func() bool {
 		return watcher.GetScheduleConfig().SplitMergeInterval.Duration == 2*sc.DefaultSplitMergeInterval
 	})
-	suite.pdLeaderServer.GetPersistOptions().SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	persistOpts.SetStoreConfig(&severcfg.StoreConfig{
+		Coprocessor: severcfg.Coprocessor{
+			RegionMaxSize: "144MiB",
+		},
+		Storage: severcfg.Storage{
+			Engine: severcfg.RaftstoreV2,
+		},
+	})
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return watcher.GetStoreConfig().GetRegionMaxSize() == 144 &&
+			watcher.GetStoreConfig().IsRaftKV2()
+	})
+	persistOpts.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	persistConfig(re, suite.pdLeaderServer)
 	testutil.Eventually(re, func() bool {
 		return watcher.GetClusterVersion().String() == "4.0.0"

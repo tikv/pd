@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
+	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -193,6 +194,7 @@ type PersistConfig struct {
 	clusterVersion unsafe.Pointer
 	schedule       atomic.Value
 	replication    atomic.Value
+	storeConfig    atomic.Value
 }
 
 // NewPersistConfig creates a new PersistConfig instance.
@@ -201,6 +203,9 @@ func NewPersistConfig(cfg *Config) *PersistConfig {
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.schedule.Store(&cfg.Schedule)
 	o.replication.Store(&cfg.Replication)
+	// storeConfig will be fetched from TiKV by PD API server,
+	// so we just set an empty value here first.
+	o.storeConfig.Store(&config.StoreConfig{})
 	return o
 }
 
@@ -232,6 +237,19 @@ func (o *PersistConfig) GetReplicationConfig() *sc.ReplicationConfig {
 // SetReplicationConfig sets the PD replication configuration.
 func (o *PersistConfig) SetReplicationConfig(cfg *sc.ReplicationConfig) {
 	o.replication.Store(cfg)
+}
+
+// SetStoreConfig sets the TiKV store configuration.
+func (o *PersistConfig) SetStoreConfig(cfg *config.StoreConfig) {
+	// Some of the fields won't be persisted and watched,
+	// so we need to adjust it here before storing it.
+	cfg.Adjust()
+	o.storeConfig.Store(cfg)
+}
+
+// GetStoreConfig returns the TiKV store configuration.
+func (o *PersistConfig) GetStoreConfig() *config.StoreConfig {
+	return o.storeConfig.Load().(*config.StoreConfig)
 }
 
 // GetMaxReplicas returns the max replicas.
