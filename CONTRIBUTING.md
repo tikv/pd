@@ -1,7 +1,12 @@
 # How to contribute
 
-This document outlines some of the conventions on development workflow, commit message formatting, contact points and other
-resources to make it easier to get your contribution accepted.
+Thanks for your interest in contributing to PD! If you need any help or mentoring getting started, understanding the codebase, or making a PR (or anything else really), please ask on [#sig-scheduling (Slack channel)](https://slack.tidb.io/invite?team=tikv-wg&channel=sig-scheduling&ref=pingcap-community).
+
+## Finding something to work on
+
+For beginners, we have prepared many suitable tasks for you. Checkout our [Help Wanted issues](https://github.com/tikv/pd/issues?q=is%3Aopen+is%3Aissue+label%3Astatus%2Fhelp-wanted) list, in which we have also marked the difficulty level.
+
+If you are planning something big, for example, relates to multiple components or changes current behaviors, make sure to open an issue to discuss with us before going on.
 
 ## Getting started
 
@@ -19,7 +24,7 @@ This is a rough outline of what a contributor's workflow looks like:
 - Make sure your commit messages are in the proper format (see below).
 - Push your changes to a topic branch in your fork of the repository.
 - Submit a pull request.
-- Your PR must receive LGTMs from two maintainers.
+- Your PR must receive LGTMs from two reviewers.
 
 More specifics on the development workflow are in [development workflow](./docs/development-workflow.md).
 
@@ -31,7 +36,7 @@ Thanks for your contributions!
 
 The coding style suggested by the Golang community is used in PD. See the [style doc](https://github.com/golang/go/wiki/CodeReviewComments) for details.
 
-Please follow this style to make TiKV easy to review, maintain and develop.
+Please follow this style to make PD easy to review, maintain and develop.
 
 ### Format of the Commit Message
 
@@ -52,7 +57,7 @@ The format can be described more formally as follows:
 <BLANK LINE>
 <why this change was made>
 <BLANK LINE>
-<footer>(optional)
+<footer>
 ```
 
 The first line is the subject and should be no longer than 70 characters, the
@@ -67,3 +72,9 @@ If the change affects many subsystems, you can use ```*``` instead, like ```*:``
 For the why part, if no specific reason for the change,
 you can use one of some generic reasons like "Improve documentation.",
 "Improve performance.", "Improve robustness.", "Improve test coverage."
+
+### Signing off the Commit
+
+The project uses [DCO check](https://github.com/probot/dco#how-it-works) and the commit message must contain a `Signed-off-by` line for [Developer Certificate of Origin](https://developercertificate.org/).
+
+Use option `git commit -s` to sign off your commits. 
