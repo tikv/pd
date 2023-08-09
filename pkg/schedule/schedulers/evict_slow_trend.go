@@ -289,7 +289,7 @@ func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSl
 }
 
 func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate slowCandidate) (slowStore *core.StoreInfo) {
-	isRaftKV2 := cluster.GetStoreConfig().IsRaftKV2()
+	isRaftKV2 := cluster.GetPersistOptions().IsRaftKV2()
 	stores := cluster.GetStores()
 	if len(stores) < 3 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-few").Inc()
@@ -326,12 +326,12 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate slow
 				// re-check whether this node is still encountering network I/O-related jitters. And If this node matches
 				// the last identified candidate, it indicates that the node is still being affected by delays in network I/O,
 				// and consequently, it should be re-designated as slow once more.
-				// Prerequisite: `raft-kv-2` engine has the ability to percept the slow trend on network io jitters.
+				// Prerequisite: `raft-kv2` engine has the ability to percept the slow trend on network io jitters.
 				// TODO: debugging
 				if lastEvictCandidate != (slowCandidate{}) && lastEvictCandidate.storeID == store.GetID() && DurationSinceAsSecs(lastEvictCandidate.captureTS) <= minReCheckDurationGap {
 					candidates = append(candidates, store)
 					storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
-					log.Info("[Debugging] evict-slow-trend-scheduler pre-captured candidate for raft-kv-2",
+					log.Info("[Debugging] evict-slow-trend-scheduler pre-captured candidate for raft-kv2",
 						zap.Uint64("store-id", store.GetID()),
 						zap.Float64("cause-rate", slowTrend.CauseRate),
 						zap.Float64("result-rate", slowTrend.ResultRate),

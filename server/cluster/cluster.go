@@ -429,7 +429,7 @@ func (c *RaftCluster) runStoreConfigSync() {
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
-			// If the cluster was set up with `raft-kv-2` engine, this cluster should
+			// If the cluster was set up with `raft-kv2` engine, this cluster should
 			// open `evict-slow-trend` scheduler as default.
 			{
 				name := schedulers.EvictSlowTrendType
