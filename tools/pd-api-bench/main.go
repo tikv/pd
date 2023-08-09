@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -38,8 +39,8 @@ import (
 var (
 	pdAddr = flag.String("pd", "127.0.0.1:2379", "pd address")
 	// min-resolved-ts
-	minResolvedTSByGRPC = flag.Bool("min-resolved-ts-grpc", false, "min-resolved-ts by grpc qps")
-	minResolvedTSByHTTP = flag.Bool("min-resolved-ts-http", false, "min-resolved-ts by http qps")
+	minResolvedTSByGRPC = flag.Bool("min-resolved-ts-grpc", false, "min-resolved-ts by grpc")
+	minResolvedTSByHTTP = flag.Bool("min-resolved-ts-http", false, "min-resolved-ts by http")
 	// concurrency
 	client = flag.Int("client", 1, "client number")
 	// qps
@@ -51,6 +52,7 @@ var (
 )
 
 var base = int(time.Second) / int(time.Millisecond)
+var wg sync.WaitGroup
 
 func main() {
 	flag.Parse()
@@ -75,6 +77,7 @@ func main() {
 	}
 
 	<-ctx.Done()
+	wg.Wait()
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)
@@ -86,6 +89,7 @@ func main() {
 func handleMinResolvedTSByGRPC(ctx context.Context) {
 	log.Println("handleMinResolvedTSByGRPC start...")
 	tt := base / *qps
+	wg.Add(*client)
 	for i := 0; i < *client; i++ {
 		pdCli := newPDClient()
 		go func() {
@@ -101,6 +105,7 @@ func handleMinResolvedTSByGRPC(ctx context.Context) {
 					}
 				case <-ctx.Done():
 					log.Println("Got signal to exit handleMinResolvedTSByGRPC")
+					wg.Done()
 					return
 				}
 			}
@@ -119,6 +124,7 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 
 	tt := base / *qps
 	httpsCli := newHttpClient()
+	wg.Add(*client)
 	for i := 0; i < *client; i++ {
 		go func() {
 			// Mock client-go's request frequency.
@@ -131,14 +137,19 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 					req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%d", url, storeID), nil)
 					res, err := httpsCli.Do(req)
 					if err != nil {
-						log.Println("error: ", err)
+						log.Println("request failed, error: ", err)
 						continue
 					}
 					listResp := &minResolvedTS{}
-					apiutil.ReadJSON(res.Body, listResp)
+					err = apiutil.ReadJSON(res.Body, listResp)
+					if err != nil {
+						log.Println("receive resp failed, error: ", err)
+						continue
+					}
 					res.Body.Close()
 				case <-ctx.Done():
 					log.Println("Got signal to exit handleMinResolvedTSByHTTP")
+					wg.Done()
 					return
 				}
 			}

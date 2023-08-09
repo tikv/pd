@@ -136,7 +136,7 @@ type Client interface {
 	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error)
 	// StoreGlobalConfig set the config from etcd
 	StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error
-	// WatchGlobalConfig returns an stream with all global config and updates
+	// WatchGlobalConfig returns a stream with all global config and updates
 	WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error)
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
