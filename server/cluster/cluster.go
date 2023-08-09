@@ -1451,6 +1451,7 @@ func (c *RaftCluster) ReduceHotThresholds() {
 	c.hotSpotCache.ReduceHotThresholds()
 }
 
+
 // CheckWriteStatus checks the write status, returns whether need update statistics and item.
 func (c *RaftCluster) CheckWriteStatus(region *core.RegionInfo) []*statistics.HotPeerStat {
 	return c.hotSpotCache.CheckWrite(region, c.storesStats)

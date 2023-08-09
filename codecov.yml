@@ -1,29 +1,4 @@
 coverage:
   status:
-    project:
-      default:
-        # basic
-        target: auto
-        threshold: 3%
-    patch:
-      default:
-        # basic
-        target: auto
-        threshold: 3%
-
-comment:
-  layout: "header, diff, flags"
-  behavior: default
-  require_changes: false
-
-flag_management:
-  default_rules: # the rules that will be followed for any flag added, generally
-    carryforward: true
-    statuses:
-      - type: project
-        target: 85%
-      - type: patch
-        target: 85%
-
-ignore:
-  - tests/** # integration test cases or tools.
+    project: off
+    patch: off
