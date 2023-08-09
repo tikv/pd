@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -1384,6 +1386,49 @@ func TestStoreConfigUpdate(t *testing.T) {
 		re.Equal(uint64(96), opt.GetRegionBucketSize())
 		re.True(opt.IsRaftKV2())
 	}
+}
+
+func TestRemoveUnhealthyStore(t *testing.T) {
+	arr := []int{1, 2, 3}
+	re := require.New(t)
+	index := 0
+	arr = append(arr[:index], arr[index+1:]...)
+	re.Len(arr, 2)
+}
+
+func TestSyncConfigContext(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(ctx, opt)
+	tc.httpClient = &http.Client{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		time.Sleep(time.Second * 100)
+		cfg := &config.StoreConfig{}
+		b, err := json.Marshal(cfg)
+		if err != nil {
+			res.WriteHeader(http.StatusInternalServerError)
+			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			return
+		}
+
+		res.WriteHeader(http.StatusOK)
+		res.Write(b)
+	}))
+	stores := newTestStores(1, "2.0.0")
+	for _, s := range stores {
+		re.NoError(tc.putStoreLocked(s))
+	}
+	// trip schema header
+	now := time.Now()
+	stores[0].GetMeta().StatusAddress = server.URL[7:]
+	synced, _ := tc.syncStoreConfig(tc.GetStores())
+	re.False(synced)
+	re.Less(time.Since(now), clientTimeout*2)
 }
 
 func TestStoreConfigSync(t *testing.T) {

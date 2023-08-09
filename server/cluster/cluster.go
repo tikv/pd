@@ -15,6 +15,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -450,6 +451,12 @@ func (c *RaftCluster) runStoreConfigSync() {
 //   - `switchRaftV2` is true if the config of tikv engine is change to raft-kv2.
 func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, switchRaftV2 bool) {
 	for index := 0; index < len(stores); index++ {
+		select {
+		case <-c.ctx.Done():
+			log.Info("sync store config job is stopped")
+			return
+		default:
+		}
 		// filter out the stores that are tiflash
 		store := stores[index]
 		if store.IsTiFlash() {
@@ -462,8 +469,11 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		}
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
-		switchRaftV2, err := c.observeStoreConfig(address)
+		switchRaftV2, err := c.observeStoreConfig(c.ctx, address)
 		if err != nil {
+			// delete the store if it is failed and retry next store.
+			stores = append(stores[:index], stores[index+1:]...)
+			index--
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
@@ -479,8 +489,8 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 
 // observeStoreConfig is used to observe the store config changes and
 // return whether if the new config changes the engine to raft-kv2.
-func (c *RaftCluster) observeStoreConfig(address string) (bool, error) {
-	cfg, err := c.fetchStoreConfigFromTiKV(address)
+func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (bool, error) {
+	cfg, err := c.fetchStoreConfigFromTiKV(ctx, address)
 	if err != nil {
 		return false, err
 	}
@@ -503,7 +513,7 @@ func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *config.StoreConfig) (bool, 
 }
 
 // fetchStoreConfigFromTiKV tries to fetch the config from the TiKV store URL.
-func (c *RaftCluster) fetchStoreConfigFromTiKV(statusAddress string) (*config.StoreConfig, error) {
+func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddress string) (*config.StoreConfig, error) {
 	cfg := &config.StoreConfig{}
 	failpoint.Inject("mockFetchStoreConfigFromTiKV", func(val failpoint.Value) {
 		if regionMaxSize, ok := val.(string); ok {
@@ -521,12 +531,20 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(statusAddress string) (*config.St
 	} else {
 		url = fmt.Sprintf("%s://%s/config", "http", statusAddress)
 	}
-	resp, err := c.httpClient.Get(url)
+	ctx, cancel := context.WithTimeout(ctx, clientTimeout)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewBuffer(nil))
 	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create http request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		cancel()
 		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
