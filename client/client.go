@@ -1460,6 +1460,9 @@ func trimHTTPPrefix(str string) string {
 }
 
 func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return nil, 0, errs.ErrClientGetProtoClient
@@ -1489,6 +1492,9 @@ func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items
 	for i, it := range items {
 		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType, Payload: it.PayLoad}
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return errs.ErrClientGetProtoClient
@@ -1504,6 +1510,9 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 	// TODO: Add retry mechanism
 	// register watch components there
 	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return nil, errs.ErrClientGetProtoClient
@@ -1550,6 +1559,9 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 }
 
 func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return 0, errs.ErrClientGetProtoClient
@@ -1568,6 +1580,9 @@ func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
 }
 
 func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) error {
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return errs.ErrClientGetProtoClient

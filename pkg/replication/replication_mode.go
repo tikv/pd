@@ -340,25 +340,29 @@ func (m *ModeManager) Run(ctx context.Context) {
 
 	go func() {
 		defer wg.Done()
+		ticker := time.NewTicker(tickInterval)
+		defer ticker.Stop()
 		for {
 			select {
-			case <-time.After(tickInterval):
+			case <-ticker.C:
+				m.tickUpdateState()
 			case <-ctx.Done():
 				return
 			}
-			m.tickUpdateState()
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
+		ticker := time.NewTicker(replicateStateInterval)
+		defer ticker.Stop()
 		for {
 			select {
-			case <-time.After(replicateStateInterval):
+			case <-ticker.C:
+				m.tickReplicateStatus()
 			case <-ctx.Done():
 				return
 			}
-			m.tickReplicateStatus()
 		}
 	}()
 
