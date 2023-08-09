@@ -634,8 +634,8 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
-// GetFlashbackStartTs returns the region's FlashbackStartTs.
-func (r *RegionInfo) GetFlashbackStartTs() uint64 {
+// GetFlashbackStartTS returns the region's FlashbackStartTs.
+func (r *RegionInfo) GetFlashbackStartTS() uint64 {
 	return r.meta.FlashbackStartTs
 }
 
@@ -771,9 +771,12 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
 			}
-			if region.GetFlashbackStartTs() != origin.GetFlashbackStartTs() ||
+			// Do not save to kv, because 1) flashback will be eventually set to
+			// false, 2) flashback changes almost all regions in a cluster.
+			// Saving kv may downgrade PD performance when there are many regions.
+			if region.GetFlashbackStartTS() != origin.GetFlashbackStartTS() ||
 				region.GetIsInFlashback() != origin.GetIsInFlashback() {
-				saveKV, saveCache = true, true
+				saveCache = true
 				return
 			}
 		}
