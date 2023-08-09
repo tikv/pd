@@ -117,12 +117,12 @@ var HTTPCaseMap = map[string]HTTPCase{
 	"GetMinResolvedTS": newMinResolvedTS(),
 }
 
-type MinResolvedTS struct {
+type minResolvedTS struct {
 	*baseCase
 }
 
-func newMinResolvedTS() *MinResolvedTS {
-	return &MinResolvedTS{
+func newMinResolvedTS() *minResolvedTS {
+	return &minResolvedTS{
 		baseCase: &baseCase{
 			name:  "GetMinResolvedTS",
 			qps:   1000,
@@ -131,7 +131,7 @@ func newMinResolvedTS() *MinResolvedTS {
 	}
 }
 
-func (c *MinResolvedTS) Do(ctx context.Context, cli *http.Client) error {
+func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
 	storeIdx := rand.Intn(int(totalStore))
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, PDAddress+fmt.Sprintf("pd/api/v1/min-resolved-ts/%d", storesID[storeIdx]), nil)
 	res, err := cli.Do(req)
@@ -142,13 +142,13 @@ func (c *MinResolvedTS) Do(ctx context.Context, cli *http.Client) error {
 	return nil
 }
 
-type RegionsStats struct {
+type regionsStats struct {
 	*baseCase
 	regionSample int
 }
 
-func newRegionStats() *RegionsStats {
-	return &RegionsStats{
+func newRegionStats() *regionsStats {
+	return &regionsStats{
 		baseCase: &baseCase{
 			name:  "GetRegionStatus",
 			qps:   100,
@@ -158,7 +158,7 @@ func newRegionStats() *RegionsStats {
 	}
 }
 
-func (c *RegionsStats) Do(ctx context.Context, cli *http.Client) error {
+func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 	upperBound := int(totalRegion) / c.regionSample
 	if upperBound < 1 {
 		upperBound = 1
@@ -179,12 +179,12 @@ func (c *RegionsStats) Do(ctx context.Context, cli *http.Client) error {
 	return nil
 }
 
-type GetRegion struct {
+type getRegion struct {
 	*baseCase
 }
 
-func newGetRegion() *GetRegion {
-	return &GetRegion{
+func newGetRegion() *getRegion {
+	return &getRegion{
 		baseCase: &baseCase{
 			name:  "GetRegion",
 			qps:   10000,
@@ -193,7 +193,7 @@ func newGetRegion() *GetRegion {
 	}
 }
 
-func (c *GetRegion) Unary(ctx context.Context, cli pd.Client) error {
+func (c *getRegion) Unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(int(totalRegion))*4 + 1
 	for i := 0; i < c.burst; i++ {
 		_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
@@ -204,13 +204,13 @@ func (c *GetRegion) Unary(ctx context.Context, cli pd.Client) error {
 	return nil
 }
 
-type ScanRegions struct {
+type scanRegions struct {
 	*baseCase
 	regionSample int
 }
 
-func newScanRegions() *ScanRegions {
-	return &ScanRegions{
+func newScanRegions() *scanRegions {
+	return &scanRegions{
 		baseCase: &baseCase{
 			name:  "ScanRegions",
 			qps:   10000,
@@ -220,7 +220,7 @@ func newScanRegions() *ScanRegions {
 	}
 }
 
-func (c *ScanRegions) Unary(ctx context.Context, cli pd.Client) error {
+func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
 	upperBound := int(totalRegion) / c.regionSample
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
@@ -234,12 +234,12 @@ func (c *ScanRegions) Unary(ctx context.Context, cli pd.Client) error {
 	return nil
 }
 
-type GetStore struct {
+type getStore struct {
 	*baseCase
 }
 
-func newGetStore() *GetStore {
-	return &GetStore{
+func newGetStore() *getStore {
+	return &getStore{
 		baseCase: &baseCase{
 			name:  "GetStore",
 			qps:   10000,
@@ -248,7 +248,7 @@ func newGetStore() *GetStore {
 	}
 }
 
-func (c *GetStore) Unary(ctx context.Context, cli pd.Client) error {
+func (c *getStore) Unary(ctx context.Context, cli pd.Client) error {
 	storeIdx := rand.Intn(int(totalStore))
 	for i := 0; i < c.burst; i++ {
 		_, err := cli.GetStore(ctx, storesID[storeIdx])
@@ -259,12 +259,12 @@ func (c *GetStore) Unary(ctx context.Context, cli pd.Client) error {
 	return nil
 }
 
-type GetStores struct {
+type getStores struct {
 	*baseCase
 }
 
-func newGetStores() *GetStores {
-	return &GetStores{
+func newGetStores() *getStores {
+	return &getStores{
 		baseCase: &baseCase{
 			name:  "GetStores",
 			qps:   10000,
@@ -273,7 +273,7 @@ func newGetStores() *GetStores {
 	}
 }
 
-func (c *GetStores) Unary(ctx context.Context, cli pd.Client) error {
+func (c *getStores) Unary(ctx context.Context, cli pd.Client) error {
 	for i := 0; i < c.burst; i++ {
 		_, err := cli.GetAllStores(ctx)
 		if err != nil {
