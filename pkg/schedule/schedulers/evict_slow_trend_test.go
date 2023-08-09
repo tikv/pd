@@ -102,6 +102,9 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendBasicFuncs() {
 	suite.Equal(es2.conf.lastEvictCandidate.storeID, uint64(1))
 	suite.Equal(es2.conf.evictCandidate.storeID, store.GetID())
 	suite.Equal(es2.conf.candidateCapturedSecs(), uint64(0))
+
+	suite.Equal(es2.conf.popCandidate(false), store.GetID())
+	suite.Equal(es2.conf.lastEvictCandidate.storeID, uint64(1))
 }
 
 func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
