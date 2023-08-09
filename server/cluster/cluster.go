@@ -441,7 +441,6 @@ func (c *RaftCluster) runSyncConfig() {
 					log.Warn("bootstrapping evict-slow-trend scheduler failed", zap.Uint64("cluster-id", c.clusterID), errs.ZapError(err))
 					return
 				}
-				log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 				if err = c.AddScheduler(s, args...); err != nil {
 					log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 				}

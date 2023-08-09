@@ -113,6 +113,9 @@ func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
 		storeID:   id,
 		captureTS: time.Now(),
 	}
+	if conf.lastEvictCandidate == (slowCandidate{}) {
+		conf.lastEvictCandidate = conf.evictCandidate
+	}
 }
 
 func (conf *evictSlowTrendSchedulerConfig) popCandidate() uint64 {
@@ -244,6 +247,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 	} else {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.continue").Inc()
 	}
+
 	slowStoreID := s.conf.candidate()
 	if slowStoreID == 0 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none").Inc()
@@ -257,8 +261,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.cancel:too-faster").Inc()
 		return ops, nil
 	}
-	slowStoreRecordTS := s.conf.captureTS()
-	if !checkStoresAreUpdated(cluster, slowStoreID, slowStoreRecordTS) {
+	if slowStoreRecordTS := s.conf.captureTS(); !checkStoresAreUpdated(cluster, slowStoreID, slowStoreRecordTS) {
 		log.Info("slow store candidate waiting for other stores to update heartbeats", zap.Uint64("store-id", slowStoreID))
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.wait").Inc()
 		return ops, nil
@@ -269,8 +272,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 		zap.Uint64("store-id", slowStoreID),
 		zap.Uint64("candidate-captured-secs", candCapturedSecs))
 	storeSlowTrendMiscGauge.WithLabelValues("cand.captured.secs").Set(float64(candCapturedSecs))
-	err := s.prepareEvictLeader(cluster, s.conf.popCandidate())
-	if err != nil {
+	if err := s.prepareEvictLeader(cluster, s.conf.popCandidate()); err != nil {
 		log.Info("prepare for evicting leader by slow trend failed", zap.Error(err), zap.Uint64("store-id", slowStoreID))
 		storeSlowTrendActionStatusGauge.WithLabelValues("evict.prepare.err").Inc()
 		return ops, nil
@@ -287,14 +289,15 @@ func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSl
 }
 
 func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate slowCandidate) (slowStore *core.StoreInfo) {
+	isRaftKV2 := cluster.GetStoreConfig().IsRaftKV2()
 	stores := cluster.GetStores()
 	if len(stores) < 3 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-few").Inc()
 		return
 	}
+
 	var candidates []*core.StoreInfo
 	var affectedStoreCount int
-	isRaftKV2 := cluster.GetStoreConfig().IsRaftKV2()
 	for _, store := range stores {
 		if store.IsRemoved() {
 			continue
@@ -342,12 +345,12 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate slow
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:no-fit").Inc()
 		return
 	}
-
 	// TODO: Calculate to judge if one store is way slower than the others
 	if len(candidates) > 1 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-many").Inc()
 		return
 	}
+
 	store := candidates[0]
 
 	affectedStoreThreshold := int(float64(len(stores)) * cluster.GetSchedulerConfig().GetSlowStoreEvictingAffectedStoreRatioThreshold())
@@ -484,16 +487,8 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 
 func checkStoreReadyForRecover(cluster sche.SchedulerCluster, target *core.StoreInfo, recoveryGap uint64) bool {
 	if targetSlowTrend := target.GetSlowTrend(); targetSlowTrend != nil {
-		leaderCount := target.GetLeaderCount()
-		learnerCount := target.GetLearnerCount()
-		witnessCount := target.GetWitnessCount()
-		regionCount := target.GetRegionCount()
-		// If the store still has no leaders, it means that the all leaders on the target store
-		// have been evicted. And it can be select as the candidate to make judgement whether
-		// it can be recovered.
-		noLeaders := regionCount > 0 && leaderCount == 0 && learnerCount == 0 && witnessCount == 0
 		// @TODO: setting the recovery time in SlowTrend
-		return noLeaders && recoveryGap >= defaultRecoveryDurationGap
+		return recoveryGap >= defaultRecoveryDurationGap
 	}
 	return true
 }
