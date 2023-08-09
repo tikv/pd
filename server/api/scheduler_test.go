@@ -170,7 +170,7 @@ func (suite *scheduleTestSuite) TestAPI() {
 				suite.NoError(err)
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
-					tu.StringEqual(re, "\"config item not found\"\n"))
+					tu.StringEqual(re, "\"Config item not found\"\n"))
 				suite.NoError(err)
 			},
 		},
@@ -263,7 +263,7 @@ func (suite *scheduleTestSuite) TestAPI() {
 				suite.NoError(err)
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
-					tu.StringEqual(re, "\"config item not found\"\n"))
+					tu.StringEqual(re, "\"Config item not found\"\n"))
 				suite.NoError(err)
 			},
 		},
