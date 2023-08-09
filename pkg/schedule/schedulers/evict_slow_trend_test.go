@@ -92,7 +92,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendBasicFuncs() {
 	suite.Equal(es2.conf.candidateCapturedSecs(), uint64(0))
 	suite.False(checkStoreReadyForRecover(suite.tc, store, es2.conf.candidateCapturedSecs()))
 
-	suite.Equal(es2.conf.popCandidate(), store.GetID())
+	suite.Equal(es2.conf.popCandidate(true), store.GetID())
 	suite.Equal(es2.conf.lastEvictCandidate.storeID, store.GetID())
 	suite.True(es2.conf.evictCandidate == (slowCandidate{}))
 
