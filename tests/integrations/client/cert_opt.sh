@@ -1,6 +1,12 @@
 #!/bin/bash
+cert_dir="$2"
+
 function generate_certs() {
-    if ! [[ "$0" =~ "./cert_opt.sh" ]]; then
+    if [[ ! -z "$cert_dir" ]]; then
+        cd "$cert_dir" || exit 255  # Change to the specified directory
+    fi
+
+    if ! [[ "$0" =~ "cert_opt.sh" ]]; then
         echo "must be run from 'cert'"
         exit 255
     fi
@@ -31,6 +37,10 @@ function generate_certs() {
 }
 
 function cleanup_certs() {
+    if [[ ! -z "$cert_dir" ]]; then
+        cd "$cert_dir" || exit 255  # Change to the specified directory
+    fi
+
     rm -f ca.pem ca-key.pem ca.srl
     rm -f pd-server.pem pd-server-key.pem pd-server.csr
     rm -f client.pem client-key.pem client.csr
@@ -41,5 +51,5 @@ if [[ "$1" == "generate" ]]; then
 elif [[ "$1" == "cleanup" ]]; then
     cleanup_certs
 else
-    echo "Usage: $0 [generate|cleanup]"
+    echo "Usage: $0 [generate|cleanup] <cert_directory>"
 fi

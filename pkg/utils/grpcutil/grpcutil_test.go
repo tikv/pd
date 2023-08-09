@@ -13,8 +13,8 @@ import (
 )
 
 var (
-	certPath   = "../../../tests/integrations/client"
-	certScript = "./cert_opt.sh"
+	certPath   = "../../../tests/integrations/client/"
+	certScript = "cert_opt.sh"
 )
 
 func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
@@ -28,14 +28,8 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 	return
 }
 
-func cmdCert(certsDir, script, args string) error {
-	currentDir, _ := os.Getwd()
-	// Change working directory
-	os.Chdir(certsDir)
-	defer os.Chdir(currentDir)
-
-	// Run the script
-	if err := exec.Command(script, args).Run(); err != nil {
+func cmdCert(script, args, certsDir string) error {
+	if err := exec.Command(script, args, certsDir).Run(); err != nil {
 		fmt.Println("Error running script:", err)
 		return err
 	}
@@ -43,11 +37,11 @@ func cmdCert(certsDir, script, args string) error {
 }
 
 func TestToTLSConfig(t *testing.T) {
-	if err := cmdCert(certPath, certScript, "generate"); err != nil {
+	if err := cmdCert(certPath+certScript, "generate", certPath); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := cmdCert(certPath, certScript, "cleanup"); err != nil {
+		if err := cmdCert(certPath+certScript, "cleanup", certPath); err != nil {
 			t.Fatal(err)
 		}
 	}()

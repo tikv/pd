@@ -59,20 +59,8 @@ var (
 	}
 )
 
-func cmdCert(certsDir, script, args string) error {
-	currentDir, _ := os.Getwd()
-	// cp script to certsDir
-	if err := copyFile(filepath.Join(currentDir, script), filepath.Join(certsDir, script)); err != nil {
-		return err
-	}
-	// chmod script
-	os.Chmod(filepath.Join(certsDir, script), 0755)
-	// Change working directory
-	os.Chdir(certsDir)
-	defer os.Chdir(currentDir)
-
-	// Run the script
-	if err := exec.Command(script, args).Run(); err != nil {
+func cmdCert(script, args, certsDir string) error {
+	if err := exec.Command(script, args, certsDir).Run(); err != nil {
 		fmt.Println("Error running script:", err)
 		return err
 	}
@@ -88,13 +76,13 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 		if err := os.Mkdir(path, 0755); err != nil {
 			t.Fatal(err)
 		}
-		if err := cmdCert(path, certScript, "generate"); err != nil {
+		if err := cmdCert(certScript, "generate", path); err != nil {
 			t.Fatal(err)
 		}
 	}
 	defer func() {
 		for _, path := range []string{certPath, certExpiredPath} {
-			if err := cmdCert(path, certScript, "cleanup"); err != nil {
+			if err := cmdCert(certScript, "cleanup", path); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.RemoveAll(path); err != nil {
