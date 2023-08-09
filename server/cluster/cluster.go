@@ -453,7 +453,7 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 	for index := 0; index < len(stores); index++ {
 		select {
 		case <-c.ctx.Done():
-			log.Info("sync store config job is stopped")
+			log.Info("stop sync store config job due to server shutdown")
 			return
 		default:
 		}
@@ -535,7 +535,7 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddres
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewBuffer(nil))
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("failed to create http request: %w", err)
+		return nil, fmt.Errorf("failed to create store config http request: %w", err)
 	}
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

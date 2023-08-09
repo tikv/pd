@@ -1388,14 +1388,6 @@ func TestStoreConfigUpdate(t *testing.T) {
 	}
 }
 
-func TestRemoveUnhealthyStore(t *testing.T) {
-	arr := []int{1, 2, 3}
-	re := require.New(t)
-	index := 0
-	arr = append(arr[:index], arr[index+1:]...)
-	re.Len(arr, 2)
-}
-
 func TestSyncConfigContext(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
