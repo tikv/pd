@@ -540,7 +540,6 @@ func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, r *http.Req
 // @Router   /regions/check/empty-region [get]
 func (h *regionsHandler) GetEmptyRegions(w http.ResponseWriter, r *http.Request) {
 	h.getRegionsByType(w, statistics.EmptyRegion, r)
-
 }
 
 func (h *regionsHandler) getRegionsByType(w http.ResponseWriter, t statistics.RegionStatisticType, r *http.Request) {
