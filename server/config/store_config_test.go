@@ -15,107 +15,10 @@
 package config
 
 import (
-	"crypto/tls"
-	"encoding/json"
-	"net/http"
 	"testing"
 
-	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 )
-
-func TestTiKVConfig(t *testing.T) {
-	re := require.New(t)
-	m := NewStoreConfigManager(nil)
-	// case1: big region.
-	{
-		body := `{ "coprocessor": {
-        "split-region-on-table": false,
-        "batch-split-limit": 2,
-        "region-max-size": "15GiB",
-        "region-split-size": "10GiB",
-        "region-max-keys": 144000000,
-        "region-split-keys": 96000000,
-        "consistency-check-method": "mvcc",
-        "perf-level": 2
-    	}}`
-		var config StoreConfig
-		re.NoError(json.Unmarshal([]byte(body), &config))
-		m.update(&config)
-		re.Equal(uint64(144000000), config.GetRegionMaxKeys())
-		re.Equal(uint64(96000000), config.GetRegionSplitKeys())
-		re.Equal(15*units.GiB/units.MiB, int(config.GetRegionMaxSize()))
-		re.Equal(uint64(10*units.GiB/units.MiB), config.GetRegionSplitSize())
-	}
-	//case2: empty config.
-	{
-		body := `{}`
-		var config StoreConfig
-		re.NoError(json.Unmarshal([]byte(body), &config))
-
-		re.Equal(uint64(1440000), config.GetRegionMaxKeys())
-		re.Equal(uint64(960000), config.GetRegionSplitKeys())
-		re.Equal(144, int(config.GetRegionMaxSize()))
-		re.Equal(uint64(96), config.GetRegionSplitSize())
-	}
-}
-
-func TestUpdateConfig(t *testing.T) {
-	re := require.New(t)
-	manager := NewTestStoreConfigManager([]string{"tidb.com"})
-	manager.ObserveConfig("tikv.com")
-	re.Equal(uint64(144), manager.GetStoreConfig().GetRegionMaxSize())
-	re.NotEqual(raftStoreV2, manager.GetStoreConfig().GetRegionMaxSize())
-	manager.ObserveConfig("tidb.com")
-	re.Equal(uint64(10), manager.GetStoreConfig().GetRegionMaxSize())
-	re.Equal(raftStoreV2, manager.GetStoreConfig().Engine)
-
-	// case2: the config should not update if config is same expect some ignore field.
-	c, err := manager.source.GetConfig("tidb.com")
-	re.NoError(err)
-	re.True(manager.GetStoreConfig().Equal(c))
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   &tls.Config{},
-		},
-	}
-	manager = NewStoreConfigManager(client)
-	re.Equal("http", manager.source.(*TiKVConfigSource).schema)
-}
-
-func TestParseConfig(t *testing.T) {
-	re := require.New(t)
-	m := NewStoreConfigManager(nil)
-	body := `
-{
-"coprocessor":{
-"split-region-on-table":false,
-"batch-split-limit":10,
-"region-max-size":"384MiB",
-"region-split-size":"256MiB",
-"region-max-keys":3840000,
-"region-split-keys":2560000,
-"consistency-check-method":"mvcc",
-"enable-region-bucket":true,
-"region-bucket-size":"96MiB",
-"region-size-threshold-for-approximate":"384MiB",
-"region-bucket-merge-size-ratio":0.33
-},
-"storage":{
-	"engine":"raft-kv2"
-}
-}
-`
-
-	var config StoreConfig
-	re.NoError(json.Unmarshal([]byte(body), &config))
-	m.update(&config)
-	re.Equal(uint64(96), config.GetRegionBucketSize())
-	re.True(config.IsRaftKV2())
-	re.Equal(raftStoreV2, config.Storage.Engine)
-}
 
 func TestMergeCheck(t *testing.T) {
 	re := require.New(t)

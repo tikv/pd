@@ -57,7 +57,6 @@ type Cluster struct {
 	*config.PersistOptions
 	ID             uint64
 	suspectRegions map[uint64]struct{}
-	*config.StoreConfigManager
 	*buckets.HotBucketCache
 	storage.Storage
 }
@@ -65,15 +64,14 @@ type Cluster struct {
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	c := &Cluster{
-		ctx:                ctx,
-		BasicCluster:       core.NewBasicCluster(),
-		IDAllocator:        mockid.NewIDAllocator(),
-		HotStat:            statistics.NewHotStat(ctx),
-		HotBucketCache:     buckets.NewBucketsCache(ctx),
-		PersistOptions:     opts,
-		suspectRegions:     map[uint64]struct{}{},
-		StoreConfigManager: config.NewTestStoreConfigManager(nil),
-		Storage:            storage.NewStorageWithMemoryBackend(),
+		ctx:            ctx,
+		BasicCluster:   core.NewBasicCluster(),
+		IDAllocator:    mockid.NewIDAllocator(),
+		HotStat:        statistics.NewHotStat(ctx),
+		HotBucketCache: buckets.NewBucketsCache(ctx),
+		PersistOptions: opts,
+		suspectRegions: map[uint64]struct{}{},
+		Storage:        storage.NewStorageWithMemoryBackend(),
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
@@ -86,7 +84,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 
 // GetStoreConfig returns the store config.
 func (mc *Cluster) GetStoreConfig() sc.StoreConfigProvider {
-	return mc.StoreConfigManager.GetStoreConfig()
+	return mc
 }
 
 // GetCheckerConfig returns the checker config.
