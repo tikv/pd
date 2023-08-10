@@ -1414,3 +1414,9 @@ func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) e
 func (s *Server) SplitAndScatterRegions(context context.Context, r *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
 	return nil, errors.New("no implemented")
 }
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
+}

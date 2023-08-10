@@ -17,6 +17,7 @@ package global_config_test
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,6 +48,7 @@ type GlobalConfigTestSuite struct {
 	server  *server.GrpcServer
 	client  pd.Client
 	cleanup server.CleanupFunc
+	mu      sync.Mutex
 }
 
 type TestReceiver struct {
@@ -204,4 +206,28 @@ func (s *GlobalConfigTestSuite) TestClientWatchTimeout(c *C) {
 	cancel()
 	_, opened := <-wc
 	c.Assert(opened, Equals, false)
+}
+
+func (s *GlobalConfigTestSuite) TestEtcdNotStart(c *C) {
+	cli := s.server.GetClient()
+	defer func() {
+		s.mu.Lock()
+		s.server.SetClient(cli)
+		s.mu.Unlock()
+	}()
+	s.mu.Lock()
+	s.server.SetClient(nil)
+	s.mu.Unlock()
+	err := s.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{}, nil)
+	c.Assert(err, NotNil)
+
+	_, err = s.server.StoreGlobalConfig(s.server.Context(), &pdpb.StoreGlobalConfigRequest{
+		Changes: []*pdpb.GlobalConfigItem{{Name: "0", Value: "0"}},
+	})
+	c.Assert(err, NotNil)
+
+	_, err = s.server.LoadGlobalConfig(s.server.Context(), &pdpb.LoadGlobalConfigRequest{
+		Names: []string{"test_etcd"},
+	})
+	c.Assert(err, NotNil)
 }
