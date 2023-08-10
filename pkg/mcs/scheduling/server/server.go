@@ -175,7 +175,7 @@ func (s *Server) primaryElectionLoop() {
 
 	for {
 		select {
-		case <-s.ctx.Done():
+		case <-s.serverLoopCtx.Done():
 			log.Info("server is closed, exit resource manager primary election loop")
 			return
 		default:
