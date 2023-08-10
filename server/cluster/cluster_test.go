@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -1288,7 +1290,116 @@ func TestOfflineAndMerge(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestSyncConfig(t *testing.T) {
+=======
+func TestStoreConfigUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(ctx, opt)
+	stores := newTestStores(5, "2.0.0")
+	for _, s := range stores {
+		re.NoError(tc.putStoreLocked(s))
+	}
+	re.Len(tc.getUpStores(), 5)
+	// Case1: big region.
+	{
+		body := `{ "coprocessor": {
+        "split-region-on-table": false,
+        "batch-split-limit": 2,
+        "region-max-size": "15GiB",
+        "region-split-size": "10GiB",
+        "region-max-keys": 144000000,
+        "region-split-keys": 96000000,
+        "consistency-check-method": "mvcc",
+        "perf-level": 2
+    	}}`
+		var config config.StoreConfig
+		re.NoError(json.Unmarshal([]byte(body), &config))
+		tc.updateStoreConfig(opt.GetStoreConfig(), &config)
+		re.Equal(uint64(144000000), opt.GetRegionMaxKeys())
+		re.Equal(uint64(96000000), opt.GetRegionSplitKeys())
+		re.Equal(uint64(15*units.GiB/units.MiB), opt.GetRegionMaxSize())
+		re.Equal(uint64(10*units.GiB/units.MiB), opt.GetRegionSplitSize())
+	}
+	// Case2: empty config.
+	{
+		body := `{}`
+		var config config.StoreConfig
+		re.NoError(json.Unmarshal([]byte(body), &config))
+		tc.updateStoreConfig(opt.GetStoreConfig(), &config)
+		re.Equal(uint64(1440000), opt.GetRegionMaxKeys())
+		re.Equal(uint64(960000), opt.GetRegionSplitKeys())
+		re.Equal(uint64(144), opt.GetRegionMaxSize())
+		re.Equal(uint64(96), opt.GetRegionSplitSize())
+	}
+	// Case3: raft-kv2 config.
+	{
+		body := `{ "coprocessor": {
+		"split-region-on-table":false,
+		"batch-split-limit":10,
+		"region-max-size":"384MiB",
+		"region-split-size":"256MiB",
+		"region-max-keys":3840000,
+		"region-split-keys":2560000,
+		"consistency-check-method":"mvcc",
+		"enable-region-bucket":true,
+		"region-bucket-size":"96MiB",
+		"region-size-threshold-for-approximate":"384MiB",
+		"region-bucket-merge-size-ratio":0.33
+		},
+		"storage":{
+			"engine":"raft-kv2"
+		}}`
+		var config config.StoreConfig
+		re.NoError(json.Unmarshal([]byte(body), &config))
+		tc.updateStoreConfig(opt.GetStoreConfig(), &config)
+		re.Equal(uint64(96), opt.GetRegionBucketSize())
+		re.True(opt.IsRaftKV2())
+	}
+}
+
+func TestSyncConfigContext(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(ctx, opt)
+	tc.httpClient = &http.Client{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		time.Sleep(time.Second * 100)
+		cfg := &config.StoreConfig{}
+		b, err := json.Marshal(cfg)
+		if err != nil {
+			res.WriteHeader(http.StatusInternalServerError)
+			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			return
+		}
+
+		res.WriteHeader(http.StatusOK)
+		res.Write(b)
+	}))
+	stores := newTestStores(1, "2.0.0")
+	for _, s := range stores {
+		re.NoError(tc.putStoreLocked(s))
+	}
+	// trip schema header
+	now := time.Now()
+	stores[0].GetMeta().StatusAddress = server.URL[7:]
+	synced, _ := tc.syncStoreConfig(tc.GetStores())
+	re.False(synced)
+	re.Less(time.Since(now), clientTimeout*2)
+}
+
+func TestStoreConfigSync(t *testing.T) {
+>>>>>>> 38d087fec (config: sync store config in time (#6919))
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
