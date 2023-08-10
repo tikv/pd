@@ -147,7 +147,7 @@ func (suite *scheduleTestSuite) TestAPI() {
 				// update again
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.StatusOK(re),
-					tu.StringEqual(re, "\"no changed\"\n"))
+					tu.StringEqual(re, "\"Config is the same with origin, so do nothing.\"\n"))
 				suite.NoError(err)
 				// update invalidate batch
 				dataMap = map[string]interface{}{}
@@ -173,7 +173,7 @@ func (suite *scheduleTestSuite) TestAPI() {
 				suite.NoError(err)
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
-					tu.StringEqual(re, "\"Config item not found\"\n"))
+					tu.StringEqual(re, "\"Config item is not found.\"\n"))
 				suite.NoError(err)
 			},
 		},
@@ -184,18 +184,29 @@ func (suite *scheduleTestSuite) TestAPI() {
 				resp := make(map[string]interface{})
 				listURL := fmt.Sprintf("%s%s%s/%s/list", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				expectMap := map[string]float64{
-					"min-hot-byte-rate":          100,
-					"min-hot-key-rate":           10,
-					"max-zombie-rounds":          3,
-					"max-peer-number":            1000,
+				expectMap := map[string]interface{}{
+					"min-hot-byte-rate":          100.0,
+					"min-hot-key-rate":           10.0,
+					"min-hot-query-rate":         10.0,
+					"max-zombie-rounds":          3.0,
+					"max-peer-number":            1000.0,
 					"byte-rate-rank-step-ratio":  0.05,
 					"key-rate-rank-step-ratio":   0.05,
 					"query-rate-rank-step-ratio": 0.05,
 					"count-rank-step-ratio":      0.01,
 					"great-dec-ratio":            0.95,
 					"minor-dec-ratio":            0.99,
+					"src-tolerance-ratio":        1.05,
+					"dst-tolerance-ratio":        1.05,
+					"split-thresholds":           0.2,
+					"rank-formula-version":       "v2",
+					"read-priorities":            []interface{}{"byte", "key"},
+					"write-leader-priorities":    []interface{}{"key", "byte"},
+					"write-peer-priorities":      []interface{}{"byte", "key"},
+					"enable-for-tiflash":         "true",
+					"strict-picking-store":       "true",
 				}
+				re.Equal(len(expectMap), len(resp), "expect %v, got %v", expectMap, resp)
 				for key := range expectMap {
 					suite.Equal(expectMap[key], resp[key])
 				}
@@ -209,12 +220,60 @@ func (suite *scheduleTestSuite) TestAPI() {
 				resp = make(map[string]interface{})
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
 				for key := range expectMap {
-					suite.Equal(expectMap[key], resp[key])
+					suite.Equal(expectMap[key], resp[key], "key %s", key)
 				}
 				// update again
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.StatusOK(re),
-					tu.StringEqual(re, "no changed"))
+					tu.StringEqual(re, "Config is the same with origin, so do nothing."))
+				suite.NoError(err)
+				// config item not found
+				dataMap = map[string]interface{}{}
+				dataMap["error"] = 3
+				body, err = json.Marshal(dataMap)
+				suite.NoError(err)
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.Status(re, http.StatusBadRequest),
+					tu.StringEqual(re, "Config item is not found."))
+				suite.NoError(err)
+			},
+		},
+		{
+			name:        "split-bucket-scheduler",
+			createdName: "split-bucket-scheduler",
+			extraTestFunc: func(name string) {
+				resp := make(map[string]interface{})
+				listURL := fmt.Sprintf("%s%s%s/%s/list", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
+				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+				suite.Equal(3.0, resp["degree"])
+				suite.Equal(0.0, resp["split-limit"])
+				dataMap := make(map[string]interface{})
+				dataMap["degree"] = 4
+				updateURL := fmt.Sprintf("%s%s%s/%s/config", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
+				body, err := json.Marshal(dataMap)
+				suite.NoError(err)
+				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
+				resp = make(map[string]interface{})
+				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+				suite.Equal(4.0, resp["degree"])
+				// update again
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.StatusOK(re),
+					tu.StringEqual(re, "Config is the same with origin, so do nothing."))
+				suite.NoError(err)
+				// empty body
+				err = tu.CheckPostJSON(testDialClient, updateURL, nil,
+					tu.Status(re, http.StatusInternalServerError),
+					tu.StringEqual(re, "\"unexpected end of JSON input\"\n"))
+				suite.NoError(err)
+				// config item not found
+				dataMap = map[string]interface{}{}
+				dataMap["error"] = 3
+				body, err = json.Marshal(dataMap)
+				suite.NoError(err)
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.Status(re, http.StatusBadRequest),
+					tu.StringEqual(re, "Config item is not found."))
 				suite.NoError(err)
 			},
 		},
@@ -254,7 +313,7 @@ func (suite *scheduleTestSuite) TestAPI() {
 				// update again
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.StatusOK(re),
-					tu.StringEqual(re, "\"no changed\"\n"))
+					tu.StringEqual(re, "\"Config is the same with origin, so do nothing.\"\n"))
 				suite.NoError(err)
 				// update invalidate batch
 				dataMap = map[string]interface{}{}
@@ -280,7 +339,7 @@ func (suite *scheduleTestSuite) TestAPI() {
 				suite.NoError(err)
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
-					tu.StringEqual(re, "\"Config item not found\"\n"))
+					tu.StringEqual(re, "\"Config item is not found.\"\n"))
 				suite.NoError(err)
 			},
 		},
