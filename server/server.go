@@ -1961,3 +1961,9 @@ func (s *Server) GetTSOUpdatePhysicalInterval() time.Duration {
 func (s *Server) GetMaxResetTSGap() time.Duration {
 	return s.persistOptions.GetMaxResetTSGap()
 }
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
+}
