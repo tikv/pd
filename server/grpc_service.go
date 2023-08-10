@@ -59,6 +59,7 @@ var (
 	ErrNotStarted           = status.Errorf(codes.Unavailable, "server not started")
 	ErrSendHeartbeatTimeout = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
 	ErrNotFoundTSOAddr      = status.Errorf(codes.NotFound, "not found tso address")
+	ErrEtcdNotStarted       = status.Errorf(codes.Unavailable, "server is started, but etcd not started")
 )
 
 // GrpcServer wraps Server to provide grpc service.
@@ -1835,6 +1836,9 @@ const globalConfigPath = "/global/config/"
 // Since item value needs to support marshal of different struct types,
 // it should be set to `Payload bytes` instead of `Value string`
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
+	if s.client == nil {
+		return nil, ErrEtcdNotStarted
+	}
 	configPath := request.GetConfigPath()
 	if configPath == "" {
 		configPath = globalConfigPath
@@ -1869,6 +1873,9 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 // - `Names` iteratively get value from `ConfigPath/Name` but not care about revision
 // - `ConfigPath` if `Names` is nil can get all values and revision of current path
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
+	if s.client == nil {
+		return nil, ErrEtcdNotStarted
+	}
 	configPath := request.GetConfigPath()
 	if configPath == "" {
 		configPath = globalConfigPath
@@ -1905,6 +1912,9 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // by Etcd.Watch() as long as the context has not been canceled or timed out.
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
+	if s.client == nil {
+		return ErrEtcdNotStarted
+	}
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
 	configPath := req.GetConfigPath()
