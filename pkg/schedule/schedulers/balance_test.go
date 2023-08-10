@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -294,6 +295,13 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLimit() {
 	// Region1:    F    F    F    L
 	suite.tc.UpdateLeaderCount(4, 16)
 	suite.NotEmpty(suite.schedule())
+
+	// can't balance leader from 4 to 1 when store 1 has split in it.
+	store := suite.tc.GetStore(4)
+	store = store.Clone(core.SetLastSplitTime(time.Now()))
+	suite.tc.PutStore(store)
+	op := suite.schedule()
+	suite.Empty(op)
 }
 
 func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderSchedulePolicy() {

@@ -72,6 +72,7 @@ const (
 	StatusStoreLowSpace = iota + 500
 	// StatusStoreNotExisted represents the store cannot be found in PD.
 	StatusStoreNotExisted
+	StatusStoreSplitRegion
 )
 
 // TODO: define region status priority

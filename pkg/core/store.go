@@ -36,6 +36,7 @@ const (
 	initialMinSpace      = 8 * units.GiB // 2^33=8GB
 	slowStoreThreshold   = 80
 	awakenStoreInterval  = 10 * time.Minute // 2 * slowScoreRecoveryTime
+	splitStoreWait       = time.Minute
 
 	// EngineKey is the label key used to indicate engine.
 	EngineKey = "engine"
@@ -66,6 +67,7 @@ type StoreInfo struct {
 	limiter             storelimit.StoreLimit
 	minResolvedTS       uint64
 	lastAwakenTime      time.Time
+	lastSplitTime       time.Time
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -537,6 +539,11 @@ func (s *StoreInfo) GetMinResolvedTS() uint64 {
 // be awaken or not.
 func (s *StoreInfo) NeedAwakenStore() bool {
 	return s.GetLastHeartbeatTS().Sub(s.lastAwakenTime) > awakenStoreInterval
+}
+
+// IsSplitStore checks if there are some region are splitted in this store.
+func (s *StoreInfo) IsSplitStore() bool {
+	return time.Since(s.lastSplitTime) < splitStoreWait
 }
 
 var (

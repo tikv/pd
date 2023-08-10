@@ -17,6 +17,7 @@ package cluster
 import (
 	"bytes"
 	"fmt"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -30,6 +31,9 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
 )
+
+// store doesn't pick balance leader source if the split region is bigger than maxSplitThreshold.
+const maxSplitThreshold = 10
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
 func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
@@ -57,6 +61,10 @@ func (c *RaftCluster) ProcessRegionSplit(regions []*metapb.Region) []error {
 	if leaderStoreID == 0 {
 		return []error{errors.New("origin region no leader")}
 	}
+	leaderStore := c.GetStore(leaderStoreID)
+	if leaderStore == nil {
+		return []error{errors.New("leader store not found")}
+	}
 	errList := make([]error, 0, total)
 	for _, region := range regions {
 		if len(region.GetPeers()) == 0 {
@@ -80,6 +88,11 @@ func (c *RaftCluster) ProcessRegionSplit(regions []*metapb.Region) []error {
 		if err := c.SaveRegion(region, changed); err != nil {
 			errList = append(errList, err)
 		}
+	}
+	// If the number of regions exceeds the threshold, update the last split time.
+	if len(regions) >= maxSplitThreshold {
+		newStore := leaderStore.Clone(core.SetLastSplitTime(time.Now()))
+		c.core.PutStore(newStore)
 	}
 	return errList
 }

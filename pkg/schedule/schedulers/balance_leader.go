@@ -65,6 +65,7 @@ var (
 	balanceLeaderNoFollowerRegionCounter = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-follower-region")
 	balanceLeaderSkipCounter             = schedulerCounter.WithLabelValues(BalanceLeaderName, "skip")
 	balanceLeaderNewOpCounter            = schedulerCounter.WithLabelValues(BalanceLeaderName, "new-operator")
+	balanceLeaderSourceSplitRegion       = schedulerCounter.WithLabelValues(BalanceLeaderName, "source-split-region")
 )
 
 type balanceLeaderSchedulerConfig struct {
@@ -183,7 +184,7 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		option(s)
 	}
 	s.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.High},
+		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, ForbidSplit: true, OperatorLevel: constant.High},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	return s
@@ -496,6 +497,15 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 			zap.Uint64("store-id", leaderStoreID),
 		)
 		balanceLeaderNoLeaderRegionCounter.Inc()
+		return nil
+	}
+
+	if solver.Source.IsSplitStore() {
+		log.Debug("source store split region in one minutes",
+			zap.String("scheduler", l.GetName()),
+			zap.Uint64("store-id", leaderStoreID),
+		)
+		balanceLeaderSourceSplitRegion.Inc()
 		return nil
 	}
 	finalFilters := l.filters
