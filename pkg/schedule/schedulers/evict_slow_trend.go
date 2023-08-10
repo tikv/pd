@@ -211,7 +211,7 @@ func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 		log.Info("evict-slow-trend-scheduler persist config failed", zap.Uint64("store-id", evictedStoreID))
 	}
 	if evictedStoreID != 0 {
-		// Assertation: evictStoreID == s.conf.LastEvictCandidate.storeID
+		// Assertion: evictStoreID == s.conf.LastEvictCandidate.storeID
 		// Mark the store has recovered.
 		s.conf.markCandidateRecovered()
 		cluster.SlowTrendRecovered(evictedStoreID)
@@ -476,7 +476,7 @@ func checkStoreCanRecover(cluster sche.SchedulerCluster, target *core.StoreInfo,
 			storeSlowTrendActionStatusGauge.WithLabelValues("recover.judging:got-event").Inc()
 		}
 	*/
-	return checkStoreFasterThanOthers(cluster, target) && checkStoreReadyForRecover(cluster, target, recoveryGap)
+	return checkStoreFasterThanOthers(cluster, target) && checkStoreReadyForRecover(target, recoveryGap)
 }
 
 func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.StoreInfo) bool {
@@ -510,7 +510,7 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 	return fasterThanStores >= expected
 }
 
-func checkStoreReadyForRecover(cluster sche.SchedulerCluster, target *core.StoreInfo, recoveryGap uint64) bool {
+func checkStoreReadyForRecover(target *core.StoreInfo, recoveryGap uint64) bool {
 	if targetSlowTrend := target.GetSlowTrend(); targetSlowTrend != nil {
 		// @TODO: setting the recovery time in SlowTrend
 		return recoveryGap >= defaultRecoveryDurationGap
