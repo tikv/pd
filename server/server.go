@@ -1770,3 +1770,9 @@ func (s *Server) SetExternalTS(externalTS uint64) error {
 	s.GetRaftCluster().SetExternalTS(externalTS)
 	return nil
 }
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
+}
