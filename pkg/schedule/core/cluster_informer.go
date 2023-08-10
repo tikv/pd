@@ -43,7 +43,6 @@ type SchedulerCluster interface {
 	GetSchedulerConfig() sc.SchedulerConfigProvider
 	GetRegionLabeler() *labeler.RegionLabeler
 	GetStoreConfig() sc.StoreConfigProvider
-	GetPersistOptions() *config.PersistOptions
 }
 
 // CheckerCluster is an aggregate interface that wraps multiple interfaces

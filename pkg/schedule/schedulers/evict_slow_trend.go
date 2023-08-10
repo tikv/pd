@@ -308,7 +308,7 @@ func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSl
 }
 
 func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slowCandidate) (slowStore *core.StoreInfo) {
-	isRaftKV2 := cluster.GetPersistOptions().IsRaftKV2()
+	isRaftKV2 := cluster.GetStoreConfig().IsRaftKV2()
 	stores := cluster.GetStores()
 	if len(stores) < 3 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-few").Inc()
