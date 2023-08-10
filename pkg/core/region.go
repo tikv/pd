@@ -756,6 +756,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
+				return
 			}
 			// Do not save to kv, because 1) flashback will be eventually set to
 			// false, 2) flashback changes almost all regions in a cluster.
