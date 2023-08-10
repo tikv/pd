@@ -103,15 +103,6 @@ func (c *Cluster) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*bu
 	return c.hotStat.BucketsStats(degree, regionIDs...)
 }
 
-<<<<<<< HEAD
-// TODO: implement the following methods
-=======
-// GetPersistOptions returns the persist options.
-func (c *Cluster) GetPersistOptions() sc.ConfProvider {
-	return c.persistConfig
-}
->>>>>>> remove some store config
-
 // GetStorage returns the storage.
 func (c *Cluster) GetStorage() storage.Storage {
 	return c.storage
@@ -123,6 +114,9 @@ func (c *Cluster) GetCheckerConfig() sc.CheckerConfigProvider { return c.persist
 // GetSchedulerConfig returns the scheduler config.
 func (c *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider { return c.persistConfig }
 
+// GetStoreConfig returns the store config.
+func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConfig }
+
 // TODO: implement the following methods
 
 // UpdateRegionsLabelLevelStats updates the region label level stats.
@@ -130,6 +124,3 @@ func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {}
 
 // AllocID allocates a new ID.
 func (c *Cluster) AllocID() (uint64, error) { return 0, nil }
-
-// GetStoreConfig returns the store config.
-func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return nil }

@@ -84,12 +84,12 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 
 // GetStoreConfig returns the store config.
 func (mc *Cluster) GetStoreConfig() sc.StoreConfigProvider {
-	return mc
+	return mc.PersistOptions.GetStoreConfig()
 }
 
 // SetRegionBucketEnabled sets the region bucket enabled.
 func (mc *Cluster) SetRegionBucketEnabled(enabled bool) {
-	cfg, ok := mc.GetStoreConfig().(*config.StoreConfig)
+	cfg, ok := mc.GetStoreConfig().(*sc.StoreConfig)
 	if !ok || cfg == nil {
 		return
 	}
@@ -99,17 +99,17 @@ func (mc *Cluster) SetRegionBucketEnabled(enabled bool) {
 
 // GetCheckerConfig returns the checker config.
 func (mc *Cluster) GetCheckerConfig() sc.CheckerConfigProvider {
-	return mc
+	return mc.PersistOptions
 }
 
 // GetSchedulerConfig returns the scheduler config.
 func (mc *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider {
-	return mc
+	return mc.PersistOptions
 }
 
 // GetSharedConfig returns the shared config.
 func (mc *Cluster) GetSharedConfig() sc.SharedConfigProvider {
-	return mc
+	return mc.PersistOptions
 }
 
 // GetStorage returns the storage.
