@@ -13,7 +13,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 // Cluster is used to manage all information for scheduling purpose.
@@ -23,12 +22,13 @@ type Cluster struct {
 	labelerManager *labeler.RegionLabeler
 	persistConfig  *config.PersistConfig
 	hotStat        *statistics.HotStat
+	storage        storage.Storage
 }
 
 const regionLabelGCInterval = time.Hour
 
 // NewCluster creates a new cluster.
-func NewCluster(ctx context.Context, storage endpoint.RuleStorage, cfg *config.Config) (*Cluster, error) {
+func NewCluster(ctx context.Context, storage storage.Storage, cfg *config.Config) (*Cluster, error) {
 	basicCluster := core.NewBasicCluster()
 	persistConfig := config.NewPersistConfig(cfg)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
@@ -42,6 +42,7 @@ func NewCluster(ctx context.Context, storage endpoint.RuleStorage, cfg *config.C
 		labelerManager: labelerManager,
 		persistConfig:  persistConfig,
 		hotStat:        statistics.NewHotStat(ctx),
+		storage:        storage,
 	}, nil
 }
 
@@ -102,22 +103,24 @@ func (c *Cluster) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*bu
 	return c.hotStat.BucketsStats(degree, regionIDs...)
 }
 
-// TODO: implement the following methods
-
 // GetStorage returns the storage.
-func (c *Cluster) GetStorage() storage.Storage { return nil }
+func (c *Cluster) GetStorage() storage.Storage {
+	return c.storage
+}
+
+// GetCheckerConfig returns the checker config.
+func (c *Cluster) GetCheckerConfig() sc.CheckerConfigProvider { return c.persistConfig }
+
+// GetSchedulerConfig returns the scheduler config.
+func (c *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider { return c.persistConfig }
+
+// GetStoreConfig returns the store config.
+func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConfig }
+
+// TODO: implement the following methods
 
 // UpdateRegionsLabelLevelStats updates the region label level stats.
 func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {}
 
-// GetStoreConfig returns the store config.
-func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return nil }
-
 // AllocID allocates a new ID.
 func (c *Cluster) AllocID() (uint64, error) { return 0, nil }
-
-// GetCheckerConfig returns the checker config.
-func (c *Cluster) GetCheckerConfig() sc.CheckerConfigProvider { return nil }
-
-// GetSchedulerConfig returns the scheduler config.
-func (c *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider { return nil }

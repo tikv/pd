@@ -426,7 +426,6 @@ func (c *RaftCluster) runStoreConfigSync() {
 	for {
 		synced, switchRaftV2Config = c.syncStoreConfig(stores)
 		if switchRaftV2Config {
-			c.GetOpts().UseRaftV2()
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
@@ -1085,7 +1084,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.coordinator.GetSchedulersController().CheckTransferWitnessLeader(region)
 
 	hasRegionStats := c.regionStats != nil
-	// Save to storage if meta is updated.
+	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)

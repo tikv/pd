@@ -174,9 +174,11 @@ func (s *Server) primaryElectionLoop() {
 	defer s.serverLoopWg.Done()
 
 	for {
-		if s.IsClosed() {
-			log.Info("server is closed, exit scheduling primary election loop")
+		select {
+		case <-s.serverLoopCtx.Done():
+			log.Info("server is closed, exit resource manager primary election loop")
 			return
+		default:
 		}
 
 		primary, checkAgain := s.participant.CheckLeader()
@@ -487,13 +489,18 @@ func (s *Server) startServer() (err error) {
 	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
 		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
 	s.storage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(s.etcdClient, endpoint.SchedulingSvcRootPath(s.clusterID)), nil)
+		kv.NewEtcdKVBase(s.etcdClient, endpoint.PDRootPath(s.clusterID)), nil)
 	s.cluster, err = NewCluster(s.ctx, s.storage, s.cfg)
 	if err != nil {
 		return err
 	}
 	s.hbStreams = hbstream.NewHeartbeatStreams(s.ctx, s.clusterID, s.cluster.GetBasicCluster())
 	s.coordinator = schedule.NewCoordinator(s.ctx, s.cluster, s.hbStreams)
+
+	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
+	if err != nil {
+		return err
+	}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
@@ -511,7 +518,7 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
-
+	go s.coordinator.RunUntilStop()
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
 	s.serverLoopWg.Add(1)

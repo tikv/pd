@@ -564,6 +564,31 @@ func (o *PersistConfig) SetHaltScheduling(halt bool, source string) {
 	o.SetScheduleConfig(v)
 }
 
+// CheckRegionKeys return error if the smallest region's keys is less than mergeKeys
+func (o *PersistConfig) CheckRegionKeys(keys, mergeKeys uint64) error {
+	return o.GetStoreConfig().CheckRegionKeys(keys, mergeKeys)
+}
+
+// CheckRegionSize return error if the smallest region's size is less than mergeSize
+func (o *PersistConfig) CheckRegionSize(size, mergeSize uint64) error {
+	return o.GetStoreConfig().CheckRegionSize(size, mergeSize)
+}
+
+// GetRegionMaxSize returns the max region size in MB
+func (o *PersistConfig) GetRegionMaxSize() uint64 {
+	return o.GetStoreConfig().GetRegionMaxSize()
+}
+
+// GetRegionMaxKeys returns the region split keys
+func (o *PersistConfig) GetRegionMaxKeys() uint64 {
+	return o.GetStoreConfig().GetRegionMaxKeys()
+}
+
+// IsEnableRegionBucket return true if the region bucket is enabled.
+func (o *PersistConfig) IsEnableRegionBucket() bool {
+	return o.GetStoreConfig().IsEnableRegionBucket()
+}
+
 // TODO: implement the following methods
 
 // AddSchedulerCfg adds the scheduler configurations.
@@ -588,5 +613,7 @@ func (o *PersistConfig) Persist(storage endpoint.ConfigStorage) error {
 // RemoveSchedulerCfg removes the scheduler configurations.
 func (o *PersistConfig) RemoveSchedulerCfg(tp string) {}
 
-// UseRaftV2 set some config for raft store v2 by default temporary.
-func (o *PersistConfig) UseRaftV2() {}
+// IsRaftKV2 returns the whether the cluster use `raft-kv2` engine.
+func (o *PersistConfig) IsRaftKV2() bool {
+	return o.GetStoreConfig().IsRaftKV2()
+}
