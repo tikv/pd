@@ -112,11 +112,6 @@ func (mc *Cluster) AllocID() (uint64, error) {
 	return mc.IDAllocator.Alloc()
 }
 
-// GetPersistOptions returns the persist options.
-func (mc *Cluster) GetPersistOptions() *config.PersistOptions {
-	return mc.PersistOptions
-}
-
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
 func (mc *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {}
 

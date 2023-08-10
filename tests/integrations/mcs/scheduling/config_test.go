@@ -25,7 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	severcfg "github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -93,12 +92,12 @@ func (suite *configTestSuite) TestConfigWatch() {
 	testutil.Eventually(re, func() bool {
 		return watcher.GetScheduleConfig().SplitMergeInterval.Duration == 2*sc.DefaultSplitMergeInterval
 	})
-	persistOpts.SetStoreConfig(&severcfg.StoreConfig{
-		Coprocessor: severcfg.Coprocessor{
+	persistOpts.SetStoreConfig(&sc.StoreConfig{
+		Coprocessor: sc.Coprocessor{
 			RegionMaxSize: "144MiB",
 		},
-		Storage: severcfg.Storage{
-			Engine: severcfg.RaftstoreV2,
+		Storage: sc.Storage{
+			Engine: sc.RaftstoreV2,
 		},
 	})
 	persistConfig(re, suite.pdLeaderServer)

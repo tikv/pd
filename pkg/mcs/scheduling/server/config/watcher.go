@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/log"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
@@ -46,7 +45,7 @@ type persistedConfig struct {
 	ClusterVersion semver.Version       `json:"cluster-version"`
 	Schedule       sc.ScheduleConfig    `json:"schedule"`
 	Replication    sc.ReplicationConfig `json:"replication"`
-	Store          config.StoreConfig   `json:"store"`
+	Store          sc.StoreConfig       `json:"store"`
 }
 
 // NewWatcher creates a new watcher to watch the config meta change from PD API server.
