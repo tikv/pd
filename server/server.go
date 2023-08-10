@@ -1531,3 +1531,9 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 	}
 	return false
 }
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
+}
