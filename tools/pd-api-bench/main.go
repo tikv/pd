@@ -51,8 +51,10 @@ var (
 	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format")
 )
 
-var base = int(time.Second) / int(time.Millisecond)
-var wg sync.WaitGroup
+var (
+	base = int(time.Second) / int(time.Millisecond)
+	wg   sync.WaitGroup
+)
 
 func main() {
 	flag.Parse()
@@ -158,10 +160,9 @@ func handleMinResolvedTSByHTTP(ctx context.Context) {
 }
 
 type minResolvedTS struct {
-	IsRealTime          bool              `json:"is_real_time,omitempty"`
-	MinResolvedTS       uint64            `json:"min_resolved_ts"`
-	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
-	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
+	IsRealTime      bool              `json:"is_real_time,omitempty"`
+	MinResolvedTS   uint64            `json:"min_resolved_ts"`
+	PersistInterval typeutil.Duration `json:"persist_interval,omitempty"`
 }
 
 // newHttpClient returns an HTTP(s) client.

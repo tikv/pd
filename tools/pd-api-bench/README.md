@@ -34,7 +34,9 @@ This section describes how to use the `pd-api-bench` tool.
 You can use the following command to generate a certificate for testing TLS:
 
 ```shell
-cd cert
-./generate_cert.sh
-go run ../main.go --min-resolved-ts-http -cacert ca.pem -cert pd-server.pem  -key pd-server-key.pem
+mkdir cert
+./cert_opt.sh generate cert
+go run main.go --min-resolved-ts-http -cacert ./cert/ca.pem -cert ./cert/pd-server.pem  -key ./cert/pd-server-key.pem
+./cert_opt.sh cleanup cert
+rm -rf cert
 ```
