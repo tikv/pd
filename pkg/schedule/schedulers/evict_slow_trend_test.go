@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
@@ -119,6 +120,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendBasicFuncs() {
 func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	es2, ok := suite.es.(*evictSlowTrendScheduler)
 	suite.True(ok)
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
 
 	// Set store-1 to slow status, generate evict candidate
 	suite.Equal(es2.conf.evictedStore(), uint64(0))
@@ -193,6 +195,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	suite.NoError(err)
 	suite.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
 	suite.Zero(persistValue.evictedStore())
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
 func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPrepare() {

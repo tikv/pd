@@ -506,9 +506,13 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 
 // checkStoreReadyForRecover checks whether the given target store is ready for recover.
 func checkStoreReadyForRecover(target *core.StoreInfo, recoveryGap uint64) bool {
+	durationGap := uint64(defaultRecoveryDurationGap)
+	failpoint.Inject("transientRecoveryGap", func() {
+		durationGap = 0
+	})
 	if targetSlowTrend := target.GetSlowTrend(); targetSlowTrend != nil {
 		// TODO: setting the recovery time in SlowTrend
-		return recoveryGap >= defaultRecoveryDurationGap
+		return recoveryGap >= durationGap
 	}
 	return true
 }
