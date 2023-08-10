@@ -65,7 +65,7 @@ func TestStoreStatistics(t *testing.T) {
 		UsedSize:  0,
 	}))
 	stores[5] = store5
-	storeStats := NewStoreStatisticsMap(opt, nil)
+	storeStats := NewStoreStatisticsMap(opt)
 	for _, store := range stores {
 		storeStats.Observe(store, storesStats)
 	}
