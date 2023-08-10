@@ -52,6 +52,8 @@ func (suite *scheduleTestSuite) SetupSuite() {
 	mustBootstrapCluster(re, suite.svr)
 	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	mustPutStore(re, suite.svr, 3, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	mustPutStore(re, suite.svr, 4, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 }
 
 func (suite *scheduleTestSuite) TearDownSuite() {
@@ -126,7 +128,8 @@ func (suite *scheduleTestSuite) TestAPI() {
 		extraTestFunc func(name string)
 	}{
 		{
-			name: "balance-leader-scheduler",
+			name:        "balance-leader-scheduler",
+			createdName: "balance-leader-scheduler",
 			extraTestFunc: func(name string) {
 				resp := make(map[string]interface{})
 				listURL := fmt.Sprintf("%s%s%s/%s/list", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
@@ -175,7 +178,8 @@ func (suite *scheduleTestSuite) TestAPI() {
 			},
 		},
 		{
-			name: "balance-hot-region-scheduler",
+			name:        "balance-hot-region-scheduler",
+			createdName: "balance-hot-region-scheduler",
 			extraTestFunc: func(name string) {
 				resp := make(map[string]interface{})
 				listURL := fmt.Sprintf("%s%s%s/%s/list", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
@@ -214,12 +218,25 @@ func (suite *scheduleTestSuite) TestAPI() {
 				suite.NoError(err)
 			},
 		},
-		{name: "balance-region-scheduler"},
-		{name: "shuffle-leader-scheduler"},
-		{name: "shuffle-region-scheduler"},
-		{name: "transfer-witness-leader-scheduler"},
 		{
-			name: "balance-witness-scheduler",
+			name:        "balance-region-scheduler",
+			createdName: "balance-region-scheduler",
+		},
+		{
+			name:        "shuffle-leader-scheduler",
+			createdName: "shuffle-leader-scheduler",
+		},
+		{
+			name:        "shuffle-region-scheduler",
+			createdName: "shuffle-region-scheduler",
+		},
+		{
+			name:        "transfer-witness-leader-scheduler",
+			createdName: "transfer-witness-leader-scheduler",
+		},
+		{
+			name:        "balance-witness-scheduler",
+			createdName: "balance-witness-scheduler",
 			extraTestFunc: func(name string) {
 				resp := make(map[string]interface{})
 				listURL := fmt.Sprintf("%s%s%s/%s/list", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
@@ -333,36 +350,36 @@ func (suite *scheduleTestSuite) TestAPI() {
 		{
 			name:        "evict-leader-scheduler",
 			createdName: "evict-leader-scheduler",
-			args:        []arg{{"store_id", 1}},
+			args:        []arg{{"store_id", 3}},
 			// Test the scheduler config handler.
 			extraTestFunc: func(name string) {
 				resp := make(map[string]interface{})
 				listURL := fmt.Sprintf("%s%s%s/%s/list", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
 				exceptMap := make(map[string]interface{})
-				exceptMap["1"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
+				exceptMap["3"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
 				suite.Equal(exceptMap, resp["store-id-ranges"])
 
 				// using /pd/v1/schedule-config/evict-leader-scheduler/config to add new store to evict-leader-scheduler
 				input := make(map[string]interface{})
 				input["name"] = "evict-leader-scheduler"
-				input["store_id"] = 2
+				input["store_id"] = 4
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(input)
 				suite.NoError(err)
 				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]interface{})
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				exceptMap["2"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
+				exceptMap["4"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
 				suite.Equal(exceptMap, resp["store-id-ranges"])
 
 				// using /pd/v1/schedule-config/evict-leader-scheduler/config to delete exist store from evict-leader-scheduler
-				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name, "2")
+				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name, "4")
 				_, err = apiutil.DoDelete(testDialClient, deleteURL)
 				suite.NoError(err)
 				resp = make(map[string]interface{})
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				delete(exceptMap, "2")
+				delete(exceptMap, "4")
 				suite.Equal(exceptMap, resp["store-id-ranges"])
 				statusCode, err := apiutil.DoDelete(testDialClient, deleteURL)
 				suite.NoError(err)
@@ -379,12 +396,15 @@ func (suite *scheduleTestSuite) TestAPI() {
 		body, err := json.Marshal(input)
 		suite.NoError(err)
 		suite.testPauseOrResume(testCase.name, testCase.createdName, body)
+		if testCase.extraTestFunc != nil {
+			testCase.extraTestFunc(testCase.createdName)
+		}
+		suite.deleteScheduler(testCase.createdName)
 	}
 
 	// test pause and resume all schedulers.
 
 	// add schedulers.
-	testCases = testCases[:3]
 	for _, testCase := range testCases {
 		input := make(map[string]interface{})
 		input["name"] = testCase.name
@@ -394,6 +414,9 @@ func (suite *scheduleTestSuite) TestAPI() {
 		body, err := json.Marshal(input)
 		suite.NoError(err)
 		suite.addScheduler(body)
+		if testCase.extraTestFunc != nil {
+			testCase.extraTestFunc(testCase.createdName)
+		}
 	}
 
 	// test pause all schedulers.
@@ -565,5 +588,4 @@ func (suite *scheduleTestSuite) testPauseOrResume(name, createdName string, body
 	isPaused, err = handler.IsSchedulerPaused(createdName)
 	suite.NoError(err)
 	suite.False(isPaused)
-	suite.deleteScheduler(createdName)
 }
