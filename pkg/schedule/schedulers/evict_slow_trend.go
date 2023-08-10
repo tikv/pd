@@ -45,6 +45,7 @@ const (
 type slowCandidate struct {
 	storeID   uint64
 	captureTS time.Time
+	recoverTS time.Time
 }
 
 type evictSlowTrendSchedulerConfig struct {
@@ -112,10 +113,19 @@ func (conf *evictSlowTrendSchedulerConfig) candidateCapturedSecs() uint64 {
 	return DurationSinceAsSecs(conf.evictCandidate.captureTS)
 }
 
+func (conf *evictSlowTrendSchedulerConfig) lastCapturedCandidate() *slowCandidate {
+	return &conf.lastEvictCandidate
+}
+
+func (conf *evictSlowTrendSchedulerConfig) lastCandidateCapturedSecs() uint64 {
+	return DurationSinceAsSecs(conf.lastEvictCandidate.captureTS)
+}
+
 func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
 	conf.evictCandidate = slowCandidate{
 		storeID:   id,
 		captureTS: time.Now(),
+		recoverTS: time.Now(),
 	}
 	if conf.lastEvictCandidate == (slowCandidate{}) {
 		conf.lastEvictCandidate = conf.evictCandidate
@@ -129,6 +139,12 @@ func (conf *evictSlowTrendSchedulerConfig) popCandidate(updLast bool) uint64 {
 	}
 	conf.evictCandidate = slowCandidate{}
 	return id
+}
+
+func (conf *evictSlowTrendSchedulerConfig) markCandidateRecovered() {
+	if conf.lastEvictCandidate != (slowCandidate{}) {
+		conf.lastEvictCandidate.recoverTS = time.Now()
+	}
 }
 
 func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
@@ -195,6 +211,9 @@ func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 		log.Info("evict-slow-trend-scheduler persist config failed", zap.Uint64("store-id", evictedStoreID))
 	}
 	if evictedStoreID != 0 {
+		// Assertation: evictStoreID == s.conf.LastEvictCandidate.storeID
+		// Mark the store has recovered.
+		s.conf.markCandidateRecovered()
 		cluster.SlowTrendRecovered(evictedStoreID)
 	}
 }
@@ -231,7 +250,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			// slow node next time.
 			log.Info("store evicted by slow trend has been removed", zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:removed").Inc()
-		} else if checkStoreCanRecover(cluster, store, DurationSinceAsSecs(s.conf.lastEvictCandidate.captureTS)) {
+		} else if checkStoreCanRecover(cluster, store, s.conf.lastCandidateCapturedSecs()) {
 			log.Info("store evicted by slow trend has been recovered", zap.Uint64("store-id", store.GetID()))
 			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:recovered").Inc()
 		} else {
@@ -244,7 +263,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 
 	candFreshCaptured := false
 	if s.conf.candidate() == 0 {
-		candidate := chooseEvictCandidate(cluster, s.conf.lastEvictCandidate)
+		candidate := chooseEvictCandidate(cluster, s.conf.lastCapturedCandidate())
 		if candidate != nil {
 			storeSlowTrendActionStatusGauge.WithLabelValues("cand.captured").Inc()
 			s.conf.captureCandidate(candidate.GetID())
@@ -294,7 +313,7 @@ func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSl
 	}
 }
 
-func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate slowCandidate) (slowStore *core.StoreInfo) {
+func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slowCandidate) (slowStore *core.StoreInfo) {
 	isRaftKV2 := cluster.GetPersistOptions().IsRaftKV2()
 	stores := cluster.GetStores()
 	if len(stores) < 3 {
@@ -334,7 +353,7 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate slow
 				// and consequently, it should be re-designated as slow once more.
 				// Prerequisite: `raft-kv2` engine has the ability to percept the slow trend on network io jitters.
 				// TODO: debugging
-				if lastEvictCandidate != (slowCandidate{}) && lastEvictCandidate.storeID == store.GetID() && DurationSinceAsSecs(lastEvictCandidate.captureTS) <= minReCheckDurationGap {
+				if lastEvictCandidate != nil && lastEvictCandidate.storeID == store.GetID() && DurationSinceAsSecs(lastEvictCandidate.recoverTS) <= minReCheckDurationGap {
 					candidates = append(candidates, store)
 					storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
 					log.Info("[Debugging] evict-slow-trend-scheduler pre-captured candidate for raft-kv2",

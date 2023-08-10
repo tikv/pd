@@ -88,23 +88,32 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendBasicFuncs() {
 	// Test capture store 1
 	store := suite.tc.GetStore(1)
 	es2.conf.captureCandidate(store.GetID())
-	suite.Equal(es2.conf.lastEvictCandidate, es2.conf.evictCandidate)
+	lastCapturedCandidate := es2.conf.lastCapturedCandidate()
+	suite.Equal(*lastCapturedCandidate, es2.conf.evictCandidate)
 	suite.Equal(es2.conf.candidateCapturedSecs(), uint64(0))
-	suite.False(checkStoreReadyForRecover(suite.tc, store, es2.conf.candidateCapturedSecs()))
-
+	suite.Equal(es2.conf.lastCandidateCapturedSecs(), uint64(0))
+	suite.False(checkStoreReadyForRecover(suite.tc, store, es2.conf.lastCandidateCapturedSecs()))
+	recoverTS := lastCapturedCandidate.recoverTS
+	suite.True(recoverTS.After(lastCapturedCandidate.captureTS))
+	// Pop captured store 1 and mark it has recovered.
+	time.Sleep(50 * time.Millisecond)
 	suite.Equal(es2.conf.popCandidate(true), store.GetID())
-	suite.Equal(es2.conf.lastEvictCandidate.storeID, store.GetID())
 	suite.True(es2.conf.evictCandidate == (slowCandidate{}))
+	es2.conf.markCandidateRecovered()
+	lastCapturedCandidate = es2.conf.lastCapturedCandidate()
+	suite.True(lastCapturedCandidate.recoverTS.Compare(recoverTS) > 0)
+	suite.Equal(lastCapturedCandidate.storeID, store.GetID())
 
 	// Test capture another store 2
 	store = suite.tc.GetStore(2)
 	es2.conf.captureCandidate(store.GetID())
-	suite.Equal(es2.conf.lastEvictCandidate.storeID, uint64(1))
-	suite.Equal(es2.conf.evictCandidate.storeID, store.GetID())
+	lastCapturedCandidate = es2.conf.lastCapturedCandidate()
+	suite.Equal(lastCapturedCandidate.storeID, uint64(1))
+	suite.Equal(es2.conf.candidate(), store.GetID())
 	suite.Equal(es2.conf.candidateCapturedSecs(), uint64(0))
 
 	suite.Equal(es2.conf.popCandidate(false), store.GetID())
-	suite.Equal(es2.conf.lastEvictCandidate.storeID, uint64(1))
+	suite.Equal(lastCapturedCandidate.storeID, uint64(1))
 }
 
 func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
