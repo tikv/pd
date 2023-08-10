@@ -207,7 +207,7 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]int
 		cmd.Printf("Failed! %s\n", err)
 		return
 	}
-	cmd.Printf("Success! %s\n", msg)
+	cmd.Printf("Success! %s\n", strings.Trim(string(msg), "\""))
 }
 
 func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
