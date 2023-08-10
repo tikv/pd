@@ -59,11 +59,6 @@ type evictSlowTrendSchedulerConfig struct {
 	EvictedStores []uint64 `json:"evict-by-trend-stores"`
 }
 
-// Get the duration gap since the given startTS, unit: s.
-func DurationSinceAsSecs(startTS time.Time) uint64 {
-	return uint64(time.Since(startTS).Seconds())
-}
-
 func (conf *evictSlowTrendSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
 	data, err := EncodeConfig(conf)
@@ -352,16 +347,9 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slo
 				// the last identified candidate, it indicates that the node is still being affected by delays in network I/O,
 				// and consequently, it should be re-designated as slow once more.
 				// Prerequisite: `raft-kv2` engine has the ability to percept the slow trend on network io jitters.
-				// TODO: debugging
 				if lastEvictCandidate != nil && lastEvictCandidate.storeID == store.GetID() && DurationSinceAsSecs(lastEvictCandidate.recoverTS) <= minReCheckDurationGap {
 					candidates = append(candidates, store)
 					storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
-					log.Info("[Debugging] evict-slow-trend-scheduler pre-captured candidate for raft-kv2",
-						zap.Uint64("store-id", store.GetID()),
-						zap.Float64("cause-rate", slowTrend.CauseRate),
-						zap.Float64("result-rate", slowTrend.ResultRate),
-						zap.Float64("cause-value", slowTrend.CauseValue),
-						zap.Float64("result-value", slowTrend.ResultValue))
 				}
 			}
 		}
@@ -510,10 +498,16 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 	return fasterThanStores >= expected
 }
 
+// checkStoreReadyForRecover checks whether the given target store is ready for recover.
 func checkStoreReadyForRecover(target *core.StoreInfo, recoveryGap uint64) bool {
 	if targetSlowTrend := target.GetSlowTrend(); targetSlowTrend != nil {
 		// @TODO: setting the recovery time in SlowTrend
 		return recoveryGap >= defaultRecoveryDurationGap
 	}
 	return true
+}
+
+// DurationSinceAsSecs returns the duration gap since the given startTS, unit: s.
+func DurationSinceAsSecs(startTS time.Time) uint64 {
+	return uint64(time.Since(startTS).Seconds())
 }
