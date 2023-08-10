@@ -15,8 +15,11 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"strconv"
@@ -140,12 +143,11 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running            bool
-	meta               *metapb.Cluster
-	storeConfigManager *config.StoreConfigManager
-	storage            storage.Storage
-	minResolvedTS      uint64
-	externalTS         uint64
+	running       bool
+	meta          *metapb.Cluster
+	storage       storage.Storage
+	minResolvedTS uint64
+	externalTS    uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
@@ -193,7 +195,7 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.
 
 // GetStoreConfig returns the store config.
 func (c *RaftCluster) GetStoreConfig() sc.StoreConfigProvider {
-	return c.storeConfigManager.GetStoreConfig()
+	return c.GetOpts()
 }
 
 // GetCheckerConfig returns the checker config.
@@ -259,11 +261,11 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 // InitCluster initializes the raft cluster.
 func (c *RaftCluster) InitCluster(
 	id id.Allocator,
-	opt *config.PersistOptions,
+	opt sc.ConfProvider,
 	storage storage.Storage,
 	basicCluster *core.BasicCluster,
 	keyspaceGroupManager *keyspace.GroupManager) {
-	c.core, c.opt, c.storage, c.id = basicCluster, opt, storage, id
+	c.core, c.opt, c.storage, c.id = basicCluster, opt.(*config.PersistOptions), storage, id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
@@ -317,9 +319,8 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-	c.storeConfigManager = config.NewStoreConfigManager(c.httpClient)
 	c.coordinator = schedule.NewCoordinator(c.ctx, cluster, s.GetHBStreams())
-	c.regionStats = statistics.NewRegionStatistics(c.core, c.opt, c.ruleManager, c.storeConfigManager)
+	c.regionStats = statistics.NewRegionStatistics(c.core, c.opt, c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.externalTS, err = c.storage.LoadExternalTS()
 	if err != nil {
@@ -334,7 +335,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.syncRegions()
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
-	go c.runSyncConfig()
+	go c.runStoreConfigSync()
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 
@@ -411,44 +412,51 @@ func (c *RaftCluster) startGCTuner() {
 	}
 }
 
-// runSyncConfig runs the job to sync tikv config.
-func (c *RaftCluster) runSyncConfig() {
+// runStoreConfigSync runs the job to sync the store config from TiKV.
+func (c *RaftCluster) runStoreConfigSync() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
+
+	var (
+		synced, switchRaftV2Config bool
+		stores                     = c.GetStores()
+	)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-
-	stores := c.GetStores()
-	syncFunc := func() {
-		synced, switchRaftV2Config := syncConfig(c.storeConfigManager, stores)
+	for {
+		synced, switchRaftV2Config = c.syncStoreConfig(stores)
 		if switchRaftV2Config {
 			c.GetOpts().UseRaftV2()
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
 		}
+		// Update the stores if the synchronization is not completed.
 		if !synced {
 			stores = c.GetStores()
+		} else if err := c.opt.Persist(c.storage); err != nil {
+			log.Warn("store config persisted failed", zap.Error(err))
 		}
-	}
-
-	syncFunc()
-	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("sync store config job is stopped")
 			return
 		case <-ticker.C:
-			syncFunc()
 		}
 	}
 }
 
-// syncConfig syncs the config of the stores.
-// synced is true if sync config from one tikv.
-// switchRaftV2 is true if the config of tikv engine is changed and engine is raft-kv2.
-func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) (synced bool, switchRaftV2 bool) {
+// syncStoreConfig syncs the store config from TiKV.
+//   - `synced` is true if sync config from one tikv.
+//   - `switchRaftV2` is true if the config of tikv engine is change to raft-kv2.
+func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, switchRaftV2 bool) {
 	for index := 0; index < len(stores); index++ {
+		select {
+		case <-c.ctx.Done():
+			log.Info("stop sync store config job due to server shutdown")
+			return
+		default:
+		}
 		// filter out the stores that are tiflash
 		store := stores[index]
 		if store.IsTiFlash() {
@@ -461,8 +469,11 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) (s
 		}
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
-		switchRaftV2, err := manager.ObserveConfig(address)
+		switchRaftV2, err := c.observeStoreConfig(c.ctx, address)
 		if err != nil {
+			// delete the store if it is failed and retry next store.
+			stores = append(stores[:index], stores[index+1:]...)
+			index--
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
@@ -474,6 +485,73 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) (s
 		return true, switchRaftV2
 	}
 	return false, false
+}
+
+// observeStoreConfig is used to observe the store config changes and
+// return whether if the new config changes the engine to raft-kv2.
+func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (bool, error) {
+	cfg, err := c.fetchStoreConfigFromTiKV(ctx, address)
+	if err != nil {
+		return false, err
+	}
+	oldCfg := c.opt.GetStoreConfig()
+	if cfg == nil || oldCfg.Equal(cfg) {
+		return false, nil
+	}
+	log.Info("sync the store config successful",
+		zap.String("store-address", address),
+		zap.String("store-config", cfg.String()),
+		zap.String("old-config", oldCfg.String()))
+	return c.updateStoreConfig(oldCfg, cfg)
+}
+
+// updateStoreConfig updates the store config. This is extracted for testing.
+func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *sc.StoreConfig) (bool, error) {
+	cfg.Adjust()
+	c.opt.SetStoreConfig(cfg)
+	return oldCfg.Storage.Engine != sc.RaftstoreV2 && cfg.Storage.Engine == sc.RaftstoreV2, nil
+}
+
+// fetchStoreConfigFromTiKV tries to fetch the config from the TiKV store URL.
+func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddress string) (*sc.StoreConfig, error) {
+	cfg := &sc.StoreConfig{}
+	failpoint.Inject("mockFetchStoreConfigFromTiKV", func(val failpoint.Value) {
+		if regionMaxSize, ok := val.(string); ok {
+			cfg.RegionMaxSize = regionMaxSize
+			cfg.Storage.Engine = sc.RaftstoreV2
+		}
+		failpoint.Return(cfg, nil)
+	})
+	if c.httpClient == nil {
+		return nil, fmt.Errorf("failed to get store config due to nil client")
+	}
+	var url string
+	if netutil.IsEnableHTTPS(c.httpClient) {
+		url = fmt.Sprintf("%s://%s/config", "https", statusAddress)
+	} else {
+		url = fmt.Sprintf("%s://%s/config", "http", statusAddress)
+	}
+	ctx, cancel := context.WithTimeout(ctx, clientTimeout)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewBuffer(nil))
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create store config http request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	cancel()
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(body, cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // LoadClusterInfo loads cluster related info.
@@ -758,11 +836,6 @@ func (c *RaftCluster) GetOpts() sc.ConfProvider {
 	return c.opt
 }
 
-// GetPersistOptions returns cluster's configuration.
-func (c *RaftCluster) GetPersistOptions() *config.PersistOptions {
-	return c.opt
-}
-
 // GetScheduleConfig returns scheduling configurations.
 func (c *RaftCluster) GetScheduleConfig() *sc.ScheduleConfig {
 	return c.opt.GetScheduleConfig()
@@ -986,7 +1059,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	region.Inherit(origin, c.storeConfigManager.GetStoreConfig().IsEnableRegionBucket())
+	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
@@ -2045,7 +2118,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
+	statsMap := statistics.NewStoreStatisticsMap(c.opt)
 	stores := c.GetStores()
 	for _, s := range stores {
 		statsMap.Observe(s, c.hotStat.StoresStats)
@@ -2059,7 +2132,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt, c.storeConfigManager.GetStoreConfig())
+	statsMap := statistics.NewStoreStatisticsMap(c.opt)
 	statsMap.Reset()
 
 	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
