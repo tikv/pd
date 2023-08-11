@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -36,13 +37,16 @@ import (
 )
 
 var (
-	pdAddr = flag.String("pd", "127.0.0.1:2379", "pd address")
+	pdAddr    = flag.String("pd", "127.0.0.1:2379", "pd address")
+	debugFlag = flag.Bool("debug", false, "print the output of api response for debug")
 
 	httpCases = flag.String("http-cases", "", "http api cases")
 	gRPCCases = flag.String("grpc-cases", "", "grpc cases")
 
-	// concurrency
-	concurrency = flag.Int("concurrency", 1, "client number")
+	client = flag.Int("client", 1, "client number")
+
+	qps   = flag.Int64("qps", 1000, "qps")
+	burst = flag.Int64("burst", 1, "burst")
 
 	// tls
 	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
@@ -50,7 +54,7 @@ var (
 	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format")
 )
 
-var base int = int(time.Second) / int(time.Microsecond)
+var base int64 = int64(time.Second) / int64(time.Microsecond)
 
 func main() {
 	flag.Parse()
@@ -75,18 +79,62 @@ func main() {
 		protocol = "https"
 	}
 	cases.PDAddress = fmt.Sprintf("%s://%s", protocol, addr)
+	cases.Debug = *debugFlag
 
 	hcases := make([]cases.HTTPCase, 0)
 	gcases := make([]cases.GRPCCase, 0)
+
+	var err error
 	hcaseStr := strings.Split(*httpCases, ",")
 	for _, str := range hcaseStr {
-		if len(str) == 0 {
+		// fmt.Println(str)
+		caseQPS := int64(0)
+		caseBurst := int64(0)
+		cStr := ""
+
+		strs := strings.Split(str, "-")
+		// to get case name
+		strsa := strings.Split(strs[0], "+")
+		cStr = strsa[0]
+		// to get case Burst
+		if len(strsa) > 1 {
+			caseBurst, err = strconv.ParseInt(strsa[1], 10, 64)
+			if err != nil {
+				log.Printf("parse burst failed for case %s", str)
+			}
+		}
+		// to get case qps
+		if len(strs) > 1 {
+			strsb := strings.Split(strs[1], "+")
+			caseQPS, err = strconv.ParseInt(strsb[0], 10, 64)
+			if err != nil {
+				log.Printf("parse qps failed for case %s", str)
+			}
+			// to get case Burst
+			if len(strsb) > 1 {
+				caseBurst, err = strconv.ParseInt(strsb[1], 10, 64)
+				if err != nil {
+					log.Printf("parse burst failed for case %s", str)
+				}
+			}
+		}
+		if len(cStr) == 0 {
 			continue
 		}
-		if cas, ok := cases.HTTPCaseMap[str]; ok {
+		if cas, ok := cases.HTTPCaseMap[cStr]; ok {
 			hcases = append(hcases, cas)
+			if caseBurst > 0 {
+				cas.SetBurst(caseBurst)
+			} else if *burst > 0 {
+				cas.SetBurst(*burst)
+			}
+			if caseQPS > 0 {
+				cas.SetQPS(caseQPS)
+			} else if *qps > 0 {
+				cas.SetQPS(*qps)
+			}
 		} else {
-			log.Println("no this case", str)
+			log.Printf("no this case: '%s'", str)
 		}
 	}
 	gcaseStr := strings.Split(*gRPCCases, ",")
@@ -100,19 +148,19 @@ func main() {
 			log.Println("no this case", str)
 		}
 	}
-	if *concurrency == 0 {
+	if *client == 0 {
 		log.Println("concurrency == 0, exit")
 		return
 	}
 	pdClis := make([]pd.Client, 0)
-	for i := 0; i < *concurrency; i++ {
+	for i := 0; i < *client; i++ {
 		pdClis = append(pdClis, newPDClient())
 	}
 	httpClis := make([]*http.Client, 0)
-	for i := 0; i < *concurrency; i++ {
+	for i := 0; i < *client; i++ {
 		httpClis = append(httpClis, newHttpClient())
 	}
-	err := cases.InitCluster(ctx, pdClis[0], httpClis[0])
+	err = cases.InitCluster(ctx, pdClis[0], httpClis[0])
 	if err != nil {
 		log.Fatalf("InitCluster error %v", err)
 	}
@@ -135,10 +183,10 @@ func main() {
 }
 
 func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Client) {
-	log.Printf("begin to run gRPC case %s", gcase.Name())
+	log.Printf("begin to run gRPC case %s, with qps = %d and burst = %d", gcase.Name(), gcase.GetQPS(), gcase.GetBurst())
 	qps := gcase.GetQPS()
 	burst := gcase.GetBurst()
-	tt := base / qps * burst * *concurrency
+	tt := base / qps * burst * int64(*client)
 	for _, cli := range clients {
 		go func(cli pd.Client) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -146,7 +194,7 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 			for {
 				select {
 				case <-ticker.C:
-					for i := 0; i < burst; i++ {
+					for i := int64(0); i < burst; i++ {
 						err := gcase.Unary(ctx, cli)
 						if err != nil {
 							log.Println(err)
@@ -162,10 +210,10 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 }
 
 func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []*http.Client) {
-	log.Printf("begin to run http case %s", hcase.Name())
+	log.Printf("begin to run http case %s, with qps = %d and burst = %d", hcase.Name(), hcase.GetQPS(), hcase.GetBurst())
 	qps := hcase.GetQPS()
 	burst := hcase.GetBurst()
-	tt := base / qps * burst * *concurrency
+	tt := base / qps * burst * int64(*client)
 	for _, hCli := range httpClis {
 		go func(hCli *http.Client) {
 			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
@@ -173,7 +221,7 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []*http.
 			for {
 				select {
 				case <-ticker.C:
-					for i := 0; i < burst; i++ {
+					for i := int64(0); i < burst; i++ {
 						err := hcase.Do(ctx, hCli)
 						if err != nil {
 							log.Println(err)

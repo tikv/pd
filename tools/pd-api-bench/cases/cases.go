@@ -25,13 +25,19 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
-var PDAddress string
+var (
+	PDAddress string
+	Debug     bool
+)
 
-var totalRegion int
-var totalStore int
-var storesID []uint64
+var (
+	totalRegion int
+	totalStore  int
+	storesID    []uint64
+)
 
 func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
@@ -63,35 +69,35 @@ func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) erro
 
 type Case interface {
 	Name() string
-	SetQPS(int)
-	GetQPS() int
-	SetBurst(int)
-	GetBurst() int
+	SetQPS(int64)
+	GetQPS() int64
+	SetBurst(int64)
+	GetBurst() int64
 }
 
 type baseCase struct {
 	name  string
-	qps   int
-	burst int
+	qps   int64
+	burst int64
 }
 
 func (c *baseCase) Name() string {
 	return c.name
 }
 
-func (c *baseCase) SetQPS(qps int) {
+func (c *baseCase) SetQPS(qps int64) {
 	c.qps = qps
 }
 
-func (c *baseCase) GetQPS() int {
+func (c *baseCase) GetQPS() int64 {
 	return c.qps
 }
 
-func (c *baseCase) SetBurst(burst int) {
+func (c *baseCase) SetBurst(burst int64) {
 	c.burst = burst
 }
 
-func (c *baseCase) GetBurst() int {
+func (c *baseCase) GetBurst() int64 {
 	return c.burst
 }
 
@@ -119,6 +125,7 @@ var HTTPCaseMap = map[string]HTTPCase{
 
 type minResolvedTS struct {
 	*baseCase
+	path string
 }
 
 func newMinResolvedTS() *minResolvedTS {
@@ -128,13 +135,28 @@ func newMinResolvedTS() *minResolvedTS {
 			qps:   1000,
 			burst: 1,
 		},
+		path: "/pd/api/v1/min-resolved-ts",
 	}
+}
+
+type minResolvedTSStruct struct {
+	IsRealTime      bool              `json:"is_real_time,omitempty"`
+	MinResolvedTS   uint64            `json:"min_resolved_ts"`
+	PersistInterval typeutil.Duration `json:"persist_interval,omitempty"`
 }
 
 func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
 	storeIdx := rand.Intn(int(totalStore))
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, PDAddress+fmt.Sprintf("pd/api/v1/min-resolved-ts/%d", storesID[storeIdx]), nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s/%d", PDAddress, c.path, storesID[storeIdx]), nil)
 	res, err := cli.Do(req)
+	if err != nil {
+		return err
+	}
+	listResp := &minResolvedTSStruct{}
+	err = apiutil.ReadJSON(res.Body, listResp)
+	if Debug {
+		log.Printf("Do %s: %v %v", c.name, listResp, err)
+	}
 	if err != nil {
 		return err
 	}
@@ -145,6 +167,7 @@ func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
 type regionsStats struct {
 	*baseCase
 	regionSample int
+	path         string
 }
 
 func newRegionStats() *regionsStats {
@@ -155,6 +178,7 @@ func newRegionStats() *regionsStats {
 			burst: 1,
 		},
 		regionSample: 1000,
+		path:         "/pd/api/v1/stats/region",
 	}
 }
 
@@ -166,12 +190,22 @@ func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, PDAddress+fmt.Sprintf("/pd/api/v1/stats/region?start_key=%s&end_key=%s&%s",
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s?start_key=%s&end_key=%s&%s",
+		PDAddress,
+		c.path,
 		url.QueryEscape(string(generateKeyForSimulator(startID, 56))),
 		url.QueryEscape(string(generateKeyForSimulator(endID, 56))),
 		"",
 	), nil)
 	res, err := cli.Do(req)
+	if err != nil {
+		return err
+	}
+	statsResp := &statistics.RegionStats{}
+	err = apiutil.ReadJSON(res.Body, statsResp)
+	if Debug {
+		log.Printf("Do %s: %v %v", c.name, statsResp, err)
+	}
 	if err != nil {
 		return err
 	}
@@ -195,11 +229,9 @@ func newGetRegion() *getRegion {
 
 func (c *getRegion) Unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(int(totalRegion))*4 + 1
-	for i := 0; i < c.burst; i++ {
-		_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
-		if err != nil {
-			return err
-		}
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -225,11 +257,9 @@ func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
-	for i := 0; i < c.burst; i++ {
-		_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID, 56), generateKeyForSimulator(endID, 56), c.regionSample)
-		if err != nil {
-			return err
-		}
+	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID, 56), generateKeyForSimulator(endID, 56), c.regionSample)
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -250,11 +280,9 @@ func newGetStore() *getStore {
 
 func (c *getStore) Unary(ctx context.Context, cli pd.Client) error {
 	storeIdx := rand.Intn(int(totalStore))
-	for i := 0; i < c.burst; i++ {
-		_, err := cli.GetStore(ctx, storesID[storeIdx])
-		if err != nil {
-			return err
-		}
+	_, err := cli.GetStore(ctx, storesID[storeIdx])
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -274,11 +302,9 @@ func newGetStores() *getStores {
 }
 
 func (c *getStores) Unary(ctx context.Context, cli pd.Client) error {
-	for i := 0; i < c.burst; i++ {
-		_, err := cli.GetAllStores(ctx)
-		if err != nil {
-			return err
-		}
+	_, err := cli.GetAllStores(ctx)
+	if err != nil {
+		return err
 	}
 	return nil
 }
