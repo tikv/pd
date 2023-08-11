@@ -15,6 +15,7 @@
 package config
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"net/http"
@@ -62,9 +63,9 @@ func (t *testTiKVConfigSuite) TestTiKVConfig(c *C) {
 
 func (t *testTiKVConfigSuite) TestUpdateConfig(c *C) {
 	manager := NewTestStoreConfigManager([]string{"tidb.com"})
-	manager.ObserveConfig("tikv.com")
+	manager.ObserveConfig(context.Background(), "tikv.com")
 	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
-	manager.ObserveConfig("tidb.com")
+	manager.ObserveConfig(context.Background(), "tidb.com")
 	c.Assert(manager.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(10))
 
 	client := &http.Client{
