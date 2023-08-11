@@ -337,7 +337,6 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 	}
 	if pass, reason := oc.checkAddOperator(false, ops...); !pass {
 		for _, op := range ops {
-            operatorCounter.WithLabelValues(op.Desc(), reason).Inc()
 			_ = op.Cancel(reason)
 			oc.buryOperator(op)
 		}
