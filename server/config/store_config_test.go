@@ -15,9 +15,9 @@
 package config
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
-	"golang.org/x/net/context"
 	"net/http"
 	"testing"
 
