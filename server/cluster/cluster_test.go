@@ -1386,20 +1386,6 @@ func TestSyncConfigContext(t *testing.T) {
 	re.Less(time.Since(now), clientTimeout*2)
 }
 
-func TestStoreConfigSync(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	tc := newTestCluster(ctx, opt)
-	stores := newTestStores(5, "2.0.0")
-	for _, s := range stores {
-		re.NoError(tc.putStoreLocked(s))
-	}
-}
-
 func TestUpdateStorePendingPeerCount(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
