@@ -432,7 +432,7 @@ func syncConfig(ctx context.Context, manager *config.StoreConfigManager, stores 
 	for index := 0; index < len(stores); index++ {
 		select {
 		case <-ctx.Done():
-			log.Info("stop sync store config job due to server shutdown")
+			log.Info("stop sync store config job due to raft cluster exited")
 			return
 		default:
 		}

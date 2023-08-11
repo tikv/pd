@@ -15,7 +15,6 @@
 package config
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -289,19 +288,17 @@ func newTiKVConfigSource(schema string, client *http.Client) *TiKVConfigSource {
 func (s TiKVConfigSource) GetConfig(ctx context.Context, statusAddress string) (*StoreConfig, error) {
 	url := fmt.Sprintf("%s://%s/config", s.schema, statusAddress)
 	ctx, cancel := context.WithTimeout(ctx, clientTimeout)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewBuffer(nil))
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		cancel()
 		return nil, fmt.Errorf("failed to create store config http request: %w", err)
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
-	cancel()
 	if err != nil {
 		return nil, err
 	}
