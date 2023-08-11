@@ -16,15 +16,13 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
-<<<<<<< HEAD
-	"strings"
-=======
 	"net/http"
 	"net/http/httptest"
->>>>>>> 38d087fec (config: sync store config in time (#6919))
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1178,6 +1176,40 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 	}
 }
 
+func (s *testClusterInfoSuite) TestSyncConfigContext(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, _ := newTestScheduleConfig()
+	tc := newTestCluster(ctx, opt)
+	tc.storeConfigManager = config.NewStoreConfigManager(http.DefaultClient)
+	tc.httpClient = &http.Client{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		time.Sleep(time.Second * 100)
+		cfg := &config.StoreConfig{}
+		b, err := json.Marshal(cfg)
+		if err != nil {
+			res.WriteHeader(http.StatusInternalServerError)
+			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			return
+		}
+
+		res.WriteHeader(http.StatusOK)
+		res.Write(b)
+	}))
+	stores := newTestStores(1, "2.0.0")
+	for _, s := range stores {
+		tc.putStoreLocked(s)
+	}
+	// trip schema header
+	now := time.Now()
+	stores[0].GetMeta().StatusAddress = server.URL[7:]
+	synced := syncConfig(tc.ctx, tc.storeConfigManager, stores)
+	c.Assert(synced, IsFalse)
+	c.Assert(time.Since(now), Less, clientTimeout*2)
+}
+
 func (s *testClusterInfoSuite) TestSyncConfig(c *C) {
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
@@ -1205,55 +1237,12 @@ func (s *testClusterInfoSuite) TestSyncConfig(c *C) {
 	for _, v := range testdata {
 		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
 		c.Assert(tc.GetStoreConfig().GetRegionMaxSize(), Equals, uint64(144))
-		c.Assert(syncConfig(tc.storeConfigManager, tc.GetStores()), Equals, v.updated)
+		c.Assert(syncConfig(context.Background(), tc.storeConfigManager, tc.GetStores()), Equals, v.updated)
 		c.Assert(tc.GetStoreConfig().GetRegionMaxSize(), Equals, v.maxRegionSize)
 	}
 }
 
-<<<<<<< HEAD
 func (s *testClusterInfoSuite) TestUpdateStorePendingPeerCount(c *C) {
-=======
-func TestSyncConfigContext(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	tc := newTestCluster(ctx, opt)
-	tc.httpClient = &http.Client{}
-
-	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
-		time.Sleep(time.Second * 100)
-		cfg := &config.StoreConfig{}
-		b, err := json.Marshal(cfg)
-		if err != nil {
-			res.WriteHeader(http.StatusInternalServerError)
-			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
-			return
-		}
-
-		res.WriteHeader(http.StatusOK)
-		res.Write(b)
-	}))
-	stores := newTestStores(1, "2.0.0")
-	for _, s := range stores {
-		re.NoError(tc.putStoreLocked(s))
-	}
-	// trip schema header
-	now := time.Now()
-	stores[0].GetMeta().StatusAddress = server.URL[7:]
-	synced, _ := tc.syncStoreConfig(tc.GetStores())
-	re.False(synced)
-	re.Less(time.Since(now), clientTimeout*2)
-}
-
-func TestStoreConfigSync(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
->>>>>>> 38d087fec (config: sync store config in time (#6919))
 	_, opt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
 	tc := newTestCluster(s.ctx, opt)
