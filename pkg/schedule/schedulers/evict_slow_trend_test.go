@@ -198,6 +198,58 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
+func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendV2() {
+	es2, ok := suite.es.(*evictSlowTrendScheduler)
+	suite.True(ok)
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/mockRaftKV2", "return(true)"))
+
+	suite.Equal(es2.conf.evictedStore(), uint64(0))
+	suite.Equal(es2.conf.candidate(), uint64(0))
+	// Set store-1 to slow status, generate slow candidate but under faster limit
+	storeInfo := suite.tc.GetStore(1)
+	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{
+			CauseValue:  5.0e6 + 100,
+			CauseRate:   1e7,
+			ResultValue: 3.0e3,
+			ResultRate:  -1e7,
+		}
+	})
+	suite.tc.PutStore(newStoreInfo)
+	suite.True(suite.es.IsScheduleAllowed(suite.tc))
+	ops, _ := suite.es.Schedule(suite.tc, false)
+	suite.Empty(ops)
+	suite.Equal(es2.conf.evictedStore(), uint64(0))
+	suite.Equal(es2.conf.candidate(), uint64(1))
+	suite.Equal(es2.conf.lastCandidateCapturedSecs(), uint64(0))
+	// Rescheduling to make it filtered by the related faster judgement.
+	ops, _ = suite.es.Schedule(suite.tc, false)
+	suite.Empty(ops)
+	suite.Equal(es2.conf.evictedStore(), uint64(0))
+	suite.Equal(es2.conf.candidate(), uint64(0))
+
+	// Set store-1 to slow status as network-io delays
+	storeInfo = suite.tc.GetStore(1)
+	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowTrend = &pdpb.SlowTrend{
+			CauseValue:  5.0e6,
+			CauseRate:   1e7,
+			ResultValue: 0,
+			ResultRate:  0,
+		}
+	})
+	suite.tc.PutStore(newStoreInfo)
+	suite.True(suite.es.IsScheduleAllowed(suite.tc))
+	ops, _ = suite.es.Schedule(suite.tc, false)
+	suite.Empty(ops)
+	suite.Equal(es2.conf.evictedStore(), uint64(0))
+	suite.Equal(es2.conf.lastCandidateCapturedSecs(), uint64(0))
+
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/mockRaftKV2"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+}
+
 func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPrepare() {
 	es2, ok := suite.es.(*evictSlowTrendScheduler)
 	suite.True(ok)

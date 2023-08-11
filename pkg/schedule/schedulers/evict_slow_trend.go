@@ -309,6 +309,9 @@ func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSl
 
 func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slowCandidate) (slowStore *core.StoreInfo) {
 	isRaftKV2 := cluster.GetStoreConfig().IsRaftKV2()
+	failpoint.Inject("mockRaftKV2", func() {
+		isRaftKV2 = true
+	})
 	stores := cluster.GetStores()
 	if len(stores) < 3 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-few").Inc()
