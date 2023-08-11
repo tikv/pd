@@ -1623,7 +1623,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	if op != nil {
 		if !rc.GetOperatorController().AddOperator(op) {
 			return &pdpb.ScatterRegionResponse{
-				Header: pdpb.ErrorType_UNKNOWN,
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 					"operator cancelled"),
 			}, nil
         }
