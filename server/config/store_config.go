@@ -296,10 +296,12 @@ func (s TiKVConfigSource) GetConfig(ctx context.Context, statusAddress string) (
 	}
 	resp, err := s.client.Do(req)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
