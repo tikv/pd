@@ -215,7 +215,7 @@ func (r *MedianFilter) GetInstantaneous() float64 {
 	return r.records[(r.count-1)%r.size]
 }
 
-// Clone returns a copy of MedianFilter
+// Clone returns a copy of MedianFilter.
 func (r *MedianFilter) Clone() *MedianFilter {
 	records := make([]float64, len(r.records))
 	copy(records, r.records)
@@ -227,7 +227,7 @@ func (r *MedianFilter) Clone() *MedianFilter {
 	}
 }
 
-// GetAll only used in test
+// GetAll only used in test.
 func (r *MedianFilter) GetAll() []float64 {
 	if r.count == 0 {
 		return nil
