@@ -16,6 +16,7 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
@@ -1331,23 +1332,24 @@ func TestSyncConfig(t *testing.T) {
 		},
 	}
 
-<<<<<<< HEAD
 	for _, v := range testdata {
 		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
 		re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
-		success, switchRaftV2 := syncConfig(tc.storeConfigManager, tc.GetStores())
+		success, switchRaftV2 := syncConfig(tc.ctx, tc.storeConfigManager, tc.GetStores())
 		re.Equal(v.updated, success)
 		if v.updated {
 			re.True(switchRaftV2)
 			tc.opt.UseRaftV2()
 			re.EqualValues(0, tc.opt.GetMaxMergeRegionSize())
 			re.EqualValues(512, tc.opt.GetMaxMovableHotPeerSize())
-			success, switchRaftV2 = syncConfig(tc.storeConfigManager, tc.GetStores())
+			success, switchRaftV2 = syncConfig(tc.ctx, tc.storeConfigManager, tc.GetStores())
 			re.True(success)
 			re.False(switchRaftV2)
 		}
 		re.Equal(v.maxRegionSize, tc.GetStoreConfig().GetRegionMaxSize())
-=======
+	}
+}
+
 func TestSyncConfigContext(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1356,6 +1358,7 @@ func TestSyncConfigContext(t *testing.T) {
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	tc := newTestCluster(ctx, opt)
+	tc.storeConfigManager = config.NewStoreConfigManager(http.DefaultClient)
 	tc.httpClient = &http.Client{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
@@ -1378,7 +1381,7 @@ func TestSyncConfigContext(t *testing.T) {
 	// trip schema header
 	now := time.Now()
 	stores[0].GetMeta().StatusAddress = server.URL[7:]
-	synced, _ := tc.syncStoreConfig(tc.GetStores())
+	synced, _ := syncConfig(tc.ctx, tc.storeConfigManager, stores)
 	re.False(synced)
 	re.Less(time.Since(now), clientTimeout*2)
 }
@@ -1394,7 +1397,6 @@ func TestStoreConfigSync(t *testing.T) {
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
 		re.NoError(tc.putStoreLocked(s))
->>>>>>> 38d087fec (config: sync store config in time (#6919))
 	}
 }
 
