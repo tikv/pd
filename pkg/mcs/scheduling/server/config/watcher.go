@@ -42,9 +42,10 @@ type Watcher struct {
 }
 
 type persistedConfig struct {
+	ClusterVersion semver.Version       `json:"cluster-version"`
 	Schedule       sc.ScheduleConfig    `json:"schedule"`
 	Replication    sc.ReplicationConfig `json:"replication"`
-	ClusterVersion semver.Version       `json:"cluster-version"`
+	Store          sc.StoreConfig       `json:"store"`
 }
 
 // NewWatcher creates a new watcher to watch the config meta change from PD API server.
@@ -71,9 +72,10 @@ func NewWatcher(
 				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
 			return err
 		}
+		cw.SetClusterVersion(&cfg.ClusterVersion)
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
-		cw.SetClusterVersion(&cfg.ClusterVersion)
+		cw.SetStoreConfig(&cfg.Store)
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {

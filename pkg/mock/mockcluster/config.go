@@ -20,7 +20,6 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/config"
 )
 
 // SetMaxMergeRegionSize updates the MaxMergeRegionSize configuration.
@@ -173,15 +172,15 @@ func (mc *Cluster) SetMaxReplicasWithLabel(enablePlacementRules bool, num int, l
 
 // SetRegionMaxSize sets the region max size.
 func (mc *Cluster) SetRegionMaxSize(v string) {
-	mc.updateStoreConfig(func(r *config.StoreConfig) { r.RegionMaxSize = v })
+	mc.updateStoreConfig(func(r *sc.StoreConfig) { r.RegionMaxSize = v })
 }
 
 // SetRegionSizeMB sets the region max size.
 func (mc *Cluster) SetRegionSizeMB(v uint64) {
-	mc.updateStoreConfig(func(r *config.StoreConfig) { r.RegionMaxSizeMB = v })
+	mc.updateStoreConfig(func(r *sc.StoreConfig) { r.RegionMaxSizeMB = v })
 }
 
-func (mc *Cluster) updateStoreConfig(f func(*config.StoreConfig)) {
+func (mc *Cluster) updateStoreConfig(f func(*sc.StoreConfig)) {
 	r := mc.PersistOptions.GetStoreConfig().Clone()
 	f(r)
 	mc.SetStoreConfig(r)

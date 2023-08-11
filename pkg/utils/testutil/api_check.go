@@ -25,8 +25,8 @@ import (
 
 // Status is used to check whether http response code is equal given code
 func Status(re *require.Assertions, code int) func([]byte, int) {
-	return func(_ []byte, i int) {
-		re.Equal(code, i)
+	return func(resp []byte, i int) {
+		re.Equal(code, i, "resp: "+string(resp))
 	}
 }
 

@@ -1,6 +1,6 @@
 module github.com/tikv/pd/client
 
-go 1.20
+go 1.21
 
 require (
 	github.com/cloudfoundry/gosigar v1.3.6
