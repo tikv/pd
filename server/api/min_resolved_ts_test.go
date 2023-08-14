@@ -15,12 +15,10 @@
 package api
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,7 +131,7 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTSByStores() {
 	rc := suite.svr.GetRaftCluster()
 	ts := uint64(233)
 
-	// set all stores min resolved ts.
+	// scope is `cluster`
 	testStoresID := make([]string, 0)
 	testMap := make(map[uint64]uint64)
 	for i := 1; i <= suite.storesNum; i++ {
@@ -149,17 +147,27 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTSByStores() {
 		IsRealTime:          true,
 		PersistInterval:     interval,
 		StoresMinResolvedTS: testMap,
-	}, testStoresID)
+	}, "cluster")
+
+	// set all stores min resolved ts.
+	testStoresIDStr := strings.Join(testStoresID, ",")
+	suite.checkMinResolvedTSByStores(&minResolvedTS{
+		MinResolvedTS:       234,
+		IsRealTime:          true,
+		PersistInterval:     interval,
+		StoresMinResolvedTS: testMap,
+	}, testStoresIDStr)
 
 	// remove last store for test.
 	testStoresID = testStoresID[:len(testStoresID)-1]
+	testStoresIDStr = strings.Join(testStoresID, ",")
 	delete(testMap, uint64(suite.storesNum))
 	suite.checkMinResolvedTSByStores(&minResolvedTS{
 		MinResolvedTS:       234,
 		IsRealTime:          true,
 		PersistInterval:     interval,
 		StoresMinResolvedTS: testMap,
-	}, testStoresID)
+	}, testStoresIDStr)
 }
 
 func (suite *minResolvedTSTestSuite) setMinResolvedTSPersistenceInterval(duration typeutil.Duration) {
@@ -183,15 +191,15 @@ func (suite *minResolvedTSTestSuite) checkMinResolvedTS(expect *minResolvedTS) {
 		listResp := &minResolvedTS{}
 		err = apiutil.ReadJSON(res.Body, listResp)
 		suite.NoError(err)
+		suite.Nil(listResp.StoresMinResolvedTS)
 		return reflect.DeepEqual(expect, listResp)
 	}, time.Second*10, time.Millisecond*20)
 }
 
-func (suite *minResolvedTSTestSuite) checkMinResolvedTSByStores(expect *minResolvedTS, storeIDs []string) {
+func (suite *minResolvedTSTestSuite) checkMinResolvedTSByStores(expect *minResolvedTS, scope string) {
 	suite.Eventually(func() bool {
-		data, _ := json.Marshal(storeIDs)
-		req, _ := http.NewRequest(http.MethodGet, suite.url, bytes.NewBuffer(data))
-		res, err := testDialClient.Do(req)
+		url := fmt.Sprintf("%s?scope=%s", suite.url, scope)
+		res, err := testDialClient.Get(url)
 		suite.NoError(err)
 		defer res.Body.Close()
 		listResp := &minResolvedTS{}
