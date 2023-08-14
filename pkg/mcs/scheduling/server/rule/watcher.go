@@ -45,7 +45,7 @@ func (rs *ruleStorage) LoadRules(f func(k, v string)) error {
 	return nil
 }
 
-// SaveRule stores a rule cfg to the rulesPath.
+// SaveRule stores a rule cfg to the rulesPathPrefix.
 func (rs *ruleStorage) SaveRule(ruleKey string, rule interface{}) error {
 	rs.rules.Store(ruleKey, rule)
 	return nil
@@ -105,18 +105,18 @@ type Watcher struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// rulePath:
+	// rulesPathPrefix:
 	//   - Key: /pd/{cluster_id}/rules/{group_id}-{rule_id}
 	//   - Value: placement.Rule
-	rulesPath string
-	// ruleGroupPath:
+	rulesPathPrefix string
+	// ruleGroupPathPrefix:
 	//   - Key: /pd/{cluster_id}/rule_group/{group_id}
 	//   - Value: placement.RuleGroup
-	ruleGroupPath string
-	// regionLabelPath:
+	ruleGroupPathPrefix string
+	// regionLabelPathPrefix:
 	//   - Key: /pd/{cluster_id}/region_label/{rule_id}
 	//  - Value: labeler.LabelRule
-	regionLabelPath string
+	regionLabelPathPrefix string
 
 	etcdClient *clientv3.Client
 	ruleStore  *ruleStorage
@@ -135,13 +135,13 @@ func NewWatcher(
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	rw := &Watcher{
-		ctx:             ctx,
-		cancel:          cancel,
-		rulesPath:       endpoint.RulesPath(clusterID) + "/",
-		ruleGroupPath:   endpoint.RuleGroupPath(clusterID) + "/",
-		regionLabelPath: endpoint.RegionLabelPath(clusterID) + "/",
-		etcdClient:      etcdClient,
-		ruleStore:       &ruleStorage{},
+		ctx:                   ctx,
+		cancel:                cancel,
+		rulesPathPrefix:       endpoint.RulesPathPrefix(clusterID),
+		ruleGroupPathPrefix:   endpoint.RuleGroupPathPrefix(clusterID),
+		regionLabelPathPrefix: endpoint.RegionLabelPathPrefix(clusterID),
+		etcdClient:            etcdClient,
+		ruleStore:             &ruleStorage{},
 	}
 	err := rw.initializeRuleWatcher()
 	if err != nil {
@@ -159,16 +159,17 @@ func NewWatcher(
 }
 
 func (rw *Watcher) initializeRuleWatcher() error {
+	prefixToTrim := rw.rulesPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		// Since the PD API server will validate the rule before saving it to etcd,
 		// so we could directly save the string rule in JSON to the storage here.
 		return rw.ruleStore.SaveRule(
-			strings.TrimPrefix(string(kv.Key), rw.rulesPath),
+			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		return rw.ruleStore.DeleteRule(strings.TrimPrefix(string(kv.Key), rw.rulesPath))
+		return rw.ruleStore.DeleteRule(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 	}
 	postEventFn := func() error {
 		return nil
@@ -176,7 +177,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	rw.ruleWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-rule-watcher", rw.rulesPath,
+		"scheduling-rule-watcher", rw.rulesPathPrefix,
 		putFn, deleteFn, postEventFn,
 		clientv3.WithPrefix(),
 	)
@@ -185,14 +186,15 @@ func (rw *Watcher) initializeRuleWatcher() error {
 }
 
 func (rw *Watcher) initializeGroupWatcher() error {
+	prefixToTrim := rw.ruleGroupPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		return rw.ruleStore.SaveRuleGroup(
-			strings.TrimPrefix(string(kv.Key), rw.ruleGroupPath),
+			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		return rw.ruleStore.DeleteRuleGroup(strings.TrimPrefix(string(kv.Key), rw.ruleGroupPath))
+		return rw.ruleStore.DeleteRuleGroup(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 	}
 	postEventFn := func() error {
 		return nil
@@ -200,7 +202,7 @@ func (rw *Watcher) initializeGroupWatcher() error {
 	rw.groupWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-rule-group-watcher", rw.ruleGroupPath,
+		"scheduling-rule-group-watcher", rw.ruleGroupPathPrefix,
 		putFn, deleteFn, postEventFn,
 		clientv3.WithPrefix(),
 	)
@@ -209,14 +211,15 @@ func (rw *Watcher) initializeGroupWatcher() error {
 }
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
+	prefixToTrim := rw.regionLabelPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		return rw.ruleStore.SaveRegionRule(
-			strings.TrimPrefix(string(kv.Key), rw.regionLabelPath),
+			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		return rw.ruleStore.DeleteRegionRule(strings.TrimPrefix(string(kv.Key), rw.regionLabelPath))
+		return rw.ruleStore.DeleteRegionRule(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 	}
 	postEventFn := func() error {
 		return nil
@@ -224,7 +227,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-region-label-watcher", rw.regionLabelPath,
+		"scheduling-region-label-watcher", rw.regionLabelPathPrefix,
 		putFn, deleteFn, postEventFn,
 		clientv3.WithPrefix(),
 	)

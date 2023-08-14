@@ -40,10 +40,10 @@ type Watcher struct {
 	//  - Key: /pd/{cluster_id}/config
 	//  - Value: configuration JSON.
 	configPath string
-	// schedulerConfigPath is the path of the scheduler configuration in etcd:
+	// schedulerConfigPathPrefix is the path prefix of the scheduler configuration in etcd:
 	//  - Key: /pd/{cluster_id}/scheduler_config/{scheduler_name}
 	//  - Value: configuration JSON.
-	schedulerConfigPath string
+	schedulerConfigPathPrefix string
 
 	etcdClient             *clientv3.Client
 	configWatcher          *etcdutil.LoopWatcher
@@ -68,12 +68,12 @@ func NewWatcher(
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	cw := &Watcher{
-		ctx:                 ctx,
-		cancel:              cancel,
-		configPath:          endpoint.ConfigPath(clusterID),
-		schedulerConfigPath: endpoint.SchedulerConfigPath(clusterID) + "/",
-		etcdClient:          etcdClient,
-		PersistConfig:       persistConfig,
+		ctx:                       ctx,
+		cancel:                    cancel,
+		configPath:                endpoint.ConfigPath(clusterID),
+		schedulerConfigPathPrefix: endpoint.SchedulerConfigPathPrefix(clusterID),
+		etcdClient:                etcdClient,
+		PersistConfig:             persistConfig,
 	}
 	err := cw.initializeConfigWatcher()
 	if err != nil {
@@ -117,15 +117,16 @@ func (cw *Watcher) initializeConfigWatcher() error {
 }
 
 func (cw *Watcher) initializeSchedulerConfigWatcher() error {
+	prefixToTrim := cw.schedulerConfigPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		cw.SetSchedulerConfig(
-			strings.TrimPrefix(string(kv.Key), cw.schedulerConfigPath),
+			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		cw.RemoveSchedulerConfig(strings.TrimPrefix(string(kv.Key), cw.schedulerConfigPath))
+		cw.RemoveSchedulerConfig(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 		return nil
 	}
 	postEventFn := func() error {
@@ -134,7 +135,7 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 	cw.schedulerConfigWatcher = etcdutil.NewLoopWatcher(
 		cw.ctx, &cw.wg,
 		cw.etcdClient,
-		"scheduling-scheduler-config-watcher", cw.schedulerConfigPath,
+		"scheduling-scheduler-config-watcher", cw.schedulerConfigPathPrefix,
 		putFn, deleteFn, postEventFn,
 		clientv3.WithPrefix(),
 	)
