@@ -15,10 +15,9 @@
 package api
 
 import (
-	"encoding/json"
-	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -49,9 +48,9 @@ type minResolvedTS struct {
 // @Tags     min_store_resolved_ts
 // @Summary  Get store-level min resolved ts.
 // @Produce      json
-// @Success      200  {array}   minResolvedTS
+// @Success      200    {array}   minResolvedTS
 // @Failure  400  {string}  string  "The input is invalid."
-// @Failure      500  {string}  string  "PD server failed to proceed the request."
+// @Failure      500    {string}  string  "PD server failed to proceed the request."
 // @Router   /min-resolved-ts/{store_id} [get]
 func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := h.svr.GetRaftCluster()
@@ -71,10 +70,16 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 }
 
 // @Tags         min_resolved_ts
-// @Summary      Get cluster-level min resolved ts.
-// @Description  Optionally, if a list of store IDs is provided in the request body,
-// it also returns the min_resolved_ts for the specified stores in a separate map.
+// @Summary      Get cluster-level min resolved ts and optionally store-level min resolved ts.
+// @Description  Optionally, we support a query parameter `scope`
+// to get store-level min resolved ts by specifying a list of store IDs.
+//   - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be nil.
+//   - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be filled.
+//   - When scope given a list of stores, min_resolved_ts will be provided for each store
+//     and the scope-specific min_resolved_ts will be returned.
+//
 // @Produce  json
+// @Param        scope  query     string  false  "Scope of the min resolved ts: comma-separated list of store IDs (e.g., '1,2,3')."  default(cluster)
 // @Success  200  {array}   minResolvedTS
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router       /min-resolved-ts [get]
@@ -84,18 +89,24 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
 
 	var storesMinResolvedTS map[uint64]uint64
-	if b, err := io.ReadAll(r.Body); err == nil && len(b) != 0 {
-		// stores ids is an optional parameter.
-		// - When no store is given, cluster-level's min_resolved_ts will be returned.
-		// - When given a list of stores, min_resolved_ts will be provided for each store
+	if scopeStr := r.URL.Query().Get("scope"); scopeStr != "" {
+		// scope is an optional parameter, it can be `cluster` or specified store IDs.
+		// - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be nil.
+		// - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be filled.
+		// - When scope given a list of stores, min_resolved_ts will be provided for each store
 		//      and the scope-specific min_resolved_ts will be returned.
-		var ids []string
-		err = json.Unmarshal(b, &ids)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
+		if scopeStr == "cluster" {
+			stores := c.GetMetaStores()
+			ids := make([]string, len(stores))
+			for i, store := range stores {
+				ids[i] = strconv.FormatUint(store.GetId(), 10)
+			}
+			// use cluster-level min_resolved_ts as the scope-specific min_resolved_ts.
+			_, storesMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
+		} else {
+			scopeIDs := strings.Split(scopeStr, ",")
+			scopeMinResolvedTS, storesMinResolvedTS = c.GetMinResolvedTSByStoreIDs(scopeIDs)
 		}
-		scopeMinResolvedTS, storesMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
 	}
 
 	h.rd.JSON(w, http.StatusOK, minResolvedTS{
