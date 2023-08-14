@@ -87,7 +87,6 @@ func main() {
 	var err error
 	hcaseStr := strings.Split(*httpCases, ",")
 	for _, str := range hcaseStr {
-		// fmt.Println(str)
 		caseQPS := int64(0)
 		caseBurst := int64(0)
 		cStr := ""
@@ -154,7 +153,7 @@ func main() {
 	}
 	pdClis := make([]pd.Client, 0)
 	for i := 0; i < *client; i++ {
-		pdClis = append(pdClis, newPDClient())
+		pdClis = append(pdClis, newPDClient(ctx))
 	}
 	httpClis := make([]*http.Client, 0)
 	for i := 0; i < *client; i++ {
@@ -173,6 +172,9 @@ func main() {
 	}
 
 	<-ctx.Done()
+	for _, cli := range pdClis {
+		cli.Close()
+	}
 	log.Println("Exit")
 	switch sig {
 	case syscall.SIGTERM:
@@ -183,13 +185,13 @@ func main() {
 }
 
 func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Client) {
-	log.Printf("begin to run gRPC case %s, with qps = %d and burst = %d", gcase.Name(), gcase.GetQPS(), gcase.GetBurst())
 	qps := gcase.GetQPS()
 	burst := gcase.GetBurst()
-	tt := base / qps * burst * int64(*client)
+	tt := time.Duration(base/qps*burst*int64(*client)) * time.Microsecond
+	log.Printf("begin to run gRPC case %s, with qps = %d and burst = %d, interval is %v", gcase.Name(), qps, burst, tt)
 	for _, cli := range clients {
 		go func(cli pd.Client) {
-			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
+			var ticker = time.NewTicker(tt)
 			defer ticker.Stop()
 			for {
 				select {
@@ -210,13 +212,13 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 }
 
 func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []*http.Client) {
-	log.Printf("begin to run http case %s, with qps = %d and burst = %d", hcase.Name(), hcase.GetQPS(), hcase.GetBurst())
 	qps := hcase.GetQPS()
 	burst := hcase.GetBurst()
-	tt := base / qps * burst * int64(*client)
+	tt := time.Duration(base/qps*burst*int64(*client)) * time.Microsecond
+	log.Printf("begin to run http case %s, with qps = %d and burst = %d, interval is %v", hcase.Name(), qps, burst, tt)
 	for _, hCli := range httpClis {
 		go func(hCli *http.Client) {
-			var ticker = time.NewTicker(time.Duration(tt) * time.Microsecond)
+			var ticker = time.NewTicker(tt)
 			defer ticker.Stop()
 			for {
 				select {
@@ -261,14 +263,14 @@ func trimHTTPPrefix(str string) string {
 }
 
 // newPDClient returns a pd client.
-func newPDClient() pd.Client {
+func newPDClient(ctx context.Context) pd.Client {
 	const (
 		keepaliveTime    = 10 * time.Second
 		keepaliveTimeout = 3 * time.Second
 	)
 
 	addrs := []string{trimHTTPPrefix(*pdAddr)}
-	pdCli, err := pd.NewClient(addrs, pd.SecurityOption{
+	pdCli, err := pd.NewClientWithContext(ctx, addrs, pd.SecurityOption{
 		CAPath:   *caPath,
 		CertPath: *certPath,
 		KeyPath:  *keyPath,

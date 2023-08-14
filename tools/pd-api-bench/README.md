@@ -4,7 +4,7 @@ pd-api-bench
 pd-api-bench is a tool to test PD API.
 
 ## Build
-1. [Go](https://golang.org/) Version 1.20 or later
+1. [Go](https://golang.org/) Version 1.21 or later
 2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make pd-api-bench` command to compile and generate `bin/pd-api-bench`
 
 
@@ -47,7 +47,8 @@ The api bench cases we support are as follows:
 >  You can set qps with '-' and set burst with '+' such as `-http-cases GetRegionStatus-100+1`
 
 -grpc-cases
->  gRPC api bench cases list. Multiple cases are separated by commas.
+>  gRPC api bench cases list. Multiple cases are separated by commas. Such as `-grpc-cases GetRegion`
+>  You can set qps with '-' and set burst with '+' such as `-grpc-cases GetRegion-1000000+10`
 
 -qps 
 >  the qps of request (default 1000). It will set qps for all cases except those in which qps is specified separately
@@ -58,6 +59,11 @@ The api bench cases we support are as follows:
 -debug
 >  print the output of api response for debug
 
+You can run shell as follows.
+```shell
+go run main.go -http-cases GetRegionStatus-1+1,GetMinResolvedTS-1+1 -client 1 -debug
+```
+
 ### TLS
 
 You can use the following command to generate a certificate for testing TLS:
@@ -65,7 +71,7 @@ You can use the following command to generate a certificate for testing TLS:
 ```shell
 mkdir cert
 ./cert_opt.sh generate cert
-go run main.go --min-resolved-ts-http -cacert ./cert/ca.pem -cert ./cert/pd-server.pem  -key ./cert/pd-server-key.pem
+go run main.go -http-cases GetRegionStatus-1+1,GetMinResolvedTS-1+1 -client 1 -debug -cacert ./cert/ca.pem -cert ./cert/pd-server.pem  -key ./cert/pd-server-key.pem
 ./cert_opt.sh cleanup cert
 rm -rf cert
 ```
