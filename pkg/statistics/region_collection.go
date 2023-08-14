@@ -22,7 +22,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/server/config"
 )
 
 // RegionInfoProvider is an interface to provide the region information.
@@ -87,12 +86,11 @@ type RegionInfoWithTS struct {
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
 	sync.RWMutex
-	rip                RegionInfoProvider
-	conf               sc.CheckerConfigProvider
-	stats              map[RegionStatisticType]map[uint64]*RegionInfoWithTS
-	index              map[uint64]RegionStatisticType
-	ruleManager        *placement.RuleManager
-	storeConfigManager *config.StoreConfigManager
+	rip         RegionInfoProvider
+	conf        sc.CheckerConfigProvider
+	stats       map[RegionStatisticType]map[uint64]*RegionInfoWithTS
+	index       map[uint64]RegionStatisticType
+	ruleManager *placement.RuleManager
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
@@ -100,15 +98,13 @@ func NewRegionStatistics(
 	rip RegionInfoProvider,
 	conf sc.CheckerConfigProvider,
 	ruleManager *placement.RuleManager,
-	storeConfigManager *config.StoreConfigManager,
 ) *RegionStatistics {
 	r := &RegionStatistics{
-		rip:                rip,
-		conf:               conf,
-		ruleManager:        ruleManager,
-		storeConfigManager: storeConfigManager,
-		stats:              make(map[RegionStatisticType]map[uint64]*RegionInfoWithTS),
-		index:              make(map[uint64]RegionStatisticType),
+		rip:         rip,
+		conf:        conf,
+		ruleManager: ruleManager,
+		stats:       make(map[RegionStatisticType]map[uint64]*RegionInfoWithTS),
+		index:       make(map[uint64]RegionStatisticType),
 	}
 	for _, typ := range regionStatisticTypes {
 		r.stats[typ] = make(map[uint64]*RegionInfoWithTS)
@@ -149,7 +145,7 @@ func (r *RegionStatistics) deleteEntry(deleteIndex RegionStatisticType, regionID
 func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 	regionID := region.GetID()
 	if r.IsRegionStatsType(regionID, OversizedRegion) !=
-		region.IsOversized(int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()), int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys())) {
+		region.IsOversized(int64(r.conf.GetRegionMaxSize()), int64(r.conf.GetRegionMaxKeys())) {
 		return true
 	}
 	return r.IsRegionStatsType(regionID, UndersizedRegion) !=
@@ -204,8 +200,8 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		LearnerPeer: len(region.GetLearners()) > 0,
 		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
 		OversizedRegion: region.IsOversized(
-			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()),
-			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys()),
+			int64(r.conf.GetRegionMaxSize()),
+			int64(r.conf.GetRegionMaxKeys()),
 		),
 		UndersizedRegion: region.NeedMerge(
 			int64(r.conf.GetMaxMergeRegionSize()),

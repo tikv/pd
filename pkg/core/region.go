@@ -634,6 +634,11 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
+// IsFlashbackChanged returns true if flashback changes.
+func (r *RegionInfo) IsFlashbackChanged(l *RegionInfo) bool {
+	return r.meta.FlashbackStartTs != l.meta.FlashbackStartTs || r.meta.IsInFlashback != l.meta.IsInFlashback
+}
+
 // IsFromHeartbeat returns whether the region info is from the region heartbeat.
 func (r *RegionInfo) IsFromHeartbeat() bool {
 	return r.fromHeartbeat
@@ -760,6 +765,14 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				saveCache = true
+				return
+			}
+			// Do not save to kv, because 1) flashback will be eventually set to
+			// false, 2) flashback changes almost all regions in a cluster.
+			// Saving kv may downgrade PD performance when there are many regions.
+			if region.IsFlashbackChanged(origin) {
+				saveCache = true
+				return
 			}
 		}
 		return

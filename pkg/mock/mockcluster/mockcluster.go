@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -56,7 +57,6 @@ type Cluster struct {
 	*config.PersistOptions
 	ID             uint64
 	suspectRegions map[uint64]struct{}
-	*config.StoreConfigManager
 	*buckets.HotBucketCache
 	storage.Storage
 }
@@ -64,15 +64,14 @@ type Cluster struct {
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	c := &Cluster{
-		ctx:                ctx,
-		BasicCluster:       core.NewBasicCluster(),
-		IDAllocator:        mockid.NewIDAllocator(),
-		HotStat:            statistics.NewHotStat(ctx),
-		HotBucketCache:     buckets.NewBucketsCache(ctx),
-		PersistOptions:     opts,
-		suspectRegions:     map[uint64]struct{}{},
-		StoreConfigManager: config.NewTestStoreConfigManager(nil),
-		Storage:            storage.NewStorageWithMemoryBackend(),
+		ctx:            ctx,
+		BasicCluster:   core.NewBasicCluster(),
+		IDAllocator:    mockid.NewIDAllocator(),
+		HotStat:        statistics.NewHotStat(ctx),
+		HotBucketCache: buckets.NewBucketsCache(ctx),
+		PersistOptions: opts,
+		suspectRegions: map[uint64]struct{}{},
+		Storage:        storage.NewStorageWithMemoryBackend(),
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
@@ -85,22 +84,32 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 
 // GetStoreConfig returns the store config.
 func (mc *Cluster) GetStoreConfig() sc.StoreConfigProvider {
-	return mc.StoreConfigManager.GetStoreConfig()
+	return mc.PersistOptions.GetStoreConfig()
+}
+
+// SetRegionBucketEnabled sets the region bucket enabled.
+func (mc *Cluster) SetRegionBucketEnabled(enabled bool) {
+	cfg, ok := mc.GetStoreConfig().(*sc.StoreConfig)
+	if !ok || cfg == nil {
+		return
+	}
+	cfg.Coprocessor.EnableRegionBucket = enabled
+	mc.SetStoreConfig(cfg)
 }
 
 // GetCheckerConfig returns the checker config.
 func (mc *Cluster) GetCheckerConfig() sc.CheckerConfigProvider {
-	return mc
+	return mc.PersistOptions
 }
 
 // GetSchedulerConfig returns the scheduler config.
 func (mc *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider {
-	return mc
+	return mc.PersistOptions
 }
 
 // GetSharedConfig returns the shared config.
 func (mc *Cluster) GetSharedConfig() sc.SharedConfigProvider {
-	return mc
+	return mc.PersistOptions
 }
 
 // GetStorage returns the storage.
@@ -111,11 +120,6 @@ func (mc *Cluster) GetStorage() storage.Storage {
 // AllocID returns a new unique ID.
 func (mc *Cluster) AllocID() (uint64, error) {
 	return mc.IDAllocator.Alloc()
-}
-
-// GetPersistOptions returns the persist options.
-func (mc *Cluster) GetPersistOptions() *config.PersistOptions {
-	return mc.PersistOptions
 }
 
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
@@ -145,7 +149,7 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 }
 
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.
-func (mc *Cluster) GetHotPeerStat(rw statistics.RWType, regionID, storeID uint64) *statistics.HotPeerStat {
+func (mc *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *statistics.HotPeerStat {
 	return mc.HotCache.GetHotPeerStat(rw, regionID, storeID)
 }
 
@@ -153,7 +157,7 @@ func (mc *Cluster) GetHotPeerStat(rw statistics.RWType, regionID, storeID uint64
 // The result only includes peers that are hot enough.
 func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
 	// We directly use threshold for read stats for mockCluster
-	return mc.HotCache.RegionStats(statistics.Read, mc.GetHotRegionCacheHitsThreshold())
+	return mc.HotCache.RegionStats(utils.Read, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // BucketsStats returns hot region's buckets stats.
@@ -168,11 +172,11 @@ func (mc *Cluster) BucketsStats(degree int, regions ...uint64) map[uint64][]*buc
 // RegionWriteStats returns hot region's write stats.
 // The result only includes peers that are hot enough.
 func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	return mc.HotCache.RegionStats(statistics.Write, mc.GetHotRegionCacheHitsThreshold())
+	return mc.HotCache.RegionStats(utils.Write, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // HotRegionsFromStore picks hot regions in specify store.
-func (mc *Cluster) HotRegionsFromStore(store uint64, kind statistics.RWType) []*core.RegionInfo {
+func (mc *Cluster) HotRegionsFromStore(store uint64, kind utils.RWType) []*core.RegionInfo {
 	stats := hotRegionsFromStore(mc.HotCache, store, kind, mc.GetHotRegionCacheHitsThreshold())
 	regions := make([]*core.RegionInfo, 0, len(stats))
 	for _, stat := range stats {
@@ -185,7 +189,7 @@ func (mc *Cluster) HotRegionsFromStore(store uint64, kind statistics.RWType) []*
 }
 
 // hotRegionsFromStore picks hot region in specify store.
-func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind statistics.RWType, minHotDegree int) []*statistics.HotPeerStat {
+func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind utils.RWType, minHotDegree int) []*statistics.HotPeerStat {
 	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
 		return stats
 	}
@@ -464,7 +468,7 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReportInterval(0, reportInterval))
 	r = r.Clone(core.SetReadQuery(readQuery))
-	filledNum := statistics.DefaultAotSize
+	filledNum := utils.DefaultAotSize
 	if len(filledNums) > 0 {
 		filledNum = filledNums[0]
 	}
@@ -473,7 +477,7 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	for i := 0; i < filledNum; i++ {
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
-			mc.HotCache.Update(item, statistics.Read)
+			mc.HotCache.Update(item, utils.Read)
 		}
 	}
 	mc.PutRegion(r)
@@ -485,7 +489,7 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStor
 	otherPeerStoreIDs []uint64, filledNums ...int) []*statistics.HotPeerStat {
 	r := mc.newMockRegionInfo(regionID, leaderStoreID, otherPeerStoreIDs...)
 	r = r.Clone(core.SetReadBytes(readBytes), core.SetReadKeys(readKeys), core.SetReportInterval(0, reportInterval))
-	filledNum := statistics.DefaultAotSize
+	filledNum := utils.DefaultAotSize
 	if len(filledNums) > 0 {
 		filledNum = filledNums[0]
 	}
@@ -494,7 +498,7 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStor
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			if item.StoreID == targetStoreID {
-				mc.HotCache.Update(item, statistics.Read)
+				mc.HotCache.Update(item, utils.Read)
 			}
 		}
 	}
@@ -513,7 +517,7 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 	r = r.Clone(core.SetReadKeys(readKeys))
 	r = r.Clone(core.SetReadQuery(readQuery))
 	r = r.Clone(core.SetReportInterval(0, reportInterval))
-	filledNum := statistics.DefaultAotSize
+	filledNum := utils.DefaultAotSize
 	if len(filledNums) > 0 {
 		filledNum = filledNums[0]
 	}
@@ -522,7 +526,7 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 	for i := 0; i < filledNum; i++ {
 		items = mc.CheckRegionLeaderRead(r)
 		for _, item := range items {
-			mc.HotCache.Update(item, statistics.Read)
+			mc.HotCache.Update(item, utils.Read)
 		}
 	}
 	mc.PutRegion(r)
@@ -541,7 +545,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	r = r.Clone(core.SetReportInterval(0, reportInterval))
 	r = r.Clone(core.SetWrittenQuery(writtenQuery))
 
-	filledNum := statistics.DefaultAotSize
+	filledNum := utils.DefaultAotSize
 	if len(filledNums) > 0 {
 		filledNum = filledNums[0]
 	}
@@ -550,7 +554,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	for i := 0; i < filledNum; i++ {
 		items = mc.CheckRegionWrite(r)
 		for _, item := range items {
-			mc.HotCache.Update(item, statistics.Write)
+			mc.HotCache.Update(item, utils.Write)
 		}
 	}
 	mc.PutRegion(r)
@@ -734,7 +738,7 @@ func (mc *Cluster) updateStorageStatistics(storeID uint64, update func(*pdpb.Sto
 	newStats := typeutil.DeepClone(store.GetStoreStats(), core.StoreStatsFactory)
 	update(newStats)
 	now := time.Now().Unix()
-	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - statistics.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
+	interval := &pdpb.TimeInterval{StartTimestamp: uint64(now - utils.StoreHeartBeatReportInterval), EndTimestamp: uint64(now)}
 	newStats.Interval = interval
 	newStore := store.Clone(core.SetStoreStats(newStats))
 	mc.Set(storeID, newStats)

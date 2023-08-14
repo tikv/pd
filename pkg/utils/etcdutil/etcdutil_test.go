@@ -718,6 +718,12 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	// Case1: restart the etcd server
 	suite.etcd.Close()
 	suite.startEtcd()
+	suite.put("TestWatcherBreak", "0")
+	checkCache("0")
+	suite.etcd.Server.Stop()
+	time.Sleep(DefaultRequestTimeout)
+	suite.etcd.Close()
+	suite.startEtcd()
 	suite.put("TestWatcherBreak", "1")
 	checkCache("1")
 

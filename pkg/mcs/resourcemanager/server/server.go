@@ -128,9 +128,11 @@ func (s *Server) primaryElectionLoop() {
 	defer s.serverLoopWg.Done()
 
 	for {
-		if s.IsClosed() {
+		select {
+		case <-s.serverLoopCtx.Done():
 			log.Info("server is closed, exit resource manager primary election loop")
 			return
+		default:
 		}
 
 		primary, checkAgain := s.participant.CheckLeader()
