@@ -368,12 +368,16 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		}
 	}
 	s.client = client
-	s.httpClient = &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   tlsConfig,
-		},
+	// FIXME: Currently, there is no timeout set for certain requests, such as GetRegions,
+	// which may take a significant amount of time. However, it might be necessary to
+	// define an appropriate timeout in the future.
+	httpCli := &http.Client{}
+	if tlsConfig != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = tlsConfig
+		httpCli.Transport = transport
 	}
+	s.httpClient = httpCli
 
 	failpoint.Inject("memberNil", func() {
 		time.Sleep(1500 * time.Millisecond)
@@ -1765,4 +1769,10 @@ func (s *Server) SetExternalTS(externalTS uint64) error {
 	}
 	s.GetRaftCluster().SetExternalTS(externalTS)
 	return nil
+}
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
 }
