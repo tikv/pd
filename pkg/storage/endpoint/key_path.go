@@ -92,6 +92,11 @@ func ConfigPath(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), configPath)
 }
 
+// SchedulerConfigPath returns the path to save the scheduler config.
+func SchedulerConfigPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), customScheduleConfigPath)
+}
+
 // RulesPath returns the path to save the placement rules.
 func RulesPath(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), rulesPath)

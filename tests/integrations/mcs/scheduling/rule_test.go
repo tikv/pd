@@ -100,13 +100,10 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re := suite.Require()
 
 	// Create a rule watcher.
-	clusterID := suite.cluster.GetCluster().GetId()
 	watcher, err := rule.NewWatcher(
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
-		endpoint.RulesPath(clusterID),
-		endpoint.RuleGroupPath(clusterID),
-		endpoint.RegionLabelPath(clusterID),
+		suite.cluster.GetCluster().GetId(),
 	)
 	re.NoError(err)
 	ruleStorage := watcher.GetRuleStorage()
