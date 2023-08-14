@@ -116,6 +116,7 @@ var GRPCCaseMap = map[string]GRPCCase{
 type HTTPCase interface {
 	Case
 	Do(context.Context, *http.Client) error
+	Params(string)
 }
 
 var HTTPCaseMap = map[string]HTTPCase{
@@ -125,7 +126,8 @@ var HTTPCaseMap = map[string]HTTPCase{
 
 type minResolvedTS struct {
 	*baseCase
-	path string
+	path   string
+	params string
 }
 
 func newMinResolvedTS() *minResolvedTS {
@@ -140,14 +142,15 @@ func newMinResolvedTS() *minResolvedTS {
 }
 
 type minResolvedTSStruct struct {
-	IsRealTime      bool              `json:"is_real_time,omitempty"`
-	MinResolvedTS   uint64            `json:"min_resolved_ts"`
-	PersistInterval typeutil.Duration `json:"persist_interval,omitempty"`
+	IsRealTime          bool              `json:"is_real_time,omitempty"`
+	MinResolvedTS       uint64            `json:"min_resolved_ts"`
+	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
+	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 }
 
 func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
-	storeIdx := rand.Intn(int(totalStore))
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s/%d", PDAddress, c.path, storesID[storeIdx]), nil)
+	url := fmt.Sprintf("%s%s", PDAddress, c.path)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	res, err := cli.Do(req)
 	if err != nil {
 		return err
@@ -155,13 +158,18 @@ func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
 	listResp := &minResolvedTSStruct{}
 	err = apiutil.ReadJSON(res.Body, listResp)
 	if Debug {
-		log.Printf("Do %s: %v %v", c.name, listResp, err)
+		log.Printf("Do %s: url: %s resp: %v err: %v", c.name, url, listResp, err)
 	}
 	if err != nil {
 		return err
 	}
 	res.Body.Close()
 	return nil
+}
+
+func (c *minResolvedTS) Params(param string) {
+	c.params = fmt.Sprintf("%s&%s", c.params, param)
+	c.path = fmt.Sprintf("%s?%s", c.path, c.params)
 }
 
 type regionsStats struct {
@@ -212,6 +220,8 @@ func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 	res.Body.Close()
 	return nil
 }
+
+func (c *regionsStats) Params(_ string) {}
 
 type getRegion struct {
 	*baseCase
