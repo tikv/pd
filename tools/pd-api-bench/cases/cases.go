@@ -168,7 +168,7 @@ func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
 }
 
 func (c *minResolvedTS) Params(param string) {
-	c.params = fmt.Sprintf("%s&%s", c.params, param)
+	c.params = param
 	c.path = fmt.Sprintf("%s?%s", c.path, c.params)
 }
 
@@ -198,13 +198,13 @@ func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s?start_key=%s&end_key=%s&%s",
+	url := fmt.Sprintf("%s%s?start_key=%s&end_key=%s&%s",
 		PDAddress,
 		c.path,
 		url.QueryEscape(string(generateKeyForSimulator(startID, 56))),
 		url.QueryEscape(string(generateKeyForSimulator(endID, 56))),
-		"",
-	), nil)
+		"")
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	res, err := cli.Do(req)
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 	statsResp := &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, statsResp)
 	if Debug {
-		log.Printf("Do %s: %v %v", c.name, statsResp, err)
+		log.Printf("Do %s: url: %s resp: %v err: %v", c.name, url, statsResp, err)
 	}
 	if err != nil {
 		return err
