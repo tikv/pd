@@ -161,6 +161,15 @@ func (h *HotBucketCache) CheckAsync(task flowBucketsItemTask) bool {
 	}
 }
 
+// BucketsStats returns hot region's buckets stats.
+func (h *HotBucketCache) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*BucketStat {
+	task := NewCollectBucketStatsTask(degree, regionIDs...)
+	if !h.CheckAsync(task) {
+		return nil
+	}
+	return task.WaitRet(h.ctx)
+}
+
 func (h *HotBucketCache) schedule() {
 	defer logutil.LogPanic()
 

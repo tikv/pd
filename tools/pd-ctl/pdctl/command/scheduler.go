@@ -26,7 +26,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 var (
@@ -717,14 +717,14 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 		priorities := make([]string, 0)
 		prioritiesMap := make(map[string]struct{})
 		for _, priority := range strings.Split(value, ",") {
-			if priority != statistics.BytePriority && priority != statistics.KeyPriority && priority != statistics.QueryPriority {
+			if priority != utils.BytePriority && priority != utils.KeyPriority && priority != utils.QueryPriority {
 				cmd.Println(fmt.Sprintf("priority should be one of [%s, %s, %s]",
-					statistics.BytePriority,
-					statistics.QueryPriority,
-					statistics.KeyPriority))
+					utils.BytePriority,
+					utils.QueryPriority,
+					utils.KeyPriority))
 				return
 			}
-			if priority == statistics.QueryPriority && key == "write-peer-priorities" {
+			if priority == utils.QueryPriority && key == "write-peer-priorities" {
 				cmd.Println("query is not allowed to be set in priorities for write-peer-priorities")
 				return
 			}

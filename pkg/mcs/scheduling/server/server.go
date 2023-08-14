@@ -41,8 +41,11 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -71,11 +74,12 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg         *config.Config
-	name        string
-	clusterID   uint64
-	listenURL   *url.URL
-	backendUrls []url.URL
+	cfg           *config.Config
+	name          string
+	clusterID     uint64
+	listenURL     *url.URL
+	backendUrls   []url.URL
+	persistConfig *config.PersistConfig
 
 	// etcd client
 	etcdClient *clientv3.Client
@@ -105,8 +109,15 @@ type Server struct {
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 
-	cluster *Cluster
-	storage *endpoint.StorageEndpoint
+	cluster   *Cluster
+	hbStreams *hbstream.HeartbeatStreams
+	storage   *endpoint.StorageEndpoint
+
+	coordinator *schedule.Coordinator
+
+	// for watching the PD API server meta info updates that are related to the scheduling.
+	configWatcher *config.Watcher
+	ruleWatcher   *rule.Watcher
 }
 
 // Name returns the unique etcd name for this server in etcd cluster.
@@ -163,9 +174,11 @@ func (s *Server) primaryElectionLoop() {
 	defer s.serverLoopWg.Done()
 
 	for {
-		if s.IsClosed() {
-			log.Info("server is closed, exit scheduling primary election loop")
+		select {
+		case <-s.serverLoopCtx.Done():
+			log.Info("server is closed, exit resource manager primary election loop")
 			return
+		default:
 		}
 
 		primary, checkAgain := s.participant.CheckLeader()
@@ -476,8 +489,15 @@ func (s *Server) startServer() (err error) {
 	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
 		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
 	s.storage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(s.etcdClient, endpoint.SchedulingSvcRootPath(s.clusterID)), nil)
+		kv.NewEtcdKVBase(s.etcdClient, endpoint.PDRootPath(s.clusterID)), nil)
 	s.cluster, err = NewCluster(s.ctx, s.storage, s.cfg)
+	if err != nil {
+		return err
+	}
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.ctx, s.clusterID, s.cluster.GetBasicCluster())
+	s.coordinator = schedule.NewCoordinator(s.ctx, s.cluster, s.hbStreams)
+
+	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
 	if err != nil {
 		return err
 	}
@@ -494,7 +514,11 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
-
+	err = s.startWatcher()
+	if err != nil {
+		return err
+	}
+	go s.coordinator.RunUntilStop()
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
 	s.serverLoopWg.Add(1)
@@ -524,12 +548,31 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
+func (s *Server) startWatcher() (err error) {
+	s.configWatcher, err = config.NewWatcher(
+		s.ctx, s.etcdClient,
+		endpoint.ConfigPath(s.clusterID),
+		s.persistConfig,
+	)
+	if err != nil {
+		return err
+	}
+	s.ruleWatcher, err = rule.NewWatcher(
+		s.ctx, s.etcdClient,
+		endpoint.RulesPath(s.clusterID),
+		endpoint.RuleGroupPath(s.clusterID),
+		endpoint.RegionLabelPath(s.clusterID),
+	)
+	return err
+}
+
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		startTimestamp:    time.Now().Unix(),
 		cfg:               cfg,
+		persistConfig:     config.NewPersistConfig(cfg),
 		ctx:               ctx,
 	}
 	return svr
