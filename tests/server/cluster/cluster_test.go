@@ -1301,6 +1301,13 @@ func checkMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expect 
 	}, time.Second*10, time.Millisecond*50)
 }
 
+func checkStoreMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expectTS, storeID uint64) {
+	re.Eventually(func() bool {
+		ts := rc.GetStoreMinResolvedTS(storeID)
+		return expectTS == ts
+	}, time.Second*10, time.Millisecond*50)
+}
+
 func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
 	re.Eventually(func() bool {
 		ts2, err := rc.GetStorage().LoadMinResolvedTS()
@@ -1400,6 +1407,9 @@ func TestMinResolvedTS(t *testing.T) {
 	resetStoreState(re, rc, store1, metapb.StoreState_Tombstone)
 	checkMinResolvedTS(re, rc, store3TS)
 	checkMinResolvedTSFromStorage(re, rc, store3TS)
+	checkStoreMinResolvedTS(re, rc, store3TS, store3)
+	// check no-exist store
+	checkStoreMinResolvedTS(re, rc, math.MaxUint64, 100)
 
 	// case7: add a store with leader peer but no report min resolved ts
 	// min resolved ts should be no change
@@ -1419,6 +1429,7 @@ func TestMinResolvedTS(t *testing.T) {
 	checkMinResolvedTS(re, rc, store3TS)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
 	checkMinResolvedTS(re, rc, store5TS)
+	checkStoreMinResolvedTS(re, rc, store5TS, store5)
 }
 
 // See https://github.com/tikv/pd/issues/4941

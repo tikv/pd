@@ -191,7 +191,7 @@ func newRegionStats() *regionsStats {
 }
 
 func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
-	upperBound := int(totalRegion) / c.regionSample
+	upperBound := totalRegion / c.regionSample
 	if upperBound < 1 {
 		upperBound = 1
 	}
@@ -238,7 +238,7 @@ func newGetRegion() *getRegion {
 }
 
 func (c *getRegion) Unary(ctx context.Context, cli pd.Client) error {
-	id := rand.Intn(int(totalRegion))*4 + 1
+	id := rand.Intn(totalRegion)*4 + 1
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
 	if err != nil {
 		return err
@@ -263,7 +263,7 @@ func newScanRegions() *scanRegions {
 }
 
 func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
-	upperBound := int(totalRegion) / c.regionSample
+	upperBound := totalRegion / c.regionSample
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
@@ -289,7 +289,7 @@ func newGetStore() *getStore {
 }
 
 func (c *getStore) Unary(ctx context.Context, cli pd.Client) error {
-	storeIdx := rand.Intn(int(totalStore))
+	storeIdx := rand.Intn(totalStore)
 	_, err := cli.GetStore(ctx, storesID[storeIdx])
 	if err != nil {
 		return err

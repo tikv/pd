@@ -2560,15 +2560,10 @@ func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
 
 // GetMinResolvedTSByStoreIDs returns the min_resolved_ts for each store
 // and returns the min_resolved_ts for all given store lists.
-func (c *RaftCluster) GetMinResolvedTSByStoreIDs(ids []string) (uint64, map[uint64]uint64) {
+func (c *RaftCluster) GetMinResolvedTSByStoreIDs(ids []uint64) (uint64, map[uint64]uint64) {
 	minResolvedTS := uint64(math.MaxUint64)
 	storesMinResolvedTS := make(map[uint64]uint64)
-	for _, idStr := range ids {
-		storeID, err := strconv.ParseUint(idStr, 10, 64)
-		if err != nil {
-			log.Error("parse store id failed", errs.ZapError(err))
-			continue
-		}
+	for _, storeID := range ids {
 		storeTS := c.GetStoreMinResolvedTS(storeID)
 		storesMinResolvedTS[storeID] = storeTS
 		if minResolvedTS > storeTS {

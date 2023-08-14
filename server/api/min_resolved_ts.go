@@ -89,7 +89,7 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
 
 	var storesMinResolvedTS map[uint64]uint64
-	if scopeStr := r.URL.Query().Get("scope"); scopeStr != "" {
+	if scopeStr := r.URL.Query().Get("scope"); len(scopeStr) > 0 {
 		// scope is an optional parameter, it can be `cluster` or specified store IDs.
 		// - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be nil.
 		// - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be filled.
@@ -97,15 +97,24 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 		//      and the scope-specific min_resolved_ts will be returned.
 		if scopeStr == "cluster" {
 			stores := c.GetMetaStores()
-			ids := make([]string, len(stores))
+			ids := make([]uint64, len(stores))
 			for i, store := range stores {
-				ids[i] = strconv.FormatUint(store.GetId(), 10)
+				ids[i] = store.GetId()
 			}
 			// use cluster-level min_resolved_ts as the scope-specific min_resolved_ts.
 			_, storesMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
 		} else {
 			scopeIDs := strings.Split(scopeStr, ",")
-			scopeMinResolvedTS, storesMinResolvedTS = c.GetMinResolvedTSByStoreIDs(scopeIDs)
+			ids := make([]uint64, len(scopeIDs))
+			for i, idStr := range scopeIDs {
+				id, err := strconv.ParseUint(idStr, 10, 64)
+				if err != nil {
+					h.rd.JSON(w, http.StatusBadRequest, err.Error())
+					return
+				}
+				ids[i] = id
+			}
+			scopeMinResolvedTS, storesMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
 		}
 	}
 
