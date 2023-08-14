@@ -1626,7 +1626,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 					"operator cancelled"),
 			}, nil
-        }
+		}
 	}
 
 	return &pdpb.ScatterRegionResponse{
