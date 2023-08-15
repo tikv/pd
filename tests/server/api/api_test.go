@@ -621,7 +621,7 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	addr := follower.GetAddr() + "/pd/api/v1/version"
 	request, err := http.NewRequest(http.MethodGet, addr, nil)
 	suite.NoError(err)
-	request.Header.Add(apiutil.PDAllowFollowerHandle, "true")
+	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
 	resp, err := dialClient.Do(request)
 	suite.NoError(err)
 	suite.Equal("", resp.Header.Get(apiutil.PDRedirectorHeader))

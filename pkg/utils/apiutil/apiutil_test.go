@@ -105,7 +105,7 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 		{
 			r: &http.Request{
 				Header: map[string][]string{
-					XRealIP: {"127.0.0.1:5299"},
+					XRealIPHeader: {"127.0.0.1:5299"},
 				},
 			},
 			ip:   "127.0.0.1",
@@ -162,7 +162,7 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 		{
 			r: &http.Request{
 				Header: map[string][]string{
-					XRealIP: {"[::1]:5299"},
+					XRealIPHeader: {"[::1]:5299"},
 				},
 			},
 			ip:   "::1",

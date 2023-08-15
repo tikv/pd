@@ -30,7 +30,7 @@ import (
 func Redirector() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		svr := c.MustGet(ServerContextKey).(*server.Server)
-		allowFollowerHandle := len(c.Request.Header.Get(apiutil.PDAllowFollowerHandle)) > 0
+		allowFollowerHandle := len(c.Request.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
 		isLeader := svr.GetMember().IsLeader()
 		if !svr.IsClosed() && (allowFollowerHandle || isLeader) {
 			c.Next()

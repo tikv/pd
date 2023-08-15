@@ -123,7 +123,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	matchedFlag, targetAddr := h.matchMicroServiceRedirectRules(r)
-	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandle)) > 0
+	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
 	isLeader := h.s.GetMember().IsLeader()
 	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !matchedFlag {
 		next(w, r)

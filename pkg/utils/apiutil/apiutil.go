@@ -49,14 +49,14 @@ var (
 const (
 	// PDRedirectorHeader is used to mark which PD redirected this request.
 	PDRedirectorHeader = "PD-Redirector"
-	// PDAllowFollowerHandle is used to mark whether this request is allowed to be handled by the follower PD.
-	PDAllowFollowerHandle = "PD-Allow-follower-handle"
+	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD.
+	PDAllowFollowerHandleHeader = "PD-Allow-follower-handle"
 	// XForwardedForHeader is used to mark the client IP.
 	XForwardedForHeader = "X-Forwarded-For"
 	// XForwardedPortHeader is used to mark the client port.
 	XForwardedPortHeader = "X-Forwarded-Port"
-	// XRealIP is used to mark the real client IP.
-	XRealIP = "X-Real-Ip"
+	// XRealIPHeader is used to mark the real client IP.
+	XRealIPHeader = "X-Real-Ip"
 
 	// ErrRedirectFailed is the error message for redirect failed.
 	ErrRedirectFailed = "redirect failed"
@@ -125,7 +125,7 @@ func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
 		if forwardedPort := strings.Trim(forwardedPorts[0], " "); len(forwardedPort) > 0 {
 			port = forwardedPort
 		}
-	} else if realIP := r.Header.Get(XRealIP); len(realIP) > 0 {
+	} else if realIP := r.Header.Get(XRealIPHeader); len(realIP) > 0 {
 		ip = realIP
 	} else {
 		ip = r.RemoteAddr
