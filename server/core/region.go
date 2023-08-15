@@ -585,7 +585,7 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 
 // IsFlashbackChanged returns true if flashback changes.
 func (r *RegionInfo) IsFlashbackChanged(l *RegionInfo) bool {
-	return r.meta.FlashbackStartTs != l.meta.FlashbackStartTs || r.meta.IsInFlashback != l.meta.IsInFlashback
+	return r.meta.IsInFlashback != l.meta.IsInFlashback
 }
 
 // IsFromHeartbeat returns whether the region info is from the region heartbeat.

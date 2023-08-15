@@ -173,7 +173,6 @@ func WithDecConfVer() RegionCreateOption {
 // WithFlashback set region flashback states.
 func WithFlashback(isInFlashback bool, flashbackTS uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.meta.FlashbackStartTs = flashbackTS
 		region.meta.IsInFlashback = isInFlashback
 	}
 }
