@@ -33,6 +33,10 @@ else
 	BUILD_CGO_ENABLED := 1
 endif
 
+ifeq ($(FAILPOINT), 1)
+	BUILD_TAGS += with_fail
+endif
+
 ifeq ("$(WITH_RACE)", "1")
 	BUILD_FLAGS += -race
 	BUILD_CGO_ENABLED := 1
@@ -75,7 +79,7 @@ pd-server: ${PD_SERVER_DEP}
 
 pd-server-failpoint:
 	@$(FAILPOINT_ENABLE)
-	$(MAKE) pd-server BUILD_TAGS="$(BUILD_TAGS) with_fail"
+	FAILPOINT=1 $(MAKE) pd-server || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 pd-server-basic:
