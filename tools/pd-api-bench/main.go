@@ -48,13 +48,16 @@ var (
 	qps   = flag.Int64("qps", 1000, "qps")
 	burst = flag.Int64("burst", 1, "burst")
 
+	// http params
+	httpParams = flag.String("params", "", "http params")
+
 	// tls
 	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
 	certPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
 	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format")
 )
 
-var base int64 = int64(time.Second) / int64(time.Microsecond)
+var base = int64(time.Second) / int64(time.Microsecond)
 
 func main() {
 	flag.Parse()
@@ -216,6 +219,9 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []*http.
 	burst := hcase.GetBurst()
 	tt := time.Duration(base/qps*burst*int64(*client)) * time.Microsecond
 	log.Printf("begin to run http case %s, with qps = %d and burst = %d, interval is %v", hcase.Name(), qps, burst, tt)
+	if *httpParams != "" {
+		hcase.Params(*httpParams)
+	}
 	for _, hCli := range httpClis {
 		go func(hCli *http.Client) {
 			var ticker = time.NewTicker(tt)
