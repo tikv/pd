@@ -92,18 +92,23 @@ func ConfigPath(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), configPath)
 }
 
-// RulesPath returns the path to save the placement rules.
-func RulesPath(clusterID uint64) string {
+// SchedulerConfigPathPrefix returns the path prefix to save the scheduler config.
+func SchedulerConfigPathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), customScheduleConfigPath)
+}
+
+// RulesPathPrefix returns the path prefix to save the placement rules.
+func RulesPathPrefix(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), rulesPath)
 }
 
-// RuleGroupPath returns the path to save the placement rule groups.
-func RuleGroupPath(clusterID uint64) string {
+// RuleGroupPathPrefix returns the path prefix to save the placement rule groups.
+func RuleGroupPathPrefix(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), ruleGroupPath)
 }
 
-// RegionLabelPath returns the path to save the region label.
-func RegionLabelPath(clusterID uint64) string {
+// RegionLabelPathPrefix returns the path prefix to save the region label.
+func RegionLabelPathPrefix(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), regionLabelPath)
 }
 
