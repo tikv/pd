@@ -15,6 +15,7 @@
 package serverapi
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 
@@ -24,13 +25,6 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/urfave/negroni"
 	"go.uber.org/zap"
-)
-
-// HTTP headers.
-const (
-	PDRedirectorHeader    = "PD-Redirector"
-	PDAllowFollowerHandle = "PD-Allow-follower-handle"
-	ForwardedForHeader    = "X-Forwarded-For"
 )
 
 type runtimeServiceValidator struct {
@@ -130,7 +124,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	matchedFlag, targetAddr := h.matchMicroServiceRedirectRules(r)
-	allowFollowerHandle := len(r.Header.Get(PDAllowFollowerHandle)) > 0
+	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandle)) > 0
 	isLeader := h.s.GetMember().IsLeader()
 	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !matchedFlag {
 		next(w, r)
@@ -138,14 +132,19 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	}
 
 	// Prevent more than one redirection.
-	if name := r.Header.Get(PDRedirectorHeader); len(name) != 0 {
+	if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) != 0 {
 		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
 		http.Error(w, apiutil.ErrRedirectToNotLeader, http.StatusInternalServerError)
 		return
 	}
 
-	r.Header.Set(PDRedirectorHeader, h.s.Name())
-	r.Header.Add(ForwardedForHeader, r.RemoteAddr)
+	r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
+	if forwardedIP, forwardedPort, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		r.Header.Add(apiutil.XForwardedForHeader, forwardedIP)
+		r.Header.Add(apiutil.XForwardedPortHeader, forwardedPort)
+	} else {
+		r.Header.Add(apiutil.XForwardedForHeader, r.RemoteAddr)
+	}
 
 	var clientUrls []string
 	if matchedFlag {
