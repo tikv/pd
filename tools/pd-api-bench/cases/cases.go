@@ -116,6 +116,7 @@ var GRPCCaseMap = map[string]GRPCCase{
 type HTTPCase interface {
 	Case
 	Do(context.Context, *http.Client) error
+	Params(string)
 }
 
 var HTTPCaseMap = map[string]HTTPCase{
@@ -125,7 +126,8 @@ var HTTPCaseMap = map[string]HTTPCase{
 
 type minResolvedTS struct {
 	*baseCase
-	path string
+	path   string
+	params string
 }
 
 func newMinResolvedTS() *minResolvedTS {
@@ -140,14 +142,15 @@ func newMinResolvedTS() *minResolvedTS {
 }
 
 type minResolvedTSStruct struct {
-	IsRealTime      bool              `json:"is_real_time,omitempty"`
-	MinResolvedTS   uint64            `json:"min_resolved_ts"`
-	PersistInterval typeutil.Duration `json:"persist_interval,omitempty"`
+	IsRealTime          bool              `json:"is_real_time,omitempty"`
+	MinResolvedTS       uint64            `json:"min_resolved_ts"`
+	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
+	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 }
 
 func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
-	storeIdx := rand.Intn(int(totalStore))
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s/%d", PDAddress, c.path, storesID[storeIdx]), nil)
+	url := fmt.Sprintf("%s%s", PDAddress, c.path)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	res, err := cli.Do(req)
 	if err != nil {
 		return err
@@ -155,13 +158,18 @@ func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
 	listResp := &minResolvedTSStruct{}
 	err = apiutil.ReadJSON(res.Body, listResp)
 	if Debug {
-		log.Printf("Do %s: %v %v", c.name, listResp, err)
+		log.Printf("Do %s: url: %s resp: %v err: %v", c.name, url, listResp, err)
 	}
 	if err != nil {
 		return err
 	}
 	res.Body.Close()
 	return nil
+}
+
+func (c *minResolvedTS) Params(param string) {
+	c.params = param
+	c.path = fmt.Sprintf("%s?%s", c.path, c.params)
 }
 
 type regionsStats struct {
@@ -183,20 +191,20 @@ func newRegionStats() *regionsStats {
 }
 
 func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
-	upperBound := int(totalRegion) / c.regionSample
+	upperBound := totalRegion / c.regionSample
 	if upperBound < 1 {
 		upperBound = 1
 	}
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s?start_key=%s&end_key=%s&%s",
+	url := fmt.Sprintf("%s%s?start_key=%s&end_key=%s&%s",
 		PDAddress,
 		c.path,
 		url.QueryEscape(string(generateKeyForSimulator(startID, 56))),
 		url.QueryEscape(string(generateKeyForSimulator(endID, 56))),
-		"",
-	), nil)
+		"")
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	res, err := cli.Do(req)
 	if err != nil {
 		return err
@@ -204,7 +212,7 @@ func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 	statsResp := &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, statsResp)
 	if Debug {
-		log.Printf("Do %s: %v %v", c.name, statsResp, err)
+		log.Printf("Do %s: url: %s resp: %v err: %v", c.name, url, statsResp, err)
 	}
 	if err != nil {
 		return err
@@ -212,6 +220,8 @@ func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 	res.Body.Close()
 	return nil
 }
+
+func (c *regionsStats) Params(_ string) {}
 
 type getRegion struct {
 	*baseCase
@@ -228,7 +238,7 @@ func newGetRegion() *getRegion {
 }
 
 func (c *getRegion) Unary(ctx context.Context, cli pd.Client) error {
-	id := rand.Intn(int(totalRegion))*4 + 1
+	id := rand.Intn(totalRegion)*4 + 1
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
 	if err != nil {
 		return err
@@ -253,7 +263,7 @@ func newScanRegions() *scanRegions {
 }
 
 func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
-	upperBound := int(totalRegion) / c.regionSample
+	upperBound := totalRegion / c.regionSample
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
@@ -279,7 +289,7 @@ func newGetStore() *getStore {
 }
 
 func (c *getStore) Unary(ctx context.Context, cli pd.Client) error {
-	storeIdx := rand.Intn(int(totalStore))
+	storeIdx := rand.Intn(totalStore)
 	_, err := cli.GetStore(ctx, storesID[storeIdx])
 	if err != nil {
 		return err

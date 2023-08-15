@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -47,6 +47,7 @@ func TestConfig(t *testing.T) {
 func (suite *configTestSuite) SetupSuite() {
 	re := suite.Require()
 
+	schedulers.Register()
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
@@ -56,6 +57,8 @@ func (suite *configTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())
+	// Force the coordinator to be prepared to initialize the schedulers.
+	suite.pdLeaderServer.GetRaftCluster().GetCoordinator().GetPrepareChecker().SetPrepared()
 }
 
 func (suite *configTestSuite) TearDownSuite() {
@@ -72,7 +75,7 @@ func (suite *configTestSuite) TestConfigWatch() {
 	watcher, err := config.NewWatcher(
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
-		endpoint.ConfigPath(suite.cluster.GetCluster().GetId()),
+		suite.cluster.GetCluster().GetId(),
 		config.NewPersistConfig(config.NewConfig()),
 	)
 	re.NoError(err)
@@ -117,4 +120,49 @@ func (suite *configTestSuite) TestConfigWatch() {
 func persistConfig(re *require.Assertions, pdLeaderServer *tests.TestServer) {
 	err := pdLeaderServer.GetPersistOptions().Persist(pdLeaderServer.GetServer().GetStorage())
 	re.NoError(err)
+}
+
+func (suite *configTestSuite) TestSchedulerConfigWatch() {
+	re := suite.Require()
+
+	// Make sure the config is persisted before the watcher is created.
+	persistConfig(re, suite.pdLeaderServer)
+	// Create a config watcher.
+	watcher, err := config.NewWatcher(
+		suite.ctx,
+		suite.pdLeaderServer.GetEtcdClient(),
+		suite.cluster.GetCluster().GetId(),
+		config.NewPersistConfig(config.NewConfig()),
+	)
+	re.NoError(err)
+	// Get all default scheduler names.
+	var (
+		schedulerNames      []string
+		schedulerController = suite.pdLeaderServer.GetRaftCluster().GetCoordinator().GetSchedulersController()
+	)
+	testutil.Eventually(re, func() bool {
+		schedulerNames = schedulerController.GetSchedulerNames()
+		return len(schedulerNames) == len(sc.DefaultSchedulers)
+	})
+	// Check all default schedulers' configs.
+	for _, schedulerName := range schedulerNames {
+		testutil.Eventually(re, func() bool {
+			return len(watcher.GetSchedulerConfig(schedulerName)) > 0
+		})
+	}
+	// Add a new scheduler.
+	err = suite.pdLeaderServer.GetServer().GetHandler().AddEvictLeaderScheduler(1)
+	re.NoError(err)
+	// Check the new scheduler's config.
+	testutil.Eventually(re, func() bool {
+		return len(watcher.GetSchedulerConfig(schedulers.EvictLeaderName)) > 0
+	})
+	// Remove the scheduler.
+	err = suite.pdLeaderServer.GetServer().GetHandler().RemoveScheduler(schedulers.EvictLeaderName)
+	re.NoError(err)
+	// Check the removed scheduler's config.
+	testutil.Eventually(re, func() bool {
+		return len(watcher.GetSchedulerConfig(schedulers.EvictLeaderName)) == 0
+	})
+	watcher.Close()
 }

@@ -143,7 +143,7 @@ func CreateMockHandler(re *require.Assertions, ip string) HandlerBuilder {
 		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")
 			// test getting ip
-			clientIP := apiutil.GetIPAddrFromHTTPRequest(r)
+			clientIP, _ := apiutil.GetIPPortFromHTTPRequest(r)
 			re.Equal(ip, clientIP)
 		})
 		info := apiutil.APIServiceGroup{

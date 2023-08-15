@@ -550,18 +550,13 @@ func (s *Server) startServer() (err error) {
 
 func (s *Server) startWatcher() (err error) {
 	s.configWatcher, err = config.NewWatcher(
-		s.ctx, s.etcdClient,
-		endpoint.ConfigPath(s.clusterID),
-		s.persistConfig,
+		s.ctx, s.etcdClient, s.clusterID, s.persistConfig,
 	)
 	if err != nil {
 		return err
 	}
 	s.ruleWatcher, err = rule.NewWatcher(
-		s.ctx, s.etcdClient,
-		endpoint.RulesPath(s.clusterID),
-		endpoint.RuleGroupPath(s.clusterID),
-		endpoint.RegionLabelPath(s.clusterID),
+		s.ctx, s.etcdClient, s.clusterID,
 	)
 	return err
 }

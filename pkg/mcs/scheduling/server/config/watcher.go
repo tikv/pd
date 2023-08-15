@@ -17,11 +17,13 @@ package config
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
@@ -34,11 +36,20 @@ type Watcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	etcdClient *clientv3.Client
-	watcher    *etcdutil.LoopWatcher
+	// configPath is the path of the configuration in etcd:
+	//  - Key: /pd/{cluster_id}/config
+	//  - Value: configuration JSON.
+	configPath string
+	// schedulerConfigPathPrefix is the path prefix of the scheduler configuration in etcd:
+	//  - Key: /pd/{cluster_id}/scheduler_config/{scheduler_name}
+	//  - Value: configuration JSON.
+	schedulerConfigPathPrefix string
+
+	etcdClient             *clientv3.Client
+	configWatcher          *etcdutil.LoopWatcher
+	schedulerConfigWatcher *etcdutil.LoopWatcher
 
 	*PersistConfig
-	// TODO: watch the scheduler config change.
 }
 
 type persistedConfig struct {
@@ -52,19 +63,30 @@ type persistedConfig struct {
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
-	// configPath is the path of the configuration in etcd:
-	//  - Key: /pd/{cluster_id}/config
-	//  - Value: configuration JSON.
-	configPath string,
+	clusterID uint64,
 	persistConfig *PersistConfig,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	cw := &Watcher{
-		ctx:           ctx,
-		cancel:        cancel,
-		etcdClient:    etcdClient,
-		PersistConfig: persistConfig,
+		ctx:                       ctx,
+		cancel:                    cancel,
+		configPath:                endpoint.ConfigPath(clusterID),
+		schedulerConfigPathPrefix: endpoint.SchedulerConfigPathPrefix(clusterID),
+		etcdClient:                etcdClient,
+		PersistConfig:             persistConfig,
 	}
+	err := cw.initializeConfigWatcher()
+	if err != nil {
+		return nil, err
+	}
+	err = cw.initializeSchedulerConfigWatcher()
+	if err != nil {
+		return nil, err
+	}
+	return cw, nil
+}
+
+func (cw *Watcher) initializeConfigWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		cfg := &persistedConfig{}
 		if err := json.Unmarshal(kv.Value, cfg); err != nil {
@@ -84,21 +106,41 @@ func NewWatcher(
 	postEventFn := func() error {
 		return nil
 	}
-	cw.watcher = etcdutil.NewLoopWatcher(
-		ctx,
-		&cw.wg,
-		etcdClient,
-		"scheduling-config-watcher",
-		configPath,
-		putFn,
-		deleteFn,
-		postEventFn,
+	cw.configWatcher = etcdutil.NewLoopWatcher(
+		cw.ctx, &cw.wg,
+		cw.etcdClient,
+		"scheduling-config-watcher", cw.configPath,
+		putFn, deleteFn, postEventFn,
 	)
-	cw.watcher.StartWatchLoop()
-	if err := cw.watcher.WaitLoad(); err != nil {
-		return nil, err
+	cw.configWatcher.StartWatchLoop()
+	return cw.configWatcher.WaitLoad()
+}
+
+func (cw *Watcher) initializeSchedulerConfigWatcher() error {
+	prefixToTrim := cw.schedulerConfigPathPrefix + "/"
+	putFn := func(kv *mvccpb.KeyValue) error {
+		cw.SetSchedulerConfig(
+			strings.TrimPrefix(string(kv.Key), prefixToTrim),
+			string(kv.Value),
+		)
+		return nil
 	}
-	return cw, nil
+	deleteFn := func(kv *mvccpb.KeyValue) error {
+		cw.RemoveSchedulerConfig(strings.TrimPrefix(string(kv.Key), prefixToTrim))
+		return nil
+	}
+	postEventFn := func() error {
+		return nil
+	}
+	cw.schedulerConfigWatcher = etcdutil.NewLoopWatcher(
+		cw.ctx, &cw.wg,
+		cw.etcdClient,
+		"scheduling-scheduler-config-watcher", cw.schedulerConfigPathPrefix,
+		putFn, deleteFn, postEventFn,
+		clientv3.WithPrefix(),
+	)
+	cw.schedulerConfigWatcher.StartWatchLoop()
+	return cw.schedulerConfigWatcher.WaitLoad()
 }
 
 // Close closes the watcher.

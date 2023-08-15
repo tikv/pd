@@ -59,10 +59,21 @@ The api bench cases we support are as follows:
 -debug
 >  print the output of api response for debug
 
+### Run Shell
+
 You can run shell as follows.
 ```shell
 go run main.go -http-cases GetRegionStatus-1+1,GetMinResolvedTS-1+1 -client 1 -debug
 ```
+
+### HTTP params
+
+You can use the following command to set the params of HTTP request:
+```shell
+go run main.go -http-cases GetMinResolvedTS-1+1 -params 'scope=cluster'  -client 1 -debug
+```
+for more params, can use like `-params 'A=1&B=2&C=3'`
+
 
 ### TLS
 
