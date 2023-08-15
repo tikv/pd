@@ -85,6 +85,22 @@ func NewTestRegionInfo(start, end []byte) *RegionInfo {
 	}}
 }
 
+// NewTestRegionInfoWithID creates a new RegionInfo for test purpose.
+func NewTestRegionInfoWithID(regionID, storeID uint64, start, end []byte, opts ...RegionCreateOption) *RegionInfo {
+	leader := &metapb.Peer{
+		Id:      regionID,
+		StoreId: storeID,
+	}
+	metaRegion := &metapb.Region{
+		Id:          regionID,
+		StartKey:    start,
+		EndKey:      end,
+		Peers:       []*metapb.Peer{leader},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	return NewRegionInfo(metaRegion, leader, opts...)
+}
+
 // NewStoreInfoWithDisk is created with all disk infos.
 func NewStoreInfoWithDisk(id, used, available, capacity, regionSize uint64) *StoreInfo {
 	stats := &pdpb.StoreStats{}
