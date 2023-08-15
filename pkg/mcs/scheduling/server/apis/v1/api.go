@@ -119,7 +119,11 @@ func (s *Service) RegisterOperatorsRouter() {
 }
 
 // @Tags     operators
+<<<<<<< HEAD
 // @Summary  Get an operator by ID.
+=======
+// @Summary  Get a Region's pending operator.
+>>>>>>> add http support for scheduling service
 // @Param    region_id  path  int  true  "A Region's Id"
 // @Produce  json
 // @Success  200  {object}  operator.OpWithStatus
@@ -146,8 +150,13 @@ func getOperatorByID(c *gin.Context) {
 }
 
 // @Tags     operators
+<<<<<<< HEAD
 // @Summary  List operators.
 // @Param    kind  query  string  false  "Specify the operator kind."  Enums(admin, leader, region, waiting)
+=======
+// @Summary  List pending operators.
+// @Param    kind  query  string  false  "Specify the operator kind."  Enums(admin, leader, region)
+>>>>>>> add http support for scheduling service
 // @Produce  json
 // @Success  200  {array}   operator.Operator
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
@@ -188,10 +197,17 @@ func getOperators(c *gin.Context) {
 }
 
 // @Tags     checkers
+<<<<<<< HEAD
 // @Summary  Get checker by name
 // @Param    name  path  string  true  "The name of the checker."
 // @Produce  json
 // @Success  200  {string}  string  "The checker's status."
+=======
+// @Summary  Get if checker is paused
+// @Param    name  path  string  true  "The name of the scheduler."
+// @Produce  json
+// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
+>>>>>>> add http support for scheduling service
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /checkers/{name} [get]
 func getCheckerByName(c *gin.Context) {
