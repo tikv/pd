@@ -119,8 +119,9 @@ func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConf
 
 // TODO: implement the following methods
 
-// UpdateRegionsLabelLevelStats updates the region label level stats.
-func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {}
+// UpdateRegionsLabelLevelStats updates the status of the region label level by types.
+func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
+}
 
 // AllocID allocates a new ID.
 func (c *Cluster) AllocID() (uint64, error) { return 0, nil }

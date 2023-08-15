@@ -328,6 +328,11 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
+// GetCoordinator returns the coordinator.
+func (s *Server) GetCoordinator() *schedule.Coordinator {
+	return s.coordinator
+}
+
 func (s *Server) initClient() error {
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
@@ -501,6 +506,7 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
+	s.service = &Service{Server: s}
 	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
@@ -543,7 +549,6 @@ func (s *Server) startServer() (err error) {
 		log.Error("failed to register the service", zap.String("service-name", utils.SchedulingServiceName), errs.ZapError(err))
 		return err
 	}
-
 	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
 }
