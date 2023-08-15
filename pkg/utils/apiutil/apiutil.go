@@ -132,7 +132,7 @@ func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
 	}
 	splitIP, splitPort, err := net.SplitHostPort(ip)
 	if err != nil {
-		// Ensure that we could get a valid IP address at least.
+		// Ensure we could get an IP address at least.
 		return ip, port
 	}
 	return splitIP, splitPort

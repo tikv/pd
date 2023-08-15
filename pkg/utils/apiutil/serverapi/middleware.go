@@ -15,7 +15,6 @@
 package serverapi
 
 import (
-	"net"
 	"net/http"
 	"net/url"
 
@@ -139,11 +138,15 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	}
 
 	r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
-	if forwardedIP, forwardedPort, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+	forwardedIP, forwardedPort := apiutil.GetIPPortFromHTTPRequest(r)
+	if len(forwardedIP) > 0 {
 		r.Header.Add(apiutil.XForwardedForHeader, forwardedIP)
-		r.Header.Add(apiutil.XForwardedPortHeader, forwardedPort)
 	} else {
+		// Fallback if GetIPPortFromHTTPRequest failed to get the IP.
 		r.Header.Add(apiutil.XForwardedForHeader, r.RemoteAddr)
+	}
+	if len(forwardedPort) > 0 {
+		r.Header.Add(apiutil.XForwardedPortHeader, forwardedPort)
 	}
 
 	var clientUrls []string

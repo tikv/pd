@@ -194,6 +194,12 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 			ip:   "::1",
 			port: "",
 		},
+		// Abnormal case
+		{
+			r:    &http.Request{},
+			ip:   "",
+			port: "",
+		},
 	}
 	for idx, testCase := range testCases {
 		ip, port := GetIPPortFromHTTPRequest(testCase.r)
