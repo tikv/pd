@@ -16,20 +16,28 @@ package utils
 
 import (
 	"context"
+	"net"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/soheilhy/cmux"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -76,6 +84,19 @@ type server interface {
 	GetTLSConfig() *grpcutil.TLSConfig
 	GetClientConns() *sync.Map
 	GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error)
+	ServerLoopWgDone()
+	ServerLoopWgAdd(int)
+	IsClosed() bool
+	GetHTTPServer() *http.Server
+	GetGRPCServer() *grpc.Server
+	SetGRPCServer(*grpc.Server)
+	SetHTTPServer(*http.Server)
+	SetETCDClient(*clientv3.Client)
+	SetHTTPClient(*http.Client)
+	IsSecure() bool
+	RegisterGRPCService(*grpc.Server)
+	SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup)
+	diagnosticspb.DiagnosticsServer
 }
 
 // WaitAPIServiceReady waits for the api service ready.
@@ -128,4 +149,160 @@ func isAPIServiceReady(s server) (bool, error) {
 		return true, nil
 	}
 	return false, nil
+}
+
+// InitClient initializes the etcd and http clients.
+func InitClient(s server) error {
+	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	if err != nil {
+		return err
+	}
+	backendUrls, err := types.NewURLs(strings.Split(s.GetBackendEndpoints(), ","))
+	if err != nil {
+		return err
+	}
+	etcdClient, httpClient, err := etcdutil.CreateClients(tlsConfig, backendUrls)
+	if err != nil {
+		return err
+	}
+	s.SetETCDClient(etcdClient)
+	s.SetHTTPClient(httpClient)
+	return nil
+}
+
+func startGRPCServer(s server, l net.Listener) {
+	defer logutil.LogPanic()
+	defer s.ServerLoopWgDone()
+
+	log.Info("grpc server starts serving", zap.String("address", l.Addr().String()))
+	err := s.GetGRPCServer().Serve(l)
+	if s.IsClosed() {
+		log.Info("grpc server stopped")
+	} else {
+		log.Fatal("grpc server stopped unexpectedly", errs.ZapError(err))
+	}
+}
+
+func startHTTPServer(s server, l net.Listener) {
+	defer logutil.LogPanic()
+	defer s.ServerLoopWgDone()
+
+	log.Info("http server starts serving", zap.String("address", l.Addr().String()))
+	err := s.GetHTTPServer().Serve(l)
+	if s.IsClosed() {
+		log.Info("http server stopped")
+	} else {
+		log.Fatal("http server stopped unexpectedly", errs.ZapError(err))
+	}
+}
+
+// StartGRPCAndHTTPServers starts the grpc and http servers.
+func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Listener) {
+	defer logutil.LogPanic()
+	defer s.ServerLoopWgDone()
+
+	mux := cmux.New(l)
+	// Don't hang on matcher after closing listener
+	mux.SetReadTimeout(3 * time.Second)
+	grpcL := mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	var httpListener net.Listener
+	if s.IsSecure() {
+		httpListener = mux.Match(cmux.Any())
+	} else {
+		httpListener = mux.Match(cmux.HTTP1())
+	}
+
+	grpcServer := grpc.NewServer()
+	s.SetGRPCServer(grpcServer)
+	s.RegisterGRPCService(grpcServer)
+	diagnosticspb.RegisterDiagnosticsServer(grpcServer, s)
+	s.ServerLoopWgAdd(1)
+	go startGRPCServer(s, grpcL)
+
+	handler, _ := s.SetUpRestHandler()
+	s.SetHTTPServer(&http.Server{
+		Handler:     handler,
+		ReadTimeout: 3 * time.Second,
+	})
+	s.ServerLoopWgAdd(1)
+	go startHTTPServer(s, httpListener)
+
+	serverReadyChan <- struct{}{}
+	if err := mux.Serve(); err != nil {
+		if s.IsClosed() {
+			log.Info("mux stopped serving", errs.ZapError(err))
+		} else {
+			log.Fatal("mux stopped serving unexpectedly", errs.ZapError(err))
+		}
+	}
+}
+
+// StopHTTPServer stops the http server.
+func StopHTTPServer(s server) {
+	log.Info("stopping http server")
+	defer log.Info("http server stopped")
+
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultHTTPGracefulShutdownTimeout)
+	defer cancel()
+
+	// First, try to gracefully shutdown the http server
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		s.GetHTTPServer().Shutdown(ctx)
+	}()
+
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		// Took too long, manually close open transports
+		log.Warn("http server graceful shutdown timeout, forcing close")
+		s.GetHTTPServer().Close()
+		// concurrent Graceful Shutdown should be interrupted
+		<-ch
+	}
+}
+
+// StopGRPCServer stops the grpc server.
+func StopGRPCServer(s server) {
+	log.Info("stopping grpc server")
+	defer log.Info("grpc server stopped")
+
+	// Do not grpc.Server.GracefulStop with TLS enabled etcd server
+	// See https://github.com/grpc/grpc-go/issues/1384#issuecomment-317124531
+	// and https://github.com/etcd-io/etcd/issues/8916
+	if s.IsSecure() {
+		s.GetGRPCServer().Stop()
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultGRPCGracefulStopTimeout)
+	defer cancel()
+
+	// First, try to gracefully shutdown the grpc server
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		// Close listeners to stop accepting new connections,
+		// will block on any existing transports
+		s.GetGRPCServer().GracefulStop()
+	}()
+
+	// Wait until all pending RPCs are finished
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		// Took too long, manually close open transports
+		// e.g. watch streams
+		log.Warn("grpc server graceful shutdown timeout, forcing close")
+		s.GetGRPCServer().Stop()
+		// concurrent GracefulStop should be interrupted
+		<-ch
+	}
+}
+
+// Exit exits the program with the given code.
+func Exit(code int) {
+	log.Sync()
+	os.Exit(code)
 }
