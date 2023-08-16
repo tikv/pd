@@ -108,7 +108,7 @@ func (suite *tsoServerTestSuite) resetTS(ts uint64, ignoreSmaller, skipUpperBoun
 	if suite.legacy {
 		err = suite.pdLeaderServer.GetServer().GetHandler().ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0)
 	} else {
-		err = suite.tsoServer.GetHandler().ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0)
+		err = suite.tsoServer.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0)
 	}
 	// Only this error is acceptable.
 	if err != nil {
