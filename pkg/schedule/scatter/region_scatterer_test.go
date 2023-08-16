@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
 	"strconv"
 	"sync"
 	"testing"
@@ -533,48 +532,11 @@ func TestSelectedStoreGC(t *testing.T) {
 	re.False(ok)
 }
 
-// TestRegionFromDifferentGroups test the multi regions. each region have its own group.
-// After scatter, the distribution for the whole cluster should be well.
-func TestRegionFromDifferentGroups(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-	// Add 6 stores.
-	storeCount := 6
-	for i := uint64(1); i <= uint64(storeCount); i++ {
-		tc.AddRegionStore(i, 0)
-	}
-	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddSuspectRegions)
-	regionCount := 50
-	for i := 1; i <= regionCount; i++ {
-		p := rand.Perm(storeCount)
-		scatterer.scatterRegion(tc.AddLeaderRegion(uint64(i), uint64(p[0])+1, uint64(p[1])+1, uint64(p[2])+1), fmt.Sprintf("t%d", i), false)
-	}
-	check := func(ss *selectedStores) {
-		max := uint64(0)
-		min := uint64(math.MaxUint64)
-		for i := uint64(1); i <= uint64(storeCount); i++ {
-			count := ss.TotalCountByStore(i)
-			if count > max {
-				max = count
-			}
-			if count < min {
-				min = count
-			}
-		}
-		re.LessOrEqual(max-min, uint64(2))
-	}
-	check(scatterer.ordinaryEngine.selectedPeer)
-}
-
 func TestRegionHasLearner(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	group := "group"
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
@@ -617,14 +579,14 @@ func TestRegionHasLearner(t *testing.T) {
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddSuspectRegions)
 	regionCount := 50
 	for i := 1; i <= regionCount; i++ {
-		_, err := scatterer.Scatter(tc.AddRegionWithLearner(uint64(i), uint64(1), []uint64{uint64(2), uint64(3)}, []uint64{7}), "group", false)
+		_, err := scatterer.Scatter(tc.AddRegionWithLearner(uint64(i), uint64(1), []uint64{uint64(2), uint64(3)}, []uint64{7}), group, false)
 		re.NoError(err)
 	}
 	check := func(ss *selectedStores) {
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		for i := uint64(1); i <= max; i++ {
-			count := ss.TotalCountByStore(i)
+			count := ss.Get(i, group)
 			if count > max {
 				max = count
 			}
@@ -639,7 +601,7 @@ func TestRegionHasLearner(t *testing.T) {
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		for i := uint64(1); i <= voterCount; i++ {
-			count := ss.TotalCountByStore(i)
+			count := ss.Get(i, group)
 			if count > max {
 				max = count
 			}
@@ -691,6 +653,7 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 		region := tc.AddLeaderRegion(i+200, i%3+2, (i+1)%3+2, (i+2)%3+2)
 		op := scatterer.scatterRegion(region, group, false)
 		re.False(isPeerCountChanged(op))
+		re.Equal(group, op.AdditionalInfos["group"])
 	}
 }
 

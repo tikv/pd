@@ -333,6 +333,11 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))                   // selected StoreID set
 	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))                    // StoreID allowed to become Leader
 	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) { // peers: StoreID -> Peer
+		filterLen := len(context.filterFuncs) + 2
+		filters := make([]filter.Filter, filterLen)
+		for i, filterFunc := range context.filterFuncs {
+			filters[i] = filterFunc()
+		}
 		for _, peer := range peers {
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
 				if allowLeader(oldFit, peer) {
@@ -342,8 +347,14 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 				continue
 			}
 			for {
-				candidates := r.selectCandidates(group, region, oldFit, peer.GetStoreId(), selectedStores, context)
-				newPeer := r.selectStore(group, peer, peer.GetStoreId(), candidates, context)
+				sourceStore := r.cluster.GetStore(peer.GetStoreId())
+				if sourceStore == nil {
+					log.Error("failed to get the store", zap.Uint64("store-id", peer.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
+					continue
+				}
+				filters[filterLen-2] = filter.NewExcludedFilter(r.name, nil, selectedStores)
+				filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
+				newPeer := r.selectCandidates(context, group, peer, filters)
 				targetPeers[newPeer.GetStoreId()] = newPeer
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
 				// If the selected peer is a peer other than origin peer in this region,
@@ -435,23 +446,8 @@ func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.
 	return region.GetLeader().GetStoreId() == targetLeader
 }
 
-func (r *RegionScatterer) selectCandidates(group string, region *core.RegionInfo, oldFit *placement.RegionFit,
-	sourceStoreID uint64, selectedStores map[uint64]struct{}, context engineContext) []uint64 {
-	sourceStore := r.cluster.GetStore(sourceStoreID)
-	if sourceStore == nil {
-		log.Error("failed to get the store", zap.Uint64("store-id", sourceStoreID), errs.ZapError(errs.ErrGetSourceStore))
-		return nil
-	}
-	filters := []filter.Filter{
-		filter.NewExcludedFilter(r.name, nil, selectedStores),
-	}
-	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
-	for _, filterFunc := range context.filterFuncs {
-		filters = append(filters, filterFunc())
-	}
-	filters = append(filters, scoreGuard)
+func (r *RegionScatterer) selectCandidates(context engineContext, group string, peer *metapb.Peer, filters []filter.Filter) *metapb.Peer {
 	stores := r.cluster.GetStores()
-	candidates := make([]uint64, 0)
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
 	for _, store := range stores {
@@ -463,37 +459,27 @@ func (r *RegionScatterer) selectCandidates(group string, region *core.RegionInfo
 			minStoreTotalCount = count
 		}
 	}
+
+	var newPeer *metapb.Peer
+	minCount := uint64(math.MaxUint64)
+	sourceHit := uint64(math.MaxUint64)
 	for _, store := range stores {
 		storeCount := context.selectedPeer.Get(store.GetID(), group)
+		if store.GetID() == peer.GetId() {
+			sourceHit = storeCount
+		}
 		// If storeCount is equal to the maxStoreTotalCount, we should skip this store as candidate.
 		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
 		// could be selected as candidate.
 		if storeCount < maxStoreTotalCount || maxStoreTotalCount == minStoreTotalCount {
 			if filter.Target(r.cluster.GetSharedConfig(), store, filters) {
-				candidates = append(candidates, store.GetID())
-			}
-		}
-	}
-	return candidates
-}
-
-func (r *RegionScatterer) selectStore(group string, peer *metapb.Peer, sourceStoreID uint64, candidates []uint64, context engineContext) *metapb.Peer {
-	if len(candidates) < 1 {
-		return peer
-	}
-	var newPeer *metapb.Peer
-	minCount := uint64(math.MaxUint64)
-	sourceHit := uint64(math.MaxUint64)
-	for _, storeID := range candidates {
-		count := context.selectedPeer.Get(storeID, group)
-		if storeID == storeID {
-			sourceHit = count
-		}
-		if count < minCount {
-			minCount = count
-			newPeer = &metapb.Peer{
-				StoreId: storeID,
-				Role:    peer.GetRole(),
+				if storeCount < minCount {
+					minCount = storeCount
+					newPeer = &metapb.Peer{
+						StoreId: store.GetID(),
+						Role:    peer.GetRole(),
+					}
+				}
 			}
 		}
 	}
