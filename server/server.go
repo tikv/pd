@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -57,6 +56,7 @@ import (
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -411,7 +411,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	s.rootPath = endpoint.PDRootPath(s.clusterID)
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
@@ -452,7 +452,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 
-	s.gcSafePointManager = gc.NewSafePointManager(s.storage)
+	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
@@ -601,8 +601,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.encryptionKeyManagerLoop()
 	if s.IsAPIServiceMode() {
 		s.initTSOPrimaryWatcher()
-		s.serverLoopWg.Add(1)
-		go s.tsoPrimaryWatcher.StartWatchLoop()
+		s.tsoPrimaryWatcher.StartWatchLoop()
 	}
 }
 
@@ -856,6 +855,12 @@ func (s *Server) GetKeyspaceManager() *keyspace.Manager {
 	return s.keyspaceManager
 }
 
+// SetKeyspaceManager sets the keyspace manager of server.
+// Note: it is only used for test.
+func (s *Server) SetKeyspaceManager(keyspaceManager *keyspace.Manager) {
+	s.keyspaceManager = keyspaceManager
+}
+
 // GetSafePointV2Manager returns the safe point v2 manager of server.
 func (s *Server) GetSafePointV2Manager() *gc.SafePointV2Manager {
 	return s.safePointV2Manager
@@ -962,12 +967,12 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 }
 
 // GetScheduleConfig gets the balance config information.
-func (s *Server) GetScheduleConfig() *config.ScheduleConfig {
+func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 	return s.persistOptions.GetScheduleConfig().Clone()
 }
 
 // SetScheduleConfig sets the balance config information.
-func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
+func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -990,12 +995,12 @@ func (s *Server) SetScheduleConfig(cfg config.ScheduleConfig) error {
 }
 
 // GetReplicationConfig get the replication config.
-func (s *Server) GetReplicationConfig() *config.ReplicationConfig {
+func (s *Server) GetReplicationConfig() *sc.ReplicationConfig {
 	return s.persistOptions.GetReplicationConfig().Clone()
 }
 
 // SetReplicationConfig sets the replication config.
-func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
+func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -1713,6 +1718,9 @@ func (s *Server) reloadConfigFromKV() error {
 }
 
 func (s *Server) loadKeyspaceConfig() {
+	if s.keyspaceManager == nil {
+		return
+	}
 	cfg := s.persistOptions.GetKeyspaceConfig()
 	s.keyspaceManager.UpdateConfig(cfg)
 }
@@ -1736,7 +1744,7 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 	}
 	url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
-	req.Header.Set("PD-Allow-follower-handle", "true")
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
 	res, err := s.httpClient.Do(req)
 	if err != nil {
 		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
@@ -1862,6 +1870,12 @@ func (s *Server) initTSOPrimaryWatcher() {
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		var oldPrimary string
+		v, ok := s.servicePrimaryMap.Load(serviceName)
+		if ok {
+			oldPrimary = v.(string)
+		}
+		log.Info("delete tso primary", zap.String("old-primary", oldPrimary))
 		s.servicePrimaryMap.Delete(serviceName)
 		return nil
 	}
@@ -1938,4 +1952,10 @@ func (s *Server) GetTSOUpdatePhysicalInterval() time.Duration {
 // GetMaxResetTSGap gets the max gap to reset the tso.
 func (s *Server) GetMaxResetTSGap() time.Duration {
 	return s.persistOptions.GetMaxResetTSGap()
+}
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
 }

@@ -1,6 +1,6 @@
 module github.com/tikv/pd/tests/integrations/client
 
-go 1.20
+go 1.21
 
 replace (
 	github.com/tikv/pd => ../../../
@@ -13,7 +13,7 @@ replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 require (
 	github.com/docker/go-units v0.4.0
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230720094213-a3b4a77b4333
+	github.com/pingcap/kvproto v0.0.0-20230727073445-53e1f8730c30
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/stretchr/testify v1.8.2
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000

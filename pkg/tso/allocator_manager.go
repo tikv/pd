@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
@@ -1135,7 +1136,8 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 }
 
 // HandleRequest forwards TSO allocation requests to correct TSO Allocators.
-func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
+func (am *AllocatorManager) HandleRequest(ctx context.Context, dcLocation string, count uint32) (pdpb.Timestamp, error) {
+	defer trace.StartRegion(ctx, "AllocatorManager.HandleRequest").End()
 	if len(dcLocation) == 0 {
 		dcLocation = GlobalDCLocation
 	}
@@ -1145,7 +1147,7 @@ func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb
 		return pdpb.Timestamp{}, err
 	}
 
-	return allocatorGroup.allocator.GenerateTSO(count)
+	return allocatorGroup.allocator.GenerateTSO(ctx, count)
 }
 
 // ResetAllocatorGroup will reset the allocator's leadership and TSO initialized in memory.

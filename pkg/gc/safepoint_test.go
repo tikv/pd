@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/server/config"
 )
 
 func newGCStorage() endpoint.GCSafePointStorage {
@@ -30,7 +31,7 @@ func newGCStorage() endpoint.GCSafePointStorage {
 }
 
 func TestGCSafePointUpdateSequentially(t *testing.T) {
-	gcSafePointManager := NewSafePointManager(newGCStorage())
+	gcSafePointManager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
 	re := require.New(t)
 	curSafePoint := uint64(0)
 	// update gc safePoint with asc value.
@@ -59,7 +60,7 @@ func TestGCSafePointUpdateSequentially(t *testing.T) {
 }
 
 func TestGCSafePointUpdateCurrently(t *testing.T) {
-	gcSafePointManager := NewSafePointManager(newGCStorage())
+	gcSafePointManager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
 	maxSafePoint := uint64(1000)
 	wg := sync.WaitGroup{}
 	re := require.New(t)
@@ -83,7 +84,7 @@ func TestGCSafePointUpdateCurrently(t *testing.T) {
 
 func TestServiceGCSafePointUpdate(t *testing.T) {
 	re := require.New(t)
-	manager := NewSafePointManager(newGCStorage())
+	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
 	gcworkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
 	brServiceID := "br"
@@ -161,4 +162,23 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 	_, updated, err = manager.UpdateServiceGCSafePoint(brServiceID, brSafePoint, brTTL, time.Now())
 	re.NoError(err)
 	re.True(updated)
+}
+
+func TestBlockUpdateSafePointV1(t *testing.T) {
+	re := require.New(t)
+	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{BlockSafePointV1: true})
+	gcworkerServiceID := "gc_worker"
+	gcWorkerSafePoint := uint64(8)
+
+	min, updated, err := manager.UpdateServiceGCSafePoint(gcworkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+	re.Error(err, blockServiceSafepointErrmsg)
+	re.Equal(err.Error(), blockServiceSafepointErrmsg)
+	re.False(updated)
+	re.Nil(min)
+
+	oldSafePoint, err := manager.UpdateGCSafePoint(gcWorkerSafePoint)
+	re.Error(err)
+	re.Equal(err.Error(), blockGCSafePointErrmsg)
+
+	re.Equal(uint64(0), oldSafePoint)
 }

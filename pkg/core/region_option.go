@@ -183,6 +183,14 @@ func WithDecConfVer() RegionCreateOption {
 	}
 }
 
+// WithFlashback set region flashback states.
+func WithFlashback(isInFlashback bool, flashbackTS uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.FlashbackStartTs = flashbackTS
+		region.meta.IsInFlashback = isInFlashback
+	}
+}
+
 // SetCPUUsage sets the CPU usage of the region.
 func SetCPUUsage(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -271,6 +279,13 @@ func AddQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 func SetApproximateSize(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.approximateSize = v
+	}
+}
+
+// SetApproximateKvSize sets the approximate size for the region.
+func SetApproximateKvSize(v int64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.approximateKvSize = v
 	}
 }
 

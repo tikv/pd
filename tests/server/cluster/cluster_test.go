@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/syncer"
@@ -921,7 +922,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	// test TiFlash store limit
-	expect := map[uint64]config.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
+	expect := map[uint64]sc.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
 	re.Equal(expect, svr.GetScheduleConfig().StoreLimit)
 
 	// cannot disable placement rules with TiFlash nodes
@@ -1168,7 +1169,7 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	// restart PD
 	// Here we use an empty storelimit to simulate the upgrade progress.
 	scheduleCfg := rc.GetScheduleConfig().Clone()
-	scheduleCfg.StoreLimit = map[uint64]config.StoreLimitConfig{}
+	scheduleCfg.StoreLimit = map[uint64]sc.StoreLimitConfig{}
 	re.NoError(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg))
 	err = leaderServer.Stop()
 	re.NoError(err)
@@ -1300,6 +1301,13 @@ func checkMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expect 
 	}, time.Second*10, time.Millisecond*50)
 }
 
+func checkStoreMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expectTS, storeID uint64) {
+	re.Eventually(func() bool {
+		ts := rc.GetStoreMinResolvedTS(storeID)
+		return expectTS == ts
+	}, time.Second*10, time.Millisecond*50)
+}
+
 func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
 	re.Eventually(func() bool {
 		ts2, err := rc.GetStorage().LoadMinResolvedTS()
@@ -1399,6 +1407,9 @@ func TestMinResolvedTS(t *testing.T) {
 	resetStoreState(re, rc, store1, metapb.StoreState_Tombstone)
 	checkMinResolvedTS(re, rc, store3TS)
 	checkMinResolvedTSFromStorage(re, rc, store3TS)
+	checkStoreMinResolvedTS(re, rc, store3TS, store3)
+	// check no-exist store
+	checkStoreMinResolvedTS(re, rc, math.MaxUint64, 100)
 
 	// case7: add a store with leader peer but no report min resolved ts
 	// min resolved ts should be no change
@@ -1418,6 +1429,7 @@ func TestMinResolvedTS(t *testing.T) {
 	checkMinResolvedTS(re, rc, store3TS)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
 	checkMinResolvedTS(re, rc, store5TS)
+	checkStoreMinResolvedTS(re, rc, store5TS, store5)
 }
 
 // See https://github.com/tikv/pd/issues/4941

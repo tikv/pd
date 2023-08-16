@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 func TestStoreStatistics(t *testing.T) {
@@ -64,7 +65,7 @@ func TestStoreStatistics(t *testing.T) {
 		UsedSize:  0,
 	}))
 	stores[5] = store5
-	storeStats := NewStoreStatisticsMap(opt, nil)
+	storeStats := NewStoreStatisticsMap(opt)
 	for _, store := range stores {
 		storeStats.Observe(store, storesStats)
 	}
@@ -93,10 +94,10 @@ func TestStoreStatistics(t *testing.T) {
 
 func TestSummaryStoreInfos(t *testing.T) {
 	re := require.New(t)
-	rw := Read
+	rw := utils.Read
 	kind := constant.LeaderKind
 	collector := newTikvCollector()
-	storeHistoryLoad := NewStoreHistoryLoads(DimLen)
+	storeHistoryLoad := NewStoreHistoryLoads(utils.DimLen)
 	storeInfos := make(map[uint64]*StoreSummaryInfo)
 	storeLoads := make(map[uint64][]float64)
 	for _, storeID := range []int{1, 3} {

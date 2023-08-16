@@ -1,6 +1,6 @@
 module github.com/tikv/pd
 
-go 1.20
+go 1.21
 
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
@@ -30,7 +30,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230720094213-a3b4a77b4333
+	github.com/pingcap/kvproto v0.0.0-20230727073445-53e1f8730c30
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20230705095454-5e220f970f27
@@ -128,7 +128,7 @@ require (
 	github.com/konsorten/go-windows-terminal-sequences v1.0.3 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20230326075908-cb1d2100619a // indirect
-	github.com/mailru/easyjson v0.7.6 // indirect
+	github.com/mailru/easyjson v0.7.6
 	github.com/mattn/go-colorable v0.1.8 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/mattn/go-runewidth v0.0.8 // indirect

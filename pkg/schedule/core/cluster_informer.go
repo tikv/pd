@@ -22,18 +22,15 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/server/config"
 )
 
 // ClusterInformer provides the necessary information of a cluster.
 type ClusterInformer interface {
 	SchedulerCluster
 	CheckerCluster
-	ScatterCluster
 
 	GetStorage() storage.Storage
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
-	GetPersistOptions() *config.PersistOptions
 }
 
 // SchedulerCluster is an aggregate interface that wraps multiple interfaces
@@ -43,24 +40,17 @@ type SchedulerCluster interface {
 	statistics.StoreStatInformer
 	buckets.BucketStatInformer
 
-	GetSchedulerConfig() sc.SchedulerConfig
+	GetSchedulerConfig() sc.SchedulerConfigProvider
 	GetRegionLabeler() *labeler.RegionLabeler
-	GetStoreConfig() sc.StoreConfig
+	GetStoreConfig() sc.StoreConfigProvider
 }
 
 // CheckerCluster is an aggregate interface that wraps multiple interfaces
 type CheckerCluster interface {
 	SharedCluster
 
-	GetCheckerConfig() sc.CheckerConfig
-	GetStoreConfig() sc.StoreConfig
-}
-
-// ScatterCluster is an aggregate interface that wraps multiple interfaces
-type ScatterCluster interface {
-	SharedCluster
-
-	AddSuspectRegions(ids ...uint64)
+	GetCheckerConfig() sc.CheckerConfigProvider
+	GetStoreConfig() sc.StoreConfigProvider
 }
 
 // SharedCluster is an aggregate interface that wraps multiple interfaces
@@ -69,7 +59,7 @@ type SharedCluster interface {
 	statistics.RegionStatInformer
 
 	GetBasicCluster() *core.BasicCluster
-	GetSharedConfig() sc.SharedConfig
+	GetSharedConfig() sc.SharedConfigProvider
 	GetRuleManager() *placement.RuleManager
 	AllocID() (uint64, error)
 }

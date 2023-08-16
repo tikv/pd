@@ -210,13 +210,14 @@ func GetProtoMsgWithModRev(c *clientv3.Client, key string, msg proto.Message, op
 }
 
 // EtcdKVPutWithTTL put (key, value) into etcd with a ttl of ttlSeconds
-func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value string, ttlSeconds int64) (*clientv3.PutResponse, error) {
+func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value string, ttlSeconds int64) (clientv3.LeaseID, error) {
 	kv := clientv3.NewKV(c)
 	grantResp, err := c.Grant(ctx, ttlSeconds)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
+	_, err = kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
+	return grantResp.ID, err
 }
 
 const (
@@ -277,7 +278,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
-				log.Info("[etcd client] etcd client is closed, exit health check goroutine")
+				log.Info("etcd client is closed, exit health check goroutine")
 				checker.Range(func(key, value interface{}) bool {
 					client := value.(*healthyClient)
 					client.Close()
@@ -294,7 +295,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 					// otherwise, the subconn will be retrying in grpc layer and use exponential backoff,
 					// and it cannot recover as soon as possible.
 					if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
-						log.Info("[etcd client] no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
+						log.Info("no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
 						client.SetEndpoints([]string{}...)
 						client.SetEndpoints(usedEps...)
 					}
@@ -303,7 +304,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 						client.SetEndpoints(healthyEps...)
 						change := fmt.Sprintf("%d->%d", len(usedEps), len(healthyEps))
 						etcdStateGauge.WithLabelValues("endpoints").Set(float64(len(healthyEps)))
-						log.Info("[etcd client] update endpoints", zap.String("num-change", change),
+						log.Info("update endpoints", zap.String("num-change", change),
 							zap.Strings("last-endpoints", usedEps), zap.Strings("endpoints", client.Endpoints()))
 					}
 					lastAvailable = time.Now()
@@ -320,7 +321,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
-				log.Info("[etcd client] etcd client is closed, exit update endpoint goroutine")
+				log.Info("etcd client is closed, exit update endpoint goroutine")
 				return
 			case <-ticker.C:
 				eps := syncUrls(client)
@@ -384,7 +385,7 @@ func (checker *healthyChecker) update(eps []string) {
 		if client, ok := checker.Load(ep); ok {
 			lastHealthy := client.(*healthyClient).lastHealth
 			if time.Since(lastHealthy) > etcdServerOfflineTimeout {
-				log.Info("[etcd client] some etcd server maybe offline", zap.String("endpoint", ep))
+				log.Info("some etcd server maybe offline", zap.String("endpoint", ep))
 				checker.Delete(ep)
 			}
 			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
@@ -401,7 +402,7 @@ func (checker *healthyChecker) update(eps []string) {
 func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
 	client, err := newClient(checker.tlsConfig, ep)
 	if err != nil {
-		log.Error("[etcd client] failed to create etcd healthy client", zap.Error(err))
+		log.Error("failed to create etcd healthy client", zap.Error(err))
 		return
 	}
 	checker.Store(ep, &healthyClient{
@@ -416,7 +417,7 @@ func syncUrls(client *clientv3.Client) []string {
 	defer cancel()
 	mresp, err := client.MemberList(ctx)
 	if err != nil {
-		log.Error("[etcd client] failed to list members", errs.ZapError(err))
+		log.Error("failed to list members", errs.ZapError(err))
 		return []string{}
 	}
 	var eps []string
@@ -440,12 +441,16 @@ func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *
 
 // createHTTPClient creates a http client with the given tls config.
 func createHTTPClient(tlsConfig *tls.Config) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   tlsConfig,
-		},
+	// FIXME: Currently, there is no timeout set for certain requests, such as GetRegions,
+	// which may take a significant amount of time. However, it might be necessary to
+	// define an appropriate timeout in the future.
+	cli := &http.Client{}
+	if tlsConfig != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = tlsConfig
+		cli.Transport = transport
 	}
+	return cli
 }
 
 // InitClusterID creates a cluster ID for the given key if it hasn't existed.
@@ -573,8 +578,13 @@ type LoopWatcher struct {
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
-func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string,
-	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error, opts ...clientv3.OpOption) *LoopWatcher {
+func NewLoopWatcher(
+	ctx context.Context, wg *sync.WaitGroup,
+	client *clientv3.Client,
+	name, key string,
+	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error,
+	opts ...clientv3.OpOption,
+) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:                      ctx,
 		client:                   client,
@@ -598,36 +608,39 @@ func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Cl
 
 // StartWatchLoop starts a loop to watch the key.
 func (lw *LoopWatcher) StartWatchLoop() {
-	defer logutil.LogPanic()
-	defer lw.wg.Done()
+	lw.wg.Add(1)
+	go func() {
+		defer logutil.LogPanic()
+		defer lw.wg.Done()
 
-	ctx, cancel := context.WithCancel(lw.ctx)
-	defer cancel()
-	watchStartRevision := lw.initFromEtcd(ctx)
+		ctx, cancel := context.WithCancel(lw.ctx)
+		defer cancel()
+		watchStartRevision := lw.initFromEtcd(ctx)
 
-	log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
-			return
-		default:
+		log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+				return
+			default:
+			}
+			nextRevision, err := lw.watch(ctx, watchStartRevision)
+			if err != nil {
+				log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
+					zap.String("name", lw.name),
+					zap.String("key", lw.key),
+					zap.Int64("next-revision", nextRevision),
+					zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
+					zap.Error(err))
+				watchStartRevision = nextRevision
+				time.Sleep(lw.watchChangeRetryInterval)
+				failpoint.Inject("updateClient", func() {
+					lw.client = <-lw.updateClientCh
+				})
+			}
 		}
-		nextRevision, err := lw.watch(ctx, watchStartRevision)
-		if err != nil {
-			log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
-				zap.String("name", lw.name),
-				zap.String("key", lw.key),
-				zap.Int64("next-revision", nextRevision),
-				zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
-				zap.Error(err))
-			watchStartRevision = nextRevision
-			time.Sleep(lw.watchChangeRetryInterval)
-			failpoint.Inject("updateClient", func() {
-				lw.client = <-lw.updateClientCh
-			})
-		}
-	}
+	}()
 }
 
 func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {

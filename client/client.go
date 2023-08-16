@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"runtime/trace"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -86,7 +87,7 @@ type Client interface {
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
-	// Also it may return nil if PD finds no Region for the key temporarily,
+	// Also, it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionFromMember gets a region from certain members.
@@ -95,7 +96,7 @@ type Client interface {
 	GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error)
-	// ScanRegion gets a list of regions, starts from the region that contains key.
+	// ScanRegions gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
 	// with empty value (PeerID is 0).
@@ -108,7 +109,7 @@ type Client interface {
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
 	GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*metapb.Store, error)
-	// Update GC safe point. TiKV will check it and do GC themselves if necessary.
+	// UpdateGCSafePoint TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
@@ -174,8 +175,9 @@ func WithExcludeTombstone() GetStoreOption {
 
 // RegionsOp represents available options when operate regions
 type RegionsOp struct {
-	group      string
-	retryLimit uint64
+	group          string
+	retryLimit     uint64
+	skipStoreLimit bool
 }
 
 // RegionsOption configures RegionsOp
@@ -189,6 +191,11 @@ func WithGroup(group string) RegionsOption {
 // WithRetry specify the retry limit during Scatter/Split Regions
 func WithRetry(retry uint64) RegionsOption {
 	return func(op *RegionsOp) { op.retryLimit = retry }
+}
+
+// WithSkipStoreLimit specify if skip the store limit check during Scatter/Split Regions
+func WithSkipStoreLimit() RegionsOption {
+	return func(op *RegionsOp) { op.skipStoreLimit = true }
 }
 
 // GetRegionOp represents available options when getting regions.
@@ -817,6 +824,7 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 }
 
 func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {
+	defer trace.StartRegion(ctx, "GetLocalTSAsync").End()
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("GetLocalTSAsync", opentracing.ChildOf(span.Context()))
 		ctx = opentracing.ContextWithSpan(ctx, span)
@@ -1393,10 +1401,11 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.ScatterRegionRequest{
-		Header:     c.requestHeader(),
-		Group:      options.group,
-		RegionsId:  regionsID,
-		RetryLimit: options.retryLimit,
+		Header:         c.requestHeader(),
+		Group:          options.group,
+		RegionsId:      regionsID,
+		RetryLimit:     options.retryLimit,
+		SkipStoreLimit: options.skipStoreLimit,
 	}
 
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
@@ -1448,6 +1457,9 @@ func trimHTTPPrefix(str string) string {
 }
 
 func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return nil, 0, errs.ErrClientGetProtoClient
@@ -1477,6 +1489,9 @@ func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items
 	for i, it := range items {
 		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType, Payload: it.PayLoad}
 	}
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return errs.ErrClientGetProtoClient
@@ -1492,6 +1507,9 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 	// TODO: Add retry mechanism
 	// register watch components there
 	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return nil, errs.ErrClientGetProtoClient
@@ -1538,6 +1556,9 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 }
 
 func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return 0, errs.ErrClientGetProtoClient
@@ -1556,6 +1577,9 @@ func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
 }
 
 func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) error {
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	protoClient := c.getClient()
 	if protoClient == nil {
 		return errs.ErrClientGetProtoClient

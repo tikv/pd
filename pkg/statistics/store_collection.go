@@ -22,6 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -32,7 +33,6 @@ const (
 
 type storeStatistics struct {
 	opt             *config.PersistOptions
-	storeConfig     *config.StoreConfig
 	Up              int
 	Disconnect      int
 	Unhealthy       int
@@ -54,10 +54,9 @@ type storeStatistics struct {
 	Removed         int
 }
 
-func newStoreStatistics(opt *config.PersistOptions, storeConfig *config.StoreConfig) *storeStatistics {
+func newStoreStatistics(opt *config.PersistOptions) *storeStatistics {
 	return &storeStatistics{
 		opt:          opt,
-		storeConfig:  storeConfig,
 		LabelCounter: make(map[string]int),
 	}
 }
@@ -77,9 +76,11 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
 	// Store state.
+	isDown := false
 	switch store.GetNodeState() {
 	case metapb.NodeState_Preparing, metapb.NodeState_Serving:
 		if store.DownTime() >= s.opt.GetMaxStoreDownTime() {
+			isDown = true
 			s.Down++
 		} else if store.IsUnhealthy() {
 			s.Unhealthy++
@@ -104,7 +105,8 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		s.resetStoreStatistics(storeAddress, id)
 		return
 	}
-	if store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
+
+	if !isDown && store.IsLowSpace(s.opt.GetLowSpaceRatio()) {
 		s.LowSpace++
 	}
 
@@ -151,26 +153,26 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		return
 	}
 
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes").Set(storeFlowStats.GetLoad(StoreWriteBytes))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes").Set(storeFlowStats.GetLoad(StoreReadBytes))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys").Set(storeFlowStats.GetLoad(StoreWriteKeys))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys").Set(storeFlowStats.GetLoad(StoreReadKeys))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate").Set(storeFlowStats.GetLoad(StoreWriteQuery))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate").Set(storeFlowStats.GetLoad(StoreReadQuery))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_cpu_usage").Set(storeFlowStats.GetLoad(StoreCPUUsage))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_read_rate").Set(storeFlowStats.GetLoad(StoreDiskReadRate))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_write_rate").Set(storeFlowStats.GetLoad(StoreDiskWriteRate))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_bytes").Set(storeFlowStats.GetLoad(StoreRegionsWriteBytes))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_keys").Set(storeFlowStats.GetLoad(StoreRegionsWriteKeys))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes").Set(storeFlowStats.GetLoad(utils.StoreWriteBytes))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes").Set(storeFlowStats.GetLoad(utils.StoreReadBytes))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys").Set(storeFlowStats.GetLoad(utils.StoreWriteKeys))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys").Set(storeFlowStats.GetLoad(utils.StoreReadKeys))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate").Set(storeFlowStats.GetLoad(utils.StoreWriteQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate").Set(storeFlowStats.GetLoad(utils.StoreReadQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_cpu_usage").Set(storeFlowStats.GetLoad(utils.StoreCPUUsage))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_read_rate").Set(storeFlowStats.GetLoad(utils.StoreDiskReadRate))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_write_rate").Set(storeFlowStats.GetLoad(utils.StoreDiskWriteRate))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_bytes").Set(storeFlowStats.GetLoad(utils.StoreRegionsWriteBytes))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_keys").Set(storeFlowStats.GetLoad(utils.StoreRegionsWriteKeys))
 
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(StoreWriteBytes))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(StoreReadBytes))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(StoreWriteKeys))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(StoreReadKeys))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate_instant").Set(storeFlowStats.GetInstantLoad(StoreWriteQuery))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate_instant").Set(storeFlowStats.GetInstantLoad(StoreReadQuery))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(StoreRegionsWriteBytes))
-	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(StoreRegionsWriteKeys))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreWriteBytes))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreReadBytes))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreWriteKeys))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreReadKeys))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreWriteQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreReadQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreRegionsWriteBytes))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreRegionsWriteKeys))
 }
 
 func (s *storeStatistics) Collect() {
@@ -216,10 +218,11 @@ func (s *storeStatistics) Collect() {
 	configs["max-snapshot-count"] = float64(s.opt.GetMaxSnapshotCount())
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
-	configs["region-max-size"] = float64(s.storeConfig.GetRegionMaxSize())
-	configs["region-split-size"] = float64(s.storeConfig.GetRegionSplitSize())
-	configs["region-split-keys"] = float64(s.storeConfig.GetRegionSplitKeys())
-	configs["region-max-keys"] = float64(s.storeConfig.GetRegionMaxKeys())
+	storeConfig := s.opt.GetStoreConfig()
+	configs["region-max-size"] = float64(storeConfig.GetRegionMaxSize())
+	configs["region-split-size"] = float64(storeConfig.GetRegionSplitSize())
+	configs["region-split-keys"] = float64(storeConfig.GetRegionSplitKeys())
+	configs["region-max-keys"] = float64(storeConfig.GetRegionMaxKeys())
 
 	var enableMakeUpReplica, enableRemoveDownReplica, enableRemoveExtraReplica, enableReplaceOfflineReplica float64
 	if s.opt.IsMakeUpReplicaEnabled() {
@@ -288,10 +291,10 @@ type storeStatisticsMap struct {
 }
 
 // NewStoreStatisticsMap creates a new storeStatisticsMap.
-func NewStoreStatisticsMap(opt *config.PersistOptions, storeConfig *config.StoreConfig) *storeStatisticsMap {
+func NewStoreStatisticsMap(opt *config.PersistOptions) *storeStatisticsMap {
 	return &storeStatisticsMap{
 		opt:   opt,
-		stats: newStoreStatistics(opt, storeConfig),
+		stats: newStoreStatistics(opt),
 	}
 }
 

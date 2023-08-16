@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/diagnostic"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -36,9 +37,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -88,14 +89,15 @@ func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams
 	ctx, cancel := context.WithCancel(ctx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
+	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
 	return &Coordinator{
 		ctx:               ctx,
 		cancel:            cancel,
 		cluster:           cluster,
 		prepareChecker:    newPrepareChecker(),
-		checkers:          checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController),
-		regionScatterer:   scatter.NewRegionScatterer(ctx, cluster, opController),
-		regionSplitter:    splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController)),
+		checkers:          checkers,
+		regionScatterer:   scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddSuspectRegions),
+		regionSplitter:    splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddSuspectRegions),
 		schedulers:        schedulers,
 		opController:      opController,
 		hbStreams:         hbStreams,
@@ -167,7 +169,7 @@ func (c *Coordinator) PatrolRegions() {
 }
 
 func (c *Coordinator) isSchedulingHalted() bool {
-	return c.cluster.GetPersistOptions().IsSchedulingHalted()
+	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
@@ -374,12 +376,12 @@ func (c *Coordinator) initSchedulers() {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
 
-	scheduleCfg := c.cluster.GetPersistOptions().GetScheduleConfig().Clone()
+	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
-		var cfg config.SchedulerConfig
+		var cfg sc.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
 			if c.Type == typ {
 				cfg = c
@@ -433,8 +435,8 @@ func (c *Coordinator) initSchedulers() {
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetPersistOptions().SetScheduleConfig(scheduleCfg)
-	if err := c.cluster.GetPersistOptions().Persist(c.cluster.GetStorage()); err != nil {
+	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
+	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
 }
@@ -503,18 +505,18 @@ func (c *Coordinator) Stop() {
 }
 
 // GetHotRegionsByType gets hot regions' statistics by RWType.
-func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.StoreHotPeersInfos {
+func (c *Coordinator) GetHotRegionsByType(typ utils.RWType) *statistics.StoreHotPeersInfos {
 	isTraceFlow := c.cluster.GetSchedulerConfig().IsTraceRegionFlow()
 	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
 	var infos *statistics.StoreHotPeersInfos
 	switch typ {
-	case statistics.Write:
+	case utils.Write:
 		regionStats := c.cluster.RegionWriteStats()
-		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
-	case statistics.Read:
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, utils.Write, isTraceFlow)
+	case utils.Read:
 		regionStats := c.cluster.RegionReadStats()
-		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, utils.Read, isTraceFlow)
 	default:
 	}
 	// update params `IsLearner` and `LastUpdateTime`
@@ -528,11 +530,11 @@ func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.Sto
 					h.IsLearner = core.IsLearner(region.GetPeer(h.StoreID))
 				}
 				switch typ {
-				case statistics.Write:
+				case utils.Write:
 					if region != nil {
 						h.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
 					}
-				case statistics.Read:
+				case utils.Read:
 					store := c.cluster.GetStore(h.StoreID)
 					if store != nil {
 						ts := store.GetMeta().GetLastHeartbeat()
@@ -555,24 +557,24 @@ func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 func (c *Coordinator) CollectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
 	// Collects hot write region metrics.
-	collectHotMetrics(c.cluster, stores, statistics.Write)
+	collectHotMetrics(c.cluster, stores, utils.Write)
 	// Collects hot read region metrics.
-	collectHotMetrics(c.cluster, stores, statistics.Read)
+	collectHotMetrics(c.cluster, stores, utils.Read)
 }
 
-func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ statistics.RWType) {
+func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) {
 	var (
 		kind        string
 		regionStats map[uint64][]*statistics.HotPeerStat
 	)
 
 	switch typ {
-	case statistics.Read:
+	case utils.Read:
 		regionStats = cluster.RegionReadStats()
-		kind = statistics.Read.String()
-	case statistics.Write:
+		kind = utils.Read.String()
+	case utils.Write:
 		regionStats = cluster.RegionWriteStats()
-		kind = statistics.Write.String()
+		kind = utils.Write.String()
 	}
 	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
@@ -608,8 +610,8 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		}
 
 		if !hasHotLeader && !hasHotPeer {
-			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, _ statistics.RegionStatKind) {
-				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), statistics.DimToString(dim))
+			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, _ utils.RegionStatKind) {
+				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim))
 			})
 		}
 	}
