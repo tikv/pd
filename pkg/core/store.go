@@ -53,6 +53,7 @@ type StoreInfo struct {
 	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
 	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
 	slowTrendEvicted    bool // this store has been evicted as a slow store by trend, should not transfer leader to it
+	slowTrendGrpcPaused bool // this store has been marked slow and can be chosen to pause Grpc.
 	leaderCount         int
 	regionCount         int
 	learnerCount        int
@@ -151,6 +152,11 @@ func (s *StoreInfo) EvictedAsSlowStore() bool {
 // IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
 func (s *StoreInfo) IsEvictedAsSlowTrend() bool {
 	return s.slowTrendEvicted
+}
+
+// IsEvictedAsSlowTrend returns if the store should be evicted as a slow store by trend.
+func (s *StoreInfo) IsPausedAsSlowTrend() bool {
+	return s.slowTrendGrpcPaused
 }
 
 // IsAvailable returns if the store bucket of limitation is available
@@ -539,6 +545,24 @@ func (s *StoreInfo) NeedAwakenStore() bool {
 	return s.GetLastHeartbeatTS().Sub(s.lastAwakenTime) > awakenStoreInterval
 }
 
+func (s *StoreInfo) IsGrpcPaused() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.slowTrendEvicted && s.slowTrendGrpcPaused
+}
+
+func (s *StoreInfo) NeedPauseGrpc() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.rawStats.IsGrpcPaused && s.slowTrendEvicted && s.slowTrendGrpcPaused
+}
+
+func (s *StoreInfo) NeedResumeGrpc() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.rawStats.IsGrpcPaused && !s.slowTrendEvicted && !s.slowTrendGrpcPaused
+}
+
 var (
 	// If a store's last heartbeat is storeDisconnectDuration ago, the store will
 	// be marked as disconnected state. The value should be greater than tikv's
@@ -722,6 +746,28 @@ func (s *StoresInfo) SlowTrendRecovered(storeID uint64) {
 		return
 	}
 	s.stores[storeID] = store.Clone(SlowTrendRecovered())
+}
+
+func (s *StoresInfo) PauseGrpcServer(storeID uint64) error {
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if store.IsPausedAsSlowTrend() {
+		return errs.ErrSlowTrendEvicted.FastGenByArgs(storeID)
+	}
+	s.stores[storeID] = store.Clone(PauseGrpcServer())
+	return nil
+}
+
+func (s *StoresInfo) ResumeGrpcServer(storeID uint64) {
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Warn("try to clean a store's evicted by trend as a slow store state, but it is not found. It may be cleanup",
+			zap.Uint64("store-id", storeID))
+		return
+	}
+	s.stores[storeID] = store.Clone(ResumeGrpcServer())
 }
 
 // ResetStoreLimit resets the limit for a specific store.

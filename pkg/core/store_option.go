@@ -129,6 +129,13 @@ func SlowStoreEvicted() StoreCreateOption {
 	}
 }
 
+// SlowStoreRecovered cleans the evicted state of a store.
+func SlowStoreRecovered() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowStoreEvicted = false
+	}
+}
+
 // SlowTrendEvicted marks a store as a slow store by trend and prevents transferring
 // leader to the store
 func SlowTrendEvicted() StoreCreateOption {
@@ -144,10 +151,18 @@ func SlowTrendRecovered() StoreCreateOption {
 	}
 }
 
-// SlowStoreRecovered cleans the evicted state of a store.
-func SlowStoreRecovered() StoreCreateOption {
+// PauseGrpcServer marks a store as a slow store by trend and prevents transferring
+// leader to the store
+func PauseGrpcServer() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.slowStoreEvicted = false
+		store.slowTrendGrpcPaused = true
+	}
+}
+
+// ResumeGrpcServer cleans the paused state of a store by slow trend.
+func ResumeGrpcServer() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.slowTrendGrpcPaused = false
 	}
 }
 

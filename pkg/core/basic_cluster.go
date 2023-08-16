@@ -144,6 +144,13 @@ func (bc *BasicCluster) SlowStoreEvicted(storeID uint64) error {
 	return bc.Stores.SlowStoreEvicted(storeID)
 }
 
+// SlowStoreRecovered cleans the evicted state of a store.
+func (bc *BasicCluster) SlowStoreRecovered(storeID uint64) {
+	bc.Stores.mu.Lock()
+	defer bc.Stores.mu.Unlock()
+	bc.Stores.SlowStoreRecovered(storeID)
+}
+
 // SlowTrendEvicted marks a store as a slow store by trend and prevents transferring
 // leader to the store
 func (bc *BasicCluster) SlowTrendEvicted(storeID uint64) error {
@@ -159,11 +166,19 @@ func (bc *BasicCluster) SlowTrendRecovered(storeID uint64) {
 	bc.Stores.SlowTrendRecovered(storeID)
 }
 
-// SlowStoreRecovered cleans the evicted state of a store.
-func (bc *BasicCluster) SlowStoreRecovered(storeID uint64) {
+// PauseGrpcServer marks a store as a slow store by trend and prevents transferring
+// leader to the store
+func (bc *BasicCluster) PauseGrpcServer(storeID uint64) error {
 	bc.Stores.mu.Lock()
 	defer bc.Stores.mu.Unlock()
-	bc.Stores.SlowStoreRecovered(storeID)
+	return bc.Stores.PauseGrpcServer(storeID)
+}
+
+// ResumeGrpcServer cleans the evicted by slow trend state of a store.
+func (bc *BasicCluster) ResumeGrpcServer(storeID uint64) {
+	bc.Stores.mu.Lock()
+	defer bc.Stores.mu.Unlock()
+	bc.Stores.ResumeGrpcServer(storeID)
 }
 
 // ResetStoreLimit resets the limit for a specific store.
@@ -282,6 +297,9 @@ type StoreSetController interface {
 	SlowStoreRecovered(id uint64)
 	SlowTrendEvicted(id uint64) error
 	SlowTrendRecovered(id uint64)
+
+	PauseGrpcServer(id uint64) error
+	ResumeGrpcServer(id uint64)
 }
 
 // KeyRange is a key range.
