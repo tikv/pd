@@ -326,15 +326,15 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 				// It is both sourcePeer and targetPeer itself, no need to select.
 				continue
 			}
+			sourceStore := r.cluster.GetStore(peer.GetStoreId())
+			if sourceStore == nil {
+				log.Error("failed to get the store", zap.Uint64("store-id", peer.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
+				continue
+			}
+			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
 			for {
-				sourceStore := r.cluster.GetStore(peer.GetStoreId())
-				if sourceStore == nil {
-					log.Error("failed to get the store", zap.Uint64("store-id", peer.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
-					continue
-				}
 				filters[filterLen-2] = filter.NewExcludedFilter(r.name, nil, selectedStores)
-				filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
-				newPeer := r.selectCandidates(context, group, peer, filters)
+				newPeer := r.selectNewPeer(context, group, peer, filters)
 				targetPeers[newPeer.GetStoreId()] = newPeer
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
 				// If the selected peer is a peer other than origin peer in this region,
@@ -426,7 +426,7 @@ func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.
 	return region.GetLeader().GetStoreId() == targetLeader
 }
 
-func (r *RegionScatterer) selectCandidates(context engineContext, group string, peer *metapb.Peer, filters []filter.Filter) *metapb.Peer {
+func (r *RegionScatterer) selectNewPeer(context engineContext, group string, peer *metapb.Peer, filters []filter.Filter) *metapb.Peer {
 	stores := r.cluster.GetStores()
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
