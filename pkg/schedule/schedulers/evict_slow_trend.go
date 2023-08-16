@@ -388,7 +388,7 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slo
 		return
 	}
 
-	storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
+	storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "add").Inc()
 	log.Info("evict-slow-trend-scheduler captured candidate", zap.Uint64("store-id", store.GetID()))
 	return store
 }
