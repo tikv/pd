@@ -188,6 +188,10 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		return
 	}
 
+	unhealthyTimeout := watchLoopUnhealthyTimeout
+	failpoint.Inject("fastTick", func() {
+		unhealthyTimeout = 5 * time.Second
+	})
 	ticker := time.NewTicker(etcdutil.RequestProgressInterval)
 	defer ticker.Stop()
 	lastReceivedResponseTime := time.Now()
@@ -213,7 +217,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.
 		if !etcdutil.IsHealthy(serverCtx, ls.client) {
-			if time.Since(lastReceivedResponseTime) > watchLoopUnhealthyTimeout {
+			if time.Since(lastReceivedResponseTime) > unhealthyTimeout {
 				log.Error("the connect of leadership watcher is unhealthy",
 					zap.Int64("revision", revision),
 					zap.String("leader-key", ls.leaderKey),
