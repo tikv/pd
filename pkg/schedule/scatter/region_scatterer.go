@@ -107,26 +107,6 @@ func (s *selectedStores) GetGroupDistribution(group string) (map[uint64]uint64, 
 	return s.getDistributionByGroupLocked(group)
 }
 
-// TotalCountByStore counts the total count by store
-func (s *selectedStores) TotalCountByStore(storeID uint64) uint64 {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	groups := s.groupDistribution.GetAllID()
-	totalCount := uint64(0)
-	for _, group := range groups {
-		storeDistribution, ok := s.getDistributionByGroupLocked(group)
-		if !ok {
-			continue
-		}
-		count, ok := storeDistribution[storeID]
-		if !ok {
-			continue
-		}
-		totalCount += count
-	}
-	return totalCount
-}
-
 // getDistributionByGroupLocked should be called with lock
 func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]uint64, bool) {
 	if result, ok := s.groupDistribution.Get(group); ok {

@@ -612,7 +612,7 @@ func TestRegionHasLearner(t *testing.T) {
 		re.LessOrEqual(max-2, uint64(regionCount)/voterCount)
 		re.LessOrEqual(min-1, uint64(regionCount)/voterCount)
 		for i := voterCount + 1; i <= storeCount; i++ {
-			count := ss.TotalCountByStore(i)
+			count := ss.Get(i, group)
 			re.LessOrEqual(count, uint64(0))
 		}
 	}
