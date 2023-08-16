@@ -31,6 +31,9 @@ import (
 	"github.com/unrolled/render"
 )
 
+// enableFailPointAPI enable fail point API handler.
+var enableFailPointAPI bool
+
 // createRouteOption is used to register service for mux.Route
 type createRouteOption func(route *mux.Route)
 
@@ -365,15 +368,13 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/admin/reset-ts", tsoAdminHandler.ResetTS, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	// API to set or unset failpoints
-	failpoint.Inject("enableFailpointAPI", func() {
-		// this function will be named to "func2". It may be used in test
+	if enableFailPointAPI {
 		registerPrefix(apiRouter, "/fail", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		}), setAuditBackend("test"))
-	})
-
+		}), setAuditBackend(localLog))
+	}
 	// Deprecated: use /pd/api/v1/health instead.
 	rootRouter.HandleFunc("/health", healthHandler.GetHealthStatus).Methods(http.MethodGet)
 	// Deprecated: use /pd/api/v1/ping instead.
