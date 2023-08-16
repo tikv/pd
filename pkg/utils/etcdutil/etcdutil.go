@@ -525,6 +525,11 @@ const (
 	defaultLoadBatchSize             = 400
 	defaultWatchChangeRetryInterval  = 1 * time.Second
 	defaultForceLoadMinimalInterval  = 200 * time.Millisecond
+
+	// RequestProgressInterval is the interval to call RequestProgress for watcher.
+	RequestProgressInterval = 1 * time.Second
+	// WatchChTimeoutDuration is the timeout duration for a watchChan.
+	WatchChTimeoutDuration = DefaultRequestTimeout
 )
 
 // LoopWatcher loads data from etcd and sets a watcher for it.
@@ -678,6 +683,10 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 }
 
 func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
+	ticker := time.NewTicker(RequestProgressInterval)
+	defer ticker.Stop()
+	lastReceivedResponseTime := time.Now()
+
 	watcher := clientv3.NewWatcher(lw.client)
 	defer watcher.Close()
 	var watchChanCancel context.CancelFunc
@@ -686,6 +695,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			watchChanCancel()
 		}
 	}()
+
 	for {
 		if watchChanCancel != nil {
 			watchChanCancel()
@@ -700,6 +710,15 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		select {
 		case <-ctx.Done():
 			return revision, nil
+		case <-ticker.C:
+			if err := watcher.RequestProgress(ctx); err != nil {
+				log.Warn("failed to request progress in watch loop", zap.Error(err))
+			}
+			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
+				// If no msg comes from an etcd watchChan for WatchChTimeoutDuration long,
+				// we should cancel the watchChan and request a new watchChan from watcher.
+				continue
+			}
 		case <-lw.forceLoadCh:
 			revision, err = lw.load(ctx)
 			if err != nil {
@@ -708,6 +727,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			}
 			continue
 		case wresp := <-watchChan:
+			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision in watch loop",
 					zap.Int64("required-revision", revision),
@@ -719,6 +739,8 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("revision", revision),
 					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
 				return revision, wresp.Err()
+			} else if wresp.IsProgressNotify() {
+				goto WatchChanLoop
 			}
 			for _, event := range wresp.Events {
 				switch event.Type {
@@ -746,8 +768,8 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.String("key", lw.key), zap.Error(err))
 			}
 			revision = wresp.Header.Revision + 1
-			goto WatchChanLoop // use goto to avoid to create a new watchChan
 		}
+		goto WatchChanLoop // use goto to avoid to create a new watchChan
 	}
 }
 
