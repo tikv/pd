@@ -117,8 +117,14 @@ require (
 	github.com/pingcap/check v0.0.0-20211026125417-57bd13f7b5f0 // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
+<<<<<<< HEAD:tests/integrations/client/go.mod
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
 	github.com/pingcap/tidb-dashboard v0.0.0-20230705095454-5e220f970f27 // indirect
+=======
+	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 // indirect
+	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20230816095313-e6414634f8fc // indirect
+>>>>>>> 4441cd85a (chore: update tidb-dashboard to v2023.08.15.1 (#6967)):tests/client/go.mod
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
