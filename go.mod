@@ -32,9 +32,15 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20220510035547-0e2f26c0a46a
 	github.com/pingcap/log v0.0.0-20210906054005-afc726e70354
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
+<<<<<<< HEAD
 	github.com/pingcap/tidb-dashboard v0.0.0-20220518164040-4d621864a9a0
 	github.com/prometheus/client_golang v1.1.0
 	github.com/prometheus/common v0.6.0
+=======
+	github.com/pingcap/tidb-dashboard v0.0.0-20230816095313-e6414634f8fc
+	github.com/prometheus/client_golang v1.11.1
+	github.com/prometheus/common v0.26.0
+>>>>>>> 4441cd85a (chore: update tidb-dashboard to v2023.08.15.1 (#6967))
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
