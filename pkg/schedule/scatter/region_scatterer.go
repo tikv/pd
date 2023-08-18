@@ -474,7 +474,8 @@ func (r *RegionScatterer) selectNewPeer(context engineContext, group string, pee
 
 // selectAvailableLeaderStore select the target leader store from the candidates. The candidates would be collected by
 // the existed peers store depended on the leader counts in the group level. Please use this func before scatter spacial engines.
-func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.RegionInfo, leaderCandidateStores []uint64, context engineContext) (uint64, uint64) {
+func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.RegionInfo,
+	leaderCandidateStores []uint64, context engineContext) (leaderID uint64, hit uint64) {
 	sourceStore := r.cluster.GetStore(region.GetLeader().GetStoreId())
 	if sourceStore == nil {
 		log.Error("failed to get the store", zap.Uint64("store-id", region.GetLeader().GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
