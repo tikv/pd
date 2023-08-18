@@ -3,7 +3,6 @@ module github.com/tools/pd-tso-bench
 go 1.16
 
 require (
-	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/influxdata/tdigest v0.0.1
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
