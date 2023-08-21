@@ -429,19 +429,6 @@ func (c *RaftCluster) runStoreConfigSync() {
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
-			// If the cluster was set up with `raft-kv2` engine, this cluster should
-			// open `evict-slow-trend` scheduler as default.
-			{
-				name := schedulers.EvictSlowTrendType
-				args := []string{}
-
-				s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), c.GetStorage(), schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().GetSchedulersController().RemoveScheduler)
-				if err != nil {
-					log.Warn("bootstrapping evict-slow-trend scheduler failed", zap.Uint64("cluster-id", c.clusterID), errs.ZapError(err))
-				} else if err = c.AddScheduler(s, args...); err != nil {
-					log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
-				}
-			}
 		}
 		// Update the stores if the synchronization is not completed.
 		if !synced {
