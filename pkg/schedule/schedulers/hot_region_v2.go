@@ -61,14 +61,14 @@ type balanceChecker struct {
 // TODO: Unified with stddevThreshold.
 type rankV2Ratios struct {
 	// futureChecker is used to calculate the balanced state after the operator is completed.
-	// It is more strict than the currentChecker.
+	// It is stricter than the currentChecker.
 	futureChecker *balanceChecker
 	// currentChecker is used to calculate the balanced state in the currentChecker state, which means that the operator is not triggered.
 	currentChecker *balanceChecker
 
 	// perceivedRatio avoid to not worse in a state with a large region.
-	// For example, if the region is 20MB, the high store is 100MB, the low store is 80MB, the high/low is 0.8.
-	// If scheduling to the low store, the high store will be 80MB, the low store will be 100MB, the high/low still be 0.8, it is not worse.
+	// For example, if the region is 20MB, the high store is 100MB, the low store is 80MB, the low/high is 0.8.
+	// If scheduling to the low store, the high store will be 80MB, the low store will be 100MB, the low/high still be 0.8, it is not worse.
 	// we need to avoid scheduling to the low store, so introduce perceivedRatio.
 	perceivedRatio float64
 	// minHotRatio is the minimum ratio for the hot region to be scheduled.
@@ -133,6 +133,7 @@ func (bs *balanceSolver) pickCheckPolicyV2() {
 }
 
 // filterUniformStoreV2 filters stores by stddev.
+// stddev is the standard deviation of the store's load for all stores.
 func (bs *balanceSolver) filterUniformStoreV2() (string, bool) {
 	if !bs.enableExpectation() {
 		return "", false

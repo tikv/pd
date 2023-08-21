@@ -1369,7 +1369,7 @@ func (bs *balanceSolver) getRkCmpPrioritiesV1(old *solution) (firstCmp int, seco
 // The comparison is based on the following principles:
 // 1. select the min load of store in current and future, because we want to select the store as source store;
 // 2. compare detail1 and detail2 by first priority and second priority, we pick the larger one to speed up the convergence;
-// 3. if the first priority and second priority are equal, we pick the diff of current and future is smaller in order to reduce the oscillation.
+// 3. if the first priority and second priority are equal, we pick the store with the smaller difference between current and future to minimize oscillations.
 func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadDetail) int {
 	if detail1 != detail2 {
 		var lpCmp storeLPCmp
@@ -1408,7 +1408,7 @@ func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadD
 // The comparison is based on the following principles:
 // 1. select the max load of store in current and future, because we want to select the store as destination store;
 // 2. compare detail1 and detail2 by first priority and second priority, we pick the smaller one to speed up the convergence;
-// 3. if the first priority and second priority are equal, we pick the diff of current and future is smaller in order to reduce the oscillation.
+// 3. if the first priority and second priority are equal, we pick the store with the smaller difference between current and future to minimize oscillations.
 func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadDetail) int {
 	if detail1 != detail2 {
 		// compare destination store
@@ -1442,6 +1442,7 @@ func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadD
 
 // stepRank returns a function can calculate the discretized data,
 // where `rate` will be discretized by `step`.
+// `rate` is the speed of the dim, `step` is the step size of the discretized data.
 func stepRank(rk0 float64, step float64) func(float64) int64 {
 	return func(rate float64) int64 {
 		return int64((rate - rk0) / step)
