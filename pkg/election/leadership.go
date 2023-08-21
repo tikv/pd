@@ -188,10 +188,16 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		return
 	}
 
-	var watcherCancel context.CancelFunc
+	var (
+		watcher       clientv3.Watcher
+		watcherCancel context.CancelFunc
+	)
 	defer func() {
 		if watcherCancel != nil {
 			watcherCancel()
+		}
+		if watcher != nil {
+			watcher.Close()
 		}
 	}()
 	unhealthyTimeout := watchLoopUnhealthyTimeout
@@ -207,9 +213,12 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		if watcherCancel != nil {
 			watcherCancel()
 		}
+		if watcher != nil {
+			watcher.Close()
+		}
+		watcher = clientv3.NewWatcher(ls.client)
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
-		watcher := clientv3.NewWatcher(ls.client)
 		watcherCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(serverCtx))
 		watcherCancel = cancel
 

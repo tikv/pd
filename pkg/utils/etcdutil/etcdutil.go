@@ -683,10 +683,16 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 }
 
 func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
-	var watcherCancel context.CancelFunc
+	var (
+		watcher       clientv3.Watcher
+		watcherCancel context.CancelFunc
+	)
 	defer func() {
 		if watcherCancel != nil {
 			watcherCancel()
+		}
+		if watcher != nil {
+			watcher.Close()
 		}
 	}()
 	ticker := time.NewTicker(RequestProgressInterval)
@@ -697,12 +703,15 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		if watcherCancel != nil {
 			watcherCancel()
 		}
+		if watcher != nil {
+			watcher.Close()
+		}
+		watcher = clientv3.NewWatcher(lw.client)
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
-		watcher := clientv3.NewWatcher(lw.client)
 		watcherCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
 		watcherCancel = cancel
-		opts := append(lw.opts, clientv3.WithRev(revision))
+		opts := append(lw.opts, clientv3.WithRev(revision), clientv3.WithProgressNotify())
 		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
 	WatchChanLoop:
 		select {
