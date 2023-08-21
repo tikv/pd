@@ -59,28 +59,12 @@ var (
 			Help:      "Store status for schedule",
 		}, []string{"scheduler"})
 
-	balanceLeaderCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "balance_leader",
-			Help:      "Counter of balance leader scheduler.",
-		}, []string{"type", "store"})
-
 	balanceWitnessCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "balance_witness",
 			Help:      "Counter of balance witness scheduler.",
-		}, []string{"type", "store"})
-
-	balanceRegionCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "balance_region",
-			Help:      "Counter of balance region scheduler.",
 		}, []string{"type", "store"})
 
 	// TODO: pre-allocate gauge metrics
@@ -108,22 +92,6 @@ var (
 			Name:      "hot_region_direction",
 			Help:      "Counter of hot region scheduler.",
 		}, []string{"type", "rw", "store", "direction", "dim"})
-
-	scatterRangeLeaderCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "scatter_range_leader",
-			Help:      "Counter of scatter range leader scheduler.",
-		}, []string{"type", "store"})
-
-	scatterRangeRegionCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "scatter_range_region",
-			Help:      "Counter of scatter range region scheduler.",
-		}, []string{"type", "store"})
 
 	hotPendingStatus = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -163,7 +131,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "store_slow_trend_misc",
-			Help:      "Store trend internal uncatelogued values",
+			Help:      "Store trend internal uncatalogued values",
 		}, []string{"type"})
 
 	// HotPendingSum is the sum of pending influence in hot region scheduler.
@@ -180,14 +148,10 @@ func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(schedulerStatus)
-	prometheus.MustRegister(balanceLeaderCounter)
-	prometheus.MustRegister(balanceRegionCounter)
 	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)
-	prometheus.MustRegister(scatterRangeLeaderCounter)
-	prometheus.MustRegister(scatterRangeRegionCounter)
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)

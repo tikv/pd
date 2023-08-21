@@ -20,7 +20,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -59,7 +58,6 @@ type balanceRegionScheduler struct {
 	*retryQuota
 	conf          *balanceRegionSchedulerConfig
 	filters       []filter.Filter
-	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
 }
 
@@ -71,7 +69,6 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
-		counter:       balanceRegionCounter,
 		filterCounter: filter.NewCounter(filter.BalanceRegion.String()),
 	}
 	for _, setOption := range opts {
@@ -86,13 +83,6 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 
 // BalanceRegionCreateOption is used to create a scheduler with an option.
 type BalanceRegionCreateOption func(s *balanceRegionScheduler)
-
-// WithBalanceRegionCounter sets the counter for the scheduler.
-func WithBalanceRegionCounter(counter *prometheus.CounterVec) BalanceRegionCreateOption {
-	return func(s *balanceRegionScheduler) {
-		s.counter = counter
-	}
-}
 
 // WithBalanceRegionName sets the name for the scheduler.
 func WithBalanceRegionName(name string) BalanceRegionCreateOption {
@@ -286,9 +276,6 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
-			// TODO: pre-allocate gauge metrics
-			s.counter.WithLabelValues("move-peer", sourceLabel+"-out"),
-			s.counter.WithLabelValues("move-peer", targetLabel+"-in"),
 		)
 		op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
 		op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)
