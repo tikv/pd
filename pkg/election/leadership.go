@@ -196,23 +196,9 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	defer ticker.Stop()
 	lastReceivedResponseTime := time.Now()
 
-	watcher := clientv3.NewWatcher(ls.client)
-	defer watcher.Close()
-	var watchChanCancel context.CancelFunc
-	defer func() {
-		if watchChanCancel != nil {
-			watchChanCancel()
-		}
-	}()
 	for {
 		failpoint.Inject("delayWatcher", nil)
-		if watchChanCancel != nil {
-			watchChanCancel()
-		}
-		// In order to prevent a watch stream being stuck in a partitioned node,
-		// make sure to wrap context with "WithRequireLeader".
-		watchChanCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(serverCtx))
-		watchChanCancel = cancel
+		watcher := clientv3.NewWatcher(ls.client)
 
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.
@@ -236,7 +222,11 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			}
 		}
 
-		watchChan := watcher.Watch(watchChanCtx, ls.leaderKey, clientv3.WithRev(revision))
+		// In order to prevent a watch stream being stuck in a partitioned node,
+		// make sure to wrap context with "WithRequireLeader".
+		watcherCtx := clientv3.WithRequireLeader(serverCtx)
+		watchChan := watcher.Watch(watcherCtx, ls.leaderKey,
+			clientv3.WithRev(revision), clientv3.WithProgressNotify())
 	WatchChanLoop:
 		select {
 		case <-serverCtx.Done():
@@ -248,14 +238,21 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			if !etcdutil.IsHealthy(serverCtx, ls.client) {
 				// When etcd is not available, the watcher.RequestProgress will block,
 				// so we check the etcd availability first.
+				log.Error("the connect of leadership watcher is unhealthy",
+					zap.Int64("revision", revision),
+					zap.String("leader-key", ls.leaderKey),
+					zap.String("purpose", ls.purpose))
 				continue
 			}
-			if err := watcher.RequestProgress(serverCtx); err != nil {
-				log.Warn("failed to request progress in watch loop", zap.Error(err))
+			// need to request progress to etcd to prevent etcd hold the watchChan,
+			// note: we need to use the same ctx with watcher.
+			if err := watcher.RequestProgress(watcherCtx); err != nil {
+				log.Warn("failed to request progress in leader watch loop", zap.Error(err))
 			}
 			if time.Since(lastReceivedResponseTime) >= etcdutil.WatchChTimeoutDuration {
 				// If no msg comes from an etcd watchChan for WatchChTimeoutDuration long,
 				// we should cancel the watchChan and request a new watchChan from watcher.
+				log.Warn("watchChan is blocked for a long time, recreate a new watchChan")
 				continue
 			}
 		case wresp := <-watchChan:

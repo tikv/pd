@@ -687,36 +687,27 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	defer ticker.Stop()
 	lastReceivedResponseTime := time.Now()
 
-	watcher := clientv3.NewWatcher(lw.client)
-	defer watcher.Close()
-	var watchChanCancel context.CancelFunc
-	defer func() {
-		if watchChanCancel != nil {
-			watchChanCancel()
-		}
-	}()
-
 	for {
-		if watchChanCancel != nil {
-			watchChanCancel()
-		}
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
-		watchChanCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
-		watchChanCancel = cancel
+		watcher := clientv3.NewWatcher(lw.client)
+		watcherCtx := clientv3.WithRequireLeader(ctx)
 		opts := append(lw.opts, clientv3.WithRev(revision))
-		watchChan := watcher.Watch(watchChanCtx, lw.key, opts...)
+		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
 	WatchChanLoop:
 		select {
 		case <-ctx.Done():
 			return revision, nil
 		case <-ticker.C:
-			if err := watcher.RequestProgress(ctx); err != nil {
-				log.Warn("failed to request progress in watch loop", zap.Error(err))
+			// need to request progress to etcd to prevent etcd hold the watchChan,
+			// note: we need to use the same ctx with watcher.
+			if err := watcher.RequestProgress(watcherCtx); err != nil {
+				log.Warn("failed to request progress in leader watch loop", zap.Error(err))
 			}
 			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
 				// If no msg comes from an etcd watchChan for WatchChTimeoutDuration long,
 				// we should cancel the watchChan and request a new watchChan from watcher.
+				log.Warn("watchChan is blocked for a long time, recreate a new watchChan")
 				continue
 			}
 		case <-lw.forceLoadCh:
