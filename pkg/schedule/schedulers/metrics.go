@@ -33,14 +33,6 @@ var (
 			Help:      "Counter of scheduler events.",
 		}, []string{"type", "name"})
 
-	schedulerStatus = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "inner_status",
-			Help:      "Inner status of the scheduler.",
-		}, []string{"type", "name"})
-
 	// TODO: pre-allocate gauge metrics
 	opInfluenceStatus = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -147,7 +139,6 @@ var (
 func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(schedulerCounter)
-	prometheus.MustRegister(schedulerStatus)
 	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
