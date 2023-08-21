@@ -188,6 +188,12 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		return
 	}
 
+	var watcherCancel context.CancelFunc
+	defer func() {
+		if watcherCancel != nil {
+			watcherCancel()
+		}
+	}()
 	unhealthyTimeout := watchLoopUnhealthyTimeout
 	failpoint.Inject("fastTick", func() {
 		unhealthyTimeout = 5 * time.Second
@@ -198,7 +204,14 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 	for {
 		failpoint.Inject("delayWatcher", nil)
+		if watcherCancel != nil {
+			watcherCancel()
+		}
+		// In order to prevent a watch stream being stuck in a partitioned node,
+		// make sure to wrap context with "WithRequireLeader".
 		watcher := clientv3.NewWatcher(ls.client)
+		watcherCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(serverCtx))
+		watcherCancel = cancel
 
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.
@@ -222,9 +235,6 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			}
 		}
 
-		// In order to prevent a watch stream being stuck in a partitioned node,
-		// make sure to wrap context with "WithRequireLeader".
-		watcherCtx := clientv3.WithRequireLeader(serverCtx)
 		watchChan := watcher.Watch(watcherCtx, ls.leaderKey,
 			clientv3.WithRev(revision), clientv3.WithProgressNotify())
 	WatchChanLoop:
