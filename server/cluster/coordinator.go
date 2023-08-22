@@ -129,8 +129,7 @@ func (c *coordinator) patrolRegions() {
 			log.Info("patrol regions has been stopped")
 			return
 		}
-		if c.cluster.GetUnsafeRecoveryController().IsRunning() {
-			// Skip patrolling regions during unsafe recovery.
+		if allowed, _ := c.cluster.CheckSchedulingAllowance(); !allowed {
 			continue
 		}
 
@@ -495,11 +494,28 @@ func (c *coordinator) getHotRegionsByType(typ statistics.RWType) *statistics.Sto
 	default:
 	}
 	// update params `IsLearner` and `LastUpdateTime`
-	for _, stores := range []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer} {
-		for _, store := range stores {
-			for _, hotPeer := range store.Stats {
-				region := c.cluster.GetRegion(hotPeer.RegionID)
-				hotPeer.UpdateHotPeerStatShow(region)
+	s := []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer}
+	for i, stores := range s {
+		for j, store := range stores {
+			for k := range store.Stats {
+				h := &s[i][j].Stats[k]
+				region := c.cluster.GetRegion(h.RegionID)
+				if region != nil {
+					h.IsLearner = core.IsLearner(region.GetPeer(h.StoreID))
+				}
+				switch typ {
+				case statistics.Write:
+					if region != nil {
+						h.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
+					}
+				case statistics.Read:
+					store := c.cluster.GetStore(h.StoreID)
+					if store != nil {
+						ts := store.GetMeta().GetLastHeartbeat()
+						h.LastUpdateTime = time.Unix(ts/1e9, ts%1e9)
+					}
+				default:
+				}
 			}
 		}
 	}
@@ -533,7 +549,7 @@ func (c *coordinator) collectSchedulerMetrics() {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
 		// See issue #1341.
-		if !s.IsPaused() && !s.cluster.GetUnsafeRecoveryController().IsRunning() {
+		if allowed, _ := s.cluster.CheckSchedulingAllowance(); !s.IsPaused() && allowed {
 			allowScheduler = 1
 		}
 		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
@@ -893,9 +909,27 @@ func (s *scheduleController) Schedule(diagnosable bool) []*operator.Operator {
 		if diagnosable {
 			s.diagnosticRecorder.setResultFromPlans(ops, plans)
 		}
+		foundDisabled := false
+		for _, op := range ops {
+			if labelMgr := s.cluster.GetRegionLabeler(); labelMgr != nil {
+				region := s.cluster.GetRegion(op.RegionID())
+				if region == nil {
+					continue
+				}
+				if labelMgr.ScheduleDisabled(region) {
+					denySchedulersByLabelerCounter.Inc()
+					foundDisabled = true
+					break
+				}
+			}
+		}
 		if len(ops) > 0 {
 			// If we have schedule, reset interval to the minimal interval.
 			s.nextInterval = s.Scheduler.GetMinInterval()
+			// try regenerating operators
+			if foundDisabled {
+				continue
+			}
 			return ops
 		}
 	}
@@ -921,7 +955,14 @@ func (s *scheduleController) AllowSchedule(diagnosable bool) bool {
 		}
 		return false
 	}
-	if s.IsPaused() || s.cluster.GetUnsafeRecoveryController().IsRunning() {
+	allowed, _ := s.cluster.CheckSchedulingAllowance()
+	if !allowed {
+		if diagnosable {
+			s.diagnosticRecorder.setResultFromStatus(halted)
+		}
+		return false
+	}
+	if s.IsPaused() {
 		if diagnosable {
 			s.diagnosticRecorder.setResultFromStatus(paused)
 		}

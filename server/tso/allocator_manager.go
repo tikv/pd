@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"github.com/tikv/pd/pkg/grpcutil"
+	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/config"
@@ -361,6 +362,7 @@ func (am *AllocatorManager) getLocalTSOAllocatorPath() string {
 
 // similar logic with leaderLoop in server/server.go
 func (am *AllocatorManager) allocatorLeaderLoop(ctx context.Context, allocator *LocalTSOAllocator) {
+	defer logutil.LogPanic()
 	defer log.Info("server is closed, return local tso allocator leader loop",
 		zap.String("dc-location", allocator.GetDCLocation()),
 		zap.String("local-tso-allocator-name", am.member.Member().Name))
@@ -612,6 +614,7 @@ func (am *AllocatorManager) allocatorUpdater() {
 
 // updateAllocator is used to update the allocator in the group.
 func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
+	defer logutil.LogPanic()
 	defer am.wg.Done()
 	select {
 	case <-ag.ctx.Done():
@@ -662,6 +665,7 @@ func (am *AllocatorManager) allocatorPatroller(serverCtx context.Context) {
 // ClusterDCLocationChecker collects all dc-locations of a cluster, computes some related info
 // and stores them into the DCLocationInfo, then finally writes them into am.mu.clusterDCLocations.
 func (am *AllocatorManager) ClusterDCLocationChecker() {
+	defer logutil.LogPanic()
 	// Wait for the PD leader to be elected out.
 	if am.member.GetLeader() == nil {
 		return

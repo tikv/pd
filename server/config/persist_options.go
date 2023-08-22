@@ -856,3 +856,15 @@ func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clien
 	}
 	return err
 }
+
+// SetHaltScheduling set HaltScheduling.
+func (o *PersistOptions) SetHaltScheduling(halt bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.HaltScheduling = halt
+	o.SetScheduleConfig(v)
+}
+
+// IsSchedulingHalted returns if PD scheduling is halted.
+func (o *PersistOptions) IsSchedulingHalted() bool {
+	return o.GetScheduleConfig().HaltScheduling
+}

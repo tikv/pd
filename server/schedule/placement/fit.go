@@ -56,6 +56,9 @@ func (f *RegionFit) IsCached() bool {
 
 // Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.
 func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
+	if dstStore == nil {
+		return false
+	}
 	fit := f.getRuleFitByStoreID(srcStoreID)
 	// check the target store is fit all constraints.
 	if fit == nil {

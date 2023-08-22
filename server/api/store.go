@@ -55,8 +55,9 @@ type StoreStatus struct {
 	RegionWeight       float64            `json:"region_weight"`
 	RegionScore        float64            `json:"region_score"`
 	RegionSize         int64              `json:"region_size"`
-	WitnessCount       int                `json:"witness_count"`
-	SlowScore          uint64             `json:"slow_score"`
+	LearnerCount       int                `json:"learner_count,omitempty"`
+	WitnessCount       int                `json:"witness_count,omitempty"`
+	SlowScore          uint64             `json:"slow_score,omitempty"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
 	IsBusy             bool               `json:"is_busy,omitempty"`
@@ -94,6 +95,7 @@ func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo 
 			RegionWeight:       store.GetRegionWeight(),
 			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
 			RegionSize:         store.GetRegionSize(),
+			LearnerCount:       store.GetLearnerCount(),
 			WitnessCount:       store.GetWitnessCount(),
 			SlowScore:          store.GetSlowScore(),
 			SendingSnapCount:   store.GetSendingSnapCount(),

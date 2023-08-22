@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/core/storelimit"
 	"github.com/tikv/pd/server/schedule/hbstream"
-	"github.com/tikv/pd/server/schedule/labeler"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/versioninfo"
 	"go.uber.org/zap"
@@ -422,14 +421,6 @@ func (oc *OperatorController) checkAddOperator(isPromoting bool, ops ...*operato
 
 		if op.SchedulerKind() == operator.OpAdmin || op.IsLeaveJointStateOperator() {
 			continue
-		}
-		if cl, ok := oc.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
-			l := cl.GetRegionLabeler()
-			if l.ScheduleDisabled(region) {
-				log.Debug("schedule disabled", zap.Uint64("region-id", op.RegionID()))
-				operatorWaitCounter.WithLabelValues(op.Desc(), "schedule-disabled").Inc()
-				return false
-			}
 		}
 	}
 	expired := false
