@@ -1445,10 +1445,13 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			lastDeletedGroupNum += 1
 		}
 		// This log would be helpful to check if the deleted groups are all gone.
-		if empty = !empty && kgm.getDeletedGroupNum() == 0; empty {
+		if !empty && kgm.getDeletedGroupNum() == 0 {
 			log.Info("all the deleted keyspace groups have been cleaned up",
 				zap.Uint32("last-deleted-group-id", lastDeletedGroupID),
 				zap.Int("last-deleted-group-num", lastDeletedGroupNum))
+			// Reset the state to make sure the log won't be printed again
+			// until we have new deleted groups.
+			empty = true
 			lastDeletedGroupNum = 0
 		}
 	}
