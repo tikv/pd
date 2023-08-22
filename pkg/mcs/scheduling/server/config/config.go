@@ -606,6 +606,11 @@ func (o *PersistConfig) GetRegionMaxKeys() uint64 {
 	return o.GetStoreConfig().GetRegionMaxKeys()
 }
 
+// IsSynced returns true if the cluster config is synced.
+func (o *PersistConfig) IsSynced() bool {
+	return o.GetStoreConfig().IsSynced()
+}
+
 // IsEnableRegionBucket return true if the region bucket is enabled.
 func (o *PersistConfig) IsEnableRegionBucket() bool {
 	return o.GetStoreConfig().IsEnableRegionBucket()

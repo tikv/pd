@@ -312,38 +312,6 @@ func (c *Coordinator) drivePushOperator() {
 	}
 }
 
-// driveEvictSlownNodeScheduler is used to create evciting slow node scheduler if using raft-kv2 engine.
-func (c *Coordinator) driveEvictSlownNodeScheduler() {
-	defer logutil.LogPanic()
-	defer c.wg.Done()
-
-	ticker := time.NewTicker(runSchedulerCheckInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Info("drive evict trend scheduler has been stopped")
-			return
-		case <-ticker.C:
-			// If the cluster was set up with `raft-kv2` engine, this cluster should
-			// open `evict-slow-trend` scheduler as default.
-			if c.GetCluster().GetStoreConfig().IsRaftKV2() {
-				name := schedulers.EvictSlowTrendType
-				args := []string{}
-
-				s, err := schedulers.CreateScheduler(name, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(name, args), c.schedulers.RemoveScheduler)
-				if err != nil {
-					log.Warn("initializing evict-slow-trend scheduler failed", errs.ZapError(err))
-				} else if err = c.schedulers.AddScheduler(s, args...); err != nil {
-					log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
-				}
-				// No need to check after creating.
-				return
-			}
-		}
-	}
-}
-
 // RunUntilStop runs the coordinator until receiving the stop signal.
 func (c *Coordinator) RunUntilStop() {
 	c.Run()
@@ -377,14 +345,12 @@ func (c *Coordinator) Run() {
 	log.Info("Coordinator starts to run schedulers")
 	c.initSchedulers()
 
-	c.wg.Add(4)
+	c.wg.Add(3)
 	// Starts to patrol regions.
 	go c.PatrolRegions()
 	// Checks suspect key ranges
 	go c.checkSuspectRanges()
 	go c.drivePushOperator()
-	// Checks whether to create evict-slow-trend scheduler.
-	go c.driveEvictSlownNodeScheduler()
 }
 
 func (c *Coordinator) initSchedulers() {
@@ -408,6 +374,12 @@ func (c *Coordinator) initSchedulers() {
 	}
 	if err != nil {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
+	}
+
+	// If the cluster was set up with `raft-kv2` engine, this cluster should
+	// open `evict-slow-trend` scheduler as default.
+	if c.GetCluster().GetStoreConfig().IsRaftKV2() {
+		scheduleNames = append(scheduleNames, schedulers.EvictSlowTrendType)
 	}
 
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
@@ -659,7 +631,7 @@ func (c *Coordinator) ResetHotSpotMetrics() {
 
 // ShouldRun returns true if the coordinator should run.
 func (c *Coordinator) ShouldRun() bool {
-	return c.prepareChecker.check(c.cluster.GetBasicCluster())
+	return c.prepareChecker.check(c.cluster.GetBasicCluster()) && c.cluster.GetStoreConfig().IsSynced()
 }
 
 // GetSchedulersController returns the schedulers controller.

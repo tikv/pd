@@ -139,6 +139,7 @@ type StoreConfigProvider interface {
 	GetRegionMaxKeys() uint64
 	CheckRegionSize(uint64, uint64) error
 	CheckRegionKeys(uint64, uint64) error
+	IsSynced() bool
 	IsEnableRegionBucket() bool
 	IsRaftKV2() bool
 }
