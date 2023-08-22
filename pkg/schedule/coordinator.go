@@ -314,6 +314,9 @@ func (c *Coordinator) drivePushOperator() {
 
 // driveEvictSlownNodeScheduler is used to create evciting slow node scheduler if using raft-kv2 engine.
 func (c *Coordinator) driveEvictSlownNodeScheduler() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	defer ticker.Stop()
 	for {
@@ -374,7 +377,7 @@ func (c *Coordinator) Run() {
 	log.Info("Coordinator starts to run schedulers")
 	c.initSchedulers()
 
-	c.wg.Add(3)
+	c.wg.Add(4)
 	// Starts to patrol regions.
 	go c.PatrolRegions()
 	// Checks suspect key ranges
