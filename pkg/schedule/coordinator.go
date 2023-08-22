@@ -380,6 +380,7 @@ func (c *Coordinator) initSchedulers() {
 	// open `evict-slow-trend` scheduler as default.
 	if c.GetCluster().GetStoreConfig().IsRaftKV2() {
 		scheduleNames = append(scheduleNames, schedulers.EvictSlowTrendType)
+		configs = append(configs, "")
 	}
 
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
@@ -631,7 +632,11 @@ func (c *Coordinator) ResetHotSpotMetrics() {
 
 // ShouldRun returns true if the coordinator should run.
 func (c *Coordinator) ShouldRun() bool {
-	return c.prepareChecker.check(c.cluster.GetBasicCluster()) && c.cluster.GetStoreConfig().IsSynced()
+	isSynced := c.cluster.GetStoreConfig().IsSynced()
+	failpoint.Inject("mockStoreConfigSynced", func() {
+		isSynced = true
+	})
+	return c.prepareChecker.check(c.cluster.GetBasicCluster()) && isSynced
 }
 
 // GetSchedulersController returns the schedulers controller.
