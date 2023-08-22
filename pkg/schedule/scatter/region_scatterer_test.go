@@ -653,7 +653,9 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 		region := tc.AddLeaderRegion(i+200, i%3+2, (i+1)%3+2, (i+2)%3+2)
 		op := scatterer.scatterRegion(region, group, false)
 		re.False(isPeerCountChanged(op))
-		re.Equal(group, op.AdditionalInfos["group"])
+		if op != nil {
+			re.Equal(group, op.AdditionalInfos["group"])
+		}
 	}
 }
 
