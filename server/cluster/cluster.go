@@ -507,6 +507,7 @@ func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (b
 // updateStoreConfig updates the store config. This is extracted for testing.
 func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *sc.StoreConfig) (bool, error) {
 	cfg.Adjust()
+	cfg.SetSynced()
 	c.opt.SetStoreConfig(cfg)
 	return oldCfg.Storage.Engine != sc.RaftstoreV2 && cfg.Storage.Engine == sc.RaftstoreV2, nil
 }
@@ -550,6 +551,8 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddres
 	if err := json.Unmarshal(body, cfg); err != nil {
 		return nil, err
 	}
+	// Mark config has been synced.
+	cfg.SetSynced()
 	return cfg, nil
 }
 
