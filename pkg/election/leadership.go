@@ -188,6 +188,14 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		return
 	}
 
+	unhealthyTimeout := watchLoopUnhealthyTimeout
+	failpoint.Inject("fastTick", func() {
+		unhealthyTimeout = 5 * time.Second
+	})
+	ticker := time.NewTicker(etcdutil.RequestProgressInterval)
+	defer ticker.Stop()
+	lastReceivedResponseTime := time.Now()
+
 	var (
 		watcher       clientv3.Watcher
 		watcherCancel context.CancelFunc
@@ -200,13 +208,6 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			watcher.Close()
 		}
 	}()
-	unhealthyTimeout := watchLoopUnhealthyTimeout
-	failpoint.Inject("fastTick", func() {
-		unhealthyTimeout = 5 * time.Second
-	})
-	ticker := time.NewTicker(etcdutil.RequestProgressInterval)
-	defer ticker.Stop()
-	lastReceivedResponseTime := time.Now()
 
 	for {
 		failpoint.Inject("delayWatcher", nil)
@@ -226,7 +227,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		// so we check the etcd availability first.
 		if !etcdutil.IsHealthy(serverCtx, ls.client) {
 			if time.Since(lastReceivedResponseTime) > unhealthyTimeout {
-				log.Error("the connect of leadership watcher is unhealthy",
+				log.Error("the connection of the leadership watcher is unhealthy",
 					zap.Int64("revision", revision),
 					zap.String("leader-key", ls.leaderKey),
 					zap.String("purpose", ls.purpose))
@@ -254,29 +255,37 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				zap.String("purpose", ls.purpose))
 			return
 		case <-ticker.C:
+			// When etcd is not available, the watcher.RequestProgress will block,
+			// so we check the etcd availability first.
 			if !etcdutil.IsHealthy(serverCtx, ls.client) {
-				// When etcd is not available, the watcher.RequestProgress will block,
-				// so we check the etcd availability first.
-				log.Error("the connect of leadership watcher is unhealthy",
+				log.Error("the connection of the leadership watcher is unhealthy",
 					zap.Int64("revision", revision),
 					zap.String("leader-key", ls.leaderKey),
 					zap.String("purpose", ls.purpose))
 				continue
 			}
-			// need to request progress to etcd to prevent etcd hold the watchChan,
-			// note: we need to use the same ctx with watcher.
+			// We need to request progress to etcd to prevent etcd hold the watchChan,
+			// note: we must use the same ctx with watcher.
 			if err := watcher.RequestProgress(watcherCtx); err != nil {
 				log.Warn("failed to request progress in leader watch loop", zap.Error(err))
 			}
+			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
+			// create a new one and need not to reset lastReceivedResponseTime.
 			if time.Since(lastReceivedResponseTime) >= etcdutil.WatchChTimeoutDuration {
-				// If no msg comes from an etcd watchChan for WatchChTimeoutDuration long,
-				// we should cancel the watchChan and request a new watchChan from watcher.
-				log.Warn("watchChan is blocked for a long time, recreate a new watchChan")
+				failpoint.Inject("watchChanBlock", func() {
+					// we detect whether into this branch by returning directly when the failpoint is injected.
+					failpoint.Return()
+				})
+				log.Warn("watchChan is blocked for a long time, recreating a new watchChan")
 				continue
 			}
 		case wresp := <-watchChan:
+			failpoint.Inject("watchChanBlock", func() {
+				// watchChanBlock is used to simulate the case that the watchChan is blocked for a long time.
+				// So we discard these responses when the failpoint is injected.
+				failpoint.Goto("WatchChanLoop")
+			})
 			lastReceivedResponseTime = time.Now()
-			// meet compacted error, use the compact revision.
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision",
 					zap.Int64("required-revision", revision),
@@ -305,7 +314,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			}
 			revision = wresp.Header.Revision + 1
 		}
-		goto WatchChanLoop // use goto to avoid to create a new watchChan
+		goto WatchChanLoop // Use goto to avoid creating a new watchChan
 	}
 }
 

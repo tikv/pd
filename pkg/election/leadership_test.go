@@ -179,7 +179,11 @@ func TestExitWatch(t *testing.T) {
 		server.Server.HardStop()
 		client1.Delete(context.Background(), leaderKey)
 	})
-	// TODO: add test to simulate the case that pd leader is io hang.
+	// Case7: whether request progress is valid
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) {
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)"))
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/fastTick"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }

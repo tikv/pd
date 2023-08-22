@@ -717,18 +717,6 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		select {
 		case <-ctx.Done():
 			return revision, nil
-		case <-ticker.C:
-			// need to request progress to etcd to prevent etcd hold the watchChan,
-			// note: we need to use the same ctx with watcher.
-			if err := watcher.RequestProgress(watcherCtx); err != nil {
-				log.Warn("failed to request progress in leader watch loop", zap.Error(err))
-			}
-			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
-				// If no msg comes from an etcd watchChan for WatchChTimeoutDuration long,
-				// we should cancel the watchChan and request a new watchChan from watcher.
-				log.Warn("watchChan is blocked for a long time, recreate a new watchChan")
-				continue
-			}
 		case <-lw.forceLoadCh:
 			revision, err = lw.load(ctx)
 			if err != nil {
@@ -736,7 +724,28 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.String("key", lw.key), zap.Error(err))
 			}
 			continue
+		case <-ticker.C:
+			// We need to request progress to etcd to prevent etcd hold the watchChan,
+			// note: we need to use the same ctx with watcher.
+			if err := watcher.RequestProgress(watcherCtx); err != nil {
+				log.Warn("failed to request progress in leader watch loop", zap.Error(err))
+			}
+			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
+			// create a new one and need not to reset lastReceivedResponseTime.
+			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
+				failpoint.Inject("watchChanBlock", func() {
+					// we detect whether into this branch by returning directly when the failpoint is injected.
+					failpoint.Return()
+				})
+				log.Warn("watchChan is blocked for a long time, recreating a new watchChan")
+				continue
+			}
 		case wresp := <-watchChan:
+			failpoint.Inject("watchChanBlock", func() {
+				// watchChanBlock is used to simulate the case that the watchChan is blocked for a long time.
+				// So we discard these responses when the failpoint is injected.
+				failpoint.Goto("WatchChanLoop")
+			})
 			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision in watch loop",
@@ -779,7 +788,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			}
 			revision = wresp.Header.Revision + 1
 		}
-		goto WatchChanLoop // use goto to avoid to create a new watchChan
+		goto WatchChanLoop // use goto to avoid creating a new watchChan
 	}
 }
 

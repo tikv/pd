@@ -767,6 +767,36 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient")
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherChanBlock() {
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestWatcherChanBlock",
+		func(kv *mvccpb.KeyValue) error { return nil },
+		func(kv *mvccpb.KeyValue) error { return nil },
+		func() error { return nil },
+	)
+	done := make(chan struct{})
+	go func() {
+		watcher.watch(suite.ctx, 0)
+		done <- struct{}{}
+	}()
+
+	failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)")
+
+	testutil.Eventually(suite.Require(), func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	})
+	failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+}
+
 func (suite *loopWatcherTestSuite) startEtcd() {
 	etcd1, err := embed.StartEtcd(suite.config)
 	suite.NoError(err)
