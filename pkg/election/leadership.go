@@ -225,12 +225,16 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		// so we check the etcd availability first.
 		if !etcdutil.IsHealthy(serverCtx, ls.client) {
 			if time.Since(lastReceivedResponseTime) > unhealthyTimeout {
-				log.Error("the connection of the leadership watcher is unhealthy",
+				log.Error("the connection of the leadership watcher is unhealthy, exit leader watch loop",
 					zap.Int64("revision", revision),
 					zap.String("leader-key", ls.leaderKey),
 					zap.String("purpose", ls.purpose))
 				return
 			}
+			log.Warn("the connection of the leadership watcher is unhealthy, retry to watch later",
+				zap.Int64("revision", revision),
+				zap.String("leader-key", ls.leaderKey),
+				zap.String("purpose", ls.purpose))
 			select {
 			case <-serverCtx.Done():
 				log.Info("server is closed, exit leader watch loop",
@@ -256,7 +260,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			// When etcd is not available, the watcher.RequestProgress will block,
 			// so we check the etcd availability first.
 			if !etcdutil.IsHealthy(serverCtx, ls.client) {
-				log.Error("the connection of the leadership watcher is unhealthy",
+				log.Warn("the connection of the leadership watcher is unhealthy, retry to watch later",
 					zap.Int64("revision", revision),
 					zap.String("leader-key", ls.leaderKey),
 					zap.String("purpose", ls.purpose))
@@ -264,7 +268,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			}
 			// We need to request progress to etcd to prevent etcd hold the watchChan,
 			// note: the ctx must be from watcherCtx, otherwise, the RequestProgress request cannot be sent properly.
-			ctx, cancel := context.WithTimeout(watcherCtx, etcdutil.DefaultDialTimeout)
+			ctx, cancel := context.WithTimeout(watcherCtx, etcdutil.DefaultRequestTimeout)
 			if err := watcher.RequestProgress(ctx); err != nil {
 				log.Warn("failed to request progress in leader watch loop",
 					zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose), zap.Error(err))
