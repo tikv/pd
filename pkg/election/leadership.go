@@ -318,7 +318,13 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 						return
 					}
 					// The leader key is overwritten by another server, so we need to watch the new leader.
-					log.Info("current leadership is overwritten by another server, watch the new leader",
+					log.Info("current leadership is overwritten by another server, watch the new leader with delete event",
+						zap.Int64("revision", revision),
+						zap.String("leader-key", ls.leaderKey),
+						zap.String("purpose", ls.purpose))
+				}
+				if ev.Type == mvccpb.PUT {
+					log.Info("current leadership is updated by another server, watch the new leader with put event",
 						zap.Int64("revision", revision),
 						zap.String("leader-key", ls.leaderKey),
 						zap.String("purpose", ls.purpose))
