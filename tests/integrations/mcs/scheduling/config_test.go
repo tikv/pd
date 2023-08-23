@@ -142,7 +142,13 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	)
 	testutil.Eventually(re, func() bool {
 		schedulerNames = schedulerController.GetSchedulerNames()
-		return len(schedulerNames) == len(sc.DefaultSchedulers)
+		targetCount := len(sc.DefaultSchedulers)
+		// In the previous case, StoreConfig of raft-kv2 has been persisted. So, it might
+		// have EvictSlowTrendName.
+		if exists, _ := schedulerController.IsSchedulerExisted(schedulers.EvictSlowTrendName); exists {
+			targetCount += 1
+		}
+		return len(schedulerNames) == targetCount
 	})
 	// Check all default schedulers' configs.
 	for _, schedulerName := range schedulerNames {
