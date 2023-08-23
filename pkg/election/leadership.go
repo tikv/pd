@@ -267,16 +267,14 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			// We need to request progress to etcd to prevent etcd hold the watchChan,
 			// note: we must use the same ctx with watcher.
 			if err := watcher.RequestProgress(watcherCtx); err != nil {
-				log.Warn("failed to request progress in leader watch loop", zap.Error(err))
+				log.Warn("failed to request progress in leader watch loop",
+					zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose), zap.Error(err))
 			}
 			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
 			// create a new one and need not to reset lastReceivedResponseTime.
 			if time.Since(lastReceivedResponseTime) >= etcdutil.WatchChTimeoutDuration {
-				failpoint.Inject("watchChanBlock", func() {
-					// we detect whether into this branch by returning directly when the failpoint is injected.
-					failpoint.Return()
-				})
-				log.Warn("watchChan is blocked for a long time, recreating a new watchChan")
+				log.Warn("watchChan is blocked for a long time, recreating a new watchChan",
+					zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				continue
 			}
 		case wresp := <-watchChan:
@@ -288,8 +286,8 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision",
-					zap.Int64("required-revision", revision),
-					zap.Int64("compact-revision", wresp.CompactRevision))
+					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
+					zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				revision = wresp.CompactRevision
 				continue
 			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
@@ -300,6 +298,8 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
 				return
 			} else if wresp.IsProgressNotify() {
+				log.Debug("watcher receives progress notify in watch loop",
+					zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				goto WatchChanLoop
 			}
 

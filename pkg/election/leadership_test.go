@@ -17,10 +17,13 @@ package election
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -179,11 +182,6 @@ func TestExitWatch(t *testing.T) {
 		server.Server.HardStop()
 		client1.Delete(context.Background(), leaderKey)
 	})
-	// Case7: whether request progress is valid
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) {
-		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)"))
-	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/fastTick"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }
@@ -231,4 +229,68 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 			return false
 		}
 	})
+}
+
+func TestRequestProgress(t *testing.T) {
+	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
+		tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+		defer os.Remove(tempStdoutFile.Name())
+		logCfg := &log.Config{}
+		logCfg.File.Filename = tempStdoutFile.Name()
+		logCfg.Level = "debug"
+		lg, p, _ := log.InitLogger(logCfg)
+		log.ReplaceGlobals(lg, p)
+
+		re := require.New(t)
+		cfg := etcdutil.NewTestSingleConfig(t)
+		etcd, err := embed.StartEtcd(cfg)
+		defer func() {
+			etcd.Close()
+		}()
+		re.NoError(err)
+
+		ep := cfg.LCUrls[0].String()
+		client1, err := clientv3.New(clientv3.Config{
+			Endpoints: []string{ep},
+		})
+		re.NoError(err)
+		client2, err := clientv3.New(clientv3.Config{
+			Endpoints: []string{ep},
+		})
+		re.NoError(err)
+
+		<-etcd.Server.ReadyNotify()
+
+		leaderKey := "/test_leader"
+		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
+		leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
+		err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+		re.NoError(err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		resp, err := client2.Get(ctx, leaderKey)
+		re.NoError(err)
+		go func() {
+			leadership2.Watch(ctx, resp.Header.Revision)
+		}()
+
+		if injectWatchChanBlock {
+			failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)")
+			testutil.Eventually(re, func() bool {
+				b, _ := os.ReadFile(tempStdoutFile.Name())
+				l := string(b)
+				return strings.Contains(l, "watchChan is blocked for a long time")
+			})
+			failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock")
+		} else {
+			testutil.Eventually(re, func() bool {
+				b, _ := os.ReadFile(tempStdoutFile.Name())
+				l := string(b)
+				return strings.Contains(l, "watcher receives progress notify in watch loop")
+			})
+		}
+	}
+	checkWatcherRequestProgress(false)
+	checkWatcherRequestProgress(true)
 }
