@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -192,10 +193,13 @@ func (c *Config) validate() error {
 // PersistConfig wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistConfig struct {
+	// Store the global configuration that is related to the scheduling.
 	clusterVersion unsafe.Pointer
 	schedule       atomic.Value
 	replication    atomic.Value
 	storeConfig    atomic.Value
+	// Store the respective configurations for different schedulers.
+	schedulerConfig sync.Map
 }
 
 // NewPersistConfig creates a new PersistConfig instance.
@@ -251,6 +255,24 @@ func (o *PersistConfig) SetStoreConfig(cfg *sc.StoreConfig) {
 // GetStoreConfig returns the TiKV store configuration.
 func (o *PersistConfig) GetStoreConfig() *sc.StoreConfig {
 	return o.storeConfig.Load().(*sc.StoreConfig)
+}
+
+// SetSchedulerConfig sets the scheduler configuration with the given name.
+func (o *PersistConfig) SetSchedulerConfig(name, data string) {
+	o.schedulerConfig.Store(name, data)
+}
+
+// RemoveSchedulerConfig removes the scheduler configuration with the given name.
+func (o *PersistConfig) RemoveSchedulerConfig(name string) {
+	o.schedulerConfig.Delete(name)
+}
+
+// GetSchedulerConfig returns the scheduler configuration with the given name.
+func (o *PersistConfig) GetSchedulerConfig(name string) string {
+	if v, ok := o.schedulerConfig.Load(name); ok {
+		return v.(string)
+	}
+	return ""
 }
 
 // GetMaxReplicas returns the max replicas.

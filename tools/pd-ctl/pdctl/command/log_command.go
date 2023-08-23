@@ -20,6 +20,7 @@ import (
 	"net/http"
 
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
 var (
@@ -55,7 +56,7 @@ func logCommandFunc(cmd *cobra.Command, args []string) {
 			cmd.Printf("Failed to parse address %v: %s\n", args[1], err)
 			return
 		}
-		_, err = doRequestSingleEndpoint(cmd, url, logPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}, "PD-Allow-follower-handle": {"true"}},
+		_, err = doRequestSingleEndpoint(cmd, url, logPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}, apiutil.PDAllowFollowerHandleHeader: {"true"}},
 			WithBody(bytes.NewBuffer(data)))
 		if err != nil {
 			cmd.Printf("Failed to set %v log level: %s\n", args[1], err)

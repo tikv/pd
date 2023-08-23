@@ -106,6 +106,10 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 
 // ListEtcdMembers returns a list of internal etcd members.
 func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	failpoint.Inject("SlowEtcdMemberList", func(val failpoint.Value) {
+		d := val.(int)
+		time.Sleep(time.Duration(d) * time.Second)
+	})
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	listResp, err := client.MemberList(ctx)
 	cancel()
@@ -132,6 +136,10 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	defer cancel()
 
 	start := time.Now()
+	failpoint.Inject("SlowEtcdKVGet", func(val failpoint.Value) {
+		d := val.(int)
+		time.Sleep(time.Duration(d) * time.Second)
+	})
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
