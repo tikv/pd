@@ -20,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -33,7 +32,6 @@ import (
 
 func TestScheduler(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/mockStoreConfigSynced", "return(true)"))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
@@ -487,5 +485,4 @@ func TestScheduler(t *testing.T) {
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
 	checkSchedulerWithStatusCommand(nil, "disabled", nil)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/mockStoreConfigSynced"))
 }

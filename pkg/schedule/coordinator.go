@@ -19,6 +19,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -639,9 +640,9 @@ func (c *Coordinator) ResetHotSpotMetrics() {
 // ShouldRun returns true if the coordinator should run.
 func (c *Coordinator) ShouldRun() bool {
 	isSynced := c.cluster.GetStoreConfig().IsSynced()
-	failpoint.Inject("mockStoreConfigSynced", func() {
+	if testing.Testing() {
 		isSynced = true
-	})
+	}
 	return c.prepareChecker.check(c.cluster.GetBasicCluster()) && isSynced
 }
 
