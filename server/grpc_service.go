@@ -879,6 +879,24 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
+	if s.IsAPIServiceMode() {
+		forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
+		if forwardedHost != "" {
+			client, err := s.getDelegateClient(ctx, forwardedHost)
+			if err != nil {
+				return &pdpb.PutStoreResponse{
+					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+						"get delegate client failed"),
+				}, nil
+			}
+			if resp, _ := schedulingpb.NewSchedulingClient(client).PutStore(ctx, request); resp.GetHeader().GetError() != nil {
+				return &pdpb.PutStoreResponse{
+					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().String()),
+				}, nil
+			}
+		}
+	}
+
 	if err := rc.PutStore(store); err != nil {
 		return &pdpb.PutStoreResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),

@@ -349,6 +349,11 @@ func (s *Server) GetCoordinator() *schedule.Coordinator {
 	return s.GetCluster().GetCoordinator()
 }
 
+// GetCluster returns the cluster.
+func (s *Server) GetCluster() *Cluster {
+	return s.cluster
+}
+
 // ServerLoopWgDone decreases the server loop wait group.
 func (s *Server) ServerLoopWgDone() {
 	s.serverLoopWg.Done()
