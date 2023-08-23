@@ -31,9 +31,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	watchLoopUnhealthyTimeout = 60 * time.Second
-)
+const watchLoopUnhealthyTimeout = 60 * time.Second
 
 // GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
