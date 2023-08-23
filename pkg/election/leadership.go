@@ -305,11 +305,23 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 			for _, ev := range wresp.Events {
 				if ev.Type == mvccpb.DELETE {
-					log.Info("current leadership is deleted",
-						zap.Int64("revision", wresp.Header.Revision),
+					resp, err := etcdutil.EtcdKVGet(ls.client, ls.leaderKey)
+					if err != nil {
+						log.Error("failed to get leader key", zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose), zap.Error(err))
+						return
+					}
+					if resp.Count == 0 {
+						log.Info("current leadership is deleted",
+							zap.Int64("revision", wresp.Header.Revision),
+							zap.String("leader-key", ls.leaderKey),
+							zap.String("purpose", ls.purpose))
+						return
+					}
+					// The leader key is overwritten by another server, so we need to watch the new leader.
+					log.Info("current leadership is overwritten by another server, watch the new leader",
+						zap.Int64("revision", revision),
 						zap.String("leader-key", ls.leaderKey),
 						zap.String("purpose", ls.purpose))
-					return
 				}
 			}
 			revision = wresp.Header.Revision + 1
