@@ -190,6 +190,47 @@ func TestExitWatch(t *testing.T) {
 			etcd2.Close()
 		}
 	})
+	// Case7: loss the quorum when the watch loop is running
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+		tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+		defer os.Remove(tempStdoutFile.Name())
+		logCfg := &log.Config{}
+		logCfg.File.Filename = tempStdoutFile.Name()
+		logCfg.Level = "info"
+		lg, p, _ := log.InitLogger(logCfg)
+		log.ReplaceGlobals(lg, p)
+
+		cfg1 := server.Config()
+		cfg2 := etcdutil.NewTestSingleConfig(t)
+		cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
+		cfg2.ClusterState = embed.ClusterStateFlagExisting
+		peerURL := cfg2.LPUrls[0].String()
+		addResp, err := etcdutil.AddEtcdMember(client, []string{peerURL})
+		re.NoError(err)
+		etcd2, err := embed.StartEtcd(cfg2)
+		re.NoError(err)
+		re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
+		<-etcd2.Server.ReadyNotify()
+
+		cfg3 := etcdutil.NewTestSingleConfig(t)
+		cfg3.InitialCluster = cfg2.InitialCluster + fmt.Sprintf(",%s=%s", cfg3.Name, &cfg3.LPUrls[0])
+		cfg3.ClusterState = embed.ClusterStateFlagExisting
+		peerURL = cfg3.LPUrls[0].String()
+		addResp, err = etcdutil.AddEtcdMember(client, []string{peerURL})
+		re.NoError(err)
+		etcd3, err := embed.StartEtcd(cfg3)
+		re.NoError(err)
+		re.Equal(uint64(etcd3.Server.ID()), addResp.Member.ID)
+		<-etcd3.Server.ReadyNotify()
+
+		resp2, err := client.MemberList(context.Background())
+		re.NoError(err)
+		re.Equal(3, len(resp2.Members))
+
+		etcd2.Server.HardStop()
+		etcd3.Server.HardStop()
+		return func() {}
+	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/fastTick"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }

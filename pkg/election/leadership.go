@@ -265,11 +265,13 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				continue
 			}
 			// We need to request progress to etcd to prevent etcd hold the watchChan,
-			// note: we must use the same ctx with watcher.
-			if err := watcher.RequestProgress(watcherCtx); err != nil {
+			// note: the ctx must be from watcherCtx, otherwise, the RequestProgress request cannot be sent properly.
+			ctx, cancel := context.WithTimeout(watcherCtx, etcdutil.DefaultDialTimeout)
+			if err := watcher.RequestProgress(ctx); err != nil {
 				log.Warn("failed to request progress in leader watch loop",
 					zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose), zap.Error(err))
 			}
+			cancel()
 			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
 			// create a new one and need not to reset lastReceivedResponseTime.
 			if time.Since(lastReceivedResponseTime) >= etcdutil.WatchChTimeoutDuration {
