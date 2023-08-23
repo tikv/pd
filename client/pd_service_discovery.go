@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/tikv/pd/client/backoff"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -32,6 +34,7 @@ import (
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 )
 
 const (
@@ -39,6 +42,7 @@ const (
 	memberUpdateInterval      = time.Minute
 	serviceModeUpdateInterval = 3 * time.Second
 	updateMemberTimeout       = time.Second // Use a shorter timeout to recover faster from network isolation.
+	requestTimeout            = 2 * time.Second
 )
 
 type serviceType int
@@ -61,7 +65,7 @@ type ServiceDiscovery interface {
 	GetKeyspaceID() uint32
 	// GetKeyspaceGroupID returns the ID of the keyspace group
 	GetKeyspaceGroupID() uint32
-	// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
+	// DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.
 	DiscoverMicroservice(svcType serviceType) ([]string, error)
 	// GetServiceURLs returns the URLs of the servers providing the service
 	GetServiceURLs() []string
@@ -153,6 +157,9 @@ type pdServiceDiscovery struct {
 	tlsCfg             *tlsutil.TLSConfig
 	// Client option.
 	option *option
+
+	successReConnect chan struct{}
+	bo               *backoff.Backoffer
 }
 
 // newPDServiceDiscovery returns a new PD service discovery-based client.
@@ -166,6 +173,7 @@ func newPDServiceDiscovery(
 ) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
 		checkMembershipCh:   make(chan struct{}, 1),
+		successReConnect:    make(chan struct{}, 1),
 		ctx:                 ctx,
 		cancel:              cancel,
 		wg:                  wg,
@@ -174,6 +182,7 @@ func newPDServiceDiscovery(
 		keyspaceID:          keyspaceID,
 		tlsCfg:              tlsCfg,
 		option:              option,
+		bo:                  backoff.NewBackoffer(ctx, maxRetryTimes),
 	}
 	pdsd.urls.Store(urls)
 	return pdsd
@@ -207,7 +216,7 @@ func (c *pdServiceDiscovery) Init() error {
 	}
 
 	c.wg.Add(2)
-	go c.updateMemberLoop()
+	go c.reconnectMemberLoop()
 	go c.updateServiceModeLoop()
 
 	c.isInitialized = true
@@ -231,13 +240,17 @@ func (c *pdServiceDiscovery) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
-func (c *pdServiceDiscovery) updateMemberLoop() {
+func (c *pdServiceDiscovery) reconnectMemberLoop() {
 	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
+	failpoint.Inject("acceleratedMemberUpdateInterval", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(time.Millisecond * 100)
+	})
 
 	for {
 		select {
@@ -246,12 +259,86 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 		case <-ticker.C:
 		case <-c.checkMembershipCh:
 		}
+
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
 		})
+
 		if err := c.updateMember(); err != nil {
-			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
+			log.Error("[pd] failed to update member", errs.ZapError(err))
+		} else {
+			c.SuccessReconnect()
 		}
+	}
+}
+
+func (c *pdServiceDiscovery) waitForReady() error {
+	if e1 := c.waitForLeaderReady(); e1 != nil {
+		log.Error("[pd.waitForReady] failed to wait for leader ready", errs.ZapError(e1))
+		return errors.WithStack(e1)
+	} else if e2 := c.loadMembers(); e2 != nil {
+		log.Error("[pd.waitForReady] failed to load members", errs.ZapError(e2))
+	} else {
+		return nil
+	}
+
+	deadline := time.Now().Add(requestTimeout)
+	for {
+		select {
+		case <-c.successReConnect:
+			return nil
+		case <-time.After(time.Until(deadline)):
+			log.Error("[pd.waitForReady] timeout")
+			return errors.New("wait for ready timeout")
+		}
+	}
+}
+
+// waitForLeaderReady waits for the leader to be ready.
+func (c *pdServiceDiscovery) waitForLeaderReady() error {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	for {
+		old, ok := c.clientConns.Load(c.getLeaderAddr())
+		if !ok {
+			cancel()
+			return errors.New("no leader")
+		}
+		cc := old.(*grpc.ClientConn)
+
+		s := cc.GetState()
+		if s == connectivity.Ready {
+			cancel()
+			return nil
+		}
+		if !cc.WaitForStateChange(ctx, s) {
+			cancel()
+			// ctx got timeout or canceled.
+			return ctx.Err()
+		}
+	}
+}
+
+func (c *pdServiceDiscovery) loadMembers() error {
+	ctx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
+
+	members, err := c.getMembers(ctx, c.getLeaderAddr(), updateMemberTimeout)
+	if err != nil {
+		log.Error("[pd.loadMembers] failed to load members ", zap.String("url", c.getLeaderAddr()), errs.ZapError(err))
+		return errors.WithStack(err)
+	} else if members.GetHeader() == nil || members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
+		err = errs.ErrClientGetLeader.FastGenByArgs("leader address don't exist")
+		log.Error("[pd.loadMembers] leader address don't exist. ", zap.String("url", c.getLeaderAddr()), errs.ZapError(err))
+		return errors.WithStack(err)
+	}
+
+	return nil
+}
+
+func (c *pdServiceDiscovery) SuccessReconnect() {
+	select {
+	case c.successReConnect <- struct{}{}:
+	default:
 	}
 }
 
@@ -319,7 +406,7 @@ func (c *pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
 	return defaultKeySpaceGroupID
 }
 
-// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
+// DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.
 func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) (urls []string, err error) {
 	switch svcType {
 	case apiService:
@@ -382,11 +469,22 @@ func (c *pdServiceDiscovery) GetBackupAddrs() []string {
 func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
 	case c.checkMembershipCh <- struct{}{}:
+		if err := c.waitForReady(); err != nil {
+			if c.bo.GetBackoffTime(backoff.BoMemberUpdate.String()) >= 10 {
+				c.bo.Reset()
+			}
+			e := c.bo.Backoff(backoff.BoMemberUpdate, err)
+			if e != nil {
+				log.Error("[pd] wait for ready backoff failed", errs.ZapError(e))
+				return
+			}
+			log.Error("[pd] wait for ready failed", errs.ZapError(err))
+		}
 	default:
 	}
 }
 
-// Immediately check if there is any membership change among the leader/followers in a
+// CheckMemberChanged Immediately check if there is any membership change among the leader/followers in a
 // quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 func (c *pdServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()

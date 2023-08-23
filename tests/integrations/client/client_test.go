@@ -96,6 +96,8 @@ func TestClientClusterIDCheck(t *testing.T) {
 
 func TestClientLeaderChange(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/acceleratedMemberUpdateInterval", `return(true)`))
+	defer failpoint.Disable("github.com/tikv/pd/client/acceleratedMemberUpdateInterval")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 3)
@@ -312,6 +314,8 @@ func TestTSOFollowerProxy(t *testing.T) {
 // TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
 func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/acceleratedMemberUpdateInterval", `return(true)`))
+	defer failpoint.Disable("github.com/tikv/pd/client/acceleratedMemberUpdateInterval")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 3)
@@ -375,6 +379,8 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 // TODO: migrate the Local/Global TSO tests to TSO integration test folder.
 func TestGlobalAndLocalTSO(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/acceleratedMemberUpdateInterval", `return(true)`))
+	defer failpoint.Disable("github.com/tikv/pd/client/acceleratedMemberUpdateInterval")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	dcLocationConfig := map[string]string{

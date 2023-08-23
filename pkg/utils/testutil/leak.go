@@ -28,4 +28,5 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
 	// natefinch/lumberjack#56, It's a goroutine leak bug. Another ignore option PR https://github.com/pingcap/tidb/pull/27405/
 	goleak.IgnoreTopFunction("gopkg.in/natefinch/lumberjack%2ev2.(*Logger).millRun"),
+	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ClientConn).WaitForStateChange"),
 }
