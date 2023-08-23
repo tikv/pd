@@ -15,10 +15,14 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"google.golang.org/grpc"
@@ -64,8 +68,41 @@ func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
 	}
 }
 
+// StoreHeartbeat implements gRPC PDServer.
+func (s *Service) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		// ignore the error
+		return &pdpb.StoreHeartbeatResponse{}, nil
+	}
+
+	// ignore the error
+	c.HandleStoreHeartbeat(request)
+	return &pdpb.StoreHeartbeatResponse{}, nil
+}
+
+// PutStore implements gRPC PDServer.
+func (s *Service) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &pdpb.PutStoreResponse{Header: &pdpb.ResponseHeader{
+			ClusterId: s.clusterID,
+			Error: &pdpb.Error{
+				Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
+				Message: "scheduling server is not initialized yet",
+			},
+		}}, nil
+	}
+
+	c.PutStore(core.NewStoreInfo(request.GetStore()))
+	return &pdpb.PutStoreResponse{Header: &pdpb.ResponseHeader{
+		ClusterId: s.clusterID,
+	}}, nil
+}
+
 // RegisterGRPCService registers the service to gRPC server.
 func (s *Service) RegisterGRPCService(g *grpc.Server) {
+	schedulingpb.RegisterSchedulingServer(g, s)
 }
 
 // RegisterRESTHandler registers the service to REST server.

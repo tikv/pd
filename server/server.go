@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -2005,6 +2006,44 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		s.client,
 		name,
 		primaryKey,
+		putFn,
+		deleteFn,
+		func() error { return nil },
+	)
+}
+
+func (s *Server) initSchedulingPrimaryWatcher() {
+	serviceName := mcs.SchedulingServiceName
+	schedulingRootPath := endpoint.SchedulingSvcRootPath(s.clusterID)
+	schedulingServicePrimaryKey := path.Join(schedulingRootPath, mcs.PrimaryKey)
+	putFn := func(kv *mvccpb.KeyValue) error {
+		primary := &tsopb.Participant{} // TODO: use Generics
+		if err := proto.Unmarshal(kv.Value, primary); err != nil {
+			return err
+		}
+		listenUrls := primary.GetListenUrls()
+		if len(listenUrls) > 0 {
+			s.servicePrimaryMap.Store(serviceName, listenUrls[0])
+			log.Info("update scheduling primary", zap.String("primary", listenUrls[0]))
+		}
+		return nil
+	}
+	deleteFn := func(kv *mvccpb.KeyValue) error {
+		var oldPrimary string
+		v, ok := s.servicePrimaryMap.Load(serviceName)
+		if ok {
+			oldPrimary = v.(string)
+		}
+		log.Info("delete scheduling primary", zap.String("old-primary", oldPrimary))
+		s.servicePrimaryMap.Delete(serviceName)
+		return nil
+	}
+	s.schedulingPrimaryWatcher = etcdutil.NewLoopWatcher(
+		s.serverLoopCtx,
+		&s.serverLoopWg,
+		s.client,
+		"scheduling-primary-watcher",
+		schedulingServicePrimaryKey,
 		putFn,
 		deleteFn,
 		func() error { return nil },

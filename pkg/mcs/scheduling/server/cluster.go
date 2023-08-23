@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -18,6 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"go.uber.org/zap"
 )
 
 // Cluster is used to manage all information for scheduling purpose.
@@ -28,6 +32,7 @@ type Cluster struct {
 	ruleManager       *placement.RuleManager
 	labelerManager    *labeler.RegionLabeler
 	regionStats       *statistics.RegionStatistics
+	labelLevelStats   *statistics.LabelStatistics
 	hotStat           *statistics.HotStat
 	storage           storage.Storage
 	coordinator       *schedule.Coordinator
@@ -53,6 +58,7 @@ func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storag
 		persistConfig:     persistConfig,
 		hotStat:           statistics.NewHotStat(ctx),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
+		labelLevelStats:   statistics.NewLabelStatistics(),
 		storage:           storage,
 		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
@@ -174,4 +180,92 @@ func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
 
 // UpdateRegionsLabelLevelStats updates the status of the region label level by types.
 func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
+	for _, region := range regions {
+		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.persistConfig.GetLocationLabels())
+	}
+}
+
+func (c *Cluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
+	for _, p := range region.GetPeers() {
+		if store := c.GetStore(p.StoreId); store != nil && !core.IsStoreContainLabel(store.GetMeta(), key, value) {
+			stores = append(stores, store)
+		}
+	}
+	return stores
+}
+
+// HandleStoreHeartbeat updates the store status.
+func (c *Cluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest) error {
+	stats := heartbeat.GetStats()
+	storeID := stats.GetStoreId()
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errors.Errorf("store %v not found", storeID)
+	}
+
+	limit := store.GetStoreLimit()
+	if limit == nil {
+		limit = storelimit.NewStoreRateLimit(0.0)
+	}
+
+	nowTime := time.Now()
+	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetStoreLimit(limit))
+
+	if newStore.IsLowSpace(c.persistConfig.GetLowSpaceRatio()) {
+		log.Warn("store does not have enough disk space",
+			zap.Uint64("store-id", storeID),
+			zap.Uint64("capacity", newStore.GetCapacity()),
+			zap.Uint64("available", newStore.GetAvailable()))
+	}
+	if newStore.NeedPersist() && c.storage != nil {
+		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
+			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
+		} else {
+			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
+		}
+	}
+	if store := c.GetStore(storeID); store != nil {
+		statistics.UpdateStoreHeartbeatMetrics(store)
+	}
+	c.PutStore(newStore)
+	c.hotStat.Observe(storeID, newStore.GetStoreStats())
+	c.hotStat.FilterUnhealthyStore(c)
+	reportInterval := stats.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+
+	regions := make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
+	for _, peerStat := range stats.GetPeerStats() {
+		regionID := peerStat.GetRegionId()
+		region := c.GetRegion(regionID)
+		regions[regionID] = region
+		if region == nil {
+			log.Warn("discard hot peer stat for unknown region",
+				zap.Uint64("region-id", regionID),
+				zap.Uint64("store-id", storeID))
+			continue
+		}
+		peer := region.GetStorePeer(storeID)
+		if peer == nil {
+			log.Warn("discard hot peer stat for unknown region peer",
+				zap.Uint64("region-id", regionID),
+				zap.Uint64("store-id", storeID))
+			continue
+		}
+		readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
+		loads := []float64{
+			utils.RegionReadBytes:     float64(peerStat.GetReadBytes()),
+			utils.RegionReadKeys:      float64(peerStat.GetReadKeys()),
+			utils.RegionReadQueryNum:  float64(readQueryNum),
+			utils.RegionWriteBytes:    0,
+			utils.RegionWriteKeys:     0,
+			utils.RegionWriteQueryNum: 0,
+		}
+		peerInfo := core.NewPeerInfo(peer, loads, interval)
+		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
+	}
+
+	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
+	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
+	return nil
 }

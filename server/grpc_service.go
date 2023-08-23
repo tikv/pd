@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
@@ -858,6 +859,24 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
+	if s.IsAPIServiceMode() {
+		forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
+		if forwardedHost != "" {
+			client, err := s.getDelegateClient(ctx, forwardedHost)
+			if err != nil {
+				return &pdpb.PutStoreResponse{
+					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+						"get delegate client failed"),
+				}, nil
+			}
+			if resp, _ := schedulingpb.NewSchedulingClient(client).PutStore(ctx, request); resp.GetHeader().GetError() != nil {
+				return &pdpb.PutStoreResponse{
+					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().String()),
+				}, nil
+			}
+		}
+	}
+
 	if err := rc.PutStore(store); err != nil {
 		return &pdpb.PutStoreResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -978,6 +997,18 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		}
 
 		s.handleDamagedStore(request.GetStats())
+
+		if s.IsAPIServiceMode() {
+			forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
+			if forwardedHost != "" {
+				client, err := s.getDelegateClient(ctx, forwardedHost)
+				if err != nil {
+					log.Error("get delegate client failed", zap.Error(err))
+				}
+				// ignore the error when forwarding store heartbeat
+				schedulingpb.NewSchedulingClient(client).StoreHeartbeat(ctx, request)
+			}
+		}
 
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
