@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package backoff
+package retry
 
 import (
 	"context"
@@ -51,7 +51,7 @@ func NewBackoffer(ctx context.Context, maxSleep int) *Backoffer {
 // It returns a retryable error if total sleep time exceeds maxSleep.
 func (b *Backoffer) Backoff(cfg *Config, err error) error {
 	if span := opentracing.SpanFromContext(b.ctx); span != nil && span.Tracer() != nil {
-		span1 := span.Tracer().StartSpan(fmt.Sprintf("tikv.backoff.%s", cfg), opentracing.ChildOf(span.Context()))
+		span1 := span.Tracer().StartSpan(fmt.Sprintf("pd.client.backoff.%s", cfg), opentracing.ChildOf(span.Context()))
 		defer span1.Finish()
 		opentracing.ContextWithSpan(b.ctx, span1)
 	}
@@ -125,8 +125,8 @@ func (b *Backoffer) GetBackoffTimes() map[string]int {
 	return b.backoffTimes
 }
 
-// GetBackoffTime returns backoff time count by specific type.
-func (b *Backoffer) GetBackoffTime(s string) int {
+// GetBackoffTimeCnt returns backoff time count by specific type.
+func (b *Backoffer) GetBackoffTimeCnt(s string) int {
 	return b.backoffTimes[s]
 }
 

@@ -23,14 +23,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/tikv/pd/client/backoff"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -159,7 +158,7 @@ type pdServiceDiscovery struct {
 	option *option
 
 	successReConnect chan struct{}
-	bo               *backoff.Backoffer
+	bo               *retry.Backoffer
 }
 
 // newPDServiceDiscovery returns a new PD service discovery-based client.
@@ -182,7 +181,7 @@ func newPDServiceDiscovery(
 		keyspaceID:          keyspaceID,
 		tlsCfg:              tlsCfg,
 		option:              option,
-		bo:                  backoff.NewBackoffer(ctx, maxRetryTimes),
+		bo:                  retry.NewBackoffer(ctx, maxRetryTimes),
 	}
 	pdsd.urls.Store(urls)
 	return pdsd
@@ -470,10 +469,11 @@ func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
 	case c.checkMembershipCh <- struct{}{}:
 		if err := c.waitForReady(); err != nil {
-			if c.bo.GetBackoffTime(backoff.BoMemberUpdate.String()) >= 10 {
+			// If backoff times count is greater than 10, reset it.
+			if c.bo.GetBackoffTimeCnt(retry.BoMemberUpdate.String()) >= 10 {
 				c.bo.Reset()
 			}
-			e := c.bo.Backoff(backoff.BoMemberUpdate, err)
+			e := c.bo.Backoff(retry.BoMemberUpdate, err)
 			if e != nil {
 				log.Error("[pd] wait for ready backoff failed", errs.ZapError(e))
 				return
