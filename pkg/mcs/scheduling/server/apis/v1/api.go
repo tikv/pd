@@ -119,7 +119,7 @@ func (s *Service) RegisterOperatorsRouter() {
 }
 
 // @Tags     operators
-// @Summary  Get a Region's pending operator.
+// @Summary  Get an operator by ID.
 // @Param    region_id  path  int  true  "A Region's Id"
 // @Produce  json
 // @Success  200  {object}  operator.OpWithStatus
@@ -146,8 +146,8 @@ func getOperatorByID(c *gin.Context) {
 }
 
 // @Tags     operators
-// @Summary  List pending operators.
-// @Param    kind  query  string  false  "Specify the operator kind."  Enums(admin, leader, region)
+// @Summary  List operators.
+// @Param    kind  query  string  false  "Specify the operator kind."  Enums(admin, leader, region, waiting)
 // @Produce  json
 // @Success  200  {array}   operator.Operator
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
@@ -188,10 +188,10 @@ func getOperators(c *gin.Context) {
 }
 
 // @Tags     checkers
-// @Summary  Get if checker is paused
-// @Param    name  path  string  true  "The name of the scheduler."
+// @Summary  Get checker by name
+// @Param    name  path  string  true  "The name of the checker."
 // @Produce  json
-// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
+// @Success  200  {string}  string  "The checker's status."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /checkers/{name} [get]
 func getCheckerByName(c *gin.Context) {
