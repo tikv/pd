@@ -690,6 +690,21 @@ func (oc *Controller) GetWaitingOperators() []*Operator {
 	return oc.wop.ListOperator()
 }
 
+// GetOperatorsOfKind returns the running operators of the kind.
+func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
+	oc.RLock()
+	defer oc.RUnlock()
+
+	operators := make([]*Operator, 0, len(oc.operators))
+	for _, op := range oc.operators {
+		if op.Kind()&mask != 0 {
+			operators = append(operators, op)
+		}
+	}
+
+	return operators
+}
+
 // SendScheduleCommand sends a command to the region.
 func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, source string) {
 	log.Info("send schedule command",
