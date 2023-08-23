@@ -1012,6 +1012,11 @@ func (o *PersistOptions) CheckRegionKeys(keys, mergeKeys uint64) error {
 	return o.GetStoreConfig().CheckRegionKeys(keys, mergeKeys)
 }
 
+// IsSynced returns true if the store config is synced.
+func (o *PersistOptions) IsSynced() bool {
+	return o.GetStoreConfig().IsSynced()
+}
+
 // IsEnableRegionBucket return true if the region bucket is enabled.
 func (o *PersistOptions) IsEnableRegionBucket() bool {
 	return o.GetStoreConfig().IsEnableRegionBucket()
