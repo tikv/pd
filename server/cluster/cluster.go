@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -441,7 +442,7 @@ func (c *RaftCluster) runStoreConfigSync() {
 		}
 		// If the config has been synced, the interval should be added
 		// up to minute level.
-		if !init && c.opt.GetStoreConfig().IsSynced() {
+		if testing.Testing() || (!init && c.opt.GetStoreConfig().IsSynced()) {
 			init = true
 			ticker.Stop()
 			ticker = time.NewTicker(time.Minute)
@@ -562,8 +563,6 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddres
 	if err := json.Unmarshal(body, cfg); err != nil {
 		return nil, err
 	}
-	// Mark config has been synced from the existing cluster.
-	cfg.SetSynced()
 	return cfg, nil
 }
 
