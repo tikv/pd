@@ -234,6 +234,8 @@ func TestPrepareChecker(t *testing.T) {
 	leaderServer = cluster.GetServer(cluster.GetLeader())
 	rc = leaderServer.GetServer().GetRaftCluster()
 	for _, region := range regions {
+		// Need to check if the region was recognized `isNew`.
+		region = region.Clone(core.WithFlashback(true, 1))
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
