@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/docker/go-units"
@@ -70,6 +71,7 @@ type RegionInfo struct {
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
 	buckets       unsafe.Pointer
 	fromHeartbeat bool
+	updateTime    time.Time
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -166,6 +168,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 		queryStats:        heartbeat.GetQueryStats(),
+		updateTime:        time.Now(),
 	}
 
 	for _, opt := range opts {
@@ -558,6 +561,16 @@ func (r *RegionInfo) GetLeader() *metapb.Peer {
 	return r.leader
 }
 
+// GetUpdateTime returns the last update time of the region.
+func (r *RegionInfo) GetUpdateTime() time.Time {
+	return r.updateTime
+}
+
+// SetUpdateTime sets the last update time of the region.
+func (r *RegionInfo) SetUpdateTime(now time.Time) {
+	r.updateTime = now
+}
+
 // GetStartKey returns the start key of the region.
 func (r *RegionInfo) GetStartKey() []byte {
 	return r.meta.StartKey
@@ -625,7 +638,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	// Mark isNew if the region in cache does not have leader.
 	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
 		if origin == nil {
-			debug("insert new region",
+			info("insert new region",
 				zap.Uint64("region-id", region.GetID()),
 				logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
 			saveKV, saveCache, isNew = true, true, true
@@ -652,6 +665,10 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
 				if origin.GetLeader().GetId() == 0 {
+					info("region leader changed",
+						zap.Uint64("region-id", region.GetID()),
+						zap.Uint64("to", region.GetLeader().GetStoreId()),
+					)
 					isNew = true
 				} else {
 					info("leader changed",
@@ -704,6 +721,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				return
 			}
 			if !origin.IsFromHeartbeat() {
+				info("from sync region", zap.Uint64("origin-id", origin.GetID()), zap.Uint64("region-id", region.GetID()))
 				isNew = true
 			}
 		}

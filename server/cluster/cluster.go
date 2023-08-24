@@ -66,8 +66,8 @@ var (
 	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
 	regionUpdateCacheEventCounter           = regionEventCounter.WithLabelValues("update_cache")
 	regionUpdateKVEventCounter              = regionEventCounter.WithLabelValues("update_kv")
-
-	denySchedulersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("schedulers", "deny")
+	regionCollectEventCounter               = regionEventCounter.WithLabelValues("collect")
+	denySchedulersByLabelerCounter          = schedule.LabelerEventCounter.WithLabelValues("schedulers", "deny")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -843,6 +843,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
+	if origin != nil {
+		origin.SetUpdateTime(time.Now())
+	}
 	region.Inherit(origin, c.storeConfigManager.GetStoreConfig().IsEnableRegionBucket())
 
 	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
@@ -860,6 +863,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
+	log.Info("heartbeat", zap.Uint64("region-id", region.GetID()), zap.Bool("heartbeat", region.IsFromHeartbeat()), zap.Bool("is-prepared", c.IsPrepared()),
+		zap.Bool("save-kv", saveKV), zap.Bool("save-cache", saveCache), zap.Bool("is-new", isNew), zap.Bool("need-sync", needSync),
+		zap.Stringer("meta", core.RegionToHexMeta(region.GetMeta())))
 	if !saveKV && !saveCache && !isNew {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
@@ -900,7 +906,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if !c.IsPrepared() && isNew {
+		log.Info("collect region which is new to the cluster", zap.Uint64("region-id", region.GetID()))
 		c.coordinator.prepareChecker.collect(region)
+		regionCollectEventCounter.Inc()
 	}
 
 	if c.storage != nil {

@@ -17,6 +17,9 @@ package cluster
 import (
 	"time"
 
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
+
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 )
@@ -49,6 +52,8 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	}
 	// The number of active regions should be more than total region of all stores * collectFactor
 	if float64(c.GetRegionCount())*collectFactor > float64(checker.sum) {
+		log.Info("not collect enough regions", zap.Uint64("sum", uint64(checker.sum)), zap.Uint64("region-count", uint64(c.GetRegionCount())))
+		logRegion(c, 10)
 		return false
 	}
 	for _, store := range c.GetStores() {
@@ -58,6 +63,8 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		storeID := store.GetID()
 		// For each store, the number of active regions should be more than total region of the store * collectFactor
 		if float64(c.GetStoreRegionCount(storeID))*collectFactor > float64(checker.reactiveRegions[storeID]) {
+			log.Info("not collect enough regions for store", zap.Uint64("store-id", storeID), zap.Uint64("sum", uint64(checker.reactiveRegions[storeID])),
+				zap.Uint64("region-count", uint64(c.GetStoreRegionCount(storeID))))
 			return false
 		}
 	}
@@ -78,4 +85,14 @@ func (checker *prepareChecker) isPrepared() bool {
 	checker.RLock()
 	defer checker.RUnlock()
 	return checker.prepared
+}
+
+func logRegion(c *core.BasicCluster, limit int) {
+	for _, region := range c.GetRegions() {
+		log.Info("region", zap.Uint64("region-id", region.GetID()), zap.Uint64("store-id", region.GetLeader().GetStoreId()),
+			zap.Uint64("leader-id", region.GetLeader().GetId()), zap.Time("update-time", region.GetUpdateTime()))
+		if limit--; limit == 0 {
+			break
+		}
+	}
 }
