@@ -700,11 +700,6 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	lastReceivedResponseTime := time.Now()
 
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
 		if watcherCancel != nil {
 			watcherCancel()
 		}
@@ -723,7 +718,11 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {
 			log.Warn("error occurred while creating watch channel and retry it later in watch loop", lw.watchLogFields(revision, err)...)
-			<-ticker.C
+			select {
+			case <-ctx.Done():
+				return revision, nil
+			case <-ticker.C:
+			}
 			continue
 		}
 		log.Info("watch channel is created in watch loop", lw.watchLogFields(revision)...)

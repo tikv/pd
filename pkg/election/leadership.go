@@ -215,12 +215,6 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 	for {
 		failpoint.Inject("delayWatcher", nil)
-		select {
-		case <-serverCtx.Done():
-			log.Info("server is closed, exit leader watch loop", ls.logFields...)
-			return
-		default:
-		}
 
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.
@@ -230,7 +224,12 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				return
 			}
 			log.Warn("the connection maybe unhealthy, retry to watch later", ls.watchLogFields(revision)...)
-			<-ticker.C
+			select {
+			case <-serverCtx.Done():
+				log.Info("server is closed, exit leader watch loop", ls.logFields...)
+				return
+			case <-ticker.C:
+			}
 			continue // continue to check the etcd availability
 		}
 
@@ -253,7 +252,12 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {
 			log.Warn("error occurred while creating watch channel and retry it later in watch loop", ls.watchLogFields(revision, err)...)
-			<-ticker.C
+			select {
+			case <-serverCtx.Done():
+				log.Info("server is closed, exit leader watch loop", ls.logFields...)
+				return
+			case <-ticker.C:
+			}
 			continue
 		}
 		log.Info("watch channel is created", ls.watchLogFields(revision)...)

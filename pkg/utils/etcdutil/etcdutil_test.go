@@ -790,7 +790,9 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			func() error { return nil },
 		)
 
+		suite.wg.Add(1)
 		go func() {
+			defer suite.wg.Done()
 			watcher.watch(suite.ctx, 0)
 		}()
 
