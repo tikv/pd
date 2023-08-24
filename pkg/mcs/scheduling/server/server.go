@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/sysutil"
 	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -112,8 +113,6 @@ type Server struct {
 	cluster   *Cluster
 	hbStreams *hbstream.HeartbeatStreams
 	storage   *endpoint.StorageEndpoint
-
-	coordinator *schedule.Coordinator
 
 	// for watching the PD API server meta info updates that are related to the scheduling.
 	configWatcher *config.Watcher
@@ -260,6 +259,7 @@ func (s *Server) Close() {
 	s.stopHTTPServer()
 	s.stopGRPCServer()
 	s.muxListener.Close()
+	s.GetCoordinator().Stop()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -328,9 +328,14 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
+// GetCluster returns the cluster.
+func (s *Server) GetCluster() *Cluster {
+	return s.cluster
+}
+
 // GetCoordinator returns the coordinator.
 func (s *Server) GetCoordinator() *schedule.Coordinator {
-	return s.coordinator
+	return s.GetCluster().GetCoordinator()
 }
 
 func (s *Server) initClient() error {
@@ -495,12 +500,12 @@ func (s *Server) startServer() (err error) {
 		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
 	s.storage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(s.etcdClient, endpoint.PDRootPath(s.clusterID)), nil)
-	s.cluster, err = NewCluster(s.ctx, s.storage, s.cfg)
+	basicCluster := core.NewBasicCluster()
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.ctx, s.clusterID, basicCluster)
+	s.cluster, err = NewCluster(s.ctx, s.cfg, s.storage, basicCluster, s.hbStreams)
 	if err != nil {
 		return err
 	}
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.ctx, s.clusterID, s.cluster.GetBasicCluster())
-	s.coordinator = schedule.NewCoordinator(s.ctx, s.cluster, s.hbStreams)
 
 	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
 	if err != nil {
@@ -524,7 +529,8 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
-	go s.coordinator.RunUntilStop()
+
+	go s.GetCoordinator().RunUntilStop()
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
 	s.serverLoopWg.Add(1)
