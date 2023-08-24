@@ -330,7 +330,7 @@ func TestRequestProgress(t *testing.T) {
 			testutil.Eventually(re, func() bool {
 				b, _ := os.ReadFile(tempStdoutFile.Name())
 				l := string(b)
-				return strings.Contains(l, "watchChan is blocked for a long time")
+				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
 			failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock")
 		} else {

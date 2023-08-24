@@ -572,6 +572,7 @@ type LoopWatcher struct {
 	// updateClientCh is used to update the etcd client.
 	// It's only used for testing.
 	updateClientCh chan *clientv3.Client
+	logFields      []zap.Field
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
@@ -600,6 +601,7 @@ func NewLoopWatcher(
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
 		loadBatchSize:            defaultLoadBatchSize,
 		watchChangeRetryInterval: defaultWatchChangeRetryInterval,
+		logFields:                []zap.Field{zap.String("name", name), zap.String("key", key)},
 	}
 }
 
@@ -614,22 +616,20 @@ func (lw *LoopWatcher) StartWatchLoop() {
 		defer cancel()
 		watchStartRevision := lw.initFromEtcd(ctx)
 
-		log.Info("start to watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+		log.Info("start to watch loop", lw.logFields...)
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("server is closed, exit watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+				log.Info("server is closed, exit watch loop", lw.logFields...)
 				return
 			default:
 			}
 			nextRevision, err := lw.watch(ctx, watchStartRevision)
 			if err != nil {
-				log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop",
-					zap.String("name", lw.name),
-					zap.String("key", lw.key),
+				log.Error("watcher canceled unexpectedly and a new watcher will start after a while for watch loop", append(lw.logFields,
 					zap.Int64("next-revision", nextRevision),
 					zap.Time("retry-at", time.Now().Add(lw.watchChangeRetryInterval)),
-					zap.Error(err))
+					zap.Error(err))...)
 				watchStartRevision = nextRevision
 				time.Sleep(lw.watchChangeRetryInterval)
 				failpoint.Inject("updateClient", func() {
@@ -674,9 +674,9 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		}
 	}
 	if err != nil {
-		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+		log.Warn("meet error when loading in watch loop", append(lw.logFields, zap.Error(err))...)
 	} else {
-		log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
+		log.Info("load finished in watch loop", lw.logFields...)
 	}
 	lw.isLoadedCh <- err
 	return watchStartRevision
@@ -700,6 +700,11 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	lastReceivedResponseTime := time.Now()
 
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if watcherCancel != nil {
 			watcherCancel()
 		}
@@ -716,70 +721,61 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		go CheckWatchChan(watcherCtx, watcherCancel, done)
 		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
 		done <- struct{}{}
-		if watcherCtx.Err() != nil {
-			log.Warn("error occurred while creating watch channel and retry it", zap.Error(watcherCtx.Err()),
-				zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+		if err := watcherCtx.Err(); err != nil {
+			log.Warn("error occurred while creating watch channel and retry it later in watch loop", lw.watchLogFields(revision, err)...)
+			<-ticker.C
 			continue
 		}
-		log.Info("watch channel is created", zap.Int64("revision", revision),
-			zap.String("name", lw.name), zap.String("key", lw.key))
-	WatchChanLoop:
+		log.Info("watch channel is created in watch loop", lw.watchLogFields(revision)...)
+	watchChanLoop:
 		select {
 		case <-ctx.Done():
 			return revision, nil
 		case <-lw.forceLoadCh:
 			revision, err = lw.load(ctx)
 			if err != nil {
-				log.Warn("force load key failed in watch loop", zap.String("name", lw.name),
-					zap.String("key", lw.key), zap.Error(err))
+				log.Warn("force load key failed in watch loop", lw.watchLogFields(revision, err)...)
 			}
 			continue
 		case <-ticker.C:
 			// We need to request progress to etcd to prevent etcd hold the watchChan,
 			// note: the ctx must be from watcherCtx, otherwise, the RequestProgress request cannot be sent properly.
-			ctx, cancel := context.WithTimeout(watcherCtx, DefaultDialTimeout)
+			ctx, cancel := context.WithTimeout(watcherCtx, DefaultRequestTimeout)
 			if err := watcher.RequestProgress(ctx); err != nil {
-				log.Warn("failed to request progress in leader watch loop",
-					zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+				log.Warn("failed to request progress in watch loop", lw.watchLogFields(revision, err)...)
 			}
 			cancel()
 			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
 			// create a new one and need not to reset lastReceivedResponseTime.
 			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
-				log.Warn("watchChan is blocked for a long time, recreating a new watchChan",
-					zap.Duration("timeout", time.Since(lastReceivedResponseTime)),
-					zap.String("name", lw.name), zap.String("key", lw.key))
+				log.Warn("watch channel is blocked for a long time, recreating a new one in watch loop", append(lw.watchLogFields(revision, err),
+					zap.Duration("timeout", time.Since(lastReceivedResponseTime)))...)
 				continue
 			}
 		case wresp := <-watchChan:
 			failpoint.Inject("watchChanBlock", func() {
 				// watchChanBlock is used to simulate the case that the watchChan is blocked for a long time.
 				// So we discard these responses when the failpoint is injected.
-				failpoint.Goto("WatchChanLoop")
+				failpoint.Goto("watchChanLoop")
 			})
 			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
-				log.Warn("required revision has been compacted, use the compact revision in watch loop",
-					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
-					zap.String("name", lw.name), zap.String("key", lw.key))
+				log.Warn("required revision has been compacted, use the compact revision in watch loop", append(lw.logFields,
+					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision))...)
 				revision = wresp.CompactRevision
 				continue
-			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
-				log.Error("watcher is canceled in watch loop",
-					zap.Int64("revision", revision), errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()),
-					zap.String("name", lw.name), zap.String("key", lw.key))
-				return revision, wresp.Err()
+			} else if err := wresp.Err(); err != nil { // wresp.Err() contains CompactRevision not equal to 0
+				log.Error("watcher is canceled in watch loop", lw.watchLogFields(revision, err)...)
+				return revision, err
 			} else if wresp.IsProgressNotify() {
-				log.Debug("watcher receives progress notify in watch loop",
-					zap.String("name", lw.name), zap.String("key", lw.key))
-				goto WatchChanLoop
+				log.Debug("watcher receives progress notify in watch loop", lw.watchLogFields(revision)...)
+				goto watchChanLoop
 			}
 			for _, event := range wresp.Events {
 				switch event.Type {
 				case clientv3.EventTypePut:
 					if err := lw.putFn(event.Kv); err != nil {
-						log.Error("put failed in watch loop", zap.String("name", lw.name),
-							zap.String("key", lw.key), zap.Error(err))
+						log.Error("put failed in watch loop", lw.watchLogFields(revision, err)...)
 					} else {
 						log.Debug("put in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key),
@@ -787,8 +783,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					}
 				case clientv3.EventTypeDelete:
 					if err := lw.deleteFn(event.Kv); err != nil {
-						log.Error("delete failed in watch loop", zap.String("name", lw.name),
-							zap.String("key", lw.key), zap.Error(err))
+						log.Error("delete failed in watch loop", lw.watchLogFields(revision, err)...)
 					} else {
 						log.Debug("delete in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key))
@@ -796,13 +791,19 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				}
 			}
 			if err := lw.postEventFn(); err != nil {
-				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
-					zap.String("key", lw.key), zap.Error(err))
+				log.Error("run post event failed in watch loop", lw.watchLogFields(revision, err)...)
 			}
 			revision = wresp.Header.Revision + 1
 		}
-		goto WatchChanLoop // use goto to avoid creating a new watchChan
+		goto watchChanLoop // Use goto to avoid creating a new watchChan
 	}
+}
+
+func (lw *LoopWatcher) watchLogFields(revision int64, errs ...error) []zap.Field {
+	if len(errs) == 0 {
+		return append(lw.logFields, zap.Int64("revision", revision))
+	}
+	return append(lw.logFields, zap.Int64("revision", revision), zap.Error(errs[0]))
 }
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {

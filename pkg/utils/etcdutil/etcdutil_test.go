@@ -799,7 +799,7 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			testutil.Eventually(suite.Require(), func() bool {
 				b, _ := os.ReadFile(tempStdoutFile.Name())
 				l := string(b)
-				return strings.Contains(l, "watchChan is blocked for a long time")
+				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
 			failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
 		} else {
