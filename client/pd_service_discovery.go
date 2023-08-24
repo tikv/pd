@@ -98,6 +98,8 @@ type ServiceDiscovery interface {
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
 	AddServiceAddrsSwitchedCallback(callbacks ...func())
+	// GetBackoffer returns the backoffer.
+	GetBackoffer() *retry.Backoffer
 }
 
 type updateKeyspaceIDFunc func() error
@@ -272,6 +274,9 @@ func (c *pdServiceDiscovery) reconnectMemberLoop() {
 }
 
 func (c *pdServiceDiscovery) waitForReady() error {
+	ctx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
+
 	if e1 := c.waitForLeaderReady(); e1 != nil {
 		log.Error("[pd.waitForReady] failed to wait for leader ready", errs.ZapError(e1))
 		return errors.WithStack(e1)
@@ -282,6 +287,9 @@ func (c *pdServiceDiscovery) waitForReady() error {
 	}
 
 	deadline := time.Now().Add(requestTimeout)
+	failpoint.Inject("acceleratedRequestTimeout", func() {
+		deadline = time.Now().Add(500 * time.Millisecond)
+	})
 	for {
 		select {
 		case <-c.successReConnect:
@@ -289,6 +297,9 @@ func (c *pdServiceDiscovery) waitForReady() error {
 		case <-time.After(time.Until(deadline)):
 			log.Error("[pd.waitForReady] timeout")
 			return errors.New("wait for ready timeout")
+		case <-ctx.Done():
+			log.Info("[pd.waitForReady] exit")
+			return nil
 		}
 	}
 }
@@ -766,4 +777,8 @@ func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
 func (c *pdServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
+}
+
+func (c *pdServiceDiscovery) GetBackoffer() *retry.Backoffer {
+	return c.bo
 }

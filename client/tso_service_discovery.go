@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -640,4 +641,8 @@ func (c *tsoServiceDiscovery) discoverWithLegacyPath() ([]string, error) {
 		return nil, errs.ErrClientGetServingEndpoint
 	}
 	return listenUrls, nil
+}
+
+func (c *tsoServiceDiscovery) GetBackoffer() *retry.Backoffer {
+	panic("unimplemented")
 }

@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -1517,4 +1518,55 @@ func TestClientWatchWithRevision(t *testing.T) {
 			}
 		}
 	}
+}
+
+func (suite *clientTestSuite) TestRetryMemberUpdate() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/acceleratedRequestTimeout", `return(true)`))
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/client/acceleratedRequestTimeout")
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(re, ctx, endpoints)
+	defer cli.Close()
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+	re.True(ok)
+
+	leader := cluster.GetLeader()
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	memberID := cluster.GetServer(leader).GetLeader().GetMemberId()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
+
+	leader2 := waitLeaderChange(re, cluster, leader, innerCli.GetServiceDiscovery())
+	re.NotEqual(leader, leader2)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+
+	bo := innerCli.GetServiceDiscovery().GetBackoffer()
+	retryTimes := bo.GetBackoffTimes()[retry.BoMemberUpdate.String()]
+	re.Greater(retryTimes, 0)
+}
+
+func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli pd.ServiceDiscovery) string {
+	var leader string
+	testutil.Eventually(re, func() bool {
+		cli.ScheduleCheckMemberChanged()
+		leader = cluster.GetLeader()
+		if leader == old || leader == "" {
+			return false
+		}
+		return true
+	})
+	return leader
 }
