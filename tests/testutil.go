@@ -33,8 +33,23 @@ import (
 
 var once sync.Once
 
-// InitLogger initializes the logger for test.
-func InitLogger(cfg *tso.Config) (err error) {
+// InitSchedulingLogger initializes the logger for test.
+func InitSchedulingLogger(cfg *sc.Config) (err error) {
+	once.Do(func() {
+		// Setup the logger.
+		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+		if err != nil {
+			return
+		}
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+		// Flushing any buffered log entries.
+		log.Sync()
+	})
+	return err
+}
+
+// InitTSOLogger initializes the logger for test.
+func InitTSOLogger(cfg *tso.Config) (err error) {
 	once.Do(func() {
 		// Setup the logger.
 		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
@@ -73,7 +88,7 @@ func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Asser
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
 	// Setup the logger.
-	err = InitLogger(cfg)
+	err = InitTSOLogger(cfg)
 	re.NoError(err)
 	return NewTSOTestServer(ctx, cfg)
 }
@@ -117,6 +132,19 @@ func StartSingleSchedulingTestServer(ctx context.Context, re *require.Assertions
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup
+}
+
+// NewSchedulingTestServer creates a scheduling server with given config for testing.
+func NewSchedulingTestServer(ctx context.Context, cfg *sc.Config) (*scheduling.Server, testutil.CleanupFunc, error) {
+	s := scheduling.CreateServer(ctx, cfg)
+	if err := s.Run(); err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		s.Close()
+		os.RemoveAll(cfg.DataDir)
+	}
+	return s, cleanup, nil
 }
 
 // WaitForPrimaryServing waits for one of servers being elected to be the primary/leader
