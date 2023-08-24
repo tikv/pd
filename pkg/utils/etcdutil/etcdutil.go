@@ -712,7 +712,17 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		watcherCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
 		watcherCancel = cancel
 		opts := append(lw.opts, clientv3.WithRev(revision), clientv3.WithProgressNotify())
+		done := make(chan struct{})
+		go CheckWatchChan(watcherCtx, watcherCancel, done)
 		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
+		done <- struct{}{}
+		if watcherCtx.Err() != nil {
+			log.Warn("error occurred while creating watch channel and retry it", zap.Error(watcherCtx.Err()),
+				zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+			continue
+		}
+		log.Info("watch channel is created", zap.Int64("revision", revision),
+			zap.String("name", lw.name), zap.String("key", lw.key))
 	WatchChanLoop:
 		select {
 		case <-ctx.Done():
@@ -737,6 +747,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			// create a new one and need not to reset lastReceivedResponseTime.
 			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
 				log.Warn("watchChan is blocked for a long time, recreating a new watchChan",
+					zap.Duration("timeout", time.Since(lastReceivedResponseTime)),
 					zap.String("name", lw.name), zap.String("key", lw.key))
 				continue
 			}
@@ -882,4 +893,19 @@ func (lw *LoopWatcher) SetLoadTimeout(timeout time.Duration) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
+}
+
+// CheckWatchChan checks whether the watch channel is blocked for a long time while creating a new watch channel.
+func CheckWatchChan(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	defer logutil.LogPanic()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+		cancel()
+	case <-ctx.Done():
+	}
+	<-done
 }

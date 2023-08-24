@@ -246,9 +246,18 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				continue
 			}
 		}
-
+		done := make(chan struct{})
+		go etcdutil.CheckWatchChan(watcherCtx, watcherCancel, done)
 		watchChan := watcher.Watch(watcherCtx, ls.leaderKey,
 			clientv3.WithRev(revision), clientv3.WithProgressNotify())
+		done <- struct{}{}
+		if watcherCtx.Err() != nil {
+			log.Warn("error occurred while creating watch channel and retry it", zap.Error(watcherCtx.Err()),
+				zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
+			continue
+		}
+		log.Info("watch channel is created", zap.Int64("revision", revision),
+			zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 	WatchChanLoop:
 		select {
 		case <-serverCtx.Done():
@@ -278,6 +287,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			// create a new one and need not to reset lastReceivedResponseTime.
 			if time.Since(lastReceivedResponseTime) >= etcdutil.WatchChTimeoutDuration {
 				log.Warn("watchChan is blocked for a long time, recreating a new watchChan",
+					zap.Duration("timeout", time.Since(lastReceivedResponseTime)),
 					zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				continue
 			}
