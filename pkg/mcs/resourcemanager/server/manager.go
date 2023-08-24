@@ -320,17 +320,17 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
 			)
 			// RU info.
-			if consumption.RRU != 0 {
+			if consumption.RRU > 0 {
 				rruMetrics.Add(consumption.RRU)
 			}
-			if consumption.WRU != 0 {
+			if consumption.WRU > 0 {
 				wruMetrics.Add(consumption.WRU)
 			}
 			// Byte info.
-			if consumption.ReadBytes != 0 {
+			if consumption.ReadBytes > 0 {
 				readByteMetrics.Add(consumption.ReadBytes)
 			}
-			if consumption.WriteBytes != 0 {
+			if consumption.WriteBytes > 0 {
 				writeByteMetrics.Add(consumption.WriteBytes)
 			}
 			// CPU time info.
@@ -342,10 +342,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				kvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
 			}
 			// RPC count info.
-			if consumption.KvReadRpcCount != 0 {
+			if consumption.KvReadRpcCount > 0 {
 				readRequestCountMetrics.Add(consumption.KvReadRpcCount)
 			}
-			if consumption.KvWriteRpcCount != 0 {
+			if consumption.KvWriteRpcCount > 0 {
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
 			}
 

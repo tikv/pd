@@ -1070,13 +1070,7 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	if !selected {
 		return nil
 	}
-
-	deltaConsumption := &rmpb.Consumption{}
-	*deltaConsumption = *gc.run.consumption
-	sub(deltaConsumption, gc.run.lastRequestConsumption)
-	req.ConsumptionSinceLastRequest = deltaConsumption
-
-	*gc.run.lastRequestConsumption = *gc.run.consumption
+	req.ConsumptionSinceLastRequest = updateDeltaConsumption(gc.run.lastRequestConsumption, gc.run.consumption)
 	gc.run.lastRequestTime = time.Now()
 	gc.run.requestInProgress = true
 	return req
@@ -1155,6 +1149,12 @@ func (gc *groupCostController) onRequestWait(
 			gc.mu.Lock()
 			sub(gc.mu.consumption, delta)
 			gc.mu.Unlock()
+			failpoint.Inject("triggerUpdate", func() {
+				select {
+				case gc.lowRUNotifyChan <- struct{}{}:
+				default:
+				}
+			})
 			return nil, nil, err
 		}
 		gc.successfulRequestDuration.Observe(d.Seconds())

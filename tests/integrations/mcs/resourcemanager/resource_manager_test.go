@@ -429,6 +429,13 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 			break
 		}
 	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate", "return(true)"))
+	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 900000000, times: 1, waitDuration: 0}
+	wreq := tcs.makeWriteRequest()
+	_, _, err := controller.OnRequestWait(suite.ctx, suite.initGroups[0].Name, wreq)
+	re.Error(err)
+	time.Sleep(time.Millisecond * 500)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate"))
 	controller.Stop()
 }
 
