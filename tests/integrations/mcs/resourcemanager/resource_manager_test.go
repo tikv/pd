@@ -434,7 +434,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	wreq := tcs.makeWriteRequest()
 	_, _, err := controller.OnRequestWait(suite.ctx, suite.initGroups[0].Name, wreq)
 	re.Error(err)
-	time.Sleep(time.Millisecond * 500)
+	time.Sleep(time.Millisecond * 200)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate"))
 	controller.Stop()
 }
