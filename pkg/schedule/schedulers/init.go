@@ -466,7 +466,7 @@ func schedulersRegister() {
 	})
 
 	RegisterScheduler(EvictSlowTrendType, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
-		conf := &evictSlowTrendSchedulerConfig{storage: storage, EvictedStores: make([]uint64, 0), evictCandidate: 0}
+		conf := &evictSlowTrendSchedulerConfig{storage: storage, EvictedStores: make([]uint64, 0), evictCandidate: slowCandidate{}, lastEvictCandidate: slowCandidate{}}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}

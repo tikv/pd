@@ -1354,12 +1354,14 @@ func TestStoreConfigUpdate(t *testing.T) {
         "perf-level": 2
     	}}`
 		var config sc.StoreConfig
+		re.False(config.IsSynced())
 		re.NoError(json.Unmarshal([]byte(body), &config))
 		tc.updateStoreConfig(opt.GetStoreConfig(), &config)
 		re.Equal(uint64(144000000), opt.GetRegionMaxKeys())
 		re.Equal(uint64(96000000), opt.GetRegionSplitKeys())
 		re.Equal(uint64(15*units.GiB/units.MiB), opt.GetRegionMaxSize())
 		re.Equal(uint64(10*units.GiB/units.MiB), opt.GetRegionSplitSize())
+		re.True(opt.IsSynced())
 	}
 	// Case2: empty config.
 	{
@@ -1371,6 +1373,7 @@ func TestStoreConfigUpdate(t *testing.T) {
 		re.Equal(uint64(960000), opt.GetRegionSplitKeys())
 		re.Equal(uint64(144), opt.GetRegionMaxSize())
 		re.Equal(uint64(96), opt.GetRegionSplitSize())
+		re.True(opt.IsSynced())
 	}
 	// Case3: raft-kv2 config.
 	{

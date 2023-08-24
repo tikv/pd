@@ -606,9 +606,19 @@ func (o *PersistConfig) GetRegionMaxKeys() uint64 {
 	return o.GetStoreConfig().GetRegionMaxKeys()
 }
 
+// IsSynced returns true if the cluster config is synced.
+func (o *PersistConfig) IsSynced() bool {
+	return o.GetStoreConfig().IsSynced()
+}
+
 // IsEnableRegionBucket return true if the region bucket is enabled.
 func (o *PersistConfig) IsEnableRegionBucket() bool {
 	return o.GetStoreConfig().IsEnableRegionBucket()
+}
+
+// IsRaftKV2 returns the whether the cluster use `raft-kv2` engine.
+func (o *PersistConfig) IsRaftKV2() bool {
+	return o.GetStoreConfig().IsRaftKV2()
 }
 
 // TODO: implement the following methods
