@@ -533,6 +533,11 @@ const (
 	defaultLoadBatchSize             = 400
 	defaultWatchChangeRetryInterval  = 1 * time.Second
 	defaultForceLoadMinimalInterval  = 200 * time.Millisecond
+
+	// RequestProgressInterval is the interval to call RequestProgress for watcher.
+	RequestProgressInterval = 1 * time.Second
+	// WatchChTimeoutDuration is the timeout duration for a watchChan.
+	WatchChTimeoutDuration = DefaultRequestTimeout
 )
 
 // LoopWatcher loads data from etcd and sets a watcher for it.
@@ -686,24 +691,36 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 }
 
 func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
-	watcher := clientv3.NewWatcher(lw.client)
-	defer watcher.Close()
-	var watchChanCancel context.CancelFunc
+	var (
+		watcher       clientv3.Watcher
+		watcherCancel context.CancelFunc
+	)
 	defer func() {
-		if watchChanCancel != nil {
-			watchChanCancel()
+		if watcherCancel != nil {
+			watcherCancel()
+		}
+		if watcher != nil {
+			watcher.Close()
 		}
 	}()
+	ticker := time.NewTicker(RequestProgressInterval)
+	defer ticker.Stop()
+	lastReceivedResponseTime := time.Now()
+
 	for {
-		if watchChanCancel != nil {
-			watchChanCancel()
+		if watcherCancel != nil {
+			watcherCancel()
 		}
+		if watcher != nil {
+			watcher.Close()
+		}
+		watcher = clientv3.NewWatcher(lw.client)
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
-		watchChanCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
-		watchChanCancel = cancel
-		opts := append(lw.opts, clientv3.WithRev(revision))
-		watchChan := watcher.Watch(watchChanCtx, lw.key, opts...)
+		watcherCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
+		watcherCancel = cancel
+		opts := append(lw.opts, clientv3.WithRev(revision), clientv3.WithProgressNotify())
+		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
 	WatchChanLoop:
 		select {
 		case <-ctx.Done():
@@ -715,18 +732,44 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.String("key", lw.key), zap.Error(err))
 			}
 			continue
+		case <-ticker.C:
+			// We need to request progress to etcd to prevent etcd hold the watchChan,
+			// note: the ctx must be from watcherCtx, otherwise, the RequestProgress request cannot be sent properly.
+			ctx, cancel := context.WithTimeout(watcherCtx, DefaultDialTimeout)
+			if err := watcher.RequestProgress(ctx); err != nil {
+				log.Warn("failed to request progress in leader watch loop",
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+			}
+			cancel()
+			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
+			// create a new one and need not to reset lastReceivedResponseTime.
+			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
+				log.Warn("watchChan is blocked for a long time, recreating a new watchChan",
+					zap.String("name", lw.name), zap.String("key", lw.key))
+				continue
+			}
 		case wresp := <-watchChan:
+			failpoint.Inject("watchChanBlock", func() {
+				// watchChanBlock is used to simulate the case that the watchChan is blocked for a long time.
+				// So we discard these responses when the failpoint is injected.
+				failpoint.Goto("WatchChanLoop")
+			})
+			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision in watch loop",
-					zap.Int64("required-revision", revision),
-					zap.Int64("compact-revision", wresp.CompactRevision))
+					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
+					zap.String("name", lw.name), zap.String("key", lw.key))
 				revision = wresp.CompactRevision
 				continue
 			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
 				log.Error("watcher is canceled in watch loop",
-					zap.Int64("revision", revision),
-					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
+					zap.Int64("revision", revision), errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()),
+					zap.String("name", lw.name), zap.String("key", lw.key))
 				return revision, wresp.Err()
+			} else if wresp.IsProgressNotify() {
+				log.Debug("watcher receives progress notify in watch loop",
+					zap.String("name", lw.name), zap.String("key", lw.key))
+				goto WatchChanLoop
 			}
 			for _, event := range wresp.Events {
 				switch event.Type {
@@ -754,8 +797,8 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.String("key", lw.key), zap.Error(err))
 			}
 			revision = wresp.Header.Revision + 1
-			goto WatchChanLoop // use goto to avoid to create a new watchChan
 		}
+		goto WatchChanLoop // use goto to avoid creating a new watchChan
 	}
 }
 
