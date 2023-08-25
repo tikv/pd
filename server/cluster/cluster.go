@@ -446,6 +446,8 @@ func (c *RaftCluster) runStoreConfigSync() {
 			init = true
 			ticker.Stop()
 			ticker = time.NewTicker(time.Minute)
+		} else if !init && !c.opt.GetStoreConfig().IsSynced() {
+			log.Warn("init sync store config is not completed")
 		}
 		select {
 		case <-c.ctx.Done():
