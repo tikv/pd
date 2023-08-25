@@ -404,7 +404,7 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 	re.Len(ops, 1)
 	re.NotEqual(hotRegionID, ops[0].RegionID())
 
-	// Case5: If there are more than topnPosition hot regions, but them need to cool down,
+	// Case6: If there are more than topnPosition hot regions, but them need to cool down,
 	// we will schedule large hot region rather than small hot region, so there is no operator.
 	topnPosition = 2
 	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, func(tc *mockcluster.Cluster, _ *hotScheduler) {
@@ -418,7 +418,7 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 	re.Len(ops, 0)
 	topnPosition = origin
 
-	// Case6: If there are more than topnPosition hot regions, but them are pending,
+	// Case7: If there are more than topnPosition hot regions, but them are pending,
 	// we will schedule large hot region rather than small hot region, so there is no operator.
 	topnPosition = 2
 	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, func(tc *mockcluster.Cluster, hb *hotScheduler) {
