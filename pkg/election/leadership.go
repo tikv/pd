@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
@@ -243,7 +244,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		watcherCancel = cancel
 
 		done := make(chan struct{})
-		go etcdutil.CheckWatchChan(watcherCtx, watcherCancel, done)
+		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
 		watchChan := watcher.Watch(watcherCtx, ls.leaderKey,
 			clientv3.WithRev(revision), clientv3.WithProgressNotify())
 		done <- struct{}{}

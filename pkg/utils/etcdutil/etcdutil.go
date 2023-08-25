@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -713,7 +714,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		watcherCancel = cancel
 		opts := append(lw.opts, clientv3.WithRev(revision), clientv3.WithProgressNotify())
 		done := make(chan struct{})
-		go CheckWatchChan(watcherCtx, watcherCancel, done)
+		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
 		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {
@@ -897,19 +898,4 @@ func (lw *LoopWatcher) SetLoadTimeout(timeout time.Duration) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
-}
-
-// CheckWatchChan checks whether the watch channel is blocked for a long time while creating a new watch channel.
-func CheckWatchChan(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
-	defer logutil.LogPanic()
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-done:
-		return
-	case <-timer.C:
-		cancel()
-	case <-ctx.Done():
-	}
-	<-done
 }

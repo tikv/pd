@@ -2124,7 +2124,7 @@ func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
 func (s *GrpcServer) createHeartbeatForwardStream(client *grpc.ClientConn) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
-	go checkStream(ctx, cancel, done)
+	go grpcutil.CheckStream(ctx, cancel, done)
 	forwardStream, err := pdpb.NewPDClient(client).RegionHeartbeat(ctx)
 	done <- struct{}{}
 	return forwardStream, cancel, err
@@ -2151,7 +2151,7 @@ func (s *GrpcServer) createTSOForwardStream(
 ) (tsopb.TSO_TsoClient, context.Context, context.CancelFunc, error) {
 	done := make(chan struct{})
 	forwardCtx, cancelForward := context.WithCancel(ctx)
-	go checkStream(forwardCtx, cancelForward, done)
+	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
 	forwardStream, err := tsopb.NewTSOClient(client).Tso(forwardCtx)
 	done <- struct{}{}
 	return forwardStream, forwardCtx, cancelForward, err
@@ -2160,7 +2160,7 @@ func (s *GrpcServer) createTSOForwardStream(
 func (s *GrpcServer) createReportBucketsForwardStream(client *grpc.ClientConn) (pdpb.PD_ReportBucketsClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
-	go checkStream(ctx, cancel, done)
+	go grpcutil.CheckStream(ctx, cancel, done)
 	forwardStream, err := pdpb.NewPDClient(client).ReportBuckets(ctx)
 	done <- struct{}{}
 	return forwardStream, cancel, err
@@ -2180,21 +2180,6 @@ func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient
 			return
 		}
 	}
-}
-
-// TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
-func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
-	defer logutil.LogPanic()
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-done:
-		return
-	case <-timer.C:
-		cancel()
-	case <-streamCtx.Done():
-	}
-	<-done
 }
 
 func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
@@ -2269,7 +2254,7 @@ func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoCli
 	}
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
-	go checkStream(ctx, cancel, done)
+	go grpcutil.CheckStream(ctx, cancel, done)
 	forwardStream, err = tsopb.NewTSOClient(client).Tso(ctx)
 	done <- struct{}{}
 	if err != nil {
