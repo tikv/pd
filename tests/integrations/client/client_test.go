@@ -1307,7 +1307,7 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 	suite.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
 }
 
-func (suite *clientTestSuite) TestScatterRegion() {
+func (suite *clientTestSuite) CreateRegion() int {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
@@ -1325,6 +1325,11 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		Leader: peers[0],
 	}
 	err := suite.regionHeartbeat.Send(req)
+	return regionID
+}
+
+func (suite *clientTestSuite) TestScatterRegion() {
+	var regionID int = CreateRegion()
 	regionsID := []uint64{regionID}
 	suite.NoError(err)
 	// Test interface `ScatterRegions`.
@@ -1348,6 +1353,9 @@ func (suite *clientTestSuite) TestScatterRegion() {
 
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
+	// create a new region as scatter operation from previous test might be running
+
+	regionID := CreateRegion()
 	testutil.Eventually(re, func() bool {
 		err := suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
