@@ -61,7 +61,6 @@ type client interface {
 	ScheduleCheckLeader()
 	GetURLs() []string
 	GetAllocatorLeaderURLs() map[string]string
-	TestBackOffExecute() bool
 }
 
 func TestClientClusterIDCheck(t *testing.T) {
@@ -1417,7 +1416,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 	}, testutil.WithTickInterval(time.Second))
 }
 
-func (suite *clientTestSuite) TestRetryMemberUpdate() {
+func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re := suite.Require()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1440,7 +1439,7 @@ func (suite *clientTestSuite) TestRetryMemberUpdate() {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/backOffExecute", `return(true)`))
 	leader2 := waitLeaderChange(re, cluster, leader, cli.(client))
-	re.True(cli.(client).TestBackOffExecute())
+	re.True(pd.TestBackOffExecute())
 
 	re.NotEqual(leader, leader2)
 

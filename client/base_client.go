@@ -175,7 +175,7 @@ func (c *baseClient) memberLoop() {
 var testBackOffExecuteFlag = false
 
 // TestBackOffExecute Only used for test.
-func (c *baseClient) TestBackOffExecute() bool {
+func TestBackOffExecute() bool {
 	return testBackOffExecuteFlag
 }
 
