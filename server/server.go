@@ -1427,9 +1427,14 @@ func (s *Server) leaderLoop() {
 			}
 			// Check the cluster dc-location after the PD leader is elected
 			go s.tsoAllocatorManager.ClusterDCLocationChecker()
+			syncer := s.cluster.GetRegionSyncer()
+			if s.persistOptions.IsUseRegionStorage() {
+				syncer.StartSyncWithLeader(leader.GetClientUrls()[0])
+			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
 			// WatchLeader will keep looping and never return unless the PD leader has changed.
 			s.member.WatchLeader(s.serverLoopCtx, leader, rev)
+			syncer.StopSyncWithLeader()
 			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
 
@@ -1439,7 +1444,7 @@ func (s *Server) leaderLoop() {
 			if s.member.GetLeader() == nil {
 				lastUpdated := s.member.GetLastLeaderUpdatedTime()
 				// use random timeout to avoid leader campaigning storm.
-				randomTimeout := time.Duration(rand.Intn(int(lostPDLeaderMaxTimeoutSecs)))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
+				randomTimeout := time.Duration(rand.Intn(lostPDLeaderMaxTimeoutSecs))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
 				// add failpoint to test the campaign leader logic.
 				failpoint.Inject("timeoutWaitPDLeader", func() {
 					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")

@@ -130,11 +130,20 @@ func (c *baseClient) memberLoop() {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 
+	ticker := time.NewTicker(memberUpdateInterval)
+	defer ticker.Stop()
+
+	// max retry backoff time is 1 * Second
+	// recalculate backoff time: (2+4+8+10*n)*100 = 1.4+1*n(s)
+	backOffBaseTime := 100 * time.Millisecond
+	backOffTime := backOffBaseTime
+
 	for {
 		select {
 		case <-c.checkLeaderCh:
-		case <-time.After(memberUpdateInterval):
+		case <-ticker.C:
 		case <-ctx.Done():
+			log.Info("[pd.reconnectLoop] exit reconnectLoop")
 			return
 		}
 		failpoint.Inject("skipUpdateMember", func() {
@@ -142,8 +151,32 @@ func (c *baseClient) memberLoop() {
 		})
 		if err := c.updateMember(); err != nil {
 			log.Error("[pd] failed updateMember", errs.ZapError(err))
+			if backOffTime > updateMemberTimeout {
+				backOffTime = updateMemberTimeout
+			} else {
+				backOffTime *= 2
+			}
+			select {
+			case <-time.After(backOffTime):
+				failpoint.Inject("backOffExecute", func() {
+					testBackOffExecuteFlag = true
+				})
+			case <-ctx.Done():
+				log.Info("[pd.reconnectLoop] exit backOff")
+				return
+			}
+		} else {
+			backOffTime = backOffBaseTime
 		}
 	}
+}
+
+// Only used for test.
+var testBackOffExecuteFlag = false
+
+// TestBackOffExecute Only used for test.
+func (c *baseClient) TestBackOffExecute() bool {
+	return testBackOffExecuteFlag
 }
 
 // ScheduleCheckLeader is used to check leader.
