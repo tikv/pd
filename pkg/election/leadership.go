@@ -61,8 +61,6 @@ type Leadership struct {
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
 	keepAliveCancelFuncLock sync.Mutex
-
-	logFields []zap.Field
 }
 
 // NewLeadership creates a new Leadership.
@@ -71,10 +69,6 @@ func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadersh
 		purpose:   purpose,
 		client:    client,
 		leaderKey: leaderKey,
-		logFields: []zap.Field{
-			zap.String("purpose", purpose),
-			zap.String("leader-key", leaderKey),
-		},
 	}
 	return leadership
 }
@@ -139,7 +133,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 		newLease.Close()
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
-	log.Info("write leaderData to leaderPath ok", ls.logFields...)
+	log.Info("write leaderData to leaderPath ok", zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
 }
 
@@ -181,7 +175,7 @@ func (ls *Leadership) DeleteLeaderKey() error {
 	}
 	// Reset the lease as soon as possible.
 	ls.Reset()
-	log.Info("delete the leader key ok", ls.logFields...)
+	log.Info("delete the leader key ok", zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 	return nil
 }
 
@@ -220,17 +214,20 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		// so we check the etcd availability first.
 		if !etcdutil.IsHealthy(serverCtx, ls.client) {
 			if time.Since(lastReceivedResponseTime) > unhealthyTimeout {
-				log.Error("the connection is unhealthy for a while, exit leader watch loop", ls.watchLogFields(revision)...)
+				log.Error("the connection is unhealthy for a while, exit leader watch loop",
+					zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				return
 			}
-			log.Warn("the connection maybe unhealthy, retry to watch later", ls.watchLogFields(revision)...)
+			log.Warn("the connection maybe unhealthy, retry to watch later",
+				zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 			select {
 			case <-serverCtx.Done():
-				log.Info("server is closed, exit leader watch loop", ls.logFields...)
+				log.Info("server is closed, exit leader watch loop",
+					zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				return
 			case <-ticker.C:
+				continue // continue to check the etcd availability
 			}
-			continue // continue to check the etcd availability
 		}
 
 		if watcherCancel != nil {
@@ -251,41 +248,47 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			clientv3.WithRev(revision), clientv3.WithProgressNotify())
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {
-			log.Warn("error occurred while creating watch channel and retry it later in watch loop", ls.watchLogFields(revision, err)...)
+			log.Warn("error occurred while creating watch channel and retry it later in watch loop", zap.Error(err),
+				zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 			select {
 			case <-serverCtx.Done():
-				log.Info("server is closed, exit leader watch loop", ls.logFields...)
+				log.Info("server is closed, exit leader watch loop",
+					zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				return
 			case <-ticker.C:
+				continue
 			}
-			continue
 		}
-		log.Info("watch channel is created", ls.watchLogFields(revision)...)
+		log.Info("watch channel is created", zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 
 	watchChanLoop:
 		select {
 		case <-serverCtx.Done():
-			log.Info("server is closed, exit leader watch loop", ls.logFields...)
+			log.Info("server is closed, exit leader watch loop",
+				zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 			return
 		case <-ticker.C:
 			// When etcd is not available, the watcher.RequestProgress will block,
 			// so we check the etcd availability first.
 			if !etcdutil.IsHealthy(serverCtx, ls.client) {
-				log.Warn("the connection maybe unhealthy, retry to watch later", ls.watchLogFields(revision)...)
+				log.Warn("the connection maybe unhealthy, retry to watch later",
+					zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				continue
 			}
 			// We need to request progress to etcd to prevent etcd hold the watchChan,
 			// note: the ctx must be from watcherCtx, otherwise, the RequestProgress request cannot be sent properly.
 			ctx, cancel := context.WithTimeout(watcherCtx, etcdutil.DefaultRequestTimeout)
 			if err := watcher.RequestProgress(ctx); err != nil {
-				log.Warn("failed to request progress in leader watch loop", ls.watchLogFields(revision, err)...)
+				log.Warn("failed to request progress in leader watch loop",
+					zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose), zap.Error(err))
 			}
 			cancel()
 			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
 			// create a new one and need not to reset lastReceivedResponseTime.
 			if time.Since(lastReceivedResponseTime) >= etcdutil.WatchChTimeoutDuration {
-				log.Warn("watch channel is blocked for a long time, recreating a new one", append(ls.watchLogFields(revision),
-					zap.Duration("timeout", time.Since(lastReceivedResponseTime)))...)
+				log.Warn("watch channel is blocked for a long time, recreating a new one",
+					zap.Duration("timeout", time.Since(lastReceivedResponseTime)),
+					zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				continue
 			}
 		case wresp := <-watchChan:
@@ -296,21 +299,25 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			})
 			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
-				log.Warn("required revision has been compacted, use the compact revision", append(ls.logFields,
-					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision))...)
+				log.Warn("required revision has been compacted, use the compact revision",
+					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
+					zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				revision = wresp.CompactRevision
 				continue
 			} else if err := wresp.Err(); err != nil { // wresp.Err() contains CompactRevision not equal to 0
-				log.Error("leadership watcher is canceled with", ls.watchLogFields(revision, err)...)
+				log.Error("leadership watcher is canceled with", errs.ZapError(errs.ErrEtcdWatcherCancel, err),
+					zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				return
 			} else if wresp.IsProgressNotify() {
-				log.Debug("watcher receives progress notify in watch loop", ls.watchLogFields(revision)...)
+				log.Debug("watcher receives progress notify in watch loop",
+					zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 				goto watchChanLoop
 			}
 
 			for _, ev := range wresp.Events {
 				if ev.Type == mvccpb.DELETE {
-					log.Info("current leadership is deleted", ls.watchLogFields(revision)...)
+					log.Info("current leadership is deleted",
+						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
 				}
 			}
@@ -318,13 +325,6 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 		}
 		goto watchChanLoop // Use goto to avoid creating a new watchChan
 	}
-}
-
-func (ls *Leadership) watchLogFields(revision int64, errs ...error) []zap.Field {
-	if len(errs) == 0 {
-		return append(ls.logFields, zap.Int64("revision", revision))
-	}
-	return append(ls.logFields, zap.Int64("revision", revision), zap.Error(errs[0]))
 }
 
 // Reset does some defer jobs such as closing lease, resetting lease etc.

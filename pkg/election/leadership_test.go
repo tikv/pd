@@ -268,8 +268,8 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 		done <- struct{}{}
 	}()
 
-	deferFunc := injectFunc(etcd, client2)
-	defer deferFunc()
+	cleanFunc := injectFunc(etcd, client2)
+	defer cleanFunc()
 
 	testutil.Eventually(re, func() bool {
 		select {
