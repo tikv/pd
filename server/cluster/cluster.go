@@ -15,6 +15,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -260,11 +262,11 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 // InitCluster initializes the raft cluster.
 func (c *RaftCluster) InitCluster(
 	id id.Allocator,
-	opt *config.PersistOptions,
+	opt sc.ConfProvider,
 	storage storage.Storage,
 	basicCluster *core.BasicCluster,
 	keyspaceGroupManager *keyspace.GroupManager) {
-	c.core, c.opt, c.storage, c.id = basicCluster, opt, storage, id
+	c.core, c.opt, c.storage, c.id = basicCluster, opt.(*config.PersistOptions), storage, id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
 	c.hotStat = statistics.NewHotStat(c.ctx)
@@ -327,6 +329,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.wg.Add(10)
+	go c.runStoreConfigSync()
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -334,7 +337,6 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.syncRegions()
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
-	go c.runStoreConfigSync()
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 
@@ -420,12 +422,14 @@ func (c *RaftCluster) runStoreConfigSync() {
 		synced, switchRaftV2Config bool
 		stores                     = c.GetStores()
 	)
-	ticker := time.NewTicker(time.Minute)
+	// Start the ticker with a second-level timer to accelerate
+	// the bootstrap stage.
+	init := false
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		synced, switchRaftV2Config = c.syncStoreConfig(stores)
 		if switchRaftV2Config {
-			c.GetOpts().UseRaftV2()
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
@@ -435,6 +439,13 @@ func (c *RaftCluster) runStoreConfigSync() {
 			stores = c.GetStores()
 		} else if err := c.opt.Persist(c.storage); err != nil {
 			log.Warn("store config persisted failed", zap.Error(err))
+		}
+		// If the config has been synced, the interval should be added
+		// up to minute level.
+		if testing.Testing() || (!init && c.opt.GetStoreConfig().IsSynced()) {
+			init = true
+			ticker.Stop()
+			ticker = time.NewTicker(time.Minute)
 		}
 		select {
 		case <-c.ctx.Done():
@@ -450,6 +461,12 @@ func (c *RaftCluster) runStoreConfigSync() {
 //   - `switchRaftV2` is true if the config of tikv engine is change to raft-kv2.
 func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, switchRaftV2 bool) {
 	for index := 0; index < len(stores); index++ {
+		select {
+		case <-c.ctx.Done():
+			log.Info("stop sync store config job due to server shutdown")
+			return
+		default:
+		}
 		// filter out the stores that are tiflash
 		store := stores[index]
 		if store.IsTiFlash() {
@@ -462,8 +479,11 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		}
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
-		switchRaftV2, err := c.observeStoreConfig(address)
+		switchRaftV2, err := c.observeStoreConfig(c.ctx, address)
 		if err != nil {
+			// delete the store if it is failed and retry next store.
+			stores = append(stores[:index], stores[index+1:]...)
+			index--
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
@@ -479,13 +499,13 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 
 // observeStoreConfig is used to observe the store config changes and
 // return whether if the new config changes the engine to raft-kv2.
-func (c *RaftCluster) observeStoreConfig(address string) (bool, error) {
-	cfg, err := c.fetchStoreConfigFromTiKV(address)
+func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (bool, error) {
+	cfg, err := c.fetchStoreConfigFromTiKV(ctx, address)
 	if err != nil {
 		return false, err
 	}
 	oldCfg := c.opt.GetStoreConfig()
-	if cfg == nil || oldCfg.Equal(cfg) {
+	if cfg == nil || (oldCfg.IsSynced() && oldCfg.Equal(cfg)) {
 		return false, nil
 	}
 	log.Info("sync the store config successful",
@@ -496,19 +516,21 @@ func (c *RaftCluster) observeStoreConfig(address string) (bool, error) {
 }
 
 // updateStoreConfig updates the store config. This is extracted for testing.
-func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *config.StoreConfig) (bool, error) {
+func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *sc.StoreConfig) (bool, error) {
 	cfg.Adjust()
+	// Mark config has been synced.
+	cfg.SetSynced()
 	c.opt.SetStoreConfig(cfg)
-	return oldCfg.Storage.Engine != config.RaftstoreV2 && cfg.Storage.Engine == config.RaftstoreV2, nil
+	return oldCfg.Storage.Engine != sc.RaftstoreV2 && cfg.Storage.Engine == sc.RaftstoreV2, nil
 }
 
 // fetchStoreConfigFromTiKV tries to fetch the config from the TiKV store URL.
-func (c *RaftCluster) fetchStoreConfigFromTiKV(statusAddress string) (*config.StoreConfig, error) {
-	cfg := &config.StoreConfig{}
+func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddress string) (*sc.StoreConfig, error) {
+	cfg := &sc.StoreConfig{}
 	failpoint.Inject("mockFetchStoreConfigFromTiKV", func(val failpoint.Value) {
 		if regionMaxSize, ok := val.(string); ok {
 			cfg.RegionMaxSize = regionMaxSize
-			cfg.Storage.Engine = config.RaftstoreV2
+			cfg.Storage.Engine = sc.RaftstoreV2
 		}
 		failpoint.Return(cfg, nil)
 	})
@@ -521,12 +543,20 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(statusAddress string) (*config.St
 	} else {
 		url = fmt.Sprintf("%s://%s/config", "http", statusAddress)
 	}
-	resp, err := c.httpClient.Get(url)
+	ctx, cancel := context.WithTimeout(ctx, clientTimeout)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewBuffer(nil))
 	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create store config http request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		cancel()
 		return nil, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
@@ -818,11 +848,6 @@ func (c *RaftCluster) GetOpts() sc.ConfProvider {
 	return c.opt
 }
 
-// GetPersistOptions returns cluster's configuration.
-func (c *RaftCluster) GetPersistOptions() *config.PersistOptions {
-	return c.opt
-}
-
 // GetScheduleConfig returns scheduling configurations.
 func (c *RaftCluster) GetScheduleConfig() *sc.ScheduleConfig {
 	return c.opt.GetScheduleConfig()
@@ -1046,7 +1071,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	region.Inherit(origin, c.GetPersistOptions().GetStoreConfig().IsEnableRegionBucket())
+	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
@@ -1059,7 +1084,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.coordinator.GetSchedulersController().CheckTransferWitnessLeader(region)
 
 	hasRegionStats := c.regionStats != nil
-	// Save to storage if meta is updated.
+	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
@@ -2536,10 +2561,29 @@ func (c *RaftCluster) GetMinResolvedTS() uint64 {
 func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	if !c.isInitialized() || !core.IsAvailableForMinResolvedTS(c.GetStore(storeID)) {
+	store := c.GetStore(storeID)
+	if store == nil {
 		return math.MaxUint64
 	}
-	return c.GetStore(storeID).GetMinResolvedTS()
+	if !c.isInitialized() || !core.IsAvailableForMinResolvedTS(store) {
+		return math.MaxUint64
+	}
+	return store.GetMinResolvedTS()
+}
+
+// GetMinResolvedTSByStoreIDs returns the min_resolved_ts for each store
+// and returns the min_resolved_ts for all given store lists.
+func (c *RaftCluster) GetMinResolvedTSByStoreIDs(ids []uint64) (uint64, map[uint64]uint64) {
+	minResolvedTS := uint64(math.MaxUint64)
+	storesMinResolvedTS := make(map[uint64]uint64)
+	for _, storeID := range ids {
+		storeTS := c.GetStoreMinResolvedTS(storeID)
+		storesMinResolvedTS[storeID] = storeTS
+		if minResolvedTS > storeTS {
+			minResolvedTS = storeTS
+		}
+	}
+	return minResolvedTS, storesMinResolvedTS
 }
 
 // GetExternalTS returns the external timestamp.

@@ -19,6 +19,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -89,14 +90,15 @@ func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams
 	ctx, cancel := context.WithCancel(ctx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
+	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
 	return &Coordinator{
 		ctx:               ctx,
 		cancel:            cancel,
 		cluster:           cluster,
 		prepareChecker:    newPrepareChecker(),
-		checkers:          checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController),
-		regionScatterer:   scatter.NewRegionScatterer(ctx, cluster, opController),
-		regionSplitter:    splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController)),
+		checkers:          checkers,
+		regionScatterer:   scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddSuspectRegions),
+		regionSplitter:    splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddSuspectRegions),
 		schedulers:        schedulers,
 		opController:      opController,
 		hbStreams:         hbStreams,
@@ -168,7 +170,7 @@ func (c *Coordinator) PatrolRegions() {
 }
 
 func (c *Coordinator) isSchedulingHalted() bool {
-	return c.cluster.GetPersistOptions().IsSchedulingHalted()
+	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
@@ -374,8 +376,7 @@ func (c *Coordinator) initSchedulers() {
 	if err != nil {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
-
-	scheduleCfg := c.cluster.GetPersistOptions().GetScheduleConfig().Clone()
+	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
 		data := configs[i]
@@ -434,9 +435,23 @@ func (c *Coordinator) initSchedulers() {
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetPersistOptions().SetScheduleConfig(scheduleCfg)
-	if err := c.cluster.GetPersistOptions().Persist(c.cluster.GetStorage()); err != nil {
+	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
+	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
+	}
+
+	// If the cluster was set up with `raft-kv2` engine, this cluster should
+	// enable `evict-slow-trend` scheduler as default.
+	if c.GetCluster().GetStoreConfig().IsRaftKV2() {
+		name := schedulers.EvictSlowTrendType
+		args := []string{}
+
+		s, err := schedulers.CreateScheduler(name, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(name, args), c.schedulers.RemoveScheduler)
+		if err != nil {
+			log.Warn("initializing evict-slow-trend scheduler failed", errs.ZapError(err))
+		} else if err = c.schedulers.AddScheduler(s, args...); err != nil {
+			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
+		}
 	}
 }
 
@@ -624,7 +639,11 @@ func (c *Coordinator) ResetHotSpotMetrics() {
 
 // ShouldRun returns true if the coordinator should run.
 func (c *Coordinator) ShouldRun() bool {
-	return c.prepareChecker.check(c.cluster.GetBasicCluster())
+	isSynced := c.cluster.GetStoreConfig().IsSynced()
+	if testing.Testing() {
+		isSynced = true
+	}
+	return c.prepareChecker.check(c.cluster.GetBasicCluster()) && isSynced
 }
 
 // GetSchedulersController returns the schedulers controller.

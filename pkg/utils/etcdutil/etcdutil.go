@@ -107,6 +107,10 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 
 // ListEtcdMembers returns a list of internal etcd members.
 func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	failpoint.Inject("SlowEtcdMemberList", func(val failpoint.Value) {
+		d := val.(int)
+		time.Sleep(time.Duration(d) * time.Second)
+	})
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	listResp, err := client.MemberList(ctx)
 	cancel()
@@ -133,6 +137,10 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	defer cancel()
 
 	start := time.Now()
+	failpoint.Inject("SlowEtcdKVGet", func(val failpoint.Value) {
+		d := val.(int)
+		time.Sleep(time.Duration(d) * time.Second)
+	})
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
@@ -271,7 +279,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
-				log.Info("[etcd client] etcd client is closed, exit health check goroutine")
+				log.Info("etcd client is closed, exit health check goroutine")
 				checker.Range(func(key, value interface{}) bool {
 					client := value.(*healthyClient)
 					client.Close()
@@ -288,7 +296,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 					// otherwise, the subconn will be retrying in grpc layer and use exponential backoff,
 					// and it cannot recover as soon as possible.
 					if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
-						log.Info("[etcd client] no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
+						log.Info("no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
 						client.SetEndpoints([]string{}...)
 						client.SetEndpoints(usedEps...)
 					}
@@ -297,7 +305,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 						client.SetEndpoints(healthyEps...)
 						change := fmt.Sprintf("%d->%d", len(usedEps), len(healthyEps))
 						etcdStateGauge.WithLabelValues("endpoints").Set(float64(len(healthyEps)))
-						log.Info("[etcd client] update endpoints", zap.String("num-change", change),
+						log.Info("update endpoints", zap.String("num-change", change),
 							zap.Strings("last-endpoints", usedEps), zap.Strings("endpoints", client.Endpoints()))
 					}
 					lastAvailable = time.Now()
@@ -314,7 +322,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
-				log.Info("[etcd client] etcd client is closed, exit update endpoint goroutine")
+				log.Info("etcd client is closed, exit update endpoint goroutine")
 				return
 			case <-ticker.C:
 				eps := syncUrls(client)
@@ -378,7 +386,7 @@ func (checker *healthyChecker) update(eps []string) {
 		if client, ok := checker.Load(ep); ok {
 			lastHealthy := client.(*healthyClient).lastHealth
 			if time.Since(lastHealthy) > etcdServerOfflineTimeout {
-				log.Info("[etcd client] some etcd server maybe offline", zap.String("endpoint", ep))
+				log.Info("some etcd server maybe offline", zap.String("endpoint", ep))
 				checker.Delete(ep)
 			}
 			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
@@ -395,7 +403,7 @@ func (checker *healthyChecker) update(eps []string) {
 func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
 	client, err := newClient(checker.tlsConfig, ep)
 	if err != nil {
-		log.Error("[etcd client] failed to create etcd healthy client", zap.Error(err))
+		log.Error("failed to create etcd healthy client", zap.Error(err))
 		return
 	}
 	checker.Store(ep, &healthyClient{
@@ -410,7 +418,7 @@ func syncUrls(client *clientv3.Client) []string {
 	defer cancel()
 	mresp, err := client.MemberList(ctx)
 	if err != nil {
-		log.Error("[etcd client] failed to list members", errs.ZapError(err))
+		log.Error("failed to list members", errs.ZapError(err))
 		return []string{}
 	}
 	var eps []string

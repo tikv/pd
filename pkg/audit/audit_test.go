@@ -103,7 +103,7 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 	b, _ := os.ReadFile(fname)
 	output := strings.SplitN(string(b), "]", 4)
 	re.Equal(
-		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
+		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, Port:, "+
 			"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
 			time.Unix(info.StartTimeStamp, 0).String()),
 		output[3],

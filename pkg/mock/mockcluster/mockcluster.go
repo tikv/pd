@@ -84,22 +84,32 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 
 // GetStoreConfig returns the store config.
 func (mc *Cluster) GetStoreConfig() sc.StoreConfigProvider {
-	return mc
+	return mc.PersistOptions.GetStoreConfig()
+}
+
+// SetRegionBucketEnabled sets the region bucket enabled.
+func (mc *Cluster) SetRegionBucketEnabled(enabled bool) {
+	cfg, ok := mc.GetStoreConfig().(*sc.StoreConfig)
+	if !ok || cfg == nil {
+		return
+	}
+	cfg.Coprocessor.EnableRegionBucket = enabled
+	mc.SetStoreConfig(cfg)
 }
 
 // GetCheckerConfig returns the checker config.
 func (mc *Cluster) GetCheckerConfig() sc.CheckerConfigProvider {
-	return mc
+	return mc.PersistOptions
 }
 
 // GetSchedulerConfig returns the scheduler config.
 func (mc *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider {
-	return mc
+	return mc.PersistOptions
 }
 
 // GetSharedConfig returns the shared config.
 func (mc *Cluster) GetSharedConfig() sc.SharedConfigProvider {
-	return mc
+	return mc.PersistOptions
 }
 
 // GetStorage returns the storage.
@@ -110,11 +120,6 @@ func (mc *Cluster) GetStorage() storage.Storage {
 // AllocID returns a new unique ID.
 func (mc *Cluster) AllocID() (uint64, error) {
 	return mc.IDAllocator.Alloc()
-}
-
-// GetPersistOptions returns the persist options.
-func (mc *Cluster) GetPersistOptions() *config.PersistOptions {
-	return mc.PersistOptions
 }
 
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.

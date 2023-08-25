@@ -68,6 +68,9 @@ type SchedulerConfigProvider interface {
 	IsDebugMetricsEnabled() bool
 	IsDiagnosticAllowed() bool
 	GetSlowStoreEvictingAffectedStoreRatioThreshold() float64
+
+	GetScheduleConfig() *ScheduleConfig
+	SetScheduleConfig(*ScheduleConfig)
 }
 
 // CheckerConfigProvider is the interface for checker configurations.
@@ -111,6 +114,7 @@ type SharedConfigProvider interface {
 	GetStoreLimitByType(uint64, storelimit.Type) float64
 	IsWitnessAllowed() bool
 	IsPlacementRulesCacheEnabled() bool
+	SetHaltScheduling(bool, string)
 
 	// for test purpose
 	SetPlacementRulesCacheEnabled(bool)
@@ -126,9 +130,7 @@ type ConfProvider interface {
 	SetPlacementRuleEnabled(bool)
 	SetSplitMergeInterval(time.Duration)
 	SetMaxReplicas(int)
-	SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
-	// only for store configuration
-	UseRaftV2()
+	SetAllStoresLimit(storelimit.Type, float64)
 }
 
 // StoreConfigProvider is the interface that wraps the StoreConfigProvider related methods.
@@ -137,7 +139,7 @@ type StoreConfigProvider interface {
 	GetRegionMaxKeys() uint64
 	CheckRegionSize(uint64, uint64) error
 	CheckRegionKeys(uint64, uint64) error
+	IsSynced() bool
 	IsEnableRegionBucket() bool
-	// for test purpose
-	SetRegionBucketEnabled(bool)
+	IsRaftKV2() bool
 }

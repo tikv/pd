@@ -67,7 +67,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.keyspace.Store(&cfg.Keyspace)
 	// storeConfig will be fetched from TiKV later,
 	// set it to an empty config here first.
-	o.storeConfig.Store(&StoreConfig{})
+	o.storeConfig.Store(&sc.StoreConfig{})
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.ttl = nil
 	return o
@@ -134,12 +134,12 @@ func (o *PersistOptions) SetKeyspaceConfig(cfg *KeyspaceConfig) {
 }
 
 // GetStoreConfig returns the store config.
-func (o *PersistOptions) GetStoreConfig() *StoreConfig {
-	return o.storeConfig.Load().(*StoreConfig)
+func (o *PersistOptions) GetStoreConfig() *sc.StoreConfig {
+	return o.storeConfig.Load().(*sc.StoreConfig)
 }
 
 // SetStoreConfig sets the store configuration.
-func (o *PersistOptions) SetStoreConfig(cfg *StoreConfig) {
+func (o *PersistOptions) SetStoreConfig(cfg *sc.StoreConfig) {
 	o.storeConfig.Store(cfg)
 }
 
@@ -215,9 +215,6 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 	v.MaxReplicas = uint64(replicas)
 	o.SetReplicationConfig(v)
 }
-
-// UseRaftV2 set some config for raft store v2 by default temporary.
-func (o *PersistOptions) UseRaftV2() {}
 
 const (
 	maxSnapshotCountKey            = "schedule.max-snapshot-count"
@@ -616,14 +613,14 @@ func (o *PersistOptions) IsRemoveExtraReplicaEnabled() bool {
 	return o.GetScheduleConfig().EnableRemoveExtraReplica
 }
 
-// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
-func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
-	return o.getTTLBoolOr(enableTiKVSplitRegion, o.GetScheduleConfig().EnableTiKVSplitRegion)
-}
-
 // IsLocationReplacementEnabled returns if location replace is enabled.
 func (o *PersistOptions) IsLocationReplacementEnabled() bool {
 	return o.getTTLBoolOr(enableLocationReplacement, o.GetScheduleConfig().EnableLocationReplacement)
+}
+
+// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
+func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
+	return o.getTTLBoolOr(enableTiKVSplitRegion, o.GetScheduleConfig().EnableTiKVSplitRegion)
 }
 
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
@@ -762,7 +759,7 @@ func (o *PersistOptions) DeleteLabelProperty(typ, labelKey, labelValue string) {
 type persistedConfig struct {
 	*Config
 	// StoreConfig is injected into Config to avoid breaking the original API.
-	StoreConfig StoreConfig `json:"store"`
+	StoreConfig sc.StoreConfig `json:"store"`
 }
 
 // Persist saves the configuration to the storage.
@@ -1013,6 +1010,11 @@ func (o *PersistOptions) CheckRegionSize(size, mergeSize uint64) error {
 // CheckRegionKeys return error if the smallest region's keys is less than mergeKeys
 func (o *PersistOptions) CheckRegionKeys(keys, mergeKeys uint64) error {
 	return o.GetStoreConfig().CheckRegionKeys(keys, mergeKeys)
+}
+
+// IsSynced returns true if the store config is synced.
+func (o *PersistOptions) IsSynced() bool {
+	return o.GetStoreConfig().IsSynced()
 }
 
 // IsEnableRegionBucket return true if the region bucket is enabled.

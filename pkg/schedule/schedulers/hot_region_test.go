@@ -247,7 +247,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
 	})
-	tc.GetStoreConfig().SetRegionBucketEnabled(true)
+	tc.SetRegionBucketEnabled(true)
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	expectOp, _ := operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
@@ -283,7 +283,7 @@ func TestSplitBucketsBySize(t *testing.T) {
 	statistics.Denoising = false
 	cancel, _, tc, oc := prepareSchedulersTest()
 	tc.SetHotRegionCacheHitsThreshold(1)
-	tc.GetStoreConfig().SetRegionBucketEnabled(true)
+	tc.SetRegionBucketEnabled(true)
 	defer cancel()
 	hb, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -336,7 +336,7 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	statistics.Denoising = false
 	cancel, _, tc, oc := prepareSchedulersTest()
 	tc.SetHotRegionCacheHitsThreshold(1)
-	tc.GetStoreConfig().SetRegionBucketEnabled(true)
+	tc.SetRegionBucketEnabled(true)
 	defer cancel()
 	hb, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
