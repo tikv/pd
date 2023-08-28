@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,8 +41,7 @@ func TestExponentialBackoff(t *testing.T) {
 	// Reset backoff
 	backoff.ResetBackoff()
 	err := WithBackoff(context.Background(), func() error {
-		return nil
+		return errors.New("test")
 	}, &backoff)
-	re.Nil(err)
-
+	re.Error(err)
 }

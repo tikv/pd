@@ -24,8 +24,9 @@ import (
 
 // BackOffer is a backoff policy for retrying operations.
 type BackOffer struct {
-	maxBackoff  time.Duration
-	nextBackoff time.Duration
+	maxBackoff     time.Duration
+	nextBackoff    time.Duration
+	initialBackoff time.Duration
 }
 
 // WithBackoff is a helper function to add backoff.
@@ -56,18 +57,19 @@ func WithBackoff(
 // InitialBackOffer make the initial state for retrying.
 func InitialBackOffer(initialBackoff, maxBackoff time.Duration) BackOffer {
 	return BackOffer{
-		maxBackoff:  maxBackoff,
-		nextBackoff: initialBackoff,
+		maxBackoff:     maxBackoff,
+		initialBackoff: initialBackoff,
+		nextBackoff:    initialBackoff,
 	}
 }
 
-// NextBackoff implements the `Backoffer`, for now use the `ExponentialBackoff`.
+// NextBackoff for now use the `exponentialBackoff`.
 func (rs *BackOffer) NextBackoff() time.Duration {
-	return rs.ExponentialBackoff()
+	return rs.exponentialBackoff()
 }
 
-// ExponentialBackoff Get the exponential backoff duration.
-func (rs *BackOffer) ExponentialBackoff() time.Duration {
+// exponentialBackoff Get the exponential backoff duration.
+func (rs *BackOffer) exponentialBackoff() time.Duration {
 	backoff := rs.nextBackoff
 	rs.nextBackoff *= 2
 	if rs.nextBackoff > rs.maxBackoff {
@@ -78,7 +80,7 @@ func (rs *BackOffer) ExponentialBackoff() time.Duration {
 
 // ResetBackoff reset the backoff to initial state.
 func (rs *BackOffer) ResetBackoff() {
-	rs.nextBackoff = 0
+	rs.nextBackoff = rs.initialBackoff
 }
 
 // Only used for test.

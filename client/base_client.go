@@ -140,7 +140,7 @@ func (c *baseClient) memberLoop() {
 		case <-c.checkLeaderCh:
 		case <-ticker.C:
 		case <-ctx.Done():
-			log.Info("[pd.reconnectLoop] exit reconnectLoop")
+			log.Info("[pd.memberLoop] exit memberLoop")
 			return
 		}
 		failpoint.Inject("skipUpdateMember", func() {
