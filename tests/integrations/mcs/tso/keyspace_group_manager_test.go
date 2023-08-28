@@ -782,8 +782,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 	groups := handlersutil.MustLoadKeyspaceGroups(re, suite.pdLeaderServer, "0", "0")
 	re.Len(groups, keyspaceGroupNum+1)
 	// Wait for all the keyspace groups to be served.
+	// Check if the first keyspace group is served.
 	svr := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
 	re.NotNil(svr)
+	// Check if the last keyspace group is served.
 	svr = suite.tsoCluster.WaitForPrimaryServing(re, uint32(keyspaceGroupNum), uint32(keyspaceGroupNum))
 	re.NotNil(svr)
 	// Merge all the keyspace groups into the default keyspace group.
