@@ -1326,11 +1326,11 @@ func (suite *clientTestSuite) TestScatterRegion() {
 			Leader: peers[0],
 		}
 		err := suite.regionHeartbeat.Send(req)
+		suite.NoError(err)
 		return regionID
 	}
-	var regionID int = CreateRegion()
+	var regionID uint64 = CreateRegion()
 	regionsID := []uint64{regionID}
-	suite.NoError(err)
 	// Test interface `ScatterRegions`.
 	re := suite.Require()
 	testutil.Eventually(re, func() bool {
@@ -1354,7 +1354,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 	// TODO: Deprecate interface `ScatterRegion`.
 	// create a new region as scatter operation from previous test might be running
 
-	regionID := CreateRegion()
+	regionID = CreateRegion()
 	testutil.Eventually(re, func() bool {
 		err := suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
