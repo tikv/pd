@@ -387,7 +387,7 @@ func (c *Coordinator) Run() {
 	// Checks suspect key ranges
 	go c.checkSuspectRanges()
 	go c.drivePushOperator()
-	// // Checks whether to create evict-slow-trend scheduler.
+	// Checks whether to create evict-slow-trend scheduler.
 	go c.driveSlowNodeScheduler()
 }
 
