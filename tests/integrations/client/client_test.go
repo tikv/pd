@@ -1307,28 +1307,27 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 	suite.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
 }
 
-func (suite *clientTestSuite) CreateRegion() int {
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers:    peers,
-		StartKey: []byte("fff"),
-		EndKey:   []byte("ggg"),
-	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(suite.srv),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := suite.regionHeartbeat.Send(req)
-	return regionID
-}
-
 func (suite *clientTestSuite) TestScatterRegion() {
+	CreateRegion := func() int {
+		regionID := regionIDAllocator.alloc()
+		region := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			Peers:    peers,
+			StartKey: []byte("fff"),
+			EndKey:   []byte("ggg"),
+		}
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(suite.srv),
+			Region: region,
+			Leader: peers[0],
+		}
+		err := suite.regionHeartbeat.Send(req)
+		return regionID
+	}
 	var regionID int = CreateRegion()
 	regionsID := []uint64{regionID}
 	suite.NoError(err)
