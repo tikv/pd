@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -765,6 +766,7 @@ func (c *client) handleDispatcher(
 
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
+	bo := retry.InitialBackOffer(100*time.Millisecond, updateMemberTimeout)
 tsoBatchLoop:
 	for {
 		select {
@@ -861,7 +863,7 @@ tsoBatchLoop:
 			stream = nil
 			// Because ScheduleCheckLeader is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
-				if err := c.updateMember(); err != nil {
+				if err := retry.WithBackoff(dispatcherCtx, c.updateMember, &bo); err != nil {
 					select {
 					case <-dispatcherCtx.Done():
 						return
@@ -885,7 +887,7 @@ func (c *client) allowTSOFollowerProxy(dc string) bool {
 }
 
 // chooseStream uses the reservoir sampling algorithm to randomly choose a connection.
-// connectionCtxs will only have only one stream to choose when the TSO Follower Proxy is off.
+// connectionCtxs will only have one stream to choose when the TSO Follower Proxy is off.
 func (c *client) chooseStream(connectionCtxs *sync.Map) (connectionCtx *connectionContext) {
 	idx := 0
 	connectionCtxs.Range(func(addr, cc interface{}) bool {

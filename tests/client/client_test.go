@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
@@ -1437,16 +1438,16 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/backOffExecute", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/retry/backOffExecute", `return(true)`))
 	leader2 := waitLeaderChange(re, cluster, leader, cli.(client))
-	re.True(pd.TestBackOffExecute())
+	re.True(retry.TestBackOffExecute())
 
 	re.NotEqual(leader, leader2)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/backOffExecute"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/retry/backOffExecute"))
 }
 
 func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli client) string {

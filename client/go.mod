@@ -12,6 +12,7 @@ require (
 	github.com/prometheus/client_golang v1.11.1
 	github.com/stretchr/testify v1.7.0
 	go.uber.org/goleak v1.1.11
+	go.uber.org/multierr v1.7.0
 	go.uber.org/zap v1.20.0
 	golang.org/x/text v0.3.8 // indirect
 	google.golang.org/grpc v1.43.0

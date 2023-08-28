@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -133,11 +134,7 @@ func (c *baseClient) memberLoop() {
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
 
-	// max retry backoff time is 1 * Second
-	// recalculate backoff time: (2+4+8+10*n)*100 = 1.4+1*n(s)
-	backOffBaseTime := 100 * time.Millisecond
-	backOffTime := backOffBaseTime
-
+	bo := retry.InitialBackOffer(100*time.Millisecond, updateMemberTimeout)
 	for {
 		select {
 		case <-c.checkLeaderCh:
@@ -149,34 +146,11 @@ func (c *baseClient) memberLoop() {
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
 		})
-		if err := c.updateMember(); err != nil {
-			log.Error("[pd] failed updateMember", errs.ZapError(err))
-			if backOffTime > updateMemberTimeout {
-				backOffTime = updateMemberTimeout
-			} else {
-				backOffTime *= 2
-			}
-			select {
-			case <-time.After(backOffTime):
-				failpoint.Inject("backOffExecute", func() {
-					testBackOffExecuteFlag = true
-				})
-			case <-ctx.Done():
-				log.Info("[pd.reconnectLoop] exit backOff")
-				return
-			}
-		} else {
-			backOffTime = backOffBaseTime
+
+		if err := retry.WithBackoff(ctx, c.updateMember, &bo); err != nil {
+			log.Info("[pd] failed update member with retry", errs.ZapError(err))
 		}
 	}
-}
-
-// Only used for test.
-var testBackOffExecuteFlag = false
-
-// TestBackOffExecute Only used for test.
-func TestBackOffExecute() bool {
-	return testBackOffExecuteFlag
 }
 
 // ScheduleCheckLeader is used to check leader.
