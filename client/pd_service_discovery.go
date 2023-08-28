@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -239,9 +240,11 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
 
+	bo := retry.InitialBackOffer(100*time.Millisecond, updateMemberTimeout)
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("[pd.updateMemberLoop] exit updateMemberLoop")
 			return
 		case <-ticker.C:
 		case <-c.checkMembershipCh:
@@ -249,7 +252,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
 		})
-		if err := c.updateMember(); err != nil {
+		if err := retry.WithBackoff(ctx, c.updateMember, &bo); err != nil {
 			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
 	}
@@ -319,7 +322,7 @@ func (c *pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
 	return defaultKeySpaceGroupID
 }
 
-// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
+// DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.
 func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) (urls []string, err error) {
 	switch svcType {
 	case apiService:
@@ -386,7 +389,7 @@ func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
 	}
 }
 
-// Immediately check if there is any membership change among the leader/followers in a
+// CheckMemberChanged Immediately check if there is any membership change among the leader/followers in a
 // quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 func (c *pdServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()

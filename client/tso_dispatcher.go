@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/timerpool"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
@@ -389,6 +390,7 @@ func (c *tsoClient) handleDispatcher(
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
 	defer streamLoopTimer.Stop()
+	bo := retry.InitialBackOffer(100*time.Millisecond, updateMemberTimeout)
 tsoBatchLoop:
 	for {
 		select {
@@ -498,7 +500,7 @@ tsoBatchLoop:
 			stream = nil
 			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
-				if err := c.svcDiscovery.CheckMemberChanged(); err != nil {
+				if err := retry.WithBackoff(dispatcherCtx, c.svcDiscovery.CheckMemberChanged, &bo); err != nil {
 					select {
 					case <-dispatcherCtx.Done():
 						return

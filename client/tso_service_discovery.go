@@ -351,7 +351,7 @@ func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 	}
 }
 
-// Immediately check if there is any membership change among the primary/secondaries in
+// CheckMemberChanged Immediately check if there is any membership change among the primary/secondaries in
 // a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	c.apiSvcDiscovery.CheckMemberChanged()
