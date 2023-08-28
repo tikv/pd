@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"runtime"
 	"runtime/trace"
 	"strconv"
 	"strings"
@@ -278,6 +279,17 @@ func (s *GrpcServer) getMinTSFromSingleServer(
 
 // GetMembers implements gRPC PDServer.
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if limiter.Allow(fName) {
+			defer limiter.Release(fName)
+		} else {
+			return &pdpb.GetMembersResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
+			}, nil
+		}
+	}
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
@@ -760,6 +772,17 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, request *pdpb.IsS
 
 // GetStore implements gRPC PDServer.
 func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest) (*pdpb.GetStoreResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if limiter.Allow(fName) {
+			defer limiter.Release(fName)
+		} else {
+			return &pdpb.GetStoreResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
+			}, nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetStore(ctx, request)
 	}
@@ -852,6 +875,17 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 
 // GetAllStores implements gRPC PDServer.
 func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStoresRequest) (*pdpb.GetAllStoresResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if limiter.Allow(fName) {
+			defer limiter.Release(fName)
+		} else {
+			return &pdpb.GetAllStoresResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
+			}, nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetAllStores(ctx, request)
 	}
@@ -886,6 +920,17 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 
 // StoreHeartbeat implements gRPC PDServer.
 func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if limiter.Allow(fName) {
+			defer limiter.Release(fName)
+		} else {
+			return &pdpb.StoreHeartbeatResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
+			}, nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).StoreHeartbeat(ctx, request)
 	}
@@ -1256,6 +1301,17 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 
 // GetRegion implements gRPC PDServer.
 func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if limiter.Allow(fName) {
+			defer limiter.Release(fName)
+		} else {
+			return &pdpb.GetRegionResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
+			}, nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetRegion(ctx, request)
 	}
@@ -1289,6 +1345,17 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 
 // GetPrevRegion implements gRPC PDServer
 func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if limiter.Allow(fName) {
+			defer limiter.Release(fName)
+		} else {
+			return &pdpb.GetRegionResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
+			}, nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetPrevRegion(ctx, request)
 	}
@@ -1323,6 +1390,17 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 
 // GetRegionByID implements gRPC PDServer.
 func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if limiter.Allow(fName) {
+			defer limiter.Release(fName)
+		} else {
+			return &pdpb.GetRegionResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
+			}, nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetRegionByID(ctx, request)
 	}
@@ -1356,6 +1434,17 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 
 // ScanRegions implements gRPC PDServer.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if limiter.Allow(fName) {
+			defer limiter.Release(fName)
+		} else {
+			return &pdpb.ScanRegionsResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
+			}, nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
 	}
@@ -2124,7 +2213,7 @@ func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
 func (s *GrpcServer) createHeartbeatForwardStream(client *grpc.ClientConn) (pdpb.PD_RegionHeartbeatClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
-	go checkStream(ctx, cancel, done)
+	go grpcutil.CheckStream(ctx, cancel, done)
 	forwardStream, err := pdpb.NewPDClient(client).RegionHeartbeat(ctx)
 	done <- struct{}{}
 	return forwardStream, cancel, err
@@ -2151,7 +2240,7 @@ func (s *GrpcServer) createTSOForwardStream(
 ) (tsopb.TSO_TsoClient, context.Context, context.CancelFunc, error) {
 	done := make(chan struct{})
 	forwardCtx, cancelForward := context.WithCancel(ctx)
-	go checkStream(forwardCtx, cancelForward, done)
+	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
 	forwardStream, err := tsopb.NewTSOClient(client).Tso(forwardCtx)
 	done <- struct{}{}
 	return forwardStream, forwardCtx, cancelForward, err
@@ -2160,7 +2249,7 @@ func (s *GrpcServer) createTSOForwardStream(
 func (s *GrpcServer) createReportBucketsForwardStream(client *grpc.ClientConn) (pdpb.PD_ReportBucketsClient, context.CancelFunc, error) {
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
-	go checkStream(ctx, cancel, done)
+	go grpcutil.CheckStream(ctx, cancel, done)
 	forwardStream, err := pdpb.NewPDClient(client).ReportBuckets(ctx)
 	done <- struct{}{}
 	return forwardStream, cancel, err
@@ -2180,21 +2269,6 @@ func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient
 			return
 		}
 	}
-}
-
-// TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
-func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
-	defer logutil.LogPanic()
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-done:
-		return
-	case <-timer.C:
-		cancel()
-	case <-streamCtx.Done():
-	}
-	<-done
 }
 
 func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
@@ -2269,7 +2343,7 @@ func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoCli
 	}
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
-	go checkStream(ctx, cancel, done)
+	go grpcutil.CheckStream(ctx, cancel, done)
 	forwardStream, err = tsopb.NewTSOClient(client).Tso(ctx)
 	done <- struct{}{}
 	if err != nil {
@@ -2529,4 +2603,10 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 		Header:    s.header(),
 		Timestamp: timestamp,
 	}, nil
+}
+
+func currentFunction() string {
+	counter, _, _, _ := runtime.Caller(1)
+	s := strings.Split(runtime.FuncForPC(counter).Name(), ".")
+	return s[len(s)-1]
 }

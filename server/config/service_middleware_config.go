@@ -17,14 +17,16 @@ package config
 import "github.com/tikv/pd/pkg/ratelimit"
 
 const (
-	defaultEnableAuditMiddleware     = true
-	defaultEnableRateLimitMiddleware = false
+	defaultEnableAuditMiddleware         = true
+	defaultEnableRateLimitMiddleware     = false
+	defaultEnableGRPCRateLimitMiddleware = false
 )
 
 // ServiceMiddlewareConfig is the configuration for PD Service middleware.
 type ServiceMiddlewareConfig struct {
-	AuditConfig     `json:"audit"`
-	RateLimitConfig `json:"rate-limit"`
+	AuditConfig         `json:"audit"`
+	RateLimitConfig     `json:"rate-limit"`
+	GRPCRateLimitConfig `json:"grpc-rate-limit"`
 }
 
 // NewServiceMiddlewareConfig returns a new service middleware config
@@ -32,13 +34,18 @@ func NewServiceMiddlewareConfig() *ServiceMiddlewareConfig {
 	audit := AuditConfig{
 		EnableAudit: defaultEnableAuditMiddleware,
 	}
-	ratelimit := RateLimitConfig{
+	rateLimit := RateLimitConfig{
+		EnableRateLimit: defaultEnableRateLimitMiddleware,
+		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+	}
+	grpcRateLimit := GRPCRateLimitConfig{
 		EnableRateLimit: defaultEnableRateLimitMiddleware,
 		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
 	}
 	cfg := &ServiceMiddlewareConfig{
-		AuditConfig:     audit,
-		RateLimitConfig: ratelimit,
+		AuditConfig:         audit,
+		RateLimitConfig:     rateLimit,
+		GRPCRateLimitConfig: grpcRateLimit,
 	}
 	return cfg
 }
@@ -71,6 +78,20 @@ type RateLimitConfig struct {
 
 // Clone returns a cloned rate limit config.
 func (c *RateLimitConfig) Clone() *RateLimitConfig {
+	cfg := *c
+	return &cfg
+}
+
+// GRPCRateLimitConfig is the configuration for gRPC rate limit
+type GRPCRateLimitConfig struct {
+	// EnableRateLimit controls the switch of the rate limit middleware
+	EnableRateLimit bool `json:"enable-grpc-rate-limit,string"`
+	// RateLimitConfig is the config of rate limit middleware
+	LimiterConfig map[string]ratelimit.DimensionConfig `json:"grpc-limiter-config"`
+}
+
+// Clone returns a cloned rate limit config.
+func (c *GRPCRateLimitConfig) Clone() *GRPCRateLimitConfig {
 	cfg := *c
 	return &cfg
 }

@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -328,6 +329,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.wg.Add(10)
+	go c.runStoreConfigSync()
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -335,7 +337,6 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.syncRegions()
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
-	go c.runStoreConfigSync()
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 
@@ -421,7 +422,10 @@ func (c *RaftCluster) runStoreConfigSync() {
 		synced, switchRaftV2Config bool
 		stores                     = c.GetStores()
 	)
-	ticker := time.NewTicker(time.Minute)
+	// Start the ticker with a second-level timer to accelerate
+	// the bootstrap stage.
+	init := false
+	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
 		synced, switchRaftV2Config = c.syncStoreConfig(stores)
@@ -435,6 +439,13 @@ func (c *RaftCluster) runStoreConfigSync() {
 			stores = c.GetStores()
 		} else if err := c.opt.Persist(c.storage); err != nil {
 			log.Warn("store config persisted failed", zap.Error(err))
+		}
+		// If the config has been synced, the interval should be added
+		// up to minute level.
+		if testing.Testing() || (!init && c.opt.GetStoreConfig().IsSynced()) {
+			init = true
+			ticker.Stop()
+			ticker = time.NewTicker(time.Minute)
 		}
 		select {
 		case <-c.ctx.Done():
@@ -494,7 +505,7 @@ func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (b
 		return false, err
 	}
 	oldCfg := c.opt.GetStoreConfig()
-	if cfg == nil || oldCfg.Equal(cfg) {
+	if cfg == nil || (oldCfg.IsSynced() && oldCfg.Equal(cfg)) {
 		return false, nil
 	}
 	log.Info("sync the store config successful",
@@ -507,6 +518,8 @@ func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (b
 // updateStoreConfig updates the store config. This is extracted for testing.
 func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *sc.StoreConfig) (bool, error) {
 	cfg.Adjust()
+	// Mark config has been synced.
+	cfg.SetSynced()
 	c.opt.SetStoreConfig(cfg)
 	return oldCfg.Storage.Engine != sc.RaftstoreV2 && cfg.Storage.Engine == sc.RaftstoreV2, nil
 }
