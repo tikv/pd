@@ -90,7 +90,7 @@ type HistoryHotRegion struct {
 
 // HotRegionStorageHandler help hot region storage get hot region info.
 type HotRegionStorageHandler interface {
-	// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion form.
+	// PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
 	PackHistoryHotReadRegions() ([]HistoryHotRegion, error)
 	// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
 	PackHistoryHotWriteRegions() ([]HistoryHotRegion, error)
