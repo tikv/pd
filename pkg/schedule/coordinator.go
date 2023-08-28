@@ -326,6 +326,10 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 			return
 		case <-ticker.C:
 			{
+				// If enabled, exit.
+				if exists, _ := c.schedulers.IsSchedulerExisted(schedulers.EvictSlowTrendName); exists {
+					return
+				}
 				// If the cluster was set up with `raft-kv2` engine, this cluster should
 				// enable `evict-slow-trend` scheduler as default.
 				if c.GetCluster().GetStoreConfig().IsRaftKV2() {
@@ -337,10 +341,6 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 						log.Warn("initializing evict-slow-trend scheduler failed", errs.ZapError(err))
 					} else if err = c.schedulers.AddScheduler(s, args...); err != nil {
 						log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
-					}
-					// If enabled, exit.
-					if exists, _ := c.schedulers.IsSchedulerExisted(schedulers.EvictSlowTrendName); exists {
-						return
 					}
 				}
 			}
