@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/assertutil"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/testutil"
@@ -1414,4 +1415,50 @@ func (suite *clientTestSuite) TestScatterRegion() {
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
 	}, testutil.WithTickInterval(time.Second))
+}
+
+func (suite *clientTestSuite) TestMemberUpdateBackOff() {
+	re := suite.Require()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(re, ctx, endpoints)
+	defer cli.Close()
+
+	leader := cluster.GetLeader()
+	waitLeader(re, cli.(client), cluster.GetServer(leader).GetConfig().ClientUrls)
+	memberID := cluster.GetServer(leader).GetLeader().GetMemberId()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
+	// make sure back off executed.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/retry/backOffExecute", `return(true)`))
+	leader2 := waitLeaderChange(re, cluster, leader, cli.(client))
+	re.True(retry.TestBackOffExecute())
+
+	re.NotEqual(leader, leader2)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/retry/backOffExecute"))
+}
+
+func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli client) string {
+	var leader string
+	testutil.Eventually(re, func() bool {
+		cli.ScheduleCheckLeader()
+		leader = cluster.GetLeader()
+		if leader == old || leader == "" {
+			return false
+		}
+		return true
+	})
+	return leader
 }
