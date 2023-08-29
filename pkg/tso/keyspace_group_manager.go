@@ -137,6 +137,13 @@ func (s *state) getDeletedGroups() []uint32 {
 	return groups
 }
 
+// getDeletedGroupNum returns the number of the deleted keyspace groups.
+func (s *state) getDeletedGroupNum() int {
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.deletedGroups)
+}
+
 func (s *state) checkTSOSplit(
 	targetGroupID uint32,
 ) (splitTargetAM, splitSourceAM *AllocatorManager, err error) {
@@ -460,10 +467,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		func() error { return nil },
 		clientv3.WithRange(tsoServiceEndKey),
 	)
-
-	kgm.wg.Add(1)
-	go kgm.tsoNodesWatcher.StartWatchLoop()
-
+	kgm.tsoNodesWatcher.StartWatchLoop()
 	if err := kgm.tsoNodesWatcher.WaitLoad(); err != nil {
 		log.Error("failed to load the registered tso servers", errs.ZapError(err))
 		return err
@@ -530,10 +534,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	if kgm.loadKeyspaceGroupsBatchSize > 0 {
 		kgm.groupWatcher.SetLoadBatchSize(kgm.loadKeyspaceGroupsBatchSize)
 	}
-
-	kgm.wg.Add(1)
-	go kgm.groupWatcher.StartWatchLoop()
-
+	kgm.groupWatcher.StartWatchLoop()
 	if err := kgm.groupWatcher.WaitLoad(); err != nil {
 		log.Error("failed to initialize keyspace group manager", errs.ZapError(err))
 		// We might have partially loaded/initialized the keyspace groups. Close the manager to clean up.
@@ -685,7 +686,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	participant := member.NewParticipant(kgm.etcdClient)
 	participant.InitInfo(
 		uniqueName, uniqueID, endpoint.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID),
-		mcsutils.KeyspaceGroupsPrimaryKey, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
+		mcsutils.PrimaryKey, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
@@ -1000,7 +1001,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	ts, err = am.HandleRequest(dcLocation, count)
+	ts, err = am.HandleRequest(context.Background(), dcLocation, count)
 	return ts, curKeyspaceGroupID, err
 }
 
@@ -1039,7 +1040,7 @@ func (kgm *KeyspaceGroupManager) GetMinTS(
 		if kgm.kgs[i] != nil && kgm.kgs[i].IsSplitTarget() {
 			continue
 		}
-		ts, err := am.HandleRequest(dcLocation, 1)
+		ts, err := am.HandleRequest(context.Background(), dcLocation, 1)
 		if err != nil {
 			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, err
 		}
@@ -1083,11 +1084,11 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	if err != nil {
 		return err
 	}
-	splitTargetTSO, err := splitTargetAllocator.GenerateTSO(1)
+	splitTargetTSO, err := splitTargetAllocator.GenerateTSO(context.Background(), 1)
 	if err != nil {
 		return err
 	}
-	splitSourceTSO, err := splitSourceAllocator.GenerateTSO(1)
+	splitSourceTSO, err := splitSourceAllocator.GenerateTSO(context.Background(), 1)
 	if err != nil {
 		return err
 	}
@@ -1397,6 +1398,11 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 	defer ticker.Stop()
 	log.Info("deleted group cleaner is started",
 		zap.Duration("patrol-interval", patrolInterval))
+	var (
+		empty               = true
+		lastDeletedGroupID  uint32
+		lastDeletedGroupNum int
+	)
 	for {
 		select {
 		case <-kgm.ctx.Done():
@@ -1409,6 +1415,7 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			if groupID == mcsutils.DefaultKeyspaceGroupID {
 				continue
 			}
+			empty = false
 			// Make sure the allocator and group meta are not in use anymore.
 			am, _ := kgm.getKeyspaceGroupMeta(groupID)
 			if am != nil {
@@ -1434,6 +1441,18 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			kgm.Lock()
 			delete(kgm.deletedGroups, groupID)
 			kgm.Unlock()
+			lastDeletedGroupID = groupID
+			lastDeletedGroupNum += 1
+		}
+		// This log would be helpful to check if the deleted groups are all gone.
+		if !empty && kgm.getDeletedGroupNum() == 0 {
+			log.Info("all the deleted keyspace groups have been cleaned up",
+				zap.Uint32("last-deleted-group-id", lastDeletedGroupID),
+				zap.Int("last-deleted-group-num", lastDeletedGroupNum))
+			// Reset the state to make sure the log won't be printed again
+			// until we have new deleted groups.
+			empty = true
+			lastDeletedGroupNum = 0
 		}
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -564,9 +566,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 		func(kv *mvccpb.KeyValue) error { return nil },
 		func() error { return nil },
 	)
-
-	suite.wg.Add(1)
-	go watcher.StartWatchLoop()
+	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	suite.NoError(err) // although no key, watcher returns no error
 	cache.RLock()
@@ -609,9 +609,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 		},
 		clientv3.WithPrefix(),
 	)
-
-	suite.wg.Add(1)
-	go watcher.StartWatchLoop()
+	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	suite.NoError(err)
 
@@ -669,8 +667,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 				},
 				clientv3.WithPrefix(),
 			)
-			suite.wg.Add(1)
-			go watcher.StartWatchLoop()
+			watcher.StartWatchLoop()
 			err := watcher.WaitLoad()
 			suite.NoError(err)
 			cache.RLock()
@@ -712,9 +709,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 		func() error { return nil },
 	)
 	watcher.watchChangeRetryInterval = 100 * time.Millisecond
-
-	suite.wg.Add(1)
-	go watcher.StartWatchLoop()
+	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	suite.NoError(err)
 	checkCache("")
@@ -723,6 +718,12 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient", "return(true)")
 
 	// Case1: restart the etcd server
+	suite.etcd.Close()
+	suite.startEtcd()
+	suite.put("TestWatcherBreak", "0")
+	checkCache("0")
+	suite.etcd.Server.Stop()
+	time.Sleep(DefaultRequestTimeout)
 	suite.etcd.Close()
 	suite.startEtcd()
 	suite.put("TestWatcherBreak", "1")
@@ -766,6 +767,53 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	checkCache("4")
 
 	failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient")
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
+	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
+		tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
+		defer os.Remove(tempStdoutFile.Name())
+		cfg := &log.Config{}
+		cfg.File.Filename = tempStdoutFile.Name()
+		cfg.Level = "debug"
+		lg, p, _ := log.InitLogger(cfg)
+		log.ReplaceGlobals(lg, p)
+
+		watcher := NewLoopWatcher(
+			suite.ctx,
+			&suite.wg,
+			suite.client,
+			"test",
+			"TestWatcherChanBlock",
+			func(kv *mvccpb.KeyValue) error { return nil },
+			func(kv *mvccpb.KeyValue) error { return nil },
+			func() error { return nil },
+		)
+
+		suite.wg.Add(1)
+		go func() {
+			defer suite.wg.Done()
+			watcher.watch(suite.ctx, 0)
+		}()
+
+		if injectWatchChanBlock {
+			failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)")
+			testutil.Eventually(suite.Require(), func() bool {
+				b, _ := os.ReadFile(tempStdoutFile.Name())
+				l := string(b)
+				return strings.Contains(l, "watch channel is blocked for a long time")
+			})
+			failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
+		} else {
+			testutil.Eventually(suite.Require(), func() bool {
+				b, _ := os.ReadFile(tempStdoutFile.Name())
+				l := string(b)
+				return strings.Contains(l, "watcher receives progress notify in watch loop")
+			})
+		}
+	}
+	checkWatcherRequestProgress(false)
+	checkWatcherRequestProgress(true)
 }
 
 func (suite *loopWatcherTestSuite) startEtcd() {

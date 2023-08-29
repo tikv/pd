@@ -31,24 +31,27 @@ type RequestInfo struct {
 	Method         string
 	Component      string
 	IP             string
+	Port           string
 	URLParam       string
 	BodyParam      string
 	StartTimeStamp int64
 }
 
 func (info *RequestInfo) String() string {
-	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, Component:%s, IP:%s, StartTime:%s, URLParam:%s, BodyParam:%s}",
-		info.ServiceLabel, info.Method, info.Component, info.IP, time.Unix(info.StartTimeStamp, 0), info.URLParam, info.BodyParam)
+	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, Component:%s, IP:%s, Port:%s, StartTime:%s, URLParam:%s, BodyParam:%s}",
+		info.ServiceLabel, info.Method, info.Component, info.IP, info.Port, time.Unix(info.StartTimeStamp, 0), info.URLParam, info.BodyParam)
 	return s
 }
 
 // GetRequestInfo returns request info needed from http.Request
 func GetRequestInfo(r *http.Request) RequestInfo {
+	ip, port := apiutil.GetIPPortFromHTTPRequest(r)
 	return RequestInfo{
 		ServiceLabel:   apiutil.GetRouteName(r),
 		Method:         fmt.Sprintf("%s/%s:%s", r.Proto, r.Method, r.URL.Path),
 		Component:      apiutil.GetComponentNameOnHTTP(r),
-		IP:             apiutil.GetIPAddrFromHTTPRequest(r),
+		IP:             ip,
+		Port:           port,
 		URLParam:       getURLParam(r),
 		BodyParam:      getBodyParam(r),
 		StartTimeStamp: time.Now().Unix(),

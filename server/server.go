@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -218,6 +217,10 @@ type Server struct {
 	serviceLabels      map[string][]apiutil.AccessPath
 	apiServiceLabelMap map[apiutil.AccessPath]string
 
+	grpcServiceRateLimiter *ratelimit.Limiter
+	grpcServiceLabels      map[string]struct{}
+	grpcServer             *grpc.Server
+
 	serviceAuditBackendLabels map[string]*audit.BackendLabels
 
 	auditBackends []audit.Backend
@@ -267,8 +270,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
 	s.serviceRateLimiter = ratelimit.NewLimiter()
+	s.grpcServiceRateLimiter = ratelimit.NewLimiter()
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
+	s.grpcServiceLabels = make(map[string]struct{})
 	s.apiServiceLabelMap = make(map[apiutil.AccessPath]string)
 
 	// Adjust etcd config.
@@ -300,8 +305,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
 		// Register the micro services GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)
+		s.grpcServer = gs
 	}
-
 	s.etcdCfg = etcdCfg
 	s.lg = cfg.Logger
 	s.logProps = cfg.LogProps
@@ -368,7 +373,16 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		time.Sleep(1500 * time.Millisecond)
 	})
 	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
+	s.initGRPCServiceLabels()
 	return nil
+}
+
+func (s *Server) initGRPCServiceLabels() {
+	for _, serviceInfo := range s.grpcServer.GetServiceInfo() {
+		for _, methodInfo := range serviceInfo.Methods {
+			s.grpcServiceLabels[methodInfo.Name] = struct{}{}
+		}
+	}
 }
 
 func (s *Server) startClient() (*clientv3.Client, *http.Client, error) {
@@ -412,7 +426,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.rootPath = path.Join(pdRootPath, strconv.FormatUint(s.clusterID, 10))
+	s.rootPath = endpoint.PDRootPath(s.clusterID)
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
@@ -602,8 +616,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.encryptionKeyManagerLoop()
 	if s.IsAPIServiceMode() {
 		s.initTSOPrimaryWatcher()
-		s.serverLoopWg.Add(1)
-		go s.tsoPrimaryWatcher.StartWatchLoop()
+		s.tsoPrimaryWatcher.StartWatchLoop()
 	}
 }
 
@@ -857,6 +870,12 @@ func (s *Server) GetKeyspaceManager() *keyspace.Manager {
 	return s.keyspaceManager
 }
 
+// SetKeyspaceManager sets the keyspace manager of server.
+// Note: it is only used for test.
+func (s *Server) SetKeyspaceManager(keyspaceManager *keyspace.Manager) {
+	s.keyspaceManager = keyspaceManager
+}
+
 // GetSafePointV2Manager returns the safe point v2 manager of server.
 func (s *Server) GetSafePointV2Manager() *gc.SafePointV2Manager {
 	return s.safePointV2Manager
@@ -895,6 +914,7 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	cfg := s.serviceMiddlewareCfg.Clone()
 	cfg.AuditConfig = *s.serviceMiddlewarePersistOptions.GetAuditConfig().Clone()
 	cfg.RateLimitConfig = *s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
+	cfg.GRPCRateLimitConfig = *s.serviceMiddlewarePersistOptions.GetGRPCRateLimitConfig().Clone()
 	return cfg
 }
 
@@ -1101,7 +1121,7 @@ func (s *Server) SetAuditConfig(cfg config.AuditConfig) error {
 func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
 	cfg := s.GetServiceMiddlewareConfig()
 	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
-	for label, item := range cfg.LimiterConfig {
+	for label, item := range cfg.RateLimitConfig.LimiterConfig {
 		rateLimitCfg[label] = item
 	}
 	rateLimitCfg[label] = value
@@ -1136,13 +1156,62 @@ func (s *Server) SetRateLimitConfig(cfg config.RateLimitConfig) error {
 	s.serviceMiddlewarePersistOptions.SetRateLimitConfig(&cfg)
 	if err := s.serviceMiddlewarePersistOptions.Persist(s.storage); err != nil {
 		s.serviceMiddlewarePersistOptions.SetRateLimitConfig(old)
-		log.Error("failed to update Rate Limit config",
+		log.Error("failed to update rate limit config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
 			errs.ZapError(err))
 		return err
 	}
 	log.Info("rate limit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// UpdateGRPCRateLimitConfig is used to update rate-limit config which will reserve old limiter-config
+func (s *Server) UpdateGRPCRateLimitConfig(key, label string, value ratelimit.DimensionConfig) error {
+	cfg := s.GetServiceMiddlewareConfig()
+	rateLimitCfg := make(map[string]ratelimit.DimensionConfig)
+	for label, item := range cfg.GRPCRateLimitConfig.LimiterConfig {
+		rateLimitCfg[label] = item
+	}
+	rateLimitCfg[label] = value
+	return s.UpdateGRPCRateLimit(&cfg.GRPCRateLimitConfig, key, &rateLimitCfg)
+}
+
+// UpdateGRPCRateLimit is used to update gRPC rate-limit config which will overwrite limiter-config
+func (s *Server) UpdateGRPCRateLimit(cfg *config.GRPCRateLimitConfig, key string, value interface{}) error {
+	updated, found, err := jsonutil.AddKeyValue(cfg, key, value)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		return errors.Errorf("config item %s not found", key)
+	}
+
+	if updated {
+		err = s.SetGRPCRateLimitConfig(*cfg)
+	}
+	return err
+}
+
+// GetGRPCRateLimitConfig gets the rate limit config information.
+func (s *Server) GetGRPCRateLimitConfig() *config.GRPCRateLimitConfig {
+	return s.serviceMiddlewarePersistOptions.GetGRPCRateLimitConfig().Clone()
+}
+
+// SetGRPCRateLimitConfig sets the rate limit config.
+func (s *Server) SetGRPCRateLimitConfig(cfg config.GRPCRateLimitConfig) error {
+	old := s.serviceMiddlewarePersistOptions.GetGRPCRateLimitConfig()
+	s.serviceMiddlewarePersistOptions.SetGRPCRateLimitConfig(&cfg)
+	if err := s.serviceMiddlewarePersistOptions.Persist(s.storage); err != nil {
+		s.serviceMiddlewarePersistOptions.SetGRPCRateLimitConfig(old)
+		log.Error("failed to update gRPC rate limit config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("gRPC rate limit config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1326,15 +1395,21 @@ func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.AccessPath {
 	return nil
 }
 
+// IsGRPCServiceLabelExist returns if the service label exists
+func (s *Server) IsGRPCServiceLabelExist(serviceLabel string) bool {
+	_, ok := s.grpcServiceLabels[serviceLabel]
+	return ok
+}
+
 // GetAPIAccessServiceLabel returns service label by given access path
 // TODO: this function will be used for updating api rate limit config
 func (s *Server) GetAPIAccessServiceLabel(accessPath apiutil.AccessPath) string {
-	if servicelabel, ok := s.apiServiceLabelMap[accessPath]; ok {
-		return servicelabel
+	if serviceLabel, ok := s.apiServiceLabelMap[accessPath]; ok {
+		return serviceLabel
 	}
 	accessPathNoMethod := apiutil.NewAccessPath(accessPath.Path, "")
-	if servicelabel, ok := s.apiServiceLabelMap[accessPathNoMethod]; ok {
-		return servicelabel
+	if serviceLabel, ok := s.apiServiceLabelMap[accessPathNoMethod]; ok {
+		return serviceLabel
 	}
 	return ""
 }
@@ -1381,6 +1456,16 @@ func (s *Server) IsInRateLimitAllowList(serviceLabel string) bool {
 // UpdateServiceRateLimiter is used to update RateLimiter
 func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) ratelimit.UpdateStatus {
 	return s.serviceRateLimiter.Update(serviceLabel, opts...)
+}
+
+// GetGRPCRateLimiter is used to get rate limiter
+func (s *Server) GetGRPCRateLimiter() *ratelimit.Limiter {
+	return s.grpcServiceRateLimiter
+}
+
+// UpdateGRPCServiceRateLimiter is used to update RateLimiter
+func (s *Server) UpdateGRPCServiceRateLimiter(serviceLabel string, opts ...ratelimit.Option) ratelimit.UpdateStatus {
+	return s.grpcServiceRateLimiter.Update(serviceLabel, opts...)
 }
 
 // GetClusterStatus gets cluster status.
@@ -1700,6 +1785,7 @@ func (s *Server) reloadConfigFromKV() error {
 		return err
 	}
 	s.loadRateLimitConfig()
+	s.loadGRPCRateLimitConfig()
 	s.loadKeyspaceConfig()
 	useRegionStorage := s.persistOptions.IsUseRegionStorage()
 	regionStorage := storage.TrySwitchRegionStorage(s.storage, useRegionStorage)
@@ -1714,6 +1800,9 @@ func (s *Server) reloadConfigFromKV() error {
 }
 
 func (s *Server) loadKeyspaceConfig() {
+	if s.keyspaceManager == nil {
+		return
+	}
 	cfg := s.persistOptions.GetKeyspaceConfig()
 	s.keyspaceManager.UpdateConfig(cfg)
 }
@@ -1723,6 +1812,14 @@ func (s *Server) loadRateLimitConfig() {
 	for key := range cfg {
 		value := cfg[key]
 		s.serviceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(&value))
+	}
+}
+
+func (s *Server) loadGRPCRateLimitConfig() {
+	cfg := s.serviceMiddlewarePersistOptions.GetGRPCRateLimitConfig().LimiterConfig
+	for key := range cfg {
+		value := cfg[key]
+		s.grpcServiceRateLimiter.Update(key, ratelimit.UpdateDimensionConfig(&value))
 	}
 }
 
@@ -1737,7 +1834,7 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 	}
 	url := clientUrls[0] + filepath.Join("/pd/api/v1/admin/persist-file", name)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
-	req.Header.Set("PD-Allow-follower-handle", "true")
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
 	res, err := s.httpClient.Do(req)
 	if err != nil {
 		log.Warn("failed to replicate file", zap.String("name", name), zap.String("member", member.GetName()), errs.ZapError(err))
@@ -1863,6 +1960,12 @@ func (s *Server) initTSOPrimaryWatcher() {
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		var oldPrimary string
+		v, ok := s.servicePrimaryMap.Load(serviceName)
+		if ok {
+			oldPrimary = v.(string)
+		}
+		log.Info("delete tso primary", zap.String("old-primary", oldPrimary))
 		s.servicePrimaryMap.Delete(serviceName)
 		return nil
 	}
@@ -1939,4 +2042,10 @@ func (s *Server) GetTSOUpdatePhysicalInterval() time.Duration {
 // GetMaxResetTSGap gets the max gap to reset the tso.
 func (s *Server) GetMaxResetTSGap() time.Duration {
 	return s.persistOptions.GetMaxResetTSGap()
+}
+
+// SetClient sets the etcd client.
+// Notes: it is only used for test.
+func (s *Server) SetClient(client *clientv3.Client) {
+	s.client = client
 }

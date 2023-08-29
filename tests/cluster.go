@@ -244,6 +244,13 @@ func (s *TestServer) GetKeyspaceManager() *keyspace.Manager {
 	return s.server.GetKeyspaceManager()
 }
 
+// SetKeyspaceManager sets the current TestServer's Keyspace Manager.
+func (s *TestServer) SetKeyspaceManager(km *keyspace.Manager) {
+	s.RLock()
+	defer s.RUnlock()
+	s.server.SetKeyspaceManager(km)
+}
+
 // GetCluster returns PD cluster.
 func (s *TestServer) GetCluster() *metapb.Cluster {
 	s.RLock()

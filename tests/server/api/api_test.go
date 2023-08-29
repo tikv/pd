@@ -34,7 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
@@ -621,10 +621,10 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	addr := follower.GetAddr() + "/pd/api/v1/version"
 	request, err := http.NewRequest(http.MethodGet, addr, nil)
 	suite.NoError(err)
-	request.Header.Add(serverapi.PDAllowFollowerHandle, "true")
+	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
 	resp, err := dialClient.Do(request)
 	suite.NoError(err)
-	suite.Equal("", resp.Header.Get(serverapi.PDRedirectorHeader))
+	suite.Equal("", resp.Header.Get(apiutil.PDRedirectorHeader))
 	defer resp.Body.Close()
 	suite.Equal(http.StatusOK, resp.StatusCode)
 	_, err = io.ReadAll(resp.Body)
@@ -655,7 +655,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 
 	// Request to follower with redirectorHeader will fail.
 	request.RequestURI = ""
-	request.Header.Set(serverapi.PDRedirectorHeader, "pd")
+	request.Header.Set(apiutil.PDRedirectorHeader, "pd")
 	resp1, err := dialClient.Do(request)
 	suite.NoError(err)
 	defer resp1.Body.Close()

@@ -17,6 +17,7 @@ package apiutil
 import (
 	"bytes"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -66,5 +67,143 @@ func TestJsonRespondErrorBadInput(t *testing.T) {
 		result := response.Result()
 		defer result.Body.Close()
 		re.Equal(400, result.StatusCode)
+	}
+}
+
+func TestGetIPPortFromHTTPRequest(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+
+	testCases := []struct {
+		r    *http.Request
+		ip   string
+		port string
+		err  error
+	}{
+		// IPv4 "X-Forwarded-For" with port
+		{
+			r: &http.Request{
+				Header: map[string][]string{
+					XForwardedForHeader: {"127.0.0.1:5299"},
+				},
+			},
+			ip:   "127.0.0.1",
+			port: "5299",
+		},
+		// IPv4 "X-Forwarded-For" without port
+		{
+			r: &http.Request{
+				Header: map[string][]string{
+					XForwardedForHeader:  {"127.0.0.1"},
+					XForwardedPortHeader: {"5299"},
+				},
+			},
+			ip:   "127.0.0.1",
+			port: "5299",
+		},
+		// IPv4 "X-Real-IP" with port
+		{
+			r: &http.Request{
+				Header: map[string][]string{
+					XRealIPHeader: {"127.0.0.1:5299"},
+				},
+			},
+			ip:   "127.0.0.1",
+			port: "5299",
+		},
+		// IPv4 "X-Real-IP" without port
+		{
+			r: &http.Request{
+				Header: map[string][]string{
+					XForwardedForHeader:  {"127.0.0.1"},
+					XForwardedPortHeader: {"5299"},
+				},
+			},
+			ip:   "127.0.0.1",
+			port: "5299",
+		},
+		// IPv4 RemoteAddr with port
+		{
+			r: &http.Request{
+				RemoteAddr: "127.0.0.1:5299",
+			},
+			ip:   "127.0.0.1",
+			port: "5299",
+		},
+		// IPv4 RemoteAddr without port
+		{
+			r: &http.Request{
+				RemoteAddr: "127.0.0.1",
+			},
+			ip:   "127.0.0.1",
+			port: "",
+		},
+		// IPv6 "X-Forwarded-For" with port
+		{
+			r: &http.Request{
+				Header: map[string][]string{
+					XForwardedForHeader: {"[::1]:5299"},
+				},
+			},
+			ip:   "::1",
+			port: "5299",
+		},
+		// IPv6 "X-Forwarded-For" without port
+		{
+			r: &http.Request{
+				Header: map[string][]string{
+					XForwardedForHeader: {"::1"},
+				},
+			},
+			ip:   "::1",
+			port: "",
+		},
+		// IPv6 "X-Real-IP" with port
+		{
+			r: &http.Request{
+				Header: map[string][]string{
+					XRealIPHeader: {"[::1]:5299"},
+				},
+			},
+			ip:   "::1",
+			port: "5299",
+		},
+		// IPv6 "X-Real-IP" without port
+		{
+			r: &http.Request{
+				Header: map[string][]string{
+					XForwardedForHeader: {"::1"},
+				},
+			},
+			ip:   "::1",
+			port: "",
+		},
+		// IPv6 RemoteAddr with port
+		{
+			r: &http.Request{
+				RemoteAddr: "[::1]:5299",
+			},
+			ip:   "::1",
+			port: "5299",
+		},
+		// IPv6 RemoteAddr without port
+		{
+			r: &http.Request{
+				RemoteAddr: "::1",
+			},
+			ip:   "::1",
+			port: "",
+		},
+		// Abnormal case
+		{
+			r:    &http.Request{},
+			ip:   "",
+			port: "",
+		},
+	}
+	for idx, testCase := range testCases {
+		ip, port := GetIPPortFromHTTPRequest(testCase.r)
+		re.Equal(testCase.ip, ip, "case %d", idx)
+		re.Equal(testCase.port, port, "case %d", idx)
 	}
 }

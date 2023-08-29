@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -98,6 +100,23 @@ func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testut
 		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
+}
+
+// StartSingleSchedulingTestServer creates and starts a scheduling server with default config for testing.
+func StartSingleSchedulingTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*scheduling.Server, func()) {
+	cfg := sc.NewConfig()
+	cfg.BackendEndpoints = backendEndpoints
+	cfg.ListenAddr = listenAddrs
+	cfg, err := scheduling.GenerateConfig(cfg)
+	re.NoError(err)
+
+	s, cleanup, err := scheduling.NewTestServer(ctx, re, cfg)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return !s.IsClosed()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	return s, cleanup
 }
 
 // WaitForPrimaryServing waits for one of servers being elected to be the primary/leader

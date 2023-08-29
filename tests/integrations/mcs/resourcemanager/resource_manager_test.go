@@ -941,7 +941,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		re.NoError(err)
 		re.Contains(string(respString), tcase.name)
 		if tcase.modifySuccess {
-			re.Equal(string(respString), tcase.expectMarshal)
+			re.JSONEq(string(respString), tcase.expectMarshal)
 		}
 
 		// Last one, Check list and delete all resource groups

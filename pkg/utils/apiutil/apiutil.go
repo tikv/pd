@@ -47,6 +47,17 @@ var (
 )
 
 const (
+	// PDRedirectorHeader is used to mark which PD redirected this request.
+	PDRedirectorHeader = "PD-Redirector"
+	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD.
+	PDAllowFollowerHandleHeader = "PD-Allow-follower-handle"
+	// XForwardedForHeader is used to mark the client IP.
+	XForwardedForHeader = "X-Forwarded-For"
+	// XForwardedPortHeader is used to mark the client port.
+	XForwardedPortHeader = "X-Forwarded-Port"
+	// XRealIPHeader is used to mark the real client IP.
+	XRealIPHeader = "X-Real-Ip"
+
 	// ErrRedirectFailed is the error message for redirect failed.
 	ErrRedirectFailed = "redirect failed"
 	// ErrRedirectToNotLeader is the error message for redirect to not leader.
@@ -101,26 +112,30 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	}
 }
 
-// GetIPAddrFromHTTPRequest returns http client IP from context.
+// GetIPPortFromHTTPRequest returns http client host IP and port from context.
 // Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
 // so `X-Forwarded-For` has the higher priority than `X-Real-IP`.
 // And both of them have the higher priority than `RemoteAddr`
-func GetIPAddrFromHTTPRequest(r *http.Request) string {
-	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-	if len(strings.Trim(ips[0], " ")) > 0 {
-		return ips[0]
+func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
+	forwardedIPs := strings.Split(r.Header.Get(XForwardedForHeader), ",")
+	if forwardedIP := strings.Trim(forwardedIPs[0], " "); len(forwardedIP) > 0 {
+		ip = forwardedIP
+		// Try to get the port from "X-Forwarded-Port" header.
+		forwardedPorts := strings.Split(r.Header.Get(XForwardedPortHeader), ",")
+		if forwardedPort := strings.Trim(forwardedPorts[0], " "); len(forwardedPort) > 0 {
+			port = forwardedPort
+		}
+	} else if realIP := r.Header.Get(XRealIPHeader); len(realIP) > 0 {
+		ip = realIP
+	} else {
+		ip = r.RemoteAddr
 	}
-
-	ip := r.Header.Get("X-Real-Ip")
-	if ip != "" {
-		return ip
-	}
-
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	splitIP, splitPort, err := net.SplitHostPort(ip)
 	if err != nil {
-		return ""
+		// Ensure we could get an IP address at least.
+		return ip, port
 	}
-	return ip
+	return splitIP, splitPort
 }
 
 // GetComponentNameOnHTTP returns component name from Request Header

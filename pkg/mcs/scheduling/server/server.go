@@ -25,30 +25,35 @@ import (
 	"os/signal"
 	"path"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -56,6 +61,7 @@ import (
 // Server is the scheduling server, and it implements bs.Server.
 type Server struct {
 	diagnosticspb.DiagnosticsServer
+
 	// Server state. 0 is not running, 1 is running.
 	isRunning int64
 	// Server start timestamp
@@ -66,18 +72,28 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg       *Config
-	clusterID uint64
-	name      string
-	listenURL *url.URL
+	cfg           *config.Config
+	name          string
+	clusterID     uint64
+	listenURL     *url.URL
+	persistConfig *config.PersistConfig
+
+	// etcd client
+	etcdClient *clientv3.Client
+	// http client
+	httpClient *http.Client
 
 	// for the primary election of scheduling
 	participant *member.Participant
-	etcdClient  *clientv3.Client
-	httpClient  *http.Client
 
+	secure      bool
 	muxListener net.Listener
+	grpcServer  *grpc.Server
+	httpServer  *http.Server
 	service     *Service
+
+	// Store as map[string]*grpc.ClientConn
+	clientConns sync.Map
 
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
@@ -85,7 +101,17 @@ type Server struct {
 	// primaryCallbacks will be called after the server becomes leader.
 	primaryCallbacks []func(context.Context)
 
+	// for service registry
+	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+
+	cluster   *Cluster
+	hbStreams *hbstream.HeartbeatStreams
+	storage   *endpoint.StorageEndpoint
+
+	// for watching the PD API server meta info updates that are related to the scheduling.
+	configWatcher *config.Watcher
+	ruleWatcher   *rule.Watcher
 }
 
 // Name returns the unique etcd name for this server in etcd cluster.
@@ -103,18 +129,32 @@ func (s *Server) GetAddr() string {
 	return s.cfg.ListenAddr
 }
 
-// Run runs the Scheduling server.
-func (s *Server) Run() (err error) {
-	if err = s.initClient(); err != nil {
-		return err
-	}
-	if err = s.startServer(); err != nil {
-		return err
+// GetBackendEndpoints returns the backend endpoints.
+func (s *Server) GetBackendEndpoints() string {
+	return s.cfg.BackendEndpoints
+}
+
+// GetClientConns returns the client connections.
+func (s *Server) GetClientConns() *sync.Map {
+	return &s.clientConns
+}
+
+// Run runs the scheduling server.
+func (s *Server) Run() error {
+	skipWaitAPIServiceReady := false
+	failpoint.Inject("skipWaitAPIServiceReady", func() {
+		skipWaitAPIServiceReady = true
+	})
+	if !skipWaitAPIServiceReady {
+		if err := utils.WaitAPIServiceReady(s); err != nil {
+			return err
+		}
 	}
 
-	s.startServerLoop()
-
-	return nil
+	if err := utils.InitClient(s); err != nil {
+		return err
+	}
+	return s.startServer()
 }
 
 func (s *Server) startServerLoop() {
@@ -128,9 +168,11 @@ func (s *Server) primaryElectionLoop() {
 	defer s.serverLoopWg.Done()
 
 	for {
-		if s.IsClosed() {
-			log.Info("server is closed, exit scheduling primary election loop")
+		select {
+		case <-s.serverLoopCtx.Done():
+			log.Info("server is closed, exit resource manager primary election loop")
 			return
+		default:
 		}
 
 		primary, checkAgain := s.participant.CheckLeader()
@@ -209,7 +251,10 @@ func (s *Server) Close() {
 
 	log.Info("closing scheduling server ...")
 	s.serviceRegister.Deregister()
+	utils.StopHTTPServer(s)
+	utils.StopGRPCServer(s)
 	s.muxListener.Close()
+	s.GetCoordinator().Stop()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -222,7 +267,6 @@ func (s *Server) Close() {
 	if s.httpClient != nil {
 		s.httpClient.CloseIdleConnections()
 	}
-
 	log.Info("scheduling server is closed")
 }
 
@@ -251,103 +295,97 @@ func (s *Server) IsClosed() bool {
 	return s != nil && atomic.LoadInt64(&s.isRunning) == 0
 }
 
+// IsSecure checks if the server enable TLS.
+func (s *Server) IsSecure() bool {
+	return s.secure
+}
+
 // AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 
-func (s *Server) initClient() error {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
-	if err != nil {
-		return err
-	}
-	u, err := types.NewURLs(strings.Split(s.cfg.BackendEndpoints, ","))
-	if err != nil {
-		return err
-	}
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL(u))
-	return err
-}
-
-func (s *Server) startGRPCServer(l net.Listener) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	gs := grpc.NewServer()
-	s.service.RegisterGRPCService(gs)
-	err := gs.Serve(l)
-	log.Info("gRPC server stop serving")
-
-	// Attempt graceful stop (waits for pending RPCs), but force a stop if
-	// it doesn't happen in a reasonable amount of time.
-	done := make(chan struct{})
-	go func() {
-		defer logutil.LogPanic()
-		log.Info("try to gracefully stop the server now")
-		gs.GracefulStop()
-		close(done)
-	}()
-	timer := time.NewTimer(utils.DefaultGRPCGracefulStopTimeout)
-	defer timer.Stop()
-	select {
-	case <-done:
-	case <-timer.C:
-		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", utils.DefaultGRPCGracefulStopTimeout))
-		gs.Stop()
-	}
-	if s.IsClosed() {
-		log.Info("grpc server stopped")
-	} else {
-		log.Fatal("grpc server stopped unexpectedly", errs.ZapError(err))
-	}
-}
-
-func (s *Server) startHTTPServer(l net.Listener) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	handler, _ := SetUpRestHandler(s.service)
-	hs := &http.Server{
-		Handler:           handler,
-		ReadTimeout:       5 * time.Minute,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	err := hs.Serve(l)
-	log.Info("http server stop serving")
-
-	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
-	defer cancel()
-	if err := hs.Shutdown(ctx); err != nil {
-		log.Error("http server shutdown encountered problem", errs.ZapError(err))
-	} else {
-		log.Info("all http(s) requests finished")
-	}
-	if s.IsClosed() {
-		log.Info("http server stopped")
-	} else {
-		log.Fatal("http server stopped unexpectedly", errs.ZapError(err))
-	}
-}
-
-func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	mux := cmux.New(l)
-	grpcL := mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
-	httpL := mux.Match(cmux.Any())
-
-	s.serverLoopWg.Add(2)
-	go s.startGRPCServer(grpcL)
-	go s.startHTTPServer(httpL)
-
-	if err := mux.Serve(); err != nil {
-		if s.IsClosed() {
-			log.Info("mux stop serving", errs.ZapError(err))
-		} else {
-			log.Fatal("mux stop serving unexpectedly", errs.ZapError(err))
+// GetDelegateClient returns grpc client connection talking to the forwarded host
+func (s *Server) GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
+	client, ok := s.clientConns.Load(forwardedHost)
+	if !ok {
+		tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+		if err != nil {
+			return nil, err
 		}
+		cc, err := grpcutil.GetClientConn(ctx, forwardedHost, tlsConfig)
+		if err != nil {
+			return nil, err
+		}
+		client = cc
+		s.clientConns.Store(forwardedHost, cc)
 	}
+	return client.(*grpc.ClientConn), nil
+}
+
+// GetTLSConfig gets the security config.
+func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
+	return &s.cfg.Security.TLSConfig
+}
+
+// GetCluster returns the cluster.
+func (s *Server) GetCluster() *Cluster {
+	return s.cluster
+}
+
+// GetCoordinator returns the coordinator.
+func (s *Server) GetCoordinator() *schedule.Coordinator {
+	return s.GetCluster().GetCoordinator()
+}
+
+// ServerLoopWgDone decreases the server loop wait group.
+func (s *Server) ServerLoopWgDone() {
+	s.serverLoopWg.Done()
+}
+
+// ServerLoopWgAdd increases the server loop wait group.
+func (s *Server) ServerLoopWgAdd(n int) {
+	s.serverLoopWg.Add(n)
+}
+
+// GetHTTPServer returns the http server.
+func (s *Server) GetHTTPServer() *http.Server {
+	return s.httpServer
+}
+
+// SetHTTPServer sets the http server.
+func (s *Server) SetHTTPServer(httpServer *http.Server) {
+	s.httpServer = httpServer
+}
+
+// SetUpRestHandler sets up the REST handler.
+func (s *Server) SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup) {
+	return SetUpRestHandler(s.service)
+}
+
+// GetGRPCServer returns the grpc server.
+func (s *Server) GetGRPCServer() *grpc.Server {
+	return s.grpcServer
+}
+
+// SetGRPCServer sets the grpc server.
+func (s *Server) SetGRPCServer(grpcServer *grpc.Server) {
+	s.grpcServer = grpcServer
+}
+
+// RegisterGRPCService registers the grpc service.
+func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
+	s.service.RegisterGRPCService(grpcServer)
+}
+
+// SetETCDClient sets the etcd client.
+func (s *Server) SetETCDClient(etcdClient *clientv3.Client) {
+	s.etcdClient = etcdClient
+}
+
+// SetHTTPClient sets the http client.
+func (s *Server) SetHTTPClient(httpClient *http.Client) {
+	s.httpClient = httpClient
 }
 
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
@@ -370,17 +408,27 @@ func (s *Server) startServer() (err error) {
 	schedulingPrimaryPrefix := endpoint.SchedulingSvcRootPath(s.clusterID)
 	s.participant = member.NewParticipant(s.etcdClient)
 	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
-		utils.KeyspaceGroupsPrimaryKey, "keyspace group primary election", s.cfg.AdvertiseListenAddr)
-
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
+	s.storage = endpoint.NewStorageEndpoint(
+		kv.NewEtcdKVBase(s.etcdClient, endpoint.PDRootPath(s.clusterID)), nil)
+	basicCluster := core.NewBasicCluster()
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.ctx, s.clusterID, basicCluster)
+	s.cluster, err = NewCluster(s.ctx, s.cfg, s.storage, basicCluster, s.hbStreams)
 	if err != nil {
 		return err
 	}
+
 	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
 	if err != nil {
 		return err
 	}
+	s.service = &Service{Server: s}
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	if err != nil {
+		return err
+	}
 	if tlsConfig != nil {
+		s.secure = true
 		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
 	} else {
 		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
@@ -388,9 +436,18 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
+	err = s.startWatcher()
+	if err != nil {
+		return err
+	}
 
+	go s.GetCoordinator().RunUntilStop()
+	serverReadyChan := make(chan struct{})
+	defer close(serverReadyChan)
 	s.serverLoopWg.Add(1)
-	go s.startGRPCAndHTTPServers(s.muxListener)
+	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.muxListener)
+	<-serverReadyChan
+	s.startServerLoop()
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
@@ -399,8 +456,7 @@ func (s *Server) startServer() (err error) {
 	}
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
-	serializedEntry, err := entry.Serialize()
+	serializedEntry, err := s.serviceID.Serialize()
 	if err != nil {
 		return err
 	}
@@ -414,12 +470,26 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
+func (s *Server) startWatcher() (err error) {
+	s.configWatcher, err = config.NewWatcher(
+		s.ctx, s.etcdClient, s.clusterID, s.persistConfig,
+	)
+	if err != nil {
+		return err
+	}
+	s.ruleWatcher, err = rule.NewWatcher(
+		s.ctx, s.etcdClient, s.clusterID,
+	)
+	return err
+}
+
 // CreateServer creates the Server
-func CreateServer(ctx context.Context, cfg *Config) *Server {
+func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		startTimestamp:    time.Now().Unix(),
 		cfg:               cfg,
+		persistConfig:     config.NewPersistConfig(cfg),
 		ctx:               ctx,
 	}
 	return svr
@@ -428,7 +498,7 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	cmd.Flags().Parse(args)
-	cfg := NewConfig()
+	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
 	err := cfg.Parse(flagSet)
 	defer logutil.LogPanic()
@@ -443,7 +513,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 		return
 	} else if printVersion {
 		versioninfo.Print()
-		exit(0)
+		utils.Exit(0)
 	}
 
 	// New zap logger
@@ -488,13 +558,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	svr.Close()
 	switch sig {
 	case syscall.SIGTERM:
-		exit(0)
+		utils.Exit(0)
 	default:
-		exit(1)
+		utils.Exit(1)
 	}
-}
-
-func exit(code int) {
-	log.Sync()
-	os.Exit(code)
 }

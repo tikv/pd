@@ -17,6 +17,12 @@ package utils
 import "time"
 
 const (
+	// MaxRetryTimesWaitAPIService is the max retry times for initializing the cluster ID.
+	MaxRetryTimesWaitAPIService = 360
+	// RetryIntervalWaitAPIService is the interval to retry.
+	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
+	RetryIntervalWaitAPIService = 500 * time.Millisecond
+
 	// TCPNetworkStr is the string of tcp network
 	TCPNetworkStr = "tcp"
 
@@ -61,8 +67,8 @@ const (
 	SchedulingServiceName = "scheduling"
 	// KeyspaceGroupsKey is the path component of keyspace groups.
 	KeyspaceGroupsKey = "keyspace_groups"
-	// KeyspaceGroupsPrimaryKey is the path component of primary for keyspace groups.
-	KeyspaceGroupsPrimaryKey = "primary"
+	// PrimaryKey is the path component of primary.
+	PrimaryKey = "primary"
 
 	// MaxKeyspaceGroupCount is the max count of keyspace groups. keyspace group in tso
 	// is the sharding unit, i.e., by the definition here, the max count of the shards
