@@ -32,8 +32,7 @@ type Cluster struct {
 const regionLabelGCInterval = time.Hour
 
 // NewCluster creates a new cluster.
-func NewCluster(ctx context.Context, cfg *config.Config, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams) (*Cluster, error) {
-	persistConfig := config.NewPersistConfig(cfg)
+func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams) (*Cluster, error) {
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
 		return nil, err
@@ -49,6 +48,10 @@ func NewCluster(ctx context.Context, cfg *config.Config, storage storage.Storage
 		storage:        storage,
 	}
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
+	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels())
+	if err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 

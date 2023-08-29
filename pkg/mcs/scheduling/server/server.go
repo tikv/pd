@@ -409,11 +409,15 @@ func (s *Server) startServer() (err error) {
 	s.participant = member.NewParticipant(s.etcdClient)
 	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
 		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
+	err = s.startWatcher()
+	if err != nil {
+		return err
+	}
 	s.storage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(s.etcdClient, endpoint.PDRootPath(s.clusterID)), nil)
 	basicCluster := core.NewBasicCluster()
 	s.hbStreams = hbstream.NewHeartbeatStreams(s.ctx, s.clusterID, basicCluster)
-	s.cluster, err = NewCluster(s.ctx, s.cfg, s.storage, basicCluster, s.hbStreams)
+	s.cluster, err = NewCluster(s.ctx, s.persistConfig, s.storage, basicCluster, s.hbStreams)
 	if err != nil {
 		return err
 	}
@@ -433,10 +437,6 @@ func (s *Server) startServer() (err error) {
 	} else {
 		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
 	}
-	if err != nil {
-		return err
-	}
-	err = s.startWatcher()
 	if err != nil {
 		return err
 	}
