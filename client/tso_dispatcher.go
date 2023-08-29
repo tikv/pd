@@ -390,7 +390,7 @@ func (c *tsoClient) handleDispatcher(
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
 	defer streamLoopTimer.Stop()
-	bo := retry.InitialBackOffer(100*time.Millisecond, updateMemberTimeout)
+	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
 tsoBatchLoop:
 	for {
 		select {

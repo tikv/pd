@@ -63,7 +63,7 @@ func (rs *BackOffer) NextBackoff() time.Duration {
 	return rs.exponentialBackoff()
 }
 
-// ExponentialBackoff Get the exponential backoff duration.
+// exponentialBackoff Get the exponential backoff duration.
 func (rs *BackOffer) exponentialBackoff() time.Duration {
 	backoff := rs.nextBackoff
 	rs.nextBackoff *= 2

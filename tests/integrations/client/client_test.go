@@ -1530,7 +1530,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
-
+	// make sure back off executed.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/retry/backOffExecute", `return(true)`))
 	leader2 := waitLeaderChange(re, cluster, leader, innerCli.GetServiceDiscovery())
 	re.True(retry.TestBackOffExecute())

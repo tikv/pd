@@ -36,10 +36,11 @@ import (
 )
 
 const (
-	globalDCLocation          = "global"
-	memberUpdateInterval      = time.Minute
-	serviceModeUpdateInterval = 3 * time.Second
-	updateMemberTimeout       = time.Second // Use a shorter timeout to recover faster from network isolation.
+	globalDCLocation            = "global"
+	memberUpdateInterval        = time.Minute
+	serviceModeUpdateInterval   = 3 * time.Second
+	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
+	updateMemberBackOffBaseTime = 100 * time.Millisecond
 )
 
 type serviceType int
@@ -240,7 +241,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
 
-	bo := retry.InitialBackOffer(100*time.Millisecond, updateMemberTimeout)
+	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
 	for {
 		select {
 		case <-ctx.Done():
