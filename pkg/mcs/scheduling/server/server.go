@@ -136,10 +136,10 @@ func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	s.serverLoopWg.Add(2)
 	go s.primaryElectionLoop()
-	go s.updateMemberLoop()
+	go s.updateAPIServerMemberLoop()
 }
 
-func (s *Server) updateMemberLoop() {
+func (s *Server) updateAPIServerMemberLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
