@@ -140,15 +140,14 @@ func (c *baseClient) memberLoop() {
 		case <-c.checkLeaderCh:
 		case <-ticker.C:
 		case <-ctx.Done():
-			log.Info("[pd.memberLoop] exit memberLoop")
+			log.Info("[pd] exit member loop")
 			return
 		}
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
 		})
-
 		if err := retry.WithBackoff(ctx, c.updateMember, &bo); err != nil {
-			log.Info("[pd] failed update member with retry", errs.ZapError(err))
+			log.Error("[pd] failed update member with retry", errs.ZapError(err))
 		}
 	}
 }
