@@ -383,6 +383,7 @@ func (s *Server) startServer() (err error) {
 
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
+	s.startServerLoop()
 	s.serverLoopWg.Add(1)
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	s.checkMembershipCh <- struct{}{}
