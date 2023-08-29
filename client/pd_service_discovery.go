@@ -244,7 +244,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("[pd.updateMemberLoop] exit updateMemberLoop")
+			log.Info("[pd] exit member loop due to context canceled")
 			return
 		case <-ticker.C:
 		case <-c.checkMembershipCh:
