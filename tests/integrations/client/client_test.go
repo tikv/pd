@@ -1308,7 +1308,7 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 }
 
 func (suite *clientTestSuite) TestScatterRegion() {
-	CreateRegion := func() {
+	CreateRegion := func() uint64 {
 		regionID := regionIDAllocator.alloc()
 		region := &metapb.Region{
 			Id: regionID,
@@ -1329,7 +1329,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		suite.NoError(err)
 		return regionID
 	}
-	var regionID uint64 = CreateRegion()
+	var regionID = CreateRegion()
 	regionsID := []uint64{regionID}
 	// Test interface `ScatterRegions`.
 	re := suite.Require()
