@@ -34,21 +34,19 @@ func WithBackoff(
 	fn func() error,
 	bo *BackOffer,
 ) error {
-	err := fn()
-	if err != nil {
+	if err := fn(); err != nil {
 		select {
 		case <-ctx.Done():
-			return err
 		case <-time.After(bo.NextBackoff()):
 			failpoint.Inject("backOffExecute", func() {
 				testBackOffExecuteFlag = true
 			})
 		}
-	} else {
-		bo.ResetBackoff()
-		return nil
+		return err
 	}
-	return err
+	// Reset backoff when fn() succeed.
+	bo.ResetBackoff()
+	return nil
 }
 
 // InitialBackOffer make the initial state for retrying.

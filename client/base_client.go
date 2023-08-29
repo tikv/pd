@@ -140,7 +140,7 @@ func (c *baseClient) memberLoop() {
 		case <-c.checkLeaderCh:
 		case <-ticker.C:
 		case <-ctx.Done():
-			log.Info("[pd] exit member loop")
+			log.Info("[pd] exit member loop due to context canceled")
 			return
 		}
 		failpoint.Inject("skipUpdateMember", func() {
