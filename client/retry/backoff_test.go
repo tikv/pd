@@ -30,18 +30,18 @@ func TestExponentialBackoff(t *testing.T) {
 	maxBackoff := 1 * time.Second
 
 	backoff := InitialBackOffer(baseBackoff, maxBackoff)
-	re.Equal(backoff.NextBackoff(), baseBackoff)
-	re.Equal(backoff.NextBackoff(), 2*baseBackoff)
+	re.Equal(backoff.nextInterval(), baseBackoff)
+	re.Equal(backoff.nextInterval(), 2*baseBackoff)
 
 	for i := 0; i < 10; i++ {
-		re.LessOrEqual(backoff.NextBackoff(), maxBackoff)
+		re.LessOrEqual(backoff.nextInterval(), maxBackoff)
 	}
-	re.Equal(backoff.NextBackoff(), maxBackoff)
+	re.Equal(backoff.nextInterval(), maxBackoff)
 
 	// Reset backoff
-	backoff.ResetBackoff()
-	err := WithBackoff(context.Background(), func() error {
+	backoff.resetBackoff()
+	err := backoff.Exec(context.Background(), func() error {
 		return errors.New("test")
-	}, &backoff)
+	})
 	re.Error(err)
 }

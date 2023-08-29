@@ -864,7 +864,7 @@ tsoBatchLoop:
 			stream = nil
 			// Because ScheduleCheckLeader is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
-				if err := retry.WithBackoff(dispatcherCtx, c.updateMember, &bo); err != nil {
+				if err := bo.Exec(dispatcherCtx, c.updateMember); err != nil {
 					select {
 					case <-dispatcherCtx.Done():
 						return
