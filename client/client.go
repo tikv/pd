@@ -326,12 +326,13 @@ type lastTSO struct {
 }
 
 const (
-	dialTimeout            = 3 * time.Second
-	updateMemberTimeout    = time.Second // Use a shorter timeout to recover faster from network isolation.
-	tsLoopDCCheckInterval  = time.Minute
-	defaultMaxTSOBatchSize = 10000 // should be higher if client is sending requests in burst
-	retryInterval          = 500 * time.Millisecond
-	maxRetryTimes          = 6
+	dialTimeout                 = 3 * time.Second
+	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
+	tsLoopDCCheckInterval       = time.Minute
+	defaultMaxTSOBatchSize      = 10000 // should be higher if client is sending requests in burst
+	retryInterval               = 500 * time.Millisecond
+	maxRetryTimes               = 6
+	updateMemberBackOffBaseTime = 100 * time.Millisecond
 )
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -766,7 +767,7 @@ func (c *client) handleDispatcher(
 
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
-	bo := retry.InitialBackOffer(100*time.Millisecond, updateMemberTimeout)
+	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
 tsoBatchLoop:
 	for {
 		select {

@@ -134,7 +134,7 @@ func (c *baseClient) memberLoop() {
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
 
-	bo := retry.InitialBackOffer(100*time.Millisecond, updateMemberTimeout)
+	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
 	for {
 		select {
 		case <-c.checkLeaderCh:
