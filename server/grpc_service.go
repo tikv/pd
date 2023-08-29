@@ -1341,8 +1341,19 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	if err != nil {
 		return nil, err
 	}
-	if op != nil {
-		rc.GetOperatorController().AddOperator(op)
+
+	if op == nil {
+		return &pdpb.ScatterRegionResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				"operator could not be allocated"),
+		}, nil
+	}
+
+	if !rc.GetOperatorController().AddOperator(op) {
+		return &pdpb.ScatterRegionResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				"operator cancelled because store limit exceeded"),
+		}, nil
 	}
 
 	return &pdpb.ScatterRegionResponse{

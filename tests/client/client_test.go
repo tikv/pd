@@ -1361,25 +1361,29 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 }
 
 func (suite *clientTestSuite) TestScatterRegion() {
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers:    peers,
-		StartKey: []byte("fff"),
-		EndKey:   []byte("ggg"),
+	CreateRegion := func() uint64 {
+		regionID := regionIDAllocator.alloc()
+		region := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			Peers:    peers,
+			StartKey: []byte("fff"),
+			EndKey:   []byte("ggg"),
+		}
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(suite.srv),
+			Region: region,
+			Leader: peers[0],
+		}
+		err := suite.regionHeartbeat.Send(req)
+		suite.NoError(err)
+		return regionID
 	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(suite.srv),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := suite.regionHeartbeat.Send(req)
+	var regionID = CreateRegion()
 	regionsID := []uint64{regionID}
-	suite.NoError(err)
 	// Test interface `ScatterRegions`.
 	re := suite.Require()
 	testutil.Eventually(re, func() bool {
@@ -1401,6 +1405,9 @@ func (suite *clientTestSuite) TestScatterRegion() {
 
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
+	// create a new region as scatter operation from previous test might be running
+
+	regionID = CreateRegion()
 	testutil.Eventually(re, func() bool {
 		err := suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {

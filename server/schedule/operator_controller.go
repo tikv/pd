@@ -324,7 +324,19 @@ func (oc *OperatorController) AddOperator(ops ...*operator.Operator) bool {
 	// but maybe user want to add operator when waiting queue is busy
 	if oc.exceedStoreLimitLocked(ops...) || !oc.checkAddOperator(false, ops...) {
 		for _, op := range ops {
+<<<<<<< HEAD:server/schedule/operator_controller.go
 			_ = op.Cancel()
+=======
+			operatorCounter.WithLabelValues(op.Desc(), "exceed-limit").Inc()
+			_ = op.Cancel(ExceedStoreLimit)
+			oc.buryOperator(op)
+		}
+		return false
+	}
+	if pass, reason := oc.checkAddOperator(false, ops...); !pass {
+		for _, op := range ops {
+			_ = op.Cancel(reason)
+>>>>>>> 9aba1a298 (pkg/schedule, grpc_service : Add error code if scatter_region grpc is failed (#6953)):pkg/schedule/operator/operator_controller.go
 			oc.buryOperator(op)
 		}
 		return false
