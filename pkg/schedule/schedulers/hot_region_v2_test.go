@@ -35,7 +35,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	defer cancel()
 	statistics.Denoising = false
 	statisticsInterval = 0
-
+	statistics.HistorySampleDuration = 0
 	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
@@ -149,6 +149,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	statisticsInterval = 0
+	statistics.HistorySampleDuration = 0
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -212,6 +213,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	statisticsInterval = 0
+	statistics.HistorySampleDuration = 0
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -274,6 +276,7 @@ func TestSkipUniformStore(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	statisticsInterval = 0
+	statistics.HistorySampleDuration = 0
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
