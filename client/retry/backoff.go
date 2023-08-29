@@ -23,59 +23,58 @@ import (
 
 // BackOffer is a backoff policy for retrying operations.
 type BackOffer struct {
-	maxBackoff     time.Duration
-	nextBackoff    time.Duration
-	initialBackoff time.Duration
+	max  time.Duration
+	next time.Duration
+	base time.Duration
 }
 
-// WithBackoff is a helper function to add backoff.
-func WithBackoff(
+// Exec is a helper function to exec backoff.
+func (bo *BackOffer) Exec(
 	ctx context.Context,
 	fn func() error,
-	bo *BackOffer,
 ) error {
 	if err := fn(); err != nil {
 		select {
 		case <-ctx.Done():
-		case <-time.After(bo.NextBackoff()):
+		case <-time.After(bo.nextInterval()):
 			failpoint.Inject("backOffExecute", func() {
 				testBackOffExecuteFlag = true
 			})
 		}
 		return err
 	}
-	// Reset backoff when fn() succeed.
-	bo.ResetBackoff()
+	// reset backoff when fn() succeed.
+	bo.resetBackoff()
 	return nil
 }
 
 // InitialBackOffer make the initial state for retrying.
-func InitialBackOffer(initialBackoff, maxBackoff time.Duration) BackOffer {
+func InitialBackOffer(base, max time.Duration) BackOffer {
 	return BackOffer{
-		maxBackoff:     maxBackoff,
-		initialBackoff: initialBackoff,
-		nextBackoff:    initialBackoff,
+		max:  max,
+		base: base,
+		next: base,
 	}
 }
 
-// NextBackoff implements the `Backoffer`, for now use the `ExponentialBackoff`.
-func (rs *BackOffer) NextBackoff() time.Duration {
-	return rs.exponentialBackoff()
+// nextInterval for now use the `exponentialInterval`.
+func (bo *BackOffer) nextInterval() time.Duration {
+	return bo.exponentialInterval()
 }
 
-// exponentialBackoff returns the exponential backoff duration.
-func (rs *BackOffer) exponentialBackoff() time.Duration {
-	backoff := rs.nextBackoff
-	rs.nextBackoff *= 2
-	if rs.nextBackoff > rs.maxBackoff {
-		rs.nextBackoff = rs.maxBackoff
+// exponentialInterval returns the exponential backoff duration.
+func (bo *BackOffer) exponentialInterval() time.Duration {
+	backoffInterval := bo.next
+	bo.next *= 2
+	if bo.next > bo.max {
+		bo.next = bo.max
 	}
-	return backoff
+	return backoffInterval
 }
 
-// ResetBackoff resets the backoff to initial state.
-func (rs *BackOffer) ResetBackoff() {
-	rs.nextBackoff = rs.initialBackoff
+// resetBackoff resets the backoff to initial state.
+func (bo *BackOffer) resetBackoff() {
+	bo.next = bo.base
 }
 
 // Only used for test.

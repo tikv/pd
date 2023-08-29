@@ -253,7 +253,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
 		})
-		if err := retry.WithBackoff(ctx, c.updateMember, &bo); err != nil {
+		if err := bo.Exec(ctx, c.updateMember); err != nil {
 			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
 	}
