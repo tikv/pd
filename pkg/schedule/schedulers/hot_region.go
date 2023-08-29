@@ -43,9 +43,33 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// HotRegionName is balance hot region scheduler name.
+	HotRegionName = "balance-hot-region-scheduler"
+	// HotRegionType is balance hot region scheduler type.
+	HotRegionType          = "hot-region"
+	splitBucket            = "split-hot-region"
+	splitProgressiveRank   = int64(-5)
+	minHotScheduleInterval = time.Second
+	maxHotScheduleInterval = 20 * time.Second
+)
+
 var (
-	topnPosition       = 10
+	// schedulePeerPr the probability of schedule the hot peer.
+	schedulePeerPr = 0.66
+	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
+	pendingAmpFactor = 2.0
+	// If the distribution of a dimension is below the corresponding stddev threshold, then scheduling will no longer be based on this dimension,
+	// as it implies that this dimension is sufficiently uniform.
+	stddevThreshold = 0.1
+	// topnPosition is the position of the topn peer in the hot peer list.
+	// We use it to judge whether to schedule the hot peer in some cases.
+	topnPosition = 10
+	// statisticsInterval is the interval to update statistics information.
 	statisticsInterval = time.Second
+)
+
+var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	hotSchedulerCounter                     = schedulerCounter.WithLabelValues(HotRegionName, "schedule")
 	hotSchedulerSkipCounter                 = schedulerCounter.WithLabelValues(HotRegionName, "skip")
@@ -201,29 +225,6 @@ func setHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64) {
 func (h *baseHotScheduler) randomRWType() statistics.RWType {
 	return h.types[h.r.Int()%len(h.types)]
 }
-
-const (
-	// HotRegionName is balance hot region scheduler name.
-	HotRegionName = "balance-hot-region-scheduler"
-	// HotRegionType is balance hot region scheduler type.
-	HotRegionType = "hot-region"
-
-	minHotScheduleInterval = time.Second
-	maxHotScheduleInterval = 20 * time.Second
-)
-
-var (
-	// schedulePeerPr the probability of schedule the hot peer.
-	schedulePeerPr = 0.66
-	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
-	pendingAmpFactor = 2.0
-	// If the distribution of a dimension is below the corresponding stddev threshold, then scheduling will no longer be based on this dimension,
-	// as it implies that this dimension is sufficiently uniform.
-	stddevThreshold = 0.1
-
-	splitBucket          = "split-hot-region"
-	splitProgressiveRank = int64(-5)
-)
 
 type hotScheduler struct {
 	name string

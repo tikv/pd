@@ -277,7 +277,7 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		topnRate = topnHotPeer.GetLoad(dim)
 	}
 
-	if rs.currentChecker.balancedRatio <= lowRate/highRate {
+	if highRate*rs.currentChecker.balancedRatio <= lowRate {
 		// At this time, it is considered to be in the balanced state.
 		// Because rs.currentChecker.balancedRatio <= lowRate/highRate.
 
@@ -327,7 +327,7 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 
 	pendingRateLimit := false
 	var minNotWorsenedRate, minBetterRate, maxBetterRate, maxNotWorsenedRate float64
-	if rs.currentChecker.preBalancedRatio <= lowRate/highRate {
+	if highRate*rs.currentChecker.preBalancedRatio <= lowRate {
 		// At this time, it is considered to be in pre-balanced state.
 		// Because rs.currentChecker.preBalancedRatio <= lowRate/highRate < rs.currentChecker.balancedRatio.
 
