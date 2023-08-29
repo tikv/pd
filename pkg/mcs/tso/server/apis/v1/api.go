@@ -16,6 +16,7 @@ package apis
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/gin-contrib/cors"
@@ -25,10 +26,10 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/unrolled/render"
@@ -105,14 +106,73 @@ func NewService(srv *tsoserver.Service) *Service {
 // RegisterAdminRouter registers the router of the TSO admin handler.
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
-	tsoAdminHandler := tso.NewAdminHandler(s.srv.GetHandler(), s.rd)
-	router.POST("/reset-ts", gin.WrapF(tsoAdminHandler.ResetTS))
+	router.POST("/reset-ts", ResetTS)
 }
 
 // RegisterKeyspaceGroupRouter registers the router of the TSO keyspace group handler.
 func (s *Service) RegisterKeyspaceGroupRouter() {
 	router := s.root.Group("keyspace-groups")
 	router.GET("/members", GetKeyspaceGroupMembers)
+}
+
+// ResetTSParams is the input json body params of ResetTS
+type ResetTSParams struct {
+	TSO           string `json:"tso"`
+	ForceUseLarge bool   `json:"force-use-larger"`
+}
+
+// ResetTS is the http.HandlerFunc of ResetTS
+// FIXME: details of input json body params
+// @Tags     admin
+// @Summary  Reset the ts.
+// @Accept   json
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "Reset ts successfully."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  403  {string}  string  "Reset ts is forbidden."
+// @Failure  500  {string}  string  "TSO server failed to proceed the request."
+// @Router   /admin/reset-ts [post]
+// if force-use-larger=true:
+//
+//	reset ts to max(current ts, input ts).
+//
+// else:
+//
+//	reset ts to input ts if it > current ts and < upper bound, error if not in that range
+//
+// during EBS based restore, we call this to make sure ts of pd >= resolved_ts in backup.
+func ResetTS(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	var param ResetTSParams
+	if err := c.ShouldBindJSON(&param); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(param.TSO) == 0 {
+		c.String(http.StatusBadRequest, "invalid tso value")
+		return
+	}
+	ts, err := strconv.ParseUint(param.TSO, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, "invalid tso value")
+		return
+	}
+
+	var ignoreSmaller, skipUpperBoundCheck bool
+	if param.ForceUseLarge {
+		ignoreSmaller, skipUpperBoundCheck = true, true
+	}
+
+	if err = svr.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0); err != nil {
+		if err == errs.ErrServerNotStarted {
+			c.String(http.StatusInternalServerError, err.Error())
+		} else {
+			c.String(http.StatusForbidden, err.Error())
+		}
+		return
+	}
+	c.String(http.StatusOK, "Reset ts successfully.")
 }
 
 // KeyspaceGroupMember contains the keyspace group and its member information.

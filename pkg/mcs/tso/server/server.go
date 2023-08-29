@@ -74,8 +74,6 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	handler *Handler
-
 	cfg       *Config
 	clusterID uint64
 	listenURL *url.URL
@@ -119,11 +117,6 @@ func (s *Server) Name() string {
 // Context returns the context of server.
 func (s *Server) Context() context.Context {
 	return s.ctx
-}
-
-// GetHandler returns the handler.
-func (s *Server) GetHandler() *Handler {
-	return s.handler
 }
 
 // GetBasicServer returns the basic server.
@@ -411,6 +404,28 @@ func (s *Server) SetExternalTS(externalTS uint64) error {
 	return nil
 }
 
+// ResetTS resets the TSO with the specified one.
+func (s *Server) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, keyspaceGroupID uint32) error {
+	log.Info("reset-ts",
+		zap.Uint64("new-ts", ts),
+		zap.Bool("ignore-smaller", ignoreSmaller),
+		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck),
+		zap.Uint32("keyspace-group-id", keyspaceGroupID))
+	tsoAllocatorManager, err := s.GetTSOAllocatorManager(keyspaceGroupID)
+	if err != nil {
+		log.Error("failed to get allocator manager", errs.ZapError(err))
+		return err
+	}
+	tsoAllocator, err := tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		return err
+	}
+	if tsoAllocator == nil {
+		return errs.ErrServerNotStarted
+	}
+	return tsoAllocator.SetTSO(ts, ignoreSmaller, skipUpperBoundCheck)
+}
+
 // GetConfig gets the config.
 func (s *Server) GetConfig() *Config {
 	return s.cfg
@@ -503,7 +518,6 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 		cfg:               cfg,
 		ctx:               ctx,
 	}
-	svr.handler = newHandler(svr)
 	return svr
 }
 
