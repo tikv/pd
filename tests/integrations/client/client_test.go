@@ -1308,7 +1308,7 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 }
 
 func (suite *clientTestSuite) TestScatterRegion() {
-	CreateRegion := func() uint64 {
+	CreateRegion := func() {
 		regionID := regionIDAllocator.alloc()
 		region := &metapb.Region{
 			Id: regionID,
