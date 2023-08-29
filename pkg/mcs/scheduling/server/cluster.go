@@ -6,7 +6,9 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
@@ -18,32 +20,41 @@ import (
 // Cluster is used to manage all information for scheduling purpose.
 type Cluster struct {
 	*core.BasicCluster
+	persistConfig  *config.PersistConfig
 	ruleManager    *placement.RuleManager
 	labelerManager *labeler.RegionLabeler
-	persistConfig  *config.PersistConfig
+	regionStats    *statistics.RegionStatistics
 	hotStat        *statistics.HotStat
 	storage        storage.Storage
+	coordinator    *schedule.Coordinator
 }
 
 const regionLabelGCInterval = time.Hour
 
 // NewCluster creates a new cluster.
-func NewCluster(ctx context.Context, storage storage.Storage, cfg *config.Config) (*Cluster, error) {
-	basicCluster := core.NewBasicCluster()
+func NewCluster(ctx context.Context, cfg *config.Config, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams) (*Cluster, error) {
 	persistConfig := config.NewPersistConfig(cfg)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
 		return nil, err
 	}
-
-	return &Cluster{
+	ruleManager := placement.NewRuleManager(storage, basicCluster, persistConfig)
+	c := &Cluster{
 		BasicCluster:   basicCluster,
-		ruleManager:    placement.NewRuleManager(storage, basicCluster, persistConfig),
+		ruleManager:    ruleManager,
 		labelerManager: labelerManager,
 		persistConfig:  persistConfig,
 		hotStat:        statistics.NewHotStat(ctx),
+		regionStats:    statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:        storage,
-	}, nil
+	}
+	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
+	return c, nil
+}
+
+// GetCoordinator returns the coordinator
+func (c *Cluster) GetCoordinator() *schedule.Coordinator {
+	return c.coordinator
 }
 
 // GetBasicCluster returns the basic cluster.

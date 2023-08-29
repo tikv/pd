@@ -124,7 +124,7 @@ func (s *Service) postResourceGroup(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, "Success!")
+	c.String(http.StatusOK, "Success!")
 }
 
 // putResourceGroup
@@ -146,7 +146,7 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, "Success!")
+	c.String(http.StatusOK, "Success!")
 }
 
 // getResourceGroup
@@ -162,7 +162,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 	if group == nil {
 		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
 	}
-	c.JSON(http.StatusOK, group)
+	c.IndentedJSON(http.StatusOK, group)
 }
 
 // getResourceGroupList
@@ -174,7 +174,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Router		/config/groups [GET]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	groups := s.manager.GetResourceGroupList()
-	c.JSON(http.StatusOK, groups)
+	c.IndentedJSON(http.StatusOK, groups)
 }
 
 // deleteResourceGroup
@@ -189,5 +189,5 @@ func (s *Service) deleteResourceGroup(c *gin.Context) {
 	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
 	}
-	c.JSON(http.StatusOK, "Success!")
+	c.String(http.StatusOK, "Success!")
 }

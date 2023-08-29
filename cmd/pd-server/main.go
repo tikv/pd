@@ -41,6 +41,11 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"go.uber.org/zap"
+
+	// register microservice API
+	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
+	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/install"
+	_ "github.com/tikv/pd/pkg/mcs/tso/server/install"
 )
 
 func main() {
