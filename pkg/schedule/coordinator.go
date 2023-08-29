@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
@@ -442,39 +441,6 @@ func (c *Coordinator) initSchedulers() {
 		if err = c.schedulers.AddScheduler(s); err != nil {
 			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 		}
-	}
-
-	// The old way to create the scheduler.
-	k := 0
-	for _, schedulerCfg := range scheduleCfg.Schedulers {
-		if schedulerCfg.Disable {
-			scheduleCfg.Schedulers[k] = schedulerCfg
-			k++
-			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args))
-			continue
-		}
-
-		s, err := schedulers.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args), c.schedulers.RemoveScheduler)
-		if err != nil {
-			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
-			continue
-		}
-
-		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
-		if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
-		} else {
-			// Only records the valid scheduler config.
-			scheduleCfg.Schedulers[k] = schedulerCfg
-			k++
-		}
-	}
-
-	// Removes the invalid scheduler config and persist.
-	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
-	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
-		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
 }
 
