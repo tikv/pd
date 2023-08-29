@@ -123,7 +123,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "store_slow_trend_misc",
-			Help:      "Store trend internal uncatelogued values",
+			Help:      "Store trend internal uncatalogued values",
 		}, []string{"type", "dim"})
 
 	// HotPendingSum is the sum of pending influence in hot region scheduler.
