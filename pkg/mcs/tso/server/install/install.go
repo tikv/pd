@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ package install
 
 import (
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	"github.com/tikv/pd/pkg/mcs/tso/server"
 
 	// init API group
-	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
+	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 )
 
 func init() {
@@ -28,5 +28,5 @@ func init() {
 
 // Install registers the API group and grpc service.
 func Install(register *registry.ServiceRegistry) {
-	register.RegisterService("ResourceManager", server.NewService[*server.Server])
+	register.RegisterService("Scheduling", server.NewService[*server.Server])
 }

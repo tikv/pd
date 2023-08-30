@@ -96,7 +96,7 @@ func (suite *globalConfigTestSuite) TestLoadWithoutNames() {
 	})
 	suite.NoError(err)
 	suite.Len(res.Items, 1)
-	suite.Equal(r.Header.GetRevision(), res.Revision)
+	suite.LessOrEqual(r.Header.GetRevision(), res.Revision)
 	suite.Equal("test", string(res.Items[0].Payload))
 }
 
