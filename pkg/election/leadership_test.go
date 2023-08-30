@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -170,14 +169,6 @@ func TestExitWatch(t *testing.T) {
 	})
 	// Case7: loss the quorum when the watch loop is running
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
-		tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-		defer os.Remove(tempStdoutFile.Name())
-		logCfg := &log.Config{}
-		logCfg.File.Filename = tempStdoutFile.Name()
-		logCfg.Level = "info"
-		lg, p, _ := log.InitLogger(logCfg)
-		log.ReplaceGlobals(lg, p)
-
 		cfg1 := server.Config()
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
 		cfg2 := etcd2.Config()
@@ -232,13 +223,8 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 
 func TestRequestProgress(t *testing.T) {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
-		tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-		defer os.Remove(tempStdoutFile.Name())
-		logCfg := &log.Config{}
-		logCfg.File.Filename = tempStdoutFile.Name()
-		logCfg.Level = "debug"
-		lg, p, _ := log.InitLogger(logCfg)
-		log.ReplaceGlobals(lg, p)
+		fname := testutil.InitLog("debug")
+		defer os.Remove(fname)
 
 		re := require.New(t)
 		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
@@ -266,14 +252,14 @@ func TestRequestProgress(t *testing.T) {
 		if injectWatchChanBlock {
 			failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)")
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(tempStdoutFile.Name())
+				b, _ := os.ReadFile(fname)
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
 			failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock")
 		} else {
 			testutil.Eventually(re, func() bool {
-				b, _ := os.ReadFile(tempStdoutFile.Name())
+				b, _ := os.ReadFile(fname)
 				l := string(b)
 				return strings.Contains(l, "watcher receives progress notify in watch loop")
 			})

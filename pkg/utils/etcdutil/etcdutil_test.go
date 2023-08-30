@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -622,13 +621,8 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
-		tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-		defer os.Remove(tempStdoutFile.Name())
-		cfg := &log.Config{}
-		cfg.File.Filename = tempStdoutFile.Name()
-		cfg.Level = "debug"
-		lg, p, _ := log.InitLogger(cfg)
-		log.ReplaceGlobals(lg, p)
+		fname := testutil.InitLog("debug")
+		defer os.Remove(fname)
 
 		watcher := NewLoopWatcher(
 			suite.ctx,
@@ -650,14 +644,14 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 		if injectWatchChanBlock {
 			failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)")
 			testutil.Eventually(suite.Require(), func() bool {
-				b, _ := os.ReadFile(tempStdoutFile.Name())
+				b, _ := os.ReadFile(fname)
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
 			failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
 		} else {
 			testutil.Eventually(suite.Require(), func() bool {
-				b, _ := os.ReadFile(tempStdoutFile.Name())
+				b, _ := os.ReadFile(fname)
 				l := string(b)
 				return strings.Contains(l, "watcher receives progress notify in watch loop")
 			})
