@@ -62,15 +62,15 @@ type Manager struct {
 	consumptionRecord map[string]time.Time
 }
 
-// ResourceManagerConfigProvider is used to get resource manager config from the given
+// ConfigProvider is used to get resource manager config from the given
 // `bs.server` without modifying its interface.
-type ResourceManagerConfigProvider interface {
+type ConfigProvider interface {
 	GetControllerConfig() *ControllerConfig
 }
 
 // NewManager returns a new manager base on the given server,
-// which should implement the `ResourceManagerConfigProvider` interface.
-func NewManager[T ResourceManagerConfigProvider](srv bs.Server) *Manager {
+// which should implement the `ConfigProvider` interface.
+func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 	m := &Manager{
 		controllerConfig: srv.(T).GetControllerConfig(),
 		groups:           make(map[string]*ResourceGroup),

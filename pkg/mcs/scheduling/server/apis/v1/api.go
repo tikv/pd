@@ -142,7 +142,7 @@ func getOperatorByID(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, opController.GetOperatorStatus(regionID))
+	c.IndentedJSON(http.StatusOK, opController.GetOperatorStatus(regionID))
 }
 
 // @Tags     operators
@@ -184,7 +184,7 @@ func getOperators(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusOK, results)
+	c.IndentedJSON(http.StatusOK, results)
 }
 
 // @Tags     checkers
@@ -206,7 +206,7 @@ func getCheckerByName(c *gin.Context) {
 	output := map[string]bool{
 		"paused": isPaused,
 	}
-	c.JSON(http.StatusOK, output)
+	c.IndentedJSON(http.StatusOK, output)
 }
 
 type schedulerPausedPeriod struct {
@@ -266,9 +266,9 @@ func getSchedulers(c *gin.Context) {
 			}
 		}
 		if needTS {
-			c.JSON(http.StatusOK, pausedPeriods)
+			c.IndentedJSON(http.StatusOK, pausedPeriods)
 		} else {
-			c.JSON(http.StatusOK, pausedSchedulers)
+			c.IndentedJSON(http.StatusOK, pausedSchedulers)
 		}
 		return
 	case "disabled":
@@ -284,8 +284,8 @@ func getSchedulers(c *gin.Context) {
 				disabledSchedulers = append(disabledSchedulers, scheduler)
 			}
 		}
-		c.JSON(http.StatusOK, disabledSchedulers)
+		c.IndentedJSON(http.StatusOK, disabledSchedulers)
 	default:
-		c.JSON(http.StatusOK, schedulers)
+		c.IndentedJSON(http.StatusOK, schedulers)
 	}
 }
