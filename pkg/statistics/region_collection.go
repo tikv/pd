@@ -208,7 +208,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		UndersizedRegion: region.NeedMerge(
 			int64(r.conf.GetMaxMergeRegionSize()),
 			int64(r.conf.GetMaxMergeRegionKeys()),
-		),
+		) && region.GetApproximateSize() >= core.EmptyRegionApproximateSize,
 		WitnessLeader: region.GetLeader().GetIsWitness(),
 	}
 	// Check if the region meets any of the conditions and update the corresponding info.

@@ -97,7 +97,8 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[PendingPeer], 1)
 	re.Len(regionStats.stats[LearnerPeer], 1)
 	re.Len(regionStats.stats[OversizedRegion], 1)
-	re.Len(regionStats.stats[UndersizedRegion], 1)
+	re.Len(regionStats.stats[UndersizedRegion], 0)
+	re.Len(regionStats.stats[EmptyRegion], 0)
 	re.Len(regionStats.stats[OfflinePeer], 1)
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
