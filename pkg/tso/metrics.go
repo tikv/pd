@@ -17,19 +17,19 @@ package tso
 import "github.com/prometheus/client_golang/prometheus"
 
 const (
-	dcLabel   = "dc"
-	typeLabel = "type"
+	dcLabel    = "dc"
+	typeLabel  = "type"
+	groupLabel = "group"
 )
 
 var (
-	// TODO: pre-allocate gauge metrics
 	tsoCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "tso",
 			Name:      "events",
 			Help:      "Counter of tso events",
-		}, []string{typeLabel, dcLabel})
+		}, []string{typeLabel, groupLabel, dcLabel})
 
 	tsoGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -37,7 +37,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "tso",
 			Help:      "Record of tso metadata.",
-		}, []string{typeLabel, dcLabel})
+		}, []string{typeLabel, groupLabel, dcLabel})
 
 	tsoGap = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -45,7 +45,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "tso_gap_millionseconds",
 			Help:      "The minimal (non-zero) TSO gap for each DC.",
-		}, []string{dcLabel})
+		}, []string{groupLabel, dcLabel})
 
 	tsoAllocatorRole = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -53,7 +53,7 @@ var (
 			Subsystem: "tso",
 			Name:      "role",
 			Help:      "Indicate the PD server role info, whether it's a TSO allocator.",
-		}, []string{dcLabel})
+		}, []string{groupLabel, dcLabel})
 )
 
 func init() {
