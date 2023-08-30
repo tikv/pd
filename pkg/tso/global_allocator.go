@@ -83,7 +83,6 @@ type GlobalTSOAllocator struct {
 	// which is used to estimate the MaxTS in a Global TSO generation
 	// to reduce the gRPC network IO latency.
 	syncRTT atomic.Value // store as int64 milliseconds
-
 	// pre-initialized metrics
 	tsoAllocatorRoleGauge prometheus.Gauge
 }
@@ -116,7 +115,7 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 	oracle := &timestampOracle{
 		client:                 am.member.GetLeadership().GetClient(),
 		keyspaceGroupID:        am.kgID,
-		tsPath:                 endpoint.KeyspaceGroupTSPath(am.kgID),
+		tsPath:                 endpoint.KeyspaceGroupGlobalTSPath(am.kgID),
 		storage:                am.storage,
 		saveInterval:           am.saveInterval,
 		updatePhysicalInterval: am.updatePhysicalInterval,

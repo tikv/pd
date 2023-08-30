@@ -17,7 +17,6 @@ package tso
 import (
 	"context"
 	"fmt"
-	"path"
 	"runtime/trace"
 	"sync/atomic"
 	"time"
@@ -27,7 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -50,7 +49,6 @@ type LocalTSOAllocator struct {
 	// So it's not conflicted.
 	rootPath        string
 	allocatorLeader atomic.Value // stored as *pdpb.Member
-
 	// pre-initialized metrics
 	tsoAllocatorRoleGauge prometheus.Gauge
 }
@@ -71,21 +69,10 @@ func NewLocalTSOAllocator(
 }
 
 func newLocalTimestampOracle(am *AllocatorManager, leadership *election.Leadership, dcLocation string) *timestampOracle {
-	// Construct the timestampOracle path prefix, which is:
-	// 1. for the default keyspace group:
-	//    lta/{dc-location} in /pd/{cluster_id}/lta/{dc-location}/timestamp
-	// 2. for the non-default keyspace groups:
-	//    {group}/lta/{dc-location} in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
-	var tsPath string
-	if am.kgID == utils.DefaultKeyspaceGroupID {
-		tsPath = path.Join(localTSOAllocatorEtcdPrefix, dcLocation)
-	} else {
-		tsPath = path.Join(fmt.Sprintf("%05d", am.kgID), localTSOAllocatorEtcdPrefix, dcLocation)
-	}
 	oracle := &timestampOracle{
 		client:                 leadership.GetClient(),
 		keyspaceGroupID:        am.kgID,
-		tsPath:                 tsPath,
+		tsPath:                 endpoint.KeyspaceGroupLocalTSPath(localTSOAllocatorEtcdPrefix, am.kgID, dcLocation),
 		storage:                am.storage,
 		saveInterval:           am.saveInterval,
 		updatePhysicalInterval: am.updatePhysicalInterval,
