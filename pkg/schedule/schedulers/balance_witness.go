@@ -76,7 +76,7 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
 		conf.persistLocked()
-		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
+		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
 		return http.StatusOK, "Config is updated."
 	}
 	m := make(map[string]interface{})
