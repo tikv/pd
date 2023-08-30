@@ -113,7 +113,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		streamCtx := stream.Context()
 		forwardedHost := grpcutil.GetForwardedHost(streamCtx)
 		if !s.IsLocalRequest(forwardedHost) {
-			clientConn, err := s.GetDelegateClient(s.ctx, forwardedHost)
+			clientConn, err := s.GetDelegateClient(s.Context(), s.GetTLSConfig(), forwardedHost)
 			if err != nil {
 				return errors.WithStack(err)
 			}
