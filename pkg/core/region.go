@@ -194,6 +194,13 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	return region
 }
 
+// InheritBuckets inherits the buckets from the parent region if bucket enabled.
+func (r *RegionInfo) InheritBuckets(origin *RegionInfo) {
+	if origin != nil && r.buckets == nil {
+		r.buckets = origin.buckets
+	}
+}
+
 // Clone returns a copy of current regionInfo.
 func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	downPeers := make([]*pdpb.PeerStats, 0, len(r.downPeers))

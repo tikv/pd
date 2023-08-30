@@ -186,6 +186,31 @@ func TestSortedEqual(t *testing.T) {
 	}
 }
 
+func TestInheritBuckets(t *testing.T) {
+	re := require.New(t)
+
+	data := []struct {
+		originBuckets *metapb.Buckets
+		buckets       *metapb.Buckets
+	}{
+		{nil, nil},
+		{nil, &metapb.Buckets{RegionId: 100, Version: 2}},
+		{&metapb.Buckets{RegionId: 100, Version: 2}, &metapb.Buckets{RegionId: 100, Version: 3}},
+		{&metapb.Buckets{RegionId: 100, Version: 2}, nil},
+	}
+	for _, d := range data {
+		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.InheritBuckets(origin)
+		re.Equal(d.originBuckets, r.GetBuckets())
+		// region will not inherit bucket keys.
+		if origin.GetBuckets() != nil {
+			newRegion := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			re.NotEqual(d.originBuckets, newRegion.GetBuckets())
+		}
+	}
+}
+
 func TestRegionRoundingFlow(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
