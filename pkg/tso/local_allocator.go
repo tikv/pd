@@ -66,7 +66,7 @@ func NewLocalTSOAllocator(
 		leadership:            leadership,
 		timestampOracle:       newLocalTimestampOracle(am, leadership, dcLocation),
 		rootPath:              leadership.GetLeaderKey(),
-		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(fmt.Sprintf("%d", am.kgID), dcLocation),
+		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(am.getGroupIDStr(), dcLocation),
 	}
 }
 
@@ -92,8 +92,8 @@ func newLocalTimestampOracle(am *AllocatorManager, leadership *election.Leadersh
 		maxResetTSGap:          am.maxResetTSGap,
 		dcLocation:             dcLocation,
 		tsoMux:                 &tsoObject{},
+		metrics:                newTSOMetrics(am.getGroupIDStr(), dcLocation),
 	}
-	oracle.initMetrics()
 	return oracle
 }
 
@@ -138,7 +138,7 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCh
 func (lta *LocalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "LocalTSOAllocator.GenerateTSO").End()
 	if !lta.leadership.Check() {
-		lta.timestampOracle.notLeaderEvent.Inc()
+		lta.getMetrics().notLeaderEvent.Inc()
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(
 			fmt.Sprintf("requested pd %s of %s allocator", errs.NotLeaderErr, lta.timestampOracle.dcLocation))
 	}
@@ -271,4 +271,8 @@ func (lta *LocalTSOAllocator) WatchAllocatorLeader(serverCtx context.Context, al
 	go lta.allocatorManager.ClusterDCLocationChecker()
 	lta.leadership.Watch(serverCtx, revision)
 	lta.unsetAllocatorLeader()
+}
+
+func (lta *LocalTSOAllocator) getMetrics() *tsoMetrics {
+	return lta.timestampOracle.metrics
 }
