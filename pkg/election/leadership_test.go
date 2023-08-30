@@ -16,7 +16,6 @@ package election
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -35,27 +34,15 @@ const defaultLeaseTimeout = 1
 
 func TestLeadership(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	defer func() {
-		etcd.Close()
-	}()
-	re.NoError(err)
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
-
-	<-etcd.Server.ReadyNotify()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
 
 	// Campaign the same leadership
 	leadership1 := NewLeadership(client, "/test_leader", "test_leader_1")
 	leadership2 := NewLeadership(client, "/test_leader", "test_leader_2")
 
 	// leadership1 starts first and get the leadership
-	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+	err := leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	// leadership2 starts then and can not get the leadership
 	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
@@ -168,23 +155,14 @@ func TestExitWatch(t *testing.T) {
 	// Case6: transfer leader without client reconnection.
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
 		cfg1 := server.Config()
-		cfg2 := etcdutil.NewTestSingleConfig(t)
-		cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
-		cfg2.ClusterState = embed.ClusterStateFlagExisting
-		peerURL := cfg2.LPUrls[0].String()
-		addResp, err := etcdutil.AddEtcdMember(client, []string{peerURL})
-		re.NoError(err)
-		etcd2, err := embed.StartEtcd(cfg2)
-		re.NoError(err)
-		re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
-		<-etcd2.Server.ReadyNotify()
-		ep := cfg2.LCUrls[0].String()
+		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
 		client1, err := clientv3.New(clientv3.Config{
-			Endpoints: []string{ep},
+			Endpoints: []string{etcd2.Config().LCUrls[0].String()},
 		})
 		re.NoError(err)
-
+		// close the original leader
 		server.Server.HardStop()
+		// delete the leader key with the new client
 		client1.Delete(context.Background(), leaderKey)
 		return func() {
 			etcd2.Close()
@@ -201,27 +179,9 @@ func TestExitWatch(t *testing.T) {
 		log.ReplaceGlobals(lg, p)
 
 		cfg1 := server.Config()
-		cfg2 := etcdutil.NewTestSingleConfig(t)
-		cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
-		cfg2.ClusterState = embed.ClusterStateFlagExisting
-		peerURL := cfg2.LPUrls[0].String()
-		addResp, err := etcdutil.AddEtcdMember(client, []string{peerURL})
-		re.NoError(err)
-		etcd2, err := embed.StartEtcd(cfg2)
-		re.NoError(err)
-		re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
-		<-etcd2.Server.ReadyNotify()
-
-		cfg3 := etcdutil.NewTestSingleConfig(t)
-		cfg3.InitialCluster = cfg2.InitialCluster + fmt.Sprintf(",%s=%s", cfg3.Name, &cfg3.LPUrls[0])
-		cfg3.ClusterState = embed.ClusterStateFlagExisting
-		peerURL = cfg3.LPUrls[0].String()
-		addResp, err = etcdutil.AddEtcdMember(client, []string{peerURL})
-		re.NoError(err)
-		etcd3, err := embed.StartEtcd(cfg3)
-		re.NoError(err)
-		re.Equal(uint64(etcd3.Server.ID()), addResp.Member.ID)
-		<-etcd3.Server.ReadyNotify()
+		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
+		cfg2 := etcd2.Config()
+		etcd3 := etcdutil.MustAddEtcdMember(t, &cfg2, client)
 
 		resp2, err := client.MemberList(context.Background())
 		re.NoError(err)
@@ -237,24 +197,13 @@ func TestExitWatch(t *testing.T) {
 
 func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embed.Etcd, client *clientv3.Client) func()) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	defer func() {
-		etcd.Close()
-	}()
-	re.NoError(err)
+	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
 
-	ep := cfg.LCUrls[0].String()
-	client1, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
 	client2, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
+		Endpoints: []string{servers[0].Config().LCUrls[0].String()},
 	})
 	re.NoError(err)
-
-	<-etcd.Server.ReadyNotify()
 
 	leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
 	leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
@@ -268,7 +217,7 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 		done <- struct{}{}
 	}()
 
-	cleanFunc := injectFunc(etcd, client2)
+	cleanFunc := injectFunc(servers[0], client2)
 	defer cleanFunc()
 
 	testutil.Eventually(re, func() bool {
@@ -292,24 +241,13 @@ func TestRequestProgress(t *testing.T) {
 		log.ReplaceGlobals(lg, p)
 
 		re := require.New(t)
-		cfg := etcdutil.NewTestSingleConfig(t)
-		etcd, err := embed.StartEtcd(cfg)
-		defer func() {
-			etcd.Close()
-		}()
-		re.NoError(err)
+		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
+		defer clean()
 
-		ep := cfg.LCUrls[0].String()
-		client1, err := clientv3.New(clientv3.Config{
-			Endpoints: []string{ep},
-		})
-		re.NoError(err)
 		client2, err := clientv3.New(clientv3.Config{
-			Endpoints: []string{ep},
+			Endpoints: []string{servers[0].Config().LCUrls[0].String()},
 		})
 		re.NoError(err)
-
-		<-etcd.Server.ReadyNotify()
 
 		leaderKey := "/test_leader"
 		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")

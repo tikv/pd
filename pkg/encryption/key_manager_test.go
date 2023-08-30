@@ -17,8 +17,6 @@ package encryption
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -31,10 +29,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 )
 
 const (
@@ -50,32 +46,10 @@ func getTestDataKey() []byte {
 }
 
 func newTestEtcd(t *testing.T, re *require.Assertions) (client *clientv3.Client) {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd"
-	cfg.Dir = t.TempDir()
-	cfg.Logger = "zap"
-	pu, err := url.Parse(tempurl.Alloc())
-	re.NoError(err)
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, err := url.Parse(tempurl.Alloc())
-	re.NoError(err)
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	server, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	<-server.Server.ReadyNotify()
-
-	client, err = clientv3.New(clientv3.Config{
-		Endpoints: []string{cfg.LCUrls[0].String()},
-	})
-	re.NoError(err)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 
 	t.Cleanup(func() {
-		client.Close()
-		server.Close()
+		clean()
 	})
 
 	return client

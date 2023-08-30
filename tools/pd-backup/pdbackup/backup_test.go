@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -48,38 +47,18 @@ type backupTestSuite struct {
 }
 
 func TestBackupTestSuite(t *testing.T) {
-	re := require.New(t)
-
-	etcd, etcdClient, err := setupEtcd(t)
-	re.NoError(err)
+	servers, etcdClient, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
 
 	server, serverConfig := setupServer()
 	testSuite := &backupTestSuite{
-		etcd:         etcd,
+		etcd:         servers[0],
 		etcdClient:   etcdClient,
 		server:       server,
 		serverConfig: serverConfig,
 	}
 
 	suite.Run(t, testSuite)
-}
-
-func setupEtcd(t *testing.T) (*embed.Etcd, *clientv3.Client, error) {
-	etcdCfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(etcdCfg)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	ep := etcdCfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return etcd, client, nil
 }
 
 func setupServer() (*httptest.Server, *config.Config) {
@@ -120,10 +99,6 @@ func setupServer() (*httptest.Server, *config.Config) {
 }
 
 func (s *backupTestSuite) BeforeTest(suiteName, testName string) {
-	// the etcd server is set up in TestBackupTestSuite() before the test suite
-	// runs
-	<-s.etcd.Server.ReadyNotify()
-
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
 
