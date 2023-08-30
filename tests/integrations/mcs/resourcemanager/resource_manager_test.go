@@ -655,6 +655,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	c.Stop()
 }
 
+// nolint:gosec
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re := suite.Require()
 	cli := suite.client
