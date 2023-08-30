@@ -27,12 +27,7 @@ import (
 
 func TestSaveLoadTimestamp(t *testing.T) {
 	re := require.New(t)
-
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
-	defer clean()
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	storage := NewStorageWithEtcdBackend(client, rootPath)
-
+	storage := newTestStorage(t)
 	expectedTS := time.Now().Round(0)
 	err := storage.SaveTimestamp(endpoint.TimestampKey, expectedTS)
 	re.NoError(err)
@@ -43,12 +38,7 @@ func TestSaveLoadTimestamp(t *testing.T) {
 
 func TestGlobalLocalTimestamp(t *testing.T) {
 	re := require.New(t)
-
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
-	defer clean()
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	storage := NewStorageWithEtcdBackend(client, rootPath)
-
+	storage := newTestStorage(t)
 	ltaKey := "lta"
 	dc1LocationKey, dc2LocationKey := "dc1", "dc2"
 	localTS1 := time.Now().Round(0)
@@ -75,12 +65,7 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 
 func TestTimestampTxn(t *testing.T) {
 	re := require.New(t)
-
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
-	defer clean()
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	storage := NewStorageWithEtcdBackend(client, rootPath)
-
+	storage := newTestStorage(t)
 	globalTS1 := time.Now().Round(0)
 	err := storage.SaveTimestamp(endpoint.TimestampKey, globalTS1)
 	re.NoError(err)
@@ -92,4 +77,11 @@ func TestTimestampTxn(t *testing.T) {
 	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)
 	re.Equal(globalTS1, ts)
+}
+
+func newTestStorage(t *testing.T) Storage {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
+	return NewStorageWithEtcdBackend(client, rootPath)
 }

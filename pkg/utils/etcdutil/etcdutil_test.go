@@ -194,21 +194,15 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 
 	// Create two etcd clients with etcd1 as endpoint.
 	client1, err := CreateEtcdClient(nil, cfg1.LCUrls) // execute member change operation with this client
-	defer func() {
-		client1.Close()
-	}()
 	re.NoError(err)
+	defer client1.Close()
 	client2, err := CreateEtcdClient(nil, cfg1.LCUrls) // check member change with this client
-	defer func() {
-		client2.Close()
-	}()
 	re.NoError(err)
+	defer client2.Close()
 
 	// Add a new member and check members
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
-	defer func() {
-		etcd2.Close()
-	}()
+	defer etcd2.Close()
 	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
 
 	// scale in etcd1
@@ -283,10 +277,8 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	urls, err := types.NewURLs([]string{proxyAddr})
 	re.NoError(err)
 	client1, err := CreateEtcdClient(nil, urls)
-	defer func() {
-		client1.Close()
-	}()
 	re.NoError(err)
+	defer client1.Close()
 
 	// Add a new member
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
