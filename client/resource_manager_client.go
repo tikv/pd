@@ -310,7 +310,10 @@ func (c *client) createTokenDispatcher() {
 }
 
 func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tbc *tokenBatchController) {
-	defer c.wg.Done()
+	defer func() {
+		log.Info("[resource manager] exit resource token dispatcher")
+		c.wg.Done()
+	}()
 	var (
 		connection   resourceManagerConnectionContext
 		firstRequest *tokenRequest
