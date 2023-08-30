@@ -93,7 +93,7 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	backend := NewLocalLogBackend(true)
-	fname := testutil.InitLog("info")
+	fname := testutil.InitTempFileLogger("info")
 	defer os.Remove(fname)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.False(backend.ProcessHTTPRequest(req))
@@ -125,7 +125,7 @@ func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	b.StopTimer()
 	backend := NewLocalLogBackend(true)
-	fname := testutil.InitLog("info")
+	fname := testutil.InitTempFileLogger("info")
 	defer os.Remove(fname)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()

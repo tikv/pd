@@ -155,16 +155,15 @@ func TestExitWatch(t *testing.T) {
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
 		cfg1 := server.Config()
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
-		client1, err := clientv3.New(clientv3.Config{
-			Endpoints: []string{etcd2.Config().LCUrls[0].String()},
-		})
+		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().LCUrls)
 		re.NoError(err)
 		// close the original leader
 		server.Server.HardStop()
 		// delete the leader key with the new client
-		client1.Delete(context.Background(), leaderKey)
+		client2.Delete(context.Background(), leaderKey)
 		return func() {
 			etcd2.Close()
+			client2.Close()
 		}
 	})
 	// Case7: loss the quorum when the watch loop is running
@@ -190,11 +189,9 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 	re := require.New(t)
 	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-
-	client2, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{servers[0].Config().LCUrls[0].String()},
-	})
+	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)
 	re.NoError(err)
+	defer client2.Close()
 
 	leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
 	leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
@@ -223,17 +220,14 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 
 func TestRequestProgress(t *testing.T) {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
-		fname := testutil.InitLog("debug")
-		defer os.Remove(fname)
-
 		re := require.New(t)
+		fname := testutil.InitTempFileLogger("debug")
+		defer os.Remove(fname)
 		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
 		defer clean()
-
-		client2, err := clientv3.New(clientv3.Config{
-			Endpoints: []string{servers[0].Config().LCUrls[0].String()},
-		})
+		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)
 		re.NoError(err)
+		defer client2.Close()
 
 		leaderKey := "/test_leader"
 		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")

@@ -452,7 +452,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 }
 
 func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
-	fname := testutil.InitLog("info")
+	fname := testutil.InitTempFileLogger("info")
 	defer os.Remove(fname)
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	input := map[string]interface{}{
@@ -661,7 +661,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 func (suite *redirectorTestSuite) TestXForwardedFor() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	suite.NoError(leader.BootstrapCluster())
-	fname := testutil.InitLog("info")
+	fname := testutil.InitTempFileLogger("info")
 	defer os.Remove(fname)
 
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
