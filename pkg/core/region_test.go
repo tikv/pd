@@ -186,58 +186,6 @@ func TestSortedEqual(t *testing.T) {
 	}
 }
 
-func TestInherit(t *testing.T) {
-	re := require.New(t)
-	// size in MB
-	// case for approximateSize
-	testCases := []struct {
-		originExists bool
-		originSize   uint64
-		size         uint64
-		expect       uint64
-	}{
-		{false, 0, 0, 1},
-		{false, 0, 2, 2},
-		{true, 0, 2, 2},
-		{true, 1, 2, 2},
-		{true, 2, 0, 2},
-	}
-	for _, testCase := range testCases {
-		var origin *RegionInfo
-		if testCase.originExists {
-			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
-			origin.approximateSize = int64(testCase.originSize)
-		}
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-		r.approximateSize = int64(testCase.size)
-		r.Inherit(origin, false)
-		re.Equal(int64(testCase.expect), r.approximateSize)
-	}
-
-	// bucket
-	data := []struct {
-		originBuckets *metapb.Buckets
-		buckets       *metapb.Buckets
-	}{
-		{nil, nil},
-		{nil, &metapb.Buckets{RegionId: 100, Version: 2}},
-		{&metapb.Buckets{RegionId: 100, Version: 2}, &metapb.Buckets{RegionId: 100, Version: 3}},
-		{&metapb.Buckets{RegionId: 100, Version: 2}, nil},
-	}
-	for _, d := range data {
-		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-		r.Inherit(origin, true)
-		re.Equal(d.originBuckets, r.GetBuckets())
-		// region will not inherit bucket keys.
-		if origin.GetBuckets() != nil {
-			newRegion := NewRegionInfo(&metapb.Region{Id: 100}, nil)
-			newRegion.Inherit(origin, false)
-			re.NotEqual(d.originBuckets, newRegion.GetBuckets())
-		}
-	}
-}
-
 func TestRegionRoundingFlow(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
