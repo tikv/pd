@@ -47,14 +47,24 @@ func TestMain(m *testing.M) {
 
 func TestMemberHelpers(t *testing.T) {
 	re := require.New(t)
-	servers, client1, clean := NewTestEtcdCluster(t, 2)
+	servers, client1, clean := NewTestEtcdCluster(t, 1)
 	defer clean()
+	etcd1, cfg1 := servers[0], servers[0].Config()
 
-	etcd1, etcd2 := servers[0], servers[1]
-	_, cfg2 := servers[0].Config(), servers[1].Config()
+	// Test ListEtcdMembers
+	listResp1, err := ListEtcdMembers(client1)
+	re.NoError(err)
+	re.Len(listResp1.Members, 1)
+	// types.ID is an alias of uint64.
+	re.Equal(uint64(etcd1.Server.ID()), listResp1.Members[0].ID)
+
+	// Test AddEtcdMember
+	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
+	defer etcd2.Close()
+	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
 
 	// Test CheckClusterID
-	urlsMap, err := types.NewURLsMap(cfg2.InitialCluster)
+	urlsMap, err := types.NewURLsMap(etcd2.Config().InitialCluster)
 	re.NoError(err)
 	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlsMap, &tls.Config{MinVersion: tls.VersionTLS12})
 	re.NoError(err)
