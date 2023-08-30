@@ -117,6 +117,8 @@ func addEtcdMemberWithRetry(t *testing.T, cfg1 *embed.Config, client *clientv3.C
 	if err != nil {
 		re.Contains(err.Error(), "error validating peerURLs")
 		if retry > 0 {
+			_, err := RemoveEtcdMember(client, addResp.Member.ID)
+			re.NoError(err)
 			return addEtcdMemberWithRetry(t, cfg1, client, retry-1)
 		}
 	}
