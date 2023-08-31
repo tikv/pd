@@ -421,7 +421,9 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
 		conf.persistLocked()
-		rd.Text(w, http.StatusOK, "success")
+		log.Info("hot-region-scheduler config is updated", zap.String("old", string(oldc)), zap.String("new", string(newc)))
+		rd.Text(w, http.StatusOK, "Config is updated.")
+		return
 	}
 
 	m := make(map[string]interface{})
@@ -431,11 +433,11 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	}
 	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
-		rd.Text(w, http.StatusOK, "no changed")
+		rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
 		return
 	}
 
-	rd.Text(w, http.StatusBadRequest, "config item not found")
+	rd.Text(w, http.StatusBadRequest, "Config item is not found.")
 }
 
 func (conf *hotRegionSchedulerConfig) persistLocked() error {

@@ -76,7 +76,8 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
 		conf.persistLocked()
-		return http.StatusOK, "success"
+		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
+		return http.StatusOK, "Config is updated."
 	}
 	m := make(map[string]interface{})
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -84,9 +85,9 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 	}
 	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
-		return http.StatusOK, "no changed"
+		return http.StatusOK, "Config is the same with origin, so do nothing."
 	}
-	return http.StatusBadRequest, "config item not found"
+	return http.StatusBadRequest, "Config item is not found."
 }
 
 func (conf *balanceWitnessSchedulerConfig) validate() bool {
