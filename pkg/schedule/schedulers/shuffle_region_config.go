@@ -101,7 +101,7 @@ func (conf *shuffleRegionSchedulerConfig) handleSetRoles(w http.ResponseWriter, 
 		rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	rd.Text(w, http.StatusOK, "")
+	rd.Text(w, http.StatusOK, "Config is updated.")
 }
 
 func (conf *shuffleRegionSchedulerConfig) persist() error {

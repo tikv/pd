@@ -32,3 +32,4 @@ linters-settings:
     excludes:
       - G402
       - G404
+      - G601

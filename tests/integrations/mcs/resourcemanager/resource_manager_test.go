@@ -655,6 +655,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	c.Stop()
 }
 
+// nolint:gosec
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re := suite.Require()
 	cli := suite.client
@@ -991,12 +992,17 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re.NoError(err)
 	servers := suite.cluster.GetServers()
 	re.NoError(suite.cluster.StopAll())
+	cli.Close()
 	serverList := make([]*tests.TestServer, 0, len(servers))
 	for _, s := range servers {
 		serverList = append(serverList, s)
 	}
 	re.NoError(suite.cluster.RunServers(serverList))
 	suite.cluster.WaitLeader()
+	// re-connect client as well
+	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	re.NoError(err)
+	cli = suite.client
 	var newGroups []*rmpb.ResourceGroup
 	testutil.Eventually(suite.Require(), func() bool {
 		var err error
