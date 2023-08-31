@@ -16,11 +16,8 @@ package server
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -39,6 +36,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -50,7 +48,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -62,45 +59,28 @@ var _ tso.ElectionMember = (*member.Participant)(nil)
 
 // Server is the TSO server, and it implements bs.Server.
 type Server struct {
+	*server.BaseServer
 	diagnosticspb.DiagnosticsServer
 
 	// Server state. 0 is not running, 1 is running.
 	isRunning int64
-	// Server start timestamp
-	startTimestamp int64
 
-	ctx              context.Context
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
 	cfg       *Config
 	clusterID uint64
-	listenURL *url.URL
 
-	// etcd client
-	etcdClient *clientv3.Client
-	// http client
-	httpClient *http.Client
-
-	secure               bool
-	muxListener          net.Listener
-	grpcServer           *grpc.Server
-	httpServer           *http.Server
 	service              *Service
 	keyspaceGroupManager *tso.KeyspaceGroupManager
-	// Store as map[string]*grpc.ClientConn
-	clientConns sync.Map
+
 	// tsoDispatcher is used to dispatch the TSO requests to
 	// the corresponding forwarding TSO channels.
 	tsoDispatcher *tsoutil.TSODispatcher
 	// tsoProtoFactory is the abstract factory for creating tso
 	// related data structures defined in the tso grpc protocol
 	tsoProtoFactory *tsoutil.TSOProtoFactory
-
-	// Callback functions for different stages
-	// startCallbacks will be called after the server is started.
-	startCallbacks []func()
 
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
@@ -109,14 +89,9 @@ type Server struct {
 
 // Implement the following methods defined in bs.Server
 
-// Name returns the unique Name for this server in the TSO cluster.
+// Name returns the unique name for this server in the TSO cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
-}
-
-// Context returns the context of server.
-func (s *Server) Context() context.Context {
-	return s.ctx
 }
 
 // GetBasicServer returns the basic server.
@@ -134,11 +109,6 @@ func (s *Server) GetBackendEndpoints() string {
 	return s.cfg.BackendEndpoints
 }
 
-// GetClientConns returns the client connections.
-func (s *Server) GetClientConns() *sync.Map {
-	return &s.clientConns
-}
-
 // ServerLoopWgDone decreases the server loop wait group.
 func (s *Server) ServerLoopWgDone() {
 	s.serverLoopWg.Done()
@@ -149,44 +119,14 @@ func (s *Server) ServerLoopWgAdd(n int) {
 	s.serverLoopWg.Add(n)
 }
 
-// GetHTTPServer returns the http server.
-func (s *Server) GetHTTPServer() *http.Server {
-	return s.httpServer
-}
-
-// SetHTTPServer sets the http server.
-func (s *Server) SetHTTPServer(httpServer *http.Server) {
-	s.httpServer = httpServer
-}
-
 // SetUpRestHandler sets up the REST handler.
 func (s *Server) SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup) {
 	return SetUpRestHandler(s.service)
 }
 
-// GetGRPCServer returns the grpc server.
-func (s *Server) GetGRPCServer() *grpc.Server {
-	return s.grpcServer
-}
-
-// SetGRPCServer sets the grpc server.
-func (s *Server) SetGRPCServer(grpcServer *grpc.Server) {
-	s.grpcServer = grpcServer
-}
-
 // RegisterGRPCService registers the grpc service.
 func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
 	s.service.RegisterGRPCService(grpcServer)
-}
-
-// SetETCDClient sets the etcd client.
-func (s *Server) SetETCDClient(etcdClient *clientv3.Client) {
-	s.etcdClient = etcdClient
-}
-
-// SetHTTPClient sets the http client.
-func (s *Server) SetHTTPClient(httpClient *http.Client) {
-	s.httpClient = httpClient
 }
 
 // Run runs the TSO server.
@@ -200,7 +140,7 @@ func (s *Server) Run() error {
 			return err
 		}
 	}
-	go systimemon.StartMonitor(s.ctx, time.Now, func() {
+	go systimemon.StartMonitor(s.Context(), time.Now, func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
 	})
@@ -224,35 +164,20 @@ func (s *Server) Close() {
 	s.serviceRegister.Deregister()
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
-	s.muxListener.Close()
+	s.GetListener().Close()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
-	if s.etcdClient != nil {
-		if err := s.etcdClient.Close(); err != nil {
+	if s.GetClient() != nil {
+		if err := s.GetClient().Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
 		}
 	}
 
-	if s.httpClient != nil {
-		s.httpClient.CloseIdleConnections()
+	if s.GetHTTPClient() != nil {
+		s.GetHTTPClient().CloseIdleConnections()
 	}
 	log.Info("tso server is closed")
-}
-
-// GetClient returns builtin etcd client.
-func (s *Server) GetClient() *clientv3.Client {
-	return s.etcdClient
-}
-
-// GetHTTPClient returns builtin http client.
-func (s *Server) GetHTTPClient() *http.Client {
-	return s.httpClient
-}
-
-// AddStartCallback adds a callback in the startServer phase.
-func (s *Server) AddStartCallback(callbacks ...func()) {
-	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
 // IsServing implements basicserver. It returns whether the server is the leader
@@ -328,11 +253,6 @@ func (s *Server) IsClosed() bool {
 	return atomic.LoadInt64(&s.isRunning) == 0
 }
 
-// IsSecure checks if the server enable TLS.
-func (s *Server) IsSecure() bool {
-	return s.secure
-}
-
 // GetKeyspaceGroupManager returns the manager of keyspace group.
 func (s *Server) GetKeyspaceGroupManager() *tso.KeyspaceGroupManager {
 	return s.keyspaceGroupManager
@@ -350,24 +270,6 @@ func (s *Server) IsLocalRequest(forwardedHost string) bool {
 	// uses the embedded etcd, check against ClientUrls; otherwise check
 	// against the cluster membership.
 	return forwardedHost == ""
-}
-
-// GetDelegateClient returns grpc client connection talking to the forwarded host
-func (s *Server) GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
-	client, ok := s.clientConns.Load(forwardedHost)
-	if !ok {
-		tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
-		if err != nil {
-			return nil, err
-		}
-		cc, err := grpcutil.GetClientConn(ctx, forwardedHost, tlsConfig)
-		if err != nil {
-			return nil, err
-		}
-		client = cc
-		s.clientConns.Store(forwardedHost, cc)
-	}
-	return client.(*grpc.ClientConn), nil
 }
 
 // ValidateInternalRequest checks if server is closed, which is used to validate
@@ -437,7 +339,7 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = utils.InitClusterID(s.ctx, s.etcdClient); err != nil {
+	if s.clusterID, err = utils.InitClusterID(s.Context(), s.GetClient()); err != nil {
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
@@ -448,18 +350,13 @@ func (s *Server) startServer() (err error) {
 	// different service modes provided by the same pd-server binary
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
-	if err != nil {
-		return err
-	}
-
 	// Initialize the TSO service.
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	legacySvcRootPath := endpoint.LegacyRootPath(s.clusterID)
 	tsoSvcRootPath := endpoint.TSOSvcRootPath(s.clusterID)
 	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
-		s.serverLoopCtx, s.serviceID, s.etcdClient, s.httpClient, s.cfg.AdvertiseListenAddr,
+		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(), s.cfg.AdvertiseListenAddr,
 		discovery.TSOPath(s.clusterID), legacySvcRootPath, tsoSvcRootPath, s.cfg)
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
@@ -468,29 +365,19 @@ func (s *Server) startServer() (err error) {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.service = &Service{Server: s}
 
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
-	if err != nil {
-		return err
-	}
-	if tlsConfig != nil {
-		s.secure = true
-		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
-	} else {
-		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
-	}
-	if err != nil {
+	if err := s.InitListener(s.GetTLSConfig(), s.cfg.ListenAddr); err != nil {
 		return err
 	}
 
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
 	s.serverLoopWg.Add(1)
-	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.muxListener)
+	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	<-serverReadyChan
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
-	for _, cb := range s.startCallbacks {
+	for _, cb := range s.GetStartCallbacks() {
 		cb()
 	}
 
@@ -499,7 +386,7 @@ func (s *Server) startServer() (err error) {
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, strconv.FormatUint(s.clusterID, 10),
+	s.serviceRegister = discovery.NewServiceRegister(s.Context(), s.GetClient(), strconv.FormatUint(s.clusterID, 10),
 		utils.TSOServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
 		log.Error("failed to register the service", zap.String("service-name", utils.TSOServiceName), errs.ZapError(err))
@@ -513,10 +400,9 @@ func (s *Server) startServer() (err error) {
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *Config) *Server {
 	svr := &Server{
+		BaseServer:        server.NewBaseServer(ctx),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		startTimestamp:    time.Now().Unix(),
 		cfg:               cfg,
-		ctx:               ctx,
 	}
 	return svr
 }
