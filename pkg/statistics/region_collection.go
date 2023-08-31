@@ -198,9 +198,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			return false
 		}(),
 		LearnerPeer: len(region.GetLearners()) > 0,
-		// When cluster resumes, the region size may be not initialized, but region heartbeat is send.
-		// So use `==` here.
-		EmptyRegion: region.GetApproximateSize() == core.EmptyRegionApproximateSize,
+		EmptyRegion: region.IsEmptyRegion(),
 		OversizedRegion: region.IsOversized(
 			int64(r.conf.GetRegionMaxSize()),
 			int64(r.conf.GetRegionMaxKeys()),

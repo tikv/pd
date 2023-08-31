@@ -506,6 +506,13 @@ func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
 }
 
+// IsEmptyRegion returns whether the region is empty.
+func (r *RegionInfo) IsEmptyRegion() bool {
+	// When cluster resumes, the region size may be not initialized, but region heartbeat is send.
+	// So use `==` here.
+	return r.approximateSize == EmptyRegionApproximateSize
+}
+
 // GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.
 func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
 	peer := r.GetStorePeer(storeID)

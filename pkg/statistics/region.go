@@ -62,7 +62,9 @@ func (s *RegionStats) Observe(r *core.RegionInfo) {
 	if approximateSize == core.EmptyRegionApproximateSize {
 		s.EmptyCount++
 	}
-	s.StorageSize += approximateSize
+	if !r.IsEmptyRegion() {
+		s.StorageSize += approximateSize
+	}
 	s.UserStorageSize += approximateKvSize
 	s.StorageKeys += approximateKeys
 	leader := r.GetLeader()
