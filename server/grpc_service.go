@@ -1250,6 +1250,9 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		lastForwardedHost string
 		lastBind          time.Time
 		errCh             chan error
+		schedulingStream  schedulingpb.Scheduling_RegionHeartbeatClient
+		cancel1           context.CancelFunc
+		lastPrimaryAddr   string
 	)
 	defer func() {
 		// cancel the forward stream
@@ -1363,6 +1366,36 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
+
+		if s.IsAPIServiceMode() {
+			ctx := stream.Context()
+			primaryAddr, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
+			if schedulingStream == nil || lastPrimaryAddr != primaryAddr {
+				if cancel1 != nil {
+					cancel1()
+				}
+				client, err := s.getDelegateClient(ctx, primaryAddr)
+				if err != nil {
+					log.Error("get delegate client failed", zap.Error(err))
+				}
+
+				log.Info("create region heartbeat forward stream", zap.String("forwarded-host", primaryAddr))
+				schedulingStream, cancel1, err = s.createSchedulingStream(client)
+				if err != nil {
+					log.Error("create region heartbeat forward stream failed", zap.Error(err))
+				} else {
+					lastPrimaryAddr = primaryAddr
+					errCh = make(chan error, 1)
+					go forwardSchedulingToServer(schedulingStream, server, errCh)
+				}
+			}
+			if schedulingStream != nil {
+				if err := schedulingStream.Send(request); err != nil {
+					log.Error("forward region heartbeat failed", zap.Error(err))
+				}
+			}
+		}
+
 		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 	}
@@ -2297,6 +2330,31 @@ func (s *GrpcServer) createHeartbeatForwardStream(client *grpc.ClientConn) (pdpb
 }
 
 func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.Recv()
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err := server.Send(resp); err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+	}
+}
+
+func (s *GrpcServer) createSchedulingStream(client *grpc.ClientConn) (schedulingpb.Scheduling_RegionHeartbeatClient, context.CancelFunc, error) {
+	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(s.ctx)
+	go grpcutil.CheckStream(ctx, cancel, done)
+	forwardStream, err := schedulingpb.NewSchedulingClient(client).RegionHeartbeat(ctx)
+	done <- struct{}{}
+	return forwardStream, cancel, err
+}
+
+func forwardSchedulingToServer(forwardStream schedulingpb.Scheduling_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
 	for {

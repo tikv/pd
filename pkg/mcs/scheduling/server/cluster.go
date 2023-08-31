@@ -17,6 +17,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/slice"
@@ -68,7 +69,6 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		hotStat:           statistics.NewHotStat(ctx),
 		labelLevelStats:   statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
-		labelLevelStats:   statistics.NewLabelStatistics(),
 		storage:           storage,
 		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
@@ -389,4 +389,83 @@ func (c *Cluster) StartBackgroundJobs() {
 func (c *Cluster) StopBackgroundJobs() {
 	c.cancel()
 	c.wg.Wait()
+}
+
+// HandleRegionHeartbeat processes RegionInfo reports from client.
+func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+	if err := c.processRegionHeartbeat(region); err != nil {
+		return err
+	}
+
+	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
+	return nil
+}
+
+// processRegionHeartbeat updates the region information.
+func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
+	origin, _, err := c.PreCheckPutRegion(region)
+	if err != nil {
+		return err
+	}
+	if c.GetStoreConfig().IsEnableRegionBucket() {
+		region.InheritBuckets(origin)
+	}
+
+	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
+	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	for _, peer := range region.GetPeers() {
+		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
+		c.hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
+	}
+	c.coordinator.GetSchedulersController().CheckTransferWitnessLeader(region)
+
+	hasRegionStats := c.regionStats != nil
+	// Save to storage if meta is updated, except for flashback.
+	// Save to cache if meta or leader is updated, or contains any down/pending peer.
+	// Mark isNew if the region in cache does not have leader.
+	isNew, _, saveCache, _ := core.GenerateRegionGuideFunc(true)(region, origin)
+	if !saveCache && !isNew {
+		// Due to some config changes need to update the region stats as well,
+		// so we do some extra checks here.
+		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
+			c.regionStats.Observe(region, c.GetRegionStores(region))
+		}
+		return nil
+	}
+
+	var overlaps []*core.RegionInfo
+	if saveCache {
+		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
+		// check its validation again here.
+		//
+		// However it can't solve the race condition of concurrent heartbeats from the same region.
+		if overlaps, err = c.AtomicCheckAndPutRegion(region); err != nil {
+			return err
+		}
+
+		for _, item := range overlaps {
+			if c.regionStats != nil {
+				c.regionStats.ClearDefunctRegion(item.GetID())
+			}
+			c.labelLevelStats.ClearDefunctRegion(item.GetID())
+			c.ruleManager.InvalidCache(item.GetID())
+		}
+	}
+
+	if hasRegionStats {
+		c.regionStats.Observe(region, c.GetRegionStores(region))
+	}
+
+	if !c.IsPrepared() && isNew {
+		c.coordinator.GetPrepareChecker().Collect(region)
+	}
+
+	return nil
+}
+
+// IsPrepared return true if the prepare checker is ready.
+func (c *Cluster) IsPrepared() bool {
+	return c.coordinator.GetPrepareChecker().IsPrepared()
 }
