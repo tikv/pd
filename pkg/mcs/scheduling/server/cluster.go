@@ -22,6 +22,7 @@ import (
 
 // Cluster is used to manage all information for scheduling purpose.
 type Cluster struct {
+	ctx context.Context
 	*core.BasicCluster
 	persistConfig     *config.PersistConfig
 	ruleManager       *placement.RuleManager
@@ -45,6 +46,7 @@ func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storag
 	}
 	ruleManager := placement.NewRuleManager(storage, basicCluster, persistConfig)
 	c := &Cluster{
+		ctx:               ctx,
 		BasicCluster:      basicCluster,
 		ruleManager:       ruleManager,
 		labelerManager:    labelerManager,
@@ -146,7 +148,7 @@ func (c *Cluster) AllocID() (uint64, error) {
 		c.checkMembershipCh <- struct{}{}
 		return 0, errors.New("API server leader is not found")
 	}
-	resp, err := cli.AllocID(context.Background(), &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
+	resp, err := cli.AllocID(c.ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
 	if err != nil {
 		c.checkMembershipCh <- struct{}{}
 		return 0, err
