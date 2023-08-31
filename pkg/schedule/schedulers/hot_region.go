@@ -110,18 +110,16 @@ var (
 
 type baseHotScheduler struct {
 	*BaseScheduler
-	// store information, including pending Influence by resource type
+	// stInfos contain store state information and pending Influence.
 	// Every time `Schedule()` will recalculate it.
 	stInfos map[uint64]*statistics.StoreSummaryInfo
-	// stLoadInfos is temporary states but exported to API or metrics
+	// stLoadInfos contain store statistics information by resource type.
+	// stLoadInfos is temporary states but exported to API or metrics.
 	// Every time `Schedule()` will recalculate it.
 	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
 	// stHistoryLoads stores the history `stLoadInfos`
 	// Every time `Schedule()` will rolling update it.
 	stHistoryLoads *statistics.StoreHistoryLoads
-	// storesLoads is temporary states.
-	// Every time `Schedule()` will recalculate it.
-	storesLoads map[uint64][]float64
 	// regionPendings stores regionID -> pendingInfluence,
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
@@ -152,14 +150,14 @@ func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
 func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.SchedulerCluster) {
 	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
 	h.summaryPendingInfluence()
-	h.storesLoads = cluster.GetStoresLoads()
+	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetSchedulerConfig().IsTraceRegionFlow()
 
 	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource constant.ResourceKind) {
 		ty := buildResourceType(rw, resource)
 		h.stLoadInfos[ty] = statistics.SummaryStoresLoad(
 			h.stInfos,
-			h.storesLoads,
+			storesLoads,
 			h.stHistoryLoads,
 			regionStats,
 			isTraceRegionFlow,

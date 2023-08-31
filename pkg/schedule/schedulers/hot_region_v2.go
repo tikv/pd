@@ -298,7 +298,7 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 
 		// (lowRate+minNotWorsenedRate) / (highRate-minNotWorsenedRate) = futureChecker.balancedRatio
 		minNotWorsenedRate := (highRate*rs.futureChecker.balancedRatio - lowRate) / (1.0 + rs.futureChecker.balancedRatio)
-		// (highRate-minNotWorsenedRate) / (lowRate+minNotWorsenedRate) = futureChecker.balancedRatio
+		// (highRate-maxNotWorsenedRate) / (lowRate+maxNotWorsenedRate) = futureChecker.balancedRatio
 		maxNotWorsenedRate := (highRate - lowRate*rs.futureChecker.balancedRatio) / (1.0 + rs.futureChecker.balancedRatio)
 
 		if minNotWorsenedRate > -bs.getMinRate(dim) { // use min rate as 0 value
