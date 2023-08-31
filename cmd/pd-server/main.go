@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -46,6 +47,13 @@ import (
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/install"
 	_ "github.com/tikv/pd/pkg/mcs/tso/server/install"
+)
+
+const (
+	apiMode        = "api"
+	tsoMode        = "tso"
+	rmMode         = "resource-manager"
+	serviceModeEnv = "PD_SERVICE_MODE"
 )
 
 func main() {
@@ -81,7 +89,7 @@ func NewServiceCommand() *cobra.Command {
 // NewTSOServiceCommand returns the tso service command.
 func NewTSOServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tso",
+		Use:   tsoMode,
 		Short: "Run the TSO service",
 		Run:   tso.CreateServerWrapper,
 	}
@@ -121,7 +129,7 @@ func NewSchedulingServiceCommand() *cobra.Command {
 // NewResourceManagerServiceCommand returns the resource manager service command.
 func NewResourceManagerServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "resource-manager",
+		Use:   rmMode,
 		Short: "Run the resource manager service",
 		Run:   resource_manager.CreateServerWrapper,
 	}
@@ -141,7 +149,7 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 // NewAPIServiceCommand returns the API service command.
 func NewAPIServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "api",
+		Use:   apiMode,
 		Short: "Run the API service",
 		Run:   createAPIServerWrapper,
 	}
@@ -175,7 +183,12 @@ func createAPIServerWrapper(cmd *cobra.Command, args []string) {
 }
 
 func createServerWrapper(cmd *cobra.Command, args []string) {
-	start(cmd, args)
+	mode := os.Getenv(serviceModeEnv)
+	if len(mode) != 0 && strings.ToLower(mode) == apiMode {
+		start(cmd, args, apiMode)
+	} else {
+		start(cmd, args)
+	}
 }
 
 func start(cmd *cobra.Command, args []string, services ...string) {
