@@ -54,13 +54,17 @@ func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("not implemented"))
 }
 
+// ConfigProvider is used to get tso config from the given
+// `bs.server` without modifying its interface.
+type ConfigProvider interface{}
+
 // Service is the TSO grpc service.
 type Service struct {
 	*Server
 }
 
 // NewService creates a new TSO service.
-func NewService(svr bs.Server) registry.RegistrableService {
+func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
 	server, ok := svr.(*Server)
 	if !ok {
 		log.Fatal("create tso server failed")
@@ -109,7 +113,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		streamCtx := stream.Context()
 		forwardedHost := grpcutil.GetForwardedHost(streamCtx)
 		if !s.IsLocalRequest(forwardedHost) {
-			clientConn, err := s.GetDelegateClient(s.ctx, forwardedHost)
+			clientConn, err := s.GetDelegateClient(s.Context(), s.GetTLSConfig(), forwardedHost)
 			if err != nil {
 				return errors.WithStack(err)
 			}

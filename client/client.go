@@ -87,7 +87,7 @@ type Client interface {
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
-	// Also it may return nil if PD finds no Region for the key temporarily,
+	// Also, it may return nil if PD finds no Region for the key temporarily,
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionFromMember gets a region from certain members.
@@ -96,7 +96,7 @@ type Client interface {
 	GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error)
-	// ScanRegion gets a list of regions, starts from the region that contains key.
+	// ScanRegions gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
 	// with empty value (PeerID is 0).
@@ -109,7 +109,7 @@ type Client interface {
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
 	GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*metapb.Store, error)
-	// Update GC safe point. TiKV will check it and do GC themselves if necessary.
+	// UpdateGCSafePoint TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)

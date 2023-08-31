@@ -329,6 +329,7 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 	// but maybe user want to add operator when waiting queue is busy
 	if oc.exceedStoreLimitLocked(ops...) {
 		for _, op := range ops {
+			operatorCounter.WithLabelValues(op.Desc(), "exceed-limit").Inc()
 			_ = op.Cancel(ExceedStoreLimit)
 			oc.buryOperator(op)
 		}
@@ -687,6 +688,21 @@ func (oc *Controller) GetWaitingOperators() []*Operator {
 	oc.RLock()
 	defer oc.RUnlock()
 	return oc.wop.ListOperator()
+}
+
+// GetOperatorsOfKind returns the running operators of the kind.
+func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
+	oc.RLock()
+	defer oc.RUnlock()
+
+	operators := make([]*Operator, 0, len(oc.operators))
+	for _, op := range oc.operators {
+		if op.Kind()&mask != 0 {
+			operators = append(operators, op)
+		}
+	}
+
+	return operators
 }
 
 // SendScheduleCommand sends a command to the region.

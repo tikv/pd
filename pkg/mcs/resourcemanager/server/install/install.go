@@ -16,7 +16,7 @@ package install
 
 import (
 	"github.com/tikv/pd/pkg/mcs/registry"
-	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 
 	// init API group
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
@@ -28,5 +28,5 @@ func init() {
 
 // Install registers the API group and grpc service.
 func Install(register *registry.ServiceRegistry) {
-	register.RegisterService("ResourceManager", rm_server.NewService[*rm_server.Server])
+	register.RegisterService("ResourceManager", server.NewService[*server.Server])
 }

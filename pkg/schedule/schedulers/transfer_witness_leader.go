@@ -78,6 +78,7 @@ func (s *trasferWitnessLeaderScheduler) Schedule(cluster sche.SchedulerCluster, 
 
 func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeaderBatch(name, typ string, cluster sche.SchedulerCluster, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
+batchLoop:
 	for i := 0; i < batchSize; i++ {
 		select {
 		case region := <-s.regions:
@@ -92,7 +93,7 @@ func (s *trasferWitnessLeaderScheduler) scheduleTransferWitnessLeaderBatch(name,
 				ops = append(ops, op)
 			}
 		default:
-			break
+			break batchLoop
 		}
 	}
 	return ops

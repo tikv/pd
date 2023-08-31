@@ -89,14 +89,15 @@ func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams
 	ctx, cancel := context.WithCancel(ctx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
+	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
 	return &Coordinator{
 		ctx:               ctx,
 		cancel:            cancel,
 		cluster:           cluster,
 		prepareChecker:    newPrepareChecker(),
-		checkers:          checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController),
-		regionScatterer:   scatter.NewRegionScatterer(ctx, cluster, opController),
-		regionSplitter:    splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController)),
+		checkers:          checkers,
+		regionScatterer:   scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddSuspectRegions),
+		regionSplitter:    splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddSuspectRegions),
 		schedulers:        schedulers,
 		opController:      opController,
 		hbStreams:         hbStreams,
@@ -168,7 +169,7 @@ func (c *Coordinator) PatrolRegions() {
 }
 
 func (c *Coordinator) isSchedulingHalted() bool {
-	return c.cluster.GetPersistOptions().IsSchedulingHalted()
+	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
@@ -311,6 +312,42 @@ func (c *Coordinator) drivePushOperator() {
 	}
 }
 
+// driveSlowNodeScheduler is used to enable slow node scheduler when using `raft-kv2`.
+func (c *Coordinator) driveSlowNodeScheduler() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("drive slow node scheduler is stopped")
+			return
+		case <-ticker.C:
+			{
+				// If enabled, exit.
+				if exists, _ := c.schedulers.IsSchedulerExisted(schedulers.EvictSlowTrendName); exists {
+					return
+				}
+				// If the cluster was set up with `raft-kv2` engine, this cluster should
+				// enable `evict-slow-trend` scheduler as default.
+				if c.GetCluster().GetStoreConfig().IsRaftKV2() {
+					typ := schedulers.EvictSlowTrendType
+					args := []string{}
+
+					s, err := schedulers.CreateScheduler(typ, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(typ, args), c.schedulers.RemoveScheduler)
+					if err != nil {
+						log.Warn("initializing evict-slow-trend scheduler failed", errs.ZapError(err))
+					} else if err = c.schedulers.AddScheduler(s, args...); err != nil {
+						log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
+					}
+				}
+			}
+		}
+	}
+}
+
 // RunUntilStop runs the coordinator until receiving the stop signal.
 func (c *Coordinator) RunUntilStop() {
 	c.Run()
@@ -344,12 +381,14 @@ func (c *Coordinator) Run() {
 	log.Info("Coordinator starts to run schedulers")
 	c.initSchedulers()
 
-	c.wg.Add(3)
+	c.wg.Add(4)
 	// Starts to patrol regions.
 	go c.PatrolRegions()
 	// Checks suspect key ranges
 	go c.checkSuspectRanges()
 	go c.drivePushOperator()
+	// Checks whether to create evict-slow-trend scheduler.
+	go c.driveSlowNodeScheduler()
 }
 
 func (c *Coordinator) initSchedulers() {
@@ -374,8 +413,7 @@ func (c *Coordinator) initSchedulers() {
 	if err != nil {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
-
-	scheduleCfg := c.cluster.GetPersistOptions().GetScheduleConfig().Clone()
+	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
 		data := configs[i]
@@ -434,8 +472,8 @@ func (c *Coordinator) initSchedulers() {
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetPersistOptions().SetScheduleConfig(scheduleCfg)
-	if err := c.cluster.GetPersistOptions().Persist(c.cluster.GetStorage()); err != nil {
+	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
+	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
 }
