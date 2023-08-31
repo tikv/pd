@@ -237,10 +237,10 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	var mode string
-	if len(services) == 0 {
-		mode = PDMode
-	} else {
+	if len(services) != 0 {
 		mode = APIServiceMode
+	} else {
+		mode = PDMode
 	}
 	log.Info(fmt.Sprintf("%s config", mode), zap.Reflect("config", cfg))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
@@ -1599,7 +1599,7 @@ func (s *Server) leaderLoop() {
 			if s.member.GetLeader() == nil {
 				lastUpdated := s.member.GetLastLeaderUpdatedTime()
 				// use random timeout to avoid leader campaigning storm.
-				randomTimeout := time.Duration(rand.Intn(int(lostPDLeaderMaxTimeoutSecs)))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
+				randomTimeout := time.Duration(rand.Intn(lostPDLeaderMaxTimeoutSecs))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
 				// add failpoint to test the campaign leader logic.
 				failpoint.Inject("timeoutWaitPDLeader", func() {
 					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
