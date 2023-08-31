@@ -73,6 +73,7 @@ func (c *StoreConfig) Adjust() {
 	if c == nil {
 		return
 	}
+
 	c.RegionMaxSizeMB = typeutil.ParseMBFromText(c.RegionMaxSize, defaultRegionMaxSize)
 	c.RegionSplitSizeMB = typeutil.ParseMBFromText(c.RegionSplitSize, defaultRegionSplitSize)
 	c.RegionBucketSizeMB = typeutil.ParseMBFromText(c.RegionBucketSize, defaultBucketSize)

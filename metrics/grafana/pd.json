@@ -7091,14 +7091,14 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "-sum(delta(pd_scheduler_balance_leader{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store-out\", instance=\"$instance\", type=\"move-leader\"}[1m])) by (store)",
+              "expr": "-sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-leader-scheduler\"}[1m])) by (source)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",
               "refId": "A"
             },
             {
-              "expr": "sum(delta(pd_scheduler_balance_leader{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store-in\", instance=\"$instance\", type=\"move-leader\"}[1m])) by (store)",
+              "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-leader-scheduler\"}[1m])) by (target)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",
@@ -7195,14 +7195,14 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "-sum(delta(pd_scheduler_balance_region{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store-out\", instance=\"$instance\", type=\"move-peer\"}[1m])) by (store)",
+              "expr": "-sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-region-scheduler\"}[1m])) by (source)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",
               "refId": "A"
             },
             {
-              "expr": "sum(delta(pd_scheduler_balance_region{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store-in\", instance=\"$instance\", type=\"move-peer\"}[1m])) by (store)",
+              "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-region-scheduler\"}[1m])) by (target)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{store}}",

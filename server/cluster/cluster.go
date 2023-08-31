@@ -421,6 +421,8 @@ func (c *RaftCluster) runStoreConfigSync() {
 		synced, switchRaftV2Config bool
 		stores                     = c.GetStores()
 	)
+	// Start the ticker with a second-level timer to accelerate
+	// the bootstrap stage.
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {

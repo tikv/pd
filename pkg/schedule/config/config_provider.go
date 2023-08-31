@@ -140,4 +140,5 @@ type StoreConfigProvider interface {
 	CheckRegionSize(uint64, uint64) error
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool
+	IsRaftKV2() bool
 }

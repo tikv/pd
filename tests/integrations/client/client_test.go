@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -1308,25 +1309,29 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 }
 
 func (suite *clientTestSuite) TestScatterRegion() {
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers:    peers,
-		StartKey: []byte("fff"),
-		EndKey:   []byte("ggg"),
+	CreateRegion := func() uint64 {
+		regionID := regionIDAllocator.alloc()
+		region := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			Peers:    peers,
+			StartKey: []byte("fff"),
+			EndKey:   []byte("ggg"),
+		}
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(suite.srv),
+			Region: region,
+			Leader: peers[0],
+		}
+		err := suite.regionHeartbeat.Send(req)
+		suite.NoError(err)
+		return regionID
 	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(suite.srv),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := suite.regionHeartbeat.Send(req)
+	var regionID = CreateRegion()
 	regionsID := []uint64{regionID}
-	suite.NoError(err)
 	// Test interface `ScatterRegions`.
 	re := suite.Require()
 	testutil.Eventually(re, func() bool {
@@ -1348,6 +1353,9 @@ func (suite *clientTestSuite) TestScatterRegion() {
 
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
+	// create a new region as scatter operation from previous test might be running
+
+	regionID = CreateRegion()
 	testutil.Eventually(re, func() bool {
 		err := suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
@@ -1505,4 +1513,52 @@ func TestClientWatchWithRevision(t *testing.T) {
 			}
 		}
 	}
+}
+
+func (suite *clientTestSuite) TestMemberUpdateBackOff() {
+	re := suite.Require()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(re, ctx, endpoints)
+	defer cli.Close()
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+	re.True(ok)
+
+	leader := cluster.GetLeader()
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	memberID := cluster.GetServer(leader).GetLeader().GetMemberId()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
+	// make sure back off executed.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/retry/backOffExecute", `return(true)`))
+	leader2 := waitLeaderChange(re, cluster, leader, innerCli.GetServiceDiscovery())
+	re.True(retry.TestBackOffExecute())
+
+	re.NotEqual(leader, leader2)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/retry/backOffExecute"))
+}
+
+func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli pd.ServiceDiscovery) string {
+	var leader string
+	testutil.Eventually(re, func() bool {
+		cli.ScheduleCheckMemberChanged()
+		leader = cluster.GetLeader()
+		if leader == old || leader == "" {
+			return false
+		}
+		return true
+	})
+	return leader
 }

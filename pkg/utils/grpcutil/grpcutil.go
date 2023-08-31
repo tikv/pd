@@ -19,10 +19,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"net/url"
+	"time"
 
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -202,4 +204,20 @@ func CreateClientConn(ctx context.Context, addr string, tlsConfig *TLSConfig, do
 		break
 	}
 	return conn
+}
+
+// CheckStream checks stream status, if stream is not created successfully in time, cancel context.
+// TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
+func CheckStream(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	defer logutil.LogPanic()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+		cancel()
+	case <-ctx.Done():
+	}
+	<-done
 }

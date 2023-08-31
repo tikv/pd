@@ -611,6 +611,11 @@ func (o *PersistConfig) IsEnableRegionBucket() bool {
 	return o.GetStoreConfig().IsEnableRegionBucket()
 }
 
+// IsRaftKV2 returns the whether the cluster use `raft-kv2` engine.
+func (o *PersistConfig) IsRaftKV2() bool {
+	return o.GetStoreConfig().IsRaftKV2()
+}
+
 // TODO: implement the following methods
 
 // AddSchedulerCfg adds the scheduler configurations.

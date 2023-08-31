@@ -80,8 +80,7 @@ var (
 	writeSkipKeyDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-key-uniform-store")
 	readSkipQueryDimUniformStoreCounter  = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-query-uniform-store")
 	writeSkipQueryDimUniformStoreCounter = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-query-uniform-store")
-
-	pendingOpFails = schedulerStatus.WithLabelValues(HotRegionName, "pending_op_fails")
+	pendingOpFailsStoreCounter           = schedulerCounter.WithLabelValues(HotRegionName, "pending-op-fails")
 )
 
 type baseHotScheduler struct {
@@ -307,7 +306,7 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
 	if ok {
-		pendingOpFails.Inc()
+		pendingOpFailsStoreCounter.Inc()
 		return false
 	}
 
