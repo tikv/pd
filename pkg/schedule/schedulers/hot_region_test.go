@@ -167,7 +167,8 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		}
 	}
 
-	hb.summaryPendingInfluence() // Calling this function will GC.
+	storeInfos := statistics.SummaryStoreInfos(tc.GetStores())
+	hb.summaryPendingInfluence(storeInfos) // Calling this function will GC.
 
 	for i := range opInfluenceCreators {
 		for j, typ := range typs {
@@ -2047,16 +2048,16 @@ func TestInfluenceByRWType(t *testing.T) {
 	op := ops[0]
 	re.NotNil(op)
 
-	hb.(*hotScheduler).summaryPendingInfluence()
-	stInfos := hb.(*hotScheduler).stInfos
-	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[utils.RegionWriteKeys], -0.5*units.MiB))
-	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[utils.RegionWriteBytes], -0.5*units.MiB))
-	re.True(nearlyAbout(stInfos[4].PendingSum.Loads[utils.RegionWriteKeys], 0.5*units.MiB))
-	re.True(nearlyAbout(stInfos[4].PendingSum.Loads[utils.RegionWriteBytes], 0.5*units.MiB))
-	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[utils.RegionReadKeys], -0.5*units.MiB))
-	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[utils.RegionReadBytes], -0.5*units.MiB))
-	re.True(nearlyAbout(stInfos[4].PendingSum.Loads[utils.RegionReadKeys], 0.5*units.MiB))
-	re.True(nearlyAbout(stInfos[4].PendingSum.Loads[utils.RegionReadBytes], 0.5*units.MiB))
+	storeInfos := statistics.SummaryStoreInfos(tc.GetStores())
+	hb.(*hotScheduler).summaryPendingInfluence(storeInfos)
+	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteKeys], -0.5*units.MiB))
+	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteBytes], -0.5*units.MiB))
+	re.True(nearlyAbout(storeInfos[4].PendingSum.Loads[utils.RegionWriteKeys], 0.5*units.MiB))
+	re.True(nearlyAbout(storeInfos[4].PendingSum.Loads[utils.RegionWriteBytes], 0.5*units.MiB))
+	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionReadKeys], -0.5*units.MiB))
+	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionReadBytes], -0.5*units.MiB))
+	re.True(nearlyAbout(storeInfos[4].PendingSum.Loads[utils.RegionReadKeys], 0.5*units.MiB))
+	re.True(nearlyAbout(storeInfos[4].PendingSum.Loads[utils.RegionReadBytes], 0.5*units.MiB))
 
 	// consider pending amp, there are nine regions or more.
 	for i := 2; i < 13; i++ {
@@ -2072,17 +2073,17 @@ func TestInfluenceByRWType(t *testing.T) {
 	op = ops[0]
 	re.NotNil(op)
 
-	hb.(*hotScheduler).summaryPendingInfluence()
-	stInfos = hb.(*hotScheduler).stInfos
+	storeInfos = statistics.SummaryStoreInfos(tc.GetStores())
+	hb.(*hotScheduler).summaryPendingInfluence(storeInfos)
 	// assert read/write influence is the sum of write peer and write leader
-	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[utils.RegionWriteKeys], -1.2*units.MiB))
-	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[utils.RegionWriteBytes], -1.2*units.MiB))
-	re.True(nearlyAbout(stInfos[3].PendingSum.Loads[utils.RegionWriteKeys], 0.7*units.MiB))
-	re.True(nearlyAbout(stInfos[3].PendingSum.Loads[utils.RegionWriteBytes], 0.7*units.MiB))
-	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[utils.RegionReadKeys], -1.2*units.MiB))
-	re.True(nearlyAbout(stInfos[1].PendingSum.Loads[utils.RegionReadBytes], -1.2*units.MiB))
-	re.True(nearlyAbout(stInfos[3].PendingSum.Loads[utils.RegionReadKeys], 0.7*units.MiB))
-	re.True(nearlyAbout(stInfos[3].PendingSum.Loads[utils.RegionReadBytes], 0.7*units.MiB))
+	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteKeys], -1.2*units.MiB))
+	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionWriteBytes], -1.2*units.MiB))
+	re.True(nearlyAbout(storeInfos[3].PendingSum.Loads[utils.RegionWriteKeys], 0.7*units.MiB))
+	re.True(nearlyAbout(storeInfos[3].PendingSum.Loads[utils.RegionWriteBytes], 0.7*units.MiB))
+	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionReadKeys], -1.2*units.MiB))
+	re.True(nearlyAbout(storeInfos[1].PendingSum.Loads[utils.RegionReadBytes], -1.2*units.MiB))
+	re.True(nearlyAbout(storeInfos[3].PendingSum.Loads[utils.RegionReadKeys], 0.7*units.MiB))
+	re.True(nearlyAbout(storeInfos[3].PendingSum.Loads[utils.RegionReadBytes], 0.7*units.MiB))
 }
 
 func nearlyAbout(f1, f2 float64) bool {

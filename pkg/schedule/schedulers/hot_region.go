@@ -110,9 +110,6 @@ var (
 
 type baseHotScheduler struct {
 	*BaseScheduler
-	// stInfos contain store state information and pending Influence.
-	// Every time `Schedule()` will recalculate it.
-	stInfos map[uint64]*statistics.StoreSummaryInfo
 	// stLoadInfos contain store statistics information by resource type.
 	// stLoadInfos is temporary states but exported to API or metrics.
 	// Every time `Schedule()` will recalculate it.
@@ -148,15 +145,15 @@ func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store, only update read or write load detail
 func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.SchedulerCluster) {
-	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
-	h.summaryPendingInfluence()
+	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
+	h.summaryPendingInfluence(storeInfos)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetSchedulerConfig().IsTraceRegionFlow()
 
 	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource constant.ResourceKind) {
 		ty := buildResourceType(rw, resource)
 		h.stLoadInfos[ty] = statistics.SummaryStoresLoad(
-			h.stInfos,
+			storeInfos,
 			storesLoads,
 			h.stHistoryLoads,
 			regionStats,
@@ -186,11 +183,11 @@ func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.Sched
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
-func (h *baseHotScheduler) summaryPendingInfluence() {
+func (h *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
 	for id, p := range h.regionPendings {
 		for _, from := range p.froms {
-			from := h.stInfos[from]
-			to := h.stInfos[p.to]
+			from := storeInfos[from]
+			to := storeInfos[p.to]
 			maxZombieDur := p.maxZombieDuration
 			weight, needGC := calcPendingInfluence(p.op, maxZombieDur)
 
@@ -207,9 +204,9 @@ func (h *baseHotScheduler) summaryPendingInfluence() {
 			}
 		}
 	}
-	for storeID, info := range h.stInfos {
+	for storeID, info := range storeInfos {
 		storeLabel := strconv.FormatUint(storeID, 10)
-		if infl := info.PendingSum; infl != nil {
+		if infl := info.PendingSum; infl != nil && len(infl.Loads) != 0 {
 			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {
 				setHotPendingInfluenceMetrics(storeLabel, rwTy.String(), utils.DimToString(dim), infl.Loads[kind])
 			})
