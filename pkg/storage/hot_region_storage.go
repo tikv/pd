@@ -90,13 +90,13 @@ type HistoryHotRegion struct {
 
 // HotRegionStorageHandler help hot region storage get hot region info.
 type HotRegionStorageHandler interface {
-	// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion form.
+	// PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
 	PackHistoryHotReadRegions() ([]HistoryHotRegion, error)
 	// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
 	PackHistoryHotWriteRegions() ([]HistoryHotRegion, error)
 	// IsLeader return true means this server is leader.
 	IsLeader() bool
-	// GetHotRegionWriteInterval gets interval for PD to store Hot Region information..
+	// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information.
 	GetHotRegionsWriteInterval() time.Duration
 	// GetHotRegionsReservedDays gets days hot region information is kept.
 	GetHotRegionsReservedDays() uint64

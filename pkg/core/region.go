@@ -1660,15 +1660,11 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 }
 
 // String converts slice of bytes to string without copy.
-func String(b []byte) (s string) {
+func String(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
-	pbytes := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	pstring := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	pstring.Data = pbytes.Data
-	pstring.Len = pbytes.Len
-	return
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
 // ToUpperASCIIInplace bytes.ToUpper but zero-cost

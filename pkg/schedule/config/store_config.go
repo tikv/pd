@@ -48,8 +48,6 @@ type StoreConfig struct {
 	RegionMaxSizeMB    uint64 `json:"-"`
 	RegionSplitSizeMB  uint64 `json:"-"`
 	RegionBucketSizeMB uint64 `json:"-"`
-
-	Sync bool `json:"sync"`
 }
 
 // Storage is the config for the tikv storage.
@@ -125,21 +123,6 @@ func (c *StoreConfig) GetRegionMaxKeys() uint64 {
 		return defaultRegionMaxKey
 	}
 	return uint64(c.RegionMaxKeys)
-}
-
-// SetSynced marks StoreConfig has been synced.
-func (c *StoreConfig) SetSynced() {
-	if c != nil {
-		c.Sync = true
-	}
-}
-
-// IsSynced returns whether the StoreConfig is synced or not.
-func (c *StoreConfig) IsSynced() bool {
-	if c == nil {
-		return false
-	}
-	return c.Sync
 }
 
 // IsEnableRegionBucket return true if the region bucket is enabled.

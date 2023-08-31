@@ -167,7 +167,7 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				}
 				res, err := l.lease.KeepAliveOnce(ctx1, leaseID)
 				if err != nil {
-					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), errs.ZapError(err))
+					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), zap.Time("start", start), errs.ZapError(err))
 					return
 				}
 				if res.TTL > 0 {

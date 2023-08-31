@@ -328,7 +328,6 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.wg.Add(10)
-	go c.runStoreConfigSync()
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -336,6 +335,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.syncRegions()
 	go c.runReplicationMode()
 	go c.runMinResolvedTSJob()
+	go c.runStoreConfigSync()
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
 
@@ -421,6 +421,8 @@ func (c *RaftCluster) runStoreConfigSync() {
 		synced, switchRaftV2Config bool
 		stores                     = c.GetStores()
 	)
+	// Start the ticker with a second-level timer to accelerate
+	// the bootstrap stage.
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -507,8 +509,6 @@ func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (b
 // updateStoreConfig updates the store config. This is extracted for testing.
 func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *sc.StoreConfig) (bool, error) {
 	cfg.Adjust()
-	// Mark config has been synced.
-	cfg.SetSynced()
 	c.opt.SetStoreConfig(cfg)
 	return oldCfg.Storage.Engine != sc.RaftstoreV2 && cfg.Storage.Engine == sc.RaftstoreV2, nil
 }
