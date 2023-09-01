@@ -388,7 +388,6 @@ func (s *Server) startServer() (err error) {
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	s.checkMembershipCh <- struct{}{}
 	<-serverReadyChan
-	s.startServerLoop()
 	go s.GetCoordinator().RunUntilStop()
 
 	// Run callbacks
