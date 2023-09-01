@@ -860,20 +860,18 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	}
 
 	if s.IsAPIServiceMode() {
-		forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
-		if forwardedHost != "" {
-			client, err := s.getDelegateClient(ctx, forwardedHost)
-			if err != nil {
-				return &pdpb.PutStoreResponse{
-					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-						"get delegate client failed"),
-				}, nil
-			}
+		client := s.getForwardedClient(ctx)
+		if client != nil {
 			if resp, _ := schedulingpb.NewSchedulingClient(client).PutStore(ctx, request); resp.GetHeader().GetError() != nil {
 				return &pdpb.PutStoreResponse{
 					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().String()),
 				}, nil
 			}
+		} else {
+			return &pdpb.PutStoreResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+					"get delegate client failed"),
+			}, nil
 		}
 	}
 
@@ -999,13 +997,8 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		s.handleDamagedStore(request.GetStats())
 
 		if s.IsAPIServiceMode() {
-			forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
-			if forwardedHost != "" {
-				client, err := s.getDelegateClient(ctx, forwardedHost)
-				if err != nil {
-					log.Error("get delegate client failed", zap.Error(err))
-				}
-				// ignore the error when forwarding store heartbeat
+			client := s.getForwardedClient(ctx)
+			if client != nil {
 				schedulingpb.NewSchedulingClient(client).StoreHeartbeat(ctx, request)
 			}
 		}
@@ -1022,6 +1015,18 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
 
 	return resp, nil
+}
+
+func (s *GrpcServer) getForwardedClient(ctx context.Context) *grpc.ClientConn {
+	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
+	if forwardedHost != "" {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			log.Error("get delegate client failed", zap.Error(err))
+		}
+		return client
+	}
+	return nil
 }
 
 // bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
