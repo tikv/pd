@@ -78,7 +78,7 @@ type state struct {
 	// deletedGroups is the cache of deleted keyspace group related information.
 	deletedGroups map[uint32]struct{}
 	// requestedGroups is the cache of requested keyspace group related information.
-	// Once a group receives its first TSO request, it will be added to this map.
+	// Once a group receives its first TSO request and pass the check, it will be added to this map.
 	requestedGroups map[uint32]struct{}
 }
 
@@ -161,19 +161,29 @@ func (s *state) cleanKeyspaceGroup(groupID uint32) {
 	delete(s.requestedGroups, groupID)
 }
 
-// checkGroupRequested checks if the given keyspace group has been requested.
-func (s *state) checkGroupRequested(groupID uint32) bool {
+// markGroupRequested checks if the given keyspace group has been requested.
+// If yes, it do nothing and returns nil.
+// If not, it marks the keyspace group as requested if the checker function returns nil,
+// otherwise it returns the error.
+func (s *state) markGroupRequested(groupID uint32, checker func() error) error {
+	// Fast path to check if the keyspace group has been marked as requested.
 	s.RLock()
-	defer s.RUnlock()
 	_, ok := s.requestedGroups[groupID]
-	return ok
-}
-
-// setGroupRequested sets the given keyspace group as requested.
-func (s *state) setGroupRequested(groupID uint32) {
+	s.RUnlock()
+	if ok {
+		return nil
+	}
 	s.Lock()
 	defer s.Unlock()
+	// Double check if the keyspace group has been marked as requested.
+	if _, ok := s.requestedGroups[groupID]; ok {
+		return nil
+	}
+	if err := checker(); err != nil {
+		return err
+	}
 	s.requestedGroups[groupID] = struct{}{}
+	return nil
 }
 
 func (s *state) checkTSOSplit(
@@ -1060,16 +1070,16 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	// timestamp one more time before serving the TSO request to make sure that the
 	// TSO is the latest one from the storage, which could prevent the potential
 	// fallback caused by the rolling update of the mixed PD and TSO service.
-	if !kgm.checkGroupRequested(curKeyspaceGroupID) {
+	err = kgm.markGroupRequested(curKeyspaceGroupID, func() error {
 		allocator, err := am.GetAllocator(dcLocation)
 		if err != nil {
-			return pdpb.Timestamp{}, curKeyspaceGroupID, err
+			return err
 		}
 		// TODO: support the Local TSO Allocator.
-		if err = allocator.Initialize(0); err != nil {
-			return pdpb.Timestamp{}, curKeyspaceGroupID, err
-		}
-		kgm.setGroupRequested(curKeyspaceGroupID)
+		return allocator.Initialize(0)
+	})
+	if err != nil {
+		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
 	ts, err = am.HandleRequest(ctx, dcLocation, count)
 	return ts, curKeyspaceGroupID, err

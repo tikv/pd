@@ -91,12 +91,8 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 	if typeutil.SubTSOPhysicalByWallClock(next, t.tsoMux.physical) > 0 {
 		t.tsoMux.physical = next
 		t.tsoMux.logical = 0
-		t.setTSOUpdateTimeLocked(time.Now())
+		t.tsoMux.updateTime = time.Now()
 	}
-}
-
-func (t *timestampOracle) setTSOUpdateTimeLocked(updateTime time.Time) {
-	t.tsoMux.updateTime = updateTime
 }
 
 func (t *timestampOracle) getTSO() (time.Time, int64) {
@@ -124,8 +120,16 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64, suffixBi
 	}
 	// Return the last update time
 	lastUpdateTime = t.tsoMux.updateTime
-	t.setTSOUpdateTimeLocked(time.Now())
+	t.tsoMux.updateTime = time.Now()
 	return physical, logical, lastUpdateTime
+}
+
+func (t *timestampOracle) getLastSavedTime() time.Time {
+	last := t.lastSavedTime.Load()
+	if last == nil {
+		return typeutil.ZeroTime
+	}
+	return last.(time.Time)
 }
 
 // Because the Local TSO in each Local TSO Allocator is independent, so they are possible
@@ -161,6 +165,13 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	last, err := t.storage.LoadTimestamp(t.tsPath)
 	if err != nil {
 		return err
+	}
+	lastSavedTime := t.getLastSavedTime()
+	// If `lastSavedTime` is not zero, it means that the `timestampOracle` has already been initialized
+	// before, so we could safely skip the sync if `lastSavedTime` is equal to `last`.
+	if lastSavedTime != typeutil.ZeroTime && typeutil.SubRealTimeByWallClock(lastSavedTime, last) == 0 {
+		t.metrics.skipSyncEvent.Inc()
+		return nil
 	}
 
 	next := time.Now()
@@ -247,7 +258,7 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}
 	// save into etcd only if nextPhysical is close to lastSavedTime
-	if typeutil.SubRealTimeByWallClock(t.lastSavedTime.Load().(time.Time), nextPhysical) <= UpdateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 			t.metrics.errSaveResetTSEvent.Inc()
@@ -258,7 +269,7 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 	// save into memory only if nextPhysical or nextLogical is greater.
 	t.tsoMux.physical = nextPhysical
 	t.tsoMux.logical = int64(nextLogical)
-	t.setTSOUpdateTimeLocked(time.Now())
+	t.tsoMux.updateTime = time.Now()
 	t.metrics.resetTSOOKEvent.Inc()
 	return nil
 }
@@ -323,7 +334,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
-	if typeutil.SubRealTimeByWallClock(t.lastSavedTime.Load().(time.Time), next) <= UpdateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 			log.Warn("save timestamp failed",
@@ -392,5 +403,6 @@ func (t *timestampOracle) ResetTimestamp() {
 	log.Info("reset the timestamp in memory")
 	t.tsoMux.physical = typeutil.ZeroTime
 	t.tsoMux.logical = 0
-	t.setTSOUpdateTimeLocked(typeutil.ZeroTime)
+	t.tsoMux.updateTime = typeutil.ZeroTime
+	t.lastSavedTime.Store(typeutil.ZeroTime)
 }
