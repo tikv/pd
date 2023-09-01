@@ -114,7 +114,7 @@ func (tc *TestTSOCluster) AddServer(addr string) error {
 	if err != nil {
 		return err
 	}
-	err = InitLogger(generatedCfg)
+	err = InitTSOLogger(generatedCfg)
 	if err != nil {
 		return err
 	}

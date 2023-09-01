@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/schedule"
@@ -19,33 +22,40 @@ import (
 
 // Cluster is used to manage all information for scheduling purpose.
 type Cluster struct {
+	ctx context.Context
 	*core.BasicCluster
-	persistConfig  *config.PersistConfig
-	ruleManager    *placement.RuleManager
-	labelerManager *labeler.RegionLabeler
-	regionStats    *statistics.RegionStatistics
-	hotStat        *statistics.HotStat
-	storage        storage.Storage
-	coordinator    *schedule.Coordinator
+	persistConfig     *config.PersistConfig
+	ruleManager       *placement.RuleManager
+	labelerManager    *labeler.RegionLabeler
+	regionStats       *statistics.RegionStatistics
+	hotStat           *statistics.HotStat
+	storage           storage.Storage
+	coordinator       *schedule.Coordinator
+	checkMembershipCh chan struct{}
+	apiServerLeader   atomic.Value
+	clusterID         uint64
 }
 
 const regionLabelGCInterval = time.Hour
 
 // NewCluster creates a new cluster.
-func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams) (*Cluster, error) {
+func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(storage, basicCluster, persistConfig)
 	c := &Cluster{
-		BasicCluster:   basicCluster,
-		ruleManager:    ruleManager,
-		labelerManager: labelerManager,
-		persistConfig:  persistConfig,
-		hotStat:        statistics.NewHotStat(ctx),
-		regionStats:    statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
-		storage:        storage,
+		ctx:               ctx,
+		BasicCluster:      basicCluster,
+		ruleManager:       ruleManager,
+		labelerManager:    labelerManager,
+		persistConfig:     persistConfig,
+		hotStat:           statistics.NewHotStat(ctx),
+		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
+		storage:           storage,
+		clusterID:         clusterID,
+		checkMembershipCh: checkMembershipCh,
 	}
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
 	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels())
@@ -131,11 +141,29 @@ func (c *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider { return c.per
 // GetStoreConfig returns the store config.
 func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConfig }
 
+// AllocID allocates a new ID.
+func (c *Cluster) AllocID() (uint64, error) {
+	cli := c.apiServerLeader.Load().(pdpb.PDClient)
+	if cli == nil {
+		c.checkMembershipCh <- struct{}{}
+		return 0, errors.New("API server leader is not found")
+	}
+	resp, err := cli.AllocID(c.ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
+	if err != nil {
+		c.checkMembershipCh <- struct{}{}
+		return 0, err
+	}
+	return resp.GetId(), nil
+}
+
+// SwitchAPIServerLeader switches the API server leader.
+func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
+	old := c.apiServerLeader.Load()
+	return c.apiServerLeader.CompareAndSwap(old, new)
+}
+
 // TODO: implement the following methods
 
 // UpdateRegionsLabelLevelStats updates the status of the region label level by types.
 func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 }
-
-// AllocID allocates a new ID.
-func (c *Cluster) AllocID() (uint64, error) { return 0, nil }

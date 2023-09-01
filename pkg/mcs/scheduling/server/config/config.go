@@ -164,6 +164,11 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	}
 }
 
+// GetListenAddr returns the ListenAddr
+func (c *Config) GetListenAddr() string {
+	return c.ListenAddr
+}
+
 // GetTLSConfig returns the TLS config.
 func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
