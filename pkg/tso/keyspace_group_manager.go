@@ -873,12 +873,12 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 			kgm.ams[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
 			splitTime := kgm.splittingGroups[groupID]
 			delete(kgm.splittingGroups, groupID)
-			kgm.metrics.splitTargetGauge.Desc()
+			kgm.metrics.splitTargetGauge.Dec()
 			kgm.metrics.splitDuration.Observe(time.Since(splitTime).Seconds())
 		}
 		// SplitSource -> !SplitSource
 		if oldGroup.IsSplitSource() && !newGroup.IsSplitting() {
-			kgm.metrics.splitSourceGauge.Desc()
+			kgm.metrics.splitSourceGauge.Dec()
 		}
 		// !Splitting -> SplitSource
 		if !oldGroup.IsSplitting() && newGroup.IsSplitSource() {
