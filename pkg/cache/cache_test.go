@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestExpireRegionCache(t *testing.T) {
@@ -78,6 +79,7 @@ func TestExpireRegionCache(t *testing.T) {
 
 	re.Equal(sortIDs(cache.GetAllID()), []uint64{1, 2, 3})
 
+	// after 20ms, the key 1 will be expired
 	time.Sleep(20 * time.Millisecond)
 
 	value, ok = cache.Get(1)
@@ -92,7 +94,10 @@ func TestExpireRegionCache(t *testing.T) {
 	re.True(ok)
 	re.Equal(3.0, value)
 
-	re.Equal(2, cache.Len())
+	testutil.Eventually(re, func() bool {
+		// we can't ensure whether gc is executed, so we check the length of cache in a loop.
+		return cache.Len() == 2
+	}, testutil.WithWaitFor(50*time.Millisecond), testutil.WithTickInterval(time.Millisecond))
 	re.Equal(sortIDs(cache.GetAllID()), []uint64{2, 3})
 
 	cache.Remove(2)

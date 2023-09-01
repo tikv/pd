@@ -55,6 +55,11 @@ func (suite *apiTestSuite) SetupSuite() {
 	}
 }
 
+func (suite *apiTestSuite) TearDownSuite() {
+	suite.cluster.Destroy()
+	suite.cleanupFunc()
+}
+
 func (suite *apiTestSuite) TestGetCheckerByName() {
 	testCases := []struct {
 		name string

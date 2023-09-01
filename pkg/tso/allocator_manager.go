@@ -103,7 +103,7 @@ type ElectionMember interface {
 	// server id of a cluster or the unique keyspace group replica id of the election
 	// group comprised of the replicas of a keyspace group.
 	ID() uint64
-	// ID returns the unique Name in the election group.
+	// ID returns the unique name in the election group.
 	Name() string
 	// MemberValue returns the member value.
 	MemberValue() string

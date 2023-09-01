@@ -125,7 +125,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
 			}
-			if oc.RemoveOperator(op, Succeed) {
+			if oc.RemoveOperator(op) {
 				operatorCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
 			}
@@ -544,8 +544,6 @@ func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) 
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
-	} else {
-		cancelReason = Unknown
 	}
 	if removed {
 		if op.Cancel(cancelReason) {

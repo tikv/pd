@@ -23,7 +23,7 @@ import (
 
 // Server defines the common basic behaviors of a server
 type Server interface {
-	// Name returns the unique Name for this server in the cluster.
+	// Name returns the unique name for this server in the cluster.
 	Name() string
 	// GetAddr returns the address of the server.
 	GetAddr() string
