@@ -193,7 +193,7 @@ func TestExitWatch(t *testing.T) {
 	// Case7: loss the quorum when the watch loop is running
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
 		tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-		defer os.Remove(tempStdoutFile.Name())
+		defer os.RemoveAll(tempStdoutFile.Name())
 		logCfg := &log.Config{}
 		logCfg.File.Filename = tempStdoutFile.Name()
 		logCfg.Level = "info"
@@ -284,7 +284,7 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 func TestRequestProgress(t *testing.T) {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-		defer os.Remove(tempStdoutFile.Name())
+		defer os.RemoveAll(tempStdoutFile.Name())
 		logCfg := &log.Config{}
 		logCfg.File.Filename = tempStdoutFile.Name()
 		logCfg.Level = "debug"

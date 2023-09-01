@@ -94,7 +94,7 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 	re := require.New(t)
 	backend := NewLocalLogBackend(true)
 	fname := initLog()
-	defer os.Remove(fname)
+	defer os.RemoveAll(fname)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.False(backend.ProcessHTTPRequest(req))
 	info := requestutil.GetRequestInfo(req)
@@ -126,7 +126,7 @@ func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	b.StopTimer()
 	backend := NewLocalLogBackend(true)
 	fname := initLog()
-	defer os.Remove(fname)
+	defer os.RemoveAll(fname)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {

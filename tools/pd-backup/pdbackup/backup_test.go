@@ -166,7 +166,7 @@ func (s *backupTestSuite) TestGetBackupInfo() {
 
 	tmpFile, err := os.CreateTemp(os.TempDir(), "pd_backup_info_test.json")
 	s.NoError(err)
-	defer os.Remove(tmpFile.Name())
+	defer os.RemoveAll(tmpFile.Name())
 
 	s.NoError(OutputToFile(actual, tmpFile))
 	_, err = tmpFile.Seek(0, 0)

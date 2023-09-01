@@ -29,34 +29,20 @@ import (
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"go.uber.org/zap"
 )
 
 var once sync.Once
 
-// InitSchedulingLogger initializes the logger for test.
-func InitSchedulingLogger(cfg *sc.Config) (err error) {
+// InitLogger initializes the logger for test.
+func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, isRedactInfoLogEnabled bool) (err error) {
 	once.Do(func() {
 		// Setup the logger.
-		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+		err = logutil.SetupLogger(logConfig, &logger, &logProps, isRedactInfoLogEnabled)
 		if err != nil {
 			return
 		}
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-		// Flushing any buffered log entries.
-		log.Sync()
-	})
-	return err
-}
-
-// InitTSOLogger initializes the logger for test.
-func InitTSOLogger(cfg *tso.Config) (err error) {
-	once.Do(func() {
-		// Setup the logger.
-		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-		if err != nil {
-			return
-		}
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+		log.ReplaceGlobals(logger, logProps)
 		// Flushing any buffered log entries.
 		log.Sync()
 	})
@@ -88,7 +74,7 @@ func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Asser
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
 	// Setup the logger.
-	err = InitTSOLogger(cfg)
+	err = InitLogger(cfg.Log, cfg.Logger, cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
 	return NewTSOTestServer(ctx, cfg)
 }

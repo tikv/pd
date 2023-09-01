@@ -454,7 +454,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 
 func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-	defer os.Remove(tempStdoutFile.Name())
+	defer os.RemoveAll(tempStdoutFile.Name())
 	cfg := &log.Config{}
 	cfg.File.Filename = tempStdoutFile.Name()
 	cfg.Level = "info"
@@ -668,7 +668,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	suite.NoError(leader.BootstrapCluster())
 	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-	defer os.Remove(tempStdoutFile.Name())
+	defer os.RemoveAll(tempStdoutFile.Name())
 	cfg := &log.Config{}
 	cfg.File.Filename = tempStdoutFile.Name()
 	cfg.Level = "info"

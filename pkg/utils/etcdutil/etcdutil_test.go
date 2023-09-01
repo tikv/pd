@@ -772,7 +772,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-		defer os.Remove(tempStdoutFile.Name())
+		defer os.RemoveAll(tempStdoutFile.Name())
 		cfg := &log.Config{}
 		cfg.File.Filename = tempStdoutFile.Name()
 		cfg.Level = "debug"
