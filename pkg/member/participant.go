@@ -22,10 +22,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -33,17 +36,28 @@ import (
 
 type leadershipCheckFunc func(*election.Leadership) bool
 
+type participant interface {
+	GetName() string
+	GetId() uint64
+	GetListenUrls() []string
+	String() string
+	Marshal() ([]byte, error)
+	Reset()
+	ProtoMessage()
+}
+
 // Participant is used for the election related logic. Compared to its counterpart
 // EmbeddedEtcdMember, Participant relies on etcd for election, but it's decoupled
 // from the embedded etcd. It implements Member interface.
 type Participant struct {
 	leadership *election.Leadership
 	// stored as member type
-	leader     atomic.Value
-	client     *clientv3.Client
-	rootPath   string
-	leaderPath string
-	member     *tsopb.Participant
+	leader      atomic.Value
+	client      *clientv3.Client
+	rootPath    string
+	leaderPath  string
+	member      participant
+	serviceName string
 	// memberValue is the serialized string of `member`. It will be saved in the
 	// leader key when this participant is successfully elected as the leader of
 	// the group. Every write will use it to check the leadership.
@@ -56,42 +70,37 @@ type Participant struct {
 }
 
 // NewParticipant create a new Participant.
-func NewParticipant(client *clientv3.Client) *Participant {
+func NewParticipant(client *clientv3.Client, serviceName string) *Participant {
 	return &Participant{
-		client: client,
+		client:      client,
+		serviceName: serviceName,
 	}
 }
 
 // InitInfo initializes the member info. The leader key is path.Join(rootPath, leaderName)
-func (m *Participant) InitInfo(name string, id uint64, rootPath string, leaderName string, purpose string, advertiseListenAddr string) {
-	leader := &tsopb.Participant{
-		Name:       name,
-		Id:         id, // id is unique among all participants
-		ListenUrls: []string{advertiseListenAddr},
-	}
-
-	data, err := leader.Marshal()
+func (m *Participant) InitInfo(p participant, rootPath string, leaderName string, purpose string) {
+	data, err := p.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal leader meet error", zap.Stringer("leader-name", leader), errs.ZapError(errs.ErrMarshalLeader, err))
+		log.Fatal("marshal leader meet error", zap.String("member-name", p.String()), errs.ZapError(errs.ErrMarshalLeader, err))
 	}
-	m.member = leader
+	m.member = p
 	m.memberValue = string(data)
 	m.rootPath = rootPath
 	m.leaderPath = path.Join(rootPath, leaderName)
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
 	m.lastLeaderUpdatedTime.Store(time.Now())
-	log.Info("participant joining election", zap.Stringer("participant-info", m.member), zap.String("leader-path", m.leaderPath))
+	log.Info("participant joining election", zap.String("participant-info", p.String()), zap.String("leader-path", m.leaderPath))
 }
 
 // ID returns the unique ID for this participant in the election group
 func (m *Participant) ID() uint64 {
-	return m.member.Id
+	return m.member.GetId()
 }
 
 // Name returns the unique name in the election group.
 func (m *Participant) Name() string {
-	return m.member.Name
+	return m.member.GetName()
 }
 
 // GetMember returns the member.
@@ -112,6 +121,9 @@ func (m *Participant) Client() *clientv3.Client {
 // IsLeader returns whether the participant is the leader or not by checking its leadership's
 // lease and leader info.
 func (m *Participant) IsLeader() bool {
+	if m.GetLeader() == nil {
+		return false
+	}
 	return m.leadership.Check() && m.GetLeader().GetId() == m.member.GetId() && m.campaignCheck()
 }
 
@@ -122,6 +134,9 @@ func (m *Participant) IsLeaderElected() bool {
 
 // GetLeaderListenUrls returns current leader's listen urls
 func (m *Participant) GetLeaderListenUrls() []string {
+	if m.GetLeader() == nil {
+		return nil
+	}
 	return m.GetLeader().GetListenUrls()
 }
 
@@ -131,12 +146,12 @@ func (m *Participant) GetLeaderID() uint64 {
 }
 
 // GetLeader returns current leader of the election group.
-func (m *Participant) GetLeader() *tsopb.Participant {
+func (m *Participant) GetLeader() participant {
 	leader := m.leader.Load()
 	if leader == nil {
 		return nil
 	}
-	member := leader.(*tsopb.Participant)
+	member := leader.(participant)
 	if member.GetId() == 0 {
 		return nil
 	}
@@ -144,14 +159,23 @@ func (m *Participant) GetLeader() *tsopb.Participant {
 }
 
 // setLeader sets the member's leader.
-func (m *Participant) setLeader(member *tsopb.Participant) {
+func (m *Participant) setLeader(member participant) {
 	m.leader.Store(member)
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
 // unsetLeader unsets the member's leader.
 func (m *Participant) unsetLeader() {
-	m.leader.Store(&tsopb.Participant{})
+	var leader participant
+	switch m.serviceName {
+	case utils.TSOServiceName:
+		leader = &tsopb.Participant{}
+	case utils.SchedulingServiceName:
+		leader = &schedulingpb.Participant{}
+	case utils.ResourceManagerServiceName:
+		leader = &resource_manager.Participant{}
+	}
+	m.leader.Store(leader)
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
@@ -200,8 +224,16 @@ func (m *Participant) PreCheckLeader() error {
 }
 
 // getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
-func (m *Participant) getPersistentLeader() (*tsopb.Participant, int64, error) {
-	leader := &tsopb.Participant{}
+func (m *Participant) getPersistentLeader() (participant, int64, error) {
+	var leader participant
+	switch m.serviceName {
+	case utils.TSOServiceName:
+		leader = &tsopb.Participant{}
+	case utils.SchedulingServiceName:
+		leader = &schedulingpb.Participant{}
+	case utils.ResourceManagerServiceName:
+		leader = &resource_manager.Participant{}
+	}
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
 	if err != nil {
 		return nil, 0, err
@@ -248,14 +280,14 @@ func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 	}
 
 	return &EtcdLeader{
-		wrapper:      m,
-		pariticipant: leader,
-		revision:     revision,
+		wrapper:     m,
+		participant: leader,
+		revision:    revision,
 	}, false
 }
 
 // WatchLeader is used to watch the changes of the leader.
-func (m *Participant) WatchLeader(ctx context.Context, leader *tsopb.Participant, revision int64) {
+func (m *Participant) WatchLeader(ctx context.Context, leader participant, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(ctx, revision)
 	m.unsetLeader()
@@ -269,7 +301,7 @@ func (m *Participant) ResetLeader() {
 }
 
 // IsSameLeader checks whether a server is the leader itself.
-func (m *Participant) IsSameLeader(leader *tsopb.Participant) bool {
+func (m *Participant) IsSameLeader(leader participant) bool {
 	return leader.GetId() == m.ID()
 }
 

@@ -23,6 +23,10 @@
 		{
 			"name": "pd-tso-bench",
 			"path": "tools/pd-tso-bench"
+		},
+		{
+			"name": "pd-api-bench",
+			"path": "tools/pd-api-bench"
 		}
 	],
 	"settings": {}

@@ -29,6 +29,7 @@ import (
 	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
@@ -736,10 +737,13 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		zap.String("participant-name", uniqueName),
 		zap.Uint64("participant-id", uniqueID))
 	// Initialize the participant info to join the primary election.
-	participant := member.NewParticipant(kgm.etcdClient)
-	participant.InitInfo(
-		uniqueName, uniqueID, endpoint.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID),
-		mcsutils.PrimaryKey, "keyspace group primary election", kgm.cfg.GetAdvertiseListenAddr())
+	participant := member.NewParticipant(kgm.etcdClient, mcsutils.TSOServiceName)
+	p := &tsopb.Participant{
+		Name:       uniqueName,
+		Id:         uniqueID, // id is unique among all participants
+		ListenUrls: []string{kgm.cfg.GetAdvertiseListenAddr()},
+	}
+	participant.InitInfo(p, endpoint.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID), mcsutils.PrimaryKey, "keyspace group primary election")
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
