@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/etcdserver/etcdserverpb"
@@ -94,12 +95,8 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 	return
 }
 
-// MustAddEtcdMember is used to add a new etcd member to the cluster.
+// MustAddEtcdMember is used to add a new etcd member to the cluster for test.
 func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
-	return addEtcdMemberWithRetry(t, cfg1, client, 3)
-}
-
-func addEtcdMemberWithRetry(t *testing.T, cfg1 *embed.Config, client *clientv3.Client, retry int) *embed.Etcd {
 	re := require.New(t)
 	cfg2 := newTestSingleConfig(t)
 	cfg2.Name = genRandName()
@@ -109,20 +106,14 @@ func addEtcdMemberWithRetry(t *testing.T, cfg1 *embed.Config, client *clientv3.C
 	addResp, err := AddEtcdMember(client, []string{peerURL})
 	re.NoError(err)
 	// Check the client can get the new member.
-	members, err := ListEtcdMembers(client)
-	re.NoError(err)
-	re.Len(addResp.Members, len(members.Members))
+	testutil.Eventually(re, func() bool {
+		members, err := ListEtcdMembers(client)
+		re.NoError(err)
+		return len(addResp.Members) == len(members.Members)
+	})
 	// Start the new etcd member.
 	etcd2, err := embed.StartEtcd(cfg2)
-	if err != nil {
-		re.Contains(err.Error(), "error validating peerURLs")
-		if retry > 0 {
-			_, err := RemoveEtcdMember(client, addResp.Member.ID)
-			re.NoError(err)
-			return addEtcdMemberWithRetry(t, cfg1, client, retry-1)
-		}
-	}
-	re.NoError(err, "addEtcdMemberWithRetry failed after retry")
+	re.NoError(err)
 	re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
 	<-etcd2.Server.ReadyNotify()
 	return etcd2
