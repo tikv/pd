@@ -72,6 +72,8 @@ type state struct {
 	// keyspaceLookupTable is a map from keyspace to the keyspace group to which it belongs.
 	keyspaceLookupTable map[uint32]uint32
 	// splittingGroups is the cache of splitting keyspace group related information.
+	// The key is the keyspace group ID, and the value is the time when the keyspace group
+	// is created as the split target.
 	splittingGroups map[uint32]time.Time
 	// deletedGroups is the cache of deleted keyspace group related information.
 	deletedGroups map[uint32]struct{}
