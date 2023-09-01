@@ -436,7 +436,7 @@ func TestMixedTSODeployment(t *testing.T) {
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	checkTSO(ctx1, re, &wg, backendEndpoints, pd.WithAllowTSOFallback() /* It's expected that the timestamp fallback happens here */)
+	checkTSO(ctx1, re, &wg, backendEndpoints)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

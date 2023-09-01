@@ -77,12 +77,16 @@ type state struct {
 	splittingGroups map[uint32]time.Time
 	// deletedGroups is the cache of deleted keyspace group related information.
 	deletedGroups map[uint32]struct{}
+	// requestedGroups is the cache of requested keyspace group related information.
+	// Once a group receives its first TSO request, it will be added to this map.
+	requestedGroups map[uint32]struct{}
 }
 
 func (s *state) initialize() {
 	s.keyspaceLookupTable = make(map[uint32]uint32)
 	s.splittingGroups = make(map[uint32]time.Time)
 	s.deletedGroups = make(map[uint32]struct{})
+	s.requestedGroups = make(map[uint32]struct{})
 }
 
 func (s *state) deInitialize() {
@@ -144,6 +148,32 @@ func (s *state) getDeletedGroupNum() int {
 	s.RLock()
 	defer s.RUnlock()
 	return len(s.deletedGroups)
+}
+
+// cleanKeyspaceGroup cleans the given keyspace group from the state.
+// NOTICE: currently the only legal way to delete a keyspace group is
+// to merge it into another one. This function is used to clean up the
+// remaining info after the merge has been finished.
+func (s *state) cleanKeyspaceGroup(groupID uint32) {
+	s.Lock()
+	defer s.Unlock()
+	delete(s.deletedGroups, groupID)
+	delete(s.requestedGroups, groupID)
+}
+
+// checkGroupRequested checks if the given keyspace group has been requested.
+func (s *state) checkGroupRequested(groupID uint32) bool {
+	s.RLock()
+	defer s.RUnlock()
+	_, ok := s.requestedGroups[groupID]
+	return ok
+}
+
+// setGroupRequested sets the given keyspace group as requested.
+func (s *state) setGroupRequested(groupID uint32) {
+	s.Lock()
+	defer s.Unlock()
+	s.requestedGroups[groupID] = struct{}{}
 }
 
 func (s *state) checkTSOSplit(
@@ -1007,6 +1037,7 @@ func (kgm *KeyspaceGroupManager) GetKeyspaceGroups() map[uint32]*endpoint.Keyspa
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
 func (kgm *KeyspaceGroupManager) HandleTSORequest(
+	ctx context.Context,
 	keyspaceID, keyspaceGroupID uint32,
 	dcLocation string, count uint32,
 ) (ts pdpb.Timestamp, curKeyspaceGroupID uint32, err error) {
@@ -1025,7 +1056,22 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	ts, err = am.HandleRequest(context.Background(), dcLocation, count)
+	// If this is the first time to request the keyspace group, we need to sync the
+	// timestamp one more time before serving the TSO request to make sure that the
+	// TSO is the latest one from the storage, which could prevent the potential
+	// fallback caused by the rolling update of the mixed PD and TSO service.
+	if !kgm.checkGroupRequested(curKeyspaceGroupID) {
+		allocator, err := am.GetAllocator(dcLocation)
+		if err != nil {
+			return pdpb.Timestamp{}, curKeyspaceGroupID, err
+		}
+		// TODO: support the Local TSO Allocator.
+		if err = allocator.Initialize(0); err != nil {
+			return pdpb.Timestamp{}, curKeyspaceGroupID, err
+		}
+		kgm.setGroupRequested(curKeyspaceGroupID)
+	}
+	ts, err = am.HandleRequest(ctx, dcLocation, count)
 	return ts, curKeyspaceGroupID, err
 }
 
@@ -1400,7 +1446,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 				zap.Uint32("keyspace-group-id", groupID),
 				zap.Uint32("keyspace-id", group.Keyspaces[0]))
 			// Request the TSO manually to speed up the split process.
-			_, _, err := kgm.HandleTSORequest(group.Keyspaces[0], groupID, GlobalDCLocation, 1)
+			_, _, err := kgm.HandleTSORequest(kgm.ctx, group.Keyspaces[0], groupID, GlobalDCLocation, 1)
 			if err != nil {
 				log.Warn("failed to request tso for the splitting keyspace group",
 					zap.Uint32("keyspace-group-id", groupID),
@@ -1465,9 +1511,7 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 					zap.Error(err))
 				continue
 			}
-			kgm.Lock()
-			delete(kgm.deletedGroups, groupID)
-			kgm.Unlock()
+			kgm.cleanKeyspaceGroup(groupID)
 			lastDeletedGroupID = groupID
 			lastDeletedGroupNum += 1
 		}

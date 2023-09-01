@@ -142,7 +142,9 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		}
 		count := request.GetCount()
 		ts, keyspaceGroupBelongTo, err := s.keyspaceGroupManager.HandleTSORequest(
-			request.Header.KeyspaceId, request.Header.KeyspaceGroupId, request.GetDcLocation(), count)
+			ctx,
+			request.Header.KeyspaceId, request.Header.KeyspaceGroupId,
+			request.GetDcLocation(), count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
