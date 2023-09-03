@@ -73,12 +73,15 @@ type state struct {
 	keyspaceLookupTable map[uint32]uint32
 	// splittingGroups is the cache of splitting keyspace group related information.
 	// The key is the keyspace group ID, and the value is the time when the keyspace group
-	// is created as the split target.
+	// is created as the split target. Once the split is finished, the keyspace group will
+	// be removed from this map.
 	splittingGroups map[uint32]time.Time
 	// deletedGroups is the cache of deleted keyspace group related information.
+	// Being merged will cause the group to be added to this map and finally be deleted after the merge.
 	deletedGroups map[uint32]struct{}
 	// requestedGroups is the cache of requested keyspace group related information.
-	// Once a group receives its first TSO request and pass the check, it will be added to this map.
+	// Once a group receives its first TSO request and pass the certain check, it will be added to this map.
+	// Being merged will cause the group to be removed from this map eventually if the merge is successful.
 	requestedGroups map[uint32]struct{}
 }
 
@@ -161,10 +164,11 @@ func (s *state) cleanKeyspaceGroup(groupID uint32) {
 	delete(s.requestedGroups, groupID)
 }
 
-// markGroupRequested checks if the given keyspace group has been requested.
-// If yes, it do nothing and returns nil.
-// If not, it marks the keyspace group as requested if the checker function returns nil,
-// otherwise it returns the error.
+// markGroupRequested checks if the given keyspace group has been requested and should be marked.
+// If yes, it will do nothing and return nil directly.
+// If not, it will try to mark the keyspace group as requested inside a critical section, which
+// will call the checker passed in to check if the keyspace group is qualified to be marked as requested.
+// Any error encountered during the check will be returned to the caller.
 func (s *state) markGroupRequested(groupID uint32, checker func() error) error {
 	// Fast path to check if the keyspace group has been marked as requested.
 	s.RLock()
@@ -1069,7 +1073,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	// If this is the first time to request the keyspace group, we need to sync the
 	// timestamp one more time before serving the TSO request to make sure that the
 	// TSO is the latest one from the storage, which could prevent the potential
-	// fallback caused by the rolling update of the mixed PD and TSO service.
+	// fallback caused by the rolling update of the mixed old PD and TSO service deployment.
 	err = kgm.markGroupRequested(curKeyspaceGroupID, func() error {
 		allocator, err := am.GetAllocator(dcLocation)
 		if err != nil {
