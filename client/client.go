@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"strings"
 	"sync"
@@ -1090,14 +1091,22 @@ func (c *client) processTSORequests(stream pdpb.PD_TsoClient, dcLocation string,
 	}
 
 	if err := stream.Send(req); err != nil {
-		err = errors.WithStack(err)
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err
 	}
 	tsoBatchSendLatency.Observe(float64(time.Since(tbc.batchStartTime)))
 	resp, err := stream.Recv()
 	if err != nil {
-		err = errors.WithStack(err)
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
 		c.finishTSORequest(requests, 0, 0, 0, err)
 		return err
 	}
@@ -1810,6 +1819,9 @@ func addrsToUrls(addrs []string) []string {
 
 // IsLeaderChange will determine whether there is a leader change.
 func IsLeaderChange(err error) bool {
+	if err == errs.ErrClientTSOStreamClosed {
+		return true
+	}
 	errMsg := err.Error()
 	return strings.Contains(errMsg, errs.NotLeaderErr) || strings.Contains(errMsg, errs.MismatchLeaderErr)
 }
