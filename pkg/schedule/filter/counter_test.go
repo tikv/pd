@@ -27,7 +27,7 @@ func TestString(t *testing.T) {
 		expected   string
 	}{
 		{int(storeStateTombstone), "store-state-tombstone-filter"},
-		{int(filtersLen - 1), "store-state-slow-trend-filter"},
+		{int(filtersLen - 1), "store-state-split-region-filter"},
 		{int(filtersLen), "unknown"},
 	}
 
