@@ -53,6 +53,8 @@ func TestReportSplit(t *testing.T) {
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}
 	region := core.NewRegionInfo(right, right.Peers[0])
 	cluster.putRegion(region)
+	store := newTestStores(1, "2.0.0")
+	cluster.core.PutStore(store[0])
 
 	// split failed, split region keys must be continuous.
 	left := &metapb.Region{Id: 2, StartKey: []byte("a"), EndKey: []byte("b"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3}),
