@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,10 +27,12 @@ import (
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/pkg/errors"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
@@ -102,8 +105,14 @@ func (m *Manager) GetBasicServer() bs.Server {
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) {
-	// Todo: If we can modify following configs in the future, we should reload these configs.
-	// Store the controller config into the storage.
+	v, err := m.storage.LoadControllerConfig()
+	if err != nil {
+		log.Error("resource controller config load failed, fallback to default config", zap.Error(err), zap.String("v", v))
+	} else if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
+		log.Error("un-marshall controller config failed", zap.Error(err), zap.String("v", v))
+	}
+
+	// re-save the config to make sure the config has been persisted.
 	m.storage.SaveControllerConfig(m.controllerConfig)
 	// Load resource group meta info from storage.
 	m.groups = make(map[string]*ResourceGroup)
@@ -156,6 +165,47 @@ func (m *Manager) Init(ctx context.Context) {
 		m.persistLoop(ctx)
 	}()
 	log.Info("resource group manager finishes initialization")
+}
+
+// UpdateControllerConfigItem updates the controller config item.
+func (m *Manager) UpdateControllerConfigItem(key string, value interface{}) error {
+	kp := strings.Split(key, ".")
+	if len(kp) == 0 {
+		return errors.Errorf("invalid key %s", key)
+	}
+	m.Lock()
+	var config interface{}
+	switch kp[0] {
+	case "request-unit":
+		config = &m.controllerConfig.RequestUnit
+	default:
+		config = m.controllerConfig
+	}
+	updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
+	if err != nil {
+		m.Unlock()
+		return err
+	}
+
+	if !found {
+		m.Unlock()
+		return errors.Errorf("config item %s not found", key)
+	}
+	m.Unlock()
+	if updated {
+		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+			log.Error("save controller config failed", zap.Error(err))
+		}
+		log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
+	}
+	return nil
+}
+
+// GetControllerConfig returns the controller config.
+func (m *Manager) GetControllerConfig() *ControllerConfig {
+	m.RLock()
+	defer m.RUnlock()
+	return m.controllerConfig
 }
 
 // AddResourceGroup puts a resource group.

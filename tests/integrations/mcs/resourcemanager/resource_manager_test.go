@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1264,4 +1265,97 @@ func (suite *resourceManagerClientTestSuite) TestSkipConsumptionForBackgroundJob
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
 
 	c.Stop()
+}
+
+func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigChanged() {
+	re := suite.Require()
+	cli := suite.client
+	for _, group := range suite.initGroups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	c1, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	re.NoError(err)
+	c1.Start(suite.ctx)
+	// with client option
+	c2, err := controller.NewResourceGroupController(suite.ctx, 2, cli, nil, controller.WithMaxWaitDuration(time.Hour))
+	re.NoError(err)
+	c2.Start(suite.ctx)
+
+	// helper function for sending HTTP requests and checking responses
+	sendRequest := func(method, url string, body io.Reader) []byte {
+		req, err := http.NewRequest(method, url, body)
+		re.NoError(err)
+		resp, err := http.DefaultClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+		bytes, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		if resp.StatusCode != http.StatusOK {
+			re.Fail(string(bytes))
+		}
+		return bytes
+	}
+
+	getAddr := func() string {
+		server := suite.cluster.GetServer(suite.cluster.GetLeader())
+		if rand.Intn(100)%2 == 1 {
+			server = suite.cluster.GetServer(suite.cluster.GetFollower())
+		}
+		return server.GetAddr()
+	}
+
+	configURL := "/resource-manager/api/v1/config/controller"
+	waitDuration := 10 * time.Second
+	readBaseCost := 1.5
+	defaultCfg := controller.DefaultConfig()
+	// failpoint enableDegradedMode will setup and set it be 1s.
+	defaultCfg.DegradedModeWaitDuration.Duration = time.Second
+	expectRUCfg := controller.GenerateRUConfig(defaultCfg)
+	// initial config verification
+	respString := sendRequest("GET", getAddr()+configURL, nil)
+	defaultString, err := json.Marshal(defaultCfg)
+	re.NoError(err)
+	re.JSONEq(string(respString), string(defaultString))
+	re.EqualValues(expectRUCfg, c1.GetConfig())
+
+	testCases := []struct {
+		configJSON string
+		value      interface{}
+		expected   func(ruConfig *controller.RUConfig)
+	}{
+		{
+			configJSON: fmt.Sprintf(`{"degraded-mode-wait-duration": "%v"}`, waitDuration),
+			value:      waitDuration,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.DegradedModeWaitDuration = waitDuration },
+		},
+		{
+			configJSON: fmt.Sprintf(`{"ltb-max-wait-duration": "%v"}`, waitDuration),
+			value:      waitDuration,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.LTBMaxWaitDuration = waitDuration },
+		},
+		{
+			configJSON: fmt.Sprintf(`{"read-base-cost": %v}`, readBaseCost),
+			value:      readBaseCost,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.ReadBaseCost = controller.RequestUnit(readBaseCost) },
+		},
+		{
+			configJSON: fmt.Sprintf(`{"write-base-cost": %v}`, readBaseCost*2),
+			value:      readBaseCost * 2,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.WriteBaseCost = controller.RequestUnit(readBaseCost * 2) },
+		},
+	}
+	// change properties one by one and verify each time
+	for _, t := range testCases {
+		sendRequest("POST", getAddr()+configURL, strings.NewReader(t.configJSON))
+		time.Sleep(500 * time.Millisecond)
+		t.expected(expectRUCfg)
+		re.EqualValues(expectRUCfg, c1.GetConfig())
+
+		expectRUCfg2 := *expectRUCfg
+		// always apply the client option
+		expectRUCfg2.LTBMaxWaitDuration = time.Hour
+		re.EqualValues(&expectRUCfg2, c2.GetConfig())
+	}
 }
