@@ -401,7 +401,7 @@ func (c *RaftCluster) runSyncConfig() {
 
 	stores := c.GetStores()
 	syncFunc := func() {
-		synced, switchRaftV2Config := syncConfig(c.storeConfigManager, stores)
+		synced, switchRaftV2Config := syncConfig(c.ctx, c.storeConfigManager, stores)
 		if switchRaftV2Config {
 			c.GetOpts().UseRaftV2()
 			if err := c.opt.Persist(c.GetStorage()); err != nil {
@@ -428,8 +428,14 @@ func (c *RaftCluster) runSyncConfig() {
 // syncConfig syncs the config of the stores.
 // synced is true if sync config from one tikv.
 // switchRaftV2 is true if the config of tikv engine is changed and engine is raft-kv2.
-func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) (synced bool, switchRaftV2 bool) {
+func syncConfig(ctx context.Context, manager *config.StoreConfigManager, stores []*core.StoreInfo) (synced bool, switchRaftV2 bool) {
 	for index := 0; index < len(stores); index++ {
+		select {
+		case <-ctx.Done():
+			log.Info("stop sync store config job due to raft cluster exited")
+			return
+		default:
+		}
 		// filter out the stores that are tiflash
 		store := stores[index]
 		if store.IsTiFlash() {
@@ -442,8 +448,12 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) (s
 		}
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
-		switchRaftV2, err := manager.ObserveConfig(address)
+		switchRaftV2, err := manager.ObserveConfig(ctx, address)
+
 		if err != nil {
+			// delete the store if it is failed and retry next store.
+			stores = append(stores[:index], stores[index+1:]...)
+			index--
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
