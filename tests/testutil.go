@@ -29,19 +29,20 @@ import (
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"go.uber.org/zap"
 )
 
 var once sync.Once
 
 // InitLogger initializes the logger for test.
-func InitLogger(cfg *tso.Config) (err error) {
+func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, isRedactInfoLogEnabled bool) (err error) {
 	once.Do(func() {
 		// Setup the logger.
-		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+		err = logutil.SetupLogger(logConfig, &logger, &logProps, isRedactInfoLogEnabled)
 		if err != nil {
 			return
 		}
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+		log.ReplaceGlobals(logger, logProps)
 		// Flushing any buffered log entries.
 		log.Sync()
 	})
@@ -73,7 +74,7 @@ func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Asser
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
 	// Setup the logger.
-	err = InitLogger(cfg)
+	err = InitLogger(cfg.Log, cfg.Logger, cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
 	return NewTSOTestServer(ctx, cfg)
 }
@@ -117,6 +118,19 @@ func StartSingleSchedulingTestServer(ctx context.Context, re *require.Assertions
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup
+}
+
+// NewSchedulingTestServer creates a scheduling server with given config for testing.
+func NewSchedulingTestServer(ctx context.Context, cfg *sc.Config) (*scheduling.Server, testutil.CleanupFunc, error) {
+	s := scheduling.CreateServer(ctx, cfg)
+	if err := s.Run(); err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		s.Close()
+		os.RemoveAll(cfg.DataDir)
+	}
+	return s, cleanup, nil
 }
 
 // WaitForPrimaryServing waits for one of servers being elected to be the primary/leader

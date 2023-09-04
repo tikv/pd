@@ -453,7 +453,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 
 func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	fname := testutil.InitTempFileLogger("info")
-	defer os.Remove(fname)
+	defer os.RemoveAll(fname)
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	input := map[string]interface{}{
 		"enable-audit": "true",
@@ -662,7 +662,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	suite.NoError(leader.BootstrapCluster())
 	fname := testutil.InitTempFileLogger("info")
-	defer os.Remove(fname)
+	defer os.RemoveAll(fname)
 
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
 	addr := follower.GetAddr() + "/pd/api/v1/regions"

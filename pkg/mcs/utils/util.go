@@ -83,7 +83,7 @@ type server interface {
 	Context() context.Context
 	GetTLSConfig() *grpcutil.TLSConfig
 	GetClientConns() *sync.Map
-	GetDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error)
+	GetDelegateClient(ctx context.Context, tlsCfg *grpcutil.TLSConfig, forwardedHost string) (*grpc.ClientConn, error)
 	ServerLoopWgDone()
 	ServerLoopWgAdd(int)
 	IsClosed() bool
@@ -130,7 +130,7 @@ func isAPIServiceReady(s server) (bool, error) {
 	if len(urls) == 0 {
 		return false, errors.New("no backend endpoints")
 	}
-	cc, err := s.GetDelegateClient(s.Context(), urls[0])
+	cc, err := s.GetDelegateClient(s.Context(), s.GetTLSConfig(), urls[0])
 	if err != nil {
 		return false, err
 	}

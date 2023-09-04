@@ -624,7 +624,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		fname := testutil.InitTempFileLogger("debug")
-		defer os.Remove(fname)
+		defer os.RemoveAll(fname)
 
 		watcher := NewLoopWatcher(
 			suite.ctx,

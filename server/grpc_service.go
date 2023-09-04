@@ -179,11 +179,11 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 
 	// Get the minimal timestamp from the TSO servers/pods
 	var mutex sync.Mutex
-	resps := make([]*tsopb.GetMinTSResponse, 0)
+	resps := make([]*tsopb.GetMinTSResponse, len(addrs))
 	wg := sync.WaitGroup{}
 	wg.Add(len(addrs))
-	for _, addr := range addrs {
-		go func(addr string) {
+	for idx, addr := range addrs {
+		go func(idx int, addr string) {
 			defer wg.Done()
 			resp, err := s.getMinTSFromSingleServer(s.ctx, dcLocation, addr)
 			if err != nil || resp == nil {
@@ -193,8 +193,8 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 			}
 			mutex.Lock()
 			defer mutex.Unlock()
-			resps = append(resps, resp)
-		}(addr)
+			resps[idx] = resp
+		}(idx, addr)
 	}
 	wg.Wait()
 
@@ -1709,8 +1709,19 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	if err != nil {
 		return nil, err
 	}
-	if op != nil {
-		rc.GetOperatorController().AddOperator(op)
+
+	if op == nil {
+		return &pdpb.ScatterRegionResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				"operator could not be allocated"),
+		}, nil
+	}
+
+	if !rc.GetOperatorController().AddOperator(op) {
+		return &pdpb.ScatterRegionResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				"operator cancelled because store limit exceeded"),
+		}, nil
 	}
 
 	return &pdpb.ScatterRegionResponse{

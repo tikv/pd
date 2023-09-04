@@ -237,6 +237,43 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
 }
 
+func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
+	delta := &rmpb.Consumption{}
+	if now.RRU >= last.RRU {
+		delta.RRU = now.RRU - last.RRU
+		last.RRU = now.RRU
+	}
+	if now.WRU >= last.WRU {
+		delta.WRU = now.WRU - last.WRU
+		last.WRU = now.WRU
+	}
+	if now.ReadBytes >= last.ReadBytes {
+		delta.ReadBytes = now.ReadBytes - last.ReadBytes
+		last.ReadBytes = now.ReadBytes
+	}
+	if now.WriteBytes >= last.WriteBytes {
+		delta.WriteBytes = now.WriteBytes - last.WriteBytes
+		last.WriteBytes = now.WriteBytes
+	}
+	if now.TotalCpuTimeMs >= last.TotalCpuTimeMs {
+		delta.TotalCpuTimeMs = now.TotalCpuTimeMs - last.TotalCpuTimeMs
+		last.TotalCpuTimeMs = now.TotalCpuTimeMs
+	}
+	if now.SqlLayerCpuTimeMs >= last.SqlLayerCpuTimeMs {
+		delta.SqlLayerCpuTimeMs = now.SqlLayerCpuTimeMs - last.SqlLayerCpuTimeMs
+		last.SqlLayerCpuTimeMs = now.SqlLayerCpuTimeMs
+	}
+	if now.KvReadRpcCount >= last.KvReadRpcCount {
+		delta.KvReadRpcCount = now.KvReadRpcCount - last.KvReadRpcCount
+		last.KvReadRpcCount = now.KvReadRpcCount
+	}
+	if now.KvWriteRpcCount >= last.KvWriteRpcCount {
+		delta.KvWriteRpcCount = now.KvWriteRpcCount - last.KvWriteRpcCount
+		last.KvWriteRpcCount = now.KvWriteRpcCount
+	}
+	return delta
+}
+
 func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	if custom1 == nil || custom2 == nil {
 		return

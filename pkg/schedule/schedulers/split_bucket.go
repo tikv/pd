@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 )
@@ -121,10 +122,22 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
 		h.conf.persistLocked()
-		rd.Text(w, http.StatusOK, "success")
+		rd.Text(w, http.StatusOK, "Config is updated.")
+		return
 	}
 
-	rd.Text(w, http.StatusBadRequest, "config item not found")
+	m := make(map[string]interface{})
+	if err := json.Unmarshal(data, &m); err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok := reflectutil.FindSameFieldByJSON(h.conf, m)
+	if ok {
+		rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
+		return
+	}
+
+	rd.Text(w, http.StatusBadRequest, "Config item is not found.")
 }
 
 func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {

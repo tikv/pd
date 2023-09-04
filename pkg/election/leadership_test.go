@@ -222,7 +222,7 @@ func TestRequestProgress(t *testing.T) {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		re := require.New(t)
 		fname := testutil.InitTempFileLogger("debug")
-		defer os.Remove(fname)
+		defer os.RemoveAll(fname)
 		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
 		defer clean()
 		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)

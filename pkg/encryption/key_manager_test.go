@@ -33,6 +33,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 )
 
+// #nosec G101
 const (
 	testMasterKey     = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b530"
 	testMasterKey2    = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b531"

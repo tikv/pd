@@ -429,6 +429,13 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 			break
 		}
 	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate", "return(true)"))
+	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 900000000, times: 1, waitDuration: 0}
+	wreq := tcs.makeWriteRequest()
+	_, _, err := controller.OnRequestWait(suite.ctx, suite.initGroups[0].Name, wreq)
+	re.Error(err)
+	time.Sleep(time.Millisecond * 200)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate"))
 	controller.Stop()
 }
 
@@ -655,6 +662,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	c.Stop()
 }
 
+// nolint:gosec
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re := suite.Require()
 	cli := suite.client
@@ -941,7 +949,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		re.NoError(err)
 		re.Contains(string(respString), tcase.name)
 		if tcase.modifySuccess {
-			re.Equal(string(respString), tcase.expectMarshal)
+			re.JSONEq(string(respString), tcase.expectMarshal)
 		}
 
 		// Last one, Check list and delete all resource groups
@@ -991,12 +999,17 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re.NoError(err)
 	servers := suite.cluster.GetServers()
 	re.NoError(suite.cluster.StopAll())
+	cli.Close()
 	serverList := make([]*tests.TestServer, 0, len(servers))
 	for _, s := range servers {
 		serverList = append(serverList, s)
 	}
 	re.NoError(suite.cluster.RunServers(serverList))
 	suite.cluster.WaitLeader()
+	// re-connect client as well
+	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	re.NoError(err)
+	cli = suite.client
 	var newGroups []*rmpb.ResourceGroup
 	testutil.Eventually(suite.Require(), func() bool {
 		var err error
