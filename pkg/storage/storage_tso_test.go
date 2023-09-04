@@ -23,28 +23,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 )
 
 func TestSaveLoadTimestamp(t *testing.T) {
 	re := require.New(t)
-
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	defer etcd.Close()
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	storage := NewStorageWithEtcdBackend(client, rootPath)
-
+	storage, clean := newTestStorage(t)
+	defer clean()
 	expectedTS := time.Now().Round(0)
-	err = storage.SaveTimestamp(endpoint.TimestampKey, expectedTS)
+	err := storage.SaveTimestamp(endpoint.TimestampKey, expectedTS)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)
@@ -53,27 +39,15 @@ func TestSaveLoadTimestamp(t *testing.T) {
 
 func TestGlobalLocalTimestamp(t *testing.T) {
 	re := require.New(t)
-
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	defer etcd.Close()
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	storage := NewStorageWithEtcdBackend(client, rootPath)
-
+	storage, clean := newTestStorage(t)
+	defer clean()
 	ltaKey := "lta"
 	dc1LocationKey, dc2LocationKey := "dc1", "dc2"
 	localTS1 := time.Now().Round(0)
 	l1 := path.Join(ltaKey, dc1LocationKey, endpoint.TimestampKey)
 	l2 := path.Join(ltaKey, dc2LocationKey, endpoint.TimestampKey)
 
-	err = storage.SaveTimestamp(l1, localTS1)
+	err := storage.SaveTimestamp(l1, localTS1)
 	re.NoError(err)
 	globalTS := time.Now().Round(0)
 	err = storage.SaveTimestamp(endpoint.TimestampKey, globalTS)
@@ -93,22 +67,10 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 
 func TestTimestampTxn(t *testing.T) {
 	re := require.New(t)
-
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	defer etcd.Close()
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	storage := NewStorageWithEtcdBackend(client, rootPath)
-
+	storage, clean := newTestStorage(t)
+	defer clean()
 	globalTS1 := time.Now().Round(0)
-	err = storage.SaveTimestamp(endpoint.TimestampKey, globalTS1)
+	err := storage.SaveTimestamp(endpoint.TimestampKey, globalTS1)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
@@ -118,4 +80,10 @@ func TestTimestampTxn(t *testing.T) {
 	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)
 	re.Equal(globalTS1, ts)
+}
+
+func newTestStorage(t *testing.T) (Storage, func()) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
+	return NewStorageWithEtcdBackend(client, rootPath), clean
 }

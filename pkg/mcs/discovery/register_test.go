@@ -28,18 +28,13 @@ import (
 
 func TestRegister(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.NewFromURL(ep)
-	re.NoError(err)
-	<-etcd.Server.ReadyNotify()
+	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	etcd, cfg := servers[0], servers[0].Config()
 
 	// Test register with http prefix.
 	sr := NewServiceRegister(context.Background(), client, "12345", "test_service", "http://127.0.0.1:1", "http://127.0.0.1:1", 10)
-	re.NoError(err)
-	err = sr.Register()
+	err := sr.Register()
 	re.NoError(err)
 	re.Equal("/ms/12345/test_service/registry/http://127.0.0.1:1", sr.key)
 	resp, err := client.Get(context.Background(), sr.key)
@@ -69,14 +64,13 @@ func TestRegister(t *testing.T) {
 		etcd.Server.HardStop()                  // close the etcd to make the keepalive failed
 		time.Sleep(etcdutil.DefaultDialTimeout) // ensure that the request is timeout
 		etcd.Close()
-		etcd, err = embed.StartEtcd(cfg)
+		etcd, err = embed.StartEtcd(&cfg)
 		re.NoError(err)
 		<-etcd.Server.ReadyNotify()
 		testutil.Eventually(re, func() bool {
 			return getKeyAfterLeaseExpired(re, client, sr.key) == "127.0.0.1:2"
 		})
 	}
-	etcd.Close()
 }
 
 func getKeyAfterLeaseExpired(re *require.Assertions, client *clientv3.Client, key string) string {
