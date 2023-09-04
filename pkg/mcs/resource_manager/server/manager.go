@@ -314,33 +314,18 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
 			)
 			// RU info.
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/manager.go
-			if consumption.RRU != 0 {
+			if consumption.RRU > 0 {
 				rruMetrics.Observe(consumption.RRU)
 			}
-			if consumption.WRU != 0 {
+			if consumption.WRU > 0 {
 				wruMetrics.Observe(consumption.WRU)
 			}
 			// Byte info.
-			if consumption.ReadBytes != 0 {
+			if consumption.ReadBytes > 0 {
 				readByteMetrics.Observe(consumption.ReadBytes)
 			}
-			if consumption.WriteBytes != 0 {
-				writeByteMetrics.Observe(consumption.WriteBytes)
-=======
-			if consumption.RRU > 0 {
-				rruMetrics.Add(consumption.RRU)
-			}
-			if consumption.WRU > 0 {
-				wruMetrics.Add(consumption.WRU)
-			}
-			// Byte info.
-			if consumption.ReadBytes > 0 {
-				readByteMetrics.Add(consumption.ReadBytes)
-			}
 			if consumption.WriteBytes > 0 {
-				writeByteMetrics.Add(consumption.WriteBytes)
->>>>>>> ee8654e9e (resource_control: fix consumption less zero (#6983)):pkg/mcs/resourcemanager/server/manager.go
+				writeByteMetrics.Observe(consumption.WriteBytes)
 			}
 			// CPU time info.
 			if consumption.TotalCpuTimeMs > 0 {
