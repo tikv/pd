@@ -54,7 +54,6 @@ type option struct {
 	enableForwarding bool
 	metricsLabels    prometheus.Labels
 	initMetrics      bool
-	allowTSOFallback bool
 
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value

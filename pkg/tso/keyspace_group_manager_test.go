@@ -667,19 +667,19 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 	// Should succeed because keyspace 0 is actually in keyspace group 0, which is served
 	// by the current keyspace group manager, instead of keyspace group 1 in ask, and
 	// keyspace group 0 is returned in the response.
-	_, keyspaceGroupBelongTo, err := mgr.HandleTSORequest(0, 1, GlobalDCLocation, 1)
+	_, keyspaceGroupBelongTo, err := mgr.HandleTSORequest(suite.ctx, 0, 1, GlobalDCLocation, 1)
 	re.NoError(err)
 	re.Equal(uint32(0), keyspaceGroupBelongTo)
 
 	// Should succeed because keyspace 100 doesn't belong to any keyspace group, so it will
 	// be served by the default keyspace group 0, and keyspace group 0 is returned in the response.
-	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(100, 0, GlobalDCLocation, 1)
+	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(suite.ctx, 100, 0, GlobalDCLocation, 1)
 	re.NoError(err)
 	re.Equal(uint32(0), keyspaceGroupBelongTo)
 
 	// Should fail because keyspace 100 doesn't belong to any keyspace group, and the keyspace group
 	// 1 in ask doesn't exist.
-	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(100, 1, GlobalDCLocation, 1)
+	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(suite.ctx, 100, 1, GlobalDCLocation, 1)
 	re.Error(err)
 	re.Equal(uint32(1), keyspaceGroupBelongTo)
 }
@@ -1109,7 +1109,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	// And the primaries on TSO Server 1 should continue to serve TSO requests without any failures.
 	for i := 0; i < 100; i++ {
 		for _, id := range ids {
-			_, keyspaceGroupBelongTo, err := mgr1.HandleTSORequest(id, id, GlobalDCLocation, 1)
+			_, keyspaceGroupBelongTo, err := mgr1.HandleTSORequest(suite.ctx, id, id, GlobalDCLocation, 1)
 			re.NoError(err)
 			re.Equal(id, keyspaceGroupBelongTo)
 		}
@@ -1205,7 +1205,7 @@ func checkTSO(
 					return
 				default:
 				}
-				respTS, respGroupID, err := mgr.HandleTSORequest(id, id, GlobalDCLocation, 1)
+				respTS, respGroupID, err := mgr.HandleTSORequest(ctx, id, id, GlobalDCLocation, 1)
 				// omit the error check since there are many kinds of errors during primaries movement
 				if err != nil {
 					continue
@@ -1228,7 +1228,7 @@ func waitForPrimariesServing(
 				if member, err := mgrs[j].GetElectionMember(id, id); err != nil || !member.IsLeader() {
 					return false
 				}
-				if _, _, err := mgrs[j].HandleTSORequest(id, id, GlobalDCLocation, 1); err != nil {
+				if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, GlobalDCLocation, 1); err != nil {
 					return false
 				}
 			}

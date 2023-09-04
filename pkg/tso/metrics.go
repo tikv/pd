@@ -87,6 +87,7 @@ func init() {
 type tsoMetrics struct {
 	// timestampOracle event counter
 	syncEvent                    prometheus.Counter
+	skipSyncEvent                prometheus.Counter
 	syncOKEvent                  prometheus.Counter
 	errSaveSyncTSEvent           prometheus.Counter
 	errLeaseResetTSEvent         prometheus.Counter
@@ -119,6 +120,7 @@ type tsoMetrics struct {
 func newTSOMetrics(groupID, dcLocation string) *tsoMetrics {
 	return &tsoMetrics{
 		syncEvent:                    tsoCounter.WithLabelValues("sync", groupID, dcLocation),
+		skipSyncEvent:                tsoCounter.WithLabelValues("skip_sync", groupID, dcLocation),
 		syncOKEvent:                  tsoCounter.WithLabelValues("sync_ok", groupID, dcLocation),
 		errSaveSyncTSEvent:           tsoCounter.WithLabelValues("err_save_sync_ts", groupID, dcLocation),
 		errLeaseResetTSEvent:         tsoCounter.WithLabelValues("err_lease_reset_ts", groupID, dcLocation),
