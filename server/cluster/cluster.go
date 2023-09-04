@@ -594,9 +594,9 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Int("count", c.core.GetTotalRegionCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
-	for _, store := range c.GetStores() {
-		storeID := store.GetID()
-		if !c.isAPIServiceMode {
+	if !c.isAPIServiceMode {
+		for _, store := range c.GetStores() {
+			storeID := store.GetID()
 			c.hotStat.GetOrCreateRollingStoreStats(storeID)
 			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
 		}
@@ -2154,10 +2154,9 @@ func (c *RaftCluster) collectMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(c.opt)
 	stores := c.GetStores()
 	for _, s := range stores {
+		statsMap.Observe(s)
 		if !c.isAPIServiceMode {
-			statsMap.Observe(s, c.hotStat.StoresStats)
-		} else {
-			statsMap.Observe(s)
+			statsMap.ObserveHotStat(s, c.hotStat.StoresStats)
 		}
 	}
 	statsMap.Collect()
