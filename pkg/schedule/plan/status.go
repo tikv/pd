@@ -128,7 +128,8 @@ var statusText = map[StatusCode]string{
 	StatusStoreDown:         "StoreDown",
 	StatusStoreBusy:         "StoreBusy",
 
-	StatusStoreNotExisted: "StoreNotExisted",
+	StatusStoreNotExisted:  "StoreNotExisted",
+	StatusStoreSplitRegion: "StoreSplitRegion",
 
 	// region
 	StatusRegionHot:           "RegionHot",

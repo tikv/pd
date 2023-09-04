@@ -275,7 +275,7 @@ func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitReque
 	originRegionID := regions[last].GetId()
 	log.Info("region batch split, generate new regions",
 		zap.Uint64("region-id", originRegionID),
-		zap.Stringer("new_peer", hrm[:last]),
+		zap.Stringer("new-peer", hrm[:last]),
 		zap.Int("total", last))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
