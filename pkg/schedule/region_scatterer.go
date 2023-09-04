@@ -327,7 +327,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 				log.Error("failed to get the store", zap.Uint64("store-id", peer.GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
 				continue
 			}
-			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
+			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
 			for {
 				newPeer := r.selectNewPeer(context, group, peer, filters)
 				targetPeers[newPeer.GetStoreId()] = newPeer
@@ -421,22 +421,6 @@ func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.
 	return region.GetLeader().GetStoreId() == targetLeader
 }
 
-<<<<<<< HEAD:pkg/schedule/region_scatterer.go
-func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, oldFit *placement.RegionFit, sourceStoreID uint64, selectedStores map[uint64]struct{}, context engineContext) []uint64 {
-	sourceStore := r.cluster.GetStore(sourceStoreID)
-	if sourceStore == nil {
-		log.Error("failed to get the store", zap.Uint64("store-id", sourceStoreID), errs.ZapError(errs.ErrGetSourceStore))
-		return nil
-	}
-	filters := []filter.Filter{
-		filter.NewExcludedFilter(r.name, nil, selectedStores),
-	}
-	scoreGuard := filter.NewPlacementSafeguard(r.name, r.cluster.GetOpts(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
-	for _, filterFunc := range context.filterFuncs {
-		filters = append(filters, filterFunc())
-	}
-	filters = append(filters, scoreGuard)
-=======
 // selectNewPeer return the new peer which pick the fewest picked count.
 // it keeps the origin peer if the origin store's pick count is equal the fewest pick.
 // it can be diveded into three steps:
@@ -444,7 +428,6 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, oldFit *plac
 // 2. if max pick count equals min pick count, it means all store picked count are some, return the origin peer.
 // 3. otherwise, select the store which pick count is the min pick count and pass all filter.
 func (r *RegionScatterer) selectNewPeer(context engineContext, group string, peer *metapb.Peer, filters []filter.Filter) *metapb.Peer {
->>>>>>> 72a13c023 (Scatter: make peer scatter logic same with the leader (#6965)):pkg/schedule/scatter/region_scatterer.go
 	stores := r.cluster.GetStores()
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
@@ -470,11 +453,7 @@ func (r *RegionScatterer) selectNewPeer(context engineContext, group string, pee
 		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
 		// could be selected as candidate.
 		if storeCount < maxStoreTotalCount || maxStoreTotalCount == minStoreTotalCount {
-<<<<<<< HEAD:pkg/schedule/region_scatterer.go
 			if filter.Target(r.cluster.GetOpts(), store, filters) {
-				candidates = append(candidates, store.GetID())
-=======
-			if filter.Target(r.cluster.GetSharedConfig(), store, filters) {
 				if storeCount < minCount {
 					minCount = storeCount
 					newPeer = &metapb.Peer{
@@ -482,7 +461,6 @@ func (r *RegionScatterer) selectNewPeer(context engineContext, group string, pee
 						Role:    peer.GetRole(),
 					}
 				}
->>>>>>> 72a13c023 (Scatter: make peer scatter logic same with the leader (#6965)):pkg/schedule/scatter/region_scatterer.go
 			}
 		}
 	}
