@@ -192,10 +192,12 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 		failpoint.Return(errs.ErrEtcdTxnInternal)
 	})
 	save := next.Add(t.saveInterval)
+	start := time.Now()
 	if err = t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 		t.metrics.errSaveSyncTSEvent.Inc()
 		return err
 	}
+	t.metrics.syncSaveDuration.Observe(time.Since(start).Seconds())
 	t.lastSavedTime.Store(save)
 
 	t.metrics.syncOKEvent.Inc()
@@ -260,10 +262,12 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 	// save into etcd only if nextPhysical is close to lastSavedTime
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
+		start := time.Now()
 		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 			t.metrics.errSaveResetTSEvent.Inc()
 			return err
 		}
+		t.metrics.resetSaveDuration.Observe(time.Since(start).Seconds())
 		t.lastSavedTime.Store(save)
 	}
 	// save into memory only if nextPhysical or nextLogical is greater.
@@ -336,6 +340,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	// The time window needs to be updated and saved to etcd.
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
+		start := time.Now()
 		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 			log.Warn("save timestamp failed",
 				zap.String("dc-location", t.dcLocation),
@@ -344,6 +349,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 			t.metrics.errSaveUpdateTSEvent.Inc()
 			return err
 		}
+		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
 		t.lastSavedTime.Store(save)
 	}
 	// save into memory

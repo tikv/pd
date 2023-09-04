@@ -190,7 +190,7 @@ func (s *state) markGroupRequested(groupID uint32, checker func() error) error {
 	return nil
 }
 
-func (s *state) checkTSOSplit(
+func (s *state) checkGroupSplit(
 	targetGroupID uint32,
 ) (splitTargetAM, splitSourceAM *AllocatorManager, err error) {
 	s.RLock()
@@ -212,7 +212,7 @@ func (s *state) checkTSOSplit(
 
 // Reject any request if the keyspace group is in merging state,
 // we need to wait for the merging checker to finish the TSO merging.
-func (s *state) checkTSOMerge(
+func (s *state) checkGroupMerge(
 	groupID uint32,
 ) error {
 	s.RLock()
@@ -1066,7 +1066,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	err = kgm.state.checkTSOMerge(curKeyspaceGroupID)
+	err = kgm.state.checkGroupMerge(curKeyspaceGroupID)
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
@@ -1156,7 +1156,7 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	keyspaceGroupID uint32,
 	dcLocation string,
 ) error {
-	splitTargetAM, splitSourceAM, err := kgm.state.checkTSOSplit(keyspaceGroupID)
+	splitTargetAM, splitSourceAM, err := kgm.state.checkGroupSplit(keyspaceGroupID)
 	if err != nil || splitTargetAM == nil {
 		return err
 	}
@@ -1209,6 +1209,7 @@ const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
 // Put the code below into the critical section to prevent from sending too many HTTP requests.
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
+	start := time.Now()
 	kgm.Lock()
 	defer kgm.Unlock()
 	// Check if the keyspace group is in split state.
@@ -1220,6 +1221,7 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	if kgm.httpClient == nil {
 		return nil
 	}
+	startRequest := time.Now()
 	statusCode, err := apiutil.DoDelete(
 		kgm.httpClient,
 		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
@@ -1232,6 +1234,7 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 			zap.Int("status-code", statusCode))
 		return errs.ErrSendRequest.FastGenByArgs()
 	}
+	kgm.metrics.finishSplitSendDuration.Observe(time.Since(startRequest).Seconds())
 	// Pre-update the split keyspace group's split state in memory.
 	// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
 	// For now, we only have scenarios to update split state/merge state, and the other fields are always
@@ -1239,10 +1242,12 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	newSplitGroup := *splitGroup
 	newSplitGroup.SplitState = nil
 	kgm.kgs[id] = &newSplitGroup
+	kgm.metrics.finishSplitDuration.Observe(time.Since(start).Seconds())
 	return nil
 }
 
 func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
+	start := time.Now()
 	kgm.Lock()
 	defer kgm.Unlock()
 	// Check if the keyspace group is in the merging state.
@@ -1254,6 +1259,7 @@ func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
 	if kgm.httpClient == nil {
 		return nil
 	}
+	startRequest := time.Now()
 	statusCode, err := apiutil.DoDelete(
 		kgm.httpClient,
 		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/merge", id))
@@ -1266,7 +1272,7 @@ func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
 			zap.Int("status-code", statusCode))
 		return errs.ErrSendRequest.FastGenByArgs()
 	}
-
+	kgm.metrics.finishMergeSendDuration.Observe(time.Since(startRequest).Seconds())
 	// Pre-update the merge target keyspace group's merge state in memory.
 	// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
 	// For now, we only have scenarios to update split state/merge state, and the other fields are always
@@ -1274,6 +1280,7 @@ func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
 	newTargetGroup := *mergeTarget
 	newTargetGroup.MergeState = nil
 	kgm.kgs[id] = &newTargetGroup
+	kgm.metrics.finishMergeDuration.Observe(time.Since(start).Seconds())
 	return nil
 }
 

@@ -17,16 +17,18 @@ package tso
 import "github.com/prometheus/client_golang/prometheus"
 
 const (
-	dcLabel    = "dc"
-	typeLabel  = "type"
-	groupLabel = "group"
+	pdNamespace  = "pd"
+	tsoNamespace = "tso"
+	dcLabel      = "dc"
+	typeLabel    = "type"
+	groupLabel   = "group"
 )
 
 var (
 	// TSO metrics
 	tsoCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: "pd",
+			Namespace: pdNamespace,
 			Subsystem: "tso",
 			Name:      "events",
 			Help:      "Counter of tso events",
@@ -34,7 +36,7 @@ var (
 
 	tsoGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "pd",
+			Namespace: pdNamespace,
 			Subsystem: "cluster",
 			Name:      "tso",
 			Help:      "Record of tso metadata.",
@@ -42,15 +44,24 @@ var (
 
 	tsoGap = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "pd",
+			Namespace: pdNamespace,
 			Subsystem: "cluster",
 			Name:      "tso_gap_millionseconds",
 			Help:      "The minimal (non-zero) TSO gap for each DC.",
 		}, []string{groupLabel, dcLabel})
 
+	tsoOpDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: pdNamespace,
+			Subsystem: "cluster",
+			Name:      "tso_operation_duration_seconds",
+			Help:      "Bucketed histogram of processing time(s) of the TSO operations.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		}, []string{typeLabel, groupLabel, dcLabel})
+
 	tsoAllocatorRole = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "pd",
+			Namespace: pdNamespace,
 			Subsystem: "tso",
 			Name:      "role",
 			Help:      "Indicate the PD server role info, whether it's a TSO allocator.",
@@ -59,7 +70,7 @@ var (
 	// Keyspace Group metrics
 	keyspaceGroupStateGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Namespace: "pd",
+			Namespace: tsoNamespace,
 			Subsystem: "keyspace_group",
 			Name:      "state",
 			Help:      "Gauge of the Keyspace Group states.",
@@ -67,7 +78,7 @@ var (
 
 	keyspaceGroupOpDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "pd",
+			Namespace: tsoNamespace,
 			Subsystem: "keyspace_group",
 			Name:      "operation_duration_seconds",
 			Help:      "Bucketed histogram of processing time(s) of the Keyspace Group operations.",
@@ -79,6 +90,7 @@ func init() {
 	prometheus.MustRegister(tsoCounter)
 	prometheus.MustRegister(tsoGauge)
 	prometheus.MustRegister(tsoGap)
+	prometheus.MustRegister(tsoOpDuration)
 	prometheus.MustRegister(tsoAllocatorRole)
 	prometheus.MustRegister(keyspaceGroupStateGauge)
 	prometheus.MustRegister(keyspaceGroupOpDuration)
@@ -104,6 +116,10 @@ type tsoMetrics struct {
 	notLeaderAnymoreEvent        prometheus.Counter
 	logicalOverflowEvent         prometheus.Counter
 	exceededMaxRetryEvent        prometheus.Counter
+	// timestampOracle operation duration
+	syncSaveDuration   prometheus.Observer
+	resetSaveDuration  prometheus.Observer
+	updateSaveDuration prometheus.Observer
 	// allocator event counter
 	notLeaderEvent               prometheus.Counter
 	globalTSOSyncEvent           prometheus.Counter
@@ -137,6 +153,9 @@ func newTSOMetrics(groupID, dcLocation string) *tsoMetrics {
 		notLeaderAnymoreEvent:        tsoCounter.WithLabelValues("not_leader_anymore", groupID, dcLocation),
 		logicalOverflowEvent:         tsoCounter.WithLabelValues("logical_overflow", groupID, dcLocation),
 		exceededMaxRetryEvent:        tsoCounter.WithLabelValues("exceeded_max_retry", groupID, dcLocation),
+		syncSaveDuration:             tsoOpDuration.WithLabelValues("sync_save", groupID, dcLocation),
+		resetSaveDuration:            tsoOpDuration.WithLabelValues("reset_save", groupID, dcLocation),
+		updateSaveDuration:           tsoOpDuration.WithLabelValues("update_save", groupID, dcLocation),
 		notLeaderEvent:               tsoCounter.WithLabelValues("not_leader", groupID, dcLocation),
 		globalTSOSyncEvent:           tsoCounter.WithLabelValues("global_tso_sync", groupID, dcLocation),
 		globalTSOEstimateEvent:       tsoCounter.WithLabelValues("global_tso_estimate", groupID, dcLocation),
@@ -150,21 +169,29 @@ func newTSOMetrics(groupID, dcLocation string) *tsoMetrics {
 }
 
 type keyspaceGroupMetrics struct {
-	splitSourceGauge prometheus.Gauge
-	splitTargetGauge prometheus.Gauge
-	mergeSourceGauge prometheus.Gauge
-	mergeTargetGauge prometheus.Gauge
-	splitDuration    prometheus.Observer
-	mergeDuration    prometheus.Observer
+	splitSourceGauge        prometheus.Gauge
+	splitTargetGauge        prometheus.Gauge
+	mergeSourceGauge        prometheus.Gauge
+	mergeTargetGauge        prometheus.Gauge
+	splitDuration           prometheus.Observer
+	mergeDuration           prometheus.Observer
+	finishSplitSendDuration prometheus.Observer
+	finishSplitDuration     prometheus.Observer
+	finishMergeSendDuration prometheus.Observer
+	finishMergeDuration     prometheus.Observer
 }
 
 func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 	return &keyspaceGroupMetrics{
-		splitSourceGauge: keyspaceGroupStateGauge.WithLabelValues("split-source"),
-		splitTargetGauge: keyspaceGroupStateGauge.WithLabelValues("split-target"),
-		mergeSourceGauge: keyspaceGroupStateGauge.WithLabelValues("merge-source"),
-		mergeTargetGauge: keyspaceGroupStateGauge.WithLabelValues("merge-target"),
-		splitDuration:    keyspaceGroupOpDuration.WithLabelValues("split"),
-		mergeDuration:    keyspaceGroupOpDuration.WithLabelValues("merge"),
+		splitSourceGauge:        keyspaceGroupStateGauge.WithLabelValues("split-source"),
+		splitTargetGauge:        keyspaceGroupStateGauge.WithLabelValues("split-target"),
+		mergeSourceGauge:        keyspaceGroupStateGauge.WithLabelValues("merge-source"),
+		mergeTargetGauge:        keyspaceGroupStateGauge.WithLabelValues("merge-target"),
+		splitDuration:           keyspaceGroupOpDuration.WithLabelValues("split"),
+		mergeDuration:           keyspaceGroupOpDuration.WithLabelValues("merge"),
+		finishSplitSendDuration: keyspaceGroupOpDuration.WithLabelValues("finish-split-send"),
+		finishSplitDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-split"),
+		finishMergeSendDuration: keyspaceGroupOpDuration.WithLabelValues("finish-merge-send"),
+		finishMergeDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-merge"),
 	}
 }

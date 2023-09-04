@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,7 +149,8 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
-		tsoHandleDuration.Observe(time.Since(start).Seconds())
+		keyspaceGroupIDStr := strconv.FormatUint(uint64(request.Header.KeyspaceGroupId), 10)
+		tsoHandleDuration.WithLabelValues(keyspaceGroupIDStr).Observe(time.Since(start).Seconds())
 		response := &tsopb.TsoResponse{
 			Header:    s.header(keyspaceGroupBelongTo),
 			Timestamp: &ts,
