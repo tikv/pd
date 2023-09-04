@@ -724,7 +724,7 @@ func TestBalanceLeader(t *testing.T) {
 	}
 }
 
-// TestBalanceRegion tests whether region peers and leaders are balanced after scatter.
+// TestBalanceRegion tests whether region peers are balanced after scatter.
 // ref https://github.com/tikv/pd/issues/6017
 func TestBalanceRegion(t *testing.T) {
 	re := require.New(t)
