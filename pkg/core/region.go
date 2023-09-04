@@ -634,6 +634,11 @@ func (r *RegionInfo) GetReplicationStatus() *replication_modepb.RegionReplicatio
 	return r.replicationStatus
 }
 
+// IsFlashbackChanged returns true if flashback changes.
+func (r *RegionInfo) IsFlashbackChanged(l *RegionInfo) bool {
+	return r.meta.FlashbackStartTs != l.meta.FlashbackStartTs || r.meta.IsInFlashback != l.meta.IsInFlashback
+}
+
 // IsFromHeartbeat returns whether the region info is from the region heartbeat.
 func (r *RegionInfo) IsFromHeartbeat() bool {
 	return r.fromHeartbeat
@@ -766,6 +771,11 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
 				changed.SaveCache = true
+				return
+			}
+			if region.IsFlashbackChanged(origin) {
+				changed.SaveCache = true
+				return
 			}
 		}
 		return
@@ -1653,15 +1663,11 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 }
 
 // String converts slice of bytes to string without copy.
-func String(b []byte) (s string) {
+func String(b []byte) string {
 	if len(b) == 0 {
 		return ""
 	}
-	pbytes := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	pstring := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	pstring.Data = pbytes.Data
-	pstring.Len = pbytes.Len
-	return
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
 // ToUpperASCIIInplace bytes.ToUpper but zero-cost

@@ -16,86 +16,92 @@ package server
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/soheilhy/cmux"
 	"github.com/spf13/cobra"
+	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
+	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
+var _ bs.Server = (*Server)(nil)
+
+const memberUpdateInterval = time.Minute
+
 // Server is the scheduling server, and it implements bs.Server.
 type Server struct {
+	*server.BaseServer
 	diagnosticspb.DiagnosticsServer
+
 	// Server state. 0 is not running, 1 is running.
 	isRunning int64
-	// Server start timestamp
-	startTimestamp int64
 
-	ctx              context.Context
 	serverLoopCtx    context.Context
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg       *Config
-	clusterID uint64
-	name      string
-	listenURL *url.URL
+	cfg           *config.Config
+	clusterID     uint64
+	persistConfig *config.PersistConfig
 
 	// for the primary election of scheduling
 	participant *member.Participant
-	etcdClient  *clientv3.Client
-	httpClient  *http.Client
 
-	muxListener net.Listener
-	service     *Service
+	service           *Service
+	checkMembershipCh chan struct{}
 
-	// Callback functions for different stages
-	// startCallbacks will be called after the server is started.
-	startCallbacks []func()
 	// primaryCallbacks will be called after the server becomes leader.
 	primaryCallbacks []func(context.Context)
 
+	// for service registry
+	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+
+	cluster   *Cluster
+	hbStreams *hbstream.HeartbeatStreams
+	storage   *endpoint.StorageEndpoint
+
+	// for watching the PD API server meta info updates that are related to the scheduling.
+	configWatcher *config.Watcher
+	ruleWatcher   *rule.Watcher
 }
 
-// Name returns the unique etcd name for this server in etcd cluster.
+// Name returns the unique name for this server in the scheduling cluster.
 func (s *Server) Name() string {
-	return s.name
-}
-
-// Context returns the context.
-func (s *Server) Context() context.Context {
-	return s.ctx
+	return s.cfg.Name
 }
 
 // GetAddr returns the server address.
@@ -103,24 +109,78 @@ func (s *Server) GetAddr() string {
 	return s.cfg.ListenAddr
 }
 
-// Run runs the Scheduling server.
-func (s *Server) Run() (err error) {
-	if err = s.initClient(); err != nil {
-		return err
-	}
-	if err = s.startServer(); err != nil {
-		return err
+// GetBackendEndpoints returns the backend endpoints.
+func (s *Server) GetBackendEndpoints() string {
+	return s.cfg.BackendEndpoints
+}
+
+// Run runs the scheduling server.
+func (s *Server) Run() error {
+	skipWaitAPIServiceReady := false
+	failpoint.Inject("skipWaitAPIServiceReady", func() {
+		skipWaitAPIServiceReady = true
+	})
+	if !skipWaitAPIServiceReady {
+		if err := utils.WaitAPIServiceReady(s); err != nil {
+			return err
+		}
 	}
 
-	s.startServerLoop()
-
-	return nil
+	if err := utils.InitClient(s); err != nil {
+		return err
+	}
+	return s.startServer()
 }
 
 func (s *Server) startServerLoop() {
-	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
-	s.serverLoopWg.Add(1)
+	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
+	s.serverLoopWg.Add(2)
 	go s.primaryElectionLoop()
+	go s.updateAPIServerMemberLoop()
+}
+
+func (s *Server) updateAPIServerMemberLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	ticker := time.NewTicker(memberUpdateInterval)
+	failpoint.Inject("fastUpdateMember", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(100 * time.Millisecond)
+	})
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("server is closed, exit update member loop")
+			return
+		case <-ticker.C:
+		case <-s.checkMembershipCh:
+		}
+		members, err := s.GetClient().MemberList(ctx)
+		if err != nil {
+			log.Warn("failed to list members", errs.ZapError(err))
+		}
+		for _, ep := range members.Members {
+			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
+			if err != nil {
+				log.Info("failed to get status of member", zap.String("member-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
+				continue
+			}
+			if status.Leader == ep.ID {
+				cc, err := s.GetDelegateClient(ctx, s.GetTLSConfig(), ep.ClientURLs[0])
+				if err != nil {
+					log.Info("failed to get delegate client", errs.ZapError(err))
+				}
+				if s.cluster.SwitchAPIServerLeader(pdpb.NewPDClient(cc)) {
+					log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
+					break
+				}
+			}
+		}
+	}
 }
 
 func (s *Server) primaryElectionLoop() {
@@ -128,9 +188,11 @@ func (s *Server) primaryElectionLoop() {
 	defer s.serverLoopWg.Done()
 
 	for {
-		if s.IsClosed() {
-			log.Info("server is closed, exit scheduling primary election loop")
+		select {
+		case <-s.serverLoopCtx.Done():
+			log.Info("server is closed, exit primary election loop")
 			return
+		default:
 		}
 
 		primary, checkAgain := s.participant.CheckLeader()
@@ -209,36 +271,25 @@ func (s *Server) Close() {
 
 	log.Info("closing scheduling server ...")
 	s.serviceRegister.Deregister()
-	s.muxListener.Close()
+	utils.StopHTTPServer(s)
+	utils.StopGRPCServer(s)
+	s.GetListener().Close()
+	s.GetCoordinator().Stop()
+	s.ruleWatcher.Close()
+	s.configWatcher.Close()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
-	if s.etcdClient != nil {
-		if err := s.etcdClient.Close(); err != nil {
+	if s.GetClient() != nil {
+		if err := s.GetClient().Close(); err != nil {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
 		}
 	}
 
-	if s.httpClient != nil {
-		s.httpClient.CloseIdleConnections()
+	if s.GetHTTPClient() != nil {
+		s.GetHTTPClient().CloseIdleConnections()
 	}
-
 	log.Info("scheduling server is closed")
-}
-
-// GetClient returns builtin etcd client.
-func (s *Server) GetClient() *clientv3.Client {
-	return s.etcdClient
-}
-
-// GetHTTPClient returns builtin http client.
-func (s *Server) GetHTTPClient() *http.Client {
-	return s.httpClient
-}
-
-// AddStartCallback adds a callback in the startServer phase.
-func (s *Server) AddStartCallback(callbacks ...func()) {
-	s.startCallbacks = append(s.startCallbacks, callbacks...)
 }
 
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
@@ -256,98 +307,39 @@ func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 
-func (s *Server) initClient() error {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
-	if err != nil {
-		return err
-	}
-	u, err := types.NewURLs(strings.Split(s.cfg.BackendEndpoints, ","))
-	if err != nil {
-		return err
-	}
-	s.etcdClient, s.httpClient, err = etcdutil.CreateClients(tlsConfig, []url.URL(u))
-	return err
+// GetTLSConfig gets the security config.
+func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
+	return &s.cfg.Security.TLSConfig
 }
 
-func (s *Server) startGRPCServer(l net.Listener) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	gs := grpc.NewServer()
-	s.service.RegisterGRPCService(gs)
-	err := gs.Serve(l)
-	log.Info("gRPC server stop serving")
-
-	// Attempt graceful stop (waits for pending RPCs), but force a stop if
-	// it doesn't happen in a reasonable amount of time.
-	done := make(chan struct{})
-	go func() {
-		defer logutil.LogPanic()
-		log.Info("try to gracefully stop the server now")
-		gs.GracefulStop()
-		close(done)
-	}()
-	timer := time.NewTimer(utils.DefaultGRPCGracefulStopTimeout)
-	defer timer.Stop()
-	select {
-	case <-done:
-	case <-timer.C:
-		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now", zap.Duration("default", utils.DefaultGRPCGracefulStopTimeout))
-		gs.Stop()
-	}
-	if s.IsClosed() {
-		log.Info("grpc server stopped")
-	} else {
-		log.Fatal("grpc server stopped unexpectedly", errs.ZapError(err))
-	}
+// GetCluster returns the cluster.
+func (s *Server) GetCluster() *Cluster {
+	return s.cluster
 }
 
-func (s *Server) startHTTPServer(l net.Listener) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
-
-	handler, _ := SetUpRestHandler(s.service)
-	hs := &http.Server{
-		Handler:           handler,
-		ReadTimeout:       5 * time.Minute,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	err := hs.Serve(l)
-	log.Info("http server stop serving")
-
-	ctx, cancel := context.WithTimeout(context.Background(), utils.DefaultHTTPGracefulShutdownTimeout)
-	defer cancel()
-	if err := hs.Shutdown(ctx); err != nil {
-		log.Error("http server shutdown encountered problem", errs.ZapError(err))
-	} else {
-		log.Info("all http(s) requests finished")
-	}
-	if s.IsClosed() {
-		log.Info("http server stopped")
-	} else {
-		log.Fatal("http server stopped unexpectedly", errs.ZapError(err))
-	}
+// GetCoordinator returns the coordinator.
+func (s *Server) GetCoordinator() *schedule.Coordinator {
+	return s.GetCluster().GetCoordinator()
 }
 
-func (s *Server) startGRPCAndHTTPServers(l net.Listener) {
-	defer logutil.LogPanic()
-	defer s.serverLoopWg.Done()
+// ServerLoopWgDone decreases the server loop wait group.
+func (s *Server) ServerLoopWgDone() {
+	s.serverLoopWg.Done()
+}
 
-	mux := cmux.New(l)
-	grpcL := mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
-	httpL := mux.Match(cmux.Any())
+// ServerLoopWgAdd increases the server loop wait group.
+func (s *Server) ServerLoopWgAdd(n int) {
+	s.serverLoopWg.Add(n)
+}
 
-	s.serverLoopWg.Add(2)
-	go s.startGRPCServer(grpcL)
-	go s.startHTTPServer(httpL)
+// SetUpRestHandler sets up the REST handler.
+func (s *Server) SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup) {
+	return SetUpRestHandler(s.service)
+}
 
-	if err := mux.Serve(); err != nil {
-		if s.IsClosed() {
-			log.Info("mux stop serving", errs.ZapError(err))
-		} else {
-			log.Fatal("mux stop serving unexpectedly", errs.ZapError(err))
-		}
-	}
+// RegisterGRPCService registers the grpc service.
+func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
+	s.service.RegisterGRPCService(grpcServer)
 }
 
 // GetLeaderListenUrls gets service endpoints from the leader in election group.
@@ -356,7 +348,7 @@ func (s *Server) GetLeaderListenUrls() []string {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = utils.InitClusterID(s.ctx, s.etcdClient); err != nil {
+	if s.clusterID, err = utils.InitClusterID(s.Context(), s.GetClient()); err != nil {
 		return err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
@@ -368,43 +360,48 @@ func (s *Server) startServer() (err error) {
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 	schedulingPrimaryPrefix := endpoint.SchedulingSvcRootPath(s.clusterID)
-	s.participant = member.NewParticipant(s.etcdClient)
+	s.participant = member.NewParticipant(s.GetClient())
 	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
-		utils.KeyspaceGroupsPrimaryKey, "keyspace group primary election", s.cfg.AdvertiseListenAddr)
-
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
+	err = s.startWatcher()
 	if err != nil {
 		return err
 	}
-	s.listenURL, err = url.Parse(s.cfg.ListenAddr)
-	if err != nil {
-		return err
-	}
-	if tlsConfig != nil {
-		s.muxListener, err = tls.Listen(utils.TCPNetworkStr, s.listenURL.Host, tlsConfig)
-	} else {
-		s.muxListener, err = net.Listen(utils.TCPNetworkStr, s.listenURL.Host)
-	}
+	s.storage = endpoint.NewStorageEndpoint(
+		kv.NewEtcdKVBase(s.GetClient(), endpoint.PDRootPath(s.clusterID)), nil)
+	basicCluster := core.NewBasicCluster()
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, basicCluster)
+	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
 	if err != nil {
 		return err
 	}
 
+	s.service = &Service{Server: s}
+	if err := s.InitListener(s.GetTLSConfig(), s.cfg.ListenAddr); err != nil {
+		return err
+	}
+
+	serverReadyChan := make(chan struct{})
+	defer close(serverReadyChan)
+	s.startServerLoop()
 	s.serverLoopWg.Add(1)
-	go s.startGRPCAndHTTPServers(s.muxListener)
+	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
+	s.checkMembershipCh <- struct{}{}
+	<-serverReadyChan
+	go s.GetCoordinator().RunUntilStop()
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
-	for _, cb := range s.startCallbacks {
+	for _, cb := range s.GetStartCallbacks() {
 		cb()
 	}
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
-	serializedEntry, err := entry.Serialize()
+	serializedEntry, err := s.serviceID.Serialize()
 	if err != nil {
 		return err
 	}
-	s.serviceRegister = discovery.NewServiceRegister(s.ctx, s.etcdClient, strconv.FormatUint(s.clusterID, 10),
+	s.serviceRegister = discovery.NewServiceRegister(s.Context(), s.GetClient(), strconv.FormatUint(s.clusterID, 10),
 		utils.SchedulingServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
 		log.Error("failed to register the service", zap.String("service-name", utils.SchedulingServiceName), errs.ZapError(err))
@@ -414,13 +411,27 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
+func (s *Server) startWatcher() (err error) {
+	s.configWatcher, err = config.NewWatcher(
+		s.Context(), s.GetClient(), s.clusterID, s.persistConfig,
+	)
+	if err != nil {
+		return err
+	}
+	s.ruleWatcher, err = rule.NewWatcher(
+		s.Context(), s.GetClient(), s.clusterID,
+	)
+	return err
+}
+
 // CreateServer creates the Server
-func CreateServer(ctx context.Context, cfg *Config) *Server {
+func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{
+		BaseServer:        server.NewBaseServer(ctx),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		startTimestamp:    time.Now().Unix(),
 		cfg:               cfg,
-		ctx:               ctx,
+		persistConfig:     config.NewPersistConfig(cfg),
+		checkMembershipCh: make(chan struct{}, 1),
 	}
 	return svr
 }
@@ -428,7 +439,7 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	cmd.Flags().Parse(args)
-	cfg := NewConfig()
+	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
 	err := cfg.Parse(flagSet)
 	defer logutil.LogPanic()
@@ -443,7 +454,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 		return
 	} else if printVersion {
 		versioninfo.Print()
-		exit(0)
+		utils.Exit(0)
 	}
 
 	// New zap logger
@@ -488,13 +499,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	svr.Close()
 	switch sig {
 	case syscall.SIGTERM:
-		exit(0)
+		utils.Exit(0)
 	default:
-		exit(1)
+		utils.Exit(1)
 	}
-}
-
-func exit(code int) {
-	log.Sync()
-	os.Exit(code)
 }

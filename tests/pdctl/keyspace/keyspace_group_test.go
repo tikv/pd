@@ -561,8 +561,13 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		args := []string{"-u", pdAddr, "keyspace-group"}
 		output, err := pdctl.ExecuteCommand(cmd, append(args, "1")...)
 		re.NoError(err)
+		if strings.Contains(string(output), "Failed") {
+			// It may be failed when meets error, such as [PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back
+			re.Contains(string(output), "ErrEtcdTxnConflict", "output: %s", string(output))
+			return false
+		}
 		err = json.Unmarshal(output, &keyspaceGroup)
-		re.NoErrorf(err, "output: %s", string(output))
+		re.NoError(err)
 		return len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {
@@ -582,4 +587,50 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+}
+
+func TestInPDMode(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	pdAddr := tc.GetConfig().GetClientURL()
+	cmd := pdctlCmd.GetRootCmd()
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+
+	argsList := [][]string{
+		{"-u", pdAddr, "keyspace-group"},
+		{"-u", pdAddr, "keyspace-group", "0"},
+		{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"},
+		{"-u", pdAddr, "keyspace-group", "split-range", "1", "2", "3", "4"},
+		{"-u", pdAddr, "keyspace-group", "finish-split", "1"},
+		{"-u", pdAddr, "keyspace-group", "merge", "1", "2"},
+		{"-u", pdAddr, "keyspace-group", "merge", "0", "--all"},
+		{"-u", pdAddr, "keyspace-group", "finish-merge", "1"},
+		{"-u", pdAddr, "keyspace-group", "set-node", "0", "http://127.0.0.1:2379"},
+		{"-u", pdAddr, "keyspace-group", "set-priority", "0", "http://127.0.0.1:2379", "200"},
+		{"-u", pdAddr, "keyspace-group", "primary", "0"},
+	}
+	for _, args := range argsList {
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		re.Contains(string(output), "Failed",
+			"args: %v, output: %v", args, string(output))
+		re.Contains(string(output), "keyspace group manager is not initialized",
+			"args: %v, output: %v", args, string(output))
+	}
+
+	leaderServer.SetKeyspaceManager(nil)
+	args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Failed",
+		"args: %v, output: %v", args, string(output))
+	re.Contains(string(output), "keyspace manager is not initialized",
+		"args: %v, output: %v", args, string(output))
 }

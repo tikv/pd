@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,7 +103,7 @@ type ElectionMember interface {
 	// server id of a cluster or the unique keyspace group replica id of the election
 	// group comprised of the replicas of a keyspace group.
 	ID() uint64
-	// ID returns the unique Name in the election group.
+	// ID returns the unique name in the election group.
 	Name() string
 	// MemberValue returns the member value.
 	MemberValue() string
@@ -279,6 +280,14 @@ func (am *AllocatorManager) getGroupID() uint32 {
 		return 0
 	}
 	return am.kgID
+}
+
+// getGroupIDStr returns the keyspace group ID of the allocator manager in string format.
+func (am *AllocatorManager) getGroupIDStr() string {
+	if am == nil {
+		return "0"
+	}
+	return strconv.FormatUint(uint64(am.kgID), 10)
 }
 
 // GetTimestampPath returns the timestamp path in etcd for the given DCLocation.
@@ -1135,7 +1144,8 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 }
 
 // HandleRequest forwards TSO allocation requests to correct TSO Allocators.
-func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
+func (am *AllocatorManager) HandleRequest(ctx context.Context, dcLocation string, count uint32) (pdpb.Timestamp, error) {
+	defer trace.StartRegion(ctx, "AllocatorManager.HandleRequest").End()
 	if len(dcLocation) == 0 {
 		dcLocation = GlobalDCLocation
 	}
@@ -1145,7 +1155,7 @@ func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb
 		return pdpb.Timestamp{}, err
 	}
 
-	return allocatorGroup.allocator.GenerateTSO(count)
+	return allocatorGroup.allocator.GenerateTSO(ctx, count)
 }
 
 // ResetAllocatorGroup will reset the allocator's leadership and TSO initialized in memory.

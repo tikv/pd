@@ -62,15 +62,15 @@ type Manager struct {
 	consumptionRecord map[string]time.Time
 }
 
-// ResourceManagerConfigProvider is used to get resource manager config from the given
+// ConfigProvider is used to get resource manager config from the given
 // `bs.server` without modifying its interface.
-type ResourceManagerConfigProvider interface {
+type ConfigProvider interface {
 	GetControllerConfig() *ControllerConfig
 }
 
 // NewManager returns a new manager base on the given server,
-// which should implement the `ResourceManagerConfigProvider` interface.
-func NewManager[T ResourceManagerConfigProvider](srv bs.Server) *Manager {
+// which should implement the `ConfigProvider` interface.
+func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 	m := &Manager{
 		controllerConfig: srv.(T).GetControllerConfig(),
 		groups:           make(map[string]*ResourceGroup),
@@ -320,17 +320,17 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
 			)
 			// RU info.
-			if consumption.RRU != 0 {
+			if consumption.RRU > 0 {
 				rruMetrics.Add(consumption.RRU)
 			}
-			if consumption.WRU != 0 {
+			if consumption.WRU > 0 {
 				wruMetrics.Add(consumption.WRU)
 			}
 			// Byte info.
-			if consumption.ReadBytes != 0 {
+			if consumption.ReadBytes > 0 {
 				readByteMetrics.Add(consumption.ReadBytes)
 			}
-			if consumption.WriteBytes != 0 {
+			if consumption.WriteBytes > 0 {
 				writeByteMetrics.Add(consumption.WriteBytes)
 			}
 			// CPU time info.
@@ -342,10 +342,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				kvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
 			}
 			// RPC count info.
-			if consumption.KvReadRpcCount != 0 {
+			if consumption.KvReadRpcCount > 0 {
 				readRequestCountMetrics.Add(consumption.KvReadRpcCount)
 			}
-			if consumption.KvWriteRpcCount != 0 {
+			if consumption.KvWriteRpcCount > 0 {
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
 			}
 

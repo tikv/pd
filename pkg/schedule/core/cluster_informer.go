@@ -22,18 +22,15 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/server/config"
 )
 
 // ClusterInformer provides the necessary information of a cluster.
 type ClusterInformer interface {
 	SchedulerCluster
 	CheckerCluster
-	ScatterCluster
 
 	GetStorage() storage.Storage
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
-	GetPersistOptions() *config.PersistOptions
 }
 
 // SchedulerCluster is an aggregate interface that wraps multiple interfaces
@@ -54,13 +51,6 @@ type CheckerCluster interface {
 
 	GetCheckerConfig() sc.CheckerConfigProvider
 	GetStoreConfig() sc.StoreConfigProvider
-}
-
-// ScatterCluster is an aggregate interface that wraps multiple interfaces
-type ScatterCluster interface {
-	SharedCluster
-
-	AddSuspectRegions(ids ...uint64)
 }
 
 // SharedCluster is an aggregate interface that wraps multiple interfaces

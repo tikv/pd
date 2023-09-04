@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/trace"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
@@ -61,7 +63,7 @@ type Allocator interface {
 	SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error
 	// GenerateTSO is used to generate a given number of TSOs.
 	// Make sure you have initialized the TSO allocator before calling.
-	GenerateTSO(count uint32) (pdpb.Timestamp, error)
+	GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error)
 	// Reset is used to reset the TSO allocator.
 	Reset()
 }
@@ -81,6 +83,8 @@ type GlobalTSOAllocator struct {
 	// which is used to estimate the MaxTS in a Global TSO generation
 	// to reduce the gRPC network IO latency.
 	syncRTT atomic.Value // store as int64 milliseconds
+	// pre-initialized metrics
+	tsoAllocatorRoleGauge prometheus.Gauge
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.
@@ -91,20 +95,12 @@ func NewGlobalTSOAllocator(
 ) Allocator {
 	ctx, cancel := context.WithCancel(ctx)
 	gta := &GlobalTSOAllocator{
-		ctx:    ctx,
-		cancel: cancel,
-		am:     am,
-		member: am.member,
-		timestampOracle: &timestampOracle{
-			client:                 am.member.GetLeadership().GetClient(),
-			tsPath:                 endpoint.KeyspaceGroupTSPath(am.kgID),
-			storage:                am.storage,
-			saveInterval:           am.saveInterval,
-			updatePhysicalInterval: am.updatePhysicalInterval,
-			maxResetTSGap:          am.maxResetTSGap,
-			dcLocation:             GlobalDCLocation,
-			tsoMux:                 &tsoObject{},
-		},
+		ctx:                   ctx,
+		cancel:                cancel,
+		am:                    am,
+		member:                am.member,
+		timestampOracle:       newGlobalTimestampOracle(am),
+		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(am.getGroupIDStr(), GlobalDCLocation),
 	}
 
 	if startGlobalLeaderLoop {
@@ -113,6 +109,22 @@ func NewGlobalTSOAllocator(
 	}
 
 	return gta
+}
+
+func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
+	oracle := &timestampOracle{
+		client:                 am.member.GetLeadership().GetClient(),
+		keyspaceGroupID:        am.kgID,
+		tsPath:                 endpoint.KeyspaceGroupGlobalTSPath(am.kgID),
+		storage:                am.storage,
+		saveInterval:           am.saveInterval,
+		updatePhysicalInterval: am.updatePhysicalInterval,
+		maxResetTSGap:          am.maxResetTSGap,
+		dcLocation:             GlobalDCLocation,
+		tsoMux:                 &tsoObject{},
+		metrics:                newTSOMetrics(am.getGroupIDStr(), GlobalDCLocation),
+	}
+	return oracle
 }
 
 // close is used to shutdown the primary election loop.
@@ -132,7 +144,7 @@ func (gta *GlobalTSOAllocator) getGroupID() uint32 {
 
 func (gta *GlobalTSOAllocator) setSyncRTT(rtt int64) {
 	gta.syncRTT.Store(rtt)
-	tsoGauge.WithLabelValues("global_tso_sync_rtt", gta.timestampOracle.dcLocation).Set(float64(rtt))
+	gta.getMetrics().globalTSOSyncRTTGauge.Set(float64(rtt))
 }
 
 func (gta *GlobalTSOAllocator) getSyncRTT() int64 {
@@ -151,8 +163,8 @@ func (gta *GlobalTSOAllocator) GetTimestampPath() string {
 	return gta.timestampOracle.GetTimestampPath()
 }
 
-func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32, suffixBits int) (*pdpb.Timestamp, bool, error) {
-	physical, logical, lastUpdateTime := gta.timestampOracle.generateTSO(int64(count), 0)
+func (gta *GlobalTSOAllocator) estimateMaxTS(ctx context.Context, count uint32, suffixBits int) (*pdpb.Timestamp, bool, error) {
+	physical, logical, lastUpdateTime := gta.timestampOracle.generateTSO(ctx, int64(count), 0)
 	if physical == 0 {
 		return &pdpb.Timestamp{}, false, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}
@@ -171,7 +183,7 @@ func (gta *GlobalTSOAllocator) estimateMaxTS(count uint32, suffixBits int) (*pdp
 
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize(int) error {
-	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(1)
+	gta.tsoAllocatorRoleGauge.Set(1)
 	// The suffix of a Global TSO should always be 0.
 	gta.timestampOracle.suffix = 0
 	return gta.timestampOracle.SyncTimestamp(gta.member.GetLeadership())
@@ -202,9 +214,10 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundC
 //  1. Collect the max Local TSO from all Local TSO Allocator leaders and write it back to them as MaxTS.
 //  2. Estimate a MaxTS and try to write it to all Local TSO Allocator leaders directly to reduce the RTT.
 //     During the process, if the estimated MaxTS is not accurate, it will fallback to the collecting way.
-func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
+func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
+	defer trace.StartRegion(ctx, "GlobalTSOAllocator.GenerateTSO").End()
 	if !gta.member.GetLeadership().Check() {
-		tsoCounter.WithLabelValues("not_leader", gta.timestampOracle.dcLocation).Inc()
+		gta.getMetrics().notLeaderEvent.Inc()
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 	// To check if we have any dc-location configured in the cluster
@@ -212,8 +225,9 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	// No dc-locations configured in the cluster, use the normal Global TSO generation way.
 	// (without synchronization with other Local TSO Allocators)
 	if len(dcLocationMap) == 0 {
-		return gta.timestampOracle.getTS(gta.member.GetLeadership(), count, 0)
+		return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count, 0)
 	}
+	ctx1 := ctx
 
 	// Have dc-locations configured in the cluster, use the Global TSO generation way.
 	// (whit synchronization with other Local TSO Allocators)
@@ -229,7 +243,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		)
 		// TODO: add a switch to control whether to enable the MaxTSO estimation.
 		// 1. Estimate a MaxTS among all Local TSO Allocator leaders according to the RTT.
-		estimatedMaxTSO, shouldRetry, err = gta.estimateMaxTS(count, suffixBits)
+		estimatedMaxTSO, shouldRetry, err = gta.estimateMaxTS(ctx1, count, suffixBits)
 		if err != nil {
 			log.Error("global tso allocator estimates MaxTS failed",
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
@@ -254,7 +268,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		// 3. If skipCheck is false and the maxTSO is bigger than estimatedMaxTSO,
 		// we need to redo the setting phase with the bigger one and skip the check safely.
 		if !skipCheck && tsoutil.CompareTimestamp(&globalTSOResp, estimatedMaxTSO) > 0 {
-			tsoCounter.WithLabelValues("global_tso_sync", gta.timestampOracle.dcLocation).Inc()
+			gta.getMetrics().globalTSOSyncEvent.Inc()
 			*estimatedMaxTSO = globalTSOResp
 			// Re-add the count and check the overflow.
 			estimatedMaxTSO.Logical += int64(count)
@@ -267,21 +281,21 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		}
 		// Is skipCheck is false and globalTSOResp remains the same, it means the estimatedTSO is valid.
 		if !skipCheck && tsoutil.CompareTimestamp(&globalTSOResp, estimatedMaxTSO) == 0 {
-			tsoCounter.WithLabelValues("global_tso_estimate", gta.timestampOracle.dcLocation).Inc()
+			gta.getMetrics().globalTSOEstimateEvent.Inc()
 		}
 		// 4. Persist MaxTS into memory, and etcd if needed
 		var currentGlobalTSO *pdpb.Timestamp
-		if currentGlobalTSO, err = gta.getCurrentTSO(); err != nil {
+		if currentGlobalTSO, err = gta.getCurrentTSO(ctx1); err != nil {
 			log.Error("global tso allocator gets the current global tso in memory failed",
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 				errs.ZapError(err))
 			continue
 		}
 		if tsoutil.CompareTimestamp(currentGlobalTSO, &globalTSOResp) < 0 {
-			tsoCounter.WithLabelValues("global_tso_persist", gta.timestampOracle.dcLocation).Inc()
+			gta.getMetrics().globalTSOPersistEvent.Inc()
 			// Update the Global TSO in memory
-			if err = gta.timestampOracle.resetUserTimestamp(gta.member.GetLeadership(), tsoutil.GenerateTS(&globalTSOResp), true); err != nil {
-				tsoCounter.WithLabelValues("global_tso_persist_err", gta.timestampOracle.dcLocation).Inc()
+			if err = gta.timestampOracle.resetUserTimestamp(ctx1, gta.member.GetLeadership(), tsoutil.GenerateTS(&globalTSOResp), true); err != nil {
+				gta.getMetrics().errGlobalTSOPersistEvent.Inc()
 				log.Error("global tso allocator update the global tso in memory failed",
 					logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 					errs.ZapError(err))
@@ -290,7 +304,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		}
 		// 5. Check leadership again before we returning the response.
 		if !gta.member.GetLeadership().Check() {
-			tsoCounter.WithLabelValues("not_leader_anymore", gta.timestampOracle.dcLocation).Inc()
+			gta.getMetrics().notLeaderAnymoreEvent.Inc()
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
 		// 6. Calibrate the logical part to make the TSO unique globally by giving it a unique suffix in the whole cluster
@@ -298,7 +312,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		globalTSOResp.SuffixBits = uint32(suffixBits)
 		return globalTSOResp, nil
 	}
-	tsoCounter.WithLabelValues("exceeded_max_retry", gta.timestampOracle.dcLocation).Inc()
+	gta.getMetrics().exceededMaxRetryEvent.Inc()
 	return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("global tso allocator maximum number of retries exceeded")
 }
 
@@ -321,7 +335,7 @@ func (gta *GlobalTSOAllocator) precheckLogical(maxTSO *pdpb.Timestamp, suffixBit
 		log.Error("estimated logical part outside of max logical interval, please check ntp time",
 			logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 			zap.Reflect("max-tso", maxTSO), errs.ZapError(errs.ErrLogicOverflow))
-		tsoCounter.WithLabelValues("precheck_logical_overflow", gta.timestampOracle.dcLocation).Inc()
+		gta.getMetrics().precheckLogicalOverflowEvent.Inc()
 		return false
 	}
 	return true
@@ -350,6 +364,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 	maxTSO *pdpb.Timestamp,
 	skipCheck bool,
 ) error {
+	defer trace.StartRegion(ctx, "GlobalTSOAllocator.SyncMaxTS").End()
 	originalMaxTSO := *maxTSO
 	for i := 0; i < syncMaxRetryCount; i++ {
 		// Collect all allocator leaders' client URLs
@@ -501,7 +516,8 @@ func (gta *GlobalTSOAllocator) checkSyncedDCs(dcLocationMap map[string]DCLocatio
 	return len(unsyncedDCs) == 0, unsyncedDCs
 }
 
-func (gta *GlobalTSOAllocator) getCurrentTSO() (*pdpb.Timestamp, error) {
+func (gta *GlobalTSOAllocator) getCurrentTSO(ctx context.Context) (*pdpb.Timestamp, error) {
+	defer trace.StartRegion(ctx, "GlobalTSOAllocator.getCurrentTSO").End()
 	currentPhysical, currentLogical := gta.timestampOracle.getTSO()
 	if currentPhysical == typeutil.ZeroTime {
 		return &pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
@@ -511,7 +527,7 @@ func (gta *GlobalTSOAllocator) getCurrentTSO() (*pdpb.Timestamp, error) {
 
 // Reset is used to reset the TSO allocator.
 func (gta *GlobalTSOAllocator) Reset() {
-	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(0)
+	gta.tsoAllocatorRoleGauge.Set(0)
 	gta.timestampOracle.ResetTimestamp()
 }
 
@@ -633,4 +649,8 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 			return
 		}
 	}
+}
+
+func (gta *GlobalTSOAllocator) getMetrics() *tsoMetrics {
+	return gta.timestampOracle.metrics
 }

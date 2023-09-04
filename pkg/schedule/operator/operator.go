@@ -50,8 +50,6 @@ var (
 	AdminStop CancelReasonType = "admin stop"
 	// NotInRunningState is the cancel reason when the operator is not in running state.
 	NotInRunningState CancelReasonType = "not in running state"
-	// Succeed is the cancel reason when the operator is finished successfully.
-	Succeed CancelReasonType = "succeed"
 	// Timeout is the cancel reason when the operator is timeout.
 	Timeout CancelReasonType = "timeout"
 	// Expired is the cancel reason when the operator is expired.
@@ -265,9 +263,9 @@ func (o *Operator) CheckSuccess() bool {
 }
 
 // Cancel marks the operator canceled.
-func (o *Operator) Cancel(reason CancelReasonType) bool {
-	if _, ok := o.AdditionalInfos[cancelReason]; !ok {
-		o.AdditionalInfos[cancelReason] = string(reason)
+func (o *Operator) Cancel(reason ...CancelReasonType) bool {
+	if _, ok := o.AdditionalInfos[cancelReason]; !ok && len(reason) != 0 {
+		o.AdditionalInfos[cancelReason] = string(reason[0])
 	}
 	return o.status.To(CANCELED)
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -106,6 +107,10 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 
 // ListEtcdMembers returns a list of internal etcd members.
 func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	failpoint.Inject("SlowEtcdMemberList", func(val failpoint.Value) {
+		d := val.(int)
+		time.Sleep(time.Duration(d) * time.Second)
+	})
 	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
 	listResp, err := client.MemberList(ctx)
 	cancel()
@@ -132,6 +137,10 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	defer cancel()
 
 	start := time.Now()
+	failpoint.Inject("SlowEtcdKVGet", func(val failpoint.Value) {
+		d := val.(int)
+		time.Sleep(time.Duration(d) * time.Second)
+	})
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
@@ -202,13 +211,14 @@ func GetProtoMsgWithModRev(c *clientv3.Client, key string, msg proto.Message, op
 }
 
 // EtcdKVPutWithTTL put (key, value) into etcd with a ttl of ttlSeconds
-func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value string, ttlSeconds int64) (*clientv3.PutResponse, error) {
+func EtcdKVPutWithTTL(ctx context.Context, c *clientv3.Client, key string, value string, ttlSeconds int64) (clientv3.LeaseID, error) {
 	kv := clientv3.NewKV(c)
 	grantResp, err := c.Grant(ctx, ttlSeconds)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	return kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
+	_, err = kv.Put(ctx, key, value, clientv3.WithLease(grantResp.ID))
+	return grantResp.ID, err
 }
 
 const (
@@ -269,7 +279,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
-				log.Info("[etcd client] etcd client is closed, exit health check goroutine")
+				log.Info("etcd client is closed, exit health check goroutine")
 				checker.Range(func(key, value interface{}) bool {
 					client := value.(*healthyClient)
 					client.Close()
@@ -286,7 +296,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 					// otherwise, the subconn will be retrying in grpc layer and use exponential backoff,
 					// and it cannot recover as soon as possible.
 					if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
-						log.Info("[etcd client] no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
+						log.Info("no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
 						client.SetEndpoints([]string{}...)
 						client.SetEndpoints(usedEps...)
 					}
@@ -295,7 +305,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 						client.SetEndpoints(healthyEps...)
 						change := fmt.Sprintf("%d->%d", len(usedEps), len(healthyEps))
 						etcdStateGauge.WithLabelValues("endpoints").Set(float64(len(healthyEps)))
-						log.Info("[etcd client] update endpoints", zap.String("num-change", change),
+						log.Info("update endpoints", zap.String("num-change", change),
 							zap.Strings("last-endpoints", usedEps), zap.Strings("endpoints", client.Endpoints()))
 					}
 					lastAvailable = time.Now()
@@ -312,7 +322,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		for {
 			select {
 			case <-client.Ctx().Done():
-				log.Info("[etcd client] etcd client is closed, exit update endpoint goroutine")
+				log.Info("etcd client is closed, exit update endpoint goroutine")
 				return
 			case <-ticker.C:
 				eps := syncUrls(client)
@@ -376,7 +386,7 @@ func (checker *healthyChecker) update(eps []string) {
 		if client, ok := checker.Load(ep); ok {
 			lastHealthy := client.(*healthyClient).lastHealth
 			if time.Since(lastHealthy) > etcdServerOfflineTimeout {
-				log.Info("[etcd client] some etcd server maybe offline", zap.String("endpoint", ep))
+				log.Info("some etcd server maybe offline", zap.String("endpoint", ep))
 				checker.Delete(ep)
 			}
 			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
@@ -393,7 +403,7 @@ func (checker *healthyChecker) update(eps []string) {
 func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
 	client, err := newClient(checker.tlsConfig, ep)
 	if err != nil {
-		log.Error("[etcd client] failed to create etcd healthy client", zap.Error(err))
+		log.Error("failed to create etcd healthy client", zap.Error(err))
 		return
 	}
 	checker.Store(ep, &healthyClient{
@@ -408,7 +418,7 @@ func syncUrls(client *clientv3.Client) []string {
 	defer cancel()
 	mresp, err := client.MemberList(ctx)
 	if err != nil {
-		log.Error("[etcd client] failed to list members", errs.ZapError(err))
+		log.Error("failed to list members", errs.ZapError(err))
 		return []string{}
 	}
 	var eps []string
@@ -432,12 +442,16 @@ func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *
 
 // createHTTPClient creates a http client with the given tls config.
 func createHTTPClient(tlsConfig *tls.Config) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   tlsConfig,
-		},
+	// FIXME: Currently, there is no timeout set for certain requests, such as GetRegions,
+	// which may take a significant amount of time. However, it might be necessary to
+	// define an appropriate timeout in the future.
+	cli := &http.Client{}
+	if tlsConfig != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = tlsConfig
+		cli.Transport = transport
 	}
+	return cli
 }
 
 // InitClusterID creates a cluster ID for the given key if it hasn't existed.
@@ -520,6 +534,11 @@ const (
 	defaultLoadBatchSize             = 400
 	defaultWatchChangeRetryInterval  = 1 * time.Second
 	defaultForceLoadMinimalInterval  = 200 * time.Millisecond
+
+	// RequestProgressInterval is the interval to call RequestProgress for watcher.
+	RequestProgressInterval = 1 * time.Second
+	// WatchChTimeoutDuration is the timeout duration for a watchChan.
+	WatchChTimeoutDuration = DefaultRequestTimeout
 )
 
 // LoopWatcher loads data from etcd and sets a watcher for it.
@@ -565,8 +584,13 @@ type LoopWatcher struct {
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
-func NewLoopWatcher(ctx context.Context, wg *sync.WaitGroup, client *clientv3.Client, name, key string,
-	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error, opts ...clientv3.OpOption) *LoopWatcher {
+func NewLoopWatcher(
+	ctx context.Context, wg *sync.WaitGroup,
+	client *clientv3.Client,
+	name, key string,
+	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error,
+	opts ...clientv3.OpOption,
+) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:                      ctx,
 		client:                   client,
@@ -668,54 +692,107 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 }
 
 func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision int64, err error) {
-	watcher := clientv3.NewWatcher(lw.client)
-	defer watcher.Close()
-	var watchChanCancel context.CancelFunc
+	var (
+		watcher       clientv3.Watcher
+		watcherCancel context.CancelFunc
+	)
 	defer func() {
-		if watchChanCancel != nil {
-			watchChanCancel()
+		if watcherCancel != nil {
+			watcherCancel()
+		}
+		if watcher != nil {
+			watcher.Close()
 		}
 	}()
+	ticker := time.NewTicker(RequestProgressInterval)
+	defer ticker.Stop()
+	lastReceivedResponseTime := time.Now()
+
 	for {
-		if watchChanCancel != nil {
-			watchChanCancel()
+		if watcherCancel != nil {
+			watcherCancel()
 		}
+		if watcher != nil {
+			watcher.Close()
+		}
+		watcher = clientv3.NewWatcher(lw.client)
 		// In order to prevent a watch stream being stuck in a partitioned node,
 		// make sure to wrap context with "WithRequireLeader".
-		watchChanCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
-		watchChanCancel = cancel
-		opts := append(lw.opts, clientv3.WithRev(revision))
-		watchChan := watcher.Watch(watchChanCtx, lw.key, opts...)
-	WatchChanLoop:
+		watcherCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
+		watcherCancel = cancel
+		opts := append(lw.opts, clientv3.WithRev(revision), clientv3.WithProgressNotify())
+		done := make(chan struct{})
+		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
+		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
+		done <- struct{}{}
+		if err := watcherCtx.Err(); err != nil {
+			log.Warn("error occurred while creating watch channel and retry it", zap.Error(err),
+				zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+			select {
+			case <-ctx.Done():
+				return revision, nil
+			case <-ticker.C:
+				continue
+			}
+		}
+		log.Info("watch channel is created in watch loop",
+			zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+	watchChanLoop:
 		select {
 		case <-ctx.Done():
 			return revision, nil
 		case <-lw.forceLoadCh:
 			revision, err = lw.load(ctx)
 			if err != nil {
-				log.Warn("force load key failed in watch loop", zap.String("name", lw.name),
-					zap.String("key", lw.key), zap.Error(err))
+				log.Warn("force load key failed in watch loop",
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
 			}
 			continue
+		case <-ticker.C:
+			// We need to request progress to etcd to prevent etcd hold the watchChan,
+			// note: the ctx must be from watcherCtx, otherwise, the RequestProgress request cannot be sent properly.
+			ctx, cancel := context.WithTimeout(watcherCtx, DefaultRequestTimeout)
+			if err := watcher.RequestProgress(ctx); err != nil {
+				log.Warn("failed to request progress in leader watch loop",
+					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+			}
+			cancel()
+			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
+			// create a new one and need not to reset lastReceivedResponseTime.
+			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
+				log.Warn("watch channel is blocked for a long time, recreating a new one in watch loop",
+					zap.Duration("timeout", time.Since(lastReceivedResponseTime)),
+					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				continue
+			}
 		case wresp := <-watchChan:
+			failpoint.Inject("watchChanBlock", func() {
+				// watchChanBlock is used to simulate the case that the watchChan is blocked for a long time.
+				// So we discard these responses when the failpoint is injected.
+				failpoint.Goto("watchChanLoop")
+			})
+			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision in watch loop",
-					zap.Int64("required-revision", revision),
-					zap.Int64("compact-revision", wresp.CompactRevision))
+					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
+					zap.String("name", lw.name), zap.String("key", lw.key))
 				revision = wresp.CompactRevision
 				continue
-			} else if wresp.Err() != nil { // wresp.Err() contains CompactRevision not equal to 0
-				log.Error("watcher is canceled in watch loop",
-					zap.Int64("revision", revision),
-					errs.ZapError(errs.ErrEtcdWatcherCancel, wresp.Err()))
-				return revision, wresp.Err()
+			} else if err := wresp.Err(); err != nil { // wresp.Err() contains CompactRevision not equal to 0
+				log.Error("watcher is canceled in watch loop", errs.ZapError(errs.ErrEtcdWatcherCancel, err),
+					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				return revision, err
+			} else if wresp.IsProgressNotify() {
+				log.Debug("watcher receives progress notify in watch loop",
+					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				goto watchChanLoop
 			}
 			for _, event := range wresp.Events {
 				switch event.Type {
 				case clientv3.EventTypePut:
 					if err := lw.putFn(event.Kv); err != nil {
-						log.Error("put failed in watch loop", zap.String("name", lw.name),
-							zap.String("key", lw.key), zap.Error(err))
+						log.Error("put failed in watch loop", zap.Error(err),
+							zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 					} else {
 						log.Debug("put in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key),
@@ -723,8 +800,8 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					}
 				case clientv3.EventTypeDelete:
 					if err := lw.deleteFn(event.Kv); err != nil {
-						log.Error("delete failed in watch loop", zap.String("name", lw.name),
-							zap.String("key", lw.key), zap.Error(err))
+						log.Error("delete failed in watch loop", zap.Error(err),
+							zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 					} else {
 						log.Debug("delete in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key))
@@ -732,12 +809,12 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				}
 			}
 			if err := lw.postEventFn(); err != nil {
-				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
-					zap.String("key", lw.key), zap.Error(err))
+				log.Error("run post event failed in watch loop", zap.Error(err),
+					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 			}
 			revision = wresp.Header.Revision + 1
-			goto WatchChanLoop // use goto to avoid to create a new watchChan
 		}
+		goto watchChanLoop // Use goto to avoid creating a new watchChan
 	}
 }
 

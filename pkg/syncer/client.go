@@ -202,7 +202,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 							region.UpdateBuckets(buckets[i], old)
 						}
 					}
-					if changed.SaveCache {
+					if changed.SaveKV {
 						err = regionStorage.SaveRegion(r)
 					}
 					if err == nil {

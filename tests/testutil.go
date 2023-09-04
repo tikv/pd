@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -31,8 +33,23 @@ import (
 
 var once sync.Once
 
-// InitLogger initializes the logger for test.
-func InitLogger(cfg *tso.Config) (err error) {
+// InitSchedulingLogger initializes the logger for test.
+func InitSchedulingLogger(cfg *sc.Config) (err error) {
+	once.Do(func() {
+		// Setup the logger.
+		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+		if err != nil {
+			return
+		}
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+		// Flushing any buffered log entries.
+		log.Sync()
+	})
+	return err
+}
+
+// InitTSOLogger initializes the logger for test.
+func InitTSOLogger(cfg *tso.Config) (err error) {
 	once.Do(func() {
 		// Setup the logger.
 		err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
@@ -71,7 +88,7 @@ func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Asser
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
 	// Setup the logger.
-	err = InitLogger(cfg)
+	err = InitTSOLogger(cfg)
 	re.NoError(err)
 	return NewTSOTestServer(ctx, cfg)
 }
@@ -90,6 +107,36 @@ func StartSingleTSOTestServer(ctx context.Context, re *require.Assertions, backe
 // NewTSOTestServer creates a tso server with given config for testing.
 func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testutil.CleanupFunc, error) {
 	s := tso.CreateServer(ctx, cfg)
+	if err := s.Run(); err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		s.Close()
+		os.RemoveAll(cfg.DataDir)
+	}
+	return s, cleanup, nil
+}
+
+// StartSingleSchedulingTestServer creates and starts a scheduling server with default config for testing.
+func StartSingleSchedulingTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*scheduling.Server, func()) {
+	cfg := sc.NewConfig()
+	cfg.BackendEndpoints = backendEndpoints
+	cfg.ListenAddr = listenAddrs
+	cfg, err := scheduling.GenerateConfig(cfg)
+	re.NoError(err)
+
+	s, cleanup, err := scheduling.NewTestServer(ctx, re, cfg)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return !s.IsClosed()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	return s, cleanup
+}
+
+// NewSchedulingTestServer creates a scheduling server with given config for testing.
+func NewSchedulingTestServer(ctx context.Context, cfg *sc.Config) (*scheduling.Server, testutil.CleanupFunc, error) {
+	s := scheduling.CreateServer(ctx, cfg)
 	if err := s.Run(); err != nil {
 		return nil, nil, err
 	}

@@ -24,7 +24,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -92,7 +91,8 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
 		conf.persistLocked()
-		return http.StatusOK, "success"
+		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
+		return http.StatusOK, "Config is updated."
 	}
 	m := make(map[string]interface{})
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -100,9 +100,9 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	}
 	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
-		return http.StatusOK, "no changed"
+		return http.StatusOK, "Config is the same with origin, so do nothing."
 	}
-	return http.StatusBadRequest, "config item not found"
+	return http.StatusBadRequest, "Config item is not found."
 }
 
 func (conf *balanceLeaderSchedulerConfig) validate() bool {
@@ -163,7 +163,6 @@ type balanceLeaderScheduler struct {
 	conf          *balanceLeaderSchedulerConfig
 	handler       http.Handler
 	filters       []filter.Filter
-	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
 }
 
@@ -177,7 +176,6 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		name:          BalanceLeaderName,
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
-		counter:       balanceLeaderCounter,
 		filterCounter: filter.NewCounter(filter.BalanceLeader.String()),
 	}
 	for _, option := range options {
@@ -196,13 +194,6 @@ func (l *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 // BalanceLeaderCreateOption is used to create a scheduler with an option.
 type BalanceLeaderCreateOption func(s *balanceLeaderScheduler)
-
-// WithBalanceLeaderCounter sets the counter for the scheduler.
-func WithBalanceLeaderCounter(counter *prometheus.CounterVec) BalanceLeaderCreateOption {
-	return func(s *balanceLeaderScheduler) {
-		s.counter = counter
-	}
-}
 
 // WithBalanceLeaderName sets the name for the scheduler.
 func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
@@ -554,9 +545,6 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
 		balanceDirectionCounter.WithLabelValues(l.GetName(), solver.SourceMetricLabel(), solver.TargetMetricLabel()),
-		// TODO: pre-allocate gauge metrics
-		l.counter.WithLabelValues("move-leader", solver.SourceMetricLabel()+"-out"),
-		l.counter.WithLabelValues("move-leader", solver.TargetMetricLabel()+"-in"),
 	)
 	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
 	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)

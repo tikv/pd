@@ -52,7 +52,7 @@ func TestPlaintextMasterKey(t *testing.T) {
 func TestEncrypt(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
+	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806" // #nosec G101
 	key, err := hex.DecodeString(keyHex)
 	re.NoError(err)
 	masterKey := &MasterKey{key: key}
@@ -68,7 +68,7 @@ func TestEncrypt(t *testing.T) {
 func TestDecrypt(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
+	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806" // #nosec G101
 	key, err := hex.DecodeString(keyHex)
 	re.NoError(err)
 	plaintext := "this-is-a-plaintext"
@@ -149,7 +149,7 @@ func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
 func TestNewFileMasterKey(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	key := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
+	key := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806" // #nosec G101
 	dir := t.TempDir()
 	path := dir + "/key"
 	os.WriteFile(path, []byte(key), 0600)

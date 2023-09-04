@@ -33,6 +33,10 @@ else
 	BUILD_CGO_ENABLED := 1
 endif
 
+ifeq ($(FAILPOINT), 1)
+	BUILD_TAGS += with_fail
+endif
+
 ifeq ("$(WITH_RACE)", "1")
 	BUILD_FLAGS += -race
 	BUILD_CGO_ENABLED := 1
@@ -58,7 +62,7 @@ BUILD_BIN_PATH := $(ROOT_PATH)/bin
 
 build: pd-server pd-ctl pd-recover
 
-tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump
+tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench
 
 PD_SERVER_DEP :=
 ifeq ($(SWAGGER), 1)
@@ -73,6 +77,11 @@ PD_SERVER_DEP += dashboard-ui
 pd-server: ${PD_SERVER_DEP}
 	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
+pd-server-failpoint:
+	@$(FAILPOINT_ENABLE)
+	FAILPOINT=1 $(MAKE) pd-server || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
+
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
@@ -84,6 +93,8 @@ pd-ctl:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
 pd-tso-bench:
 	cd tools/pd-tso-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench main.go
+pd-api-bench:
+	cd tools/pd-api-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench main.go
 pd-recover:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
 pd-analysis:
@@ -97,7 +108,7 @@ regions-dump:
 stores-dump:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump tools/stores-dump/main.go
 
-.PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump
+.PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench
 
 #### Docker image ####
 
@@ -143,7 +154,7 @@ install-tools:
 
 #### Static checks ####
 
-check: install-tools tidy static generate-errdoc check-plugin check-test
+check: install-tools tidy static generate-errdoc check-test
 
 static: install-tools
 	@ echo "gofmt ..."

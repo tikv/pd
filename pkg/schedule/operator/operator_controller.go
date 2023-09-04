@@ -125,7 +125,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
 			}
-			if oc.RemoveOperator(op, Succeed) {
+			if oc.RemoveOperator(op) {
 				operatorCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
 			}
@@ -329,6 +329,7 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 	// but maybe user want to add operator when waiting queue is busy
 	if oc.exceedStoreLimitLocked(ops...) {
 		for _, op := range ops {
+			operatorCounter.WithLabelValues(op.Desc(), "exceed-limit").Inc()
 			_ = op.Cancel(ExceedStoreLimit)
 			oc.buryOperator(op)
 		}
@@ -543,8 +544,6 @@ func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) 
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
-	} else {
-		cancelReason = Unknown
 	}
 	if removed {
 		if op.Cancel(cancelReason) {
@@ -687,6 +686,21 @@ func (oc *Controller) GetWaitingOperators() []*Operator {
 	oc.RLock()
 	defer oc.RUnlock()
 	return oc.wop.ListOperator()
+}
+
+// GetOperatorsOfKind returns the running operators of the kind.
+func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
+	oc.RLock()
+	defer oc.RUnlock()
+
+	operators := make([]*Operator, 0, len(oc.operators))
+	for _, op := range oc.operators {
+		if op.Kind()&mask != 0 {
+			operators = append(operators, op)
+		}
+	}
+
+	return operators
 }
 
 // SendScheduleCommand sends a command to the region.

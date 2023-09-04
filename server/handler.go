@@ -18,8 +18,8 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"net/url"
 	"path"
 	"strconv"
 	"strings"
@@ -76,8 +76,6 @@ var (
 	ErrPluginNotFound = func(pluginPath string) error {
 		return errors.Errorf("plugin is not found: %s", pluginPath)
 	}
-
-	schedulerConfigPrefix = "pd/api/v1/scheduler-config"
 )
 
 // Handler is a helper to export methods to handle API/RPC requests.
@@ -455,32 +453,29 @@ func (h *Handler) GetWaitingOperators() ([]*operator.Operator, error) {
 
 // GetAdminOperators returns the running admin operators.
 func (h *Handler) GetAdminOperators() ([]*operator.Operator, error) {
-	return h.GetOperatorsOfKind(operator.OpAdmin)
+	c, err := h.GetOperatorController()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetOperatorsOfKind(operator.OpAdmin), nil
 }
 
 // GetLeaderOperators returns the running leader operators.
 func (h *Handler) GetLeaderOperators() ([]*operator.Operator, error) {
-	return h.GetOperatorsOfKind(operator.OpLeader)
+	c, err := h.GetOperatorController()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetOperatorsOfKind(operator.OpLeader), nil
 }
 
 // GetRegionOperators returns the running region operators.
 func (h *Handler) GetRegionOperators() ([]*operator.Operator, error) {
-	return h.GetOperatorsOfKind(operator.OpRegion)
-}
-
-// GetOperatorsOfKind returns the running operators of the kind.
-func (h *Handler) GetOperatorsOfKind(mask operator.OpKind) ([]*operator.Operator, error) {
-	ops, err := h.GetOperators()
+	c, err := h.GetOperatorController()
 	if err != nil {
 		return nil, err
 	}
-	var results []*operator.Operator
-	for _, op := range ops {
-		if op.Kind()&mask != 0 {
-			results = append(results, op)
-		}
-	}
-	return results, nil
+	return c.GetOperatorsOfKind(operator.OpRegion), nil
 }
 
 // GetHistory returns finished operators' history since start.
@@ -1099,7 +1094,10 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]interface{})
 	input["name"] = name
 	input["store_id"] = storeID
-	updateURL := fmt.Sprintf("%s/%s/%s/config", h.GetAddr(), schedulerConfigPrefix, name)
+	updateURL, err := url.JoinPath(h.GetAddr(), "pd", SchedulerConfigHandlerPath, name, "config")
+	if err != nil {
+		return err
+	}
 	body, err := json.Marshal(input)
 	if err != nil {
 		return err

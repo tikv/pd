@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 // StoreHotPeersInfos is used to get human-readable description for hot regions.
@@ -35,7 +36,7 @@ type StoreHotPeersStat map[uint64]*HotPeersStat
 
 // CollectHotPeerInfos only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*HotPeerStat) *StoreHotPeersInfos {
-	peerLoadSum := make([]float64, DimLen)
+	peerLoadSum := make([]float64, utils.DimLen)
 	collect := func(kind constant.ResourceKind) StoreHotPeersStat {
 		ret := make(StoreHotPeersStat, len(stores))
 		for _, store := range stores {
@@ -54,9 +55,9 @@ func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*Hot
 				}
 			}
 			ret[id] = &HotPeersStat{
-				TotalBytesRate: peerLoadSum[ByteDim],
-				TotalKeysRate:  peerLoadSum[KeyDim],
-				TotalQueryRate: peerLoadSum[QueryDim],
+				TotalBytesRate: peerLoadSum[utils.ByteDim],
+				TotalKeysRate:  peerLoadSum[utils.KeyDim],
+				TotalQueryRate: peerLoadSum[utils.QueryDim],
 				Count:          len(peers),
 			}
 		}
@@ -70,7 +71,7 @@ func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*Hot
 
 // GetHotStatus returns the hot status for a given type.
 // NOTE: This function is exported by HTTP API. It does not contain `isLearner` and `LastUpdateTime` field. If need, please call `updateRegionInfo`.
-func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, regionStats map[uint64][]*HotPeerStat, typ RWType, isTraceRegionFlow bool) *StoreHotPeersInfos {
+func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, regionStats map[uint64][]*HotPeerStat, typ utils.RWType, isTraceRegionFlow bool) *StoreHotPeersInfos {
 	stInfos := SummaryStoreInfos(stores)
 	stLoadInfosAsLeader := SummaryStoresLoad(
 		stInfos,
@@ -110,7 +111,7 @@ func SummaryStoresLoad(
 	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
 	isTraceRegionFlow bool,
-	rwTy RWType,
+	rwTy utils.RWType,
 	kind constant.ResourceKind,
 ) map[uint64]*StoreLoadDetail {
 	// loadDetail stores the storeID -> hotPeers stat and its current and future stat(rate,count)
@@ -144,13 +145,13 @@ func summaryStoresLoadByEngine(
 	storesLoads map[uint64][]float64,
 	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
-	rwTy RWType,
+	rwTy utils.RWType,
 	kind constant.ResourceKind,
 	collector storeCollector,
 ) []*StoreLoadDetail {
 	loadDetail := make([]*StoreLoadDetail, 0, len(storeInfos))
-	allStoreLoadSum := make([]float64, DimLen)
-	allStoreHistoryLoadSum := make([][]float64, DimLen)
+	allStoreLoadSum := make([]float64, utils.DimLen)
+	allStoreHistoryLoadSum := make([][]float64, utils.DimLen)
 	allStoreCount := 0
 	allHotPeersCount := 0
 
@@ -164,7 +165,7 @@ func summaryStoresLoadByEngine(
 
 		// Find all hot peers first
 		var hotPeers []*HotPeerStat
-		peerLoadSum := make([]float64, DimLen)
+		peerLoadSum := make([]float64, utils.DimLen)
 		// TODO: To remove `filterHotPeers`, we need to:
 		// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
 		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
@@ -177,11 +178,11 @@ func summaryStoresLoadByEngine(
 			// Metric for debug.
 			// TODO: pre-allocate gauge metrics
 			ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[ByteDim])
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[utils.ByteDim])
 			ty = "key-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[KeyDim])
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[utils.KeyDim])
 			ty = "query-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[QueryDim])
+			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[utils.QueryDim])
 		}
 		loads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
 
@@ -231,7 +232,7 @@ func summaryStoresLoadByEngine(
 	}
 
 	// todo: remove some the max value or min value to avoid the effect of extreme value.
-	expectHistoryLoads := make([][]float64, DimLen)
+	expectHistoryLoads := make([][]float64, utils.DimLen)
 	for i := range allStoreHistoryLoadSum {
 		expectHistoryLoads[i] = make([]float64, len(allStoreHistoryLoadSum[i]))
 		for j := range allStoreHistoryLoadSum[i] {
@@ -254,19 +255,19 @@ func summaryStoresLoadByEngine(
 		// Metric for debug.
 		engine := collector.Engine()
 		ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[ByteDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.ByteDim])
 		ty = "exp-key-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[KeyDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.KeyDim])
 		ty = "exp-query-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[QueryDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.QueryDim])
 		ty = "exp-count-rate-" + rwTy.String() + "-" + kind.String()
 		hotPeerSummary.WithLabelValues(ty, engine).Set(expectCount)
 		ty = "stddev-byte-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[ByteDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.ByteDim])
 		ty = "stddev-key-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[KeyDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.KeyDim])
 		ty = "stddev-query-rate-" + rwTy.String() + "-" + kind.String()
-		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[QueryDim])
+		hotPeerSummary.WithLabelValues(ty, engine).Set(stddevLoads[utils.QueryDim])
 	}
 	expect := StoreLoad{
 		Loads:        expectLoads,

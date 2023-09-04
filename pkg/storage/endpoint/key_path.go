@@ -92,6 +92,26 @@ func ConfigPath(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), configPath)
 }
 
+// SchedulerConfigPathPrefix returns the path prefix to save the scheduler config.
+func SchedulerConfigPathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), customScheduleConfigPath)
+}
+
+// RulesPathPrefix returns the path prefix to save the placement rules.
+func RulesPathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), rulesPath)
+}
+
+// RuleGroupPathPrefix returns the path prefix to save the placement rule groups.
+func RuleGroupPathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), ruleGroupPath)
+}
+
+// RegionLabelPathPrefix returns the path prefix to save the region label.
+func RegionLabelPathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), regionLabelPath)
+}
+
 func scheduleConfigPath(scheduleName string) string {
 	return path.Join(customScheduleConfigPath, scheduleName)
 }
@@ -291,7 +311,7 @@ func LegacyRootPath(clusterID uint64) string {
 // non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
 func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
 	electionPath := KeyspaceGroupsElectionPath(rootPath, keyspaceGroupID)
-	return path.Join(electionPath, utils.KeyspaceGroupsPrimaryKey)
+	return path.Join(electionPath, utils.PrimaryKey)
 }
 
 // KeyspaceGroupsElectionPath returns the path of keyspace groups election.
@@ -307,7 +327,7 @@ func KeyspaceGroupsElectionPath(rootPath string, keyspaceGroupID uint32) string 
 // GetCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
 func GetCompiledNonDefaultIDRegexp(clusterID uint64) *regexp.Regexp {
 	rootPath := TSOSvcRootPath(clusterID)
-	pattern := strings.Join([]string{rootPath, utils.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, utils.KeyspaceGroupsPrimaryKey + `$`}, "/")
+	pattern := strings.Join([]string{rootPath, utils.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, utils.PrimaryKey + `$`}, "/")
 	return regexp.MustCompile(pattern)
 }
 
@@ -330,16 +350,28 @@ func buildPath(withSuffix bool, str ...string) string {
 	return sb.String()
 }
 
-// KeyspaceGroupTSPath constructs the timestampOracle path prefix, which is:
+// KeyspaceGroupGlobalTSPath constructs the timestampOracle path prefix for Global TSO, which is:
 //  1. for the default keyspace group:
 //     "" in /pd/{cluster_id}/timestamp
 //  2. for the non-default keyspace groups:
 //     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
-func KeyspaceGroupTSPath(groupID uint32) string {
+func KeyspaceGroupGlobalTSPath(groupID uint32) string {
 	if groupID == utils.DefaultKeyspaceGroupID {
 		return ""
 	}
 	return path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
+}
+
+// KeyspaceGroupLocalTSPath constructs the timestampOracle path prefix for Local TSO, which is:
+//  1. for the default keyspace group:
+//     lta/{dc-location} in /pd/{cluster_id}/lta/{dc-location}/timestamp
+//  2. for the non-default keyspace groups:
+//     {group}/lta/{dc-location} in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
+func KeyspaceGroupLocalTSPath(keyPrefix string, groupID uint32, dcLocation string) string {
+	if groupID == utils.DefaultKeyspaceGroupID {
+		return path.Join(keyPrefix, dcLocation)
+	}
+	return path.Join(fmt.Sprintf("%05d", groupID), keyPrefix, dcLocation)
 }
 
 // TimestampPath returns the timestamp path for the given timestamp oracle path prefix.
@@ -354,7 +386,7 @@ func TimestampPath(tsPath string) string {
 //     /ms/{cluster_id}/tso/{group}/gta/timestamp
 func FullTimestampPath(clusterID uint64, groupID uint32) string {
 	rootPath := TSOSvcRootPath(clusterID)
-	tsPath := TimestampPath(KeyspaceGroupTSPath(groupID))
+	tsPath := TimestampPath(KeyspaceGroupGlobalTSPath(groupID))
 	if groupID == utils.DefaultKeyspaceGroupID {
 		rootPath = LegacyRootPath(clusterID)
 	}

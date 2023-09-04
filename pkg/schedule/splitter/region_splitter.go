@@ -56,15 +56,17 @@ func NewSplitRegionsHandler(cluster sche.ClusterInformer, oc *operator.Controlle
 
 // RegionSplitter handles split regions
 type RegionSplitter struct {
-	cluster sche.ClusterInformer
-	handler SplitRegionsHandler
+	cluster           sche.ClusterInformer
+	handler           SplitRegionsHandler
+	addSuspectRegions func(ids ...uint64)
 }
 
 // NewRegionSplitter return a region splitter
-func NewRegionSplitter(cluster sche.ClusterInformer, handler SplitRegionsHandler) *RegionSplitter {
+func NewRegionSplitter(cluster sche.ClusterInformer, handler SplitRegionsHandler, addSuspectRegions func(ids ...uint64)) *RegionSplitter {
 	return &RegionSplitter{
-		cluster: cluster,
-		handler: handler,
+		cluster:           cluster,
+		handler:           handler,
+		addSuspectRegions: addSuspectRegions,
 	}
 }
 
@@ -170,7 +172,7 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) map[uint64]*regionGrou
 
 func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
 	if !filter.IsRegionReplicated(r.cluster, region) {
-		r.cluster.AddSuspectRegions(region.GetID())
+		r.addSuspectRegions(region.GetID())
 		return false
 	}
 	if region.GetLeader() == nil {

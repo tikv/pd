@@ -136,7 +136,7 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 	re.NoError(err)
 
 	// Setup the logger.
-	err = tests.InitLogger(cfg)
+	err = tests.InitTSOLogger(cfg)
 	re.NoError(err)
 
 	s, cleanup, err := tests.NewTSOTestServer(suite.ctx, cfg)

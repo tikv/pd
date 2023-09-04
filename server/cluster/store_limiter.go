@@ -16,21 +16,21 @@ package cluster
 
 import (
 	"github.com/tikv/pd/pkg/core/storelimit"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/config"
 )
 
 // StoreLimiter adjust the store limit dynamically
 type StoreLimiter struct {
 	m       syncutil.RWMutex
-	opt     *config.PersistOptions
+	opt     sc.ConfProvider
 	scene   map[storelimit.Type]*storelimit.Scene
 	state   *State
 	current LoadState
 }
 
 // NewStoreLimiter builds a store limiter object using the operator controller
-func NewStoreLimiter(opt *config.PersistOptions) *StoreLimiter {
+func NewStoreLimiter(opt sc.ConfProvider) *StoreLimiter {
 	defaultScene := map[storelimit.Type]*storelimit.Scene{
 		storelimit.AddPeer:    storelimit.DefaultScene(storelimit.AddPeer),
 		storelimit.RemovePeer: storelimit.DefaultScene(storelimit.RemovePeer),
