@@ -61,7 +61,7 @@ func (tc *TestSchedulingCluster) AddServer(addr string) error {
 	if err != nil {
 		return err
 	}
-	err = InitSchedulingLogger(generatedCfg)
+	err = InitLogger(generatedCfg.Log, generatedCfg.Logger, generatedCfg.LogProps, generatedCfg.Security.RedactInfoLog)
 	if err != nil {
 		return err
 	}

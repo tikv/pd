@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -67,7 +68,8 @@ func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.ClusterID = rand.Uint64()
-	suite.backendEndpoints, suite.etcdClient, suite.clean = startEmbeddedEtcd(t)
+	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	suite.backendEndpoints, suite.etcdClient, suite.clean = servers[0].Config().LCUrls[0].String(), client, clean
 	suite.cfg = suite.createConfig()
 }
 
