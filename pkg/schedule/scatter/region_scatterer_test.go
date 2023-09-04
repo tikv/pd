@@ -696,6 +696,34 @@ func TestSelectedStoresTooManyPeers(t *testing.T) {
 	}
 }
 
+// TestBalanceLeader only tests whether region leaders are balanced after scatter.
+func TestBalanceLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	// Add 3 stores
+	for i := uint64(2); i <= 4; i++ {
+		tc.AddLabelsStore(i, 0, nil)
+		// prevent store from being disconnected
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+	group := "group"
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddSuspectRegions)
+	for i := uint64(1001); i <= 1300; i++ {
+		region := tc.AddLeaderRegion(i, 2, 3, 4)
+		op := scatterer.scatterRegion(region, group, false)
+		re.False(isPeerCountChanged(op))
+	}
+	// all leader will be balanced in three stores.
+	for i := uint64(2); i <= 4; i++ {
+		re.Equal(uint64(100), scatterer.ordinaryEngine.selectedLeader.Get(i, group))
+	}
+}
+
 // TestBalanceRegion tests whether region peers and leaders are balanced after scatter.
 // ref https://github.com/tikv/pd/issues/6017
 func TestBalanceRegion(t *testing.T) {
@@ -722,7 +750,6 @@ func TestBalanceRegion(t *testing.T) {
 	}
 	for i := uint64(2); i <= 7; i++ {
 		re.Equal(uint64(150), scatterer.ordinaryEngine.selectedPeer.Get(i, group))
-		re.Equal(uint64(50), scatterer.ordinaryEngine.selectedLeader.Get(i, group))
 	}
 	// Test for unhealthy region
 	// ref https://github.com/tikv/pd/issues/6099
