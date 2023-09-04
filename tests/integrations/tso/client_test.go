@@ -498,14 +498,13 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 }
 
 func checkTSO(
-	ctx context.Context, re *require.Assertions, wg *sync.WaitGroup,
-	backendEndpoints string, opts ...pd.ClientOption,
+	ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, backendEndpoints string,
 ) {
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
-			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","), opts...)
+			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","))
 			defer cli.Close()
 			var ts, lastTS uint64
 			for {
