@@ -30,6 +30,7 @@ import (
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/spf13/cobra"
@@ -58,6 +59,8 @@ import (
 
 var _ bs.Server = (*Server)(nil)
 
+const memberUpdateInterval = time.Minute
+
 // Server is the scheduling server, and it implements bs.Server.
 type Server struct {
 	*server.BaseServer
@@ -77,7 +80,8 @@ type Server struct {
 	// for the primary election of scheduling
 	participant *member.Participant
 
-	service *Service
+	service           *Service
+	checkMembershipCh chan struct{}
 
 	// primaryCallbacks will be called after the server becomes leader.
 	primaryCallbacks []func(context.Context)
@@ -130,8 +134,53 @@ func (s *Server) Run() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
-	s.serverLoopWg.Add(1)
+	s.serverLoopWg.Add(2)
 	go s.primaryElectionLoop()
+	go s.updateAPIServerMemberLoop()
+}
+
+func (s *Server) updateAPIServerMemberLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	ticker := time.NewTicker(memberUpdateInterval)
+	failpoint.Inject("fastUpdateMember", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(100 * time.Millisecond)
+	})
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("server is closed, exit update member loop")
+			return
+		case <-ticker.C:
+		case <-s.checkMembershipCh:
+		}
+		members, err := s.GetClient().MemberList(ctx)
+		if err != nil {
+			log.Warn("failed to list members", errs.ZapError(err))
+		}
+		for _, ep := range members.Members {
+			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
+			if err != nil {
+				log.Info("failed to get status of member", zap.String("member-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
+				continue
+			}
+			if status.Leader == ep.ID {
+				cc, err := s.GetDelegateClient(ctx, s.GetTLSConfig(), ep.ClientURLs[0])
+				if err != nil {
+					log.Info("failed to get delegate client", errs.ZapError(err))
+				}
+				if s.cluster.SwitchAPIServerLeader(pdpb.NewPDClient(cc)) {
+					log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
+					break
+				}
+			}
+		}
+	}
 }
 
 func (s *Server) primaryElectionLoop() {
@@ -141,7 +190,7 @@ func (s *Server) primaryElectionLoop() {
 	for {
 		select {
 		case <-s.serverLoopCtx.Done():
-			log.Info("server is closed, exit resource manager primary election loop")
+			log.Info("server is closed, exit primary election loop")
 			return
 		default:
 		}
@@ -226,6 +275,8 @@ func (s *Server) Close() {
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
 	s.GetCoordinator().Stop()
+	s.ruleWatcher.Close()
+	s.configWatcher.Close()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -320,7 +371,7 @@ func (s *Server) startServer() (err error) {
 		kv.NewEtcdKVBase(s.GetClient(), endpoint.PDRootPath(s.clusterID)), nil)
 	basicCluster := core.NewBasicCluster()
 	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, basicCluster)
-	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, basicCluster, s.hbStreams)
+	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
 	if err != nil {
 		return err
 	}
@@ -330,13 +381,14 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 
-	go s.GetCoordinator().RunUntilStop()
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
+	s.startServerLoop()
 	s.serverLoopWg.Add(1)
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
+	s.checkMembershipCh <- struct{}{}
 	<-serverReadyChan
-	s.startServerLoop()
+	go s.GetCoordinator().RunUntilStop()
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
@@ -379,6 +431,7 @@ func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		cfg:               cfg,
 		persistConfig:     config.NewPersistConfig(cfg),
+		checkMembershipCh: make(chan struct{}, 1),
 	}
 	return svr
 }

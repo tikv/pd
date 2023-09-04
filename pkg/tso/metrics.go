@@ -23,6 +23,7 @@ const (
 )
 
 var (
+	// TSO metrics
 	tsoCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -54,6 +55,24 @@ var (
 			Name:      "role",
 			Help:      "Indicate the PD server role info, whether it's a TSO allocator.",
 		}, []string{groupLabel, dcLabel})
+
+	// Keyspace Group metrics
+	keyspaceGroupStateGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "keyspace_group",
+			Name:      "state",
+			Help:      "Gauge of the Keyspace Group states.",
+		}, []string{typeLabel})
+
+	keyspaceGroupOpDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "keyspace_group",
+			Name:      "operation_duration_seconds",
+			Help:      "Bucketed histogram of processing time(s) of the Keyspace Group operations.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		}, []string{typeLabel})
 )
 
 func init() {
@@ -61,6 +80,8 @@ func init() {
 	prometheus.MustRegister(tsoGauge)
 	prometheus.MustRegister(tsoGap)
 	prometheus.MustRegister(tsoAllocatorRole)
+	prometheus.MustRegister(keyspaceGroupStateGauge)
+	prometheus.MustRegister(keyspaceGroupOpDuration)
 }
 
 type tsoMetrics struct {
@@ -123,5 +144,25 @@ func newTSOMetrics(groupID, dcLocation string) *tsoMetrics {
 		tsoPhysicalGauge:             tsoGauge.WithLabelValues("tso", groupID, dcLocation),
 		tsoPhysicalGapGauge:          tsoGap.WithLabelValues(groupLabel, dcLocation),
 		globalTSOSyncRTTGauge:        tsoGauge.WithLabelValues("global_tso_sync_rtt", groupID, dcLocation),
+	}
+}
+
+type keyspaceGroupMetrics struct {
+	splitSourceGauge prometheus.Gauge
+	splitTargetGauge prometheus.Gauge
+	mergeSourceGauge prometheus.Gauge
+	mergeTargetGauge prometheus.Gauge
+	splitDuration    prometheus.Observer
+	mergeDuration    prometheus.Observer
+}
+
+func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
+	return &keyspaceGroupMetrics{
+		splitSourceGauge: keyspaceGroupStateGauge.WithLabelValues("split-source"),
+		splitTargetGauge: keyspaceGroupStateGauge.WithLabelValues("split-target"),
+		mergeSourceGauge: keyspaceGroupStateGauge.WithLabelValues("merge-source"),
+		mergeTargetGauge: keyspaceGroupStateGauge.WithLabelValues("merge-target"),
+		splitDuration:    keyspaceGroupOpDuration.WithLabelValues("split"),
+		mergeDuration:    keyspaceGroupOpDuration.WithLabelValues("merge"),
 	}
 }
