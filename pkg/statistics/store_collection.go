@@ -61,7 +61,7 @@ func newStoreStatistics(opt *config.PersistOptions) *storeStatistics {
 	}
 }
 
-func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
+func (s *storeStatistics) Observe(store *core.StoreInfo, stats ...*StoresStats) {
 	for _, k := range s.opt.GetLocationLabels() {
 		v := store.GetLabelValue(k)
 		if v == "" {
@@ -147,8 +147,11 @@ func (s *storeStatistics) Observe(store *core.StoreInfo, stats *StoresStats) {
 		storeStatusGauge.WithLabelValues(storeAddress, id, "store_slow_trend_result_rate").Set(slowTrend.ResultRate)
 	}
 
+	if len(stats) == 0 {
+		return
+	}
 	// Store flows.
-	storeFlowStats := stats.GetRollingStoreStats(store.GetID())
+	storeFlowStats := stats[0].GetRollingStoreStats(store.GetID())
 	if storeFlowStats == nil {
 		return
 	}
@@ -298,8 +301,8 @@ func NewStoreStatisticsMap(opt *config.PersistOptions) *storeStatisticsMap {
 	}
 }
 
-func (m *storeStatisticsMap) Observe(store *core.StoreInfo, stats *StoresStats) {
-	m.stats.Observe(store, stats)
+func (m *storeStatisticsMap) Observe(store *core.StoreInfo, stats ...*StoresStats) {
+	m.stats.Observe(store, stats...)
 }
 
 func (m *storeStatisticsMap) Collect() {

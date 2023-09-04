@@ -250,6 +250,8 @@ func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
 	if err := c.processReportBuckets(b); err != nil {
 		return err
 	}
-	c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
+	if !c.isAPIServiceMode {
+		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
+	}
 	return nil
 }
