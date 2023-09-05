@@ -323,21 +323,21 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Error("load external timestamp meets error", zap.Error(err))
 	}
 
-	// bootstrap keyspace group manager after starting other parts successfully.
-	// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
 	if s.IsAPIServiceMode() {
+		// bootstrap keyspace group manager after starting other parts successfully.
+		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
 			return err
 		}
-	}
-
-	if !s.IsAPIServiceMode() {
+		c.initSchedulers()
+	} else {
 		c.wg.Add(3)
 		go c.runCoordinator()
 		go c.runStatsBackgroundJobs()
 		go c.runMetricsCollectionJob()
 	}
+
 	c.wg.Add(7)
 	go c.runNodeStateCheckJob()
 	go c.syncRegions()
@@ -847,6 +847,10 @@ func (c *RaftCluster) GetStorage() storage.Storage {
 // There is no need a lock since it won't changed.
 func (c *RaftCluster) GetOpts() sc.ConfProvider {
 	return c.opt
+}
+
+func (c *RaftCluster) initSchedulers() {
+	c.coordinator.InitSchedulers(false)
 }
 
 // GetScheduleConfig returns scheduling configurations.
