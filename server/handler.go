@@ -241,6 +241,8 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
+	} else {
+		c.GetSchedulerConfig().AddSchedulerCfg(s.GetType(), args)
 	}
 	if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))
@@ -264,6 +266,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 		}
 	} else {
 		conf := c.GetSchedulerConfig()
+		c.GetSchedulerConfig().RemoveSchedulerCfg(schedulers.FindSchedulerTypeByName(name))
 		if err := conf.Persist(c.GetStorage()); err != nil {
 			log.Error("the option can not persist scheduler config", errs.ZapError(err))
 			return err
