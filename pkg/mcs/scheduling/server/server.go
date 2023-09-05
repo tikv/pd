@@ -163,6 +163,7 @@ func (s *Server) updateAPIServerMemberLoop() {
 		members, err := s.GetClient().MemberList(ctx)
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
+			continue
 		}
 		for _, ep := range members.Members {
 			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
