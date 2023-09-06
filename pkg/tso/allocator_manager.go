@@ -1198,6 +1198,9 @@ func (am *AllocatorManager) getAllocatorGroup(dcLocation string) (*allocatorGrou
 func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
+	if len(dcLocation) == 0 {
+		dcLocation = GlobalDCLocation
+	}
 	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
 	if !exist {
 		return nil, errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found", dcLocation))

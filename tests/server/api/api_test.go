@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
@@ -453,13 +452,8 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 }
 
 func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
-	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-	defer os.RemoveAll(tempStdoutFile.Name())
-	cfg := &log.Config{}
-	cfg.File.Filename = tempStdoutFile.Name()
-	cfg.Level = "info"
-	lg, p, _ := log.InitLogger(cfg)
-	log.ReplaceGlobals(lg, p)
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	input := map[string]interface{}{
 		"enable-audit": "true",
@@ -477,7 +471,7 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	b, _ := os.ReadFile(tempStdoutFile.Name())
+	b, _ := os.ReadFile(fname)
 	suite.Contains(string(b), "audit log")
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
@@ -667,13 +661,8 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 func (suite *redirectorTestSuite) TestXForwardedFor() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	suite.NoError(leader.BootstrapCluster())
-	tempStdoutFile, _ := os.CreateTemp("/tmp", "pd_tests")
-	defer os.RemoveAll(tempStdoutFile.Name())
-	cfg := &log.Config{}
-	cfg.File.Filename = tempStdoutFile.Name()
-	cfg.Level = "info"
-	lg, p, _ := log.InitLogger(cfg)
-	log.ReplaceGlobals(lg, p)
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
 
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
 	addr := follower.GetAddr() + "/pd/api/v1/regions"
@@ -684,7 +673,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	defer resp.Body.Close()
 	suite.Equal(http.StatusOK, resp.StatusCode)
 	time.Sleep(1 * time.Second)
-	b, _ := os.ReadFile(tempStdoutFile.Name())
+	b, _ := os.ReadFile(fname)
 	l := string(b)
 	suite.Contains(l, "/pd/api/v1/regions")
 	suite.NotContains(l, suite.cluster.GetConfig().GetClientURLs())

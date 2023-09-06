@@ -24,11 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/requestutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestLabelMatcher(t *testing.T) {
@@ -93,7 +93,7 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	backend := NewLocalLogBackend(true)
-	fname := initLog()
+	fname := testutil.InitTempFileLogger("info")
 	defer os.RemoveAll(fname)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.False(backend.ProcessHTTPRequest(req))
@@ -125,7 +125,7 @@ func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	b.StopTimer()
 	backend := NewLocalLogBackend(true)
-	fname := initLog()
+	fname := testutil.InitTempFileLogger("info")
 	defer os.RemoveAll(fname)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()
@@ -134,16 +134,4 @@ func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)
 	}
-}
-
-func initLog() string {
-	cfg := &log.Config{}
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
-	fname := f.Name()
-	f.Close()
-	cfg.File.Filename = fname
-	cfg.Level = "info"
-	lg, p, _ := log.InitLogger(cfg)
-	log.ReplaceGlobals(lg, p)
-	return fname
 }
