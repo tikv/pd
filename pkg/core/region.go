@@ -72,7 +72,7 @@ type RegionInfo struct {
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
 	buckets unsafe.Pointer
-	// source is used to indicate region's source, such as FromHeartbeat/FromSync/InDisk.
+	// source is used to indicate region's source, such as FromHeartbeat/FromSync/FromStorage.
 	source RegionSource
 }
 
@@ -685,7 +685,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			saveKV, saveCache, isNew = true, true, true
 		} else {
-			if origin.source == FromSync || origin.source == InDisk {
+			if origin.source == FromSync || origin.source == FromStorage {
 				isNew = true
 			}
 			r := region.GetRegionEpoch()
@@ -799,8 +799,8 @@ type RegionsInfo struct {
 type RegionSource uint32
 
 const (
-	// InDisk means region is stale.
-	InDisk RegionSource = iota
+	// FromStorage means region is stale.
+	FromStorage RegionSource = iota
 	// FromSync means region is stale.
 	FromSync
 	// FromHeartbeat means region is fresh.
@@ -854,7 +854,7 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
-	// InDisk means region is stale.
+	// FromStorage means region is stale.
 	r.AtomicAddStaleRegionCnt()
 	return overlaps
 }
