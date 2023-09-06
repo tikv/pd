@@ -270,12 +270,16 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURL url.URL) (*clientv3.Client, e
 }
 
 func createHTTPClient(tlsConfig *tls.Config) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-			TLSClientConfig:   tlsConfig,
-		},
+	// FIXME: Currently, there is no timeout set for certain requests, such as GetRegions,
+	// which may take a significant amount of time. However, it might be necessary to
+	// define an appropriate timeout in the future.
+	cli := &http.Client{}
+	if tlsConfig != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = tlsConfig
+		cli.Transport = transport
 	}
+	return cli
 }
 
 // InitClusterID creates a cluster ID for the given key if it hasn't existed.
