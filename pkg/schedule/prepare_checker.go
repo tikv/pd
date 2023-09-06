@@ -17,8 +17,10 @@ package schedule
 import (
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"go.uber.org/zap"
 )
 
 type prepareChecker struct {
@@ -44,6 +46,11 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		return true
 	}
 	if time.Since(checker.start) > collectTimeout {
+		checker.prepared = true
+		return true
+	}
+	if float64(c.GetStaleRegionCnt()) < float64(c.GetTotalRegionCount())*(1-collectFactor) {
+		log.Info("stale region num is satisfied, skip prepare checker", zap.Int64("stale-region", c.GetStaleRegionCnt()), zap.Int("total-region", c.GetTotalRegionCount()))
 		checker.prepared = true
 		return true
 	}

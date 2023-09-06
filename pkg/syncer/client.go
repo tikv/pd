@@ -183,16 +183,20 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 							core.SetWrittenKeys(stats[i].KeysWritten),
 							core.SetReadBytes(stats[i].BytesRead),
 							core.SetReadKeys(stats[i].KeysRead),
-							core.SetFromHeartbeat(false),
+							core.SetSource(core.FromSync),
 						)
 					} else {
-						region = core.NewRegionInfo(r, regionLeader, core.SetFromHeartbeat(false))
+						region = core.NewRegionInfo(r, regionLeader, core.SetSource(core.FromSync))
 					}
 
 					origin, _, err := bc.PreCheckPutRegion(region)
 					if err != nil {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
+					}
+					// FromSync means region is stale.
+					if origin == nil || (origin != nil && origin.GetRegionSource() == core.FromHeartbeat) {
+						bc.RegionsInfo.AtomicAddStaleRegionCnt()
 					}
 					_, saveKV, _, _ := regionGuide(region, origin)
 					overlaps := bc.PutRegion(region)

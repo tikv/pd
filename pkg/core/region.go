@@ -71,8 +71,14 @@ type RegionInfo struct {
 	queryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
-	buckets       unsafe.Pointer
-	fromHeartbeat bool
+	buckets unsafe.Pointer
+	// source is used to indicate region's source, such as FromHeartbeat/FromSync/InDisk.
+	source RegionSource
+}
+
+// GetRegionSource returns the region source.
+func (r *RegionInfo) GetRegionSource() RegionSource {
+	return r.source
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -171,6 +177,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 		queryStats:        heartbeat.GetQueryStats(),
+		source:            FromHeartbeat,
 	}
 
 	for _, opt := range opts {
@@ -639,11 +646,6 @@ func (r *RegionInfo) IsFlashbackChanged(l *RegionInfo) bool {
 	return r.meta.FlashbackStartTs != l.meta.FlashbackStartTs || r.meta.IsInFlashback != l.meta.IsInFlashback
 }
 
-// IsFromHeartbeat returns whether the region info is from the region heartbeat.
-func (r *RegionInfo) IsFromHeartbeat() bool {
-	return r.fromHeartbeat
-}
-
 func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
 	return bytes.Compare(r.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(r.GetEndKey()) > 0 && bytes.Compare(r.GetEndKey(), endKey) <= 0))
 }
@@ -683,7 +685,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			saveKV, saveCache, isNew = true, true, true
 		} else {
-			if !origin.IsFromHeartbeat() {
+			if origin.source == FromSync || origin.source == InDisk {
 				isNew = true
 			}
 			r := region.GetRegionEpoch()
@@ -793,6 +795,18 @@ type RegionsInfo struct {
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 }
 
+// RegionSource is the source of region.
+type RegionSource uint32
+
+const (
+	// InDisk means region is stale.
+	InDisk RegionSource = iota
+	// FromSync means region is stale.
+	FromSync
+	// FromHeartbeat means region is fresh.
+	FromHeartbeat
+)
+
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
@@ -840,6 +854,8 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	// InDisk means region is stale.
+	r.AtomicAddStaleRegionCnt()
 	return overlaps
 }
 
@@ -857,6 +873,21 @@ func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*reg
 	return origin, overlaps, err
 }
 
+// GetStaleRegionCnt returns the stale region count.
+func (r *RegionsInfo) GetStaleRegionCnt() int64 {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	if r.tree.length() == 0 {
+		return 0
+	}
+	return r.tree.staleRegionCnt
+}
+
+// AtomicAddStaleRegionCnt atomically adds the stale region count.
+func (r *RegionsInfo) AtomicAddStaleRegionCnt() {
+	r.tree.AtomicAddStaleRegionCnt()
+}
+
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
 	r.t.Lock()
@@ -869,6 +900,10 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 	if err != nil {
 		r.t.Unlock()
 		return nil, err
+	}
+	// If origin is stale, need to sub the stale region count.
+	if origin != nil && origin.source != FromHeartbeat && region.source == FromHeartbeat {
+		r.tree.AtomicSubStaleRegionCnt()
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
