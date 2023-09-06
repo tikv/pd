@@ -332,13 +332,13 @@ func (c *RaftCluster) Start(s Server) error {
 		}
 		c.initSchedulers()
 	} else {
-		c.wg.Add(3)
+		c.wg.Add(2)
 		go c.runCoordinator()
 		go c.runStatsBackgroundJobs()
-		go c.runMetricsCollectionJob()
 	}
 
-	c.wg.Add(7)
+	c.wg.Add(8)
+	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
 	go c.syncRegions()
 	go c.runReplicationMode()
