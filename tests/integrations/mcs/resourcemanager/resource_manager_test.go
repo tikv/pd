@@ -1282,7 +1282,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	c2, err := controller.NewResourceGroupController(suite.ctx, 2, cli, nil, controller.WithMaxWaitDuration(time.Hour))
 	re.NoError(err)
 	c2.Start(suite.ctx)
-
+	time.Sleep(500 * time.Millisecond)
 	// helper function for sending HTTP requests and checking responses
 	sendRequest := func(method, url string, body io.Reader) []byte {
 		req, err := http.NewRequest(method, url, body)
