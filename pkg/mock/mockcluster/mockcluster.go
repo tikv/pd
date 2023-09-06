@@ -231,7 +231,7 @@ func (mc *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
 func (mc *Cluster) SetStoreUp(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
-		core.UpStore(),
+		core.SetStoreState(metapb.StoreState_Up),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	mc.PutStore(newStore)
@@ -241,7 +241,7 @@ func (mc *Cluster) SetStoreUp(storeID uint64) {
 func (mc *Cluster) SetStoreDisconnect(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
-		core.UpStore(),
+		core.SetStoreState(metapb.StoreState_Up),
 		core.SetLastHeartbeatTS(time.Now().Add(-time.Second*30)),
 	)
 	mc.PutStore(newStore)
@@ -251,7 +251,7 @@ func (mc *Cluster) SetStoreDisconnect(storeID uint64) {
 func (mc *Cluster) SetStoreDown(storeID uint64) {
 	store := mc.GetStore(storeID)
 	newStore := store.Clone(
-		core.UpStore(),
+		core.SetStoreState(metapb.StoreState_Up),
 		core.SetLastHeartbeatTS(typeutil.ZeroTime),
 	)
 	mc.PutStore(newStore)
@@ -260,7 +260,7 @@ func (mc *Cluster) SetStoreDown(storeID uint64) {
 // SetStoreOffline sets store state to be offline.
 func (mc *Cluster) SetStoreOffline(storeID uint64) {
 	store := mc.GetStore(storeID)
-	newStore := store.Clone(core.OfflineStore(false))
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	mc.PutStore(newStore)
 }
 
@@ -287,7 +287,7 @@ func (mc *Cluster) BuryStore(storeID uint64, forceBury bool) error {
 		}
 	}
 
-	newStore := store.Clone(core.TombstoneStore())
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
 	mc.PutStore(newStore)
 	return nil
 }
