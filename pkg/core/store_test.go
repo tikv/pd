@@ -84,7 +84,7 @@ func TestCloneStore(t *testing.T) {
 				break
 			}
 			store.Clone(
-				UpStore(),
+				SetStoreState(metapb.StoreState_Up),
 				SetLastHeartbeatTS(time.Now()),
 			)
 		}

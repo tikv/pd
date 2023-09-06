@@ -225,7 +225,7 @@ func TestFilterUnhealthyStore(t *testing.T) {
 			Available:   50,
 			RegionCount: 1,
 		}
-		newStore := store.Clone(core.TombstoneStore())
+		newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
 		re.NoError(cluster.putStoreLocked(newStore))
 		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 		re.Nil(cluster.hotStat.GetRollingStoreStats(store.GetID()))
@@ -2351,7 +2351,7 @@ func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 func (c *testCluster) setStoreDown(storeID uint64) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(
-		core.UpStore(),
+		core.SetStoreState(metapb.StoreState_Up),
 		core.SetLastHeartbeatTS(typeutil.ZeroTime),
 	)
 	c.Lock()
@@ -2361,7 +2361,7 @@ func (c *testCluster) setStoreDown(storeID uint64) error {
 
 func (c *testCluster) setStoreOffline(storeID uint64) error {
 	store := c.GetStore(storeID)
-	newStore := store.Clone(core.OfflineStore(false))
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	c.Lock()
 	defer c.Unlock()
 	return c.putStoreLocked(newStore)
