@@ -293,6 +293,9 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 // NOTICE: this function should be called after the TSO in memory has been initialized
 // and should not be called when the TSO in memory has been reset anymore.
 func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error {
+	if !t.isInitialized() {
+		return errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
+	}
 	prevPhysical, prevLogical := t.getTSO()
 	t.metrics.tsoPhysicalGauge.Set(float64(prevPhysical.UnixNano() / int64(time.Millisecond)))
 	t.metrics.tsoPhysicalGapGauge.Set(float64(time.Since(prevPhysical).Milliseconds()))

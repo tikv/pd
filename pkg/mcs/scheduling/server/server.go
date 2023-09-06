@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -31,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/spf13/cobra"
@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -77,6 +78,7 @@ type Server struct {
 	cfg           *config.Config
 	clusterID     uint64
 	persistConfig *config.PersistConfig
+	basicCluster  *core.BasicCluster
 
 	// for the primary election of scheduling
 	participant *member.Participant
@@ -98,6 +100,7 @@ type Server struct {
 	// for watching the PD API server meta info updates that are related to the scheduling.
 	configWatcher *config.Watcher
 	ruleWatcher   *rule.Watcher
+	metaWatcher   *meta.Watcher
 }
 
 // Name returns the unique name for this server in the scheduling cluster.
@@ -279,6 +282,7 @@ func (s *Server) Close() {
 	s.GetCoordinator().Stop()
 	s.ruleWatcher.Close()
 	s.configWatcher.Close()
+	s.metaWatcher.Close()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -317,6 +321,11 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 // GetCluster returns the cluster.
 func (s *Server) GetCluster() *Cluster {
 	return s.cluster
+}
+
+// GetBasicCluster returns the basic cluster.
+func (s *Server) GetBasicCluster() *core.BasicCluster {
+	return s.basicCluster
 }
 
 // GetCoordinator returns the coordinator.
@@ -361,19 +370,22 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.ListenAddr
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
-	schedulingPrimaryPrefix := endpoint.SchedulingSvcRootPath(s.clusterID)
-	s.participant = member.NewParticipant(s.GetClient())
-	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
-		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
+	s.participant = member.NewParticipant(s.GetClient(), utils.SchedulingServiceName)
+	p := &schedulingpb.Participant{
+		Name:       uniqueName,
+		Id:         uniqueID, // id is unique among all participants
+		ListenUrls: []string{s.cfg.AdvertiseListenAddr},
+	}
+	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
+	s.basicCluster = core.NewBasicCluster()
 	err = s.startWatcher()
 	if err != nil {
 		return err
 	}
 	s.storage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(s.GetClient(), endpoint.PDRootPath(s.clusterID)), nil)
-	basicCluster := core.NewBasicCluster()
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, basicCluster)
-	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, s.basicCluster)
+	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
 	if err != nil {
 		return err
 	}
@@ -414,15 +426,15 @@ func (s *Server) startServer() (err error) {
 }
 
 func (s *Server) startWatcher() (err error) {
-	s.configWatcher, err = config.NewWatcher(
-		s.Context(), s.GetClient(), s.clusterID, s.persistConfig,
-	)
+	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.basicCluster)
 	if err != nil {
 		return err
 	}
-	s.ruleWatcher, err = rule.NewWatcher(
-		s.Context(), s.GetClient(), s.clusterID,
-	)
+	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.persistConfig)
+	if err != nil {
+		return err
+	}
+	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID)
 	return err
 }
 

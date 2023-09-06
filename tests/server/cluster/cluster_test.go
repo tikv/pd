@@ -351,11 +351,11 @@ func getTestDeployPath(storeID uint64) string {
 func resetStoreState(re *require.Assertions, rc *cluster.RaftCluster, storeID uint64, state metapb.StoreState) {
 	store := rc.GetStore(storeID)
 	re.NotNil(store)
-	newStore := store.Clone(core.OfflineStore(false))
+	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	if state == metapb.StoreState_Up {
-		newStore = newStore.Clone(core.UpStore())
+		newStore = newStore.Clone(core.SetStoreState(metapb.StoreState_Up))
 	} else if state == metapb.StoreState_Tombstone {
-		newStore = newStore.Clone(core.TombstoneStore())
+		newStore = newStore.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
 	}
 
 	rc.GetBasicCluster().PutStore(newStore)
