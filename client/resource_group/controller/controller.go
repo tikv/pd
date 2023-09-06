@@ -124,6 +124,9 @@ type ResourceGroupsController struct {
 	}
 
 	opts []ResourceControlCreateOption
+
+	// a cache for ru config and make concurrency safe.
+	safeRuConfig atomic.Pointer[RUConfig]
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -157,6 +160,7 @@ func NewResourceGroupController(
 	}
 	log.Info("load resource controller config", zap.Reflect("config", config), zap.Reflect("ru-config", controller.ruConfig))
 	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
+	controller.safeRuConfig.Store(controller.ruConfig)
 	return controller, nil
 }
 
@@ -177,9 +181,9 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 	return config, nil
 }
 
-// GetConfig returns the config of controller. It's only used for test.
+// GetConfig returns the config of controller.
 func (c *ResourceGroupsController) GetConfig() *RUConfig {
-	return c.ruConfig
+	return c.safeRuConfig.Load()
 }
 
 // Source List
@@ -345,10 +349,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						continue
 					}
 					c.ruConfig = GenerateRUConfig(config)
+
 					// Stay compatible with serverless
 					for _, opt := range c.opts {
 						opt(c)
 					}
+					copyCfg := *c.ruConfig
+					c.safeRuConfig.Store(&copyCfg)
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
 

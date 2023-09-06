@@ -1282,7 +1282,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	c2, err := controller.NewResourceGroupController(suite.ctx, 2, cli, nil, controller.WithMaxWaitDuration(time.Hour))
 	re.NoError(err)
 	c2.Start(suite.ctx)
-	time.Sleep(500 * time.Millisecond)
 	// helper function for sending HTTP requests and checking responses
 	sendRequest := func(method, url string, body io.Reader) []byte {
 		req, err := http.NewRequest(method, url, body)
@@ -1344,6 +1343,12 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 			configJSON: fmt.Sprintf(`{"write-base-cost": %v}`, readBaseCost*2),
 			value:      readBaseCost * 2,
 			expected:   func(ruConfig *controller.RUConfig) { ruConfig.WriteBaseCost = controller.RequestUnit(readBaseCost * 2) },
+		},
+		{
+			// reset the degraded-mode-wait-duration to default in test.
+			configJSON: fmt.Sprintf(`{"degraded-mode-wait-duration": "%v"}`, time.Second),
+			value:      time.Second,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.DegradedModeWaitDuration = time.Second },
 		},
 	}
 	// change properties one by one and verify each time
