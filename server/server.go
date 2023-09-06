@@ -40,6 +40,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
@@ -2017,7 +2018,7 @@ func (s *Server) initSchedulingPrimaryWatcher() {
 	schedulingRootPath := endpoint.SchedulingSvcRootPath(s.clusterID)
 	schedulingServicePrimaryKey := path.Join(schedulingRootPath, mcs.PrimaryKey)
 	putFn := func(kv *mvccpb.KeyValue) error {
-		primary := &tsopb.Participant{} // TODO: use Generics
+		primary := &schedulingpb.Participant{} // TODO: use Generics
 		if err := proto.Unmarshal(kv.Value, primary); err != nil {
 			return err
 		}
