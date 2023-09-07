@@ -198,15 +198,22 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		DownPeer:    len(region.GetDownPeers()) > 0,
 		PendingPeer: len(region.GetPendingPeers()) > 0,
 		LearnerPeer: len(region.GetLearners()) > 0,
-		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
+		EmptyRegion: region.IsEmptyRegion(),
 		OversizedRegion: region.IsOversized(
 			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()),
 			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys()),
 		),
 		UndersizedRegion: region.NeedMerge(
+<<<<<<< HEAD:server/statistics/region_collection.go
 			int64(r.opt.GetMaxMergeRegionSize()),
 			int64(r.opt.GetMaxMergeRegionKeys()),
 		),
+=======
+			int64(r.conf.GetMaxMergeRegionSize()),
+			int64(r.conf.GetMaxMergeRegionKeys()),
+		) && region.GetApproximateSize() >= core.EmptyRegionApproximateSize,
+		WitnessLeader: region.GetLeader().GetIsWitness(),
+>>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009)):pkg/statistics/region_collection.go
 	}
 
 	for typ, c := range conditions {

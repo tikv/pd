@@ -843,7 +843,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	region.Inherit(origin, c.storeConfigManager.GetStoreConfig().IsEnableRegionBucket())
+=======
+	if c.GetStoreConfig().IsEnableRegionBucket() {
+		region.InheritBuckets(origin)
+	}
+>>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009))
 
 	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
