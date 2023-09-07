@@ -193,6 +193,7 @@ func (s *testRegionInfoSuite) TestSortedEqual(c *C) {
 	}
 }
 
+<<<<<<< HEAD:server/core/region_test.go
 func (s *testRegionInfoSuite) TestInherit(c *C) {
 	// size in MB
 	// case for approximateSize
@@ -219,8 +220,11 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 		r.Inherit(origin, false)
 		c.Assert(r.approximateSize, Equals, int64(t.expect))
 	}
+=======
+func TestInheritBuckets(t *testing.T) {
+	re := require.New(t)
+>>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009)):pkg/core/region_test.go
 
-	// bucket
 	data := []struct {
 		originBuckets *metapb.Buckets
 		buckets       *metapb.Buckets
@@ -233,6 +237,7 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 	for _, d := range data {
 		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+<<<<<<< HEAD:server/core/region_test.go
 		r.Inherit(origin, true)
 		c.Assert(r.GetBuckets(), DeepEquals, d.originBuckets)
 		// region will not inherit bucket keys.
@@ -240,6 +245,14 @@ func (s *testRegionInfoSuite) TestInherit(c *C) {
 			newRegion := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 			newRegion.Inherit(origin, false)
 			c.Assert(newRegion.GetBuckets(), Not(DeepEquals), d.originBuckets)
+=======
+		r.InheritBuckets(origin)
+		re.Equal(d.originBuckets, r.GetBuckets())
+		// region will not inherit bucket keys.
+		if origin.GetBuckets() != nil {
+			newRegion := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			re.NotEqual(d.originBuckets, newRegion.GetBuckets())
+>>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009)):pkg/core/region_test.go
 		}
 	}
 }

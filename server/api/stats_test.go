@@ -131,7 +131,12 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	statsAll := &statistics.RegionStats{
 		Count:            4,
 		EmptyCount:       1,
+<<<<<<< HEAD
 		StorageSize:      351,
+=======
+		StorageSize:      350,
+		UserStorageSize:  291,
+>>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009))
 		StorageKeys:      221,
 		StoreLeaderCount: map[uint64]int{1: 1, 4: 2, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 3, 2: 1, 3: 1, 4: 2, 5: 2},
@@ -144,7 +149,12 @@ func (s *testStatsSuite) TestRegionStats(c *C) {
 	stats23 := &statistics.RegionStats{
 		Count:            2,
 		EmptyCount:       1,
+<<<<<<< HEAD
 		StorageSize:      201,
+=======
+		StorageSize:      200,
+		UserStorageSize:  181,
+>>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009))
 		StorageKeys:      151,
 		StoreLeaderCount: map[uint64]int{4: 1, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 2, 4: 1, 5: 2},

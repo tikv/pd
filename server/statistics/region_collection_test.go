@@ -78,7 +78,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	stores[3] = store3
 	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
-	region1 := core.NewRegionInfo(r1, peers[0])
+	region1 := core.NewRegionInfo(r1, peers[0], core.SetApproximateSize(1))
 	region2 := core.NewRegionInfo(r2, peers[0])
 	regionStats := NewRegionStatistics(opt, t.manager, nil)
 	regionStats.Observe(region1, stores)
@@ -112,6 +112,7 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 
 	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
 	regionStats.Observe(region2, stores[0:2])
+<<<<<<< HEAD:server/statistics/region_collection_test.go
 	c.Assert(regionStats.stats[ExtraPeer], HasLen, 1)
 	c.Assert(regionStats.stats[MissPeer], HasLen, 1)
 	c.Assert(regionStats.stats[DownPeer], HasLen, 2)
@@ -125,6 +126,17 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(regionStats.offlineStats[PendingPeer], HasLen, 1)
 	c.Assert(regionStats.offlineStats[LearnerPeer], HasLen, 1)
 	c.Assert(regionStats.offlineStats[OfflinePeer], HasLen, 1)
+=======
+	re.Len(regionStats.stats[ExtraPeer], 1)
+	re.Len(regionStats.stats[MissPeer], 1)
+	re.Len(regionStats.stats[DownPeer], 2)
+	re.Len(regionStats.stats[PendingPeer], 1)
+	re.Len(regionStats.stats[LearnerPeer], 1)
+	re.Len(regionStats.stats[OversizedRegion], 1)
+	re.Len(regionStats.stats[UndersizedRegion], 0)
+	re.Len(regionStats.stats[EmptyRegion], 0)
+	re.Len(regionStats.stats[OfflinePeer], 1)
+>>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009)):pkg/statistics/region_collection_test.go
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
 	regionStats.Observe(region1, stores[0:3])
