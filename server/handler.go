@@ -114,6 +114,9 @@ func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if rc == nil {
+		return false, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	return rc.GetCoordinator().GetSchedulersController().IsSchedulerPaused(name)
 }
 
@@ -123,6 +126,9 @@ func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if rc == nil {
+		return false, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	return rc.GetCoordinator().GetSchedulersController().IsSchedulerDisabled(name)
 }
 
@@ -131,6 +137,9 @@ func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 	rc, err := h.GetRaftCluster()
 	if err != nil {
 		return false, err
+	}
+	if rc == nil {
+		return false, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	return rc.GetCoordinator().GetSchedulersController().IsSchedulerExisted(name)
 }
@@ -146,6 +155,9 @@ func (h *Handler) GetSchedulers() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	return c.GetSchedulers(), nil
 }
 
@@ -154,6 +166,9 @@ func (h *Handler) IsCheckerPaused(name string) (bool, error) {
 	rc, err := h.GetRaftCluster()
 	if err != nil {
 		return false, err
+	}
+	if rc == nil {
+		return false, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	return rc.GetCoordinator().IsCheckerPaused(name)
 }
@@ -180,7 +195,7 @@ func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 // GetHotWriteRegions gets all hot write regions stats.
 func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
 	c, err := h.GetRaftCluster()
-	if err != nil {
+	if err != nil || c == nil {
 		return nil
 	}
 	return c.GetHotWriteRegions()
@@ -189,7 +204,7 @@ func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
 // GetHotBuckets returns all hot buckets stats.
 func (h *Handler) GetHotBuckets(regionIDs ...uint64) map[uint64][]*buckets.BucketStat {
 	c, err := h.GetRaftCluster()
-	if err != nil {
+	if err != nil || c == nil {
 		return nil
 	}
 	degree := c.GetOpts().GetHotRegionCacheHitsThreshold()
@@ -199,7 +214,7 @@ func (h *Handler) GetHotBuckets(regionIDs ...uint64) map[uint64][]*buckets.Bucke
 // GetHotReadRegions gets all hot read regions stats.
 func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 	c, err := h.GetRaftCluster()
-	if err != nil {
+	if err != nil || c == nil {
 		return nil
 	}
 	return c.GetHotReadRegions()
@@ -230,6 +245,9 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 
 	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().GetSchedulersController().RemoveScheduler)
 	if err != nil {
@@ -257,6 +275,9 @@ func (h *Handler) RemoveScheduler(name string) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
+	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	if !h.s.IsAPIServiceMode() {
 		if err = c.RemoveScheduler(name); err != nil {
@@ -288,6 +309,9 @@ func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
 	if err != nil {
 		return err
 	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	if err = c.PauseOrResumeScheduler(name, t); err != nil {
 		if t == 0 {
 			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
@@ -311,6 +335,9 @@ func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
+	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	if err = c.PauseOrResumeChecker(name, t); err != nil {
 		if t == 0 {
@@ -526,6 +553,9 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	if err != nil {
 		return err
 	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	return c.SetAllStoresLimit(limitType, ratePerMin)
 }
 
@@ -534,6 +564,9 @@ func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
+	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
 	return nil
@@ -544,6 +577,9 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
+	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	for _, store := range c.GetStores() {
 		for _, label := range labels {
@@ -564,6 +600,9 @@ func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]sc.St
 	if err != nil {
 		return nil, err
 	}
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	return c.GetAllStoresLimit(), nil
 }
 
@@ -573,6 +612,9 @@ func (h *Handler) SetStoreLimit(storeID uint64, ratePerMin float64, limitType st
 	if err != nil {
 		return err
 	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	return c.SetStoreLimit(storeID, limitType, ratePerMin)
 }
 
@@ -581,6 +623,9 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
+	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 
 	region := c.GetRegion(regionID)
@@ -609,6 +654,9 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
+	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 
 	region := c.GetRegion(regionID)
@@ -654,6 +702,9 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	if err != nil {
 		return err
 	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 
 	region := c.GetRegion(regionID)
 	if region == nil {
@@ -686,6 +737,9 @@ func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, nil, err
+	}
+	if c == nil {
+		return nil, nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 
 	region := c.GetRegion(regionID)
@@ -752,6 +806,9 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 	if err != nil {
 		return err
 	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 
 	region := c.GetRegion(regionID)
 	if region == nil {
@@ -778,6 +835,9 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
+	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 
 	region := c.GetRegion(regionID)
@@ -821,6 +881,9 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 	if err != nil {
 		return err
 	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 
 	region := c.GetRegion(regionID)
 	if region == nil {
@@ -860,6 +923,9 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 	if err != nil {
 		return err
 	}
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 
 	region := c.GetRegion(regionID)
 	if region == nil {
@@ -889,6 +955,9 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return 0, err
+	}
+	if c == nil {
+		return 0, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	opsCount := 0
 	var failures map[uint64]error
@@ -934,6 +1003,9 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	mux := http.NewServeMux()
 	for name, handler := range c.GetSchedulerHandlers() {
 		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
@@ -961,14 +1033,20 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ 
 
 // SetStoreLimitScene sets the limit values for different scenes
 func (h *Handler) SetStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
-	cluster := h.s.GetRaftCluster()
-	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return
+	}
+	rc.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
 }
 
 // GetStoreLimitScene returns the limit values for different scenes
 func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
-	cluster := h.s.GetRaftCluster()
-	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return nil
+	}
+	return rc.GetStoreLimiter().StoreLimitScene(limitType)
 }
 
 // GetProgressByID returns the progress details for a given store ID.

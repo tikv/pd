@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -54,6 +55,10 @@ type minResolvedTS struct {
 // @Router   /min-resolved-ts/{store_id} [get]
 func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := h.svr.GetRaftCluster()
+	if c == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	idStr := mux.Vars(r)["store_id"]
 	storeID, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
@@ -85,6 +90,10 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 // @Router       /min-resolved-ts [get]
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := h.svr.GetRaftCluster()
+	if c == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		return
+	}
 	scopeMinResolvedTS := c.GetMinResolvedTS()
 	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
 

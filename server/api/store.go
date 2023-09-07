@@ -428,6 +428,10 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 // @Router   /store/{id}/limit [post]
 func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
+	if rc == nil {
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
