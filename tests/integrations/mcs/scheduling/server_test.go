@@ -20,9 +20,12 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 )
@@ -125,4 +128,48 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr
 	})
+}
+
+func (suite *serverTestSuite) TestForwardSchedulingRelated() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	s.PutStore(
+		context.Background(), &pdpb.PutStoreRequest{
+			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      1,
+				Address: "tikv1",
+				State:   metapb.StoreState_Up,
+				Version: "7.0.0",
+			},
+		},
+	)
+	s.StoreHeartbeat(
+		context.Background(), &pdpb.StoreHeartbeatRequest{
+			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+			Stats: &pdpb.StoreStats{
+				StoreId:      1,
+				Capacity:     1798985089024,
+				Available:    1709868695552,
+				UsedSize:     85150956358,
+				KeysWritten:  20000,
+				BytesWritten: 199,
+				KeysRead:     10000,
+				BytesRead:    99,
+			},
+		},
+	)
+	store := tc.GetPrimaryServer().GetCluster().GetStore(1)
+	re.Equal(uint64(1798985089024), store.GetStoreStats().GetCapacity())
+	re.Equal(uint64(1709868695552), store.GetStoreStats().GetAvailable())
+	re.Equal(uint64(85150956358), store.GetStoreStats().GetUsedSize())
+	re.Equal(uint64(20000), store.GetStoreStats().GetKeysWritten())
+	re.Equal(uint64(199), store.GetStoreStats().GetBytesWritten())
+	re.Equal(uint64(10000), store.GetStoreStats().GetKeysRead())
+	re.Equal(uint64(99), store.GetStoreStats().GetBytesRead())
 }

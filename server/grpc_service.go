@@ -862,16 +862,14 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	if s.IsAPIServiceMode() {
 		client := s.getForwardedClient(ctx)
 		if client != nil {
-			if resp, _ := schedulingpb.NewSchedulingClient(client).PutStore(ctx, request); resp.GetHeader().GetError() != nil {
-				return &pdpb.PutStoreResponse{
-					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().String()),
-				}, nil
+			req := &schedulingpb.PutStoreRequest{
+				Header: &schedulingpb.RequestHeader{
+					ClusterId: request.GetHeader().GetClusterId(),
+					SenderId:  request.GetHeader().GetSenderId(),
+				},
+				Store: request.GetStore(),
 			}
-		} else {
-			return &pdpb.PutStoreResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-					"get delegate client failed"),
-			}, nil
+			schedulingpb.NewSchedulingClient(client).PutStore(ctx, req)
 		}
 	}
 
@@ -995,15 +993,20 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		}
 
 		s.handleDamagedStore(request.GetStats())
-
+		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		if s.IsAPIServiceMode() {
 			client := s.getForwardedClient(ctx)
 			if client != nil {
-				schedulingpb.NewSchedulingClient(client).StoreHeartbeat(ctx, request)
+				req := &schedulingpb.StoreHeartbeatRequest{
+					Header: &schedulingpb.RequestHeader{
+						ClusterId: request.GetHeader().GetClusterId(),
+						SenderId:  request.GetHeader().GetSenderId(),
+					},
+					Stats: request.GetStats(),
+				}
+				schedulingpb.NewSchedulingClient(client).StoreHeartbeat(ctx, req)
 			}
 		}
-
-		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 	}
 
 	if status := request.GetDrAutosyncStatus(); status != nil {

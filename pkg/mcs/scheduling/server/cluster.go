@@ -7,10 +7,9 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -196,7 +195,7 @@ func (c *Cluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, valu
 }
 
 // HandleStoreHeartbeat updates the store status.
-func (c *Cluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest) error {
+func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatRequest) error {
 	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
 	store := c.GetStore(storeID)
@@ -204,27 +203,9 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest) er
 		return errors.Errorf("store %v not found", storeID)
 	}
 
-	limit := store.GetStoreLimit()
-	if limit == nil {
-		limit = storelimit.NewStoreRateLimit(0.0)
-	}
-
 	nowTime := time.Now()
-	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetStoreLimit(limit))
+	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
 
-	if newStore.IsLowSpace(c.persistConfig.GetLowSpaceRatio()) {
-		log.Warn("store does not have enough disk space",
-			zap.Uint64("store-id", storeID),
-			zap.Uint64("capacity", newStore.GetCapacity()),
-			zap.Uint64("available", newStore.GetAvailable()))
-	}
-	if newStore.NeedPersist() && c.storage != nil {
-		if err := c.storage.SaveStoreMeta(newStore.GetMeta()); err != nil {
-			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
-		} else {
-			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
-		}
-	}
 	if store := c.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
 	}

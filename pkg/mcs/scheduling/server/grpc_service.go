@@ -18,7 +18,6 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -69,35 +68,29 @@ func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
 }
 
 // StoreHeartbeat implements gRPC PDServer.
-func (s *Service) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHeartbeatRequest) (*pdpb.StoreHeartbeatResponse, error) {
+func (s *Service) StoreHeartbeat(ctx context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
 	if c == nil {
-		// ignore the error
-		return &pdpb.StoreHeartbeatResponse{}, nil
+		// TODO: add metrics
+		return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 	}
 
-	// ignore the error
+	// TODO: add metrics
 	c.HandleStoreHeartbeat(request)
-	return &pdpb.StoreHeartbeatResponse{}, nil
+	return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 }
 
 // PutStore implements gRPC PDServer.
-func (s *Service) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
+func (s *Service) PutStore(ctx context.Context, request *schedulingpb.PutStoreRequest) (*schedulingpb.PutStoreResponse, error) {
 	c := s.GetCluster()
 	if c == nil {
-		return &pdpb.PutStoreResponse{Header: &pdpb.ResponseHeader{
-			ClusterId: s.clusterID,
-			Error: &pdpb.Error{
-				Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
-				Message: "scheduling server is not initialized yet",
-			},
-		}}, nil
+		// TODO: add metrics
+		return &schedulingpb.PutStoreResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 	}
 
+	// TODO: add metrics
 	c.PutStore(core.NewStoreInfo(request.GetStore()))
-	return &pdpb.PutStoreResponse{Header: &pdpb.ResponseHeader{
-		ClusterId: s.clusterID,
-	}}, nil
+	return &schedulingpb.PutStoreResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 }
 
 // RegisterGRPCService registers the service to gRPC server.
