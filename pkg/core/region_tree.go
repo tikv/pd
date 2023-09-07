@@ -62,7 +62,7 @@ type regionTree struct {
 	totalSize           int64
 	totalWriteBytesRate float64
 	totalWriteKeysRate  float64
-
+	// count the stale meta regions
 	staleRegionCnt int64
 }
 

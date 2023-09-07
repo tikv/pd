@@ -194,8 +194,8 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
 					}
-					// FromSync means region is stale.
-					if origin == nil || (origin != nil && origin.GetRegionSource() == core.FromHeartbeat) {
+					// FromSync means this region's meta info might be stale.
+					if origin == nil || (origin != nil && origin.SourceFresh()) {
 						bc.RegionsInfo.AtomicAddStaleRegionCnt()
 					}
 					_, saveKV, _, _ := regionGuide(region, origin)

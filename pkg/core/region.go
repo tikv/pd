@@ -76,6 +76,28 @@ type RegionInfo struct {
 	source RegionSource
 }
 
+// RegionSource is the source of region.
+type RegionSource uint32
+
+const (
+	// FromStorage means this region's meta info might be stale.
+	FromStorage RegionSource = iota
+	// FromSync means this region's meta info might be stale.
+	FromSync
+	// FromHeartbeat means this region's meta info is relatively fresher.
+	FromHeartbeat
+)
+
+// SourceStale means this region's meta info might be stale.
+func (r *RegionInfo) SourceStale() bool {
+	return r.source == FromStorage || r.source == FromSync
+}
+
+// SourceFresh means this region's meta info is relatively fresher.
+func (r *RegionInfo) SourceFresh() bool {
+	return r.source == FromHeartbeat
+}
+
 // GetRegionSource returns the region source.
 func (r *RegionInfo) GetRegionSource() RegionSource {
 	return r.source
@@ -685,7 +707,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			saveKV, saveCache, isNew = true, true, true
 		} else {
-			if origin.source == FromSync || origin.source == FromStorage {
+			if origin.SourceStale() {
 				isNew = true
 			}
 			r := region.GetRegionEpoch()
@@ -795,18 +817,6 @@ type RegionsInfo struct {
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 }
 
-// RegionSource is the source of region.
-type RegionSource uint32
-
-const (
-	// FromStorage means region is stale.
-	FromStorage RegionSource = iota
-	// FromSync means region is stale.
-	FromSync
-	// FromHeartbeat means region is fresh.
-	FromHeartbeat
-)
-
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
@@ -854,7 +864,7 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
-	// FromStorage means region is stale.
+	// FromStorage means this region's meta info might be stale.
 	r.AtomicAddStaleRegionCnt()
 	return overlaps
 }
@@ -902,7 +912,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 		return nil, err
 	}
 	// If origin is stale, need to sub the stale region count.
-	if origin != nil && origin.source != FromHeartbeat && region.source == FromHeartbeat {
+	if origin != nil && origin.SourceStale() && region.SourceFresh() {
 		r.tree.AtomicSubStaleRegionCnt()
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
