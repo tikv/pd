@@ -121,6 +121,17 @@ func StorePath(storeID uint64) string {
 	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))
 }
 
+// StorePathPrefix returns the store meta info key path prefix.
+func StorePathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), clusterPath, "s") + "/"
+}
+
+// ExtractStoreIDFromPath extracts the store ID from the given path.
+func ExtractStoreIDFromPath(clusterID uint64, path string) (uint64, error) {
+	idStr := strings.TrimLeft(strings.TrimPrefix(path, StorePathPrefix(clusterID)), "0")
+	return strconv.ParseUint(idStr, 10, 64)
+}
+
 func storeLeaderWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
 }
@@ -350,16 +361,28 @@ func buildPath(withSuffix bool, str ...string) string {
 	return sb.String()
 }
 
-// KeyspaceGroupTSPath constructs the timestampOracle path prefix, which is:
+// KeyspaceGroupGlobalTSPath constructs the timestampOracle path prefix for Global TSO, which is:
 //  1. for the default keyspace group:
 //     "" in /pd/{cluster_id}/timestamp
 //  2. for the non-default keyspace groups:
 //     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
-func KeyspaceGroupTSPath(groupID uint32) string {
+func KeyspaceGroupGlobalTSPath(groupID uint32) string {
 	if groupID == utils.DefaultKeyspaceGroupID {
 		return ""
 	}
 	return path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
+}
+
+// KeyspaceGroupLocalTSPath constructs the timestampOracle path prefix for Local TSO, which is:
+//  1. for the default keyspace group:
+//     lta/{dc-location} in /pd/{cluster_id}/lta/{dc-location}/timestamp
+//  2. for the non-default keyspace groups:
+//     {group}/lta/{dc-location} in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
+func KeyspaceGroupLocalTSPath(keyPrefix string, groupID uint32, dcLocation string) string {
+	if groupID == utils.DefaultKeyspaceGroupID {
+		return path.Join(keyPrefix, dcLocation)
+	}
+	return path.Join(fmt.Sprintf("%05d", groupID), keyPrefix, dcLocation)
 }
 
 // TimestampPath returns the timestamp path for the given timestamp oracle path prefix.
@@ -374,7 +397,7 @@ func TimestampPath(tsPath string) string {
 //     /ms/{cluster_id}/tso/{group}/gta/timestamp
 func FullTimestampPath(clusterID uint64, groupID uint32) string {
 	rootPath := TSOSvcRootPath(clusterID)
-	tsPath := TimestampPath(KeyspaceGroupTSPath(groupID))
+	tsPath := TimestampPath(KeyspaceGroupGlobalTSPath(groupID))
 	if groupID == utils.DefaultKeyspaceGroupID {
 		rootPath = LegacyRootPath(clusterID)
 	}

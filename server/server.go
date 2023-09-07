@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"context"
+	errorspkg "errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -237,10 +238,10 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	var mode string
-	if len(services) == 0 {
-		mode = PDMode
-	} else {
+	if len(services) != 0 {
 		mode = APIServiceMode
+	} else {
+		mode = PDMode
 	}
 	log.Info(fmt.Sprintf("%s config", mode), zap.Reflect("config", cfg))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
@@ -1669,8 +1670,11 @@ func (s *Server) campaignLeader() {
 		defer func() {
 			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
 			failpoint.Inject("updateAfterResetTSO", func() {
-				if err = allocator.UpdateTSO(); err != nil {
-					panic(err)
+				if err = allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+				}
+				if allocator.IsInitialize() {
+					log.Panic("the allocator should be uninitialized after reset")
 				}
 			})
 		}()

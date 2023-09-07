@@ -21,28 +21,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 )
 
 func TestDiscover(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	defer func() {
-		etcd.Close()
-	}()
-	re.NoError(err)
-
-	ep := cfg.LCUrls[0].String()
-	re.NoError(err)
-
-	client, err := clientv3.NewFromURL(ep)
-	re.NoError(err)
-
-	<-etcd.Server.ReadyNotify()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
 	sr1 := NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
-	err = sr1.Register()
+	err := sr1.Register()
 	re.NoError(err)
 	sr2 := NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	err = sr2.Register()
@@ -64,20 +50,8 @@ func TestDiscover(t *testing.T) {
 
 func TestServiceRegistryEntry(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	defer func() {
-		etcd.Close()
-	}()
-	re.NoError(err)
-
-	ep := cfg.LCUrls[0].String()
-	re.NoError(err)
-
-	client, err := clientv3.NewFromURL(ep)
-	re.NoError(err)
-
-	<-etcd.Server.ReadyNotify()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
 	entry1 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:1"}
 	s1, err := entry1.Serialize()
 	re.NoError(err)

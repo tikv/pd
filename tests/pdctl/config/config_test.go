@@ -321,6 +321,7 @@ func TestPlacementRules(t *testing.T) {
 	f, _ := os.CreateTemp("/tmp", "pd_tests")
 	fname := f.Name()
 	f.Close()
+	defer os.RemoveAll(fname)
 
 	// test load
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
@@ -493,9 +494,7 @@ func TestPlacementRuleBundle(t *testing.T) {
 	re.NoError(err)
 	fname := f.Name()
 	f.Close()
-	defer func() {
-		os.RemoveAll(fname)
-	}()
+	defer os.RemoveAll(fname)
 
 	// test load
 	var bundles []placement.GroupBundle

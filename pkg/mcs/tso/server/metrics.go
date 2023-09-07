@@ -16,12 +16,9 @@ package server
 
 import "github.com/prometheus/client_golang/prometheus"
 
-const (
-	namespace = "tso"
-)
+const namespace = "tso"
 
 var (
-	// TODO: pre-allocate gauge metrics
 	timeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -30,7 +27,7 @@ var (
 			Help:      "Counter of system time jumps backward.",
 		})
 
-	metadataGauge = prometheus.NewGaugeVec(
+	metaDataGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: "cluster",
@@ -46,39 +43,19 @@ var (
 			Help:      "Indicate the tso server info, and the value is the start timestamp (s).",
 		}, []string{"version", "hash"})
 
-	tsoProxyHandleDuration = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: "server",
-			Name:      "handle_tso_proxy_duration_seconds",
-			Help:      "Bucketed histogram of processing time (s) of handled tso proxy requests.",
-			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		})
-
-	tsoProxyBatchSize = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: "server",
-			Name:      "handle_tso_proxy_batch_size",
-			Help:      "Bucketed histogram of the batch size of handled tso proxy requests.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
-		})
-
-	tsoHandleDuration = prometheus.NewHistogram(
+	tsoHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: "server",
 			Name:      "handle_tso_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
-		})
+		}, []string{"group"})
 )
 
 func init() {
 	prometheus.MustRegister(timeJumpBackCounter)
-	prometheus.MustRegister(metadataGauge)
+	prometheus.MustRegister(metaDataGauge)
 	prometheus.MustRegister(serverInfo)
-	prometheus.MustRegister(tsoProxyHandleDuration)
-	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoHandleDuration)
 }

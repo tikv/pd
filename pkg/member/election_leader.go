@@ -18,7 +18,6 @@ import (
 	"context"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/kvproto/pkg/tsopb"
 )
 
 // ElectionLeader defines the common interface of the leader, which is the pdpb.Member
@@ -64,14 +63,14 @@ func (l *EmbeddedEtcdLeader) Watch(ctx context.Context) {
 // EtcdLeader is the leader in the election group backed by the etcd, but it's
 // decoupled from the embedded etcd.
 type EtcdLeader struct {
-	wrapper      *Participant
-	pariticipant *tsopb.Participant
-	revision     int64
+	wrapper     *Participant
+	participant participant
+	revision    int64
 }
 
 // GetListenUrls returns current leader's client urls
 func (l *EtcdLeader) GetListenUrls() []string {
-	return l.pariticipant.GetListenUrls()
+	return l.participant.GetListenUrls()
 }
 
 // GetRevision the revision of the leader in etcd
@@ -81,10 +80,10 @@ func (l *EtcdLeader) GetRevision() int64 {
 
 // String declares fmt.Stringer
 func (l *EtcdLeader) String() string {
-	return l.pariticipant.String()
+	return l.participant.String()
 }
 
 // Watch on the leader
 func (l *EtcdLeader) Watch(ctx context.Context) {
-	l.wrapper.WatchLeader(ctx, l.pariticipant, l.revision)
+	l.wrapper.WatchLeader(ctx, l.participant, l.revision)
 }

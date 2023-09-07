@@ -167,8 +167,16 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 	log.Info("start to alloc nodes to all keyspace groups")
 	for {
 		select {
+		case <-m.ctx.Done():
+			// When the group manager is closed, we should stop to alloc nodes to all keyspace groups.
+			// Note: If raftcluster is created failed but the group manager has been bootstrapped,
+			// we need to close this goroutine by m.cancel() rather than ctx.Done() from the raftcluster.
+			// because the ctx.Done() from the raftcluster will be triggered after raftcluster is created successfully.
+			log.Info("server is closed, stop to alloc nodes to all keyspace groups")
+			return
 		case <-ctx.Done():
-			log.Info("stop to alloc nodes to all keyspace groups")
+			// When the API leader is changed, we should stop to alloc nodes to all keyspace groups.
+			log.Info("the raftcluster is closed, stop to alloc nodes to all keyspace groups")
 			return
 		case <-ticker.C:
 		}

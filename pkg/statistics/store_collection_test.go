@@ -55,7 +55,7 @@ func TestStoreStatistics(t *testing.T) {
 		stores = append(stores, s)
 	}
 
-	store3 := stores[3].Clone(core.OfflineStore(false))
+	store3 := stores[3].Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	stores[3] = store3
 	store4 := stores[4].Clone(core.SetLastHeartbeatTS(stores[4].GetLastHeartbeatTS().Add(-time.Hour)))
 	stores[4] = store4
@@ -67,7 +67,8 @@ func TestStoreStatistics(t *testing.T) {
 	stores[5] = store5
 	storeStats := NewStoreStatisticsMap(opt)
 	for _, store := range stores {
-		storeStats.Observe(store, storesStats)
+		storeStats.Observe(store)
+		storeStats.ObserveHotStat(store, storesStats)
 	}
 	stats := storeStats.stats
 

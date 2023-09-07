@@ -379,7 +379,7 @@ func (c *Coordinator) Run() {
 		}
 	}
 	log.Info("Coordinator starts to run schedulers")
-	c.initSchedulers()
+	c.InitSchedulers(true)
 
 	c.wg.Add(4)
 	// Starts to patrol regions.
@@ -391,7 +391,8 @@ func (c *Coordinator) Run() {
 	go c.driveSlowNodeScheduler()
 }
 
-func (c *Coordinator) initSchedulers() {
+// InitSchedulers initializes schedulers.
+func (c *Coordinator) InitSchedulers(needRun bool) {
 	var (
 		scheduleNames []string
 		configs       []string
@@ -401,7 +402,7 @@ func (c *Coordinator) initSchedulers() {
 		scheduleNames, configs, err = c.cluster.GetStorage().LoadAllScheduleConfig()
 		select {
 		case <-c.ctx.Done():
-			log.Info("Coordinator stops running")
+			log.Info("init schedulers has been stopped")
 			return
 		default:
 		}
@@ -439,8 +440,10 @@ func (c *Coordinator) initSchedulers() {
 			continue
 		}
 		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
-		if err = c.schedulers.AddScheduler(s); err != nil {
-			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+		if needRun {
+			if err = c.schedulers.AddScheduler(s); err != nil {
+				log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+			}
 		}
 	}
 
@@ -461,12 +464,14 @@ func (c *Coordinator) initSchedulers() {
 		}
 
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
-		if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
-		} else {
-			// Only records the valid scheduler config.
-			scheduleCfg.Schedulers[k] = schedulerCfg
-			k++
+		if needRun {
+			if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+				log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+			} else {
+				// Only records the valid scheduler config.
+				scheduleCfg.Schedulers[k] = schedulerCfg
+				k++
+			}
 		}
 	}
 

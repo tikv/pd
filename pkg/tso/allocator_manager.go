@@ -103,7 +103,7 @@ type ElectionMember interface {
 	// server id of a cluster or the unique keyspace group replica id of the election
 	// group comprised of the replicas of a keyspace group.
 	ID() uint64
-	// ID returns the unique Name in the election group.
+	// ID returns the unique name in the election group.
 	Name() string
 	// MemberValue returns the member value.
 	MemberValue() string
@@ -280,6 +280,14 @@ func (am *AllocatorManager) getGroupID() uint32 {
 		return 0
 	}
 	return am.kgID
+}
+
+// getGroupIDStr returns the keyspace group ID of the allocator manager in string format.
+func (am *AllocatorManager) getGroupIDStr() string {
+	if am == nil {
+		return "0"
+	}
+	return strconv.FormatUint(uint64(am.kgID), 10)
 }
 
 // GetTimestampPath returns the timestamp path in etcd for the given DCLocation.
@@ -1190,6 +1198,9 @@ func (am *AllocatorManager) getAllocatorGroup(dcLocation string) (*allocatorGrou
 func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
+	if len(dcLocation) == 0 {
+		dcLocation = GlobalDCLocation
+	}
 	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
 	if !exist {
 		return nil, errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found", dcLocation))

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 )
@@ -85,4 +86,17 @@ func MustNewGrpcClient(re *require.Assertions, addr string) pdpb.PDClient {
 func CleanServer(dataDir string) {
 	// Clean data directory
 	os.RemoveAll(dataDir)
+}
+
+// InitTempFileLogger initializes the logger and redirects the log output to a temporary file.
+func InitTempFileLogger(level string) (fname string) {
+	cfg := &log.Config{}
+	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	fname = f.Name()
+	f.Close()
+	cfg.File.Filename = fname
+	cfg.Level = level
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
+	return fname
 }

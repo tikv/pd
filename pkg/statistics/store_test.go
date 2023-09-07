@@ -35,7 +35,7 @@ func TestFilterUnhealtyStore(t *testing.T) {
 	re.Len(stats.GetStoresLoads(), 5)
 
 	cluster.PutStore(cluster.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-24 * time.Hour))))
-	cluster.PutStore(cluster.GetStore(2).Clone(core.TombstoneStore()))
+	cluster.PutStore(cluster.GetStore(2).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
 	cluster.DeleteStore(cluster.GetStore(3))
 
 	stats.FilterUnhealthyStore(cluster)
