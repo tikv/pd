@@ -221,7 +221,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		DownPeer:    len(region.GetDownPeers()) > 0,
 		PendingPeer: len(region.GetPendingPeers()) > 0,
 		LearnerPeer: len(region.GetLearners()) > 0,
-		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
+		EmptyRegion: region.IsEmptyRegion(),
 		OversizedRegion: region.IsOversized(
 			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()),
 			int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys()),
@@ -229,7 +229,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		UndersizedRegion: region.NeedMerge(
 			int64(r.conf.GetMaxMergeRegionSize()),
 			int64(r.conf.GetMaxMergeRegionKeys()),
-		),
+		) && region.GetApproximateSize() >= core.EmptyRegionApproximateSize,
 		WitnessLeader: region.GetLeader().GetIsWitness(),
 	}
 

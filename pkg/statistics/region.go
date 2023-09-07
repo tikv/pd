@@ -57,10 +57,21 @@ func (s *RegionStats) Observe(r *core.RegionInfo) {
 	s.Count++
 	approximateKeys := r.GetApproximateKeys()
 	approximateSize := r.GetApproximateSize()
+<<<<<<< HEAD
 	if approximateSize <= core.EmptyRegionApproximateSize {
 		s.EmptyCount++
 	}
 	s.StorageSize += approximateSize
+=======
+	approximateKvSize := r.GetApproximateKvSize()
+	if approximateSize == core.EmptyRegionApproximateSize {
+		s.EmptyCount++
+	}
+	if !r.IsEmptyRegion() {
+		s.StorageSize += approximateSize
+	}
+	s.UserStorageSize += approximateKvSize
+>>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009))
 	s.StorageKeys += approximateKeys
 	leader := r.GetLeader()
 	if leader != nil {

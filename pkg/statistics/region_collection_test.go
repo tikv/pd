@@ -63,7 +63,7 @@ func TestRegionStatistics(t *testing.T) {
 	stores[3] = store3
 	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
-	region1 := core.NewRegionInfo(r1, peers[0])
+	region1 := core.NewRegionInfo(r1, peers[0], core.SetApproximateSize(1))
 	region2 := core.NewRegionInfo(r2, peers[0])
 	regionStats := NewRegionStatistics(opt, manager, nil)
 	regionStats.Observe(region1, stores)
@@ -103,6 +103,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[PendingPeer], 1)
 	re.Len(regionStats.stats[LearnerPeer], 1)
 	re.Len(regionStats.stats[OversizedRegion], 1)
+<<<<<<< HEAD
 	re.Len(regionStats.stats[UndersizedRegion], 1)
 	re.Len(regionStats.offlineStats[ExtraPeer], 1)
 	re.Empty(regionStats.offlineStats[MissPeer])
@@ -110,6 +111,11 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.offlineStats[PendingPeer], 1)
 	re.Len(regionStats.offlineStats[LearnerPeer], 1)
 	re.Len(regionStats.offlineStats[OfflinePeer], 1)
+=======
+	re.Len(regionStats.stats[UndersizedRegion], 0)
+	re.Len(regionStats.stats[EmptyRegion], 0)
+	re.Len(regionStats.stats[OfflinePeer], 1)
+>>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009))
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
 	regionStats.Observe(region1, stores[0:3])
