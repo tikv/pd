@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -72,11 +73,14 @@ func (s *Service) StoreHeartbeat(ctx context.Context, request *schedulingpb.Stor
 	c := s.GetCluster()
 	if c == nil {
 		// TODO: add metrics
+		log.Info("cluster isn't initialized")
 		return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 	}
 
 	// TODO: add metrics
-	c.HandleStoreHeartbeat(request)
+	if err := c.HandleStoreHeartbeat(request); err != nil {
+		log.Error("handle store heartbeat failed", zap.Error(err))
+	}
 	return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 }
 
@@ -85,6 +89,7 @@ func (s *Service) PutStore(ctx context.Context, request *schedulingpb.PutStoreRe
 	c := s.GetCluster()
 	if c == nil {
 		// TODO: add metrics
+		log.Info("cluster isn't initialized")
 		return &schedulingpb.PutStoreResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 	}
 

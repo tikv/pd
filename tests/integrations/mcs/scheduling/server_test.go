@@ -96,8 +96,10 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NoError(err)
 	re.NotEqual(uint64(0), id)
 	suite.cluster.ResignLeader()
-	suite.cluster.WaitLeader()
-	time.Sleep(200 * time.Millisecond)
+	leaderName := suite.cluster.WaitLeader()
+	suite.pdLeader = suite.cluster.GetServer(leaderName)
+	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	time.Sleep(time.Second)
 	id1, err := cluster.AllocID()
 	re.NoError(err)
 	re.Greater(id1, id)
@@ -130,7 +132,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	})
 }
 
-func (suite *serverTestSuite) TestForwardSchedulingRelated() {
+func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
@@ -138,7 +140,7 @@ func (suite *serverTestSuite) TestForwardSchedulingRelated() {
 	tc.WaitForPrimaryServing(re)
 
 	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
-	s.PutStore(
+	resp, err := s.PutStore(
 		context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 			Store: &metapb.Store{
@@ -149,7 +151,10 @@ func (suite *serverTestSuite) TestForwardSchedulingRelated() {
 			},
 		},
 	)
-	s.StoreHeartbeat(
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+
+	resp1, err := s.StoreHeartbeat(
 		context.Background(), &pdpb.StoreHeartbeatRequest{
 			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 			Stats: &pdpb.StoreStats{
@@ -164,12 +169,16 @@ func (suite *serverTestSuite) TestForwardSchedulingRelated() {
 			},
 		},
 	)
-	store := tc.GetPrimaryServer().GetCluster().GetStore(1)
-	re.Equal(uint64(1798985089024), store.GetStoreStats().GetCapacity())
-	re.Equal(uint64(1709868695552), store.GetStoreStats().GetAvailable())
-	re.Equal(uint64(85150956358), store.GetStoreStats().GetUsedSize())
-	re.Equal(uint64(20000), store.GetStoreStats().GetKeysWritten())
-	re.Equal(uint64(199), store.GetStoreStats().GetBytesWritten())
-	re.Equal(uint64(10000), store.GetStoreStats().GetKeysRead())
-	re.Equal(uint64(99), store.GetStoreStats().GetBytesRead())
+	re.NoError(err)
+	re.Empty(resp1.GetHeader().GetError())
+	testutil.Eventually(re, func() bool {
+		store := tc.GetPrimaryServer().GetCluster().GetStore(1)
+		return store.GetStoreStats().GetCapacity() == uint64(1798985089024) &&
+			store.GetStoreStats().GetAvailable() == uint64(1709868695552) &&
+			store.GetStoreStats().GetUsedSize() == uint64(85150956358) &&
+			store.GetStoreStats().GetKeysWritten() == uint64(20000) &&
+			store.GetStoreStats().GetBytesWritten() == uint64(199) &&
+			store.GetStoreStats().GetKeysRead() == uint64(10000) &&
+			store.GetStoreStats().GetBytesRead() == uint64(99)
+	})
 }
