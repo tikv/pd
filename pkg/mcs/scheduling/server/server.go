@@ -87,7 +87,8 @@ type Server struct {
 	checkMembershipCh chan struct{}
 
 	// primaryCallbacks will be called after the server becomes leader.
-	primaryCallbacks []func(context.Context)
+	primaryCallbacks     []func(context.Context) error
+	primaryExitCallbacks []func()
 
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
@@ -163,6 +164,9 @@ func (s *Server) updateAPIServerMemberLoop() {
 			return
 		case <-ticker.C:
 		case <-s.checkMembershipCh:
+		}
+		if !s.IsServing() {
+			continue
 		}
 		members, err := s.GetClient().MemberList(ctx)
 		if err != nil {
@@ -247,9 +251,16 @@ func (s *Server) campaignLeader() {
 
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
-		cb(ctx)
+		if err := cb(ctx); err != nil {
+			log.Error("failed to trigger the primary callback functions", errs.ZapError(err))
+			return
+		}
 	}
-
+	defer func() {
+		for _, cb := range s.primaryExitCallbacks {
+			cb()
+		}
+	}()
 	s.participant.EnableLeader()
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
@@ -283,10 +294,6 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
-	s.GetCoordinator().Stop()
-	s.ruleWatcher.Close()
-	s.configWatcher.Close()
-	s.metaWatcher.Close()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -313,8 +320,13 @@ func (s *Server) IsClosed() bool {
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
-func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
+}
+
+// AddServiceExitCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) AddServiceExitCallback(callbacks ...func()) {
+	s.primaryExitCallbacks = append(s.primaryExitCallbacks, callbacks...)
 }
 
 // GetTLSConfig gets the security config.
@@ -381,20 +393,10 @@ func (s *Server) startServer() (err error) {
 		ListenUrls: []string{s.cfg.AdvertiseListenAddr},
 	}
 	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
-	s.basicCluster = core.NewBasicCluster()
-	err = s.startWatcher()
-	if err != nil {
-		return err
-	}
-	s.storage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(s.GetClient(), endpoint.PDRootPath(s.clusterID)), nil)
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, s.basicCluster)
-	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
-	if err != nil {
-		return err
-	}
 
 	s.service = &Service{Server: s}
+	s.AddServiceReadyCallback(s.startCluster)
+	s.AddServiceExitCallback(s.stopCluster)
 	if err := s.InitListener(s.GetTLSConfig(), s.cfg.ListenAddr); err != nil {
 		return err
 	}
@@ -406,7 +408,6 @@ func (s *Server) startServer() (err error) {
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	s.checkMembershipCh <- struct{}{}
 	<-serverReadyChan
-	go s.GetCoordinator().RunUntilStop()
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
@@ -427,6 +428,29 @@ func (s *Server) startServer() (err error) {
 	}
 	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
+}
+
+func (s *Server) startCluster(context.Context) error {
+	s.basicCluster = core.NewBasicCluster()
+	err := s.startWatcher()
+	if err != nil {
+		return err
+	}
+	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, s.basicCluster)
+	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
+	if err != nil {
+		return err
+	}
+	go s.GetCoordinator().RunUntilStop()
+	return nil
+}
+
+func (s *Server) stopCluster() {
+	s.GetCoordinator().Stop()
+	s.ruleWatcher.Close()
+	s.configWatcher.Close()
+	s.metaWatcher.Close()
 }
 
 func (s *Server) startWatcher() (err error) {
