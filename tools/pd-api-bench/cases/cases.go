@@ -29,8 +29,10 @@ import (
 )
 
 var (
+	// PDAddress is the address of PD server.
 	PDAddress string
-	Debug     bool
+	// Debug is the flag to print the output of api response for debug.
+	Debug bool
 )
 
 var (
@@ -39,6 +41,7 @@ var (
 	storesID    []uint64
 )
 
+// InitCluster initializes the cluster.
 func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		PDAddress+"/pd/api/v1/stats/region?start_key=&end_key=&count", nil)
@@ -67,6 +70,7 @@ func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) erro
 	return nil
 }
 
+// Case is the interface for all cases.
 type Case interface {
 	Name() string
 	SetQPS(int64)
@@ -101,11 +105,13 @@ func (c *baseCase) GetBurst() int64 {
 	return c.burst
 }
 
+// GRPCCase is the interface for all gRPC cases.
 type GRPCCase interface {
 	Case
 	Unary(context.Context, pd.Client) error
 }
 
+// GRPCCaseMap is the map for all gRPC cases.
 var GRPCCaseMap = map[string]GRPCCase{
 	"GetRegion":   newGetRegion(),
 	"GetStore":    newGetStore(),
@@ -113,12 +119,14 @@ var GRPCCaseMap = map[string]GRPCCase{
 	"ScanRegions": newScanRegions(),
 }
 
+// HTTPCase is the interface for all HTTP cases.
 type HTTPCase interface {
 	Case
 	Do(context.Context, *http.Client) error
 	Params(string)
 }
 
+// HTTPCaseMap is the map for all HTTP cases.
 var HTTPCaseMap = map[string]HTTPCase{
 	"GetRegionStatus":  newRegionStats(),
 	"GetMinResolvedTS": newMinResolvedTS(),
@@ -319,6 +327,7 @@ func (c *getStores) Unary(ctx context.Context, cli pd.Client) error {
 	return nil
 }
 
+// nolint
 func generateKeyForSimulator(id int, keyLen int) []byte {
 	k := make([]byte, keyLen)
 	copy(k, fmt.Sprintf("%010d", id))
