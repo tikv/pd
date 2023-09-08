@@ -155,6 +155,7 @@ func (s *Server) updateAPIServerMemberLoop() {
 		ticker = time.NewTicker(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
+	var curLeader uint64
 	for {
 		select {
 		case <-ctx.Done():
@@ -180,7 +181,10 @@ func (s *Server) updateAPIServerMemberLoop() {
 					log.Info("failed to get delegate client", errs.ZapError(err))
 				}
 				if s.cluster.SwitchAPIServerLeader(pdpb.NewPDClient(cc)) {
-					log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
+					if status.Leader != curLeader {
+						log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
+					}
+					curLeader = ep.ID
 					break
 				}
 			}
