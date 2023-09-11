@@ -16,11 +16,9 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -30,6 +28,7 @@ import (
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/spf13/cobra"
@@ -284,10 +283,13 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.ListenAddr
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
-	resourceManagerPrimaryPrefix := endpoint.ResourceManagerSvcRootPath(s.clusterID)
-	s.participant = member.NewParticipant(s.GetClient())
-	s.participant.InitInfo(uniqueName, uniqueID, path.Join(resourceManagerPrimaryPrefix, fmt.Sprintf("%05d", 0)),
-		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
+	s.participant = member.NewParticipant(s.GetClient(), utils.ResourceManagerServiceName)
+	p := &resource_manager.Participant{
+		Name:       uniqueName,
+		Id:         uniqueID, // id is unique among all participants
+		ListenUrls: []string{s.cfg.AdvertiseListenAddr},
+	}
+	s.participant.InitInfo(p, endpoint.ResourceManagerSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
 
 	s.service = &Service{
 		ctx:     s.Context(),

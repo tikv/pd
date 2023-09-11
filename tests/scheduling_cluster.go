@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -36,6 +37,7 @@ type TestSchedulingCluster struct {
 
 // NewTestSchedulingCluster creates a new scheduling test cluster.
 func NewTestSchedulingCluster(ctx context.Context, initialServerCount int, backendEndpoints string) (tc *TestSchedulingCluster, err error) {
+	schedulers.Register()
 	tc = &TestSchedulingCluster{
 		ctx:              ctx,
 		backendEndpoints: backendEndpoints,

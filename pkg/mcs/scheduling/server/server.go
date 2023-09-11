@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -31,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/spf13/cobra"
@@ -155,6 +155,7 @@ func (s *Server) updateAPIServerMemberLoop() {
 		ticker = time.NewTicker(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
+	var curLeader uint64
 	for {
 		select {
 		case <-ctx.Done():
@@ -180,7 +181,10 @@ func (s *Server) updateAPIServerMemberLoop() {
 					log.Info("failed to get delegate client", errs.ZapError(err))
 				}
 				if s.cluster.SwitchAPIServerLeader(pdpb.NewPDClient(cc)) {
-					log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
+					if status.Leader != curLeader {
+						log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
+					}
+					curLeader = ep.ID
 					break
 				}
 			}
@@ -370,10 +374,13 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.ListenAddr
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
-	schedulingPrimaryPrefix := endpoint.SchedulingSvcRootPath(s.clusterID)
-	s.participant = member.NewParticipant(s.GetClient())
-	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
-		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
+	s.participant = member.NewParticipant(s.GetClient(), utils.SchedulingServiceName)
+	p := &schedulingpb.Participant{
+		Name:       uniqueName,
+		Id:         uniqueID, // id is unique among all participants
+		ListenUrls: []string{s.cfg.AdvertiseListenAddr},
+	}
+	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
 	s.basicCluster = core.NewBasicCluster()
 	err = s.startWatcher()
 	if err != nil {

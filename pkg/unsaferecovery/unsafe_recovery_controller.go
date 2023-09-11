@@ -890,10 +890,11 @@ func (t *regionTree) insert(item *regionItem) (bool, error) {
 		return false, errors.Errorf("region %v shouldn't be updated twice", item.Region().GetId())
 	}
 
-	for _, old := range overlaps {
+	for _, newer := range overlaps {
+		log.Info("Unsafe recovery found overlap regions", logutil.ZapRedactStringer("newer-region-meta", core.RegionToHexMeta(newer.Region())), logutil.ZapRedactStringer("older-region-meta", core.RegionToHexMeta(item.Region())))
 		// it's ensured by the `buildUpFromReports` that peers are inserted in epoch descending order.
-		if old.IsEpochStale(item) {
-			return false, errors.Errorf("region %v's epoch shouldn't be staler than old ones %v", item, old)
+		if newer.IsEpochStale(item) {
+			return false, errors.Errorf("region %v's epoch shouldn't be staler than old ones %v", item, newer)
 		}
 	}
 	if len(overlaps) != 0 {
