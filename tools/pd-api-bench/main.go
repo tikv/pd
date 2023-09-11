@@ -160,7 +160,7 @@ func main() {
 	}
 	httpClis := make([]*http.Client, 0)
 	for i := 0; i < *client; i++ {
-		httpClis = append(httpClis, newHttpClient())
+		httpClis = append(httpClis, newHTTPClient())
 	}
 	err = cases.InitCluster(ctx, pdClis[0], httpClis[0])
 	if err != nil {
@@ -248,8 +248,8 @@ func exit(code int) {
 	os.Exit(code)
 }
 
-// newHttpClient returns an HTTP(s) client.
-func newHttpClient() *http.Client {
+// newHTTPClient returns an HTTP(s) client.
+func newHTTPClient() *http.Client {
 	// defaultTimeout for non-context requests.
 	const defaultTimeout = 30 * time.Second
 	cli := &http.Client{Timeout: defaultTimeout}

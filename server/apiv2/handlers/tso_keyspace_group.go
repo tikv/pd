@@ -21,7 +21,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pkg/errors"
+	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"

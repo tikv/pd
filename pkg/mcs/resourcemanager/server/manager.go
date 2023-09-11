@@ -104,39 +104,47 @@ func (m *Manager) GetBasicServer() bs.Server {
 }
 
 // Init initializes the resource group manager.
-func (m *Manager) Init(ctx context.Context) {
+func (m *Manager) Init(ctx context.Context) error {
 	v, err := m.storage.LoadControllerConfig()
 	if err != nil {
-		log.Error("resource controller config load failed, fallback to default config", zap.Error(err), zap.String("v", v))
-	} else if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
-		log.Error("un-marshall controller config failed", zap.Error(err), zap.String("v", v))
+		log.Error("resource controller config load failed", zap.Error(err), zap.String("v", v))
+		return err
+	}
+	if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
+		log.Error("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
 	}
 
 	// re-save the config to make sure the config has been persisted.
-	m.storage.SaveControllerConfig(m.controllerConfig)
+	if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+		return err
+	}
 	// Load resource group meta info from storage.
 	m.groups = make(map[string]*ResourceGroup)
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {
-			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
+			log.Error("failed to parse the resource group", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
-	m.storage.LoadResourceGroupSettings(handler)
+	if err := m.storage.LoadResourceGroupSettings(handler); err != nil {
+		return err
+	}
 	// Load resource group states from storage.
 	tokenHandler := func(k, v string) {
 		tokens := &GroupStates{}
 		if err := json.Unmarshal([]byte(v), tokens); err != nil {
-			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
+			log.Error("failed to parse the resource group state", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
 		if group, ok := m.groups[k]; ok {
 			group.SetStatesIntoResourceGroup(tokens)
 		}
 	}
-	m.storage.LoadResourceGroupStates(tokenHandler)
+	if err := m.storage.LoadResourceGroupStates(tokenHandler); err != nil {
+		return err
+	}
 
 	// Add default group if it's not inited.
 	if _, ok := m.groups[reservedDefaultGroupName]; !ok {
@@ -165,6 +173,7 @@ func (m *Manager) Init(ctx context.Context) {
 		m.persistLoop(ctx)
 	}()
 	log.Info("resource group manager finishes initialization")
+	return nil
 }
 
 // UpdateControllerConfigItem updates the controller config item.
