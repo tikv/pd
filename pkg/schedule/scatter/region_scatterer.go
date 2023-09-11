@@ -284,10 +284,10 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		return nil, errors.Errorf("region %d is hot", region.GetID())
 	}
 
-	return r.scatterRegion(region, group, skipStoreLimit), nil
+	return r.scatterRegion(region, group, skipStoreLimit)
 }
 
-func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, skipStoreLimit bool) *operator.Operator {
+func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, skipStoreLimit bool) (*operator.Operator, error) {
 	engineFilter := filter.NewEngineFilter(r.name, filter.NotSpecialEngines)
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
@@ -296,7 +296,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {
-			return nil
+			return nil, errs.ErrGetSourceStore.FastGenByArgs(fmt.Sprintf("store not found, peer: %v", peer))
 		}
 		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			ordinaryPeers[peer.GetStoreId()] = peer
@@ -358,7 +358,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 	targetLeader, leaderStorePickedCount := r.selectAvailableLeaderStore(group, region, leaderCandidateStores, r.ordinaryEngine)
 	if targetLeader == 0 {
 		scatterSkipNoLeaderCounter.Inc()
-		return nil
+		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
 	}
 
 	for engine, peers := range specialPeers {
@@ -375,7 +375,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 	if isSameDistribution(region, targetPeers, targetLeader) {
 		scatterUnnecessaryCounter.Inc()
 		r.Put(targetPeers, targetLeader, group)
-		return nil
+		return nil, nil
 	}
 	op, err := operator.CreateScatterRegionOperator("scatter-region", r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
@@ -384,8 +384,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 			targetPeers[peer.GetStoreId()] = peer
 		}
 		r.Put(targetPeers, region.GetLeader().GetStoreId(), group)
-		log.Debug("fail to create scatter region operator", errs.ZapError(err))
-		return nil
+		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("failed to create scatter region operator for region %v", region.GetID()))
 	}
 	if op != nil {
 		scatterSuccessCounter.Inc()
@@ -394,7 +393,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		op.AdditionalInfos["leader-picked-count"] = strconv.FormatUint(leaderStorePickedCount, 10)
 		op.SetPriorityLevel(constant.High)
 	}
-	return op
+	return op, nil
 }
 
 func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
