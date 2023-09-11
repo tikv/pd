@@ -71,7 +71,7 @@ type Server struct {
 	service *Service
 
 	// primaryCallbacks will be called after the server becomes leader.
-	primaryCallbacks []func(context.Context)
+	primaryCallbacks []func(context.Context) error
 
 	serviceRegister *discovery.ServiceRegister
 }
@@ -232,7 +232,7 @@ func (s *Server) IsClosed() bool {
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
-func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 

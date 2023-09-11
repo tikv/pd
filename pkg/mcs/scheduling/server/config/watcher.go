@@ -94,6 +94,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
 			return err
 		}
+		cw.AdjustScheduleCfg(&cfg.Schedule)
 		cw.SetClusterVersion(&cfg.ClusterVersion)
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
