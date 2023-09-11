@@ -185,6 +185,7 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]int
 				return err
 			}
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Add("Accept-Encoding", "identity")
 			resp, err = dialClient.Do(req)
 		default:
 			err := errors.Errorf("method %s not supported", method)
@@ -228,6 +229,7 @@ func do(endpoint, prefix, method string, resp *string, customHeader http.Header,
 	var req *http.Request
 
 	req, err = http.NewRequest(method, url, b.body)
+	req.Header.Add("Accept-Encoding", "identity")
 	if err != nil {
 		return err
 	}

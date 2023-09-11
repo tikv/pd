@@ -530,3 +530,28 @@ func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v inte
 	}
 	json.Unmarshal(output, v)
 }
+
+func TestMicroservice(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	server := cluster.GetServer(cluster.GetLeader())
+	re.NoError(server.BootstrapCluster())
+	backendEndpoints := server.GetAddr()
+	tc, err := tests.NewTestSchedulingCluster(ctx, 2, backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	cmd := pdctlCmd.GetRootCmd()
+	args := []string{"-u", backendEndpoints, "scheduler", "show"}
+	var slice []string
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &slice))
+	re.Contains(slice, "balance-leader-scheduler")
+}

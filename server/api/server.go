@@ -19,6 +19,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -35,14 +36,29 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 		Name:   "core",
 		IsCore: true,
 	}
-	router := mux.NewRouter()
+	prefix := apiPrefix + "/api/v1"
 	r := createRouter(apiPrefix, svr)
+	router := mux.NewRouter()
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
-		serverapi.NewRedirector(svr, serverapi.MicroserviceRedirectRule(
-			apiPrefix+"/api/v1"+"/admin/reset-ts",
-			tsoapi.APIPathPrefix+"/admin/reset-ts",
-			mcs.TSOServiceName)),
+		serverapi.NewRedirector(svr,
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/admin/reset-ts",
+				tsoapi.APIPathPrefix+"/admin/reset-ts",
+				mcs.TSOServiceName),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/operators",
+				scheapi.APIPathPrefix+"/operators",
+				mcs.SchedulingServiceName),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/checker", // Note: this is a typo in the original code
+				scheapi.APIPathPrefix+"/checkers",
+				mcs.SchedulingServiceName),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/schedulers",
+				scheapi.APIPathPrefix+"/schedulers",
+				mcs.SchedulingServiceName),
+		),
 		negroni.Wrap(r)),
 	)
 

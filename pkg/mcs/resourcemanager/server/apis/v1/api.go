@@ -73,7 +73,7 @@ func NewService(srv *rmserver.Service) *Service {
 	manager := srv.GetManager()
 	apiHandlerEngine.Use(func(c *gin.Context) {
 		// manager implements the interface of basicserver.Service.
-		c.Set("service", manager.GetBasicServer())
+		c.Set(multiservicesapi.ServiceContextKey, manager.GetBasicServer())
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())

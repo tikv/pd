@@ -196,12 +196,14 @@ func PostJSON(client *http.Client, url string, data []byte) (*http.Response, err
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Add("Accept-Encoding", "identity")
 	return client.Do(req)
 }
 
 // GetJSON is used to send GET request to specific url
 func GetJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
+	req.Header.Add("Accept-Encoding", "identity")
 	if err != nil {
 		return nil, err
 	}

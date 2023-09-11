@@ -106,3 +106,34 @@ func (suite *apiTestSuite) TestGetCheckerByName() {
 		suite.False(resp["paused"].(bool))
 	}
 }
+
+func (suite *apiTestSuite) TestAPIForward() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", suite.backendEndpoints)
+	var slice []string
+	var resp map[string]interface{}
+
+	// Test opeartor
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice)
+	re.NoError(err)
+	re.Len(slice, 0)
+
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/2"), &resp)
+	re.NoError(err)
+	re.Nil(resp)
+
+	// Test checker
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), &resp)
+	re.NoError(err)
+	suite.False(resp["paused"].(bool))
+
+	// Test scheduler
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), &slice)
+	re.NoError(err)
+	re.Contains(slice, "balance-leader-scheduler")
+}

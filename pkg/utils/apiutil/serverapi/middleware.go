@@ -17,6 +17,7 @@ package serverapi
 import (
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -108,13 +109,19 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 		return false, ""
 	}
 	for _, rule := range h.microserviceRedirectRules {
-		if rule.matchPath == r.URL.Path {
+		if strings.HasPrefix(r.URL.Path, rule.matchPath) {
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
 			if !ok || addr == "" {
 				log.Warn("failed to get the service primary addr when try match redirect rules",
 					zap.String("path", r.URL.Path))
 			}
-			r.URL.Path = rule.targetPath
+			// Extract parameters from the URL path
+			pathParams := strings.TrimPrefix(r.URL.Path, rule.matchPath)
+			if len(pathParams) > 0 && pathParams[0] == '/' {
+				pathParams = pathParams[1:] // Remove leading '/'
+			}
+			r.URL.Path = rule.targetPath + "/" + pathParams
+			r.URL.Path = strings.TrimRight(r.URL.Path, "/")
 			return true, addr
 		}
 	}
@@ -122,10 +129,10 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	matchedFlag, targetAddr := h.matchMicroServiceRedirectRules(r)
+	needRedirectToMicroService, targetAddr := h.matchMicroServiceRedirectRules(r)
 	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
 	isLeader := h.s.GetMember().IsLeader()
-	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !matchedFlag {
+	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !needRedirectToMicroService {
 		next(w, r)
 		return
 	}
@@ -150,7 +157,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	}
 
 	var clientUrls []string
-	if matchedFlag {
+	if needRedirectToMicroService {
 		if len(targetAddr) == 0 {
 			http.Error(w, apiutil.ErrRedirectFailed, http.StatusInternalServerError)
 			return
