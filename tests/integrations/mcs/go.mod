@@ -10,7 +10,7 @@ replace (
 // reset grpc and protobuf deps in order to import client and server at the same time
 replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 
-replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20230907032444-eba37dcb1a38
+replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20230911082634-98261c49ac7c
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00

@@ -21,7 +21,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.uber.org/zap"
@@ -77,25 +76,15 @@ func (s *Service) StoreHeartbeat(ctx context.Context, request *schedulingpb.Stor
 		return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 	}
 
+	if c.GetStore(request.GetStats().GetStoreId()) == nil {
+		s.metaWatcher.GetStoreWatcher().ForceLoad()
+	}
+
 	// TODO: add metrics
 	if err := c.HandleStoreHeartbeat(request); err != nil {
 		log.Error("handle store heartbeat failed", zap.Error(err))
 	}
 	return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
-}
-
-// PutStore implements gRPC PDServer.
-func (s *Service) PutStore(ctx context.Context, request *schedulingpb.PutStoreRequest) (*schedulingpb.PutStoreResponse, error) {
-	c := s.GetCluster()
-	if c == nil {
-		// TODO: add metrics
-		log.Info("cluster isn't initialized")
-		return &schedulingpb.PutStoreResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
-	}
-
-	// TODO: add metrics
-	c.PutStore(core.NewStoreInfo(request.GetStore()))
-	return &schedulingpb.PutStoreResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 }
 
 // RegisterGRPCService registers the service to gRPC server.

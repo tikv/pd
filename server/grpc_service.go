@@ -859,20 +859,6 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
-	if s.IsAPIServiceMode() {
-		client := s.getForwardedClient(ctx)
-		if client != nil {
-			req := &schedulingpb.PutStoreRequest{
-				Header: &schedulingpb.RequestHeader{
-					ClusterId: request.GetHeader().GetClusterId(),
-					SenderId:  request.GetHeader().GetSenderId(),
-				},
-				Store: request.GetStore(),
-			}
-			schedulingpb.NewSchedulingClient(client).PutStore(ctx, req)
-		}
-	}
-
 	if err := rc.PutStore(store); err != nil {
 		return &pdpb.PutStoreResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
