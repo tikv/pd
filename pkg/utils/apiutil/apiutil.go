@@ -435,17 +435,18 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			reader = resp.Body
 		}
 
-		// If WriteHeader has not yet been called, Write calls WriteHeader(http.StatusOK) before writing the data.
-		// So we need to call WriteHeader first.
+		// We need to copy the response headers before we write the header.
+		// Otherwise, we cannot set the header.
+		// And we need to write the header before we copy the response body.
+		// Otherwise, we cannot set the status code.
+		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
 
-		var contentLength, written int64
 		for {
-			if written, err = io.CopyN(w, reader, chunkSize); err != nil {
+			if _, err = io.CopyN(w, reader, chunkSize); err != nil {
 				if err == io.EOF {
 					err = nil
 				}
-				contentLength += written
 				break
 			}
 		}
@@ -454,10 +455,6 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			// try next url.
 			continue
 		}
-
-		// We need to set the Content-Length header manually to avoid meeting unexpected EOF error.
-		w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
-		copyHeader(w.Header(), resp.Header)
 		return
 	}
 	http.Error(w, ErrRedirectFailed, http.StatusInternalServerError)
@@ -465,6 +462,11 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 func copyHeader(dst, src http.Header) {
 	for k, vv := range src {
+		// skip Content-Encoding and Content-Length header
+		// because they need to be set by http.ResponseWriter when gzip is enabled
+		if k == "Content-Encoding" || k == "Content-Length" {
+			continue
+		}
 		values := dst[k]
 		for _, v := range vv {
 			if !slice.Contains(values, v) {
