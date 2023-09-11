@@ -98,7 +98,7 @@ func (suite *tsoAPITestSuite) TestGetKeyspaceGroupMembers() {
 	re.Equal(primaryMember.GetLeaderID(), defaultGroupMember.PrimaryID)
 }
 
-func (suite *tsoAPITestSuite) TestResetTS() {
+func (suite *tsoAPITestSuite) TestForwardResetTS() {
 	re := suite.Require()
 	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
 	re.NotNil(primary)

@@ -196,14 +196,12 @@ func PostJSON(client *http.Client, url string, data []byte) (*http.Response, err
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Add("Accept-Encoding", "identity")
 	return client.Do(req)
 }
 
 // GetJSON is used to send GET request to specific url
 func GetJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodGet, url, bytes.NewBuffer(data))
-	req.Header.Add("Accept-Encoding", "identity")
 	if err != nil {
 		return nil, err
 	}
@@ -437,13 +435,17 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			reader = resp.Body
 		}
 
-		copyHeader(w.Header(), resp.Header)
+		// If WriteHeader has not yet been called, Write calls WriteHeader(http.StatusOK) before writing the data.
+		// So we need to call WriteHeader first.
 		w.WriteHeader(resp.StatusCode)
+
+		var contentLength, written int64
 		for {
-			if _, err = io.CopyN(w, reader, chunkSize); err != nil {
+			if written, err = io.CopyN(w, reader, chunkSize); err != nil {
 				if err == io.EOF {
 					err = nil
 				}
+				contentLength += written
 				break
 			}
 		}
@@ -452,6 +454,10 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			// try next url.
 			continue
 		}
+
+		// We need to set the Content-Length header manually to avoid meeting unexpected EOF error.
+		w.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
+		copyHeader(w.Header(), resp.Header)
 		return
 	}
 	http.Error(w, ErrRedirectFailed, http.StatusInternalServerError)
