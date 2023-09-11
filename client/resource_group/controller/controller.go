@@ -71,9 +71,11 @@ type ResourceGroupProvider interface {
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
-	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]pd.GlobalConfigItem, int64, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
+
+	// meta storage client
 	Watch(ctx context.Context, key []byte, opts ...pd.OpOption) (chan []*meta_storagepb.Event, error)
+	Get(ctx context.Context, key []byte, opts ...pd.OpOption) (*meta_storagepb.GetResponse, error)
 }
 
 // ResourceControlCreateOption create a ResourceGroupsController with the optional settings.
@@ -165,16 +167,16 @@ func NewResourceGroupController(
 }
 
 func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Config, error) {
-	items, _, err := provider.LoadGlobalConfig(ctx, nil, controllerConfigPath)
+	resp, err := provider.Get(ctx, []byte(controllerConfigPath))
 	if err != nil {
 		return nil, err
 	}
-	if len(items) == 0 {
+	if len(resp.Kvs) == 0 {
 		log.Warn("[resource group controller] server does not save config, load config failed")
 		return DefaultConfig(), nil
 	}
 	config := &Config{}
-	err = json.Unmarshal(items[0].PayLoad, config)
+	err = json.Unmarshal(resp.Kvs[0].GetValue(), config)
 	if err != nil {
 		return nil, err
 	}
@@ -225,10 +227,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
-		_, cfgRevision, err := c.provider.LoadGlobalConfig(ctx, nil, controllerConfigPath)
+		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
+		cfgRevision := resp.GetHeader().GetRevision()
 		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix())
@@ -236,6 +239,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
 		}
+
 		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, pd.WithRev(cfgRevision), pd.WithPrefix())
 		if err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))

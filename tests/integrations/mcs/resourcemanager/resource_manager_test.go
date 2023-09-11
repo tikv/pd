@@ -1363,4 +1363,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 		expectRUCfg2.LTBMaxWaitDuration = time.Hour
 		re.EqualValues(&expectRUCfg2, c2.GetConfig())
 	}
+	// restart c1
+	c1.Stop()
+	c1, err = controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	re.NoError(err)
+	re.EqualValues(expectRUCfg, c1.GetConfig())
 }
