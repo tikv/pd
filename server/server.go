@@ -618,9 +618,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.encryptionKeyManagerLoop()
 	if s.IsAPIServiceMode() {
 		s.initTSOPrimaryWatcher()
-		s.tsoPrimaryWatcher.StartWatchLoop()
 		s.initSchedulingPrimaryWatcher()
-		s.schedulingPrimaryWatcher.StartWatchLoop()
 	}
 }
 
@@ -1966,12 +1964,14 @@ func (s *Server) initTSOPrimaryWatcher() {
 	tsoRootPath := endpoint.TSOSvcRootPath(s.clusterID)
 	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, mcs.DefaultKeyspaceGroupID)
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
+	s.tsoPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initSchedulingPrimaryWatcher() {
 	serviceName := mcs.SchedulingServiceName
 	primaryKey := endpoint.SchedulingPrimaryPath(s.clusterID)
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
+	s.schedulingPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string) *etcdutil.LoopWatcher {

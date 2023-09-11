@@ -385,14 +385,14 @@ func (m *Participant) SetCampaignChecker(checker leadershipCheckFunc) {
 }
 
 // NewParticipantByService creates a new participant by service name.
-func NewParticipantByService(serviceName string) (leader participant) {
+func NewParticipantByService(serviceName string) (p participant) {
 	switch serviceName {
 	case utils.TSOServiceName:
-		leader = &tsopb.Participant{}
+		p = &tsopb.Participant{}
 	case utils.SchedulingServiceName:
-		leader = &schedulingpb.Participant{}
+		p = &schedulingpb.Participant{}
 	case utils.ResourceManagerServiceName:
-		leader = &resource_manager.Participant{}
+		p = &resource_manager.Participant{}
 	}
-	return leader
+	return p
 }
