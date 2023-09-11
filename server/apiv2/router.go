@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"sync"
 
+	ginzap "github.com/gin-contrib/zap"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -61,6 +62,7 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 		c.Next()
 	})
 	router.Use(middlewares.Redirector())
+	router.Use(ginzap.GinzapWithConfig(svr.GetConfig().Logger, &ginzap.Config{}))
 	root := router.Group(apiV2Prefix)
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
