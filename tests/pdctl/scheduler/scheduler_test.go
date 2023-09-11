@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -442,8 +443,6 @@ func TestScheduler(t *testing.T) {
 }
 
 func TestSchedulerDiagnostic(t *testing.T) {
-	// TODO: enable it after we fix https://github.com/tikv/pd/issues/7062
-	t.Skip()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -494,7 +493,8 @@ func TestSchedulerDiagnostic(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
 	time.Sleep(3 * time.Second)
 
 	echo := mustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
