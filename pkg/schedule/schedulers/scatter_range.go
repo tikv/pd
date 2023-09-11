@@ -87,7 +87,7 @@ func (conf *scatterRangeSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *scatterRangeSchedulerConfig) GetRangeName() string {
@@ -164,6 +164,19 @@ func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 	l.config.mu.RLock()
 	defer l.config.mu.RUnlock()
 	return EncodeConfig(l.config)
+}
+
+func (l *scatterRangeScheduler) ReloadConfig() error {
+	l.config.mu.Lock()
+	defer l.config.mu.Unlock()
+	cfgData, err := l.config.storage.LoadSchedulerConfig(l.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	return DecodeConfig([]byte(cfgData), l.config)
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {

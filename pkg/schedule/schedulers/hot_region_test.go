@@ -2456,7 +2456,7 @@ func TestCompatibilityConfig(t *testing.T) {
 		"dst-tolerance-ratio":       1.05,
 	})
 	re.NoError(err)
-	err = storage.SaveScheduleConfig(HotRegionName, data)
+	err = storage.SaveSchedulerConfig(HotRegionName, data)
 	re.NoError(err)
 	hb, err = CreateScheduler(HotRegionType, oc, storage, ConfigJSONDecoder(data))
 	re.NoError(err)
@@ -2472,7 +2472,7 @@ func TestCompatibilityConfig(t *testing.T) {
 	cfg.WriteLeaderPriorities = []string{"query", "key"}
 	data, err = EncodeConfig(cfg)
 	re.NoError(err)
-	err = storage.SaveScheduleConfig(HotRegionName, data)
+	err = storage.SaveSchedulerConfig(HotRegionName, data)
 	re.NoError(err)
 	hb, err = CreateScheduler(HotRegionType, oc, storage, ConfigJSONDecoder(data))
 	re.NoError(err)

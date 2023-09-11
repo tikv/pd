@@ -442,6 +442,8 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
+	go s.cluster.UpdateScheduler()
 	go s.GetCoordinator().RunUntilStop()
 	return nil
 }

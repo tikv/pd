@@ -95,7 +95,7 @@ func (conf *grantLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
@@ -176,6 +176,24 @@ func (s *grantLeaderScheduler) GetType() string {
 
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
+}
+
+func (s *grantLeaderScheduler) ReloadConfig() error {
+	s.conf.mu.Lock()
+	defer s.conf.mu.Unlock()
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &grantLeaderSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
+	return nil
 }
 
 func (s *grantLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {

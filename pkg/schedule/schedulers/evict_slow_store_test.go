@@ -99,7 +99,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	suite.Zero(es2.conf.evictStore())
 
 	// check the value from storage.
-	sches, vs, err := es2.conf.storage.LoadAllScheduleConfig()
+	sches, vs, err := es2.conf.storage.LoadAllSchedulerConfig()
 	suite.NoError(err)
 	valueStr := ""
 	for id, sche := range sches {

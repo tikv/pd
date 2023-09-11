@@ -160,7 +160,7 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return err
 	}
 
-	if err := c.storage.RemoveScheduleConfig(name); err != nil {
+	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
 	}
@@ -210,7 +210,7 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return err
 	}
 
-	if err := c.storage.RemoveScheduleConfig(name); err != nil {
+	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
 	}
@@ -251,6 +251,14 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 		sc.SetDelay(delayAt, delayUntil)
 	}
 	return err
+}
+
+// ReloadSchedulerConfig reloads a scheduler's config if it exists.
+func (c *Controller) ReloadSchedulerConfig(name string) error {
+	if exist, _ := c.IsSchedulerExisted(name); !exist {
+		return nil
+	}
+	return c.GetScheduler(name).ReloadConfig()
 }
 
 // IsSchedulerAllowed returns whether a scheduler is allowed to schedule, a scheduler is not allowed to schedule if it is paused or blocked by unsafe recovery.

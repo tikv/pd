@@ -938,7 +938,7 @@ func (s *Server) GetConfig() *config.Config {
 	if s.storage == nil {
 		return cfg
 	}
-	sches, configs, err := s.storage.LoadAllScheduleConfig()
+	sches, configs, err := s.storage.LoadAllSchedulerConfig()
 	if err != nil {
 		return cfg
 	}
